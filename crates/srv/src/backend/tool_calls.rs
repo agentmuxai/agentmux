@@ -19,6 +19,9 @@ const MAX_CALLS: usize = 4096;
 /// before the report (the report is sent as the wrapper starts its command):
 /// a later process reusing the pid never inherits the label.
 const START_SLACK_MS: u64 = 60_000;
+/// And at most this long after it: a start time the OS gives in whole
+/// seconds (Linux's boot time) can land just after the report.
+const CLOCK_SLACK_MS: u64 = 2_000;
 
 /// One tool call a wrapper reported.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +58,7 @@ pub fn lookup(pid: u32, started_at_ms: Option<u64>) -> Option<Call> {
     let map = calls().lock().unwrap_or_else(|e| e.into_inner());
     let call = map.get(&pid)?;
     match started_at_ms {
-        Some(started) if started > call.at_ms || call.at_ms - started > START_SLACK_MS => None,
+        Some(started) if started > call.at_ms + CLOCK_SLACK_MS || call.at_ms.saturating_sub(started) > START_SLACK_MS => None,
         _ => Some(call.clone()),
     }
 }
@@ -115,7 +118,8 @@ mod tests {
         record(910_001, call(500_000));
         assert_eq!(lookup(910_001, Some(499_000)).unwrap().description, "Build");
         assert!(lookup(910_001, None).is_some(), "an unknown start is trusted on the pid");
-        assert!(lookup(910_001, Some(501_000)).is_none(), "started after the report: the pid was reused");
+        assert!(lookup(910_001, Some(501_000)).is_some(), "a start a second late is the clock's");
+        assert!(lookup(910_001, Some(500_000 + CLOCK_SLACK_MS + 1)).is_none(), "started after the report: the pid was reused");
         assert!(lookup(910_001, Some(500_000 - START_SLACK_MS - 1)).is_none(), "far older than the report");
         assert!(lookup(910_002, Some(499_000)).is_none());
     }

@@ -581,6 +581,7 @@ fn render(
                 cpu_time_ns: e.info.cpu_ns,
                 peak_mem: e.peak,
                 exited_ms: Some(e.gone_ms),
+                started_by: crate::backend::tool_calls::lookup(e.info.pid, e.info.started_at_ms).map(|c| c.description),
                 ..Default::default()
             })
             .collect()
