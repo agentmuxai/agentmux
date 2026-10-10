@@ -265,10 +265,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (!live()) revealInstantly = true;
     });
 
-    // A new line types out when its rank changes; a new line of the same rank
-    // swaps in at once (the presenter's `reveal`), and the same line with its
-    // counters moved (its key unchanged) just updates, so a running clock
-    // never re-types it.
+    // A new line types out only when its rank changes (the presenter's `reveal`),
+    // else it swaps in; a moved counter (same key) never re-types it.
     createEffect(
         on(
             () => status().key,
@@ -280,20 +278,14 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                     return;
                 }
                 setRevealed(0);
-                // Progress follows the clock, not the number of callbacks: a
-                // throttled timer (a background window, a busy thread) catches
-                // up instead of falling behind, so the line is fully printed
-                // when the presenter's dwell (counted from the same clock)
-                // assumes it is.
+                // Progress follows the clock, not the callback count: a throttled
+                // timer catches up, as the presenter's dwell (same clock) assumes.
                 const startedAt = Date.now();
                 const id = setInterval(() => {
                     const n = Math.floor((Date.now() - startedAt) / REVEAL_CHAR_MS);
-                    if (n >= untrack(leftText).length) {
-                        clearInterval(id);
-                        setRevealed(Number.POSITIVE_INFINITY);
-                    } else {
-                        setRevealed(n);
-                    }
+                    if (n < untrack(leftText).length) return void setRevealed(n);
+                    clearInterval(id);
+                    setRevealed(Number.POSITIVE_INFINITY);
                 }, REVEAL_CHAR_MS);
                 onCleanup(() => clearInterval(id));
             },
