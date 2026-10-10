@@ -48,7 +48,7 @@ import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
-import { paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
+import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
 import { Button, IconButton } from "@/app/element/ui";
 
@@ -561,10 +561,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         };
         let handled = true;
         // Command keys are the `files:*` rows of the shortcut table, so they
-        // show in the help pane and can't collide with a global shortcut. The
-        // list's own keys (arrows, paging, Enter, type-ahead) stay here.
+        // show in the help pane. The list's own keys (arrows, paging, Enter,
+        // type-ahead) stay here, unless the table gives the key a global command.
         const command = paneCommandFor(e, "files");
-        handled = command ? runFilesCommand(command) : listKey();
+        handled = command ? runFilesCommand(command) : !isGlobalKey(e) && listKey();
         if (handled) {
             e.preventDefault();
             e.stopPropagation();
