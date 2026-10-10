@@ -64,10 +64,12 @@ export function mediaIcon(path: string): string {
     return "photo-film";
 }
 
+/** A tab with no file yet is "New Tab", as in a browser: a place to load a
+ *  file, not a document to save. It has no icon; a file's tab has its kind's. */
 export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     keyOf: (d) => d.path || `blank:${d.blank ?? 0}`,
-    titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "Media")),
-    iconOf: (d) => mediaIcon(d.path || d.file?.name || ""),
+    titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "New Tab")),
+    iconOf: (d) => (isEmpty(d) ? undefined : mediaIcon(d.path || d.file?.name || "")),
     serialize: (d) => d.path,
     deserialize: (st) => (typeof st === "string" && st ? { path: st } : null),
     // Ctrl+T, "+": a tab to pick a file into.
@@ -91,10 +93,10 @@ export class MediaPaneModel {
         );
     }
 
-    /** The pane's title: the file in front. */
+    /** The pane's title: the file in front, or "Media" while it shows none. */
     title(): string {
         const t = this.tabs.active();
-        return t ? MEDIA_DOC_TABS.titleOf(t.payload) : "Media";
+        return t && !isEmpty(t.payload) ? MEDIA_DOC_TABS.titleOf(t.payload) : "Media";
     }
 
     /** A tab now shows `path`: its title follows, and the pane's

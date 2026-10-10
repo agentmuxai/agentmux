@@ -74,7 +74,12 @@ export class DocTabsController<P> {
         initial?: P[]
     ) {
         const saved = hydrateDocTabs<P>(host.meta()?.[DOC_TABS_META], (st) => spec.deserialize(st));
-        let start = saved ?? emptyDocTabs<P>();
+        // A restored tab's title and icon come from its document, as this
+        // build names it, not from the save: a change (Media's tabs lost their
+        // icons) reaches tabs saved before it.
+        let start = saved
+            ? { ...saved, tabs: saved.tabs.map((t) => ({ ...t, title: spec.titleOf(t.payload), icon: spec.iconOf?.(t.payload) })) }
+            : emptyDocTabs<P>();
         if (!saved && initial) {
             for (const p of initial) start = openDoc(start, this.argsFor(p));
         }
