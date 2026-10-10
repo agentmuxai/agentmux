@@ -3,7 +3,7 @@
 
 //! UI-thread task that actually creates a CEF browser pane.
 //!
-//! Moved out of `browser_panes.rs` during Phase 3 of the pane modularization
+//! Moved out of the former `browser_panes` module during Phase 3 of the pane modularization
 //! split (see `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md` §6). The task
 //! structure here is a straight lift — same pre-flight checks, same
 //! `browser_host_create_browser` call. `BrowserPaneManager::create` still

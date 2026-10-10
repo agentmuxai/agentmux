@@ -3,7 +3,7 @@
 
 // Identity accounts, Armory key/OAuth flows, agent-identity links, and
 // the pre-launch OAuth / install / prereq flows. Split from the
-// original rpc-api.ts.
+// original rpc-api file.
 
 import { RpcClient } from "../rpc-client";
 

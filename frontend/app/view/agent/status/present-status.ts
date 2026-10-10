@@ -93,7 +93,7 @@ function line(rank: number, text: string, key = text): StatusLine {
 
 /** Rank 4: what is running, once it has lasted long enough. A subagent's
  *  own calls show under its Agent call ("Explore agent: map it · Reading
- *  a.ts"); one call shows its test progress, else its time once long. */
+ *  a.ts"); one call shows its test progress, else its time once long. (comment-hygiene: allow) */
 function nowLine(a: ActivityState, nowMs: number): StatusLine | null {
     const running = a.tools.filter((t) => t.activity.family !== "plan");
     const ids = new Set(running.map((t) => t.id).filter((id): id is string => id != null));

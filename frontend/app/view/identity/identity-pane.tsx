@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Identity pane barrel: the `view: "identity"` pane's native pane tab
-// manifest. Distinct from `identity.tsx` (if any), which barrelled the
+// manifest. Distinct from the `identity` module (if any), which barrelled the
 // legacy in-agent-pane Identity tab.
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";

@@ -3,7 +3,7 @@
 
 //! LAN-facing listener management.
 //!
-//! Background (the bug this module fixes): `bootstrap.rs` used to resolve the
+//! Background (the bug this module fixes): the single-file `bootstrap` module used to resolve the
 //! srv bind address **once at startup** — `0.0.0.0` when
 //! `network:lan_discovery` was on, `127.0.0.1` otherwise. Toggling the setting
 //! at runtime therefore started/stopped mDNS (live, via
