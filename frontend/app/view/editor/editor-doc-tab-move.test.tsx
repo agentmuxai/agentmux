@@ -18,6 +18,8 @@ const h = vi.hoisted(() => ({
     reads: [] as string[],
     watched: [] as string[],
     unwatched: [] as string[],
+    /** Reads still running: a test ends only once they have, so none lands on a pane already disposed. */
+    inflight: new Set<Promise<unknown>>(),
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -28,11 +30,16 @@ vi.mock("@/app/store/global", () => ({
 }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ReadEditorFileCommand: vi.fn(async (_c: unknown, req: { path: string }) => {
-            h.reads.push(req.path);
-            const content = h.files.get(req.path);
-            if (content === undefined) throw new Error(`no such file: ${req.path}`);
-            return { content, read_only: false, encoding: "UTF-16LE", bom: "utf16le", line_ending: "crlf" };
+        ReadEditorFileCommand: vi.fn((_c: unknown, req: { path: string }) => {
+            const read = (async () => {
+                h.reads.push(req.path);
+                const content = h.files.get(req.path);
+                if (content === undefined) throw new Error(`no such file: ${req.path}`);
+                return { content, read_only: false, encoding: "UTF-16LE", bom: "utf16le", line_ending: "crlf" };
+            })();
+            h.inflight.add(read);
+            void read.catch(() => {}).finally(() => h.inflight.delete(read));
+            return read;
         }),
         WatchEditorFileCommand: vi.fn(async (_c: unknown, req: { path: string }) => void h.watched.push(req.path)),
         UnwatchEditorFileCommand: vi.fn(async (_c: unknown, req: { path: string }) => void h.unwatched.push(req.path)),
@@ -94,7 +101,11 @@ beforeEach(() => {
     h.watched = [];
     h.unwatched = [];
 });
-afterEach(() => {
+afterEach(async () => {
+    // A moved clean tab is read fresh where it lands: let every read finish,
+    // and its result reach its pane, before the panes go.
+    while (h.inflight.size > 0) await Promise.allSettled([...h.inflight]);
+    await new Promise((r) => setTimeout(r, 0));
     for (const c of cleanups.splice(0)) c();
 });
 
