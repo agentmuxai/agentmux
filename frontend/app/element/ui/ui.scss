@@ -32,14 +32,28 @@
 }
 
 // Filled, and glowing gently while it waits for the user; still under
-// reduced motion.
+// reduced motion. The glow animates box-shadow, which would override the
+// focus ring, so it stops while the button has keyboard focus, and focus
+// gets a solid outline of its own.
 .ui-tone-attention {
     @include line.tone(attention);
     box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
-    animation: ui-attention-glow 1.8s ease-in-out infinite;
+
+    &:not(:focus-visible) {
+        animation: ui-attention-glow 1.8s ease-in-out infinite;
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--main-text-color);
+        outline-offset: 2px;
+    }
 
     @media (prefers-reduced-motion: reduce) {
         animation: none;
+
+        &:not(:focus-visible) {
+            animation: none;
+        }
     }
 }
 

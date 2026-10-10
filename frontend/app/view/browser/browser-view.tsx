@@ -301,12 +301,15 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 accent, since Block is the safe answer there. */}
                             <Button
                                 tone={a().kind === "navigation" ? "accent" : "attention"}
-                                density="compact"
+                                density={a().kind === "navigation" ? "compact" : "comfortable"}
                                 onClick={() => model.resolveAttention(a().kind === "handoff" ? "done" : "approve").catch(() => {})}
                             >
                                 {a().kind === "handoff" ? "Done" : a().kind === "navigation" ? "Allow" : "Approve"}
                             </Button>
-                            <Button density="compact" onClick={() => model.resolveAttention("cancel").catch(() => {})}>
+                            <Button
+                                density={a().kind === "navigation" ? "compact" : "comfortable"}
+                                onClick={() => model.resolveAttention("cancel").catch(() => {})}
+                            >
                                 {a().kind === "navigation" ? "Block" : "Cancel"}
                             </Button>
                         </div>
