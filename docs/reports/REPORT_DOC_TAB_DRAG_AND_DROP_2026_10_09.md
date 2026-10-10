@@ -110,11 +110,11 @@ The drop target in pane B reads the source block from the drag data, finds both 
 
 Rules the Editor host enforces:
 - **Same connection only.** An Editor can be on another host (`connection()`); its paths are that host's. A tab never moves between Editors on different connections (local ↔ remote, host A ↔ host B). As built, this is a generic `DocTabHost.scope` that `moveDocTab` compares for every pane type.
-- **Same file already open in the target.** The moved tab gives way: the source tab goes and the target's copy comes to the front. That loses nothing unless the moved tab has unsaved edits, so only then is it refused, with a message saying why (as built; this narrows "dirty in either", since a dirty copy in the target is never touched).
+- **Same file already open in the target.** Refused with a message saying so, clean or dirty, for every type (`ALREADY_OPEN_THERE` in `doc-tab-hosts.ts`). Moved in, the tab would merge into the target's and vanish from where it was: the repo owner, testing a first build that did that for a clean Media tab, read it as a lost file.
 - A tab still loading moves as a not-yet-loaded tab; the target reads it when it is shown (the existing `_ensureActiveLoaded`).
 
 Media's own rules:
-- An empty tab ("Click to load media") can't be dragged; there is nothing to move.
+- An empty tab ("Click to load media") drags like any other: to reorder it, or to move it and load a file there. A file moved onto a pane showing only its empty tab takes that tab's place; an empty tab moved there joins it. (A first build refused to drag an empty tab; the repo owner, testing, expected it to move.)
 - The source pane keeps its "always one tab" rule: moving its last tab leaves an empty one behind, as closing does today.
 
 ### 3.5 Reorder within a pane comes free
@@ -142,7 +142,7 @@ Tests, per phase: reducer cases in `doc-tabs.test.ts` (`moveDocTo` group bounds;
 
 1. **Dropping onto a pane's body, or only its tab strip?** Proposed: anywhere on the document pane, matching how pane tabs join a pane, with the feedback on its document strip.
 2. **Undo history across a move.** Each Editor tab keeps its own undo history today (`cmStates`, kept across tab switches, dropped on close, not kept across a restart). Proposed: carry it, as JSON, per §3.4. The cost is small, and losing undo by dragging a tab would read as a bug. The alternative is carrying only the text in v1.
-3. **Dirty file already open in the target.** Proposed: refuse with a message. The alternative is asking which version to keep.
+3. **File already open in the target.** Settled: refuse with a message, clean or dirty (§3.4).
 
 ## 7. DRY notes found on the way (not part of this work)
 

@@ -23,6 +23,7 @@ vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantMove: hub.can
 import { docTabItemType } from "@/app/drag/drag-types";
 import { DocTabsController, type DocTabsSpec } from "./doc-tabs-controller";
 import {
+    ALREADY_OPEN_THERE,
     controllerHost,
     docTabHost,
     dropDocTab,
@@ -78,13 +79,12 @@ describe("moving a document tab between panes", () => {
         expect(keys(b)).toEqual(["/1", "/x", "/y"]);
     });
 
-    it("a document already open in the target comes to the front there, once", () => {
+    it("a document already open in the target stays where it is, and says why", () => {
         const a = pane("a", ["/1"]);
         const b = pane("b", ["/1", "/x"]);
-        moveDocTab("a", a.tabs()[0].id, "b");
-        expect(keys(a)).toEqual([]);
+        expect(moveDocTab("a", a.tabs()[0].id, "b")).toEqual({ moved: false, reason: ALREADY_OPEN_THERE });
+        expect(keys(a)).toEqual(["/1"]);
         expect(keys(b)).toEqual(["/1", "/x"]);
-        expect(b.active()?.key).toBe("/1");
     });
 
     it("nothing changes when either side refuses, and the reason comes back", () => {

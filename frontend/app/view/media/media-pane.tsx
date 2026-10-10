@@ -88,16 +88,13 @@ export class MediaPaneModel {
             { meta: () => ctx.meta() as Record<string, unknown> | undefined, setMeta: (p) => ctx.setMeta(p) },
             [typeof start === "string" && start ? { path: start } : { path: "", blank: ++blanks }]
         );
-        // Its tabs can move to and from other Media panes (doc-tab-hosts.ts).
-        // An empty tab has nothing to move, and gives way to one moved in, as
-        // it does to a file opened here. A pane left with no tabs gets an
-        // empty one, as when its last tab closes (MediaPane below).
+        // Its tabs can move to and from other Media panes (doc-tab-hosts.ts),
+        // an empty one too. An empty tab in front gives way to a file moved
+        // in, as it does to a file opened here. A pane left with no tabs gets
+        // an empty one, as when its last tab closes (MediaPane below).
         this.unregisterHost = registerDocTabHost(
             ctx.blockId,
-            controllerHost(this.tabs, "media", {
-                refuseGive: (t) => (isEmpty(t.payload) ? "It has no file yet." : null),
-                isPlaceholder: (t) => isEmpty(t.payload),
-            })
+            controllerHost(this.tabs, "media", { isPlaceholder: (t) => isEmpty(t.payload) })
         );
     }
 
@@ -243,7 +240,6 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
                 ctl={tabs}
                 docType="media"
                 blockId={ctx.blockId}
-                canDrag={(t) => !isEmpty(t.payload)}
                 tooltipOf={(t) => t.payload.path || "No file yet"}
                 addTitle={`New tab (${keyLabel("ctrl+t")})`}
             />
