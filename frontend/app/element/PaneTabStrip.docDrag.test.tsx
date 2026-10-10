@@ -12,6 +12,7 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dropTargetCalls: any[] = [];
@@ -119,5 +120,49 @@ describe("PaneTabStrip — document-tab drag", () => {
         expect(onReceive).not.toHaveBeenCalled();
         await new Promise((r) => setTimeout(r, 0));
         expect(onReceive).toHaveBeenCalledWith("block-2", "z", { targetId: "b", position: "after" });
+    });
+});
+
+describe("PaneTabStrip — closing a document tab", () => {
+    let strips = 0;
+    function strip(withDocDrag: boolean) {
+        // Its own pane: the landing cue outlives a test (LANDING_BOUNCE_MS).
+        const blockId = `close-${++strips}`;
+        const [tabs, setTabs] = createSignal<T[]>([{ id: "a" }, { id: "b" }, { id: "c" }]);
+        const [active, setActive] = createSignal("b");
+        const r = render(() => (
+            <PaneTabStrip
+                tabs={tabs()}
+                activeId={active()}
+                getId={(t: T) => t.id}
+                getLabel={() => "same.ts"}
+                onActivate={vi.fn()}
+                docDrag={withDocDrag ? { docType: "editor", blockId, onReorder: vi.fn() } : undefined}
+            />
+        ));
+        const close = (id: string, next: string) => {
+            setTabs(tabs().filter((t) => t.id !== id));
+            setActive(next);
+        };
+        return { r, close, setActive };
+    }
+
+    it("the tab that comes to the front after the active one closes plays the landing cue", () => {
+        const s = strip(true);
+        expect(s.r.container.querySelectorAll(".pane-tab--landing")).toHaveLength(0);
+        s.close("b", "c");
+        const pills = [...s.r.container.querySelectorAll(".pane-tab")];
+        expect(pills.map((p) => p.classList.contains("pane-tab--landing"))).toEqual([false, true]);
+    });
+
+    it("not for a plain switch, a tab closed behind, or a pane-tab strip", () => {
+        const s = strip(true);
+        s.setActive("c");
+        s.close("a", "c");
+        expect(s.r.container.querySelectorAll(".pane-tab--landing")).toHaveLength(0);
+        cleanup();
+        const p = strip(false);
+        p.close("b", "c");
+        expect(p.r.container.querySelectorAll(".pane-tab--landing")).toHaveLength(0);
     });
 });
