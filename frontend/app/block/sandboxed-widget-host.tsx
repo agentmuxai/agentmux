@@ -31,12 +31,15 @@ import { writeText } from "@/util/clipboard";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
 import { BridgeError, bridgeErrorOf, bridgeTheme, ERR, handleBridgeRequest, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { setStatusLook, type CommandSource } from "./widget-panes";
 
 import "./sandboxed-widget.scss";
 
 export const PROTOCOL = 1;
 const HELLO_TIMEOUT_MS = 10_000;
 const MAX_IN_FLIGHT = 64;
+/** Commands kept for a pane that hasn't connected yet. */
+const MAX_PENDING_COMMANDS = 20;
 
 export const IFRAME_SANDBOX = "allow-scripts allow-forms allow-modals allow-downloads";
 
@@ -69,6 +72,14 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
     let state: BridgeState = { ready: false, inFlight: 0 };
 
     const notify = (method: string, params: unknown) => port?.postMessage({ jsonrpc: "2.0", method, params });
+
+    // A command for a pane still starting (it was opened for the command) is
+    // delivered right after its hello.
+    const pendingCommands: { id: string; source: CommandSource }[] = [];
+    const flushCommands = () => {
+        if (!state.ready) return;
+        for (const c of pendingCommands.splice(0)) notify("command", c);
+    };
 
     // The pane's session with srv, for the calls srv answers. Opened on the
     // first such call; srv checks every call against the package again.
@@ -126,6 +137,7 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
         pickFiles: (accept, multiple) => pickFiles(accept, multiple),
         saveFile: (name, type, data) => saveFile(name, type, data),
         writeClipboard: (text) => writeText(text),
+        setStatusItem: (id, look) => setStatusLook(pkg.id, id, ctx.blockId, look),
     };
 
     const closePort = () => {
@@ -170,6 +182,8 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
                     reply = { error: { code: 1099, message: e instanceof Error ? e.message : String(e) } };
                 }
                 if (port === own) own.postMessage({ jsonrpc: "2.0", id: msg.id, ...reply });
+                // After the hello's answer, so the widget is listening.
+                if (msg.method === "hello" && session.ready) setTimeout(flushCommands, 0);
             } finally {
                 session.inFlight--;
             }
@@ -217,6 +231,10 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
                 title: a.title,
                 click: () => notify("action", { id: a.id, source: "header" }),
             })),
+        command: (id, source) => {
+            if (state.ready) notify("command", { id, source });
+            else if (pendingCommands.length < MAX_PENDING_COMMANDS) pendingCommands.push({ id, source });
+        },
         contextMenu: () =>
             menu().map((item) =>
                 "separator" in item

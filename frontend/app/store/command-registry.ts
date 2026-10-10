@@ -57,8 +57,13 @@ export function isCommandAvailable(entry: CommandEntry): boolean {
 class CommandRegistry {
     private commands = new Map<string, CommandEntry>();
 
-    register(entry: CommandEntry): void {
+    /** Adds or replaces `entry`; returns what removes it (only while it is
+     *  still the entry registered under its id). */
+    register(entry: CommandEntry): () => void {
         this.commands.set(entry.id, entry);
+        return () => {
+            if (this.commands.get(entry.id) === entry) this.commands.delete(entry.id);
+        };
     }
 
     get(id: string): CommandEntry | undefined {

@@ -15,10 +15,13 @@ import type { WidgetRequestsResult } from "@/types/rpc/WidgetRequestsResult";
 import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 
 export type { WidgetInstallRequest } from "@/types/rpc/WidgetInstallRequest";
+export type { StatusAlignment } from "@/types/rpc/StatusAlignment";
+export type { WidgetCommandInfo } from "@/types/rpc/WidgetCommandInfo";
 export type { WidgetKind } from "@/types/rpc/WidgetKind";
 export type { WidgetPackageInfo } from "@/types/rpc/WidgetPackageInfo";
 export type { WidgetPaneInfo } from "@/types/rpc/WidgetPaneInfo";
 export type { WidgetState } from "@/types/rpc/WidgetState";
+export type { WidgetStatusItemInfo } from "@/types/rpc/WidgetStatusItemInfo";
 
 export const WidgetsApi = {
     /** Every installed widget package and its state. */

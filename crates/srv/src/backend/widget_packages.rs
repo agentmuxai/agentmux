@@ -26,6 +26,9 @@ pub const MANIFEST_FILE: &str = "widget.json";
 pub const MANIFEST_VERSION: u32 = 1;
 pub const MAX_PACKAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_PACKAGE_FILES: usize = 2000;
+/// Palette commands and status bar items a package may add (spec §6.8).
+pub const MAX_COMMANDS: usize = 20;
+pub const MAX_STATUS_ITEMS: usize = 4;
 const APPROVALS_FILE: &str = "widget-approvals.json";
 
 /// Every permission a manifest may ask for (spec §6.4). `net:<origin>` is
@@ -58,15 +61,54 @@ pub struct ManifestPane {
     pub singleton: bool,
 }
 
+/// A command palette entry (spec §6.8).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestCommand {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// The pane it runs in; the first pane when left out.
+    #[serde(default)]
+    pub pane: Option<String>,
+    #[serde(default)]
+    pub keywords: Option<String>,
+}
+
+/// A status bar item (spec §6.8).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestStatusItem {
+    pub id: String,
+    pub text: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub tooltip: Option<String>,
+    /// One of the package's commands, run on a click; the first pane opens
+    /// when left out.
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub alignment: Option<StatusAlignment>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum StatusAlignment {
+    Left,
+    #[default]
+    Right,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ManifestContributes {
     #[serde(default)]
     pub panes: Vec<ManifestPane>,
-    /// Reserved for W5; accepted and ignored.
     #[serde(default)]
-    pub commands: Option<serde_json::Value>,
+    pub commands: Vec<ManifestCommand>,
     #[serde(default, rename = "statusItems")]
-    pub status_items: Option<serde_json::Value>,
+    pub status_items: Vec<ManifestStatusItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +158,11 @@ fn is_slug(s: &str) -> bool {
 
 pub fn valid_id(id: &str) -> bool {
     id.len() <= 64 && matches!(id.split_once('.'), Some((a, b)) if is_slug(a) && is_slug(b))
+}
+
+/// A Font Awesome name: lowercase letters, digits and `-`.
+fn valid_icon(icon: &Option<String>) -> bool {
+    icon.as_deref().is_none_or(|i| i.len() <= 60 && is_slug(i))
 }
 
 fn valid_semver(v: &str) -> bool {
@@ -214,6 +261,64 @@ pub fn validate(m: &Manifest, folder: &str) -> Result<(), String> {
         if let Some(meta) = &pane.default_meta {
             if let Some(k) = meta.keys().find(|k| !k.starts_with("widget:")) {
                 return Err(format!("defaultMeta key {k:?} must start with \"widget:\""));
+            }
+        }
+    }
+    validate_contributions(m)
+}
+
+/// `contributes.commands` and `contributes.statusItems` (spec §6.8).
+fn validate_contributions(m: &Manifest) -> Result<(), String> {
+    let c = &m.contributes;
+    if c.commands.len() > MAX_COMMANDS {
+        return Err(format!("contributes.commands lists more than {MAX_COMMANDS} commands"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for cmd in &c.commands {
+        if !is_slug(&cmd.id) || cmd.id.len() > 60 {
+            return Err(format!("command id {:?} must be lowercase letters, digits and -", cmd.id));
+        }
+        if !seen.insert(cmd.id.as_str()) {
+            return Err(format!("two commands have the id {:?}", cmd.id));
+        }
+        if cmd.title.trim().is_empty() || cmd.title.chars().count() > 60 {
+            return Err(format!("command {:?} needs a title of 1–60 characters", cmd.id));
+        }
+        if !valid_icon(&cmd.icon) {
+            return Err(format!("command {:?}: icon must be a Font Awesome name", cmd.id));
+        }
+        if cmd.keywords.as_deref().is_some_and(|k| k.chars().count() > 200) {
+            return Err(format!("command {:?}: keywords are longer than 200 characters", cmd.id));
+        }
+        if let Some(p) = &cmd.pane {
+            if !c.panes.iter().any(|pane| &pane.name == p) {
+                return Err(format!("command {:?} runs in pane {p:?}, which the package doesn't contribute", cmd.id));
+            }
+        }
+    }
+    if c.status_items.len() > MAX_STATUS_ITEMS {
+        return Err(format!("contributes.statusItems lists more than {MAX_STATUS_ITEMS} items"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for item in &c.status_items {
+        if !is_slug(&item.id) || item.id.len() > 60 {
+            return Err(format!("status item id {:?} must be lowercase letters, digits and -", item.id));
+        }
+        if !seen.insert(item.id.as_str()) {
+            return Err(format!("two status items have the id {:?}", item.id));
+        }
+        if item.text.trim().is_empty() || item.text.chars().count() > 40 {
+            return Err(format!("status item {:?} needs a text of 1–40 characters", item.id));
+        }
+        if item.tooltip.as_deref().is_some_and(|t| t.chars().count() > 120) {
+            return Err(format!("status item {:?}: tooltip is longer than 120 characters", item.id));
+        }
+        if !valid_icon(&item.icon) {
+            return Err(format!("status item {:?}: icon must be a Font Awesome name", item.id));
+        }
+        if let Some(cmd) = &item.command {
+            if !c.commands.iter().any(|x| &x.id == cmd) {
+                return Err(format!("status item {:?} runs command {cmd:?}, which the package doesn't contribute", item.id));
             }
         }
     }
@@ -336,6 +441,30 @@ pub struct WidgetPaneInfo {
     pub default_meta: serde_json::Map<String, serde_json::Value>,
 }
 
+/// A palette command, as the UI registers it (spec §6.8).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetCommandInfo {
+    pub id: String,
+    pub title: String,
+    pub icon: String,
+    /// The view of the pane it runs in.
+    pub view: String,
+    pub keywords: String,
+}
+
+/// A status bar item, before any pane of the widget updates it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetStatusItemInfo {
+    pub id: String,
+    pub text: String,
+    pub icon: String,
+    pub tooltip: Option<String>,
+    pub command: Option<String>,
+    pub alignment: StatusAlignment,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetPackageInfo {
@@ -358,6 +487,8 @@ pub struct WidgetPackageInfo {
     /// The current content hash (empty when the files couldn't be read).
     pub hash: String,
     pub panes: Vec<WidgetPaneInfo>,
+    pub commands: Vec<WidgetCommandInfo>,
+    pub status_items: Vec<WidgetStatusItemInfo>,
     /// Where its files are served, ending in `/`, while it is approved and
     /// enabled; relative to srv's web endpoint.
     pub files_url: Option<String>,
@@ -444,8 +575,8 @@ pub fn implied_from_v1(key: &str, entry: &WidgetConfigType, widgets_dir: &Path) 
         min_agent_mux: None,
         contributes: ManifestContributes {
             panes: vec![ManifestPane { name: slug, label: None, icon: None, entry: None, default_meta: None, singleton: false }],
-            commands: None,
-            status_items: None,
+            commands: vec![],
+            status_items: vec![],
         },
     };
     let _ = view;
@@ -491,6 +622,8 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         error: Some(error),
         hash: String::new(),
         panes: vec![],
+        commands: vec![],
+        status_items: vec![],
         files_url: None,
         implied: found.implied,
         folder: folder.clone(),
@@ -533,6 +666,34 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
             singleton: p.singleton,
             default_meta: p.default_meta.clone().unwrap_or_default(),
         })
+        .collect::<Vec<WidgetPaneInfo>>();
+    let commands = m
+        .contributes
+        .commands
+        .iter()
+        .map(|c| {
+            let pane = c.pane.as_deref().unwrap_or(&m.contributes.panes[0].name);
+            WidgetCommandInfo {
+                id: c.id.clone(),
+                title: c.title.clone(),
+                icon: c.icon.clone().unwrap_or_else(|| icon.clone()),
+                view: panes.iter().find(|p| p.name == pane).map(|p| p.view.clone()).unwrap_or_default(),
+                keywords: c.keywords.clone().unwrap_or_default(),
+            }
+        })
+        .collect();
+    let status_items = m
+        .contributes
+        .status_items
+        .iter()
+        .map(|s| WidgetStatusItemInfo {
+            id: s.id.clone(),
+            text: s.text.clone(),
+            icon: s.icon.clone().unwrap_or_else(|| icon.clone()),
+            tooltip: s.tooltip.clone(),
+            command: s.command.clone(),
+            alignment: s.alignment.unwrap_or_default(),
+        })
         .collect();
     let files_url = (state == WidgetState::Approved)
         .then(|| format!("/agentmux/widget-files/{}/{}/{}/", m.id, hash, files_key(secret, &m.id, &hash)));
@@ -552,6 +713,8 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         error: None,
         hash,
         panes,
+        commands,
+        status_items,
         files_url,
         implied: found.implied,
         folder,
@@ -1047,6 +1210,56 @@ mod tests {
         m.contributes.panes[0].default_meta = None;
         m.contributes.panes[0].entry = Some("../escape.html".into());
         assert!(validate(&m, "acme.test").unwrap_err().contains("inside the package"));
+    }
+
+    #[test]
+    fn commands_and_status_items_are_checked() {
+        let with = |contributes: serde_json::Value| {
+            let mut v = manifest("acme.test");
+            v["contributes"] = contributes;
+            serde_json::from_value::<Manifest>(v).map_err(|e| e.to_string()).and_then(|m| validate(&m, "acme.test"))
+        };
+        let panes = serde_json::json!([{ "name": "main" }]);
+        assert!(with(serde_json::json!({
+            "panes": panes,
+            "commands": [{ "id": "refresh", "title": "Refresh", "icon": "rotate" }],
+            "statusItems": [{ "id": "count", "text": "PRs", "command": "refresh", "alignment": "left" }]
+        }))
+        .is_ok());
+        let err = |c: serde_json::Value| with(c).unwrap_err();
+        assert!(err(serde_json::json!({ "panes": panes, "commands": [{ "id": "Bad", "title": "x" }] })).contains("lowercase"));
+        assert!(err(serde_json::json!({ "panes": panes, "commands": [{ "id": "a", "title": "" }] })).contains("title"));
+        assert!(err(serde_json::json!({ "panes": panes, "commands": [{ "id": "a", "title": "x" }, { "id": "a", "title": "y" }] })).contains("two commands"));
+        assert!(err(serde_json::json!({ "panes": panes, "commands": [{ "id": "a", "title": "x", "pane": "other" }] })).contains("doesn't contribute"));
+        assert!(err(serde_json::json!({ "panes": panes, "commands": [{ "id": "a", "title": "x", "icon": "x\" onclick" }] })).contains("Font Awesome"));
+        assert!(err(serde_json::json!({ "panes": panes, "statusItems": [{ "id": "s", "text": "x", "command": "nope" }] })).contains("doesn't contribute"));
+        assert!(err(serde_json::json!({ "panes": panes, "statusItems": [{ "id": "s", "text": "a very long status bar text of more than forty" }] })).contains("1–40"));
+        let five: Vec<_> = (0..5).map(|i| serde_json::json!({ "id": format!("s{i}"), "text": "x" })).collect();
+        assert!(err(serde_json::json!({ "panes": panes, "statusItems": five })).contains("more than 4"));
+        let many: Vec<_> = (0..21).map(|i| serde_json::json!({ "id": format!("c{i}"), "title": "x" })).collect();
+        assert!(err(serde_json::json!({ "panes": panes, "commands": many })).contains("more than 20"));
+    }
+
+    #[test]
+    fn commands_and_status_items_reach_the_ui_with_their_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path());
+        let dir = package(&svc.widgets_dir, "acme.test");
+        let mut v = manifest("acme.test");
+        v["icon"] = "note-sticky".into();
+        v["contributes"] = serde_json::json!({
+            "panes": [{ "name": "main" }, { "name": "side" }],
+            "commands": [{ "id": "new", "title": "New note", "pane": "side", "keywords": "add" }, { "id": "show", "title": "Show" }],
+            "statusItems": [{ "id": "count", "text": "Notes", "command": "show" }]
+        });
+        std::fs::write(dir.join(MANIFEST_FILE), v.to_string()).unwrap();
+        let p = &svc.rescan(&HashMap::new())[0];
+        assert_eq!(p.state, WidgetState::NeedsApproval, "{:?}", p.error);
+        assert_eq!(p.commands[0].view, "ext:acme.test/side");
+        assert_eq!((p.commands[1].view.as_str(), p.commands[1].icon.as_str()), ("ext:acme.test/main", "note-sticky"));
+        assert_eq!(p.commands[0].keywords, "add");
+        let s = &p.status_items[0];
+        assert_eq!((s.text.as_str(), s.command.as_deref(), s.alignment), ("Notes", Some("show"), StatusAlignment::Right));
     }
 
     #[test]
