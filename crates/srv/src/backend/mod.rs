@@ -134,5 +134,6 @@ pub mod registry_probe;
 pub mod cron;
 pub mod dev_proxy;
 pub mod shell_node;
+pub mod work_facts;
 
 pub use oref::ORef;

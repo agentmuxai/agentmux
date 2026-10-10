@@ -93,8 +93,56 @@ fn is_todo_tool(name: &str) -> bool {
     TODO_TOOL_NAMES.contains(&name) || name.contains("Todo")
 }
 
+/// Tools whose input names a file the agent is changing. Their paths become
+/// the agent's recent files, which `backend::work_facts` compares across
+/// agents (docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.1).
+const FILE_EDIT_TOOL_NAMES: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// Most recent files kept per block, distinct paths, newest first.
+pub const MAX_RECENT_FILES: usize = 50;
+
+/// One file an agent changed, as its tool call named it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecentFile {
+    /// The path exactly as the tool input wrote it (usually absolute).
+    pub path: String,
+    pub tool: String,
+    /// When this watcher read the call: not the call's own time, so a block
+    /// first seen mid-session stamps its whole backlog with that moment.
+    pub ts_ms: u64,
+}
+
+/// What the watcher currently knows about one block, for readers outside
+/// the sweep loop.
+#[derive(Debug, Clone, Default)]
+pub struct WatchedWork {
+    pub progress: AgentProgress,
+    pub recent_files: Vec<RecentFile>,
+}
+
+/// The latest [`WatchedWork`] per block id, replaced after every sweep.
+fn snapshot() -> &'static parking_lot::RwLock<HashMap<String, WatchedWork>> {
+    static SNAPSHOT: std::sync::LazyLock<parking_lot::RwLock<HashMap<String, WatchedWork>>> =
+        std::sync::LazyLock::new(Default::default);
+    &SNAPSHOT
+}
+
+/// Read access to the watcher's state for one block: its checklist, current
+/// tool and recent files. `None` until the watcher has swept it once.
+pub fn watched_work(block_id: &str) -> Option<WatchedWork> {
+    snapshot().read().get(block_id).cloned()
+}
+
+/// Record that `path` was just changed by `tool`: moved to the front if it
+/// was already listed, and the list kept to [`MAX_RECENT_FILES`].
+fn note_recent_file(files: &mut Vec<RecentFile>, path: &str, tool: &str, ts_ms: u64) {
+    files.retain(|f| f.path != path);
+    files.insert(0, RecentFile { path: path.to_string(), tool: tool.to_string(), ts_ms });
+    files.truncate(MAX_RECENT_FILES);
+}
+
 /// One checklist entry as the Swarm renders it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TodoItem {
     pub text: String,
     /// `pending` | `in_progress` | `completed`. Passed through as the provider
@@ -144,6 +192,8 @@ struct BlockState {
     open: Vec<(String, String)>,
     /// See [`AgentProgress::todos_partial`].
     partial: bool,
+    /// Files named by edit tools, newest first (see [`note_recent_file`]).
+    recent_files: Vec<RecentFile>,
 }
 
 impl BlockState {
@@ -169,8 +219,8 @@ impl BlockState {
 ///
 /// Pure w.r.t. I/O so it can be unit-tested against real transcript shapes
 /// without a FileStore. Called once per tick with only the lines appended since
-/// the previous call — never the whole file.
-fn apply_lines(state: &mut BlockState, lines: &[&str]) {
+/// the previous call — never the whole file. `now_ms` stamps recent files.
+fn apply_lines(state: &mut BlockState, lines: &[&str], now_ms: u64) {
     for line in lines {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -194,6 +244,15 @@ fn apply_lines(state: &mut BlockState, lines: &[&str]) {
                 if state.open.len() > MAX_OPEN_TOOLS {
                     state.open.remove(0);
                 }
+            }
+
+            if FILE_EDIT_TOOL_NAMES.contains(&name) {
+                if let Some(path) = frame_input(frame)
+                    .and_then(|i| first_string(i, &["file_path", "notebook_path"]))
+                {
+                    note_recent_file(&mut state.recent_files, &path, name, now_ms);
+                }
+                continue;
             }
 
             if !is_todo_tool(name) {
@@ -437,7 +496,7 @@ fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockSt
     if lines.is_empty() {
         return false;
     }
-    apply_lines(state, &lines);
+    apply_lines(state, &lines, agentmux_common::time::now_ms_u64());
     true
 }
 
@@ -542,6 +601,12 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
             }
         };
         states = returned_states;
+        *snapshot().write() = states
+            .iter()
+            .map(|(block_id, s)| {
+                (block_id.clone(), WatchedWork { progress: s.progress(), recent_files: s.recent_files.clone() })
+            })
+            .collect();
 
         for SweepOutcome { agent_id, block_id, progress } in outcomes {
             last_published.insert(block_id.clone(), progress.clone());
@@ -600,8 +665,86 @@ mod tests {
 
     /// One tick's worth of lines.
     fn feed(state: &mut BlockState, lines: &[String]) {
+        feed_at(state, lines, 1_000);
+    }
+
+    fn feed_at(state: &mut BlockState, lines: &[String], now_ms: u64) {
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-        apply_lines(state, &refs);
+        apply_lines(state, &refs, now_ms);
+    }
+
+    fn edit_call(id: &str, tool: &str, key: &str, path: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"{tool}","input":{{"{key}":"{path}","old_string":"a","new_string":"b"}}}}]}}}}"#
+        )
+    }
+
+    /// A fake output stream with Edit / Write / MultiEdit / NotebookEdit
+    /// calls fills recent files, newest first, with the read time.
+    #[test]
+    fn edit_tools_fill_recent_files_newest_first() {
+        let mut st = BlockState::default();
+        feed_at(
+            &mut st,
+            &[
+                edit_call("e1", "Edit", "file_path", "C:/r/a.rs"),
+                tool_result("e1"),
+                edit_call("e2", "Write", "file_path", "C:/r/b.rs"),
+                edit_call("e3", "MultiEdit", "file_path", "C:/r/c.rs"),
+            ],
+            10,
+        );
+        feed_at(&mut st, &[edit_call("e4", "NotebookEdit", "notebook_path", "C:/r/n.ipynb")], 20);
+        let got: Vec<(&str, &str, u64)> =
+            st.recent_files.iter().map(|f| (f.path.as_str(), f.tool.as_str(), f.ts_ms)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("C:/r/n.ipynb", "NotebookEdit", 20),
+                ("C:/r/c.rs", "MultiEdit", 10),
+                ("C:/r/b.rs", "Write", 10),
+                ("C:/r/a.rs", "Edit", 10),
+            ]
+        );
+        // The checklist and current tool are unchanged by the new bookkeeping.
+        assert!(st.progress().todos.is_empty());
+        assert_eq!(st.progress().current_tool.as_deref(), Some("Write"));
+    }
+
+    #[test]
+    fn editing_a_file_again_moves_it_to_the_front_without_duplicating_it() {
+        let mut st = BlockState::default();
+        feed_at(&mut st, &[edit_call("e1", "Edit", "file_path", "/r/a.rs")], 1);
+        feed_at(&mut st, &[edit_call("e2", "Edit", "file_path", "/r/b.rs")], 2);
+        feed_at(&mut st, &[edit_call("e3", "Write", "file_path", "/r/a.rs")], 3);
+        let got: Vec<(&str, u64)> = st.recent_files.iter().map(|f| (f.path.as_str(), f.ts_ms)).collect();
+        assert_eq!(got, vec![("/r/a.rs", 3), ("/r/b.rs", 2)]);
+        assert_eq!(st.recent_files[0].tool, "Write");
+    }
+
+    #[test]
+    fn recent_files_stay_bounded() {
+        let mut st = BlockState::default();
+        let calls: Vec<String> = (0..MAX_RECENT_FILES + 7)
+            .map(|i| edit_call(&format!("e{i}"), "Edit", "file_path", &format!("/r/f{i}.rs")))
+            .collect();
+        feed(&mut st, &calls);
+        assert_eq!(st.recent_files.len(), MAX_RECENT_FILES);
+        assert_eq!(st.recent_files[0].path, format!("/r/f{}.rs", MAX_RECENT_FILES + 6));
+    }
+
+    #[test]
+    fn reads_and_other_tools_add_no_recent_files() {
+        let mut st = BlockState::default();
+        feed(
+            &mut st,
+            &[
+                edit_call("r1", "Read", "file_path", "/r/a.rs"),
+                edit_call("g1", "Grep", "file_path", "/r/b.rs"),
+                edit_call("w1", "Edit", "old_string", "no path"),
+            ],
+        );
+        assert!(st.recent_files.is_empty());
     }
 
     fn run(lines: &[String]) -> AgentProgress {

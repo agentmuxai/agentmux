@@ -1067,13 +1067,10 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
         agents.push(json!({
             "name": reg.agent_id,
             "tier": "host",
+            "block_id": reg.block_id,
             "turn_active": turn_active,
-            // Real transcript-write time when available (see
-            // last_line_preview_and_activity's doc comment) — falls back
-            // to registration time only when there's no output yet at
-            // all, which is still a meaningful "how long has this agent
-            // existed" signal in that one specific case, not a stand-in
-            // for a genuinely unknown value.
+            // Transcript-write time (see last_line_preview_and_activity);
+            // registration time only while there is no output at all.
             "last_activity_ms": activity_ms.unwrap_or(reg.last_seen),
             "last_message_preview": preview,
         }));
@@ -1139,6 +1136,7 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
                     "name": entry.agent_id,
                     "tier": "cross-channel",
                     "channel": entry.channel,
+                    "block_id": entry.block_id,
                     "turn_active": turn_active,
                     "last_activity_ms": entry.updated_at,
                     "last_message_preview": preview,
@@ -1177,6 +1175,8 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
         }
     }
 
+    // Host and cross-channel entries gain their agent's work facts (`work`).
+    super::work_facts_handlers::annotate_conversations(&state, &mut agents).await;
     Json(json!({ "agents": agents })).into_response()
 }
 
