@@ -35,6 +35,7 @@ import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import { SwarmStatsPanel } from "./swarm-stats";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
+import { isModKey } from "@/util/platformutil";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -71,7 +72,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
             // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
             // (app.tsx) — let it bubble there instead of zooming just this
             // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!ev.ctrlKey || ev.shiftKey) return;
+            if (!isModKey(ev) || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const STEP = 0.1;
@@ -85,7 +86,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
         if (!rootRef) return;
         const el = rootRef;
         const handleKey = (ev: KeyboardEvent) => {
-            if (!ev.ctrlKey || ev.altKey || ev.metaKey) return;
+            if (!isModKey(ev) || ev.altKey) return;
             if (!(ev.target instanceof Node) || !el.contains(ev.target)) return;
             const STEP = 0.1;
             if (ev.key === "+" || ev.key === "=") {

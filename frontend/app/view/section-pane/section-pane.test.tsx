@@ -11,6 +11,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setPlatform } from "@/util/platformutil";
 
 vi.mock("@/app/view/accounts/accounts-manager", () => ({
     AccountsManager: () => <div data-testid="accounts-manager" />,
@@ -259,6 +260,7 @@ describe("section pane zoom", () => {
     });
 
     it("Ctrl+Wheel steps term:zoom; back at 1.0 it clears the key", () => {
+        setPlatform("win32"); // mod+wheel: Ctrl here, ⌘ on macOS
         const { container } = mount(memoryPaneTab);
         const view = container.querySelector(".armory-view")!;
         wheel(view, { ctrlKey: true, deltaY: 100 });

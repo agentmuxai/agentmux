@@ -67,6 +67,22 @@ export const TIPS: TipRow[] = [
         source: { file: "frontend/app/store/keymodel-dispatch.ts", anchor: "export function registerControlShiftTracking" },
     },
     {
+        id: "pane:zoom:wheel",
+        area: "Panes",
+        gesture: "mod+wheel",
+        where: "over a pane",
+        label: "Zoom that pane; over the title bar, status bar or a pane's header, zoom the app's frame instead",
+        source: { file: "frontend/app/app.tsx", anchor: "function isOverChrome(target: HTMLElement): boolean" },
+    },
+    {
+        id: "pane:zoom:allPanes",
+        area: "Panes",
+        gesture: "mod+shift+wheel",
+        where: "over a pane",
+        label: "Zoom every pane in the window together (over a browser pane's page, only that page zooms)",
+        source: { file: "frontend/app/app.tsx", anchor: "const AppAllPanesZoomHandler = () => {" },
+    },
+    {
         id: "pane:dropOnTab",
         area: "Panes",
         gesture: "drag",
@@ -288,6 +304,14 @@ export const TIPS: TipRow[] = [
         where: "files onto an agent pane, or paste them",
         label: "Attach them to your next message",
         source: { file: "frontend/app/view/agent/hooks/useAgentDropAttach.ts", anchor: "Drop file(s) onto an agent pane" },
+    },
+    {
+        id: "agent:search",
+        area: "Agent",
+        gesture: "mod+key:F",
+        where: "in an agent pane",
+        label: "Search the conversation; Enter and {key:shift+Enter} step through matches",
+        source: { file: "frontend/app/view/agent/hooks/useAgentKeyboard.ts", anchor: 'isModKey(e) && e.key === "f"' },
     },
     {
         id: "agent:permission",
