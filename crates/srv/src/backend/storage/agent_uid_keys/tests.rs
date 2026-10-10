@@ -128,3 +128,15 @@ fn a_purged_row_gets_no_key_and_its_keys_go_with_it() {
     let wan: i64 = conn.query_row("SELECT COUNT(*) FROM db_agent_wan_keys_by_uid WHERE uid = 'uid-aria'", [], |r| r.get(0)).unwrap();
     assert_eq!(wan, 0);
 }
+
+#[test]
+fn slugs_that_fold_together_outside_ascii_are_nobody_s_either() {
+    // SQLite's lower() folds only ASCII; the key tables fold with Rust's
+    // to_lowercase, so "Ä" and "ä" share one key row (Codex on #4567).
+    let store = Store::open_in_memory().unwrap();
+    row(&store, "uid-upper", "Ä", ROW_MS);
+    row(&store, "uid-lower", "ä", ROW_MS);
+    name_keys(&store, "ä", ROW_SECS + 60);
+    assert_eq!(ensure(&store, "uid-upper").1, [UidKeyOrigin::Fresh(FreshReason::SlugShared); 2]);
+    assert_eq!(ensure(&store, "uid-lower").1, [UidKeyOrigin::Fresh(FreshReason::SlugShared); 2]);
+}

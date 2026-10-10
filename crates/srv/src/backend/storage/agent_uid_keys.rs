@@ -197,7 +197,10 @@ fn copyable_name_key(conn: &rusqlite::Connection, tier: Tier, row: &Row) -> Resu
     let Some((pair, key_created_secs)) = key else { return Ok(Err(FreshReason::NoNameKey)) };
     // Slug uniqueness is case-sensitive, the key tables are not: "Aria" and
     // "aria" share one key row, so either holding it disqualifies both.
-    let holders: i64 = conn.query_row("SELECT COUNT(*) FROM db_agents WHERE lower(trim(slug)) = ?1", params![slug], |r| r.get(0))?;
+    // Folded in Rust as the key tables fold, never with SQLite's ASCII-only
+    // lower(): "Ä" and "ä" would each count as the only holder and both
+    // take one private key.
+    let holders = slug_holders_folded(conn, &slug)?;
     if holders != 1 {
         return Ok(Err(FreshReason::SlugShared));
     }
@@ -217,6 +220,20 @@ fn copyable_name_key(conn: &rusqlite::Connection, tier: Tier, row: &Row) -> Resu
         return Ok(Err(FreshReason::Tombstoned));
     }
     Ok(Ok((pair, slug)))
+}
+
+/// How many rows hold `folded` as their slug, trimmed and folded with Rust's
+/// Unicode-aware `to_lowercase` (the key tables' folding).
+pub(super) fn slug_holders_folded(conn: &rusqlite::Connection, folded: &str) -> Result<usize, StoreError> {
+    let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
+    let slugs = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let mut n = 0;
+    for slug in slugs {
+        if slug?.trim().to_lowercase() == folded {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 #[cfg(test)]
