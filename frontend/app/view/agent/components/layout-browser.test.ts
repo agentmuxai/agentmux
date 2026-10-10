@@ -39,9 +39,8 @@ describe("findBrowser", () => {
     });
 
     it("finds the headless shell on PATH", () => {
-        expect(
-            findBrowser(lookup({ env: { PATH: "/opt/bin:/usr/bin" }, files: ["/opt/bin/chrome-headless-shell"] }))
-        ).toBe("/opt/bin/chrome-headless-shell");
+        const onPath = join("/opt/bin", "chrome-headless-shell");
+        expect(findBrowser(lookup({ env: { PATH: "/opt/bin:/usr/bin" }, files: [onPath] }))).toBe(onPath);
     });
 
     it("finds the newest headless shell in the Puppeteer cache", () => {
