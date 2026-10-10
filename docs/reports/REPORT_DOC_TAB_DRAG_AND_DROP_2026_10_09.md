@@ -1,6 +1,6 @@
 # Report: dragging document tabs between panes (Editor to Editor, Media to Media)
 
-**Status:** analysis
+**Status:** active. Phase 1 (drag to reorder) and Phase 2 (Media ↔ Media) are built; Phase 3 (Editor ↔ Editor) is next.
 **Date:** 2026-10-09 · **Author:** agent2
 **Trigger:** the repo owner: *"we want to implement dnd for document panes. Editor and Media each have document panes, but they each are not compatible with eachother. we want to implement dnd so a user can drag a doc pane from editor to another, or from one media to another, i believe it is already DRY and we want to keep it that way."*
 **Written against:** `main` @ `4afd8c527`. **Builds on:** `SPEC_DOCUMENT_TABS_2026_10_02.md` (this is its Phase 5, §5.8 and §4.1), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (the pane-tab drag this reuses), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (the drag session).

@@ -43,7 +43,7 @@ import "./PaneTabStrip.scss";
 // The Pane Tab pill's drag tag (drag-types.ts): distinct from the tile and
 // window-tab tags, so no existing target mistakes a pill for either.
 // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
-import { docTabItemType, paneTabItemType } from "@/app/drag/drag-types";
+import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData } from "@/app/drag/drag-types";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
@@ -117,23 +117,6 @@ export interface DocTabDrag {
      *  one task after the drop: the move unmounts the dragged pill, the live
      *  source of the drag. Omitted: such a drop is not accepted here. */
     onReceive?: (sourceBlockId: string, tabId: string, at: { targetId: string; position: "before" | "after" }) => boolean | void;
-}
-
-/** What a document-tab drag carries (pragmatic-dnd's `source.data`). */
-export interface DocTabDragData {
-    type: typeof docTabItemType;
-    tabId: string;
-    docType: string;
-    sourceBlockId: string;
-}
-
-export function asDocTabDragData(data: Record<string | symbol, unknown>): DocTabDragData | null {
-    return data.type === docTabItemType &&
-        typeof data.tabId === "string" &&
-        typeof data.docType === "string" &&
-        typeof data.sourceBlockId === "string"
-        ? (data as unknown as DocTabDragData)
-        : null;
 }
 
 /**

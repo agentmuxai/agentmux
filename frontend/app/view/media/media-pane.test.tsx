@@ -26,7 +26,7 @@ vi.mock("@/app/drag/file-drop", () => ({
         return () => hub.hooks.delete(id);
     },
 }));
-vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantOpen: vi.fn() } }));
+vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantOpen: vi.fn(), cantMove: vi.fn() } }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { WatchMediaDirCommand: () => Promise.resolve(), UnwatchMediaDirCommand: () => Promise.resolve() },
 }));
@@ -56,6 +56,7 @@ vi.mock("@/layout/lib/layoutModelHooks", () => ({
 import { mediaPaneTab } from "./media";
 import { openInMediaPaneOnScreen } from "./media-open";
 import { MediaPaneModel } from "./media-pane";
+import { moveDocTab } from "@/app/doc-tabs/doc-tab-hosts";
 
 let reqs = 0;
 /** A `media:open` request, as openInMediaPaneOnScreen appends it. */
@@ -241,5 +242,38 @@ describe("opening media into the Media pane on screen", () => {
         hub.focused = "m2";
         await openInMediaPaneOnScreen("C:/y.png");
         expect(hub.metaWrites[1]).toEqual(["m2", { "media:open": [{ id: expect.any(String), path: "C:/y.png" }] }]);
+    });
+});
+
+describe("moving Media tabs between panes", () => {
+    const ctxFor = (blockId: string) =>
+        ({ blockId, meta: () => ({}) as MetaType, setMeta: async () => {}, isFocused: () => true, visibility: () => "active" }) as PaneTabHostContext;
+
+    it("a Media tab moves to another Media pane; an empty one can't", () => {
+        const a = new MediaPaneModel(ctxFor("move-a"));
+        const b = new MediaPaneModel(ctxFor("move-b"));
+        a.open("C:/out/1.png");
+        b.open("C:/out/2.png");
+        a.tabs.open({ path: "C:/out/3.png" });
+        const three = a.tabs.activeId()!;
+        expect(moveDocTab("move-a", three, "move-b")).toEqual({ moved: true });
+        expect(a.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/1.png"]);
+        expect(b.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/2.png", "C:/out/3.png"]);
+        expect(b.tabs.activeId()).toBe(three);
+
+        a.tabs.newDocument();
+        const result = moveDocTab("move-a", a.tabs.activeId()!, "move-b");
+        expect(result).toEqual({ moved: false, reason: "It has no file yet." });
+        a.dispose();
+        b.dispose();
+    });
+
+    it("a disposed pane no longer takes tabs", () => {
+        const a = new MediaPaneModel(ctxFor("gone-a"));
+        const b = new MediaPaneModel(ctxFor("gone-b"));
+        a.open("C:/out/1.png");
+        b.dispose();
+        expect(moveDocTab("gone-a", a.tabs.activeId()!, "gone-b").moved).toBe(false);
+        a.dispose();
     });
 });
