@@ -184,6 +184,20 @@ pub(crate) fn backend_browser_attention(
         .map_err(|e| format!("srv refused the answer: {e}"))
 }
 
+/// Relay the user's answer to a widget install prompt to srv, as the host:
+/// srv accepts an approval only with this host's IPC token, which agents never
+/// see (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3).
+pub(crate) fn backend_widget_approval(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/widget_approval", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the approval: {e}"))
+}
+
 /// Report a popup a browser pane's page opened, as the host, and return
 /// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane beside
 /// its opener, `{admitted: false, reason}` when the caller should open it in

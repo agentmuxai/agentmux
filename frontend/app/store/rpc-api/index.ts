@@ -20,6 +20,7 @@ import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
 import { RemotesApi } from "./remotes";
+import { WidgetsApi } from "./widgets";
 import { FsApi } from "./fs";
 import { IdentityApi } from "./identity";
 import { LayoutApi } from "./layout";
@@ -352,6 +353,7 @@ export const RpcApi = {
     ...BundleImportApi,
     ...FleetApi,
     ...RemotesApi,
+    ...WidgetsApi,
     ...ReactiveApi,
     ...BookmarksApi,
     ...LayoutApi,

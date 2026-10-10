@@ -140,6 +140,8 @@ export const WpsEvent = {
     DispatchUpdated: "dispatch:updated",
     IdentityAccountsChanged: "identityaccounts:changed",
     InstallChunk: "install_chunk",
+    /** Widget packages changed (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8). */
+    WidgetPackages: "widgetpackages",
     LanInstances: "laninstances",
     LanInstancesError: "laninstances:error",
     LanInstancesFirewall: "laninstances:firewall",
