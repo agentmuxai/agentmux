@@ -36,19 +36,23 @@ impl SiteLimits {
     /// after `EARLY_LIST_GRACE` here, without waiting for srv's next push: a
     /// pane taken over (or never created) must not stay limited until then.
     pub fn list(&self, pane: &str) -> Option<Vec<String>> {
+        // `lists` before `early`, the order `replace_lists` takes them in:
+        // the two run on different threads.
+        let mut lists = self.lists.lock();
         let mut early = self.early.lock();
         if early.get(pane).is_some_and(|at| at.elapsed() >= EARLY_LIST_GRACE) {
             early.remove(pane);
-            self.lists.lock().remove(pane);
+            lists.remove(pane);
             return None;
         }
-        self.lists.lock().get(pane).cloned()
+        lists.get(pane).cloned()
     }
 }
 
 /// Replace the lists with srv's (`allowed`), keeping each early copy srv's
 /// push doesn't cover yet.
 pub(crate) fn replace_lists(limits: &SiteLimits, allowed: std::collections::HashMap<String, Vec<String>>) {
+    // `lists` before `early`, as everywhere both are held.
     let mut lists = limits.lists.lock();
     let mut early = limits.early.lock();
     let mut next = allowed;
@@ -72,8 +76,9 @@ pub(crate) fn limit_before_create(limits: &SiteLimits, pane: &str, list: Option<
     let Some(entries) = list.and_then(|v| v.as_array()) else { return };
     let entries: Vec<String> = entries.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
     if let Ok(list) = agentmux_common::allowed_origins::parse_list(&entries) {
-        if !list.is_empty() && !limits.lists.lock().contains_key(pane) {
-            limits.lists.lock().insert(pane.to_string(), list);
+        let mut lists = limits.lists.lock();
+        if !list.is_empty() && !lists.contains_key(pane) {
+            lists.insert(pane.to_string(), list);
             limits.early.lock().insert(pane.to_string(), std::time::Instant::now());
         }
     }
