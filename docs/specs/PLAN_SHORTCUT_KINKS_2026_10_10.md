@@ -23,7 +23,7 @@ This plan turns them into work packages, one owner each, sized for one PR apiece
 | K2 | RunCommand/PressKeys reach only panes in the window's active tab; switching tabs means guessing `tab:goto:N` | App API |
 | K3 | Three table commands act beyond their pane: `files:openInNewTab` (a PDF opens in its OS app unasked; programs ask first), `term:paste` (a line break in the clipboard runs in the shell), `files:mention` (writes into an agent's message box) | App API safety |
 | K4 | `files:trash` can't be undone on macOS (restore isn't implemented), for users too. #4603 refuses it to agents there | macOS gap |
-| K5 | The Files pane's stale `<Show>` crash: fixed defensively in #4603, but it never reproduced in jsdom or on Windows, only on macOS and Linux after the full Files sequence | Unconfirmed root cause |
+| K5 | The Files pane's stale `<Show>` crash: fixed in #4603 by reading a memo instead of the `<Show>` accessor. Confirmed gone on Linux (Maricon's rerun, 3 of 3 rounds); macOS rerun pending. It never reproduced in jsdom or on Windows | Root cause inferred |
 | K6 | Dialogs handle Escape themselves, so `app:escape` rarely resolves; PressKeys can't report it | App API reporting |
 | K7 | Ctrl+F in a focused terminal goes to the shell on Windows/Linux, by design; the Help pane doesn't say so | Help accuracy |
 | K8 | Ctrl+Tab in an editor with one document falls through to the global `tab:next` | Behaviour (by design) |
@@ -34,6 +34,8 @@ This plan turns them into work packages, one owner each, sized for one PR apiece
 | K13 | Dev pages reloaded mid-run, twice right after terminals were created; Vite already ignores `dist/`, `target/`, `*.md`, `*.json`, so the trigger is unknown | Dev env |
 | K14 | `npm install` in `task dev` rewrites `package-lock.json` with another npm's flags; it slipped into #4603 | Dev env |
 | K15 | The verification script changed files outside its scratch folder on the first runs (folders created and trashed a few levels up) | Process |
+| K16 | `editor:saveAs` notes the key as resolved before finding that Save As doesn't apply (non-scratch tab), so PressKeys reports a false pass | App API reporting |
+| K17 | One `--editor` pane can't cover every editor row: a Markdown file opens in preview, where save, Save As and find don't apply, but `editor:togglePreview` needs Markdown | Script setup |
 
 Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket exit assertion on Windows, `gh pr merge --delete-branch` switching the checkout, cargo and a dev build sharing the target lock) aren't AgentMux bugs. They go into each agent's own notes, not this plan.
 
@@ -52,13 +54,14 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
 
 ### Maricon@charlie (Linux)
 
-- **L1. Confirm or root-cause the stale `<Show>` crash** (K5).
-  - Rerun `--only '^(editor|files):' --files-mutate` on main.
-  - If it still throws: log the stack with Solid's dev build, and bisect which `<Show>` accessor is read after unmount. The candidates are `RenameInput`, the confirm and context-menu `<Show>`s, and `GridTile`.
+- **L1. Stale `<Show>` crash** (K5). Confirmed gone on Linux after #4603.
+  - Done on Linux; Masty's macOS rerun closes it.
+  - If it comes back anywhere: log the stack with Solid's dev build, and bisect which `<Show>` accessor is read after unmount (`RenameInput`, the confirm and context-menu `<Show>`s, `GridTile`).
   - Fix at the reader, with a jsdom test that reproduces the order of updates.
 - **L2. Temp-tree guard for the script** (K15).
   - `verify-shortcuts.mjs --files-mutate` creates its own temp tree, at least three levels deep, and points the Files pane there.
   - It refuses to run disk-changing rows unless the pane's path is under that tree, rechecking before each one.
+  - Editor rows (K17): take a second editor pane on a plain-text file (`--editor-text`) for save, Save As and find, and keep `--editor` on a Markdown file for the preview toggle.
 - **L3. Injected L3 pass on Linux** (`ydotool`), following the safety rules in the shortcuts plan §6:
   - skip keys the grab report lists as taken;
   - focus the dev instance first;
@@ -75,6 +78,7 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
 - **A4. Help pane notes** (K7):
   - a short "not while a terminal has focus" on `pane:find`'s Ctrl+F row;
   - PressKeys reports when a dialog handled the key itself (K6), so the result isn't "resolved nothing".
+  - The editor's Save keys note the key only when the command applied (K16).
 - **A5. Pool windows identify themselves** (K11): pool pages set a distinct document title or a marker DevTools clients can filter on, and the script uses it.
 - **A6. Dev-environment fixes** (K12–K14), one small PR each:
   - `npm ci` instead of `npm install` in the dev path when `package-lock.json` hasn't changed;
@@ -112,7 +116,7 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 |---|---|---|
 | M1 Trash restore (macOS) | Masty@starpower | open |
 | M2 L3 macOS | Masty@starpower | waiting for Accessibility |
-| L1 Stale `<Show>` | Maricon@charlie | open |
+| L1 Stale `<Show>` | Maricon@charlie | done on Linux; macOS rerun pending |
 | L2 Temp-tree guard | Maricon@charlie | open |
 | L3 Injected L3 Linux | Maricon@charlie | open |
 | A1 Pane-tab targets | AgentA@Area54 | open |
