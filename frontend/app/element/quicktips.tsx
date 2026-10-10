@@ -7,7 +7,7 @@ import { createMemo, For, JSX, Show } from "solid-js";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { keyLabelWords } from "@/app/keybindings/help";
 import { keyPlatform } from "@/app/keybindings";
-import { gestureLabels, tipsFor, type TipArea, type TipRow } from "@/app/keybindings/tips";
+import { gestureLabels, tipLabel, tipsFor, type TipArea } from "@/app/keybindings/tips";
 import { getPlatform } from "@/util/platformutil";
 
 const KeyCap = (props: { children?: JSX.Element }): JSX.Element => {
@@ -104,11 +104,12 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
     // The hidden tips (keybindings/tips.ts), grouped by area in table order.
     const gestureSections = createMemo(() => {
         const platform = keyPlatform();
-        const byArea = new Map<TipArea, { tip: TipRow; keys: string[][] }[]>();
+        const byArea = new Map<TipArea, { label: string; where?: string; keys: string[][] }[]>();
         for (const tip of tipsFor(getPlatform())) {
             const keys = gestureLabels(tip, platform);
-            if (!matches("Mouse and gestures", tip.area, tip.label, tip.where ?? "", ...keys.flat().map(keyLabelWords))) continue;
-            byArea.set(tip.area, [...(byArea.get(tip.area) ?? []), { tip, keys }]);
+            const label = tipLabel(tip, platform);
+            if (!matches("Mouse and gestures", tip.area, label, tip.where ?? "", ...keys.flat().map(keyLabelWords))) continue;
+            byArea.set(tip.area, [...(byArea.get(tip.area) ?? []), { label, where: tip.where, keys }]);
         }
         return [...byArea.entries()].map(([area, entries]) => ({ area, entries }));
     });
@@ -195,7 +196,7 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
                                     <For each={section.entries}>
                                         {(entry) => (
                                             <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                                                <span class="text-[15px]">{entry.tip.label}</span>
+                                                <span class="text-[15px]">{entry.label}</span>
                                                 <div class="flex flex-row flex-wrap items-center gap-1">
                                                     <For each={entry.keys}>
                                                         {(alt, i) => (
@@ -207,8 +208,8 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
                                                             </>
                                                         )}
                                                     </For>
-                                                    <Show when={entry.tip.where}>
-                                                        <span class="text-secondary text-[13px]">{entry.tip.where}</span>
+                                                    <Show when={entry.where}>
+                                                        <span class="text-secondary text-[13px]">{entry.where}</span>
                                                     </Show>
                                                 </div>
                                             </div>

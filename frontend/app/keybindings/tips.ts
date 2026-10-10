@@ -8,7 +8,7 @@
 // code it describes; tips.test.ts fails when that code changes, so a tip
 // can't quietly go out of date.
 
-import type { KeyPlatform } from "./keys";
+import { formatKey, type KeyPlatform } from "./keys";
 
 export type TipArea = "Panes" | "Window" | "Tabs" | "Terminal" | "Editor" | "Files" | "Media" | "Agent" | "Find" | "Browser";
 
@@ -22,6 +22,8 @@ export interface TipRow {
      * (`key:Space`). Alternatives are separated by " / ".
      */
     gesture: string;
+    /** What it does. A key inside it is written `{key:mod+z}` (the shortcut
+     *  table's syntax), so it shows as ⌘Z on macOS and Ctrl+Z elsewhere. */
     label: string;
     /** Where to do it: "on a pane border", "over an image". */
     where?: string;
@@ -61,7 +63,7 @@ export const TIPS: TipRow[] = [
         id: "pane:numbers",
         area: "Panes",
         gesture: "hold:ctrl+shift",
-        label: "Number every pane, for Ctrl+Shift+1–9",
+        label: "Number every pane, for {key:ctrl+shift+1}–9",
         source: { file: "frontend/app/store/keymodel-dispatch.ts", anchor: "export function registerControlShiftTracking" },
     },
     {
@@ -179,7 +181,7 @@ export const TIPS: TipRow[] = [
         id: "term:ctrlF",
         area: "Terminal",
         gesture: "ctrl+shift+key:F",
-        label: "Find in a terminal (Ctrl+F there goes to the shell)",
+        label: "Find in a terminal ({key:ctrl+f} there goes to the shell)",
         os: ["win32", "linux"],
         source: { file: "frontend/app/keybindings/defaults.ts", anchor: 'other: ["ctrl+shift+f"], when: "terminalFocus"' },
     },
@@ -200,7 +202,7 @@ export const TIPS: TipRow[] = [
         area: "Files",
         gesture: "mod+click / shift+click",
         where: "on rows in the Files pane",
-        label: "Add or remove one row / select a range; mod+Space toggles the focused row",
+        label: "Add or remove one row / select a range; {key:mod+Space} toggles the focused row",
         source: { file: "frontend/app/view/files/files-view.tsx", anchor: "e.shiftKey" },
     },
     {
@@ -252,7 +254,7 @@ export const TIPS: TipRow[] = [
         area: "Agent",
         gesture: "key:Escape",
         where: "in the agent's message box",
-        label: "Clear it (mod+Z brings it back); in an empty box, interrupt the agent",
+        label: "Clear it ({key:mod+z} brings it back); in an empty box, interrupt the agent",
         source: { file: "frontend/app/view/agent/components/AgentFooter.tsx", anchor: "textarea is empty → send SIGINT" },
     },
     {
@@ -357,6 +359,11 @@ function tokenLabels(alt: string, platform: KeyPlatform): string[] {
 /** A tip's gesture, per alternative, as key-cap labels for this platform. */
 export function gestureLabels(tip: TipRow, platform: KeyPlatform): string[][] {
     return tip.gesture.split(" / ").map((alt) => tokenLabels(alt.trim(), platform));
+}
+
+/** A tip's label for this platform: each `{key:…}` shown as the Help pane shows keys. */
+export function tipLabel(tip: TipRow, platform: KeyPlatform): string {
+    return tip.label.replace(/\{key:([^}]+)\}/g, (_m, spec: string) => formatKey(spec, platform));
 }
 
 /** The tips that apply on `os`, in table order. */

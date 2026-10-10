@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { gestureLabels, TIPS, tipsFor } from "./tips";
+import { gestureLabels, tipLabel, TIPS, tipsFor } from "./tips";
 
 const ROOT = join(__dirname, "..", "..", "..");
 
@@ -29,6 +29,18 @@ describe("Help tips", () => {
         expect(gestureLabels(select, "other")).toEqual([["Ctrl", "click"], ["Shift", "click"]]);
         const numbers = TIPS.find((t) => t.id === "pane:numbers")!;
         expect(gestureLabels(numbers, "other")).toEqual([["hold", "Ctrl", "Shift"]]);
+    });
+
+    it("name keys inside a label per platform, and leave no raw key token", () => {
+        const esc = TIPS.find((t) => t.id === "agent:esc")!;
+        expect(tipLabel(esc, "mac")).toContain("⌘Z");
+        expect(tipLabel(esc, "other")).toContain("Ctrl+Z");
+        for (const t of TIPS) {
+            for (const platform of ["mac", "other"] as const) {
+                const label = tipLabel(t, platform);
+                expect(label, `${t.id} on ${platform}`).not.toMatch(/\{key:|\bmod\+/);
+            }
+        }
     });
 
     it("leave out tips for another operating system", () => {
