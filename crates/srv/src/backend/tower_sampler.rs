@@ -363,15 +363,18 @@ impl Tower {
     }
 
     /// A sample (module doc). BLOCKING: reads the process table, and `labels`
-    /// may read the store; call it off the async workers.
+    /// and `renderer` may read the store; call it off the async workers.
+    /// `renderer` says what a renderer PID serves ("window Main"), for the
+    /// AgentMux task's rows (`tower_agentmux::renderer_serves`).
     pub fn sample(
         &self,
         want_host: bool,
         hostname: &str,
         inputs: impl FnOnce() -> Inputs,
         labels: impl Fn(&str) -> Option<BlockLabel>,
+        renderer: impl Fn(u32) -> Option<String>,
     ) -> std::io::Result<TowerSnapshot> {
-        self.sample_from(agentmux_procstats::snapshot, want_host, hostname, inputs, labels)
+        self.sample_from(agentmux_procstats::snapshot, want_host, hostname, inputs, labels, renderer)
     }
 
     /// [`sample`](Self::sample) with the process table read by `snapshot`.
@@ -382,6 +385,7 @@ impl Tower {
         hostname: &str,
         inputs: impl FnOnce() -> Inputs,
         labels: impl Fn(&str) -> Option<BlockLabel>,
+        renderer: impl Fn(u32) -> Option<String>,
     ) -> std::io::Result<TowerSnapshot> {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let fresh = st.last.as_ref().is_some_and(|l| l.at.elapsed() < REUSE_WITHIN);
@@ -396,7 +400,7 @@ impl Tower {
             st.last = Some(sampled);
         }
         let last = st.last.as_ref().expect("measured above");
-        Ok(render(last, want_host, hostname, &labels))
+        Ok(render(last, want_host, hostname, &labels, &renderer))
     }
 }
 
@@ -443,14 +447,25 @@ fn advance(
     }
 }
 
+/// What a renderer row adds after its type: the window or pane it serves.
+fn renderer_suffix(detail: &str, pid: u32, renderer: &dyn Fn(u32) -> Option<String>) -> Option<String> {
+    (detail == "Renderer").then(|| renderer(pid)).flatten()
+}
+
 /// A sum of rates, or `None` when none of them is known yet (a first
 /// sample), never a made-up 0.
 fn sum_known(rates: impl Iterator<Item = Option<f64>>) -> Option<f64> {
     rates.flatten().fold(None, |acc, r| Some(acc.unwrap_or(0.0) + r))
 }
 
-/// The answer from a measurement. Pure apart from `labels`.
-fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) -> Option<BlockLabel>) -> TowerSnapshot {
+/// The answer from a measurement. Pure apart from `labels` and `renderer`.
+fn render(
+    s: &Sampled,
+    want_host: bool,
+    hostname: &str,
+    labels: &dyn Fn(&str) -> Option<BlockLabel>,
+    renderer: &dyn Fn(u32) -> Option<String>,
+) -> TowerSnapshot {
     let (procs, rates, grouping) = (&s.procs, &s.rates, &s.grouping);
     let row = |i: usize, role: Option<TowerProcessRole>, task: Option<String>| {
         let p = &procs[i];
@@ -466,7 +481,10 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
             mem_commit: p.mem_commit,
             role,
             task,
-            detail: s.details.get(&i).cloned(),
+            detail: s.details.get(&i).map(|d| match renderer_suffix(d, p.pid, renderer) {
+                Some(serves) => format!("{d} · {serves}"),
+                None => d.clone(),
+            }),
         }
     };
 
@@ -565,7 +583,7 @@ mod tests {
         labels: &dyn Fn(&str) -> Option<BlockLabel>,
     ) -> TowerSnapshot {
         let sampled = advance(st, procs.to_vec(), inputs, now, &|_| None);
-        render(&sampled, want_host, hostname, labels)
+        render(&sampled, want_host, hostname, labels, &|_| None)
     }
 
     fn state() -> State {
@@ -845,9 +863,9 @@ mod tests {
             Ok(machine())
         };
         let inputs = || Inputs { own_pid: 110, ..Default::default() };
-        let tasks_only = tower.sample_from(table, false, "h", inputs, label).unwrap();
+        let tasks_only = tower.sample_from(table, false, "h", inputs, label, |_| None).unwrap();
         assert!(tasks_only.host.is_none());
-        let with_host = tower.sample_from(table, true, "h", inputs, label).unwrap();
+        let with_host = tower.sample_from(table, true, "h", inputs, label, |_| None).unwrap();
         assert_eq!(reads.get(), 1, "one read for both");
         assert_eq!(with_host.ts_ms, tasks_only.ts_ms);
         assert_eq!(with_host.host.unwrap().processes.len(), machine().len());
@@ -860,8 +878,8 @@ mod tests {
     fn a_real_sample_and_its_reuse() {
         let tower = Tower::new();
         let inputs = || Inputs { own_pid: std::process::id(), ..Default::default() };
-        let a = tower.sample(true, "h", inputs, |_| None).unwrap();
-        let b = tower.sample(false, "h", inputs, |_| None).unwrap();
+        let a = tower.sample(true, "h", inputs, |_| None, |_| None).unwrap();
+        let b = tower.sample(false, "h", inputs, |_| None, |_| None).unwrap();
         assert_eq!(a.ts_ms, b.ts_ms, "reused");
         assert!(a.host.as_ref().unwrap().processes.iter().any(|x| x.pid == std::process::id()));
         assert!(a.cpu_count >= 1);

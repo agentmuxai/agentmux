@@ -395,7 +395,7 @@ export type TreeLine =
     | { kind: "many"; key: string; name: string; nodes: ProcessNode[]; cpu?: number; mem?: number };
 
 /** What a process row is called: what one of AgentMux's own processes is
- *  ("GPU", "Renderer"), else its executable's name. */
+ *  ("GPU", "Renderer · window Main"), else its executable's name. */
 export function processLabel(p: TowerProcess): string {
     return p.detail || p.name || `PID ${p.pid}`;
 }
