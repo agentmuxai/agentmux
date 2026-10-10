@@ -1,10 +1,28 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getObjectValue, makeORef } from "@/app/store/mos";
 import { findNode } from "./layoutNode";
 import { LayoutTreeActionType, LayoutTreeFocusNodeAction, NavigateDirection, NavigationResult } from "./types";
 import { getCenter, navigateDirectionToOffset } from "./utils";
 import type { LayoutModel } from "./layoutModel";
+
+/** An agent pane with no agent yet: it shows the picker (My Agents). */
+function isAgentPicker(blockId: string): boolean {
+    const meta = getObjectValue<Block>(makeORef("block", blockId))?.meta;
+    return meta?.view === "agent" && !meta?.["agentId"];
+}
+
+/**
+ * The pane focused when nothing else decides it: the first pane that isn't an
+ * agent picker, else the first pane. A picker with keyboard focus is one
+ * Enter away from launching an agent, so neither a user's first keys nor an
+ * agent's PressKeys should land there just because a tab opened
+ * (docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md, D3).
+ */
+export function defaultFocusLeaf(leafOrder: LeafOrderEntry[]): LeafOrderEntry | undefined {
+    return leafOrder.find((e) => !isAgentPicker(e.blockid)) ?? leafOrder[0];
+}
 
 /**
  * Checks whether the focused node id has changed and, if so, whether to update the focused node stack.
@@ -18,7 +36,7 @@ export function validateFocusedNode(model: LayoutModel, leafOrder: LeafOrderEntr
     // leaving all panes unfocused until the user clicks one.
     if (!model.treeState.focusedNodeId && model.focusedNodeIdStack.length === 0) {
         if (leafOrder.length > 0) {
-            model.treeState.focusedNodeId = leafOrder[0].nodeid;
+            model.treeState.focusedNodeId = defaultFocusLeaf(leafOrder)!.nodeid;
             model.focusedNodeIdStack = [model.treeState.focusedNodeId];
             model.setter(model.localTreeStateAtom, { ...model.treeState });
         }
@@ -38,8 +56,8 @@ export function validateFocusedNode(model: LayoutModel, leafOrder: LeafOrderEntr
             if (model.focusedNodeIdStack.length > 0) {
                 model.treeState.focusedNodeId = model.focusedNodeIdStack.shift();
             } else if (leafOrder.length > 0) {
-                // If no nodes are in the stack, use the top left node in the layout.
-                model.treeState.focusedNodeId = leafOrder[0].nodeid;
+                // If no nodes are in the stack, the top-left pane that isn't a picker.
+                model.treeState.focusedNodeId = defaultFocusLeaf(leafOrder)!.nodeid;
             }
         }
         model.focusedNodeIdStack.unshift(model.treeState.focusedNodeId);
