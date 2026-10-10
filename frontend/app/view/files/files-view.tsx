@@ -560,11 +560,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             return true;
         };
         let handled = true;
-        // Command keys are the `files:*` rows of the shortcut table, so they
-        // show in the help pane. The list's own keys (arrows, paging, Enter,
-        // type-ahead) stay here, unless the table gives the key a global command.
+        // Command keys are the `files:*` rows of the shortcut table, so they show in
+        // the help pane. The list's own keys (arrows, paging, Enter, type-ahead, Esc)
+        // stay here; with a modifier besides Shift, a global command wins (⌃⇧↑, ⌘/).
         const command = paneCommandFor(e, "files");
-        handled = command ? runFilesCommand(command) : !isGlobalKey(e) && listKey();
+        handled = command ? runFilesCommand(command) : !((e.ctrlKey || e.metaKey || e.altKey) && isGlobalKey(e)) && listKey();
         if (handled) {
             e.preventDefault();
             e.stopPropagation();

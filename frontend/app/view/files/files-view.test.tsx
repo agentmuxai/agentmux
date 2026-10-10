@@ -745,6 +745,18 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         expect(v.container.querySelector(".files-filter-input")).toBeNull();
     });
 
+    it("Escape on the list clears the filter too, though Escape is also a global row (muxreview on #4636)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "f", ctrlKey: true });
+        const input = await waitFor(() => v.container.querySelector(".files-filter-input") as HTMLInputElement);
+        fireEvent.input(input, { target: { value: "A" } });
+        await waitFor(() => expect(v.names()).toEqual(["a2.md", "a10.md"]));
+        // Focus back on the list, filter still applied.
+        fireEvent.keyDown(v.list(), { key: "Escape" });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+    });
+
     it("a new folder clears the filter", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));

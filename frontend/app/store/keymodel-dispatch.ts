@@ -125,8 +125,9 @@ function focusedViewType(): string {
     return (blockId && getBlockComponentModel(blockId)?.viewModel?.viewType) || "";
 }
 
-/** Where focus is, for the shortcut table's `when` clauses. */
 setKeyContextProvider(() => currentKeyContext());
+
+/** Where focus is, for the shortcut table's `when` clauses. */
 export function currentKeyContext(): KeyContext {
     const el = document.activeElement;
     const viewType = focusedViewType();
