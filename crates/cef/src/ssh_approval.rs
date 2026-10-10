@@ -55,6 +55,10 @@ pub struct AskRequest {
     pub ok_label: String,
     #[serde(default)]
     pub cancel_label: String,
+    /// The OK answer destroys something (Remove, End Session): the window
+    /// draws it in the danger tone, not the attention fill.
+    #[serde(default)]
+    pub destructive: bool,
     #[serde(default)]
     pub timeout_ms: u64,
 }
@@ -115,6 +119,21 @@ fn authorized(headers: &HeaderMap, expected: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// What the approval window is opened with (its `initialMeta`).
+fn window_meta(approval_id: &str, req: &AskRequest, wait: Duration) -> serde_json::Value {
+    serde_json::json!({
+        "approval_id": approval_id,
+        "kind": req.kind,
+        "title": req.title,
+        "message": req.message,
+        "checkbox": req.checkbox,
+        "ok_label": req.ok_label,
+        "cancel_label": req.cancel_label,
+        "destructive": req.destructive,
+        "timeout_ms": wait.as_millis() as u64,
+    })
+}
+
 async fn ask(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -140,17 +159,7 @@ async fn ask(
             window_label: None,
         },
     );
-    let meta = serde_json::json!({
-        "approval_id": approval_id,
-        "kind": req.kind,
-        "title": req.title,
-        "message": req.message,
-        "checkbox": req.checkbox,
-        "ok_label": req.ok_label,
-        "cancel_label": req.cancel_label,
-        "timeout_ms": wait.as_millis() as u64,
-    })
-    .to_string();
+    let meta = window_meta(&approval_id, &req, wait).to_string();
     let opened = crate::commands::window::open_subwindow(
         &state,
         parent,
@@ -303,6 +312,23 @@ mod tests {
             "answered once"
         );
         assert!(!decide("ssh-never", true, String::new(), false));
+    }
+
+    #[test]
+    fn the_window_learns_when_an_answer_destroys_something() {
+        let req: AskRequest = serde_json::from_value(serde_json::json!({
+            "block_id": "b1", "kind": "consent", "title": "End a session on area54", "message": "",
+            "ok_label": "End Session", "cancel_label": "Keep It", "destructive": true,
+        }))
+        .unwrap();
+        let meta = window_meta("a1", &req, Duration::from_secs(120));
+        assert_eq!(meta["destructive"], true);
+        assert_eq!(meta["ok_label"], "End Session");
+        // Older srv sends no flag: not destructive.
+        let older: AskRequest =
+            serde_json::from_value(serde_json::json!({ "block_id": "b1", "kind": "consent", "title": "t", "message": "" }))
+                .unwrap();
+        assert_eq!(window_meta("a2", &older, Duration::from_secs(120))["destructive"], false);
     }
 
     #[test]
