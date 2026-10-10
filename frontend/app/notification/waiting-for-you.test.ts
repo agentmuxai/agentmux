@@ -5,7 +5,14 @@
  *  action does, and srv's announcements count only in the windows they name
  *  (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2). */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createSignal } from "solid-js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The pane's block object, which the registry watches: present until deleted.
+const [blocks, setBlocks] = createSignal<Record<string, object | undefined>>({});
+vi.mock("@/app/store/global", () => ({
+    MOS: { getMuxObjectAtom: (oref: string) => () => blocks()[oref] },
+}));
 import { addEventListener as addPaneListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import {
@@ -60,5 +67,22 @@ describe("waiting for you", () => {
         // No pane: every window, under an app: key.
         applyUserAttention({ ...a, key: "k2", block_id: "", window_ids: [] }, "w9");
         expect(events[2]).toEqual(["app:k2", expect.objectContaining({ type: "waiting-for-input" })]);
+    });
+
+    it("ends a wait on its own when it stops waiting, or its pane is deleted, mounted or not", async () => {
+        setBlocks({ "block:b3": {}, "block:b4": {} });
+        const [pending, setPending] = createSignal(true);
+        startWaitingForYou("b3", "question", "Which?", { questionCount: 3, stillWaiting: pending });
+        expect(events[0][1]).toMatchObject({ type: "waiting-for-input", questionCount: 3 });
+        setPending(false);
+        await Promise.resolve();
+        expect(types()).toEqual(["b3:waiting-for-input", "b3:waiting-ended"]);
+        expect(events[1][1]).toMatchObject({ reason: "submitted" });
+
+        startWaitingForYou("b4", "permission", "Allow Bash?", { stillWaiting: () => true });
+        setBlocks({ "block:b3": {} });
+        await Promise.resolve();
+        expect(events.at(-1)).toEqual(["b4", expect.objectContaining({ type: "waiting-ended", reason: "closed" })]);
+        expect(isWaitingForYou("b4")).toBe(false);
     });
 });

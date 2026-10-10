@@ -20,7 +20,9 @@
  * tone only while this window isn't in front, and send no OS notification.
  */
 
+import { createEffect, createRoot } from "solid-js";
 import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
+import { MOS } from "@/app/store/global";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { windowId } from "@/app/store/window-identity";
@@ -30,10 +32,23 @@ import { APP_KEY_PREFIX } from "./waiting-keys";
 export { APP_KEY_PREFIX };
 
 const waiting = new Map<string, Map<string, string | undefined>>();
+/** `blockId\0source` → disposes the watch that ends that wait on its own. */
+const watches = new Map<string, () => void>();
+
+export interface WaitingOptions {
+    /** How many questions it asks, for the notification's "(+N more)". */
+    questionCount?: number;
+    /**
+     * Whether it still waits, read reactively. The registry ends the wait
+     * when this turns false or the pane is deleted, whether or not the pane
+     * is mounted, so a wait outlives a tab switch but not its pane.
+     */
+    stillWaiting?: () => boolean;
+}
 
 /** `source` (e.g. "question", "permission", "srv:<key>") now waits on the
  *  user in pane `blockId`; `text` says what it wants, for the notification. */
-export function startWaitingForYou(blockId: string, source: string, text?: string): void {
+export function startWaitingForYou(blockId: string, source: string, text?: string, opts: WaitingOptions = {}): void {
     if (!blockId) return;
     let sources = waiting.get(blockId);
     if (!sources) {
@@ -42,12 +57,29 @@ export function startWaitingForYou(blockId: string, source: string, text?: strin
     }
     const first = sources.size === 0;
     sources.set(source, text);
-    if (first) firePaneEvent(blockId, { type: "waiting-for-input", question: text });
+    if (opts.stillWaiting) watch(blockId, source, opts.stillWaiting);
+    if (first) firePaneEvent(blockId, { type: "waiting-for-input", question: text, questionCount: opts.questionCount });
+}
+
+function watch(blockId: string, source: string, stillWaiting: () => boolean): void {
+    const key = `${blockId}\0${source}`;
+    if (watches.has(key)) return;
+    const dispose = createRoot((d) => {
+        createEffect(() => {
+            const gone = !MOS.getMuxObjectAtom<Block>(`block:${blockId}`)();
+            if (gone || !stillWaiting()) queueMicrotask(() => endWaitingForYou(blockId, source, gone ? "closed" : "submitted"));
+        });
+        return d;
+    });
+    watches.set(key, dispose);
 }
 
 /** `source` no longer waits in pane `blockId`: `submitted` when the user
  *  answered, `closed` when it went away unanswered. */
 export function endWaitingForYou(blockId: string, source: string, reason: "submitted" | "closed" = "submitted"): void {
+    const key = `${blockId}\0${source}`;
+    watches.get(key)?.();
+    watches.delete(key);
     const sources = waiting.get(blockId);
     if (!sources?.delete(source)) return;
     if (sources.size > 0) return;
@@ -96,5 +128,7 @@ export function installWaitingForYou(): void {
 
 /** Test helper. */
 export function __resetWaitingForYou(): void {
+    for (const d of watches.values()) d();
+    watches.clear();
     waiting.clear();
 }

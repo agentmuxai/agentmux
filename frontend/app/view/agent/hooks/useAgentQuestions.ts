@@ -134,7 +134,10 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         if (hasAny && !hadAny) {
             waitingToneActive = true;
             setAwaitingUser(true);
-            startWaitingForYou(opts.blockId, "question", qs[0]?.question?.questions?.[0]?.question);
+            startWaitingForYou(opts.blockId, "question", qs[0]?.question?.questions?.[0]?.question, {
+                questionCount: qs[0]?.question?.questions?.length,
+                stillWaiting: () => pendingQuestions().length > 0,
+            });
         } else if (!hasAny && hadAny) {
             waitingToneActive = false;
             setAwaitingUser(false);
@@ -152,16 +155,11 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
     }));
     // An unmount isn't the end of the wait: a tab switch unmounts the pane
     // while its question is still pending, and the tone should keep asking.
-    // Only a pane that's gone (closed) stops waiting. A pane that mounts
-    // again finds the question still pending, and the registry keeps the one
-    // entry.
+    // The registry ends it when the question is no longer pending or the
+    // pane is deleted (stillWaiting above), mounted or not; a pane that
+    // mounts again keeps the one entry.
     onCleanup(() => {
-        if (!waitingToneActive) return;
         waitingToneActive = false;
-        const blockId = opts.blockId;
-        setTimeout(() => {
-            if (!MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()) endWaitingForYou(blockId, "question", "closed");
-        }, 1500);
     });
 
     // AskUserQuestion answer handler.

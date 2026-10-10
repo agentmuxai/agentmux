@@ -13,7 +13,6 @@
 import { createEffect, on, onCleanup } from "solid-js";
 import { endWaitingForYou, startWaitingForYou } from "@/app/notification/waiting-for-you";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
-import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DocumentNode, ToolNode } from "../types";
@@ -106,20 +105,19 @@ export function useAgentDecisions(opts: UseAgentDecisionsOptions): UseAgentDecis
         on(pendingDecisions, (pending) => {
             if (pending.length > 0 && !waitingForPermission) {
                 waitingForPermission = true;
-                startWaitingForYou(opts.blockId, "permission", `Allow ${pending[0].toolName ?? pending[0].tool}?`);
+                startWaitingForYou(opts.blockId, "permission", `Allow ${pending[0].toolName ?? pending[0].tool}?`, {
+                    stillWaiting: () => pendingDecisions().length > 0,
+                });
             } else if (pending.length === 0) {
                 waitingForPermission = false;
                 endWaitingForYou(opts.blockId, "permission", "submitted");
             }
         })
     );
+    // The registry ends the wait when nothing is pending or the pane is
+    // deleted (stillWaiting above), mounted or not.
     onCleanup(() => {
-        if (!waitingForPermission) return;
         waitingForPermission = false;
-        const blockId = opts.blockId;
-        setTimeout(() => {
-            if (!MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()) endWaitingForYou(blockId, "permission", "closed");
-        }, 1500);
     });
 
     return { pendingDecisions, handleDecide };
