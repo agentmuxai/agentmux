@@ -76,7 +76,11 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
                 </div>
             </Show>
             <div class="widget-approval-actions">
-                <Button tone="accent" disabled={busy()} onClick={() => void decide(true)}>
+                <Button
+                    tone={props.pkg.signature?.state === "key_changed" ? "danger" : "accent"}
+                    disabled={busy()}
+                    onClick={() => void decide(true)}
+                >
                     {installLabel(props.pkg, updated() ? "Approve" : "Install")}
                 </Button>
                 <Button disabled={busy()} onClick={() => void decide(false).then(props.onDone)}>
