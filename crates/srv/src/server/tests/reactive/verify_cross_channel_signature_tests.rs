@@ -236,3 +236,131 @@ fn same_host_forward_relabels_host_as_channel_and_keeps_network_tiers() {
     assert_eq!(same_host_forward_tier(Some("lan")), "lan");
     assert_eq!(same_host_forward_tier(Some("wan")), "wan");
 }
+
+// ---- identity M4d-6: v2 signatures, verified by UID ----
+
+/// This instance's own row for `name`, with `uid`.
+fn local_row(state: &crate::server::AppState, uid: &str, name: &str) {
+    let mut def =
+        crate::backend::storage::agents::test_agent_def(uid, name, "claude", "agent", 1, "");
+    def.slug = name.to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+}
+
+/// A shared entry for `agent` in `channel`, publishing `uid`'s key.
+fn publish_uid(
+    shared_dir: &std::path::Path,
+    agent: &str,
+    channel: &str,
+    uid: &str,
+    uid_public: &[u8; 32],
+) {
+    write_shared_entry_for_test(
+        shared_dir,
+        &AgentEntry {
+            agent_id: agent.to_string(),
+            local_url: "http://127.0.0.1:9001".to_string(),
+            block_id: "block-1".to_string(),
+            pid: 1,
+            updated_at: 1,
+            auth_key: String::new(),
+            channel: channel.to_string(),
+            registration_nonce: 0,
+            jekt_public_key: String::new(),
+            uid: uid.to_string(),
+            uid_public_key: BASE64.encode(uid_public),
+        },
+    );
+}
+
+fn sign_v2(req: &mut InjectionRequest, uid: &str, private: &[u8; 32]) {
+    req.source_uid = Some(uid.to_string());
+    req.channel_sig_v2 = agentmux_common::jekt_sign::sign_channel_jekt_v2(
+        private,
+        req.request_id.as_deref().unwrap(),
+        req.source_agent.as_deref().unwrap(),
+        uid,
+        req.source_channel.as_deref().unwrap(),
+        &req.target_agent,
+        req.ts_secs.unwrap(),
+        &req.message,
+    );
+}
+
+#[tokio::test]
+async fn the_same_agent_after_a_move_is_verified_and_its_stale_key_is_not_a_forgery() {
+    // agent4 ran here once (its row and HMAC key remain) and now runs in
+    // chan-a. Its v2 proves it is uid-4, the agent this instance knows as
+    // agent4 (the 2026-10-10 TRUST=unverified incident).
+    let state = test_state();
+    local_row(&state, "uid-4", "agent4");
+    state.mstore.agent_jekt_key_ensure("agent4").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (private, public) = keypair(4);
+    publish_uid(dir.path(), "agent4", "chan-a", "uid-4", &public);
+    let mut req = channel_req("agent4", "chan-a", NOW);
+    sign_v2(&mut req, "uid-4", &private);
+    req.sig_verified = Some(false); // the stale key's HMAC verdict
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    assert_eq!(req.channel_verified, Some(true));
+    assert_eq!(req.sig_verified, None);
+    assert_eq!(
+        req.audit_source_uid, "uid-4",
+        "attributed to the proven UID"
+    );
+}
+
+#[tokio::test]
+async fn a_same_named_stranger_proves_only_itself_and_stays_a_forgery_of_the_name() {
+    // Another agent called agent4, uid-x, signs a valid v2 as itself: it is
+    // not the agent4 this instance knows (#4558).
+    let state = test_state();
+    local_row(&state, "uid-4", "agent4");
+    state.mstore.agent_jekt_key_ensure("agent4").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (private, public) = keypair(7);
+    publish_uid(dir.path(), "agent4", "chan-a", "uid-x", &public);
+    let mut req = channel_req("agent4", "chan-a", NOW);
+    sign_v2(&mut req, "uid-x", &private);
+    req.sig_verified = Some(false);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    assert_eq!(
+        req.channel_verified,
+        Some(false),
+        "not this instance's agent4"
+    );
+    assert_eq!(
+        req.sig_verified,
+        Some(false),
+        "the name's failed HMAC check stands"
+    );
+}
+
+#[tokio::test]
+async fn a_forged_v2_settles_nothing_and_the_name_s_checks_decide() {
+    let state = test_state();
+    local_row(&state, "uid-4", "agent4");
+    state.mstore.agent_jekt_key_ensure("agent4").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (_, public) = keypair(4);
+    let (wrong, _) = keypair(5);
+    publish_uid(dir.path(), "agent4", "chan-a", "uid-4", &public);
+    let mut req = channel_req("agent4", "chan-a", NOW);
+    sign_v2(&mut req, "uid-4", &wrong);
+    req.sig_verified = Some(false);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    assert_eq!(req.sig_verified, Some(false));
+    assert_ne!(req.channel_verified, Some(true));
+}
+
+#[tokio::test]
+async fn an_agent_this_instance_has_no_row_for_is_verified_by_its_uid() {
+    let state = test_state();
+    let dir = tempfile::tempdir().unwrap();
+    let (private, public) = keypair(4);
+    publish_uid(dir.path(), "lark", "chan-a", "uid-lark", &public);
+    let mut req = channel_req("lark", "chan-a", NOW);
+    sign_v2(&mut req, "uid-lark", &private);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    assert_eq!(req.channel_verified, Some(true));
+}

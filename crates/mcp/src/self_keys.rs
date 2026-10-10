@@ -38,7 +38,8 @@ struct Wire {
     jekt_key_expires_at: Option<i64>,
     lan_key: Option<String>,
     wan_key: Option<String>,
-    #[allow(dead_code)] // M4d-6 signs v2 with it.
+    #[serde(default)]
+    uid: String,
     uid_lan_key: Option<String>,
 }
 
@@ -112,6 +113,19 @@ pub(crate) fn lan_key() -> Option<Vec<u8>> {
 /// The WAN private key: fetched when ours, else the env's.
 pub(crate) fn wan_key() -> Option<Vec<u8>> {
     name_key(|k| k.wan_key.as_ref()).or_else(|| env_key("AGENTMUX_WAN_KEY"))
+}
+
+/// This agent's UID and its UID-keyed LAN private key, for the v2 signature
+/// (identity M4d-6). Only ever the fetched key, never an env one: the v2
+/// signature claims the UID, so it must come from srv's own record of it.
+pub(crate) fn uid_signer() -> Option<(String, Vec<u8>)> {
+    let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let keys = &cache.as_ref()?.keys;
+    let uid = keys.uid.trim();
+    if uid.is_empty() {
+        return None;
+    }
+    Some((uid.to_string(), agentmux_common::jekt_sign::decode_key(keys.uid_lan_key.as_ref()?)?))
 }
 
 fn env_key(var: &str) -> Option<Vec<u8>> {
@@ -193,5 +207,33 @@ mod tests {
         assert!(still_good(&cached(Some(1_000)), 999));
         assert!(!still_good(&cached(Some(1_000)), 1_000), "expired: srv may rotate it now");
         assert!(still_good(&cached(None), 1_000_000), "no expiry served: the 20 h clock");
+    }
+
+    #[test]
+    fn the_v2_signer_is_only_ever_the_fetched_uid_key() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_for_test();
+        assert!(
+            uid_signer().is_none(),
+            "no fetch: no v2, whatever the env holds"
+        );
+        let set = |uid: &str, key: Option<&str>| {
+            *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Cached {
+                keys: Wire {
+                    slug: "aria".into(),
+                    uid: uid.into(),
+                    uid_lan_key: key.map(str::to_string),
+                    ..Default::default()
+                },
+                fetched_at: Instant::now(),
+            });
+        };
+        set("uid-1", Some(FETCHED_B64));
+        assert_eq!(uid_signer(), Some(("uid-1".to_string(), vec![7u8; 32])));
+        set("", Some(FETCHED_B64));
+        assert!(uid_signer().is_none(), "a key with no UID to claim");
+        set("uid-1", None);
+        assert!(uid_signer().is_none());
+        clear_for_test();
     }
 }

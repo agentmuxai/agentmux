@@ -525,6 +525,8 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     req.lan_verified = Some(verified);
 }
 
+mod channel_v2;
+
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
 /// `JEKT_SIG_MAX_AGE_SECS`, NOT LAN/WAN's wider one. A cross-channel forward
@@ -587,6 +589,14 @@ pub(super) fn verify_cross_channel_signature_in(
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
+    // Identity M4d-6: a v2 signature proves which agent sent it, by UID. When
+    // that is the agent this instance knows by the claimed name, the name's
+    // checks are settled, including a failed HMAC check against a key it kept
+    // from when that agent ran here (a key outlives a move between
+    // instances). A different agent of the same name is not the name's.
+    if channel_v2::settle_by_uid(state, req, &claimed, shared_dir, now_secs) {
+        return;
+    }
     // §D2 step 2: a same-instance sender is the HMAC path's to judge.
     if matches!(state.mstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
         return;
@@ -798,6 +808,11 @@ pub(crate) async fn deliver(
     // Identity M4c-2d: the sender's UID, for the audit entry only — never
     // forwarded (`#[serde(skip)]`).
     req.audit_source_uid = caller_uid.to_string();
+    // Identity M4d-6: the signed source_uid is the sender's to set; this srv
+    // only counts one that isn't the UID its token named.
+    if !caller_uid.is_empty() && req.source_uid.as_deref().is_some_and(|s| s != caller_uid) {
+        crate::backend::agent_resolve::record_uid_fallback("m4.source_uid_mismatch");
+    }
 
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());

@@ -624,6 +624,18 @@ pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
     }
 }
 
+/// Every channel's shared entry that published a key for `uid` (identity
+/// M4d-6). Scans the whole registry: entries are filed by name, and one UID
+/// live in several channels has an entry, and a key, in each.
+pub fn lookup_shared_by_uid(shared_dir: &Path, uid: &str) -> Vec<AgentEntry> {
+    let Ok(dirs) = std::fs::read_dir(shared_dir) else { return Vec::new() };
+    dirs.flatten()
+        .filter(|d| d.path().is_dir())
+        .flat_map(|d| read_entry_files_in_dir(&d.path()))
+        .filter(|e| e.uid == uid && !e.uid_public_key.is_empty())
+        .collect()
+}
+
 /// Return every live candidate for `agent_id` across all channels,
 /// freshest-first (§4.3: Tier 2b prefers the freshest candidate). Does
 /// NOT filter by staleness/pid-liveness — callers needing that should use
