@@ -564,6 +564,7 @@ fn render(
             cpu_time_ns: p.cpu_ns,
             peak_mem: s.peaks.get(i).copied().flatten(),
             exited_ms: None,
+            started_by: crate::backend::tool_calls::lookup(p.pid, p.started_at_ms).map(|c| c.description),
         }
     };
     let exited_of = |task: &str| -> Vec<TowerProcess> {

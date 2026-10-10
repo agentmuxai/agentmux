@@ -91,6 +91,12 @@ pub struct TowerProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub exited_ms: Option<u64>,
+    /// The agent tool call this process runs, as the agent described it
+    /// ("Run the srv tests"): set on the wrapper at the root of the call's
+    /// process tree (`backend::tool_calls`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub started_by: Option<String>,
 }
 
 /// A pane and every process it started, or AgentMux itself.

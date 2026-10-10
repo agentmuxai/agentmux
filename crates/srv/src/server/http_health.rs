@@ -202,6 +202,15 @@ pub(super) async fn handle_wps_publish(
     // a harmless no-op broadcast like any other MPS event — left as-is
     // rather than removing the route, since deleting it isn't warranted
     // just to avoid one no-op publish.
+    // A wrapper's report of which tool call it runs (Tower's "started by"):
+    // kept here, not broadcast, since the pane would take an unknown op for
+    // output (`backend::tool_calls`).
+    if req.event == "tool_chunk" {
+        if let Some((pid, call)) = crate::backend::tool_calls::parse_report(&req.scopes, &req.data) {
+            crate::backend::tool_calls::record(pid, call);
+            return (StatusCode::OK, Json(json!({"ok": true})));
+        }
+    }
     let event = crate::backend::mps::MuxEvent {
         event: req.event,
         scopes: req.scopes,
