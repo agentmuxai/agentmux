@@ -131,8 +131,13 @@ export function registerDocTabDropZone(el: HTMLElement, docType: string, blockId
         },
         onDragEnter: () => setHover(true),
         onDragLeave: () => setHover(false),
-        onDrop: ({ source }) => {
+        onDrop: ({ source, location }) => {
             setHover(false);
+            // pragmatic-dnd tells every accepting target under the pointer,
+            // outermost included. A drop on one of the strip's tabs is that
+            // tab's (it lands beside it); this zone acts only when it is the
+            // innermost target, or the move would be tried twice.
+            if (location.current.dropTargets[0]?.element !== el) return;
             const data = asDocTabDragData(source.data);
             if (!data) return;
             // On the next task: the move unmounts the dragged pill, which is

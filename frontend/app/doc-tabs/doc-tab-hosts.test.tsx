@@ -151,6 +151,22 @@ describe("the pane-wide drop zone", () => {
         expect(zone.canDrop({ source: { data: { type: "PANE_TAB_ITEM", blockId: "x" } } })).toBe(false);
     });
 
+    /** pragmatic-dnd's drop location: the accepting targets, innermost first. */
+    const innermost = (...elements: HTMLElement[]) => ({ current: { dropTargets: elements.map((element) => ({ element })) } });
+
+    it("a drop on one of its strip's tabs is that tab's alone", async () => {
+        const a = pane("a", ["/1"]);
+        const b = pane("b", ["/x"]);
+        const el = document.createElement("div");
+        const pill = document.createElement("div");
+        el.appendChild(pill);
+        registerDocTabDropZone(el, "media", "b");
+        hub.dropTargets[0].onDrop({ ...drag(a.tabs()[0].id, "a"), location: innermost(pill, el) });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(keys(a)).toEqual(["/1"]);
+        expect(keys(b)).toEqual(["/x"]);
+    });
+
     it("shows the drop look while one hovers, and moves the tab one task after the drop", async () => {
         const a = pane("a", ["/1"]);
         const b = pane("b", ["/x"]);
@@ -159,7 +175,7 @@ describe("the pane-wide drop zone", () => {
         const zone = hub.dropTargets[0];
         zone.onDragEnter();
         expect(el.classList.contains("doc-tab-host--drop-hover")).toBe(true);
-        zone.onDrop(drag(a.tabs()[0].id, "a"));
+        zone.onDrop({ ...drag(a.tabs()[0].id, "a"), location: innermost(el) });
         expect(el.classList.contains("doc-tab-host--drop-hover")).toBe(false);
         expect(keys(b)).toEqual(["/x"]);
         await new Promise((r) => setTimeout(r, 0));
