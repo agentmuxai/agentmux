@@ -10,7 +10,24 @@ export { registerPaneCommandRunner } from "./app-api";
 import type { KeyPane } from "./defaults";
 import { helpSections, type HelpSection } from "./help";
 import { formatKey, parseKey, type KeyEventLike, type KeyPlatform } from "./keys";
-import { formatCommand, keybindingsVersion, keysFor, matchPaneKey } from "./registry";
+import { formatCommand, keybindingsVersion, keysFor, matchPaneKey, resolveKey, type KeyContext } from "./registry";
+
+let keyContext: () => KeyContext = () => ({ textInputFocus: false, terminalFocus: false, viewType: "", docTabsHost: false });
+
+/** Where focus is, for `isGlobalKey`: the dispatcher supplies it at load
+ *  (keymodel-dispatch's currentKeyContext), which avoids an import cycle. */
+export function setKeyContextProvider(provider: () => KeyContext): void {
+    keyContext = provider;
+}
+
+/**
+ * Whether the shortcut table gives this key a global command where focus is
+ * now. A pane's own key handler leaves such a key to the dispatcher, even an
+ * arrow or Page key it would otherwise take (⌃⇧↑ in the Files list).
+ */
+export function isGlobalKey(e: KeyboardEvent): boolean {
+    return resolveKey(keyEventLike(e), keyContext(), keyPlatform()) != null;
+}
 
 export function keyPlatform(): KeyPlatform {
     return isMacOS() ? "mac" : "other";
