@@ -173,6 +173,17 @@ fn parse_web_endpoint(web_endpoint: &str, caller: &str) -> Option<std::net::Sock
 /// or an approval banner) to srv, as the host: `X-Host-Token` carries this
 /// host's IPC token, which srv checks against the one we registered and
 /// agents never see (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4).
+pub(crate) fn backend_browser_attention(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_attention", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the answer: {e}"))
+}
+
 /// Relay the user's answer to a widget install prompt to srv, as the host:
 /// srv accepts an approval only with this host's IPC token, which agents never
 /// see (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3).
@@ -185,17 +196,6 @@ pub(crate) fn backend_widget_approval(
     post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/widget_approval", body)
         .map(|_| ())
         .map_err(|e| format!("srv refused the approval: {e}"))
-}
-
-pub(crate) fn backend_browser_attention(
-    web_endpoint: &str,
-    auth_key: &str,
-    ipc_token: &str,
-    body: &serde_json::Value,
-) -> Result<(), String> {
-    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_attention", body)
-        .map(|_| ())
-        .map_err(|e| format!("srv refused the answer: {e}"))
 }
 
 /// Report a popup a browser pane's page opened, as the host, and return
