@@ -351,9 +351,14 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
+    if super::actor::jekt_sender_by_token(&state.mstore, req, &claimed) {
+        req.sig_verified = Some(true); // identity M4d-4
+        return;
+    }
     let Ok(Some(key)) = state.mstore.agent_jekt_key_load(&claimed) else {
         return;
     };
+    crate::backend::agent_resolve::record_uid_fallback("m4d.host_hmac_by_name");
     let msgid = req.request_id.clone().unwrap_or_default();
     let ts = req.ts_secs.unwrap_or(0);
     let within_freshness_window =

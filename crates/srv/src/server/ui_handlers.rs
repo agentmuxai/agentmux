@@ -80,6 +80,10 @@ pub(crate) fn verified_block_id(
         crate::server::actor::ActorSite::UiAuth,
         Some(&auth.agent_id),
     );
+    if let Some(block) = crate::server::actor::own_pane_by_token(&state.mstore, caller, &auth.agent_id) {
+        return Ok(block); // identity M4d-4
+    }
+    crate::backend::agent_resolve::record_uid_fallback("m4d.ui_auth_by_name");
     if auth.ts_secs <= 0 || (now_unix_secs() - auth.ts_secs).abs() > UI_AUTOMATION_SIG_MAX_AGE_SECS
     {
         return Err("signature timestamp missing or outside the freshness window".to_string());

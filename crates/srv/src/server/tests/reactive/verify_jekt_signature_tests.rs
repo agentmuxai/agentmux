@@ -175,3 +175,69 @@ async fn a_wrong_signature_is_unverified() {
     verify_jekt_signature(&state, &mut req);
     assert_eq!(req.sig_verified, Some(false));
 }
+
+// ---- identity M4d-4: a token caller is verified by its token ----
+
+/// A row `uid` with slug `slug`, as a token-carrying agent has.
+fn row(state: &crate::server::AppState, uid: &str, slug: &str, name: &str) {
+    let mut def = crate::backend::storage::agents::test_agent_def(uid, name, "claude", "agent", 1, "");
+    def.slug = slug.to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+}
+
+/// From `uid`'s token under `claimed`, signed with a key that is not on file
+/// (a stale one: the false `unverified` M4d-4 ends).
+fn from_token(state: &crate::server::AppState, uid: &str, claimed: &str) -> InjectionRequest {
+    state.mstore.agent_jekt_key_ensure(claimed).unwrap();
+    let mut req = base_req(claimed, "agenty", "hello");
+    req.request_id = Some("msg-m4d4".to_string());
+    req.ts_secs = Some(now());
+    req.jekt_sig = Some(agentmux_common::jekt_sign::sign_jekt(&[9u8; 32], "msg-m4d4", claimed, "agenty", now(), "hello"));
+    req.audit_source_uid = uid.to_string();
+    req
+}
+
+#[tokio::test]
+async fn a_token_caller_under_its_own_slug_is_verified_by_the_token() {
+    let state = test_state();
+    row(&state, "uid-m4d4-x", "agentx", "AgentX");
+    let mut req = from_token(&state, "uid-m4d4-x", "agentx");
+    verify_jekt_signature(&state, &mut req);
+    assert_eq!(req.sig_verified, Some(true), "the stale key is not consulted");
+}
+
+#[tokio::test]
+async fn any_other_name_or_tier_keeps_the_hmac_check() {
+    let state = test_state();
+    row(&state, "uid-m4d4-x", "agentx", "AgentX");
+    row(&state, "uid-m4d4-y", "agenty", "AgentY");
+    // Its display name, not its slug (rule ii); another agent's slug.
+    for claimed in ["AgentX", "agenty"] {
+        let mut req = from_token(&state, "uid-m4d4-x", claimed);
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(req.sig_verified, Some(false), "{claimed}");
+    }
+    let mut lan = from_token(&state, "uid-m4d4-x", "agentx");
+    lan.delivery_tier = Some("lan".to_string());
+    verify_jekt_signature(&state, &mut lan);
+    assert_eq!(lan.sig_verified, Some(false), "only the host tier has a Caller to trust");
+    let mut unattributed = from_token(&state, "", "agentx");
+    verify_jekt_signature(&state, &mut unattributed);
+    assert_eq!(unattributed.sig_verified, Some(false));
+}
+
+#[tokio::test]
+async fn a_token_caller_acts_on_its_uid_pane_with_no_key_on_file() {
+    let state = test_state();
+    row(&state, "uid-m4d4-ui", "m4d4-ui", "M4d4Ui");
+    let caller = crate::server::caller::Caller::Agent { uid: "uid-m4d4-ui".into() };
+    let auth = agentmux_common::api_types::UiAutomationAuth { agent_id: "m4d4-ui".into(), ts_secs: 0, sig: String::new() };
+    let verify = || crate::server::ui_handlers::verified_block_id(&state, Some(&caller), &auth);
+    assert!(verify().is_err(), "no UID registration yet: the name path, which has no key");
+    crate::backend::reactive::handler::get_global_handler()
+        .register_agent_full("m4d4-ui", "block-m4d4-ui", None, 0, None, Some("uid-m4d4-ui"), "test")
+        .unwrap();
+    assert_eq!(verify().unwrap(), "block-m4d4-ui");
+    let other = agentmux_common::api_types::UiAutomationAuth { agent_id: "M4d4Ui".into(), ..auth.clone() };
+    assert!(crate::server::ui_handlers::verified_block_id(&state, Some(&caller), &other).is_err(), "display name: the name path");
+}
