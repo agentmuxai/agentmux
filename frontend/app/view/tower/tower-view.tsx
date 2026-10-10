@@ -22,6 +22,7 @@ import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
 import { AgentsView } from "./tower-agents";
+import { ProcessName } from "./tower-process-name";
 import type { TowerViewModel } from "./tower-model";
 import { SortHeader } from "./tower-sort-header";
 import {
@@ -267,7 +268,7 @@ function ProcessRow(props: {
         >
             <td class="tower-name">
                 <div class="tower-name-line">
-                    <span class="tower-label">{props.process.name || `PID ${props.process.pid}`}</span>
+                    <ProcessName process={props.process} />
                     <Show when={props.taskLabel}>
                         {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
                     </Show>

@@ -18,6 +18,7 @@ import {
     sortGroups,
     sortProcesses,
     sortTasks,
+    processLabel,
     treeLines,
 } from "./tower-util";
 
@@ -113,6 +114,12 @@ describe("filtering the host list", () => {
         expect(filterProcesses(ps, "node agentx", label).map((p) => p.pid)).toEqual([100]);
         expect(filterProcesses(ps, "41", label).map((p) => p.pid)).toEqual([4100]);
         expect(filterProcesses(ps, "  ", label)).toBe(ps);
+    });
+
+    it("also matches what one of AgentMux's own processes is", () => {
+        const gpu = { ...proc(300, "agentmux-0.59.18.exe"), detail: "GPU" };
+        const renderer = { ...proc(301, "agentmux-0.59.18.exe"), detail: "Renderer" };
+        expect(filterProcesses([gpu, renderer], "gpu", label).map((p) => p.pid)).toEqual([300]);
     });
 });
 
@@ -276,6 +283,24 @@ describe("process trees", () => {
         };
         roots.forEach(walk);
         expect(names.sort()).toEqual(["a", "b"]);
+    });
+
+    it("folds AgentMux's CEF processes by what they are, not by their shared executable", () => {
+        const exe = "agentmux-0.59.18.exe";
+        const withDetail = (pid: number, cpu: number, detail: string) => ({ ...p(pid, 1, exe, cpu, pid), detail });
+        const [root] = buildProcessTree([
+            { ...p(1, 0, exe, 0, 1), detail: "Main process" },
+            withDetail(2, 0.3, "GPU"),
+            withDetail(3, 0.2, "Renderer"),
+            withDetail(4, 0.1, "Renderer"),
+            withDetail(5, 0.05, "Network service"),
+        ]);
+        const lines = treeLines(root.children, { key: "cpu", desc: true });
+        expect(lines.map((l) => (l.kind === "many" ? `${l.name} x${l.nodes.length}` : processLabel(l.node.process)))).toEqual([
+            "GPU",
+            "Renderer x2",
+            "Network service",
+        ]);
     });
 
     it("folds same-named childless siblings, sorted by the subtree", () => {

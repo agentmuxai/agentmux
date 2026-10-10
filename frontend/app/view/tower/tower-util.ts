@@ -126,7 +126,7 @@ export function filterProcesses(
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length === 0) return processes;
     return processes.filter((p) => {
-        const hay = `${p.name} ${p.pid} ${p.task ? (taskLabel(p.task) ?? "") : ""}`.toLowerCase();
+        const hay = `${p.name} ${p.pid} ${p.task ? (taskLabel(p.task) ?? "") : ""} ${p.detail ?? ""}`.toLowerCase();
         return words.every((w) => hay.includes(w));
     });
 }
@@ -330,16 +330,24 @@ export type TreeLine =
     | { kind: "process"; key: string; node: ProcessNode }
     | { kind: "many"; key: string; name: string; nodes: ProcessNode[]; cpu?: number; mem?: number };
 
+/** What a process row is called: what one of AgentMux's own processes is
+ *  ("GPU", "Renderer"), else its executable's name. */
+export function processLabel(p: TowerProcess): string {
+    return p.detail || p.name || `PID ${p.pid}`;
+}
+
 /** Siblings in `sort` order (by their subtree totals), with same-named
- *  childless ones folded into one line unless `fold` is false. */
+ *  childless ones folded into one line unless `fold` is false. AgentMux's
+ *  CEF processes all run one executable, so they fold by what they are
+ *  (`processLabel`), not by that shared name. */
 export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: boolean } = {}): TreeLine[] {
     const fold = opts.fold ?? true;
     const value = (n: ProcessNode) => (sort.key === "cpu" ? n.cpu : sort.key === "mem" ? n.mem : n.process.pid);
-    const sorted = [...siblings].sort(compareWith(sort, value, (n) => n.process.name));
+    const sorted = [...siblings].sort(compareWith(sort, value, (n) => processLabel(n.process)));
     const leavesByName = new Map<string, ProcessNode[]>();
     for (const n of sorted) {
         if (n.children.length) continue;
-        const key = (n.process.name || `pid ${n.process.pid}`).toLowerCase();
+        const key = processLabel(n.process).toLowerCase();
         const list = leavesByName.get(key);
         if (list) list.push(n);
         else leavesByName.set(key, [n]);
@@ -347,7 +355,7 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
     const lines: TreeLine[] = [];
     const placed = new Set<string>();
     for (const n of sorted) {
-        const key = (n.process.name || `pid ${n.process.pid}`).toLowerCase();
+        const key = processLabel(n.process).toLowerCase();
         const group = !fold || n.children.length ? undefined : leavesByName.get(key);
         if (group && group.length > 1) {
             if (placed.has(key)) continue;
@@ -355,7 +363,7 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
             lines.push({
                 kind: "many",
                 key: `many:${key}`,
-                name: n.process.name || `PID ${n.process.pid}`,
+                name: processLabel(n.process),
                 nodes: group,
                 cpu: sumKnown(group.map((g) => g.cpu)),
                 mem: sumKnown(group.map((g) => g.mem)),

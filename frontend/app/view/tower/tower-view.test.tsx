@@ -97,7 +97,9 @@ function snapshot(host = false): TowerSnapshot {
                 cpu: 0.1,
                 cpu_account: false,
                 mem: 2 * GB,
-                processes: [{ id: "5:1", pid: 5, name: "agentmux-srv.exe", cpu: 0.1, mem: 2 * GB, role: "main" }],
+                processes: [
+                    { id: "5:1", pid: 5, name: "agentmux-srv.exe", cpu: 0.1, mem: 2 * GB, role: "main", detail: "Server" },
+                ],
             },
         ],
         // The machine: 3.3 cores busy and 8 GB, so 1.2 cores and 5 GB are
@@ -298,6 +300,13 @@ describe("Tower", () => {
         // Two from the opened line, and the other line still closed.
         expect(screen.getAllByText("rustc.exe")).toHaveLength(4);
         expect(screen.getAllByRole("button", { name: "Show the rustc.exe processes" })).toHaveLength(1);
+    });
+
+    it("says what each of AgentMux's own processes is, with its executable alongside", async () => {
+        renderTower();
+        fireEvent.click(await screen.findByTestId("tower-rail-agentmux"));
+        const srv = screen.getByText("Server").closest("tr")!;
+        expect(within(srv).getByText("agentmux-srv.exe")).toHaveClass("tower-muted");
     });
 
     it("keeps each row, and updates it, across a refresh", async () => {

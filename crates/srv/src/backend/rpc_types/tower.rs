@@ -72,6 +72,12 @@ pub struct TowerProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub task: Option<String>,
+    /// One of AgentMux's own processes: what it is ("GPU", "Renderer",
+    /// "Network service", "Server", "Launcher", …). Absent for any other
+    /// process, and for one of AgentMux's the backend can't place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
 }
 
 /// A pane and every process it started, or AgentMux itself.

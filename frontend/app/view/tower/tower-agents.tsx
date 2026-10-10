@@ -14,6 +14,7 @@ import { pickAgentColor } from "@/app/view/agent/agent-color";
 import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
 import { HISTORY_POINTS, type TowerViewModel } from "./tower-model";
+import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import {
     buildProcessTree,
@@ -427,7 +428,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                                 onClick={() => m.toggleExpanded(foldKey(props.node.process))}
                             />
                         </Show>
-                        <span class="tower-label">{props.node.process.name || `PID ${props.node.process.pid}`}</span>
+                        <ProcessName process={props.node.process} />
                     </div>
                 </td>
                 <td class="tower-num" title={subtree()}>

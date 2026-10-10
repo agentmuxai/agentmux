@@ -103,6 +103,7 @@ pub fn to_snapshot(conn: &str, os: &str, f: ProcFrame) -> TowerSnapshot {
             mem_commit: None,
             role: None,
             task: None,
+            detail: None,
         })
         .collect();
     TowerSnapshot {
