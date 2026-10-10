@@ -31,6 +31,7 @@ import {
     type OpenArgs,
 } from "./doc-tabs";
 import { keyPlatform } from "@/app/keybindings";
+import { noteResolved } from "@/app/keybindings/app-api";
 import { matchPaneKey } from "@/app/keybindings/registry";
 
 /** What a pane type says about its documents (§5.6). */
@@ -236,7 +237,13 @@ export function docTabKeyAction(
     // spread would drop.
     const ev = { key: e.key, code: e.code ?? "", ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey };
     const command = matchPaneKey(ev, "doctabs", keyPlatform());
+    if (command) noteResolved(command, "doctabs");
     return command ? (DOC_TAB_ACTIONS[command] ?? null) : null;
+}
+
+/** The action for a `doctab:*` command id, or null for any other command. */
+export function docTabAction(command: string): DocTabKeyAction | null {
+    return DOC_TAB_ACTIONS[command] ?? null;
 }
 
 /**
@@ -247,6 +254,14 @@ export function docTabKeyAction(
 export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsController<P>, onRefused?: () => void): boolean {
     const action = docTabKeyAction(e);
     if (!action) return false;
+    runDocTabAction(action, ctl, onRefused);
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+}
+
+/** Carry out a document-tab action on `ctl`: a key's, or the App API's RunCommand. */
+export function runDocTabAction<P>(action: DocTabKeyAction, ctl: DocTabsController<P>, onRefused?: () => void): void {
     const id = ctl.activeId();
     switch (action.kind) {
         case "new":
@@ -265,7 +280,4 @@ export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsController<P>, 
             if (id) ctl.move(id, action.delta);
             break;
     }
-    e.preventDefault();
-    e.stopPropagation();
-    return true;
 }

@@ -5,6 +5,7 @@ import { App } from "@/app/app";
 import { registerDefaultCommands } from "@/app/store/command-registry";
 import {
     globalRefocus,
+    installShortcutApi,
     registerControlShiftTracking,
     registerHostShortcuts,
     registerGlobalKeys,
@@ -969,6 +970,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerDefaultCommands();
     registerControlShiftTracking();
     registerHostShortcuts();
+    installShortcutApi();
     registerLinkInPaneListener();
     tlog("registerKeys", t);
 
