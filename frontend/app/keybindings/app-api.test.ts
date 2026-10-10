@@ -98,9 +98,9 @@ describe("runCommand refusals", () => {
         expect(d.ran).toEqual([]);
     });
 
-    it("refuses files:trash on macOS only, where the Trash can't be restored from yet", () => {
-        expect(runCommand("files:trash", "focused", deps({ platform: "mac" })).reason).toMatch(/macOS/);
-        expect(planKeyPress("Delete", "mac")).toMatchObject({ reason: expect.stringMatching(/files:trash/) });
+    it("runs files:trash on every platform, since the Trash can be restored from", () => {
+        expect(runCommand("files:trash", "focused", deps({ platform: "mac" })).reason).not.toMatch(/not available/);
+        expect(planKeyPress("Delete", "mac")).not.toHaveProperty("reason");
         expect(runCommand("files:trash", "focused", deps()).reason).not.toMatch(/not available/);
     });
 
