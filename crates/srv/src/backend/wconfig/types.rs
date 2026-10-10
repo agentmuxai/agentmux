@@ -359,6 +359,11 @@ pub struct SettingsType {
     // SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md.
     #[serde(rename = "notify:tooltones:flash", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_flash: Option<bool>,
+    // Whether browser hand-offs and approvals join the waiting tone, the tab
+    // flash and the notification. Absence = on.
+    // REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2.
+    #[serde(rename = "notify:waiting:browser", default, skip_serializing_if = "Option::is_none")]
+    pub notify_waiting_browser: Option<bool>,
 
     // -- Messaging bridge settings --
 
