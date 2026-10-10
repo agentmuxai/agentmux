@@ -21,6 +21,7 @@ import {
     type LoadedPackage,
     type PackageLoaderDeps,
 } from "./widget-loader";
+import { widgetPanesOf } from "./widget-panes";
 
 const SAMPLE = "../../../docs/examples/widgets/hello/index.js";
 
@@ -49,6 +50,8 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
         panes: [
             { view: `ext:${id}/main`, name: "main", label: "Hello", icon: "hand", entry: "index.js", singleton: false, default_meta: {} },
         ],
+        commands: [],
+        status_items: [],
         files_url: "/agentmux/widget-files/x/h1/k/",
         implied: false,
         folder: `C:/Users/me/.agentmux/widgets/${id}`,
@@ -179,6 +182,26 @@ describe("syncWidgetPackages", () => {
         exported = sample; // the author fixes it
         const [second] = await syncWidgetPackages([pkg()], d, loaded);
         expect(second.ok).toBe(true);
+    });
+
+    it("adds the package's commands and status items with it, and tracks its panes while open", async () => {
+        const sample = (await import(SAMPLE)).default;
+        const removed = vi.fn();
+        const contribute = vi.fn(() => [removed]);
+        const d = deps(() => sample, { contribute });
+        const loaded = new Map<string, LoadedPackage>();
+        await syncWidgetPackages([pkg()], d, loaded);
+        expect(contribute).toHaveBeenCalledWith(expect.objectContaining({ id: "agentmux.hello" }));
+
+        const manifest = getPaneTab("ext:agentmux.hello/main")!;
+        const ctx = { blockId: "b9", meta: () => ({}), setMeta: async () => {}, isFocused: () => false, visibility: () => "active" as const };
+        const inst = createRoot(() => manifest.create(ctx as never));
+        expect(widgetPanesOf("ext:agentmux.hello/main").map(([b]) => b)).toEqual(["b9"]);
+        inst.dispose?.();
+        expect(widgetPanesOf("ext:agentmux.hello/main")).toEqual([]);
+
+        await syncWidgetPackages([pkg({ state: "disabled" })], d, loaded);
+        expect(removed).toHaveBeenCalledTimes(1);
     });
 
     it("doesn't load the same package twice when two passes overlap", async () => {

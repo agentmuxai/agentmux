@@ -133,6 +133,9 @@ export interface PaneTabInstance {
      *  focused pane also gets `focus()`. */
     onActivate?(): void;
     onDeactivate?(): void;
+    /** A widget's palette command or status item click, run in this pane
+     *  (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.8). */
+    command?(id: string, source: "palette" | "status"): void;
     /** Runs when the host disposes the instance; its reactive root (host rule
      *  8) is disposed right after. */
     dispose?(): void;

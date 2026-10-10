@@ -1,6 +1,6 @@
 {
   "name": "@agentmuxai/widget-sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The client for sandboxed AgentMux widgets: connect to AgentMux from a widget's page and use the widget API.",
   "type": "module",
   "main": "./v1.js",

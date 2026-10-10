@@ -10,6 +10,7 @@
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
 import type { PaneTabHostContext } from "./pane-tab-registry";
+import type { StatusLook, StatusTone } from "./widget-panes";
 
 export const ERR = {
     INVALID_PARAMS: -32602,
@@ -29,6 +30,8 @@ const FILES_LIMIT_BYTES = 25 * 1024 * 1024;
 const CLIPBOARD_LIMIT_CHARS = 1024 * 1024;
 const MAX_ACTIONS = 4;
 const MAX_MENU_ITEMS = 20;
+const TONES: StatusTone[] = ["info", "success", "warning", "error"];
+const FA_NAME = /^[a-z0-9-]{1,60}$/;
 
 export interface BridgeState {
     ready: boolean;
@@ -56,6 +59,8 @@ export interface BridgeHost {
     /** The host's save dialog; false when the user cancels it. */
     saveFile?(name: string, type: string, data: Uint8Array): Promise<boolean>;
     writeClipboard?(text: string): Promise<void>;
+    /** Sets one of the package's status bar items (null: the manifest's look). */
+    setStatusItem?(id: string, look: StatusLook | null): void;
 }
 
 /** A refusal with the bridge's own error code (§6.6). */
@@ -292,6 +297,35 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
             if (u.protocol !== "http:" && u.protocol !== "https:") return fail(ERR.INVALID_PARAMS, "only http and https links open");
             if (!host.openUrl) return fail(ERR.UNAVAILABLE, "this AgentMux can't open links from widgets");
             await host.openUrl(u.toString());
+            return ok();
+        }
+        case "ui.setStatusItem": {
+            if (!str(p.id, 60) || !(pkg.status_items ?? []).some((s) => s.id === p.id)) {
+                return fail(ERR.NOT_FOUND, `${pkg.name} declares no status item ${JSON.stringify(p.id)} (contributes.statusItems)`);
+            }
+            const look: StatusLook = {};
+            if (p.text != null) {
+                if (!str(p.text, 40) || !p.text.trim()) return fail(ERR.INVALID_PARAMS, "a status item's text is 1–40 characters");
+                look.text = p.text;
+            }
+            if (p.tooltip != null) {
+                if (!str(p.tooltip, 120)) return fail(ERR.INVALID_PARAMS, "a status item's tooltip is at most 120 characters");
+                look.tooltip = p.tooltip;
+            }
+            if (p.icon != null) {
+                if (typeof p.icon !== "string" || !FA_NAME.test(p.icon)) return fail(ERR.INVALID_PARAMS, "icon is a Font Awesome name");
+                look.icon = p.icon;
+            }
+            if (p.tone != null) {
+                if (!TONES.includes(p.tone as StatusTone)) return fail(ERR.INVALID_PARAMS, `tone is one of ${TONES.join(", ")}`);
+                look.tone = p.tone as StatusTone;
+            }
+            if (p.hidden != null) {
+                if (typeof p.hidden !== "boolean") return fail(ERR.INVALID_PARAMS, "hidden is true or false");
+                look.hidden = p.hidden;
+            }
+            if (!host.setStatusItem) return fail(ERR.UNAVAILABLE, "this AgentMux has no status bar for widgets");
+            host.setStatusItem(p.id, Object.keys(look).length ? look : null);
             return ok();
         }
         case "theme.get":

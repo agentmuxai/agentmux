@@ -20,10 +20,13 @@
  *
  * When a package's approved version changes (an update, an edit approved
  * again), its pane types are unregistered and registered again; open panes
- * rebuild (`block.tsx`).
+ * rebuild (`block.tsx`). Its palette commands and status bar items
+ * (`widget-contributions.tsx`) come and go with it.
  */
 
 import { createEffect, createRoot, createSignal } from "solid-js";
+import { createBlock, getFocusedBlockId } from "@/app/store/global";
+import { focusPaneForApi } from "@/app/store/keymodel-dispatch";
 import * as solid from "solid-js";
 import * as solidStore from "solid-js/store";
 import * as solidWeb from "solid-js/web";
@@ -33,6 +36,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { startWidgetPackages, widgetPackages } from "@/app/store/widget-packages-store";
 import { registerPaneTab, type PaneTabManifest } from "./pane-tab-registry";
 import { makeSandboxedPaneManifest } from "./sandboxed-widget-host";
+import { registerWidgetContributions, type ContributionDeps } from "./widget-contributions";
+import { trackWidgetPane } from "./widget-panes";
 
 /** The contract version this host implements for trusted widgets. A widget
  *  built for another is rejected rather than half-working. */
@@ -47,6 +52,31 @@ export interface PackageLoaderDeps {
     register?(manifest: PaneTabManifest): () => void;
     /** A sandboxed pane's manifest (an iframe host). */
     sandboxed?(pkg: WidgetPackageInfo, pane: WidgetPaneInfo): PaneTabManifest;
+    /** Registers the package's commands and status items; returns what
+     *  removes each. */
+    contribute?(pkg: WidgetPackageInfo): (() => void)[];
+}
+
+/** `m`, with each instance it creates noted as a pane of `pkg` (where its
+ *  commands are delivered) until it is disposed. */
+export function trackedManifest(pkg: WidgetPackageInfo, m: PaneTabManifest): PaneTabManifest {
+    return {
+        ...m,
+        create: (ctx) => {
+            const inst = m.create(ctx);
+            const forget = trackWidgetPane(ctx.blockId, {
+                pkgId: pkg.id,
+                view: m.view,
+                command: inst.command ? (id, source) => inst.command!(id, source) : undefined,
+            });
+            const dispose = inst.dispose;
+            inst.dispose = () => {
+                forget();
+                dispose?.call(inst);
+            };
+            return inst;
+        },
+    };
 }
 
 /** A loaded package: the version it was loaded at and how to take it down. */
@@ -128,7 +158,8 @@ export async function syncWidgetPackages(
                 if (typeof m === "string") throw new Error(m);
                 manifests.push(m);
             }
-            for (const m of manifests) unregister.push(register(m));
+            for (const m of manifests) unregister.push(register(trackedManifest(pkg, m)));
+            unregister.push(...(deps.contribute?.(pkg) ?? []));
             loaded.set(pkg.id, { hash: pkg.hash, unregister });
             results.push({ id: pkg.id, ok: true, views: manifests.map((m) => m.view) });
             console.log(`[widget-loader] loaded ${pkg.id} ${pkg.version} (${pkg.kind})`);
@@ -225,6 +256,12 @@ async function importFromBlob(source: string): Promise<{ default?: unknown }> {
     }
 }
 
+const contributionDeps: ContributionDeps = {
+    focusedBlockId: () => getFocusedBlockId() ?? null,
+    focusPane: (blockId) => focusPaneForApi(blockId),
+    openPane: (blockDef) => createBlock(blockDef),
+};
+
 let firstPass: Promise<void> | null = null;
 
 /**
@@ -240,6 +277,7 @@ export function startWidgetLoader(): Promise<void> {
         readModule: async (pkg, path) =>
             (await RpcApi.WidgetsReadFileCommand(TabRpcClient, { id: pkg.id, hash: pkg.hash, path })).content,
         importModule: (source) => importFromBlob(source),
+        contribute: (pkg) => registerWidgetContributions(pkg, contributionDeps),
     };
     const sync = createWidgetSync(deps, new Map<string, LoadedPackage>(), noteResults);
     firstPass = startWidgetPackages().then(

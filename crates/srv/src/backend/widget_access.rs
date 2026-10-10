@@ -232,6 +232,8 @@ mod tests {
             error: None,
             hash: "h1".into(),
             panes: Vec::<WidgetPaneInfo>::new(),
+            commands: vec![],
+            status_items: vec![],
             files_url: None,
             implied: false,
             folder: String::new(),

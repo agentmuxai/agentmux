@@ -52,6 +52,8 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
         error: null,
         hash: "abc123",
         panes: [],
+        commands: [],
+        status_items: [],
         files_url: null,
         implied: false,
         folder: "C:/Users/me/.agentmux/widgets/acme.notes",

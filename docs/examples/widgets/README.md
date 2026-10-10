@@ -9,7 +9,7 @@ A widget adds your own kind of pane to AgentMux. Each folder here is a complete 
 | `hello-sandboxed/` | The smallest widget: connect, set the title, count clicks in the pane's meta, a header action, follow the theme. Plain HTML, no build step. | sandboxed |
 | `react-vite/` | The same, built with React and Vite. | sandboxed |
 | `notes/` | Notes kept with `storage`, exported and imported with `files`, copied with `clipboard:write`. | sandboxed |
-| `pr-dashboard/` | A repository's open pull requests from GitHub's API, with `net:https://api.github.com`; polls only while shown. | sandboxed |
+| `pr-dashboard/` | A repository's open pull requests from GitHub's API, with `net:https://api.github.com`; polls only while shown; adds a palette command and a status bar item. | sandboxed |
 | `ask-agent/` | Your agents and whether they're working (`agents:read`), and a message to one (`agents:send`). | sandboxed |
 | `hello/` | A trusted widget: a Solid module that runs as part of AgentMux. | trusted |
 
