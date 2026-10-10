@@ -514,6 +514,21 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         )
     );
 
+    // A document tab in front closed (×, Ctrl+W, a menu, moved away): the
+    // tab that takes its place plays the landing cue, so the change shows even
+    // when the tabs around it read the same. Document strips only.
+    createEffect(
+        on(
+            () => [props.activeId, props.tabs.map(props.getId)] as const,
+            ([active, ids], prev) => {
+                const doc = props.docDrag;
+                if (!doc || !prev || !active || atoms.prefersReducedMotionAtom()) return;
+                const [wasActive] = prev;
+                if (wasActive && wasActive !== active && !ids.includes(wasActive)) markLanded(active, doc.blockId);
+            }
+        )
+    );
+
     // A plain vertical mouse wheel over a horizontally-scrolling region isn't
     // reliably redirected to horizontal scroll by the engine on its own —
     // explicit handling needed so "scroll the wheel over an overflowing tab
