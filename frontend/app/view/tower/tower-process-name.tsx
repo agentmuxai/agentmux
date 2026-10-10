@@ -16,7 +16,7 @@ export function ProcessName(props: { process: TowerProcess }): JSX.Element {
             {(detail) => (
                 <>
                     <span class="tower-label">{detail()}</span>
-                    <span class="tower-muted">{props.process.name}</span>
+                    <span class="tower-muted tower-exe">{props.process.name}</span>
                 </>
             )}
         </Show>

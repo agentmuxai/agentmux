@@ -173,6 +173,17 @@
     min-width: 0;
 }
 
+// The executable after what a process is ("Renderer  AgentMux Helper
+// (Renderer)"): it takes only the room the label leaves, cut short in a
+// narrow pane, so it neither runs into the CPU column nor cuts the label.
+.tower-exe {
+    flex: 1 1 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
 .tower-task-row .tower-label {
     font-weight: 500;
 }
