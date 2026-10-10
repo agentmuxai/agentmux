@@ -11,6 +11,7 @@ import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
 import { RpcClient } from "../rpc-client";
 
 export type { TowerHost } from "@/types/rpc/TowerHost";
+export type { TowerMachine } from "@/types/rpc/TowerMachine";
 export type { TowerPeerInfo } from "@/types/rpc/TowerPeerInfo";
 export type { TowerProcess } from "@/types/rpc/TowerProcess";
 export type { TowerProcessRole } from "@/types/rpc/TowerProcessRole";

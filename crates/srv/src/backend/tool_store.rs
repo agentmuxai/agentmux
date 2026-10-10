@@ -159,6 +159,20 @@ pub fn tools_path(existing: &str, user_precedence: UserToolsPrecedence) -> Optio
     compose_tools_path(existing, bundled.as_deref(), user.as_deref(), user_precedence)
 }
 
+/// The `agentmux-bashwrap` agents' Bash commands run through: the bundled
+/// copy, else the user tools dir's (where `task dev` puts it), in the order
+/// [`tools_path`] puts them on PATH. An absolute path, so a stale copy
+/// elsewhere on PATH can never be the one that runs
+/// (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md).
+pub fn bashwrap_path() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "agentmux-bashwrap.exe" } else { "agentmux-bashwrap" };
+    [bundled_tools_dir(), user_tools_dir()]
+        .into_iter()
+        .flatten()
+        .map(|dir| dir.join(name))
+        .find(|p| p.is_file())
+}
+
 /// Returns `~/.agentmux/tools/downloads/`.
 fn downloads_dir() -> Option<PathBuf> {
     let home = dirs::home_dir()?;

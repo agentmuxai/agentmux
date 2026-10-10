@@ -49,6 +49,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "which 6.0.3",
+ "winres",
 ]
 
 [[package]]
@@ -155,6 +156,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "winres",
  "xcap",
 ]
 

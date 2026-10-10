@@ -29,6 +29,8 @@ struct PreToolUseInput {
     #[serde(default)]
     tool_use_id: String,
     #[serde(default)]
+    session_id: String,
+    #[serde(default)]
     tool_input: Value,
 }
 
@@ -40,7 +42,15 @@ pub fn run_pretooluse_bash() -> Result<()> {
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
 
-    let response = build_response(&buf);
+    // With AgentMux's wrapper as the CLI's shell prefix, the call is only
+    // recorded: the prefix process streams it, and the CLI keeps the call
+    // as the model made it. Otherwise (an older srv, `claude` run by hand
+    // in an agent's workspace) the command is rewritten as before.
+    let response = if crate::prefix::prefix_active() {
+        record_response(&buf)
+    } else {
+        build_response(&buf)
+    };
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     writeln!(handle, "{}", response)?;
@@ -129,6 +139,31 @@ pub fn build_response(stdin_payload: &str) -> Value {
     })
 }
 
+/// The hook's response when the CLI's shell prefix is this wrapper: record
+/// the Bash call for the prefix process to claim (prefix.rs), and answer
+/// nothing, so the CLI runs the call exactly as the model made it, its
+/// permission rules and checks included. A call that can't be recorded still
+/// runs; it just isn't streamed.
+/// docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.2.
+pub fn record_response(stdin_payload: &str) -> Value {
+    let Ok(input) = serde_json::from_str::<PreToolUseInput>(stdin_payload) else {
+        return passthrough();
+    };
+    let command = input.tool_input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+    let usable = input.tool_name == "Bash"
+        && !input.tool_use_id.is_empty()
+        && !input.session_id.is_empty()
+        && !command.starts_with(WRAPPED_PREFIX);
+    if usable {
+        let background = input.tool_input.get("run_in_background").and_then(|v| v.as_bool()).unwrap_or(false);
+        let record = crate::prefix::new_record(&input.tool_use_id, command, background);
+        if let Err(e) = crate::prefix::register(&input.session_id, &record) {
+            tracing::warn!(target: "bashwrap", tool_id = %input.tool_use_id, error = %e, "couldn't record the Bash call; it runs unstreamed");
+        }
+    }
+    passthrough()
+}
+
 fn passthrough() -> Value {
     // Empty object → Claude Code treats as "no opinion", proceeds.
     json!({})
@@ -180,7 +215,7 @@ struct ScanResult {
 
 /// Rewrite a recognized trailing redirect to a `tee` pipeline, or `None` to pass
 /// the command through unchanged.
-fn tee_redirect_rewrite(raw: &str) -> Option<String> {
+pub(crate) fn tee_redirect_rewrite(raw: &str) -> Option<String> {
     let cmd = raw.trim();
     if cmd.is_empty() {
         return None;
@@ -732,6 +767,46 @@ line' && cat $HOME/.env"#;
         assert_eq!(updated["dangerouslyDisableSandbox"], json!(false));
         assert_eq!(updated["some_future_field"], json!({ "nested": [1, 2] }));
         assert_eq!(updated.as_object().unwrap().len(), 6);
+    }
+
+    /// Prefix mode: the call is recorded for the prefix process and the
+    /// response changes nothing (no `updatedInput`, no `permissionDecision`).
+    #[test]
+    fn record_mode_records_the_call_and_answers_nothing() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bashwrap-hook-record-{}", std::process::id()));
+        std::env::set_var("AGENTMUX_BASHWRAP_CALLS_DIR", &dir);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_rec",
+            "session_id": "sess-rec",
+            "tool_input": { "command": "cargo build", "description": "Build", "run_in_background": true }
+        })
+        .to_string();
+        let resp = record_response(&payload);
+        let claimed = crate::prefix::claim("sess-rec", Some("cargo build"));
+        let wrapped = json!({
+            "tool_name": "Bash", "tool_use_id": "toolu_w", "session_id": "sess-rec",
+            "tool_input": { "command": "agentmux-bashwrap exec --tool-id=x --b64-cmd=eA" }
+        })
+        .to_string();
+        let resp_wrapped = record_response(&wrapped);
+        let left = crate::prefix::claim("sess-rec", None);
+        std::env::remove_var("AGENTMUX_BASHWRAP_CALLS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(resp, json!({}));
+        let claimed = claimed.expect("the call was recorded");
+        assert_eq!((claimed.tool_use_id.as_str(), claimed.run_in_background), ("toolu_rec", true));
+        assert_eq!(resp_wrapped, json!({}));
+        assert_eq!(left, None, "an already-wrapped command isn't recorded");
+    }
+
+    #[test]
+    fn record_mode_ignores_other_tools_and_malformed_payloads() {
+        assert_eq!(record_response("not json"), json!({}));
+        let read = json!({ "tool_name": "Read", "tool_use_id": "t", "session_id": "s", "tool_input": {} }).to_string();
+        assert_eq!(record_response(&read), json!({}));
     }
 
     #[test]

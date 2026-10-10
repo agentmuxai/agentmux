@@ -21,6 +21,7 @@ pub mod user_widgets;
 pub mod widget_access;
 pub mod widget_net;
 pub mod widget_packages;
+pub mod widget_requests;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_validate;

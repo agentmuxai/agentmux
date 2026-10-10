@@ -347,6 +347,7 @@ for i in "${!HELPER_NAMES[@]}"; do
     <key>CFBundleName</key><string>${hn}</string>
     <key>CFBundleDisplayName</key><string>${hn}</string>
     <key>CFBundleExecutable</key><string>${hn}</string>
+    <key>CFBundleIconFile</key><string>AgentMux</string>
     <key>CFBundleIdentifier</key><string>${BUNDLE_ID}.${HELPER_IDS[$i]}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
@@ -373,6 +374,14 @@ for s in 16 32 64 128 256 512; do
   d=$((s * 2)); sips -z "$d" "$d" "$SRC_PNG" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AgentMux.icns"
+# The CEF helper apps get the same icon (their Info.plist names it above), so
+# Activity Monitor shows "AgentMux Helper (GPU)" etc. with the AgentMux icon
+# instead of a generic app icon. Copied before signing, so it is sealed with
+# the bundle (docs/reports/REPORT_PROCESS_ICONS_NAMES_AND_LABELS_2026_10_10.md).
+for ha in "${HELPER_APPS[@]}"; do
+    mkdir -p "$ha/Contents/Resources"
+    cp "$APP/Contents/Resources/AgentMux.icns" "$ha/Contents/Resources/AgentMux.icns"
+done
 # Info.plist
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

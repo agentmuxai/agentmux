@@ -5,6 +5,7 @@ import { App } from "@/app/app";
 import { registerDefaultCommands } from "@/app/store/command-registry";
 import {
     globalRefocus,
+    installShortcutApi,
     registerControlShiftTracking,
     registerHostShortcuts,
     registerGlobalKeys,
@@ -969,6 +970,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerDefaultCommands();
     registerControlShiftTracking();
     registerHostShortcuts();
+    installShortcutApi();
     registerLinkInPaneListener();
     tlog("registerKeys", t);
 
@@ -988,6 +990,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
         console.warn("[widget-loader] first pass still running at first render:", e)
     );
     tlog("LoadWidgets", t);
+    // An agent's request to install a widget opens a prompt here.
+    void import("@/app/block/widget-install-requests").then((m) => m.startWidgetInstallRequests());
 
     // Window services that don't paint. They load alongside the render and
     // install when loaded; initMux doesn't wait for them, because its end is
