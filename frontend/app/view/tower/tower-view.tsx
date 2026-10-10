@@ -396,7 +396,19 @@ function ProcessRow(props: {
         >
             <td class="tower-name">
                 <div class="tower-name-line">
-                    <span class="tower-label">{props.process.name || `PID ${props.process.pid}`}</span>
+                    {/* AgentMux's own processes say what they are ("GPU", "Renderer"),
+                        since many run the same executable; the name follows, muted. */}
+                    <Show
+                        when={props.process.detail}
+                        fallback={<span class="tower-label">{props.process.name || `PID ${props.process.pid}`}</span>}
+                    >
+                        {(detail) => (
+                            <>
+                                <span class="tower-label">{detail()}</span>
+                                <span class="tower-muted">{props.process.name}</span>
+                            </>
+                        )}
+                    </Show>
                     <Show when={props.taskLabel}>
                         {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
                     </Show>

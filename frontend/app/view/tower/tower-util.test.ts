@@ -110,6 +110,12 @@ describe("filtering the host list", () => {
         expect(filterProcesses(ps, "41", label).map((p) => p.pid)).toEqual([4100]);
         expect(filterProcesses(ps, "  ", label)).toBe(ps);
     });
+
+    it("also matches what one of AgentMux's own processes is", () => {
+        const gpu = { ...proc(300, "agentmux-0.59.18.exe"), detail: "GPU" };
+        const renderer = { ...proc(301, "agentmux-0.59.18.exe"), detail: "Renderer" };
+        expect(filterProcesses([gpu, renderer], "gpu", label).map((p) => p.pid)).toEqual([300]);
+    });
 });
 
 describe("a process's details", () => {

@@ -124,7 +124,7 @@ export function filterProcesses(
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length === 0) return processes;
     return processes.filter((p) => {
-        const hay = `${p.name} ${p.pid} ${p.task ? (taskLabel(p.task) ?? "") : ""}`.toLowerCase();
+        const hay = `${p.name} ${p.pid} ${p.task ? (taskLabel(p.task) ?? "") : ""} ${p.detail ?? ""}`.toLowerCase();
         return words.every((w) => hay.includes(w));
     });
 }

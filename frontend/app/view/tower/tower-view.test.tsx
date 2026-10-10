@@ -71,7 +71,9 @@ function snapshot(host = false): TowerSnapshot {
                 cpu: 0.1,
                 cpu_account: false,
                 mem: 2 * GB,
-                processes: [{ id: "5:1", pid: 5, name: "agentmux-srv.exe", cpu: 0.1, mem: 2 * GB, role: "main" }],
+                processes: [
+                    { id: "5:1", pid: 5, name: "agentmux-srv.exe", cpu: 0.1, mem: 2 * GB, role: "main", detail: "Server" },
+                ],
             },
         ],
         host: host
@@ -158,6 +160,14 @@ describe("Tower", () => {
         // 1.5 cores of 4.
         expect(within(node).getByText("38%")).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: /command line/i })).toBeNull();
+    });
+
+    it("says what each of AgentMux's own processes is, with its executable alongside", async () => {
+        renderTower();
+        const agentmux = await screen.findByTestId("tower-task-agentmux");
+        fireEvent.click(within(agentmux).getByRole("button", { name: "Show processes" }));
+        const srv = screen.getByText("Server").closest("tr")!;
+        expect(within(srv).getByText("agentmux-srv.exe")).toHaveClass("tower-muted");
     });
 
     it("keeps each row, and updates it, across a refresh", async () => {
