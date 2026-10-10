@@ -70,7 +70,9 @@ const EVDEV = {
     KeyX: 45, KeyC: 46, KeyV: 47, KeyB: 48, KeyN: 49, KeyM: 50, Comma: 51, Period: 52, Slash: 53, Space: 57,
     F1: 59, F2: 60, F3: 61, F4: 62, F5: 63, F6: 64, F7: 65, F8: 66, F9: 67, F10: 68, NumpadSubtract: 74, NumpadAdd: 78,
     Numpad0: 82, F11: 87, F12: 88, Home: 102, ArrowUp: 103, PageUp: 104, ArrowLeft: 105, ArrowRight: 106, End: 107,
-    ArrowDown: 108, PageDown: 109, Delete: 111,
+    ArrowDown: 108, PageDown: 109, Insert: 110, Delete: 111, NumpadMultiply: 55, Numpad7: 71, Numpad8: 72, Numpad9: 73,
+    Numpad4: 75, Numpad5: 76, Numpad6: 77, Numpad1: 79, Numpad2: 80, Numpad3: 81, NumpadDecimal: 83, NumpadEnter: 96,
+    NumpadDivide: 98, IntlBackslash: 86,
 };
 /** CDP modifier bits (Alt 1, Ctrl 2, Meta 4, Shift 8) and their keys. */
 const MODIFIERS = [
@@ -213,6 +215,11 @@ async function main() {
         const plan = await cdp.evaluate(`${S}.plan(${js(k.raw)})`);
         if (plan.reason) {
             r.result = `skipped: ${plan.reason}`;
+            continue;
+        }
+        const unknown = plan.events.find((ev) => EVDEV[ev.code] == null);
+        if (unknown) {
+            r.result = `skipped: no Linux key code for ${unknown.code}`;
             continue;
         }
         const windowsBefore = new Set((await appWindows(args.port)).map((t) => t.id));
