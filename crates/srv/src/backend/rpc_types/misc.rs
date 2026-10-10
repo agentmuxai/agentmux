@@ -384,7 +384,8 @@ pub struct CommandBrowserProfileCreateData {
     pub color: Option<String>,
 }
 
-/// `browser_profiles.update`: rename and/or recolour.
+/// `browser_profiles.update`: rename, recolour, and/or switch "Agents may use
+/// this profile".
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBrowserProfileUpdateData {
@@ -395,6 +396,9 @@ pub struct CommandBrowserProfileUpdateData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub agents_allowed: Option<bool>,
 }
 
 /// `browser_profiles.delete`: the profile, its open tabs and its saved data.

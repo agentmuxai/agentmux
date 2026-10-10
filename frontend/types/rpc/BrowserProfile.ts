@@ -9,4 +9,9 @@ id: string, name: string,
 /**
  * `#rrggbb`: the profile's colour on its button and tabs.
  */
-color: string, created_at: number, };
+color: string, created_at: number, 
+/**
+ * "Agents may use this profile": an agent's `OpenBrowser` may browse as
+ * it. Off until the user switches it on.
+ */
+agents_allowed: boolean, };

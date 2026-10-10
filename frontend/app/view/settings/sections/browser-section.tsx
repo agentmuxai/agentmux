@@ -1,12 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Settings → Browser: the named browser profiles — rename, recolour, delete,
-// add (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3).
+// Settings → Browser: the named browser profiles — rename, recolour, let
+// agents use one, delete, add
+// (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3, §5).
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import clsx from "clsx";
-import { Button, TextInput } from "@/app/element/ui";
+import { Button, Switch, TextInput } from "@/app/element/ui";
 import { getPlatform } from "@/util/platformutil";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import {
@@ -26,9 +27,9 @@ export const BROWSER_SETTINGS = {
         id: "browser.profiles",
         label: "Browser profiles",
         description:
-            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed.",
+            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; it can always use an Incognito tab.",
         section: "browser",
-        keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work"],
+        keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work", "agent", "agents"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -93,6 +94,14 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                     )}
                 </For>
             </div>
+            <label class="browser-profile-agents">
+                <Switch
+                    checked={props.profile.agents_allowed}
+                    ariaLabel={`Agents may use ${props.profile.name}`}
+                    onChange={(on) => void run(() => updateBrowserProfile(props.profile.id, { agents_allowed: on }))}
+                />
+                <span>Agents may use it</span>
+            </label>
             <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={remove}>
                 {confirming() ? `Delete ${props.profile.name} and sign out?` : "Delete"}
             </Button>

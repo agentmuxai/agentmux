@@ -790,11 +790,11 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    meta.insert(
-        crate::server::browser_owner::OWNER_META_KEY.to_string(),
-        json!(req.auth.agent_id),
-    );
+    meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(req.auth.agent_id));
     crate::server::browser_allowlist::mirror(&mut meta, allowed.as_deref());
+    if let Err(e) = crate::server::browser_identity::for_agent_open(&state, &mut meta, req.profile.as_deref()) {
+        return err_response(StatusCode::BAD_REQUEST, e);
+    }
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,

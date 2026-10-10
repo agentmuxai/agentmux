@@ -25,6 +25,10 @@ pub struct BrowserProfile {
     #[serde(default)]
     #[ts(type = "number")]
     pub created_at: i64,
+    /// "Agents may use this profile": an agent's `OpenBrowser` may browse as
+    /// it. Off until the user switches it on.
+    #[serde(default)]
+    pub agents_allowed: bool,
 }
 
 const PROFILES_FILE_NAME: &str = "browser-profiles.json";
@@ -111,13 +115,19 @@ pub fn add(profiles: &mut Vec<BrowserProfile>, name: &str, color: Option<&str>, 
         None => PALETTE[profiles.len() % PALETTE.len()].to_string(),
     };
     let id = format!("p-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let profile = BrowserProfile { id, name, color, created_at: now_ms };
+    let profile = BrowserProfile { id, name, color, created_at: now_ms, agents_allowed: false };
     profiles.push(profile.clone());
     Ok(profile)
 }
 
 /// Rename or recolour profile `id`.
-pub fn update(profiles: &mut [BrowserProfile], id: &str, name: Option<&str>, color: Option<&str>) -> Result<(), String> {
+pub fn update(
+    profiles: &mut [BrowserProfile],
+    id: &str,
+    name: Option<&str>,
+    color: Option<&str>,
+    agents_allowed: Option<bool>,
+) -> Result<(), String> {
     let name = name.map(|n| check_name(profiles, n, Some(id))).transpose()?;
     let color = color.map(check_color).transpose()?;
     let p = profiles.iter_mut().find(|p| p.id == id).ok_or_else(|| format!("no profile {id:?}"))?;
@@ -126,6 +136,9 @@ pub fn update(profiles: &mut [BrowserProfile], id: &str, name: Option<&str>, col
     }
     if let Some(c) = color {
         p.color = c;
+    }
+    if let Some(a) = agents_allowed {
+        p.agents_allowed = a;
     }
     Ok(())
 }
@@ -172,11 +185,11 @@ mod tests {
         let mut ps = Vec::new();
         let a = add(&mut ps, "A", None, 1).unwrap();
         add(&mut ps, "B", None, 1).unwrap();
-        update(&mut ps, &a.id, Some("a"), None).unwrap();
-        assert!(update(&mut ps, &a.id, Some("B"), None).is_err());
-        update(&mut ps, &a.id, None, Some("#000000")).unwrap();
+        update(&mut ps, &a.id, Some("a"), None, None).unwrap();
+        assert!(update(&mut ps, &a.id, Some("B"), None, None).is_err());
+        update(&mut ps, &a.id, None, Some("#000000"), None).unwrap();
         assert_eq!(ps[0].color, "#000000");
-        assert!(update(&mut ps, "p-none", Some("C"), None).is_err());
+        assert!(update(&mut ps, "p-none", Some("C"), None, None).is_err());
     }
 
     #[test]

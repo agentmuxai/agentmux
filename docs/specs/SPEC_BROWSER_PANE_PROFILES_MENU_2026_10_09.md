@@ -121,7 +121,13 @@ second glyph beside it would only repeat it.
   - **Named profiles:** an agent may use one only after you switch on "Agents may use this
     profile" for it in Manage profiles.
   - **Incognito:** always allowed, since it gives the agent less, not more (identities spec §7).
-  - **Agents never create, rename or delete profiles.**
+  - **Agents never create, rename or delete profiles.** `browser_profiles.create`, `update`
+    and `delete` refuse a connection registered as an agent; `list` doesn't.
+  - **Where it's checked (P4):** `OpenBrowser`'s `profile` goes through
+    `browser_identity::identity_for_agent`. A `browser:identity` an agent passes to `pane.open`
+    (a connection registered as an agent) or to the HTTP pane open (`/api/v1/pane/open`, which
+    agents and `muxsh` call) goes through `check_agent_may_use`. The window's own calls aren't
+    checked, the same trust as every other key the window sets.
 
 ## 6. How it works
 
@@ -147,6 +153,9 @@ second glyph beside it would only repeat it.
     - **A profile:** a disk-backed context at `<cef-cache>/profile-<id>`, one per profile,
       shared by its tabs.
   - **Popup contexts:** a popup gets its opener's context.
+  - **Writing sign-ins (P2):** the host exits without shutting CEF down, so cookies newer than
+    Chromium's last periodic write (about every 30 seconds) were lost on quit. A profile's cookie
+    store is written when one of its tabs finishes loading a page, which is how a sign-in ends.
 - **Frontend:**
   - **Toolbar and menu:** the Home and Profile buttons in `browser-nav-bar.tsx`, the menu as a
     `FlyoutMenu`, and the inline New-profile form.
@@ -198,6 +207,7 @@ Until P2, the menu shows Personal, Open new Incognito tab, and a disabled **New 
 | Bookmarks and Home | Global, shared by every profile. Per-profile bookmarks can come later if wanted. |
 | Incognito after restart | Back signed out, with a fresh jar: its pane is in srv's store, its jar was only in memory. |
 | The cap | 8 Incognito tabs; P1 measures the memory and sets it. |
+| Agents and profiles | Off for each profile until the user switches on "Agents may use it" in Settings → Browser. Incognito is always allowed. Agents can list profiles but never change them. |
 
 ## 10. Tests
 
