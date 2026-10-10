@@ -87,7 +87,7 @@ describe("WidgetsSection", () => {
         expect(within(prompt).getByText("Connect to https://api.github.com")).toBeInTheDocument();
         expect(within(prompt).getByText(/Send messages to your agents/)).toBeInTheDocument();
         fireEvent.click(within(prompt).getByText("Install"));
-        await waitFor(() => expect(decideWidget).toHaveBeenCalledWith("acme.notes", "abc123", true));
+        await waitFor(() => expect(decideWidget).toHaveBeenCalledWith("acme.notes", "abc123", true, ""));
     });
 
     it("warns, in so many words, that a trusted widget has full access", async () => {
@@ -152,7 +152,7 @@ describe("WidgetsSection", () => {
         const prompt = within(board).getByRole("dialog");
         expect(within(prompt).getByText(/Not signed by the key that signed your other acme widgets/)).toBeInTheDocument();
         fireEvent.click(within(prompt).getByText("Install anyway"));
-        await waitFor(() => expect(decideWidget).toHaveBeenCalledWith("acme.board", "def", true));
+        await waitFor(() => expect(decideWidget).toHaveBeenCalledWith("acme.board", "def", true, "AAAA-BBBB-CCCC-DDDD"));
     });
 
     it("lists pinned publisher keys and forgets one through the host", async () => {

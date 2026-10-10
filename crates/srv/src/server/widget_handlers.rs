@@ -269,12 +269,12 @@ pub(crate) async fn handle_host_widget_approval(
             .into_response();
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let (id, hash, decision) = (s("id"), s("hash"), s("decision"));
+    let (id, hash, decision, signer) = (s("id"), s("hash"), s("decision"), s("signer"));
     let Ok(service) = svc() else {
         return (StatusCode::NOT_FOUND, Json(json!({ "ok": false, "error": "widget packages aren't available" }))).into_response();
     };
     let result = match decision.as_str() {
-        "approve" => service.approve(&id, &hash),
+        "approve" => service.approve(&id, &hash, &signer),
         "cancel" => Ok(()),
         // Settings → Widgets → Forget key: `id` names the publisher
         // (SPEC_WIDGET_SHARING_2026_10_10.md §2.3). Only the user can, like

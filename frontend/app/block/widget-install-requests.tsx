@@ -36,7 +36,7 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
     });
     const decide = async (approve: boolean) => {
         try {
-            await getApi().approvals.decideWidget(r.id, r.hash, approve);
+            await getApi().approvals.decideWidget(r.id, r.hash, approve, r.signature?.fingerprint ?? "");
             props.close();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));

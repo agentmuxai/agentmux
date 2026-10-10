@@ -54,7 +54,8 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
     const decide = async (approve: boolean) => {
         setBusy(true);
         try {
-            await getApi().approvals.decideWidget(props.pkg.id, props.pkg.hash, approve);
+            // With the key the prompt showed: srv refuses if another signs it now.
+            await getApi().approvals.decideWidget(props.pkg.id, props.pkg.hash, approve, props.pkg.signature?.fingerprint ?? "");
             props.onDone();
         } catch (e) {
             setError(errorText(e));

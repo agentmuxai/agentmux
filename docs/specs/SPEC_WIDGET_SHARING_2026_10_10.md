@@ -1,6 +1,6 @@
 # Sharing widgets: signed packages, widgets in agent bundles, a catalog
 
-**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in this PR; W6b and W6c not started.
+**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b and W6c not started.
 **Date:** 2026-10-10
 **Builds on:** `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (packages §5, the content hash §8.2, approval §8.3)
 
@@ -50,6 +50,7 @@ The manifest's publisher (the part of `id` before the dot) is free-form (decisio
 | `key_changed` | It verifies, but the publisher is pinned to another key; or it isn't signed and the publisher is pinned | A warning: "**Not signed by the key that signed your other acme widgets.** It may not be from the same author." The button reads **Install anyway**. |
 | `invalid` | `widget.sig` is there but doesn't parse or doesn't verify | The package is `invalid` (§8.1): "its signature doesn't match its files". It can't be installed. |
 
+- The answer carries the fingerprint the prompt showed ("" for unsigned), relayed by the host with the id and hash. `widget.sig` isn't in the hash, so srv checks the signature on disk against it and refuses the approval if another key signs the package now ("the widget's signature changed since you were asked"): a signature swapped between the prompt and the click can't be recorded or pinned.
 - The approval record keeps the signing key. A package whose files are unchanged but whose signature now names another key, or was removed, is `changed` and asks again with the full prompt.
 - An update (`changed`) whose signature state is `key_changed` always gets the full prompt, never the short "was updated" one.
 - Approving a `key_changed` package does **not** move the pin. Settings → Widgets lists the pinned publishers, with **Forget key**, for an author who really changed keys. Forgetting goes through the host-only route an approval uses (decision `forget_key`): with only srv's auth key, which every agent has, a pin can't be removed.
@@ -139,7 +140,7 @@ A public list of sandboxed widgets, browsable in Settings → Widgets → **Brow
 }
 ```
 
-`index.json.sig` is an Ed25519 signature over the index's exact bytes by the catalog key. AgentMux pins the catalog's public key in its source (like muxreview's message key), so a changed index or a different server can't add a widget.
+`index.json.sig` is an Ed25519 signature over the index's exact bytes by the catalog key. AgentMux pins the catalog's public key in its source, so a changed index or a different server can't add a widget.
 
 ### 4.4 What CI checks before a widget is listed
 

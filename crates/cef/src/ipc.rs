@@ -680,6 +680,9 @@ async fn route_command(
                 "id": args.get("id").and_then(|v| v.as_str()).unwrap_or(""),
                 "hash": args.get("hash").and_then(|v| v.as_str()).unwrap_or(""),
                 "decision": args.get("decision").and_then(|v| v.as_str()).unwrap_or(""),
+                // The signing key's fingerprint the prompt showed ("" for
+                // unsigned): srv approves only if it still signs the package.
+                "signer": args.get("signer").and_then(|v| v.as_str()).unwrap_or(""),
             });
             let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
             let auth_key = state.auth_key.lock().clone();

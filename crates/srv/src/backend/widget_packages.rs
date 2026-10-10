@@ -850,9 +850,12 @@ impl WidgetPackages {
         self.inner.lock().unwrap_or_else(|p| p.into_inner()).packages.clone()
     }
 
-    /// Record the user's approval of exactly `hash` (the host-only route
-    /// calls this). Fails if the package changed since the prompt was shown.
-    pub fn approve(&self, id: &str, hash: &str) -> Result<(), String> {
+    /// Record the user's approval of exactly `hash`, signed by the key whose
+    /// fingerprint the prompt showed (`shown_signer`, "" for unsigned); the
+    /// host-only route calls this. Fails if the package or its signature
+    /// changed since the prompt was shown: `widget.sig` isn't in the hash, so
+    /// it is checked here (SPEC_WIDGET_SHARING_2026_10_10.md §2.3).
+    pub fn approve(&self, id: &str, hash: &str, shown_signer: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let found = inner.found.iter().find(|f| f.id == id).ok_or("no such widget")?;
         let m = found.manifest.as_ref().map_err(|e| e.clone())?;
@@ -865,6 +868,9 @@ impl WidgetPackages {
             Some(Ok(key)) => Some(key),
             Some(Err(e)) => return Err(e),
         };
+        if signer.as_deref().map(sig::fingerprint).unwrap_or_default() != shown_signer {
+            return Err("the widget's signature changed since you were asked; review it again".to_string());
+        }
         // The first signed package of a publisher pins it to its key; a
         // later one signed otherwise doesn't move the pin
         // (SPEC_WIDGET_SHARING_2026_10_10.md §2.2).
@@ -1326,7 +1332,7 @@ mod tests {
         assert_eq!(p.files_url, None);
         assert_eq!(p.panes[0].view, "ext:acme.test/main");
 
-        svc.approve("acme.test", &p.hash).unwrap();
+        svc.approve("acme.test", &p.hash, p.signature.fingerprint.as_deref().unwrap_or("")).unwrap();
         let p = svc.rescan(&HashMap::new())[0].clone();
         assert_eq!(p.state, WidgetState::Approved);
         assert_eq!(p.granted, vec!["storage".to_string(), "net:https://api.github.com".to_string()]);
@@ -1335,7 +1341,7 @@ mod tests {
         assert_eq!(svc.read_file("acme.test", &p.hash, key, "index.html").unwrap(), b"<p>hi</p>");
 
         // An approval of a stale hash is refused.
-        assert!(svc.approve("acme.test", "0000").is_err());
+        assert!(svc.approve("acme.test", "0000", "").is_err());
     }
 
     fn sign(dir: &Path, seed: u8, id: &str) {
@@ -1357,7 +1363,7 @@ mod tests {
         assert_eq!(p.signature.fingerprint.as_deref(), Some(sig::fingerprint(&sig::test_keys::public_key(1)).as_str()));
 
         // Approving pins the publisher; the package is then plainly signed.
-        svc.approve("acme.test", &p.hash).unwrap();
+        svc.approve("acme.test", &p.hash, p.signature.fingerprint.as_deref().unwrap_or("")).unwrap();
         let p = svc.rescan(&HashMap::new())[0].clone();
         assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Approved, sig::SignatureState::Signed));
         assert_eq!(svc.publishers().len(), 1);
@@ -1385,14 +1391,14 @@ mod tests {
         let dir = package(&svc.widgets_dir, "acme.test");
         sign(&dir, 1, "acme.test");
         let p = svc.rescan(&HashMap::new())[0].clone();
-        svc.approve("acme.test", &p.hash).unwrap();
+        svc.approve("acme.test", &p.hash, p.signature.fingerprint.as_deref().unwrap_or("")).unwrap();
 
         // Same files, re-signed by someone else: asks again, flagged.
         sign(&dir, 2, "acme.test");
         let p = svc.rescan(&HashMap::new())[0].clone();
         assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Changed, sig::SignatureState::KeyChanged));
         // Approving it doesn't move the pin.
-        svc.approve("acme.test", &p.hash).unwrap();
+        svc.approve("acme.test", &p.hash, p.signature.fingerprint.as_deref().unwrap_or("")).unwrap();
         let p = svc.rescan(&HashMap::new())[0].clone();
         assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Approved, sig::SignatureState::KeyChanged));
 
@@ -1408,13 +1414,30 @@ mod tests {
     }
 
     #[test]
+    fn a_signature_swapped_after_the_prompt_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path());
+        let dir = package(&svc.widgets_dir, "acme.test");
+        sign(&dir, 1, "acme.test");
+        let shown = svc.rescan(&HashMap::new())[0].clone();
+        // Another key signs the same files before the click: the hash still
+        // matches, the key the user saw doesn't.
+        sign(&dir, 2, "acme.test");
+        let err = svc.approve("acme.test", &shown.hash, shown.signature.fingerprint.as_deref().unwrap()).unwrap_err();
+        assert!(err.contains("signature changed"), "{err}");
+        assert!(svc.publishers().is_empty(), "nothing pinned");
+        // Shown as unsigned, signed now: refused too.
+        assert!(svc.approve("acme.test", &shown.hash, "").is_err());
+    }
+
+    #[test]
     fn removing_the_signature_of_an_approved_package_asks_again() {
         let tmp = tempfile::tempdir().unwrap();
         let svc = service(tmp.path());
         let dir = package(&svc.widgets_dir, "acme.test");
         sign(&dir, 1, "acme.test");
         let p = svc.rescan(&HashMap::new())[0].clone();
-        svc.approve("acme.test", &p.hash).unwrap();
+        svc.approve("acme.test", &p.hash, p.signature.fingerprint.as_deref().unwrap_or("")).unwrap();
         std::fs::remove_file(dir.join(sig::SIG_FILE)).unwrap();
         let p = svc.rescan(&HashMap::new())[0].clone();
         assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Changed, sig::SignatureState::KeyChanged));
@@ -1426,7 +1449,7 @@ mod tests {
         let svc = service(tmp.path());
         let dir = package(&svc.widgets_dir, "acme.test");
         let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
+        svc.approve("acme.test", &hash, "").unwrap();
         let key = files_key("secret", "acme.test", &hash);
 
         // Edited after approval, before any rescan: the read itself catches it.
@@ -1448,7 +1471,7 @@ mod tests {
         package(&svc.widgets_dir, "acme.test");
         std::fs::write(svc.widgets_dir.join("secret.txt"), "nope").unwrap();
         let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
+        svc.approve("acme.test", &hash, "").unwrap();
         let key = files_key("secret", "acme.test", &hash);
         assert_eq!(svc.read_file("acme.test", &hash, "guess", "index.html"), Err(FileError::NotFound));
         assert_eq!(svc.read_file("acme.test", &hash, &key, "../secret.txt"), Err(FileError::NotFound));
@@ -1461,7 +1484,7 @@ mod tests {
         let svc = service(tmp.path());
         package(&svc.widgets_dir, "acme.test");
         let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
+        svc.approve("acme.test", &hash, "").unwrap();
         let packages = svc.rescan(&HashMap::new());
         let entries = widget_entries(&packages);
         assert_eq!(entries["ext@acme.test/main"].block_def.meta["view"], "ext:acme.test/main");
@@ -1480,7 +1503,7 @@ mod tests {
         let svc = service(tmp.path());
         package(&svc.widgets_dir, "acme.test");
         let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
+        svc.approve("acme.test", &hash, "").unwrap();
         // Same widgets folder, another instance's data dir: asks again.
         let other = WidgetPackages::new(tmp.path().join("widgets"), &tmp.path().join("other-data"), "s2".into());
         assert_eq!(other.rescan(&HashMap::new())[0].state, WidgetState::NeedsApproval);
@@ -1507,7 +1530,7 @@ mod tests {
         assert_eq!(p.panes[0].view, "ext:hello");
         assert_eq!(p.panes[0].entry, "index.js");
         // A v1 widget keeps its own widget-bar entry; none is added.
-        svc.approve("local.hello", &p.hash).unwrap();
+        svc.approve("local.hello", &p.hash, "").unwrap();
         assert!(widget_entries(&svc.rescan(&v1)).is_empty());
     }
 
