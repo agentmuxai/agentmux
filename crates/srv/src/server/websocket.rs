@@ -1691,6 +1691,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // CLI handlers (resolvecli, checkcliauth, runclilogin)
     super::cli_handlers::register_cli_handlers(engine, &state);
 
+    // Widget packages (widgets.list, .install, .setenabled, .uninstall, .readfile)
+    super::widget_handlers::register_widget_handlers(engine, &state);
+
     // Tool store handlers (gettoolstatus, installtool)
     super::tool_handlers::register_tool_handlers(engine, &state);
 

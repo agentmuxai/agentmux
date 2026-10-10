@@ -87,9 +87,39 @@ fn retarget_remotes(entry: &mut WidgetConfigType) {
     }
 }
 
+/// The user's widgets.json as last read, for the widget packages scan (its v1
+/// `module` entries are implied packages) and for recomputing the merge when
+/// a package changes.
+static LAST_USER: std::sync::Mutex<Option<HashMap<String, WidgetConfigType>>> = std::sync::Mutex::new(None);
+
+/// The v1 entries (`module` set) of the user's widgets.json as last read.
+pub fn last_v1_entries() -> HashMap<String, WidgetConfigType> {
+    let guard = LAST_USER.lock().unwrap_or_else(|p| p.into_inner());
+    guard
+        .as_ref()
+        .map(|u| u.iter().filter(|(_, e)| !e.module.is_empty()).map(|(k, e)| (k.clone(), e.clone())).collect())
+        .unwrap_or_default()
+}
+
 fn apply(config_watcher: &ConfigState, user: HashMap<String, WidgetConfigType>) {
     wconfig::validate_widget_configs(&user);
-    config_watcher.update_widgets(merge_widgets(builtin_widgets(), user));
+    *LAST_USER.lock().unwrap_or_else(|p| p.into_inner()) = Some(user);
+    if let Some(svc) = super::widget_packages::service() {
+        svc.rescan(&last_v1_entries());
+    }
+    recompute(config_watcher);
+}
+
+/// Merge again: the built-ins, then each approved widget package's entries
+/// (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §5.4), then the user's own
+/// widgets.json, which can still rename, hide or replace a package's entry.
+pub fn recompute(config_watcher: &ConfigState) {
+    let user = LAST_USER.lock().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_default();
+    let mut base = builtin_widgets().clone();
+    if let Some(svc) = super::widget_packages::service() {
+        base.extend(super::widget_packages::widget_entries(&svc.list()));
+    }
+    config_watcher.update_widgets(merge_widgets(&base, user));
 }
 
 pub fn load_user_widgets_from_disk(config_watcher: &ConfigState) {

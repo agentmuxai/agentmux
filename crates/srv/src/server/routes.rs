@@ -410,6 +410,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
+        .route("/api/v1/host/widget_approval", post(super::widget_handlers::handle_host_widget_approval))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
@@ -563,8 +564,17 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .layer(cors.clone())
         .with_state(state.clone());
 
+    // An approved widget's files (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md
+    // §5.2). No auth key: a widget's iframe loads them, and the URL's key
+    // segment is what keeps other pages out. Full router only, never the LAN.
+    let widget_files = Router::new().route(
+        "/agentmux/widget-files/:id/:hash/:key/*path",
+        get(super::widget_handlers::handle_widget_file),
+    );
+
     let full = Router::new()
         .merge(full_health)
+        .merge(widget_files)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
         .merge(authed_routes);

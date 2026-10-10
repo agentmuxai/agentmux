@@ -493,6 +493,7 @@ partial list.
 | [`SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md) | SPEC: Harden the "Working…" indicator and message-list auto-follow against four related recurring bugs |
 | [`SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19`](SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19.md) | SPEC: Write tool expanded content view |
 | [`SPEC_WRITE_TOOL_MD_RENDER_2026_06_23`](SPEC_WRITE_TOOL_MD_RENDER_2026_06_23.md) | SPEC: Render `.md` content as markdown in the Write tool overlay |
+| [`app-api-extension`](app-api-extension.md) | App API Extension Spec |
 | [`cef-portable-build`](cef-portable-build.md) | Spec: CEF Portable Build Pipeline |
 | [`command-palette`](command-palette.md) | Command Palette — Spec |
 | [`dev-build-env-isolation`](dev-build-env-isolation.md) | Dev-Build Env Isolation |
@@ -805,7 +806,6 @@ partial list.
 | [`agent-pane-slash-commands`](agent-pane-slash-commands.md) | Agent Pane Slash Commands |
 | [`agent-pane-title-buttons`](agent-pane-title-buttons.md) | Agent Pane Title Buttons + Git Identity |
 | [`agentmux-local-url-injection`](agentmux-local-url-injection.md) | AGENTMUX_LOCAL_URL Pane Injection |
-| [`app-api-extension`](app-api-extension.md) | App API Extension Spec |
 | [`browser-pane-reducer-roadmap`](browser-pane-reducer-roadmap.md) | Browser-pane reducer migration — diagnostic-first roadmap |
 | [`cef-portable-layout`](cef-portable-layout.md) | CEF Portable Layout — Clean Directory Spec |
 | [`cef-size-reduction`](cef-size-reduction.md) | CEF Portable Size Reduction Spec |

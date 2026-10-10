@@ -1,6 +1,6 @@
 # App API Extension Spec
 
-**Status:** Proposed
+**Status:** Implemented (as `crates/srv/src/app_api/` and the `/api/v1` routes; the MCP tools in `crates/mcp`). This document is kept for its history.
 **Date:** 2026-04-10
 **Motivation:** CEF webview content is inaccessible to external automation tools
 (Windows MCP, AppleScript, etc.). The only reliable way to programmatically

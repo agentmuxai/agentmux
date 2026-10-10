@@ -146,6 +146,10 @@ declare global {
          *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
          *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
         decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "cancel"): Promise<void>;
+        /** Answer a widget's install prompt: approve exactly the package version
+         *  (`hash`) the user was shown, or cancel. Relayed by the host, which srv
+         *  trusts and agents can't impersonate. SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3. */
+        decideWidget(id: string, hash: string, approve: boolean): Promise<void>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */

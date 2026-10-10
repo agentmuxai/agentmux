@@ -380,3 +380,95 @@
     color: var(--secondary-text-color);
     margin-top: var(--space-1);
 }
+
+// Widgets (sections/widgets-section.tsx): the install toolbar, one block per
+// package, and the install prompt inside the package it's for.
+.widgets-toolbar,
+.widget-row-actions,
+.widget-approval-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+.widgets-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.widget-row {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-2, 6px);
+    padding: var(--space-2);
+}
+
+.widget-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+}
+
+.widget-row-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.widget-row-version,
+.widget-row-kind,
+.widget-row-description,
+.widget-row-permissions,
+.widget-approval-meta,
+.widget-row-confirm {
+    color: var(--secondary-text-color);
+}
+
+.widget-row-state {
+    margin-left: auto;
+    white-space: nowrap;
+
+    &.state-approved {
+        color: var(--success-color);
+    }
+    &.state-needs_approval,
+    &.state-changed {
+        color: var(--warning-color);
+    }
+    &.state-invalid {
+        color: var(--error-color);
+    }
+}
+
+.widget-row-description,
+.widget-row-permissions {
+    margin-bottom: var(--space-2);
+}
+
+.widget-approval {
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-2, 6px);
+    padding: var(--space-2);
+    margin: var(--space-2) 0;
+
+    ul {
+        margin: var(--space-1) 0 var(--space-2) var(--space-4);
+    }
+
+    li.strong {
+        font-weight: 600;
+        color: var(--warning-color);
+    }
+}
+
+.widget-approval-title {
+    font-weight: 600;
+    margin-bottom: var(--space-1);
+}
+
+.widget-approval-warning {
+    color: var(--warning-color);
+    margin: var(--space-2) 0;
+}

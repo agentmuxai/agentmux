@@ -1,0 +1,19 @@
+{
+  "manifestVersion": 1,
+  "id": "agentmux.hello",
+  "name": "Hello",
+  "version": "1.0.0",
+  "description": "The smallest trusted widget: counts clicks in its pane's meta.",
+  "author": "AgentMux",
+  "icon": "hand",
+  "kind": "trusted",
+  "entry": "index.js",
+  "contributes": {
+    "panes": [
+      {
+        "name": "main",
+        "label": "Hello"
+      }
+    ]
+  }
+}
