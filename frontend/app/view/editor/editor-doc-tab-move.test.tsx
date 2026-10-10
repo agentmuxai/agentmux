@@ -144,6 +144,20 @@ describe("moving an Editor tab to another Editor", () => {
         expect(takeMovedEditorState(b, id)).toBeUndefined();
     });
 
+    it("moved on again before the middle pane built it, the history still arrives, once", async () => {
+        const a = mount();
+        const b = mount();
+        const c = mount();
+        await openLoaded(a, "c:/repo/a.ts");
+        const id = a.activeIdAtom()!;
+        const json = { doc: "const a = 1;\n", selection: { ranges: [{ anchor: 0, head: 0 }], main: 0 } };
+        provideEditorStates(a, (tabId) => (tabId === id ? ({ toJSON: () => json } as never) : undefined));
+        moveDocTab(a.blockId, id, b.blockId);
+        moveDocTab(b.blockId, id, c.blockId); // b has no view: its build never ran
+        expect(takeMovedEditorState(b, id)).toBeUndefined();
+        expect(takeMovedEditorState(c, id)).toBe(json);
+    });
+
     it("the same file open in the target: a clean tab gives way to it, a dirty one is refused", async () => {
         const a = mount();
         const b = mount();

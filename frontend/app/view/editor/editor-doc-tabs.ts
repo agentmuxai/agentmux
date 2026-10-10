@@ -73,10 +73,15 @@ function liveStateOf(model: EditorViewModel, tab: DocTab<EditorBuffer>): EditorL
         mode: model._tabModes.get(tab.id),
     };
     if (tab.payload.contentLoaded && model._contentByTab.has(tab.id)) live.content = model._contentByTab.get(tab.id);
+    // A tab that moved in and moves on before this pane's view has built it
+    // still has its state waiting here: pass that on (and don't leave it
+    // behind). A built tab's own state is the newer.
+    const pending = takeMovedEditorState(model, tab.id);
     try {
-        live.editorState = viewStates.get(model)?.(tab.id)?.toJSON(EDITOR_STATE_FIELDS);
+        live.editorState = viewStates.get(model)?.(tab.id)?.toJSON(EDITOR_STATE_FIELDS) ?? pending;
     } catch {
         // History that can't be serialized stays behind; the text still moves.
+        live.editorState = pending;
     }
     return live;
 }
