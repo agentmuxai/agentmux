@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { lastResolvedCommand, listShortcuts, noteResolved, planKeyPress, registerPaneCommandRunner, runCommand, type RunDeps } from "./app-api";
+import { lastResolvedCommand, listShortcuts, noteResolved, paneRefusal, planKeyPress, registerPaneCommandRunner, runCommand, type RunDeps, type RunResult } from "./app-api";
 import { DEFAULT_KEYBINDINGS } from "./defaults";
+
+/** runCommand with a synchronous runner: these tests never await. */
+const runSync = (...a: Parameters<typeof runCommand>): RunResult => runCommand(...a) as RunResult;
 
 function deps(over: Partial<RunDeps> = {}): RunDeps & { ran: string[] } {
     const ran: string[] = [];
@@ -42,51 +45,51 @@ describe("listShortcuts", () => {
 describe("runCommand", () => {
     it("runs a global command through the dispatcher's handler", () => {
         const d = deps();
-        expect(runCommand("term:multiInput", undefined, d)).toEqual({ ran: true });
+        expect(runSync("term:multiInput", undefined, d)).toEqual({ ran: true });
         expect(d.ran).toEqual(["term:multiInput"]);
     });
 
     it("refuses a permanent delete", () => {
-        const r = runCommand("files:deletePermanently", undefined, deps());
+        const r = runSync("files:deletePermanently", undefined, deps());
         expect(r.ran).toBe(false);
         expect(r.reason).toMatch(/can't be undone/);
     });
 
     it("names an unknown command", () => {
-        expect(runCommand("nope:nothing", undefined, deps()).reason).toMatch(/unknown command/);
+        expect(runSync("nope:nothing", undefined, deps()).reason).toMatch(/unknown command/);
     });
 
     it("refuses a target that isn't in the active tab", () => {
-        expect(runCommand("term:multiInput", "elsewhere", deps()).reason).toMatch(/not in the active tab/);
+        expect(runSync("term:multiInput", "elsewhere", deps()).reason).toMatch(/not in the active tab/);
     });
 
     it("sends a pane command to that pane's runner, not the dispatcher", () => {
         const seen: string[] = [];
         const off = registerPaneCommandRunner("other-pane", (c) => (seen.push(c), true));
         const d = deps();
-        expect(runCommand("files:refresh", "other-pane", d)).toEqual({ ran: true });
+        expect(runSync("files:refresh", "other-pane", d)).toEqual({ ran: true });
         expect(seen).toEqual(["files:refresh"]);
         expect(d.ran).toEqual([]);
         off();
-        expect(runCommand("files:refresh", "other-pane", d).reason).toMatch(/doesn't handle/);
+        expect(runSync("files:refresh", "other-pane", d).reason).toMatch(/doesn't handle/);
     });
 
     it("sends the terminal's own commands to the focused pane's runner", () => {
         const off = registerPaneCommandRunner("focused", (c) => c === "term:clear");
-        expect(runCommand("term:clear", undefined, deps())).toEqual({ ran: true });
-        expect(runCommand("term:copy", undefined, deps()).reason).toMatch(/didn't apply/);
+        expect(runSync("term:clear", undefined, deps())).toEqual({ ran: true });
+        expect(runSync("term:copy", undefined, deps()).reason).toMatch(/didn't apply/);
         off();
     });
 
     it("needs a focused pane for a pane command without a target", () => {
-        expect(runCommand("editor:find", undefined, deps({ focusedBlockId: () => null })).reason).toMatch(/none is focused/);
+        expect(runSync("editor:find", undefined, deps({ focusedBlockId: () => null })).reason).toMatch(/none is focused/);
     });
 
     it("keeps a newer runner when an older one unregisters", () => {
         const offOld = registerPaneCommandRunner("focused", () => false);
         const offNew = registerPaneCommandRunner("focused", () => true);
         offOld();
-        expect(runCommand("editor:find", undefined, deps())).toEqual({ ran: true });
+        expect(runSync("editor:find", undefined, deps())).toEqual({ ran: true });
         offNew();
     });
 });
@@ -94,18 +97,18 @@ describe("runCommand", () => {
 describe("runCommand refusals", () => {
     it("sends pane:close to ClosePane", () => {
         const d = deps();
-        expect(runCommand("pane:close", undefined, d).reason).toMatch(/ClosePane/);
+        expect(runSync("pane:close", undefined, d).reason).toMatch(/undo/);
         expect(d.ran).toEqual([]);
     });
 
     it("runs files:trash on every platform, since the Trash can be restored from", () => {
-        expect(runCommand("files:trash", "focused", deps({ platform: "mac" })).reason).not.toMatch(/not available/);
+        expect(runSync("files:trash", "focused", deps({ platform: "mac" })).reason).not.toMatch(/not available/);
         expect(planKeyPress("Delete", "mac")).not.toHaveProperty("reason");
-        expect(runCommand("files:trash", "focused", deps()).reason).not.toMatch(/not available/);
+        expect(runSync("files:trash", "focused", deps()).reason).not.toMatch(/not available/);
     });
 
     it("runs tab:close, which keeps its own confirmation", () => {
-        expect(runCommand("tab:close", undefined, deps())).toEqual({ ran: true });
+        expect(runSync("tab:close", undefined, deps())).toEqual({ ran: true });
     });
 });
 
@@ -148,6 +151,26 @@ describe("planKeyPress", () => {
                 }
             }
         }
+    });
+});
+
+describe("a pane's own guard", () => {
+    it("lets a runner answer with a reason, after waiting", async () => {
+        const off = registerPaneCommandRunner("focused", async () => ({ ran: false, reason: "the clipboard has a line break" }));
+        expect(await runCommand("term:paste", undefined, deps())).toEqual({ ran: false, reason: "the clipboard has a line break" });
+        off();
+    });
+
+    it("reports the first command its guard refuses, for PressKeys", async () => {
+        const off = registerPaneCommandRunner(
+            "focused",
+            () => true,
+            async (c) => (c === "term:paste" ? "would run a line" : undefined)
+        );
+        expect(await paneRefusal("focused", ["term:copy", "term:paste"])).toBe("term:paste: would run a line");
+        expect(await paneRefusal("focused", ["term:copy"])).toBeUndefined();
+        expect(await paneRefusal(null, ["term:paste"])).toBeUndefined();
+        off();
     });
 });
 
