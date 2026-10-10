@@ -114,9 +114,9 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 
 | Package | Owner | Status |
 |---|---|---|
-| M1 Trash restore (macOS) | Masty@starpower | open |
+| M1 Trash restore (macOS) | Masty@starpower | in #4610 |
 | M2 L3 macOS | Masty@starpower | waiting for Accessibility |
-| L1 Stale `<Show>` | Maricon@charlie | done on Linux; macOS rerun pending |
+| L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS after #4603 |
 | L2 Temp-tree guard | Maricon@charlie | open |
 | L3 Injected L3 Linux | Maricon@charlie | open |
 | A1 Pane-tab targets | AgentA@Area54 | open |
