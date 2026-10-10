@@ -350,6 +350,7 @@ partial list.
 | [`SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) | SPEC: Desktops find each other without mDNS — UDP broadcast peer discovery |
 | [`SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`](SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md) | SPEC: Launch Modal — State Machine Hardening |
 | [`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16`](SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md) | Spec — Pane Minimize as a Locked State (redesign) |
+| [`SPEC_LAYOUT_TESTS_HEADLESS_SHELL_2026_10_09`](SPEC_LAYOUT_TESTS_HEADLESS_SHELL_2026_10_09.md) | Layout tests run in Chrome's headless shell, not the Chrome app |
 | [`SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11`](SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11.md) | Spec: Light theme + theme-system depth fixes |
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
