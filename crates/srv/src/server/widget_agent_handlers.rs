@@ -58,17 +58,18 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
 
 /// Who the prompt says is asking: the agent whose signature verified, or,
 /// without one, a plain "not a verified agent" (never a name the caller chose).
-fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> String {
+/// Its pane comes with it, the one the waiting tone plays for.
+fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
     const UNVERIFIED: &str = "Something on this computer (not a verified agent)";
     match auth {
         Some(a) => match super::ui_handlers::verified_block_id(state, None, a) {
-            Ok(_) => a.agent_id.chars().take(64).collect(),
+            Ok(pane) => (a.agent_id.chars().take(64).collect(), Some(pane)),
             Err(e) => {
                 tracing::warn!(claimed = %a.agent_id, error = %e, "a widget install's signed identity didn't verify");
-                UNVERIFIED.to_string()
+                (UNVERIFIED.to_string(), None)
             }
         },
-        None => UNVERIFIED.to_string(),
+        None => (UNVERIFIED.to_string(), None),
     }
 }
 
@@ -123,9 +124,18 @@ pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(b
         }
         _ => {}
     }
-    let agent = asking_agent(&state, body.auth.as_ref());
+    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
     let answer = widget_requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent));
     publish_requests(&state);
+    // The asking agent's pane (or, unverified, no pane) waits on the user
+    // until this returns: the waiting tone and notification for it.
+    let _asking = crate::backend::user_attention::Asking::start(
+        &state.broker,
+        &state.mstore,
+        pane.as_deref().unwrap_or(""),
+        "widget",
+        &format!("{agent} wants to install {}", pkg.name),
+    );
     tracing::info!(id = %id, agent = %agent, "an agent asked to install a widget; waiting for the user");
     let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(DEFAULT_WAIT).min(MAX_WAIT);
     match tokio::time::timeout(wait, answer).await {

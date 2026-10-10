@@ -1,7 +1,7 @@
 # Plan — ironing out the kinks found while verifying the shortcuts
 
 **Date:** 2026-10-10
-**Status:** proposed — work split across three platforms; owner decisions in §5.
+**Status:** active — work split across three platforms (#4607); owner decisions in §5.
 **Author:** AgentA@Area54 (Windows), for Masty@starpower (macOS) and Maricon@charlie (Linux)
 **Builds on:** [PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) (#4591, #4593, #4603). That plan's phase 4 (per-platform rebinds and Help fixes) stays there; this one covers what went wrong *around* it.
 
@@ -46,6 +46,7 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
 - **M1. Restore from the Trash on macOS** (K4).
   - `crates/srv/src/backend/fs_ops/trash_worker.rs`: the macOS `restore_paths` returns "isn't supported".
   - Trash through `NSFileManager.trashItemAtURL`, which returns the item's new URL, and keep that per operation. Then restore moves it back, refusing on a name collision like the other platforms.
+  - `files:undo` after `files:newFolder` also moves the folder to the Trash (Masty's rerun), so it hits the same gap; restore covers it.
   - When it lands, lift #4603's macOS refusal of `files:trash` (`frontend/app/keybindings/app-api.ts` `API_REFUSED_MAC`, `crates/srv/src/server/ui_shortcuts.rs`).
   - Tests: trash then undo in a temp dir, run on macOS.
 - **M2. L3 on macOS**, once the owner grants Accessibility.
@@ -61,6 +62,7 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
 - **L2. Temp-tree guard for the script** (K15).
   - `verify-shortcuts.mjs --files-mutate` creates its own temp tree, at least three levels deep, and points the Files pane there.
   - It refuses to run disk-changing rows unless the pane's path is under that tree, rechecking before each one.
+  - Script robustness (Masty's rerun): give every DevTools call a timeout, and fire `closeWindow` without awaiting its reply; a full macOS run hung 7+ min waiting on a window that closed first. Say in the header that `files:copy`/`cut` write the system clipboard, or gate them like the disk rows.
   - Editor rows (K17): take a second editor pane on a plain-text file (`--editor-text`) for save, Save As and find, and keep `--editor` on a Markdown file for the preview toggle.
 - **L3. Injected L3 pass on Linux** (`ydotool`), following the safety rules in the shortcuts plan §6:
   - skip keys the grab report lists as taken;
@@ -73,6 +75,7 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
   - `focus(target)` resolves a pane tab's id to its layout node and makes that tab the visible one.
   - ListShortcuts, Layout and WhoAmI document which id to pass.
   - Tests in `app-api.test.ts`, plus a Files pane tab case.
+  - On macOS every Files key failed L2 with "didn't take keyboard focus" (Masty's #4603 rerun). `giveBlockFocus` lands the caret a few frames late, and `plan` checked at once, so `plan` now waits up to 500 ms for it.
 - **A2. Reach a pane in another tab of the agent's window** (K2), if the owner agrees (§5, D1): RunCommand/PressKeys switch to the tab that holds `target`, still in the agent's own window.
 - **A3. Commands that act beyond their pane** (K3): applies the owner's choice per command (§5, D2), in the page and srv, with tests and the tool descriptions updated.
 - **A4. Help pane notes** (K7):
@@ -116,10 +119,10 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 |---|---|---|
 | M1 Trash restore (macOS) | Masty@starpower | in #4610 |
 | M2 L3 macOS | Masty@starpower | waiting for Accessibility |
-| L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS after #4603 |
-| L2 Temp-tree guard | Maricon@charlie | open |
+| L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS (#4603 reruns) |
+| L2 Temp-tree guard, script timeouts | Maricon@charlie | in progress |
 | L3 Injected L3 Linux | Maricon@charlie | open |
-| A1 Pane-tab targets | AgentA@Area54 | open |
+| A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
 | A2 Other tabs | AgentA@Area54 | waiting for D1 |
 | A3 Beyond-the-pane commands | AgentA@Area54 | waiting for D2 |
 | A4 Help notes, dialog Escape | AgentA@Area54 | open |

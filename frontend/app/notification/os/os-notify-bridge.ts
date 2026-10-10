@@ -25,6 +25,7 @@
 
 import { createEffect, createRoot, on } from "solid-js";
 
+import { APP_KEY_PREFIX } from "@/app/notification/waiting-keys";
 import { addEventListener as addPaneListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import { focusManager } from "@/app/store/focusManager";
@@ -73,6 +74,8 @@ export function paneEventToNotify(
 }
 
 function emit(blockId: string, ev: AgentPaneEvent): void {
+    // A request that belongs to no pane has no pane to notify about.
+    if (blockId.startsWith(APP_KEY_PREFIX)) return;
     const m = paneEventToNotify(ev);
     if (!m) return;
     RpcApi.NotifyEmitCommand(TabRpcClient, {
