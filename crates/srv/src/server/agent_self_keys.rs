@@ -32,6 +32,9 @@ pub(crate) struct SelfKeys {
     pub slug: String,
     /// Host-tier HMAC key, base64.
     pub jekt_key: Option<String>,
+    /// When `jekt_key` expires (unix seconds). srv rotates a key only once it
+    /// has, so the MCP re-fetches at this time, not on a clock of its own.
+    pub jekt_key_expires_at: Option<i64>,
     /// LAN (and cross-channel) Ed25519 private key, base64.
     pub lan_key: Option<String>,
     /// WAN Ed25519 private key, base64.
@@ -48,12 +51,14 @@ pub(crate) fn self_keys_for(mstore: &crate::backend::storage::store::Store, uid:
     let slug = def.slug.trim().to_string();
     let named = !slug.is_empty();
     let jekt_key = named.then(|| mstore.agent_jekt_key_ensure(&slug).ok()).flatten().map(|k| BASE64.encode(k));
+    let jekt_key_expires_at = named.then(|| mstore.agent_jekt_key_expires_at(&slug).ok().flatten()).flatten();
     let lan_key = named.then(|| mstore.agent_lan_key_ensure(&slug).ok()).flatten().map(|k| k.private_key);
     let wan_key = named.then(|| mstore.agent_wan_key_ensure(&slug).ok()).flatten().map(|k| k.private_key);
     let uid_keys = mstore.agent_uid_keys_ensure(uid).ok().flatten().map(|(keys, _)| keys);
     Some(SelfKeys {
         slug,
         jekt_key,
+        jekt_key_expires_at,
         lan_key,
         wan_key,
         uid: uid.to_string(),
@@ -118,6 +123,9 @@ mod tests {
         assert_eq!(keys.lan_key, Some(store.agent_lan_key_ensure("aria").unwrap().private_key));
         assert_eq!(keys.wan_key, Some(store.agent_wan_key_ensure("aria").unwrap().private_key));
         assert!(keys.uid_lan_key.is_some() && keys.uid_wan_key.is_some());
+        let expires = keys.jekt_key_expires_at.expect("an expiry with the key");
+        let ttl = crate::backend::storage::agent_jekt_keys::JEKT_KEY_TTL_SECS;
+        assert!((expires - agentmux_common::time::now_secs() - ttl).abs() <= 5, "a fresh key expires a TTL from now");
         assert_eq!(self_keys_for(&store, "uid-aria").unwrap(), keys, "stable across fetches");
     }
 

@@ -357,6 +357,9 @@ async fn call_tool(
         .cloned()
         .unwrap_or(json!({}));
 
+    // Identity M4d-3: every tool may sign (a jekt, a UI-automation proof), so
+    // the fetched keys are checked here, once, before any of them runs.
+    self_keys::refresh_if_stale(client, local_url, auth_key).await;
     tools::call(
         name,
         &arguments,
