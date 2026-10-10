@@ -22,6 +22,50 @@ use super::AgentMuxHandler;
 pub struct SiteLimits {
     pub lists: Mutex<std::collections::HashMap<String, Vec<String>>>,
     pub reports: Mutex<std::collections::HashSet<String>>,
+    /// Panes whose list came with `browser_pane_create`, and when. srv's push
+    /// can be taken before it records the pane; such a push mustn't wipe the
+    /// early copy, so it is kept until a push covers the pane, or for
+    /// `EARLY_LIST_GRACE`.
+    pub early: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+}
+
+const EARLY_LIST_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl SiteLimits {
+    /// `pane`'s list, if it has one. An early copy srv never confirmed ends
+    /// after `EARLY_LIST_GRACE` here, without waiting for srv's next push: a
+    /// pane taken over (or never created) must not stay limited until then.
+    pub fn list(&self, pane: &str) -> Option<Vec<String>> {
+        // `lists` before `early`, the order `replace_lists` takes them in:
+        // the two run on different threads.
+        let mut lists = self.lists.lock();
+        let mut early = self.early.lock();
+        if early.get(pane).is_some_and(|at| at.elapsed() >= EARLY_LIST_GRACE) {
+            early.remove(pane);
+            lists.remove(pane);
+            return None;
+        }
+        lists.get(pane).cloned()
+    }
+}
+
+/// Replace the lists with srv's (`allowed`), keeping each early copy srv's
+/// push doesn't cover yet.
+pub(crate) fn replace_lists(limits: &SiteLimits, allowed: std::collections::HashMap<String, Vec<String>>) {
+    // `lists` before `early`, as everywhere both are held.
+    let mut lists = limits.lists.lock();
+    let mut early = limits.early.lock();
+    let mut next = allowed;
+    early.retain(|pane, at| {
+        if next.contains_key(pane) || at.elapsed() >= EARLY_LIST_GRACE {
+            return false;
+        }
+        if let Some(list) = lists.get(pane) {
+            next.insert(pane.clone(), list.clone());
+        }
+        true
+    });
+    *lists = next;
 }
 
 /// A pane's site list as its block carries it (`browser:allowed_origins`,
@@ -32,8 +76,10 @@ pub(crate) fn limit_before_create(limits: &SiteLimits, pane: &str, list: Option<
     let Some(entries) = list.and_then(|v| v.as_array()) else { return };
     let entries: Vec<String> = entries.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
     if let Ok(list) = agentmux_common::allowed_origins::parse_list(&entries) {
-        if !list.is_empty() {
-            limits.lists.lock().entry(pane.to_string()).or_insert(list);
+        let mut lists = limits.lists.lock();
+        if !list.is_empty() && !lists.contains_key(pane) {
+            lists.insert(pane.to_string(), list);
+            limits.early.lock().insert(pane.to_string(), std::time::Instant::now());
         }
     }
 }
@@ -68,10 +114,8 @@ impl AgentMuxHandler {
     fn off_list(&self, pane: &str, url: &str) -> bool {
         self.state
             .site_limits
-            .lists
-            .lock()
-            .get(pane)
-            .is_some_and(|list| !agentmux_common::allowed_origins::allows(list, url))
+            .list(pane)
+            .is_some_and(|list| !agentmux_common::allowed_origins::allows(&list, url))
     }
 
     /// `on_before_browse`, main frame: true (cancel) when `browser` is a
@@ -154,5 +198,32 @@ mod tests {
             limit_before_create(&limits, "p3", v.as_ref());
         }
         assert!(!limits.lists.lock().contains_key("p3"));
+    }
+
+    #[test]
+    fn a_push_that_doesnt_cover_a_new_pane_keeps_its_early_list() {
+        let limits = SiteLimits::default();
+        limit_before_create(&limits, "new", Some(&serde_json::json!(["example.com"])));
+        // srv's push, taken before it recorded the pane.
+        replace_lists(&limits, std::collections::HashMap::from([("other".to_string(), vec!["https://o.example".to_string()])]));
+        assert_eq!(limits.lists.lock().get("new").unwrap(), &vec!["https://example.com".to_string()]);
+        // srv's next push covers it: srv's list wins, and the early copy is done.
+        replace_lists(&limits, std::collections::HashMap::from([("new".to_string(), vec!["https://example.com".to_string(), "https://b.example".to_string()])]));
+        assert_eq!(limits.lists.lock().get("new").unwrap().len(), 2);
+        assert!(limits.early.lock().is_empty());
+        // And a push without it after that drops it: the limit ended.
+        replace_lists(&limits, std::collections::HashMap::new());
+        assert!(!limits.lists.lock().contains_key("new"));
+    }
+
+    #[test]
+    fn an_early_list_srv_never_confirms_ends_on_its_own() {
+        let limits = SiteLimits::default();
+        limit_before_create(&limits, "gone", Some(&serde_json::json!(["example.com"])));
+        assert!(limits.list("gone").is_some());
+        // Its grace ran out with no push from srv covering it.
+        *limits.early.lock().get_mut("gone").unwrap() -= EARLY_LIST_GRACE;
+        assert!(limits.list("gone").is_none());
+        assert!(!limits.lists.lock().contains_key("gone"));
     }
 }
