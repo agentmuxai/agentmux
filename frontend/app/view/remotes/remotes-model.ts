@@ -15,8 +15,16 @@ import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showHostSessions } from "@/app/view/term/hostSessions";
 import { META_REMOTES_EXPAND } from "./remotes-sections";
+import { connectionName, defaultAlias, type Destination } from "./add-remote";
 
-/** What the Add remote form gives; only `alias` is required. */
+/** Add remote's Advanced section (all optional). */
+export interface AddAdvanced {
+    name: string;
+    identityfile: string;
+    proxyjump: string;
+}
+
+/** A Host block for ~/.ssh/config (`RemoteAdd`); only `alias` is required. */
 export interface NewRemote {
     alias: string;
     hostname: string;
@@ -218,17 +226,31 @@ export class RemotesViewModel {
 
     // ── Adding and testing (§4.4) ───────────────────────────────────────────
 
-    /** Append the host to ~/.ssh/config; srv shows the user the exact block
-     *  first. Resolves `false` when they cancel. Expands the new row. */
-    async addRemote(host: NewRemote): Promise<boolean> {
-        try {
-            // The question waits up to two minutes for the user.
-            await RpcApi.RemoteAddCommand(TabRpcClient, { ...host, blockid: this.blockId }, { timeout: 180_000 });
-        } catch (e) {
-            if (String(e instanceof Error ? e.message : e).includes("kept:")) return false;
-            throw e;
+    /** Add a remote. With just a destination it is saved in AgentMux's
+     *  settings under `user@host:port`, nothing written to ~/.ssh/config. An
+     *  identity file or jump host is something ssh itself must know, so then
+     *  it is appended to ~/.ssh/config under a plain alias, after srv shows the
+     *  user the exact block (`false` when they cancel). Either way `name` (by
+     *  default `user@host:port`) is its name in Remotes. Expands the new row. */
+    async addRemote(dest: Destination, advanced: AddAdvanced): Promise<boolean> {
+        const conn = connectionName(dest);
+        const name = advanced.name.trim() || conn;
+        const identityfile = advanced.identityfile.trim();
+        const proxyjump = advanced.proxyjump.trim();
+        let row = conn;
+        if (identityfile || proxyjump) {
+            row = defaultAlias(dest);
+            const host: NewRemote = { alias: row, hostname: dest.hostname, user: dest.user, port: dest.port, identityfile, proxyjump };
+            try {
+                // The question waits up to two minutes for the user.
+                await RpcApi.RemoteAddCommand(TabRpcClient, { ...host, blockid: this.blockId }, { timeout: 180_000 });
+            } catch (e) {
+                if (String(e instanceof Error ? e.message : e).includes("kept:")) return false;
+                throw e;
+            }
         }
-        this.setExpanded(host.alias.trim());
+        await this.setSettings(row, { "display:name": name });
+        this.setExpanded(row);
         await this.refresh();
         return true;
     }
