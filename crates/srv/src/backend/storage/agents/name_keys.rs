@@ -331,9 +331,11 @@ impl Store {
     /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
     /// "Aria" and "aria" are two rows).
     pub fn agent_slugs_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
+        // Folded in Rust as the key tables fold, never SQLite's ASCII-only lower().
+        let folded = name.trim().to_lowercase();
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE lower(trim(slug)) = lower(trim(?1))")?;
-        let rows = stmt.query_map(params![name], |r| r.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
+        let slugs = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(slugs.into_iter().filter(|s| s.trim().to_lowercase() == folded).collect())
     }
 }

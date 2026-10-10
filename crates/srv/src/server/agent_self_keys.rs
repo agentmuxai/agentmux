@@ -105,4 +105,35 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         assert_eq!(self_keys_for(&store, "uid-nobody"), None);
     }
+
+    #[test]
+    fn a_config_s_id_matches_one_row_only_when_one_slug_folds_to_it() {
+        let store = store_with("uid-a", "Aria");
+        assert_eq!(crate::backend::agent_config::single_row_slug_folded(&store, "aria").as_deref(), Some("Aria"));
+        let mut def = test_agent_def("uid-b", "ä", "claude", "agent", 1, "");
+        def.slug = "Ä".into();
+        store.agent_def_insert(&mut def).unwrap();
+        let mut def = test_agent_def("uid-c", "ä", "claude", "agent", 1, "");
+        def.slug = "ä".into();
+        store.agent_def_insert(&mut def).unwrap();
+        assert_eq!(crate::backend::agent_config::single_row_slug_folded(&store, "ä"), None, "Ä and ä fold together: ambiguous");
+        assert_eq!(crate::backend::agent_config::single_row_slug_folded(&store, "nobody"), None);
+    }
+
+    #[test]
+    fn drift_is_counted_when_the_written_id_is_not_exactly_the_row_s_slug() {
+        let count = || {
+            crate::backend::agent_resolve::uid_fallback_counts()
+                .into_iter()
+                .find(|(site, _)| *site == "m4d.config_id_drift.test")
+                .map_or(0, |(_, n)| n)
+        };
+        let before = count();
+        crate::backend::agent_config::record_config_id_drift("m4d.config_id_drift.test", "aria", Some("aria"));
+        assert_eq!(count(), before, "exact match: no drift");
+        crate::backend::agent_config::record_config_id_drift("m4d.config_id_drift.test", "aria", Some("aria-2"));
+        crate::backend::agent_config::record_config_id_drift("m4d.config_id_drift.test", "Aria", Some("aria"));
+        crate::backend::agent_config::record_config_id_drift("m4d.config_id_drift.test", "aria", None);
+        assert_eq!(count(), before + 3);
+    }
 }
