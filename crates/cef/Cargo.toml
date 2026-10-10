@@ -81,9 +81,6 @@ whoami = "1"
 # run_cli_login. See SPEC_OPENCLAW_AGENT_2026_05_17.md §6.
 portable-pty = "0.9"
 json_comments = "0.2"
-# Browser DOM API (SPEC_BROWSER_DOM_API.md): CDP WebSocket client + /json probe
-tokio-tungstenite = "0.24"
-futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -158,3 +155,8 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 # Issue #2977 WS4: the background audit log is file-backed (it must survive a
 # host restart), so its tests need a real temp directory rather than a mock.
 tempfile = "3"
+
+# `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
+# embeds the Windows icon/version resource from build.rs.
+[package.metadata.cargo-machete]
+ignored = ["winres"]

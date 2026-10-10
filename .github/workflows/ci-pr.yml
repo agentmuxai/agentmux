@@ -436,6 +436,16 @@ jobs:
 
       - name: Doc Status vocabulary (changed docs only)
         run: bash scripts/check-doc-status.sh
+      # Unused Rust dependencies (#4207 S2). Every audit since 2026-07 found
+      # the same dead deps still present; this keeps the next one from
+      # landing. Reads Cargo.toml and source only, no build. A false
+      # positive goes in that crate's [package.metadata.cargo-machete].
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: No unused Rust dependencies (cargo machete)
+        run: cargo machete
       - name: Name-resolver callers (identity M3, spec §9.3)
         run: bash scripts/check-name-resolver-callers.sh
       - name: No new hand-rolled epoch time (use agentmux_common::time)
