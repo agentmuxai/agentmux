@@ -285,6 +285,55 @@ describe("derived chip geometry", () => {
     });
 });
 
+// ── Chrome zoom (REPORT_MINIMIZED_PANE_CHROME_ZOOM_DESYNC_2026_10_10.md) ─────
+// The pane header is drawn with `zoom: var(--zoomfactor)`, so a chip has to be
+// HeaderHeightPx × chromeZoom tall. At the old fixed 33px, zooming out left the
+// pane's content showing below a shrunken header and zooming in clipped it.
+
+describe("chip geometry follows chrome zoom", () => {
+    const size = (n: LayoutNode) => n.size;
+    const gap = 3;
+
+    it.each([0.5, 0.8, 1, 1.5, 2])("Column parent at %s×: chip = zoomed header + unzoomed gap", (zoom) => {
+        const { colA, paneA1 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const { px } = computeMainAxisAllocation(colA.children!, false, 800, size, gap, undefined, zoom);
+        expect(px[0]).toBeCloseTo(HeaderHeightPx * zoom + gap);
+        expect(px[1]).toBeCloseTo(800 - HeaderHeightPx * zoom - gap);
+    });
+
+    it("Row parent: chip width scales with zoom too", () => {
+        const a = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "a" });
+        const b = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: "b" });
+        a.minimized = true;
+        const { px } = computeMainAxisAllocation([a, b], true, 1000, size, gap, undefined, 1.5);
+        expect(px[0]).toBeCloseTo(MinimizedRowSlotWidthPx * 1.5 + gap);
+    });
+
+    it("cross-axis (docked / Row-parent chip height) scales per stacked leaf", () => {
+        const leaf = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "a" });
+        leaf.minimized = true;
+        expect(minimizedCrossAxisPx(leaf, gap, 0.5)).toBeCloseTo(HeaderHeightPx * 0.5 + gap);
+
+        const c1 = newLayoutNode(FlexDirection.Row, 1, undefined, { blockId: "c1" });
+        const c2 = newLayoutNode(FlexDirection.Row, 1, undefined, { blockId: "c2" });
+        c1.minimized = true;
+        c2.minimized = true;
+        const col = newLayoutNode(FlexDirection.Column, 5, [c1, c2]);
+        expect(minimizedCrossAxisPx(col, gap, 2)).toBeCloseTo(2 * (HeaderHeightPx * 2 + gap));
+        // A Row branch lays its chips side by side: one chip deep at any zoom.
+        const row = newLayoutNode(FlexDirection.Row, 5, [c1, c2]);
+        expect(collapsedExtentPx(row, true, gap, 2)).toBeCloseTo(HeaderHeightPx * 2 + gap);
+    });
+
+    it("omitting the zoom is 1×, so unzoomed geometry is unchanged", () => {
+        const leaf = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "a" });
+        leaf.minimized = true;
+        expect(minimizedCrossAxisPx(leaf, gap)).toBe(minimizedCrossAxisPx(leaf, gap, 1));
+        expect(collapsedExtentPx(leaf, false, gap)).toBe(MinimizedRowSlotWidthPx + gap);
+    });
+});
+
 // ── Reducer guards (minimized = locked) ──────────────────────────────────────
 
 describe("minimized panes are untargetable by tree mutations", () => {
