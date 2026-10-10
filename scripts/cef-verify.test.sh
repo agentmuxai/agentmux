@@ -163,14 +163,15 @@ else bad "stale-ref after failed fetch" "rc=$rc last=$(printf '%s' "$out" | tail
 # where the destructive bug lived: a non-global replace left `-o` on the real
 # object and the "verification" overwrote the build output. The fake compiler
 # embeds the SOURCE PATH in its output, modelling the DWARF path embedding that
-# made the original comparison unfalsifiable.
+# made the original comparison unfalsifiable, and the OUTPUT PATH, modelling the
+# .dwo name Linux's split DWARF derives from `-o` (which made A never match).
 PSCRIPT="$HERE/cef-verify-patches.sh"
 PT="$TMP/pbuild"; mkdir -p "$PT/out/build/obj" "$PT/bin"
 ( cd "$PT" && git init -q . )
 cat > "$PT/bin/fakecc" <<'CC'
 #!/usr/bin/env bash
-# Writes "<source-path>|<source-contents>" to the -o target: sensitive to BOTH
-# the path (like DWARF) and the content (like real codegen).
+# Writes "<source-path>|<output-path>|<source-contents>" to the -o target:
+# sensitive to both paths (like DWARF and the .dwo name) and the content.
 out=""; src=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -180,7 +181,7 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-{ printf '%s|' "$src"; cat "$src"; } > "$out"
+{ printf '%s|%s|' "$src" "$out"; cat "$src"; } > "$out"
 CC
 cat > "$PT/bin/ninja" <<CC
 #!/usr/bin/env bash
@@ -205,6 +206,10 @@ else bad "patches happy path" "rc=$rc out=$(printf '%s' "$out" | tail -2 | tr '\
 if [ "$OBJ_BEFORE" = "$(shasum < "$PT/out/build/obj/x.o")" ]; then
   ok "patches: the real object is byte-untouched (no -o leaking onto it)"
 else bad "patches: REAL OBJECT WAS OVERWRITTEN"; fi
+
+if ! ls -d "$PT/out"/.cef-verify-patches.* >/dev/null 2>&1; then
+  ok "patches: the scratch build dir is removed"
+else bad "patches: scratch build dir left behind"; fi
 
 # A "patch" that changes nothing must be reported as a no-op, not as verified.
 git -C "$PT" -c user.email=t@t -c user.name=t commit -qam "adopt the patched body upstream"
