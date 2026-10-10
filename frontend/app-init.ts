@@ -77,6 +77,18 @@ import { installFocusFollowsSelection } from "@/app/store/focusManager";
 let platform: NodeJS.Platform;
 let savedInitOpts: AgentMuxInitOpts = null;
 
+// Dev only (no `import.meta.hot` in a release build): log why Vite is about to
+// reload the page, so an unexpected reload can be traced to the file that
+// caused it (docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md, K13). getApi() is
+// called at reload time, never while this module loads.
+import.meta.hot?.on("vite:beforeFullReload", (payload) => {
+    try {
+        getApi().sendLog(`[vite] full reload: ${JSON.stringify(payload)}`);
+    } catch {
+        // No host API yet: nothing to log to.
+    }
+});
+
 window.MOS = MOS;
 window.globalAtoms = atoms;
 window.RpcApi = RpcApi;
