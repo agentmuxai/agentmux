@@ -838,6 +838,18 @@ async fn a_relay_that_refuses_v3_gets_no_goodbye_in_another_version() {
     assert_eq!(versions, vec![serde_json::json!(3)], "never again as v2 or v1, which would say the opposite");
 }
 
+/// A 409 is as good as stored for an ordinary record, but for a goodbye it
+/// means the relay kept a newer, live record: devices still see this computer.
+#[tokio::test]
+async fn a_goodbye_answered_409_is_not_stored() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    stub.relay.put_status.store(409, std::sync::atomic::Ordering::SeqCst);
+    let session = TestSession::new(Some("tok"));
+    let snapshot = session.feed.snapshot();
+    assert!(!send_goodbye(&session, &reqwest::Client::new(), &stub.url, &snapshot, 1, GOODBYE_TIMEOUT).await);
+    assert_eq!(stub.relay.puts(), 1);
+}
+
 #[tokio::test]
 async fn signed_out_there_is_no_goodbye() {
     let stub = fake_relay(FakeRelay::default()).await;

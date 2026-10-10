@@ -136,6 +136,10 @@ fn header_date(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 pub(crate) struct RelayReply {
     pub answer: Answer,
     pub date_ms: Option<u64>,
+    /// The HTTP status, when the relay answered at all. A goodbye needs a
+    /// 2xx: [`Answer::Stored`] also covers a 409, where the relay kept a newer
+    /// record and the goodbye did not take effect.
+    pub status: Option<u16>,
 }
 
 /// `PUT /wan-instances/:instance_id/presence`. A pure HTTP operation, like
@@ -164,6 +168,7 @@ pub(crate) async fn put_presence(
             return RelayReply {
                 answer: Answer::Unavailable { reason: "cloud unreachable".into(), detail: e.to_string() },
                 date_ms: None,
+                status: None,
             }
         }
     };
@@ -181,7 +186,7 @@ pub(crate) async fn put_presence(
         .unwrap_or_else(|| body.clone());
     let error: String = error.chars().take(200).collect();
     let error = (!error.is_empty()).then_some(error);
-    RelayReply { answer: machine::classify(status, error.as_deref(), retry_after), date_ms }
+    RelayReply { answer: machine::classify(status, error.as_deref(), retry_after), date_ms, status: Some(status) }
 }
 
 /// The relay's unauthenticated `GET /api/health`: its version, and its clock.
@@ -248,7 +253,7 @@ impl Session for LiveSession {
 }
 
 /// Send the goodbye for `snapshot` (v3, `gone`): whether the relay stored
-/// it. Gives up after `timeout`. A relay that refuses v3 (an older one)
+/// it, which only a 2xx says (a 409 means it kept a newer, live record). Gives up after `timeout`. A relay that refuses v3 (an older one)
 /// gets nothing more: the record is never sent again as v1 or v2.
 pub(crate) async fn send_goodbye<S: Session>(
     session: &S,
@@ -261,7 +266,7 @@ pub(crate) async fn send_goodbye<S: Session>(
     let say = async {
         let token = session.token().await?;
         let record = session.record(snapshot, PRESENCE_VERSION_GOODBYE, published_at_ms).ok()?;
-        Some(put_presence(base_url, http, &token, &record).await.answer == Answer::Stored)
+        Some(matches!(put_presence(base_url, http, &token, &record).await.status, Some(200..=299)))
     };
     matches!(tokio::time::timeout(timeout, say).await, Ok(Some(true)))
 }
