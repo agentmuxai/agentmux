@@ -789,6 +789,32 @@ describe("AgentWorkingRow type-out follows the clock", () => {
         vi.advanceTimersByTime(30);
         expect(primary()).toBe("Waiting for your approval: git push");
     });
+
+    // Reported live: a line printed, then reset and printed again, about once
+    // a second. The status memo fires every tick (a new object each time) and
+    // `on()` doesn't compare, so the type-out restarted on the same key.
+    it("a line on screen is never typed out again while it stays the same line", () => {
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+        const [needsYou, setNeedsYou] = createSignal<string | null>(null);
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" needsYou={needsYou()} />
+        ));
+        const primary = () => container.querySelector(".agent-working-row-primary")?.textContent;
+        setNeedsYou("Waiting for your approval: git push");
+        vi.advanceTimersByTime(2_000); // fully typed out
+        expect(primary()).toBe("Waiting for your approval: git push");
+        // Five seconds of ticks: the line must stay whole at every step.
+        for (let t = 0; t < 5_000; t += 100) {
+            vi.advanceTimersByTime(100);
+            expect(primary()).toBe("Waiting for your approval: git push");
+        }
+    });
+
+    it("shows an ASCII spinner, not the pulsing dot", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" />);
+        expect(container.querySelector(".agent-working-row .agent-spinner-dot")).toBeNull();
+        expect(container.querySelector(".agent-working-row .agent-spinner-ascii")?.textContent).toMatch(/^[|/\*-]$/);
+    });
 });
 
 /**

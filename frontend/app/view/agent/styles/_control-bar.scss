@@ -226,13 +226,16 @@
                 animation: agent-compaction-indeterminate 1.6s ease-in-out infinite;
             }
 
-            // The pulsing dot is the status text's color: the pane's identity
-            // color, falling back to the theme accent (see `color` above).
-            // Scoped to this row: the pending-messages header uses the same
-            // dot class and keeps the accent.
-            .agent-spinner-dot {
-                background: var(--block-identity-color, var(--accent-color));
-                box-shadow: 0 0 6px color-mix(in srgb, var(--block-identity-color, var(--accent-color)) 60%, transparent);
+            // The ASCII spinner (AsciiSpinner.tsx) is the status text's color:
+            // the pane's identity color, falling back to the theme accent (see
+            // `color` above). One fixed cell, so a frame never shifts the text.
+            .agent-spinner-ascii {
+                display: inline-block;
+                width: 1ch;
+                flex-shrink: 0;
+                text-align: center;
+                font-weight: 600;
+                color: var(--block-identity-color, var(--accent-color));
             }
 
             @media (prefers-reduced-motion: reduce) {

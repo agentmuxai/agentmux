@@ -523,7 +523,13 @@ Still open: tuning `TIMING` from real `[turn]` and `[wave-turn]` log data.
 
 ### 6.10 As built: the row changed too often (PR #4559)
 
-Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right after the line prints". Three causes, all in the presenter, none in the values of `TIMING`:
+Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right after the line prints".
+
+**The main cause was in the row, not the presenter.** The type-out effect was `createEffect(on(() => status().key, …))`. Solid's `on()` doesn't compare values: it runs whenever its source fires. `status` is a memo that returns a new object every tick (every second) and on every activity update, so the same line was reset to empty and typed out again about once a second, whatever the presenter decided. The effect now keys on `statusKey = createMemo(() => status().key)`, which fires only when the key really changes. A row test runs five seconds of ticks over one line and fails on the old wiring. The operator found this by watching it live in a `task dev` build, after the presenter fixes below had passed every unit and replay test: those tests drove the presenter, never the row's effect.
+
+**The dot became an ASCII spinner** (`components/AsciiSpinner.tsx`), at the operator's request: one character cycling `| / - \` every 120 ms in the pane's color, on its own signal so a frame never re-renders the text. Reduced motion shows a still `*`. The pending-messages header keeps its dot.
+
+The presenter also had three causes of its own, none in the values of `TIMING`:
 
 - **Every new line typed out.** §6.4 says the type-out runs only when the class changes, and a change within rank 4 swaps instantly. The row typed out on any new key, so "Reading a.ts" → "Reading 2 files" → "Running the tests", and "Thinking" → "Thinking: …", each re-typed. The presenter now marks a line `reveal` only when its rank differs from the line it replaces, and the row swaps a same-rank line in at once.
 - **The dwell started before the line was readable.** It counted from when a line was chosen, while the type-out runs at 28 ms a character, so any line over about 43 characters was replaced as soon as it had printed. The memory now keeps `readyAt` (chosen, plus the type-out when there is one), and the dwell counts from there. The pace moved into `TIMING.revealCharMs` so the presenter and the row agree on it.

@@ -17,6 +17,7 @@ import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { ActivityState, CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
 import { presentStatus, TIMING, type StatusMemory } from "../status/present-status";
+import { AsciiSpinner } from "./AsciiSpinner";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
@@ -202,8 +203,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // First display of a new left-zone string (a phrase, summary, or status
     // change) reveals character-by-character. The gradient highlight that
     // used to sweep over it afterwards is gone: the text is one solid color
-    // now (SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md); the pulsing
-    // dot beside it carries the "still working" signal. Originally
+    // now (SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md); the ASCII
+    // spinner beside it carries the "still working" signal. Originally
     // SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md §2.
     //
     // Reduced motion: read the app's centralized atom (settings override OR
@@ -226,7 +227,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // instantly — the type-out reveal is a transition effect for text
     // changes while already visibly working (summary → phrase). Playing
     // it on entry meant "Working…" trailed the Enter keypress by
-    // ~REVEAL_CHAR_MS × 8 ≈ 250ms of a nearly-empty row, reading as "the
+    // ~TIMING.revealCharMs × 8 ≈ 250ms of a nearly-empty row, reading as "the
     // indicator comes up late" even though the state flip is synchronous
     // with the send (user report 2026-08-10). Plain (non-reactive) flag:
     // only the loading edge below writes it, only the reveal effect reads it.
@@ -247,7 +248,6 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 turnStartedAt: l && turnOpen(l, now) ? l.startedAtMs : untrack(loadStartMs),
                 goal: props.activitySummary?.trim() || null,
                 phrase: phrase(),
-                // The type-out effect below skips these; the dwell must too.
                 instantReveal: untrack(reducedMotion) || revealInstantly,
             },
             statusMemory,
@@ -256,10 +256,12 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         return r.line;
     });
     const leftText = () => status().text;
+    // Deduplicated: `on()` re-runs whenever its source fires, and `status` is a
+    // new object every tick, so `on(() => status().key)` re-typed it each second.
+    const statusKey = createMemo(() => status().key);
     // How much of the line is typed out; Infinity once it is all there, so a
     // counter that grows inside the same line shows in full.
     const [revealed, setRevealed] = createSignal(Number.POSITIVE_INFINITY);
-    const REVEAL_CHAR_MS = TIMING.revealCharMs;
 
     createEffect(() => {
         if (!live()) revealInstantly = true;
@@ -269,7 +271,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // else it swaps in; a moved counter (same key) never re-types it.
     createEffect(
         on(
-            () => status().key,
+            statusKey,
             () => {
                 const text = untrack(leftText);
                 if (untrack(reducedMotion) || !text || revealInstantly || untrack(status).reveal === false) {
@@ -278,15 +280,14 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                     return;
                 }
                 setRevealed(0);
-                // Progress follows the clock, not the callback count: a throttled
-                // timer catches up, as the presenter's dwell (same clock) assumes.
+                // By the clock, so a throttled timer catches up (the dwell's clock too).
                 const startedAt = Date.now();
                 const id = setInterval(() => {
-                    const n = Math.floor((Date.now() - startedAt) / REVEAL_CHAR_MS);
+                    const n = Math.floor((Date.now() - startedAt) / TIMING.revealCharMs);
                     if (n < untrack(leftText).length) return void setRevealed(n);
                     clearInterval(id);
                     setRevealed(Number.POSITIVE_INFINITY);
-                }, REVEAL_CHAR_MS);
+                }, TIMING.revealCharMs);
                 onCleanup(() => clearInterval(id));
             },
         ),
@@ -475,7 +476,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 class="agent-working-row agent-working-row--loading"
                 classList={{ "is-settling": !props.loading && settling() }}
             >
-                <span class="agent-spinner-dot" />
+                <AsciiSpinner />
                 <span class="agent-working-row-left">
                     <span class="agent-working-row-primary">{leftText().slice(0, revealed())}</span>
                     <Show when={revealed() === Number.POSITIVE_INFINITY && status().detail}>
