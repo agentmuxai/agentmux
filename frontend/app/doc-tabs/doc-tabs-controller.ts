@@ -20,6 +20,7 @@ import {
     emptyDocTabs,
     hydrateDocTabs,
     moveDoc,
+    moveDocTo,
     openDoc,
     persistDocTabs,
     promoteDoc,
@@ -179,6 +180,14 @@ export class DocTabsController<P> {
 
     move(id: string, delta: number): void {
         this.apply(moveDoc(this.state(), id, delta));
+    }
+
+    /** A tab dragged to just before or after another. False when nothing
+     *  moved. */
+    moveTo(id: string, targetId: string, position: "before" | "after"): boolean {
+        const before = this.state();
+        this.apply(moveDocTo(before, id, targetId, position));
+        return this.state() !== before;
     }
 
     pin(id: string, pinned: boolean): void {

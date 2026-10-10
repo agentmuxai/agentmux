@@ -27,7 +27,14 @@ import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-d
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { markEscaped } from "@/app/drag/drag-session";
-import { isDraggedPaneTab, releasePaneTabDrag, startPaneTabDrag } from "@/app/drag/pane-tab-drag";
+import {
+    isDraggedDocTab,
+    isDraggedPaneTab,
+    releaseDocTabDrag,
+    releasePaneTabDrag,
+    startDocTabDrag,
+    startPaneTabDrag,
+} from "@/app/drag/pane-tab-drag";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { atoms } from "@/store/global";
 import { isWindows } from "@/util/platformutil";
@@ -36,7 +43,7 @@ import "./PaneTabStrip.scss";
 // The Pane Tab pill's drag tag (drag-types.ts): distinct from the tile and
 // window-tab tags, so no existing target mistakes a pill for either.
 // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
-import { paneTabItemType } from "@/app/drag/drag-types";
+import { docTabItemType, paneTabItemType } from "@/app/drag/drag-types";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
@@ -87,6 +94,46 @@ export interface PaneTabColors {
      *  falls back to `background` when absent. */
     activeBackground?: string;
     neutralBackground?: string;
+}
+
+/**
+ * Document-tab drag for a strip of a pane's documents (an Editor's files, a
+ * Media pane's files): the same pills, drop marks and landing bounce as pane
+ * tabs, but its own drag kind. A document tab moves only within its strip or
+ * to another pane of the same `docType`, and never tears off into a window.
+ * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md section 3.1.
+ */
+export interface DocTabDrag {
+    /** The pane type ("editor", "media"): tabs move only between panes of one type. */
+    docType: string;
+    /** The block whose tabs these are. */
+    blockId: string;
+    /** Whether a tab can be dragged at all (an empty Media tab can not). */
+    canDrag?: (tabId: string) => boolean;
+    /** A tab of this strip dropped before or after another of its tabs.
+     *  `false`: refused (no landing bounce). */
+    onReorder: (tabId: string, targetId: string, position: "before" | "after") => boolean | void;
+    /** A tab of another pane of this type dropped on one of these tabs. Runs
+     *  one task after the drop: the move unmounts the dragged pill, the live
+     *  source of the drag. Omitted: such a drop is not accepted here. */
+    onReceive?: (sourceBlockId: string, tabId: string, at: { targetId: string; position: "before" | "after" }) => boolean | void;
+}
+
+/** What a document-tab drag carries (pragmatic-dnd's `source.data`). */
+export interface DocTabDragData {
+    type: typeof docTabItemType;
+    tabId: string;
+    docType: string;
+    sourceBlockId: string;
+}
+
+export function asDocTabDragData(data: Record<string | symbol, unknown>): DocTabDragData | null {
+    return data.type === docTabItemType &&
+        typeof data.tabId === "string" &&
+        typeof data.docType === "string" &&
+        typeof data.sourceBlockId === "string"
+        ? (data as unknown as DocTabDragData)
+        : null;
 }
 
 /**
@@ -308,6 +355,12 @@ export interface PaneTabStripProps<T> {
      *  only reorder / move between panes, as before.
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5. */
     sourceTabId?: string;
+
+    /** Make the pills document tabs (`DocTabDrag`) instead of pane tabs:
+     *  their own drag kind, no tear-off. Takes the place of `onReorder`,
+     *  `paneKey`, `onReceiveForeignTab` and `sourceTabId`, which are for pane
+     *  tabs. */
+    docDrag?: DocTabDrag;
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -552,6 +605,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             onReorder={props.onReorder}
                             paneKey={props.paneKey}
                             sourceTabId={props.sourceTabId}
+                            docDrag={props.docDrag}
                         />
                     )}
                 </For>
@@ -608,13 +662,29 @@ interface PaneTabStripItemProps<T> {
     onReorder?: (blockId: string, targetId: string, position: "before" | "after") => boolean | void;
     paneKey?: string;
     sourceTabId?: string;
+    docDrag?: DocTabDrag;
+}
+
+/** How one pill drags, for either kind of tab: what it carries, what it
+ *  accepts, and what a drop on it does. One registration (below) serves both. */
+interface PillDrag {
+    data: () => Record<string, unknown>;
+    canDrag: () => boolean;
+    start: () => void;
+    release: () => void;
+    accepts: (data: Record<string | symbol, unknown>) => boolean;
+    /** Act on a drop at `position`; returns the id of the tab to bounce, or null. */
+    drop: (data: Record<string | symbol, unknown>, position: "before" | "after") => string | null;
 }
 
 function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
     let pillRef: HTMLDivElement | undefined;
-    const isDragging = () => isDraggedPaneTab(id(), props.paneKey);
+    // The pane a landing bounce is for: the block, for document tabs.
+    const landingKey = () => props.docDrag?.blockId ?? props.paneKey;
+    const isDragging = () =>
+        props.docDrag ? isDraggedDocTab(props.docDrag.blockId, id()) : isDraggedPaneTab(id(), props.paneKey);
     const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
 
     // Activity flash: click this pill on every tone from its own block,
@@ -667,62 +737,104 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     };
     onCleanup(stopTearOffTracking);
 
-    // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.1/§3.2). Gated entirely on `onReorder` being passed — every existing
-    // consumer that doesn't (editor file tabs, agent History strip) gets no
-    // draggable()/dropTargetForElements() registration at all, zero behavior
-    // change. A pill is simultaneously a drag SOURCE (itself) and a drop
-    // TARGET (for another pill being dragged onto it) — same dual-role
-    // pattern droppable-tab.tsx's own tab buttons already use for the outer
-    // Window Tab bar.
-    onMount(() => {
-        if (!props.onReorder) return;
-        const el = pillRef;
-        if (!el) return;
-        const cleanupDraggable = draggable({
-            element: el,
-            getInitialData: () => ({
-                kind: "pane-tab",
-                blockId: id(),
-                type: paneTabItemType,
-                sourceNodeId: props.paneKey,
-            }),
-            onDragStart: () => {
+    // A pane tab: same-pane reorder (Phase 3,
+    // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md section 3.1 and 3.2), gated on
+    // `onReorder`, with tear-off when the strip names its window tab (3.5). A
+    // pill from a DIFFERENT pane (another `sourceNodeId`) is rejected here
+    // rather than accepted and then silently ignored on drop: cross-pane is
+    // the whole-pane target's job (#3444).
+    const paneTabDrag = (): PillDrag | null => {
+        const onReorder = props.onReorder;
+        if (!onReorder) return null;
+        return {
+            data: () => ({ kind: "pane-tab", blockId: id(), type: paneTabItemType, sourceNodeId: props.paneKey }),
+            canDrag: () => true,
+            start: () => {
                 startPaneTabDrag(id(), props.paneKey, props.sourceTabId);
                 startTearOffTracking();
             },
-            onDrop: () => {
+            release: () => {
                 releasePaneTabDrag();
                 stopTearOffTracking();
             },
+            accepts: (data) =>
+                data.type === paneTabItemType && data.blockId !== id() && data.sourceNodeId === props.paneKey,
+            drop: (data, position) => {
+                // Handled in-window: never also a tear-off.
+                setCurrentDragPayload(null);
+                const blockId = data.blockId as string | undefined;
+                if (!blockId) return null;
+                return onReorder(blockId, id(), position) !== false ? blockId : null;
+            },
+        };
+    };
+
+    // A document tab (`docDrag`): reorder within the strip, or a tab of
+    // another pane of the same type dropped onto this one. Never a tear-off.
+    const docTabDrag = (): PillDrag | null => {
+        const doc = props.docDrag;
+        if (!doc) return null;
+        return {
+            data: () => ({ type: docTabItemType, tabId: id(), docType: doc.docType, sourceBlockId: doc.blockId }) satisfies DocTabDragData,
+            canDrag: () => doc.canDrag?.(id()) ?? true,
+            start: () => startDocTabDrag(doc.blockId, id()),
+            release: releaseDocTabDrag,
+            accepts: (raw) => {
+                const data = asDocTabDragData(raw);
+                if (!data || data.docType !== doc.docType) return false;
+                return data.sourceBlockId === doc.blockId ? data.tabId !== id() : !!doc.onReceive;
+            },
+            drop: (raw, position) => {
+                const data = asDocTabDragData(raw);
+                if (!data) return null;
+                if (data.sourceBlockId === doc.blockId) {
+                    return doc.onReorder(data.tabId, id(), position) !== false ? data.tabId : null;
+                }
+                // From another pane: commit on the next task, after
+                // pragmatic-dnd has finished dispatching this drop, because
+                // the move unmounts the dragged pill, the live source of the
+                // drag (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md 4.2).
+                const receive = doc.onReceive!;
+                const at = { targetId: id(), position };
+                setTimeout(() => {
+                    if (receive(data.sourceBlockId, data.tabId, at) !== false) markLanded(data.tabId, doc.blockId);
+                }, 0);
+                return null;
+            },
+        };
+    };
+
+    // A pill is both a drag source (itself) and a drop target (for another
+    // pill dragged onto it), the same dual role droppable-tab.tsx's tab
+    // buttons have in the window tab bar. A strip with neither `onReorder`
+    // nor `docDrag` registers nothing.
+    onMount(() => {
+        const drag = docTabDrag() ?? paneTabDrag();
+        const el = pillRef;
+        if (!drag || !el) return;
+        const cleanupDraggable = draggable({
+            element: el,
+            canDrag: () => drag.canDrag(),
+            getInitialData: () => drag.data(),
+            onDragStart: () => drag.start(),
+            onDrop: () => drag.release(),
         });
         const cleanupDropTarget = dropTargetForElements({
             element: el,
-            // Same-pane only — a pill dragged from a DIFFERENT pane (a
-            // different `sourceNodeId`) is rejected here rather than
-            // accepted-then-silently-no-op'd on drop. Cross-pane drop is
-            // Phase 4 (§3.3), not yet implemented. ReAgent P1 on PR #3444.
-            canDrop: ({ source }) =>
-                source.data.type === paneTabItemType &&
-                source.data.blockId !== id() &&
-                source.data.sourceNodeId === props.paneKey,
+            canDrop: ({ source }) => drag.accepts(source.data),
             onDrag: ({ location }) => {
                 setDropSide(dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX));
             },
             onDragLeave: () => setDropSide(null),
             onDrop: ({ source, location }) => {
                 setDropSide(null);
-                // Handled in-window: never also a tear-off.
-                setCurrentDragPayload(null);
-                const blockId = source.data.blockId as string | undefined;
-                if (!blockId) return;
                 // Computed fresh here, not reused from the `onDrag`-updated
-                // signal above — avoids relying on that signal's last value
-                // still being current at the exact moment of drop.
+                // signal above: that value may not be current at the drop.
                 const position = dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX);
                 // The moved pill (not the one it was dropped on) bounces,
                 // same as a reordered Window Tab.
-                if (props.onReorder!(blockId, id(), position) !== false) markLanded(blockId, props.paneKey);
+                const landed = drag.drop(source.data, position);
+                if (landed) markLanded(landed, landingKey());
             },
         });
         onCleanup(() => {
@@ -803,7 +915,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     "pane-tab--dragging": isDragging(),
                     "pane-tab--drop-before": dropSide() === "before",
                     "pane-tab--drop-after": dropSide() === "after",
-                    "pane-tab--landing": landedTab()?.id === id() && landedTab()?.paneKey === props.paneKey,
+                    "pane-tab--landing": landedTab()?.id === id() && landedTab()?.paneKey === landingKey(),
                     // Gates PaneTabStrip.scss's lighter-on-hover treatment —
                     // only a tab with its own color gets it; every other
                     // consumer's plain hover tint is untouched.

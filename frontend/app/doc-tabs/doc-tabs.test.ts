@@ -11,6 +11,7 @@ import {
     hydrateDocTabs,
     MAX_CLOSED,
     moveDoc,
+    moveDocTo,
     openDoc,
     persistDocTabs,
     reopenClosed,
@@ -84,6 +85,30 @@ describe("document tabs: the model", () => {
         expect(keys(s)).toEqual(["c", "b", "a"]);
     });
 
+    it("moves a dragged tab before or after another", () => {
+        const s = open(open(open(open(emptyDocTabs<P>(), "a"), "b"), "c"), "d");
+        expect(keys(moveDocTo(s, "d", "a", "before"))).toEqual(["d", "a", "b", "c"]);
+        expect(keys(moveDocTo(s, "a", "c", "after"))).toEqual(["b", "c", "a", "d"]);
+        expect(keys(moveDocTo(s, "a", "c", "before"))).toEqual(["b", "a", "c", "d"]);
+    });
+
+    it("a drag that lands where the tab already is changes nothing", () => {
+        const s = open(open(open(emptyDocTabs<P>(), "a"), "b"), "c");
+        expect(moveDocTo(s, "b", "a", "after")).toBe(s);
+        expect(moveDocTo(s, "b", "b", "before")).toBe(s);
+        expect(moveDocTo(s, "nope", "a", "before")).toBe(s);
+        expect(moveDocTo(s, "a", "nope", "before")).toBe(s);
+    });
+
+    it("a dragged tab stays in its pinned or unpinned group", () => {
+        let s = open(open(open(emptyDocTabs<P>(), "a"), "b"), "c");
+        s = setPinned(s, "a", true);
+        // Unpinned "c" dropped before pinned "a": first of the unpinned.
+        expect(keys(moveDocTo(s, "c", "a", "before"))).toEqual(["a", "c", "b"]);
+        // Pinned "a" dropped after unpinned "c": still the pinned group, first.
+        expect(keys(moveDocTo(s, "a", "c", "after"))).toEqual(["a", "b", "c"]);
+    });
+
     it("closes others and to the right, sparing pinned tabs", () => {
         let s = open(open(open(open(emptyDocTabs<P>(), "a"), "b"), "c"), "d");
         s = setPinned(s, "a", true);
@@ -149,6 +174,14 @@ describe("document tabs: the controller", () => {
         const again = new DocTabsController(spec, h, [{ path: "/ignored" }]);
         expect(again.tabs().map((t) => t.key)).toEqual(["/a", "/b"]);
         expect(again.active()?.key).toBe("/b");
+    });
+
+    it("moves a dragged tab, and says whether anything moved", () => {
+        const ctl = new DocTabsController(spec, host(), [{ path: "/a" }, { path: "/b" }, { path: "/c" }]);
+        const [a, , c] = ctl.tabs().map((t) => t.id);
+        expect(ctl.moveTo(c, a, "before")).toBe(true);
+        expect(ctl.tabs().map((t) => t.key)).toEqual(["/c", "/a", "/b"]);
+        expect(ctl.moveTo(c, a, "before")).toBe(false);
     });
 
     it("refuses to close a keepOne pane's last tab, and says so to the key handler", () => {

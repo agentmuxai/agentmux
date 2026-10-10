@@ -15,6 +15,7 @@
 // own copy. Only the editor-specific bits (preview italics, pin-on-
 // double-click, the inline Save-As path input, the "+" → new scratch
 // buffer) stay local. See docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
+// Tabs drag as document tabs, as Media's do (DocTabStrip.tsx).
 
 import { createSignal, onMount, type JSX } from "solid-js";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
@@ -98,6 +99,14 @@ export function EditorTabStrip(props: Props): JSX.Element {
             // No scratch buffers in an editor on a host (they're local files).
             onAdd={props.model.connection() ? undefined : () => void props.model.openScratch(false)}
             addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
+            docDrag={{
+                docType: "editor",
+                blockId: props.model.blockId,
+                // Not while its Save As box is open: the drag would take the
+                // box's text selection.
+                canDrag: (id) => props.saveAsTabId !== id,
+                onReorder: (id, targetId, position) => props.model.moveTabTo(id, targetId, position),
+            }}
         />
     );
 }

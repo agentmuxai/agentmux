@@ -172,6 +172,21 @@ export function moveDoc<P>(s: DocTabsState<P>, id: string, delta: number): DocTa
     return { ...s, tabs: tab.pinned ? [...reordered, ...others] : [...others, ...reordered] };
 }
 
+/**
+ * Move a tab to just before or after `targetId` (a drag). It stays in its
+ * pinned or unpinned group: dropped among the other group, it lands at the
+ * nearest end of its own.
+ */
+export function moveDocTo<P>(s: DocTabsState<P>, id: string, targetId: string, position: "before" | "after"): DocTabsState<P> {
+    const tab = s.tabs.find((t) => t.id === id);
+    if (!tab || id === targetId) return s;
+    const rest = s.tabs.filter((t) => t.id !== id);
+    const at = rest.findIndex((t) => t.id === targetId);
+    if (at < 0) return s;
+    const tabs = pinnedFirst([...rest.slice(0, position === "before" ? at : at + 1), tab, ...rest.slice(position === "before" ? at : at + 1)]);
+    return tabs.every((t, i) => t === s.tabs[i]) ? s : { ...s, tabs };
+}
+
 export function setPinned<P>(s: DocTabsState<P>, id: string, pinned: boolean): DocTabsState<P> {
     const tabs = s.tabs.map((t) => (t.id === id ? { ...t, pinned, preview: pinned ? false : t.preview } : t));
     return { ...s, tabs: pinnedFirst(tabs) };

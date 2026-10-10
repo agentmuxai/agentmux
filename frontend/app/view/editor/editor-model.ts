@@ -818,6 +818,14 @@ export class EditorViewModel {
         if (at >= 0) dispatch(this.blockId, { type: "ReorderTab", tabId: tabs[at].id, toIndex: at + delta, source: "user" });
     }
 
+    /** A tab dragged to just before or after another. False when nothing
+     *  moved (dropped where it already was). */
+    moveTabTo(tabId: string, targetId: string, position: "before" | "after"): boolean {
+        const before = snapshot(this.blockId)?.doc;
+        dispatch(this.blockId, { type: "MoveTabTo", tabId, targetId, position, source: "user" });
+        return snapshot(this.blockId)?.doc !== before;
+    }
+
     /** Read the active tab's file if it hasn't been (a tab restored from
      *  the block, or reopened). */
     private _ensureActiveLoaded(): void {
