@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
+use crate::backend::browser_profiles_store::BrowserProfile;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::server::AppState;
 
@@ -145,9 +146,91 @@ pub(crate) fn refresh_for_replay(
     true
 }
 
+/// The identity an agent's `OpenBrowser` asked for by `profile` browses as:
+/// none (Personal) for "personal" or nothing; a fresh Incognito jar for
+/// "incognito", always allowed since it gives the agent less, not more; and a
+/// named profile (by name, any case, or id) only when the user switched on
+/// "Agents may use it" for it in Settings → Browser (profiles spec §5).
+pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -> Result<Option<String>, String> {
+    let requested = requested.trim();
+    if requested.is_empty() || requested.eq_ignore_ascii_case("personal") {
+        return Ok(None);
+    }
+    if requested.eq_ignore_ascii_case("incognito") {
+        return Ok(Some(format!("incognito:{}", uuid::Uuid::new_v4())));
+    }
+    let allowed = || {
+        let names: Vec<&str> = profiles.iter().filter(|p| p.agents_allowed).map(|p| p.name.as_str()).collect();
+        if names.is_empty() {
+            "none".to_string()
+        } else {
+            names.join(", ")
+        }
+    };
+    let Some(p) = profiles.iter().find(|p| p.name.eq_ignore_ascii_case(requested) || p.id == requested) else {
+        return Err(format!(
+            "there is no browser profile called {requested:?}. Use \"incognito\", or a profile the user lets agents use: {}",
+            allowed()
+        ));
+    };
+    if !p.agents_allowed {
+        return Err(format!(
+            "the user hasn't let agents use the browser profile {:?}: they can switch on \"Agents may use it\" for it in Settings → Browser. Use \"incognito\", or a profile agents may use: {}",
+            p.name,
+            allowed()
+        ));
+    }
+    Ok(Some(format!("profile:{}", p.id)))
+}
+
+/// `OpenBrowser`'s `profile`: give the agent's new tab the identity it asked
+/// for, checked like any new tab (the platform, the Incognito cap).
+pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, requested: Option<&str>) -> Result<(), String> {
+    let Some(requested) = requested else { return Ok(()) };
+    let profiles = crate::server::app_api::browser_profiles_list()?;
+    if let Some(identity) = identity_for_agent(requested, &profiles)? {
+        meta.insert(IDENTITY_META_KEY.to_string(), json!(identity));
+        check_new_tab(state, meta)?;
+    }
+    Ok(())
+}
+
+/// An agent opening a browser tab some other way (`pane.open`, the HTTP pane
+/// open) with a `browser:identity`: a named profile only if agents may use it.
+pub(crate) fn check_agent_may_use(meta: &MetaMapType) -> Result<(), String> {
+    let Some(id) = identity_of(meta).and_then(profile_id) else { return Ok(()) };
+    let profiles = crate::server::app_api::browser_profiles_list()?;
+    match profiles.iter().find(|p| p.id == id) {
+        Some(p) if p.agents_allowed => Ok(()),
+        Some(p) => Err(format!("the user hasn't let agents use the browser profile {:?}", p.name)),
+        None => Err(format!("there is no browser profile {id:?}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn profile(id: &str, name: &str, agents_allowed: bool) -> BrowserProfile {
+        BrowserProfile { id: id.into(), name: name.into(), color: "#3b82f6".into(), created_at: 0, agents_allowed }
+    }
+
+    #[test]
+    fn an_agent_gets_personal_incognito_or_a_profile_it_is_allowed() {
+        let ps = [profile("p-work", "Work", true), profile("p-bank", "Bank", false)];
+        assert_eq!(identity_for_agent("", &ps), Ok(None));
+        assert_eq!(identity_for_agent("Personal", &ps), Ok(None));
+        let a = identity_for_agent("incognito", &ps).unwrap().unwrap();
+        let b = identity_for_agent("Incognito", &ps).unwrap().unwrap();
+        assert!(is_incognito(&a) && is_incognito(&b) && a != b, "a fresh jar each time");
+        assert_eq!(identity_for_agent("work", &ps), Ok(Some("profile:p-work".into())));
+        assert_eq!(identity_for_agent("p-work", &ps), Ok(Some("profile:p-work".into())));
+        let refused = identity_for_agent("Bank", &ps).unwrap_err();
+        assert!(refused.contains("hasn't let agents use") && refused.contains("Work"), "{refused}");
+        assert!(refused.contains("\"Agents may use it\" for it in Settings → Browser") && !refused.contains("  "), "{refused}");
+        let unknown = identity_for_agent("Nope", &ps).unwrap_err();
+        assert!(unknown.contains("no browser profile") && !unknown.contains("Bank"), "{unknown}");
+    }
 
     #[test]
     fn only_well_formed_incognito_identities_pass() {

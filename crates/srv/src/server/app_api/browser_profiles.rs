@@ -31,7 +31,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let _writing = WRITING.lock().await;
         let path = path()?;
         let mut profiles = store::read_profiles(&path)?;
-        store::update(&mut profiles, &req.id, req.name.as_deref(), req.color.as_deref())?;
+        store::update(&mut profiles, &req.id, req.name.as_deref(), req.color.as_deref(), req.agents_allowed)?;
         store::write_profiles(&path, &profiles)?;
         Ok(BrowserProfilesResult { profiles, created: None })
     });

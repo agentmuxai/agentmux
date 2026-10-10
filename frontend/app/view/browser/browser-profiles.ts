@@ -49,7 +49,10 @@ export async function createBrowserProfile(name: string, color?: string): Promis
     return r.created;
 }
 
-export async function updateBrowserProfile(id: string, patch: { name?: string; color?: string }): Promise<void> {
+export async function updateBrowserProfile(
+    id: string,
+    patch: { name?: string; color?: string; agents_allowed?: boolean }
+): Promise<void> {
     const r = await RpcApi.UpdateBrowserProfileCommand(TabRpcClient, { id, ...patch });
     setProfiles(r.profiles ?? []);
 }
