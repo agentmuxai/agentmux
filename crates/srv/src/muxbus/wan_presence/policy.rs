@@ -54,10 +54,13 @@ impl Install {
 
     /// Why this install doesn't publish by default, if it doesn't.
     fn default_off(&self) -> Option<PresenceOffReason> {
-        if self.test_harness {
-            Some(PresenceOffReason::TestHarness)
-        } else if self.headless {
+        // Headless first: a headless srv sets AGENTMUX_DISABLE_CLOUD_SUBSCRIBER
+        // itself (headless::prepare_env), which would otherwise read as a test
+        // harness.
+        if self.headless {
             Some(PresenceOffReason::Headless)
+        } else if self.test_harness {
+            Some(PresenceOffReason::TestHarness)
         } else if self.home_override {
             Some(PresenceOffReason::IsolatedHome)
         } else if self.channel.starts_with("dev-") {
@@ -108,7 +111,7 @@ mod tests {
             (
                 "a headless dev build under test",
                 Install { headless: true, test_harness: true, channel: "dev-x".into(), ..normal() },
-                Some(PresenceOffReason::TestHarness),
+                Some(PresenceOffReason::Headless),
             ),
         ];
         for (what, install, expect) in cases {
@@ -154,5 +157,15 @@ mod tests {
         assert!(!with(&[("AGENTMUX_HOME_OVERRIDE", "")]).home_override, "empty is unset");
         assert!(with(&[(FORCE_ENV, "1")]).forced);
         assert!(!with(&[(FORCE_ENV, "true")]).forced, "only 1");
+    }
+
+    /// A real headless srv sets AGENTMUX_DISABLE_CLOUD_SUBSCRIBER itself, so it
+    /// must still read as headless, not as a test harness.
+    #[test]
+    fn a_headless_srv_says_headless_not_test_harness() {
+        let install = Install::from_vars(true, "stable".into(), |name| {
+            (name == "AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").then(|| "1".to_string())
+        });
+        assert_eq!(install.off_reason(true), Some(PresenceOffReason::Headless));
     }
 }

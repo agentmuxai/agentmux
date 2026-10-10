@@ -222,6 +222,10 @@ pub(crate) struct Machine {
     outage_warned: bool,
     /// Why this install doesn't publish; `None` while it does.
     off: Option<PresenceOffReason>,
+    /// This machine asked for a goodbye ([`Action::Goodbye`]) whose result
+    /// hasn't come back yet. A sign-out reports [`Event::Goodbye`] too, even
+    /// when none was due, so only this says the result is worth logging.
+    goodbye_sent: bool,
 }
 
 fn ms(d: Duration) -> u64 {
@@ -258,6 +262,7 @@ impl Machine {
             outage_since_ms: None,
             outage_warned: false,
             off: None,
+            goodbye_sent: false,
         }
     }
 
@@ -338,7 +343,9 @@ impl Machine {
             }
             Event::Goodbye { stored } => {
                 let reason = self.off.unwrap_or(PresenceOffReason::Setting);
-                logs.push(Log { warn: false, text: goodbye_text(stored).into() });
+                if std::mem::take(&mut self.goodbye_sent) {
+                    logs.push(Log { warn: false, text: goodbye_text(stored).into() });
+                }
                 self.enter_off(reason, now, logs);
                 Action::Wait
             }
@@ -377,6 +384,7 @@ impl Machine {
             Event::Policy { off: Some(reason) } => match self.farewell(&now) {
                 Some(farewell) => {
                     self.off = Some(reason);
+                    self.goodbye_sent = true;
                     Action::Goodbye { published_at_ms: farewell.stamp(now.wall_ms) }
                 }
                 None => {

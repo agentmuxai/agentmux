@@ -783,6 +783,18 @@ mod rules {
     }
 
     #[test]
+    fn a_sign_out_while_off_logs_no_goodbye_result() {
+        let mut m = machine();
+        m.next(Event::Policy { off: Some(Off::DevBuild) }, at(0));
+        let step = m.next(Event::Goodbye { stored: false }, at(S));
+        assert!(
+            step.logs.iter().all(|l| !l.text.contains("goodbye")),
+            "no goodbye was due, so none is reported: {:?}",
+            step.logs
+        );
+    }
+
+    #[test]
     fn a_sign_out_without_a_goodbye_is_signed_out() {
         let mut m = published();
         assert_eq!(m.next(Event::Goodbye { stored: false }, at(S)).action, Action::Attempt { v: 2 });
