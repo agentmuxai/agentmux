@@ -1,6 +1,6 @@
 # Hidden tips in the Help pane: the gestures nobody would guess
 
-**Status:** active: P1 in #4631, P2 in #NNNN; owner decisions in §9.
+**Status:** active: P1 in #4631, P2 in #4637; owner decisions in §9.
 **Date:** 2026-10-10.
 **Requested by:** repo owner: "lets add more hidden tips to the help. there are a lot of unobvious key shortcut helpers, like using ctrl when border resize, or anything else u find, write that to a separate spec".
 **Author:** AgentA@Area54, with Masty@starpower (macOS) and Maricon@charlie (Linux) to verify per platform.
@@ -148,7 +148,7 @@ The questions as asked:
 - Every tip's anchor is checked by `tips.test.ts`.
 - The hand check per platform (§7) is still owed, for Windows as well; it's recorded here as it's done.
 
-**P2 (#NNNN).**
+**P2 (#4637).**
 - The handlers in §5 now use `mod`, through a shared `isModKey` in `util/platformutil.ts`: ⌘ on macOS, Ctrl elsewhere.
   - pane zoom with mod+scroll: terminal, editor, Warden, section pane, Swarm, the agent's shell drawer;
   - Swarm's mod + / − / 0;
