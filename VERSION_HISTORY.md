@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.59.18 — 2026-10-09
+
+- Tool previews render through one pipeline: tabs show 2 columns a level in code wherever the line number ends, code and command output scroll instead of wrapping mid-word, diff highlights span the whole line, streamed output looks the same as the finished result, and leftover terminal escape codes no longer show.
+- Popup windows a page opens now show the site's address first in their title bar (for example "accounts.google.com — Sign in"), so a page can't make its window look like another site's.
+- The Settings pane and the settings template now show the defaults the app actually uses when a setting is unset: terminal font size 15 (font Hack), scrollback 2000 lines, predictive echo on with a 0 ms threshold, copy-on-select off, pane gap 3, window opacity 80%, magnified pane opacity 1.0, and the pane number overlay on.
+- The working row names a background task that joined a turn as a finished task, the same words the away summary uses.
+- Agents can limit a browser pane they open to the sites a task needs (OpenBrowser allowed_origins). If the page tries to go anywhere else, the navigation is stopped and you're asked in the pane to Allow or Block.
+- A memory re-injection that was a session's last turn no longer hides the next session's live messages; history already handled this.
+- App API routes (memory, Global Memory, presets, identity, self) now answer 404 instead of 400 when the thing asked for does not exist, matching the naming routes.
+- The Swarm row says "Waiting for you" whenever an agent is waiting on your answer, even once it has a title, as the agent pane already did. A rate-limit retry longer than a minute reads as minutes and seconds ("retrying in 1m 15s").
+
 ## 0.59.17 — 2026-10-09
 
 - Session titles, subagent and workflow names, previews and narration now use the same strict reply format as the next-message suggestion, so the model's notes to itself and refusals can't reach a title or name; subagent names no longer come out as "I cannot access the repository…".
