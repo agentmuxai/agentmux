@@ -355,6 +355,8 @@ pub struct AppState {
     /// pane's popups open in-app. Who may drive a window is srv's decision
     /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
     pub owned_panes: Mutex<std::collections::HashSet<String>>,
+    /// Agents' site limits on their panes (client/allowed_origins.rs).
+    pub site_limits: crate::client::allowed_origins::SiteLimits,
 
     /// Popup window label (`popup-<uuid>`) → the browser-pane block id whose
     /// page opened it. Written when the popup is created, removed when it
@@ -772,6 +774,7 @@ impl Default for AppState {
             window_meta: Mutex::new(HashMap::new()),
             approval_windows: Mutex::new(std::collections::HashSet::new()),
             owned_panes: Mutex::new(std::collections::HashSet::new()),
+            site_limits: Default::default(),
             popup_openers: Mutex::new(std::collections::HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
             media_grants: Mutex::new(

@@ -51,6 +51,7 @@ const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 
 pub(crate) mod creation_labels;
 pub(crate) mod app_navigation;
+pub(crate) mod allowed_origins;
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;
@@ -77,7 +78,9 @@ pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // `commands/window_pool.rs::demote_srv_cleanup` replicates
 // `on_before_close`'s backend cleanup (which never fires for parked
 // pool-window browsers).
-pub(crate) use helpers::{backend_browser_attention, backend_browser_popup, backend_browser_popup_window};
+pub(crate) use helpers::{
+    backend_browser_attention, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
+};
 pub(crate) use helpers::backend_close_window;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through
 // / read-back, used by `commands/window/transparency.rs`.

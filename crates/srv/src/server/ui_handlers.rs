@@ -161,7 +161,7 @@ pub(crate) fn target_block_id(
     }
 }
 
-async fn get_host_ipc(state: &AppState) -> Result<HostIpc, String> {
+pub(crate) async fn get_host_ipc(state: &AppState) -> Result<HostIpc, String> {
     state.host_ipc.lock().await.clone().ok_or_else(|| {
         "this AgentMux instance's CEF host has not registered its UI-automation \
          credentials yet (host_ipc.Register) — try again in a moment"
@@ -184,7 +184,7 @@ async fn proxy_to_host(
 /// `proxy_to_host` with a request timeout of its own, for host routes that
 /// legitimately take longer than the shared client's default (a snapshot of
 /// a large page, `wait_for`).
-async fn proxy_to_host_timeout(
+pub(crate) async fn proxy_to_host_timeout(
     state: &AppState,
     host: &HostIpc,
     route: &str,
@@ -216,7 +216,7 @@ async fn proxy_to_host_timeout(
         .map_err(|e| format!("parse host {route} response: {e}"))
 }
 
-fn err_response(status: StatusCode, e: String) -> Response {
+pub(crate) fn err_response(status: StatusCode, e: String) -> Response {
     (status, Json(json!({ "ok": false, "error": e }))).into_response()
 }
 
@@ -441,7 +441,7 @@ pub(crate) async fn handle_ui_query(
 /// Shared by the write-only browser-pane tools (navigate/back/forward/
 /// reload/focus_element/dispatch_key) — they differ only in which
 /// route/body they send, not in how they interpret an ack-only reply.
-async fn proxy_ack(
+pub(crate) async fn proxy_ack(
     state: &AppState,
     host: &HostIpc,
     route: &str,
@@ -472,6 +472,10 @@ pub(crate) async fn handle_ui_browser_navigate(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    // Off the pane's site list: refused outright, without asking the person.
+    if let Some(e) = crate::server::browser_allowlist::refuse_agent_navigation(&banner_for(&block_id).0, &req.url) {
+        return err_response(StatusCode::FORBIDDEN, e);
+    }
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -753,6 +757,10 @@ pub(crate) async fn handle_ui_browser_open(
             format!("split must be right, left, up or down, not {split:?}"),
         );
     }
+    let allowed = match crate::server::browser_allowlist::list_for_open(req.allowed_origins.as_deref(), url) {
+        Ok(a) => a,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
     let mut cmd = crate::backend::rpc_types::CommandPaneOpenData {
         view: "browser".to_string(),
         file: None,
@@ -782,11 +790,13 @@ pub(crate) async fn handle_ui_browser_open(
         crate::server::browser_owner::OWNER_META_KEY.to_string(),
         json!(req.auth.agent_id),
     );
+    crate::server::browser_allowlist::mirror(&mut meta, allowed.as_deref());
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
+    crate::server::browser_allowlist::limit_new_pane(&state, &result.block_id, allowed).await;
     crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
     tracing::info!(
         agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url,
@@ -1122,7 +1132,7 @@ fn popup_window_target(state: &AppState, id: &str, agent_id: &str) -> Result<Str
 /// Where a request to the person about `target` shows: in its own banner,
 /// or, for a popup window (which has no AgentMux header), in its opener's,
 /// with the window's address so the banner can say which window it means.
-fn banner_for(target: &str) -> (String, Option<String>) {
+pub(crate) fn banner_for(target: &str) -> (String, Option<String>) {
     if crate::server::browser_popup::is_window_id(target) {
         if let Some(w) = crate::server::browser_popup::window(target) {
             return (w.opener, Some(w.url));
@@ -1151,6 +1161,10 @@ fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
                 "pane {pane:?} is waiting for the user to approve your click; your tools on it are \
                  paused until they answer"
             ),
+        )),
+        Some(Kind::Navigation) => Err((
+            StatusCode::CONFLICT,
+            format!("the page in pane {pane:?} tried to leave its allowed_origins and the user is being asked whether to allow it; your tools on it are paused until they answer"),
         )),
     }
 }
@@ -1248,7 +1262,7 @@ pub(crate) async fn handle_host_browser_attention(
 /// Is this request from the CEF host? `X-Host-Token` must be the IPC token
 /// the host registered with (`host_ipc.Register`), which agents never see;
 /// the instance auth key alone, which every agent has, isn't enough.
-async fn from_host(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
+pub(crate) async fn from_host(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
     let presented = headers.get("x-host-token").and_then(|v| v.to_str().ok()).unwrap_or("");
     let registered = state.host_ipc.lock().await.clone().map(|h| h.token).unwrap_or_default();
     !registered.is_empty()
@@ -1298,6 +1312,9 @@ pub(crate) async fn handle_host_browser_popup(
     // the person took over belongs to nobody.
     let owner = owning_agent(&block, &opener)
         .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
+    if let Some(why) = crate::server::browser_allowlist::refuse_popup(&opener, &url) {
+        return refused(why);
+    }
     // The count and the slot are taken together: two popups reported at once
     // can't both fit under the cap. The slot is given back if the pane
     // doesn't open.
@@ -1377,6 +1394,7 @@ pub(crate) async fn handle_host_browser_popup(
         }
     }
     reservation.commit(&result.block_id);
+    crate::server::browser_allowlist::join_popup_pane(&state, &result.block_id, &opener).await;
     tracing::info!(
         opener = %opener, pane = %result.block_id, url = %url, owner = ?owner,
         "[browser-popup] popup opened as a pane"
@@ -1470,30 +1488,6 @@ fn update_popup_windows_strip(state: &AppState, opener: &str) {
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, opener, &meta) {
         tracing::debug!(opener = %opener, error = %e, "[browser-popup] popup-windows strip not updated");
     }
-}
-
-/// Keep the host's copy of the agent-owned panes current: push the whole set
-/// whenever it changes or the host registers (`browser_owner::changed`), and
-/// every minute regardless, so a push the host missed is made up for.
-pub(crate) fn spawn_owned_panes_sync(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(60),
-                crate::server::browser_owner::changed().notified(),
-            )
-            .await;
-            let Some(host) = state.host_ipc.lock().await.clone() else {
-                continue;
-            };
-            let body = json!({ "panes": crate::server::browser_owner::owned_panes() });
-            if let Err(e) =
-                proxy_to_host_timeout(&state, &host, "owned_panes", body, Some(std::time::Duration::from_secs(5))).await
-            {
-                tracing::debug!(error = %e, "[browser-popup] couldn't send the owned panes to the host");
-            }
-        }
-    });
 }
 
 /// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,

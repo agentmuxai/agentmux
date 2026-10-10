@@ -22,6 +22,36 @@ export function formatElapsedCompact(ms: number): string {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+/** A countdown in the prose form: whole seconds rounded up, so a wait that
+ *  has not quite run out never reads "0s". "up to 14s", "retrying in 1m 5s". */
+export function formatCountdownCompact(ms: number): string {
+    return formatElapsedCompact(Math.ceil(Math.max(0, ms) / 1000) * 1000);
+}
+
+/** A known wait's remaining time beside its elapsed clock: "~260s left". */
+export function formatTimeLeft(ms: number): string {
+    return `~${Math.ceil(Math.max(0, ms) / 1000)}s left`;
+}
+
+/** `93s` / `4m 12s` / `2h 14m`: a duration, no trailing "0s" on a round minute. */
+export function formatDurationShort(ms: number): string {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return s % 60 === 0 ? `${m}m` : `${m}m ${s % 60}s`;
+    return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** "Time ago" to the second, for things checked within the last hours:
+ *  "just now" under a second, then "45s ago", "5m ago", "3h ago". */
+export function formatAgoPrecise(thenMs: number, nowMs: number = Date.now()): string {
+    const s = Math.floor(Math.max(0, nowMs - thenMs) / 1000);
+    if (s < 1) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
+}
+
 /**
  * Clock form, growing a field at a time as the duration does:
  * `M:SS` → `H:MM:SS` → `D:HH:MM:SS`.

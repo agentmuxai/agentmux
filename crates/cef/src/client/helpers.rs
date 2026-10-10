@@ -214,6 +214,22 @@ pub(crate) fn backend_browser_popup_window(
     post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_popup_window", body).map(|_| ())
 }
 
+/// Report a navigation stopped because it left its pane's site list
+/// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6), as the host. srv
+/// asks the person. Returns whether it did (`asked`). Blocking: run it off
+/// the UI thread.
+pub(crate) fn backend_browser_navigation(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<bool, String> {
+    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_navigation", body)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    Ok(parsed.pointer("/data/asked").and_then(|v| v.as_bool()) == Some(true))
+}
+
 /// POST `body` to srv's `path` as the host: `X-Host-Token` carries this
 /// host's IPC token, which srv checks against the one we registered and
 /// agents never see. Returns the response body on a 200, else an error with

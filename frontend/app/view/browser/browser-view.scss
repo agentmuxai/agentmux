@@ -162,6 +162,10 @@
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 
+    .browser-limited-to {
+        color: var(--secondary-text-color);
+    }
+
     .browser-take-over {
         margin-left: auto;
     }

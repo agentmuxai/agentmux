@@ -2,7 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { formatElapsedClock, formatElapsedCompact, formatExactTime, formatTimeAgo, formatUtcTimestamp } from "./format-time";
+import {
+    formatAgoPrecise,
+    formatCountdownCompact,
+    formatDurationShort,
+    formatElapsedClock,
+    formatElapsedCompact,
+    formatExactTime,
+    formatTimeAgo,
+    formatTimeLeft,
+    formatUtcTimestamp,
+} from "./format-time";
 
 describe("formatElapsedCompact", () => {
     it("renders seconds only under a minute", () => {
@@ -126,5 +136,43 @@ describe("formatUtcTimestamp", () => {
             if (saved === undefined) delete process.env.TZ;
             else process.env.TZ = saved;
         }
+    });
+});
+
+describe("formatCountdownCompact", () => {
+    it("rounds up, so a wait that hasn't run out never reads 0s", () => {
+        expect(formatCountdownCompact(14_200)).toBe("15s");
+        expect(formatCountdownCompact(1)).toBe("1s");
+        expect(formatCountdownCompact(0)).toBe("0s");
+        expect(formatCountdownCompact(-500)).toBe("0s");
+        expect(formatCountdownCompact(59_001)).toBe("1m 0s");
+        expect(formatCountdownCompact(75_000)).toBe("1m 15s");
+    });
+});
+
+describe("formatTimeLeft", () => {
+    it("is whole seconds, rounded up and clamped at 0", () => {
+        expect(formatTimeLeft(259_100)).toBe("~260s left");
+        expect(formatTimeLeft(300_000)).toBe("~300s left");
+        expect(formatTimeLeft(-2_000)).toBe("~0s left");
+    });
+});
+
+describe("formatDurationShort", () => {
+    it("drops the seconds on a round minute and goes to hours past one", () => {
+        expect(formatDurationShort(93_000)).toBe("1m 33s");
+        expect(formatDurationShort(42_000)).toBe("42s");
+        expect(formatDurationShort(240_000)).toBe("4m");
+        expect(formatDurationShort(2 * 3_600_000 + 14 * 60_000 + 5_000)).toBe("2h 14m");
+    });
+});
+
+describe("formatAgoPrecise", () => {
+    it("counts seconds, then minutes, then hours, rounding down", () => {
+        expect(formatAgoPrecise(0, 999)).toBe("just now");
+        expect(formatAgoPrecise(0, 45_000)).toBe("45s ago");
+        expect(formatAgoPrecise(0, 150_000)).toBe("2m ago");
+        expect(formatAgoPrecise(0, 3 * 3_600_000)).toBe("3h ago");
+        expect(formatAgoPrecise(10_000, 0)).toBe("just now");
     });
 });

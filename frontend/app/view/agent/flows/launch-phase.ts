@@ -13,6 +13,8 @@
  * is ever silent (see the maintainer's rule: a timer without a visible
  * notification is a bug, not an implementation detail).
  */
+import { formatCountdownCompact } from "@/util/format-time";
+
 /** Display-only estimate for how long tier 1's URL-capture wait takes,
  *  shown as a countdown while `waiting-for-login-link` is active. Must
  *  track cli_login.rs's actual URL_CAPTURE_TIMEOUT_SECS (currently 15s) —
@@ -66,11 +68,6 @@ export type LaunchPhase =
     | { kind: "resumed-ready" }
     | { kind: "failed"; reason: string };
 
-function fmtRemaining(ms: number): string {
-    const s = Math.max(0, Math.ceil(ms / 1000));
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
 /** Render `phase` as a footer-line label given the current time (`nowMs`,
  *  typically from the caller's own 1s tick so the countdown live-updates).
  *  Returns null for phases with nothing distinct to say (the generic
@@ -88,11 +85,11 @@ export function formatPhaseLabel(phase: LaunchPhase | null | undefined, nowMs: n
         case "auth-expired":
             return "Login expired — sign in required";
         case "waiting-for-login-link":
-            return `Waiting for login link… up to ${fmtRemaining(phase.deadlineMs - nowMs)}`;
+            return `Waiting for login link… up to ${formatCountdownCompact(phase.deadlineMs - nowMs)}`;
         case "opening-login-terminal":
             return "Opening login terminal";
         case "waiting-for-login-completion":
-            return `Waiting for you to finish logging in… up to ${fmtRemaining(phase.deadlineMs - nowMs)}`;
+            return `Waiting for you to finish logging in… up to ${formatCountdownCompact(phase.deadlineMs - nowMs)}`;
         case "verifying":
             return "Verifying login";
         case "fresh-ready":

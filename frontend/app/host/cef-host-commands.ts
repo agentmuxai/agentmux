@@ -9,8 +9,14 @@ import { invokeBrowserApi, invokeCommand } from "@/app/platform/ipc";
 
 /** `AppApi.browserPanes` on CEF: one host command per method. */
 export const cefBrowserPanes: BrowserPaneHostApi = {
-    create: async (blockId, url, windowLabel, rect) => {
-        await invokeCommand("browser_pane_create", { block_id: blockId, url, window_label: windowLabel, ...rect });
+    create: async (blockId, url, windowLabel, rect, allowedOrigins) => {
+        await invokeCommand("browser_pane_create", {
+            block_id: blockId,
+            url,
+            window_label: windowLabel,
+            ...rect,
+            ...(allowedOrigins?.length ? { allowed_origins: allowedOrigins } : {}),
+        });
     },
     resize: async (blockId, rect) => {
         await invokeCommand("browser_pane_resize", { block_id: blockId, ...rect });

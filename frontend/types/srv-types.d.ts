@@ -782,7 +782,7 @@ declare global {
     // waveobj.MetaTSType
     type BrowserAttention = {
         id: string;
-        kind: "handoff" | "approval";
+        kind: "handoff" | "approval" | "navigation";
         agent?: string;
         /** Hand-off: what the user should do. */
         reason?: string;
@@ -795,6 +795,11 @@ declare global {
         fields?: [string, string][];
         /** When the request is about one of this pane's popup windows: its address. */
         window?: string | null;
+        /** Navigation: where the page tried to go, and that address's site. */
+        url?: string;
+        origin?: string;
+        /** Navigation: it was a popup, which isn't reopened on Allow. */
+        popup?: boolean;
     };
 
     type MetaType = {
@@ -820,6 +825,10 @@ declare global {
          *  opened), shown with Show and Close. Written by srv only
          *  (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). */
         "browser:popup_windows"?: { id: string; url: string }[] | null;
+        /** The sites the driving agent limited this pane to; a navigation
+         *  elsewhere asks the user. Written by srv only
+         *  (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §5). */
+        "browser:allowed_origins"?: string[] | null;
         // Floating-pane window state (host-written; `pane:floating_*` family).
         "pane:floating_placement"?: "normal" | "maximized";
         "pane:floating_normal_rect"?: { left: number; top: number; right: number; bottom: number };
