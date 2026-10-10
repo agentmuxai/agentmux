@@ -50,4 +50,10 @@ peak_mem?: number,
 /**
  * In a task's `exited` list: when it was first seen gone, unix ms.
  */
-exited_ms?: number, };
+exited_ms?: number, 
+/**
+ * The agent tool call this process runs, as the agent described it
+ * ("Run the srv tests"): set on the wrapper at the root of the call's
+ * process tree (`backend::tool_calls`).
+ */
+started_by?: string, };

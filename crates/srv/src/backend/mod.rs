@@ -113,6 +113,7 @@ pub mod sysinfo;
 pub mod tower_agentmux;
 pub mod tower_peers;
 pub mod tower_remote;
+pub mod tool_calls;
 pub mod tower_sampler;
 pub mod storage;
 pub mod subagent_watcher;

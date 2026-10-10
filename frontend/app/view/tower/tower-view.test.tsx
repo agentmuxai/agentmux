@@ -360,6 +360,26 @@ describe("Tower", () => {
         expect(within(gone).getByText("1.0 GB")).toBeInTheDocument();
     });
 
+    it("the process a tool call runs says which call, in both views", async () => {
+        const snap = snapshot(true);
+        snap.tasks[0].processes[1].started_by = "Run the srv tests";
+        snap.host!.processes.push({
+            id: "11:1",
+            pid: 11,
+            name: "node.exe",
+            cpu: 1.5,
+            mem: GB / 2,
+            task: "block-a",
+            started_by: "Run the srv tests",
+        });
+        sample.mockResolvedValue(snap);
+        renderTower();
+        const row = (await screen.findByText("node.exe")).closest("tr")!;
+        expect(within(row).getByText("⟵ Run the srv tests")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
+        await waitFor(() => expect(screen.getAllByText("⟵ Run the srv tests").length).toBeGreaterThan(0));
+    });
+
     it("keeps each row, and updates it, across a refresh", async () => {
         vi.useFakeTimers();
         renderTower();
