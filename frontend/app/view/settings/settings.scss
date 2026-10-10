@@ -421,7 +421,6 @@
 .widget-row-kind,
 .widget-row-description,
 .widget-row-permissions,
-.widget-approval-meta,
 .widget-row-confirm {
     color: var(--secondary-text-color);
 }
@@ -452,23 +451,9 @@
     border-radius: var(--radius-md);
     padding: var(--space-2);
     margin: var(--space-2) 0;
-
-    ul {
-        margin: var(--space-1) 0 var(--space-2) var(--space-4);
-    }
-
-    li.strong {
-        font-weight: 600;
-        color: var(--warning-color);
-    }
 }
 
 .widget-approval-title {
     font-weight: 600;
     margin-bottom: var(--space-1);
-}
-
-.widget-approval-warning {
-    color: var(--warning-color);
-    margin: var(--space-2) 0;
 }

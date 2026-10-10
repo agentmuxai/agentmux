@@ -21,6 +21,7 @@ mod presets;
 mod pty_shell;
 mod shell;
 mod ui;
+mod widgets;
 mod work;
 
 /// What every handler may need from the MCP process.
@@ -85,7 +86,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         memory,
         global_memory,
         presets,
-        accounts
+        accounts,
+        widgets
     );
     anyhow::bail!("unknown tool: {name}")
 }
@@ -108,6 +110,7 @@ mod tests {
         ("pty_shell", include_str!("pty_shell.rs")),
         ("shell", include_str!("shell.rs")),
         ("ui", include_str!("ui.rs")),
+        ("widgets", include_str!("widgets.rs")),
         ("work", include_str!("work.rs")),
     ];
 

@@ -1,6 +1,6 @@
 # User widgets and the widget API
 
-**Status:** active — W1 (packages and approval, §13) in PR #4575; W2 (the sandboxed runtime and the SDK) in PR #4581; W3 (scoped access) in PR #4582; W4 to W6 not started.
+**Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 and W6 not started.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
 **Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
@@ -77,7 +77,7 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
 - Only files inside the package folder; `..`, absolute paths and symlinks are refused. The `<content-hash>` segment must equal the approved hash (§8.2), so a URL always means one exact version of the code. Each file is hashed again on every read and compared with its hash at approval, so an edited file is never served (409), whether or not srv's folder watcher noticed the edit.
 - No auth key: the URL is what the iframe loads, and package files aren't secrets. `<key>` is an HMAC of the instance secret over the id and hash (srv hands the full URL to the UI in `widgets.list`), so a web page elsewhere on the machine can't name a package's files.
 - Every response carries `Content-Security-Policy` (§6.1), `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache`, `Referrer-Policy: no-referrer`, a content type from the extension, and `Access-Control-Allow-Origin: *`: the widget's document has an opaque origin, so its module scripts load in CORS mode with `Origin: null`.
-- The SDK and its stylesheet are served the same way at `GET /agentmux/widget-sdk/v1.js` and `GET /agentmux/widget-sdk/am-widget.css` (§7).
+- The SDK and its stylesheet are served the same way at `GET /agentmux/widget-sdk/v1.js` and `GET /agentmux/widget-sdk/am-widget.css` (§7), and its reference for agents at `v1.d.ts` and `README.md` (§10).
 
 ### 5.3 The manifest, `widget.json`
 
@@ -112,13 +112,13 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
 | `version` | string | yes | Semver (`1.2.0`). |
 | `description` | string | no | One or two sentences, at most 300 characters. |
 | `author`, `homepage` | string | no | Shown in the prompt. `homepage` must be `https:`. |
-| `icon` | string | no | A Font Awesome name (as built-in widgets use), or a path to an SVG/PNG in the package. |
+| `icon` | string | no | A Font Awesome name (as built-in widgets use). An image in the package isn't supported yet. |
 | `defaultHue` | integer 0–359 | no | The pane color hue, as `SPEC_WIDGET_DEFAULT_PANE_COLORS`. |
 | `kind` | `"sandboxed"` \| `"trusted"` | no, default `"sandboxed"` | §4. |
 | `entry` | string | no | The default entry for panes that don't name one: `index.html` (sandboxed) or `index.js` (trusted). |
 | `permissions` | string[] | no | §6.4. Unknown names make the package invalid. Ignored for `trusted` (it has full access). |
-| `minAgentMux` | string | no | The lowest AgentMux version the widget works with; an older AgentMux lists it as needing an update. |
-| `contributes.panes` | object[] | yes, at least one | Each: `name` (`^[a-z0-9-]+$`, the part after `/` in the view name), `label`, optional `icon`, `entry`, `defaultMeta` (merged into a new pane's meta, keys under `widget:` only), `singleton` (bool: a click focuses the open pane instead of adding one). |
+| `minAgentMux` | string | no | The lowest AgentMux version the widget works with; an older AgentMux lists it as needing an update. Read, but not checked yet. |
+| `contributes.panes` | object[] | yes, at least one | Each: `name` (`^[a-z0-9-]+$`, the part after `/` in the view name), `label`, optional `icon`, `entry`, `defaultMeta` (merged into a new pane's meta, keys under `widget:` only), `singleton` (bool: a click focuses the open pane instead of adding one; read, but not acted on yet). |
 | `contributes.commands`, `contributes.statusItems` | | reserved | W5. Ignored until then; not an error. |
 
 **Validation** happens in srv when it scans the folder (§8.1). An invalid package is listed in Settings with its first error ("`version` isn't semver"), never loaded.
@@ -247,7 +247,7 @@ A dormant widget keeps running (it's an iframe), but should pause timers and pol
 
 ## 7. The SDK, `@agentmux/widget-sdk`
 
-One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it, and also published to npm for widgets built with a bundler.
+One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it; a widget built with a bundler imports the same URL and marks it external. Publishing it to npm, for types and completion, is not done yet: the `@agentmux` scope is the operator's to set up.
 
 ```js
 import { connect } from "/agentmux/widget-sdk/v1.js";
@@ -336,10 +336,18 @@ Agents can build widgets for the user and open them:
 | MCP tool | Params | Does |
 |---|---|---|
 | `WidgetList` | — | Installed packages: id, name, version, kind, state, permissions, views |
-| `WidgetInstall` | `{ path: string }` (a folder or `.zip` in the agent's workspace) | Validates and copies the package and asks the user to approve it (§8.3); returns once they answer: `installed`, `cancelled`, or the validation error |
+| `WidgetInstall` | `{ path: string, replace?: boolean, wait_secs?: number }` (a folder, its `widget.json` or a `.zip`; a relative path is in the agent's workspace) | Validates and copies the package and asks the user to approve it (§8.3); returns once they answer or the wait ends (300 s by default, at most 600): `installed` (with its views), `declined`, `pending` (the request stays open for the user), or the validation error. An already-approved version is `installed` at once; a package the user turned off stays off |
 | `OpenWidget` | `{ view: string, meta?: object, split?: "right"\|"down" }` | Opens a pane of an installed, approved widget next to the agent's pane |
 
-An agent can't approve its own install or raise a widget's permissions; every install is the user's decision in the prompt. A workspace skill, "Write an AgentMux widget", gives agents the manifest rules, the SDK and the samples, and the test loop (`WidgetInstall`, `OpenWidget`, read the pane's error, fix, install again).
+An agent can't approve its own install or raise a widget's permissions; every install is the user's decision in the prompt.
+
+How it works:
+- srv's `POST /api/v1/widgets/install` installs the package, and if it isn't approved at that version, holds a request (`backend/widget_requests.rs`) and waits.
+- Every UI hears of the requests waiting (the `widgetrequests` event, and `widgets.requests` for a UI that starts later). Each one opens a prompt naming the agent (from its signed identity, the one UI automation and SSH consent use; a request without one that verifies says "not a verified agent", never a name the caller chose), with exactly what Settings → Widgets shows for the package: version, kind, each permission in plain words, or the trusted-widget warning.
+- The answer goes to srv the only way an approval can, through the host (§8.3). The host's approval route answers every request for that version, so approving in Settings answers the agent too; an answer for one version ends requests for the widget's other versions.
+- A newer version replaces an older request for the same widget; a version asked for twice is one prompt.
+
+What agents are told: an Operator Config entry, "Building widgets", given to host agents, says what a widget is, how to write the smallest one, the loop (`WidgetInstall`, `OpenWidget`, `UIScreenshot` of its pane, fix, install again), and to ask for as few permissions as possible and never make a widget trusted unless the user asks. The full reference is served by srv where an agent can read it: `/agentmux/widget-sdk/README.md` and `/agentmux/widget-sdk/v1.d.ts`. The App API entry lists the three tools.
 
 ## 11. Security summary
 
