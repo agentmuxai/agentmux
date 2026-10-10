@@ -409,6 +409,17 @@ describe("exited processes and CPU time", () => {
         started_at_ms: pid,
     });
 
+    it("a pid an exited process had and a live one reused: each child goes to its own parent", () => {
+        const old: TowerProcess = { ...q(100, 1, "cargo", 1, true), id: "100:old", started_at_ms: 10 };
+        const reused: TowerProcess = { ...q(100, 1, "node", 1), id: "100:new", started_at_ms: 50 };
+        const ofOld: TowerProcess = { ...q(7, 100, "rustc", 1, true), started_at_ms: 20 };
+        const ofReused: TowerProcess = { ...q(8, 100, "npm", 1), started_at_ms: 60 };
+        const roots = buildProcessTree([reused, ofReused, old, ofOld]);
+        const kids = (id: string) => roots.find((r) => r.process.id === id)!.children.map((c) => c.process.name);
+        expect(kids("100:new")).toEqual(["npm"]);
+        expect(kids("100:old")).toEqual(["rustc"]);
+    });
+
     it("a subtree's CPU time includes what its exited processes used", () => {
         const [cargo] = buildProcessTree([q(1, 0, "cargo", 1), q(2, 1, "rustc", 2), q(3, 1, "rustc", 30, true)]);
         expect(cargo.cpuTime).toBe(33e9);

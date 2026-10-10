@@ -367,17 +367,38 @@ export interface ProcessNode {
  *  it is in the same list and started no later than it: a reused PID is
  *  never a parent. A process without one is a root. */
 export function buildProcessTree(processes: TowerProcess[]): ProcessNode[] {
-    const byPid = new Map<number, TowerProcess>();
-    for (const p of processes) byPid.set(p.pid, p);
+    // More than one process can have a pid: one that exited (still listed for
+    // a minute) and a later one that reused it.
+    const byPid = new Map<number, TowerProcess[]>();
+    for (const p of processes) {
+        const list = byPid.get(p.pid);
+        if (list) list.push(p);
+        else byPid.set(p.pid, [p]);
+    }
+    // The parent is the process with the child's ppid that started no later
+    // than it, and of those the latest to start (an earlier one with the pid
+    // had exited before the child began); with no start times to tell them
+    // apart, the live one.
+    const parentOf = (p: TowerProcess): TowerProcess | undefined => {
+        if (p.ppid == null || p.ppid === p.pid) return undefined;
+        const candidates = (byPid.get(p.ppid) ?? []).filter(
+            (c) =>
+                c.id !== p.id &&
+                (c.started_at_ms == null || p.started_at_ms == null || c.started_at_ms <= p.started_at_ms)
+        );
+        const rank = (c: TowerProcess) => [c.started_at_ms ?? -1, c.exited_ms == null ? 1 : 0];
+        return candidates.sort((a, b) => {
+            const [sa, la] = rank(a);
+            const [sb, lb] = rank(b);
+            return sb - sa || lb - la;
+        })[0];
+    };
     const nodes = new Map<string, ProcessNode>(processes.map((p) => [p.id, { process: p, children: [] }]));
     const roots: ProcessNode[] = [];
     for (const p of processes) {
-        const parent = p.ppid != null && p.ppid !== p.pid ? byPid.get(p.ppid) : undefined;
-        const trusted =
-            parent != null &&
-            (parent.started_at_ms == null || p.started_at_ms == null || parent.started_at_ms <= p.started_at_ms);
+        const parent = parentOf(p);
         const node = nodes.get(p.id)!;
-        if (trusted) nodes.get(parent.id)!.children.push(node);
+        if (parent) nodes.get(parent.id)!.children.push(node);
         else roots.push(node);
     }
     // A cycle (two processes naming each other) would leave both unreached:
