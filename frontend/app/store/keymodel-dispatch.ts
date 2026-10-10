@@ -6,6 +6,7 @@ import {
     lastResolvedCommand,
     listShortcuts,
     noteResolved,
+    paneRefusal,
     planKeyPress,
     runCommand,
     type KeyPressPlan,
@@ -306,14 +307,17 @@ export function installShortcutApi() {
     });
     (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
         list: () => listShortcuts(keyPlatform()),
-        run: (command: string, target?: string): RunResult => runCommand(command, target || undefined, deps()),
+        run: (command: string, target?: string): RunResult | Promise<RunResult> => runCommand(command, target || undefined, deps()),
         // PressKeys: what to send, after focusing `target`. The host then
         // sends the events and reads `last()`.
         plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
             if (target && !focusPaneForApi(target)) return { reason: `pane ${target} is not in the active tab of this window` };
             // A key goes where the caret is: refuse rather than press it into another pane.
             if (target && !(await caretArrives(target))) return { reason: `pane ${target} didn't take keyboard focus` };
-            return planKeyPress(keys, keyPlatform());
+            const plan = planKeyPress(keys, keyPlatform());
+            // The pane's own guard (the terminal's paste guard) sees the key too.
+            const refused = "commands" in plan ? await paneRefusal(target ?? focusedBlockId(), plan.commands) : undefined;
+            return refused ? { reason: refused } : plan;
         },
         focus: (blockId: string): boolean => focusPaneForApi(blockId),
         focused: focusedBlockId,
