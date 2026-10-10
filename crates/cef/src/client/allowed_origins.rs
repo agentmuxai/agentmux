@@ -31,6 +31,21 @@ pub struct SiteLimits {
 
 const EARLY_LIST_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
+impl SiteLimits {
+    /// `pane`'s list, if it has one. An early copy srv never confirmed ends
+    /// after `EARLY_LIST_GRACE` here, without waiting for srv's next push: a
+    /// pane taken over (or never created) must not stay limited until then.
+    pub fn list(&self, pane: &str) -> Option<Vec<String>> {
+        let mut early = self.early.lock();
+        if early.get(pane).is_some_and(|at| at.elapsed() >= EARLY_LIST_GRACE) {
+            early.remove(pane);
+            self.lists.lock().remove(pane);
+            return None;
+        }
+        self.lists.lock().get(pane).cloned()
+    }
+}
+
 /// Replace the lists with srv's (`allowed`), keeping each early copy srv's
 /// push doesn't cover yet.
 pub(crate) fn replace_lists(limits: &SiteLimits, allowed: std::collections::HashMap<String, Vec<String>>) {
@@ -94,10 +109,8 @@ impl AgentMuxHandler {
     fn off_list(&self, pane: &str, url: &str) -> bool {
         self.state
             .site_limits
-            .lists
-            .lock()
-            .get(pane)
-            .is_some_and(|list| !agentmux_common::allowed_origins::allows(list, url))
+            .list(pane)
+            .is_some_and(|list| !agentmux_common::allowed_origins::allows(&list, url))
     }
 
     /// `on_before_browse`, main frame: true (cancel) when `browser` is a
@@ -196,5 +209,16 @@ mod tests {
         // And a push without it after that drops it: the limit ended.
         replace_lists(&limits, std::collections::HashMap::new());
         assert!(!limits.lists.lock().contains_key("new"));
+    }
+
+    #[test]
+    fn an_early_list_srv_never_confirms_ends_on_its_own() {
+        let limits = SiteLimits::default();
+        limit_before_create(&limits, "gone", Some(&serde_json::json!(["example.com"])));
+        assert!(limits.list("gone").is_some());
+        // Its grace ran out with no push from srv covering it.
+        *limits.early.lock().get_mut("gone").unwrap() -= EARLY_LIST_GRACE;
+        assert!(limits.list("gone").is_none());
+        assert!(!limits.lists.lock().contains_key("gone"));
     }
 }
