@@ -327,6 +327,9 @@ fn wrapper_invocation(tool_id: &str, b64: &str) -> String {
 `shell_quote` wraps in single quotes (Unix) or `"` (Win32 cmd) to survive whatever shell Claude's Bash tool uses internally (`bash -c "..."` on Unix; `cmd.exe /c "..."` on Windows ConPTY).
 
 > [!IMPORTANT]
+> **Superseded for Claude Code, 2026-10-10:** commands are no longer rewritten when srv sets `CLAUDE_CODE_SHELL_PREFIX` (the default); the hook only records each call, and `agentmux-bashwrap` runs as the CLI's shell prefix. The rewrite below remains the fallback. See `SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md`.
+
+> [!IMPORTANT]
 > **Amended 2026-10-10.** `updatedInput` *replaces* the tool's whole input; Claude Code does not merge it. The sketch above, which returns `command` alone, made the CLI drop the call's `description`, `timeout` and `run_in_background`: background calls ran in the foreground, every command was cut at 120 s, and tasks were labelled with the wrapper. The hook (`crates/bashwrap/src/hook.rs`) now copies `tool_input` and replaces only `command`. See `docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`.
 
 ### 5.3 Merging with user-provided hooks

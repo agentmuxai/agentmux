@@ -16,11 +16,17 @@
 //!   MPS broker (HTTP), and prints the aggregated output on its own
 //!   stdout for Claude's native Bash tool to capture as `tool_result`.
 //!
-//! - `hook` — reads a PreToolUse JSON payload on stdin and emits a
-//!   hook response that rewrites the command so Claude's native
-//!   Bash invokes `agentmux-bashwrap exec` instead. The original
-//!   command is base64-encoded into the rewrite argv so quoting +
-//!   multi-line bodies survive.
+//! - `hook` — reads a PreToolUse JSON payload on stdin. When the CLI's
+//!   shell prefix is this binary, it records the call for the prefix
+//!   process and changes nothing. Otherwise it emits a hook response that
+//!   rewrites the command so Claude's native Bash invokes
+//!   `agentmux-bashwrap exec` instead, the command base64-encoded into the
+//!   rewrite argv so quoting + multi-line bodies survive.
+//!
+//! - prefix mode (one argument: the CLI's script) — Claude Code's
+//!   `CLAUDE_CODE_SHELL_PREFIX`. Runs the script the way `exec` runs a
+//!   command, for the call the hook recorded. See `prefix.rs` and
+//!   `docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md`.
 //!
 //! - `precompact` — registered as Claude Code's `PreCompact` hook.
 //!   Fires the instant compaction begins; pings the sidecar's MPS
@@ -49,6 +55,7 @@ mod askpass;
 mod bash_wrap;
 mod hook;
 mod precompact;
+mod prefix;
 mod sessionstart;
 #[cfg(test)]
 mod test_env_lock;
@@ -88,6 +95,15 @@ fn main() -> Result<()> {
     // argument, so this is decided before clap sees it (askpass.rs).
     if let Some(code) = askpass::run_if_asked() {
         std::process::exit(code);
+    }
+
+    // Claude Code's shell prefix: the CLI's script is the only argument, so
+    // this too is decided before clap sees it (prefix.rs).
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(script) = prefix::prefix_script(&argv) {
+        let rt = tokio::runtime::Runtime::new()?;
+        let exit_code = rt.block_on(bash_wrap::run_prefix(script))?;
+        std::process::exit(exit_code);
     }
 
     let cli = Cli::parse();

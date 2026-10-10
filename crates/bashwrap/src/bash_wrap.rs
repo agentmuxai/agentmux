@@ -481,10 +481,60 @@ struct LineEvent {
 /// the wrapper's own process exit. Without this, Claude's native Bash
 /// tool would see success for every wrapped command regardless of the
 /// actual outcome.
-pub async fn run(mut args: Args) -> Result<i32> {
+pub async fn run(args: Args) -> Result<i32> {
+    let command = decode_command(&args.b64_cmd)?;
+    run_command(args, command).await
+}
+
+/// Prefix mode: run the CLI's whole `script` for the Bash call it belongs to,
+/// streaming it exactly as `exec` streams a command. The call is the record
+/// the hook left for this session's command (prefix.rs). A script that can't
+/// be linked to a call (a `claude` run by hand or nested inside an agent,
+/// whose session has no records) runs as plain bash, as if there were no
+/// prefix: no live output, nothing else changed.
+/// docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.2, §2.3.
+pub async fn run_prefix(script: String) -> Result<i32> {
+    let extracted = crate::prefix::extract_command(&script);
+    let session = std::env::var(crate::prefix::SESSION_ID_ENV).ok().filter(|s| !s.is_empty());
+    let record = session
+        .as_deref()
+        .and_then(|s| crate::prefix::claim(s, extracted.as_ref().map(|(cmd, _)| cmd.as_str())));
+    let Some(record) = record else {
+        tracing::info!(target: "bashwrap", session = ?session, extracted = extracted.is_some(), "prefix: no call to link; running the script as plain bash");
+        return run_plain(&script);
+    };
+    // The tee rewrite works on the model's command, so it is applied to the
+    // command inside the script's `eval` and the script rebuilt around it.
+    // Without the command (the CLI's format changed) the script runs as is.
+    let script = match &extracted {
+        Some((command, range)) => match crate::hook::tee_redirect_rewrite(command) {
+            Some(teed) => crate::prefix::replace_command(&script, range.clone(), &teed),
+            None => script,
+        },
+        None => script,
+    };
+    let args = Args {
+        tool_id: record.tool_use_id,
+        b64_cmd: String::new(),
+        block_id: None,
+        declared_background: record.run_in_background,
+    };
+    run_command(args, script).await
+}
+
+/// Run `script` with bash on this process's own stdio, for its exit code.
+fn run_plain(script: &str) -> Result<i32> {
+    let bash = locate_bash()?;
+    let mut cmd = std::process::Command::new(&bash);
+    cmd.arg("-c").arg(script);
+    cmd.no_window();
+    let status = cmd.status().with_context(|| format!("running {}", bash.display()))?;
+    Ok(status.code().unwrap_or(1))
+}
+
+async fn run_command(mut args: Args, command: String) -> Result<i32> {
     detach_declared_background_session(&args);
     log_relevant_env();
-    let command = decode_command(&args.b64_cmd)?;
 
     // `block_id` controls the MPS publish scope. Prefer the explicit
     // CLI arg, but fall back to AGENTMUX_BLOCKID env (set by

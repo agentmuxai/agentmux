@@ -252,6 +252,12 @@ pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
     // The host path of the agent's workspace; srv sets it for host agents
     // only, this keeps a stale `cmd:env` copy out of a container too.
     "AGENTMUX_AGENT_WORKDIR",
+    // Names the host's `agentmux-bashwrap`. The image has its own copy, which
+    // may predate prefix mode and would then fail every Bash command it was
+    // handed a script for; without the variable the hook in the container
+    // rewrites commands as before
+    // (SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.4).
+    "CLAUDE_CODE_SHELL_PREFIX",
 ];
 
 /// Shared container manager. Clone-on-Arc; cheap to pass around.

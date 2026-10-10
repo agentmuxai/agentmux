@@ -1,0 +1,370 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Prefix mode: `agentmux-bashwrap '<script>'` as Claude Code's
+//! `CLAUDE_CODE_SHELL_PREFIX`.
+//!
+//! The CLI runs every Bash tool command as `<prefix> '<its script>'` when the
+//! variable is set, and leaves the tool call itself alone: its permission
+//! rules, labels and checks see the model's own command. The `PreToolUse`
+//! hook records each call here (`register`) instead of rewriting it; the
+//! prefix process takes the model's command back out of the CLI's script,
+//! claims the matching record for the call's `tool_use_id`, and runs the
+//! whole script the way `exec` runs a command (bash_wrap.rs).
+//!
+//! docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.
+
+use std::ffi::OsString;
+use std::ops::Range;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
+/// The CLI's environment variable naming the prefix.
+pub const SHELL_PREFIX_ENV: &str = "CLAUDE_CODE_SHELL_PREFIX";
+/// The CLI's session id, as the prefix process sees it. Equal to the
+/// `session_id` in the hook's payload.
+pub const SESSION_ID_ENV: &str = "CLAUDE_CODE_SESSION_ID";
+/// Overrides where records are kept (tests).
+const CALLS_DIR_OVERRIDE_ENV: &str = "AGENTMUX_BASHWRAP_CALLS_DIR";
+/// Records older than this are deleted on each claim: a call the CLI never
+/// ran (denied, interrupted) leaves its record behind.
+const RECORD_MAX_AGE: Duration = Duration::from_secs(3600);
+/// The subcommands, which a lone argument must not be mistaken for.
+const SUBCOMMANDS: &[&str] = &["exec", "hook", "precompact", "sessionstart", "help"];
+
+/// One Bash call, as the hook saw it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallRecord {
+    pub tool_use_id: String,
+    pub command: String,
+    #[serde(default)]
+    pub run_in_background: bool,
+    pub created_ms: u64,
+}
+
+/// The script, when this process was started as the CLI's shell prefix:
+/// exactly one argument, which is neither a subcommand nor a flag. The CLI's
+/// script always has spaces in it (`source … && eval '…'`), which a
+/// subcommand never does.
+pub fn prefix_script(args: &[OsString]) -> Option<String> {
+    if args.len() != 2 {
+        return None;
+    }
+    let script = args[1].to_str()?;
+    let looks_like_cli_arg = script.starts_with('-') || SUBCOMMANDS.contains(&script);
+    (!looks_like_cli_arg && script.contains(char::is_whitespace)).then(|| script.to_string())
+}
+
+/// Whether this process runs under a CLI whose shell prefix is AgentMux's
+/// wrapper, so the hook records calls instead of rewriting them.
+pub fn prefix_active() -> bool {
+    std::env::var_os(SHELL_PREFIX_ENV)
+        .map(|v| is_bashwrap_path(Path::new(&v)))
+        .unwrap_or(false)
+}
+
+fn is_bashwrap_path(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("agentmux-bashwrap"))
+        .unwrap_or(false)
+}
+
+/// The model's command inside the CLI's script, and where its quoted form
+/// sits in the script: the shell word after the CLI's `eval `, which the CLI
+/// quotes with single quotes (an embedded `'` becomes `'"'"'`). `None` when
+/// the script doesn't have one, e.g. after a change to the CLI's format.
+pub fn extract_command(script: &str) -> Option<(String, Range<usize>)> {
+    // The CLI's own `eval` comes before the command, which is inside it.
+    let at = script.find("&& eval '")? + "&& eval ".len();
+    let (command, end) = read_shell_word(script, at)?;
+    Some((command, at..end))
+}
+
+/// Read one shell word starting at `start`: single-quoted, double-quoted and
+/// backslash-escaped parts, up to unquoted whitespace or the end. Returns the
+/// word's value and the byte offset after it.
+fn read_shell_word(s: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = s.as_bytes();
+    let mut out = String::new();
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' => {
+                let close = s[i + 1..].find('\'')? + i + 1;
+                out.push_str(&s[i + 1..close]);
+                i = close + 1;
+            }
+            b'"' => {
+                i += 1;
+                loop {
+                    let c = *bytes.get(i)?;
+                    if c == b'"' {
+                        i += 1;
+                        break;
+                    }
+                    if c == b'\\' && matches!(bytes.get(i + 1), Some(b'"' | b'\\' | b'$' | b'`')) {
+                        out.push(bytes[i + 1] as char);
+                        i += 2;
+                        continue;
+                    }
+                    let ch = s[i..].chars().next()?;
+                    out.push(ch);
+                    i += ch.len_utf8();
+                }
+            }
+            b'\\' => {
+                let ch = s[i + 1..].chars().next()?;
+                out.push(ch);
+                i += 1 + ch.len_utf8();
+            }
+            c if c.is_ascii_whitespace() => break,
+            _ => {
+                let ch = s[i..].chars().next()?;
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+    }
+    (i > start).then_some((out, i))
+}
+
+/// `s` as one single-quoted shell word, the way the CLI quotes it.
+pub fn single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\"'\"'"))
+}
+
+/// The script with the command at `range` replaced by `command`.
+pub fn replace_command(script: &str, range: Range<usize>, command: &str) -> String {
+    format!("{}{}{}", &script[..range.start], single_quote(command), &script[range.end..])
+}
+
+fn calls_root() -> Option<PathBuf> {
+    if let Some(over) = std::env::var_os(CALLS_DIR_OVERRIDE_ENV).filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(over));
+    }
+    Some(dirs::home_dir()?.join(".agentmux").join("state").join("bashwrap-calls"))
+}
+
+fn session_dir(session_id: &str) -> Option<PathBuf> {
+    Some(calls_root()?.join(sanitize(session_id)))
+}
+
+fn sanitize(raw: &str) -> String {
+    raw.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Record a call for the prefix process to claim. Written to a temporary
+/// name and renamed, so a claim never reads half a record.
+pub fn register(session_id: &str, record: &CallRecord) -> std::io::Result<()> {
+    let dir = session_dir(session_id)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let name = format!("{}.json", sanitize(&record.tool_use_id));
+    let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+    std::fs::write(&tmp, serde_json::to_vec(record)?)?;
+    std::fs::rename(&tmp, dir.join(name))
+}
+
+/// Claim the record of the call this script runs: the oldest one for the
+/// session whose command is `command`; failing that (no command, or no
+/// match), the session's only record. A claim renames the record away, so
+/// two prefix processes never claim the same call. `None` when there is
+/// nothing to claim: the script then runs unlinked.
+pub fn claim(session_id: &str, command: Option<&str>) -> Option<CallRecord> {
+    let dir = session_dir(session_id)?;
+    let mut records = read_records(&dir);
+    records.sort_by_key(|(_, r)| r.created_ms);
+    let matching: Vec<&(PathBuf, CallRecord)> = match command {
+        Some(cmd) => records.iter().filter(|(_, r)| r.command == cmd).collect(),
+        None => Vec::new(),
+    };
+    let candidates: Vec<&(PathBuf, CallRecord)> = if !matching.is_empty() {
+        matching
+    } else if records.len() == 1 {
+        records.iter().collect()
+    } else {
+        Vec::new()
+    };
+    for (path, record) in candidates {
+        let claimed = path.with_extension(format!("claimed.{}", std::process::id()));
+        if std::fs::rename(path, &claimed).is_ok() {
+            let _ = std::fs::remove_file(&claimed);
+            return Some(record.clone());
+        }
+    }
+    None
+}
+
+/// The session's unclaimed records, deleting any past their age.
+fn read_records(dir: &Path) -> Vec<(PathBuf, CallRecord)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let cutoff = now_ms().saturating_sub(RECORD_MAX_AGE.as_millis() as u64);
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_record = path.extension().and_then(|e| e.to_str()) == Some("json")
+            && !path.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.');
+        if !is_record {
+            continue;
+        }
+        match std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<CallRecord>(&b).ok()) {
+            Some(record) if record.created_ms >= cutoff => out.push((path, record)),
+            _ => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    out
+}
+
+/// A record for a call the hook just saw.
+pub fn new_record(tool_use_id: &str, command: &str, run_in_background: bool) -> CallRecord {
+    CallRecord {
+        tool_use_id: tool_use_id.to_string(),
+        command: command.to_string(),
+        run_in_background,
+        created_ms: now_ms(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The script Claude Code 2.1.288 passed to the prefix, recorded for
+    /// `echo 'it''s' "q" && echo two > out.txt; cat out.txt`.
+    const CLI_SCRIPT: &str = r#"source /c/Users/u/AppData/Local/Temp/config/shell-snapshots/snapshot-bash-1.sh 2>/dev/null || true && export TEMP='C:\Users\u\AppData\Local\Temp' TMP='C:\Users\u\AppData\Local\Temp' && { shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'echo '"'"'it'"'"''"'"'s'"'"' "q" && echo two > out.txt; cat out.txt' < /dev/null && pwd -P >| /c/Users/u/AppData/Local/Temp/claude-941e-cwd"#;
+
+    fn os(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn a_lone_script_argument_is_a_prefix_call() {
+        assert_eq!(prefix_script(&os(&["bw", CLI_SCRIPT])).as_deref(), Some(CLI_SCRIPT));
+    }
+
+    #[test]
+    fn subcommands_flags_and_other_shapes_are_not() {
+        for args in [
+            vec!["bw", "hook"],
+            vec!["bw", "exec"],
+            vec!["bw", "--version"],
+            vec!["bw", "--help"],
+            vec!["bw"],
+            vec!["bw", "exec", "--tool-id=x"],
+            vec!["bw", "nospaces"],
+        ] {
+            assert_eq!(prefix_script(&os(&args)), None, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn takes_the_command_out_of_the_clis_script() {
+        let (command, range) = extract_command(CLI_SCRIPT).unwrap();
+        assert_eq!(command, r#"echo 'it''s' "q" && echo two > out.txt; cat out.txt"#);
+        assert!(CLI_SCRIPT[range.end..].starts_with(" < /dev/null && pwd -P"));
+        assert!(CLI_SCRIPT[..range.start].ends_with("&& eval "));
+    }
+
+    #[test]
+    fn putting_the_command_back_round_trips() {
+        let (command, range) = extract_command(CLI_SCRIPT).unwrap();
+        assert_eq!(replace_command(CLI_SCRIPT, range.clone(), &command), CLI_SCRIPT);
+        let rewritten = replace_command(CLI_SCRIPT, range, "echo 'a' | tee out.txt");
+        assert_eq!(extract_command(&rewritten).unwrap().0, "echo 'a' | tee out.txt");
+    }
+
+    #[test]
+    fn multi_line_and_unicode_commands_survive() {
+        let cmd = "for f in *; do\n  echo \"$f\" — ✓ 'x'\ndone";
+        let script = format!("source s.sh || true && eval {} < /dev/null && pwd -P >| f", single_quote(cmd));
+        assert_eq!(extract_command(&script).unwrap().0, cmd);
+    }
+
+    #[test]
+    fn a_script_without_the_clis_eval_has_no_command() {
+        assert_eq!(extract_command("echo hi && ls"), None);
+        assert_eq!(extract_command("x && eval 'unterminated"), None);
+    }
+
+    #[test]
+    fn only_a_path_to_agentmux_bashwrap_turns_the_prefix_on() {
+        assert!(is_bashwrap_path(Path::new("C:/Program Files/AgentMux/tools/bin/agentmux-bashwrap.exe")));
+        assert!(is_bashwrap_path(Path::new("/usr/local/bin/agentmux-bashwrap")));
+        assert!(!is_bashwrap_path(Path::new("/usr/local/bin/logger.sh")));
+        assert!(!is_bashwrap_path(Path::new("")));
+    }
+
+    fn with_calls_dir<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bashwrap-calls-test-{}-{}", std::process::id(), now_ms()));
+        std::env::set_var(CALLS_DIR_OVERRIDE_ENV, &dir);
+        let out = f();
+        std::env::remove_var(CALLS_DIR_OVERRIDE_ENV);
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
+
+    #[test]
+    fn a_claim_takes_the_matching_record_once() {
+        with_calls_dir(|| {
+            register("s1", &new_record("toolu_a", "cargo build", false)).unwrap();
+            register("s1", &new_record("toolu_b", "npm test", true)).unwrap();
+            register("s1", &new_record("toolu_c", "ls", false)).unwrap();
+            let got = claim("s1", Some("npm test")).unwrap();
+            assert_eq!((got.tool_use_id.as_str(), got.run_in_background), ("toolu_b", true));
+            assert_eq!(claim("s1", Some("npm test")), None, "claimed once: two others left, neither matches");
+            assert_eq!(claim("s1", Some("cargo build")).unwrap().tool_use_id, "toolu_a");
+            // One record left: a command that doesn't match exactly (the CLI
+            // may tidy it) still gets the session's only waiting call.
+            assert_eq!(claim("s1", Some("ls ")).unwrap().tool_use_id, "toolu_c");
+        });
+    }
+
+    #[test]
+    fn identical_commands_are_claimed_oldest_first() {
+        with_calls_dir(|| {
+            let mut first = new_record("toolu_1", "make", false);
+            first.created_ms -= 10;
+            register("s", &first).unwrap();
+            register("s", &new_record("toolu_2", "make", false)).unwrap();
+            assert_eq!(claim("s", Some("make")).unwrap().tool_use_id, "toolu_1");
+            assert_eq!(claim("s", Some("make")).unwrap().tool_use_id, "toolu_2");
+        });
+    }
+
+    #[test]
+    fn without_a_match_only_a_lone_record_is_claimed() {
+        with_calls_dir(|| {
+            register("s", &new_record("toolu_1", "a", false)).unwrap();
+            assert_eq!(claim("s", None).unwrap().tool_use_id, "toolu_1");
+            register("s", &new_record("toolu_2", "b", false)).unwrap();
+            register("s", &new_record("toolu_3", "c", false)).unwrap();
+            assert_eq!(claim("s", Some("zzz")), None, "two candidates: ambiguous");
+            assert_eq!(claim("other-session", Some("b")), None, "another session's records are never claimed");
+        });
+    }
+
+    #[test]
+    fn stale_records_are_dropped() {
+        with_calls_dir(|| {
+            let mut old = new_record("toolu_old", "x", false);
+            old.created_ms -= RECORD_MAX_AGE.as_millis() as u64 + 1;
+            register("s", &old).unwrap();
+            assert_eq!(claim("s", Some("x")), None);
+            assert!(read_records(&session_dir("s").unwrap()).is_empty());
+        });
+    }
+}
