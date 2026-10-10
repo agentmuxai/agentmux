@@ -286,7 +286,10 @@ export function installShortcutApi() {
         plan: (keys: string, target?: string): KeyPressPlan | { reason: string } => {
             if (target && !deps().focusBlock(target)) return { reason: `pane ${target} is not in the active tab of this window` };
             // A key goes where the caret is: refuse rather than press it into another pane.
-            if (target && !document.activeElement?.closest(`[data-blockid="${CSS.escape(target)}"]`)) {
+            // A pane tab's content sits in its own block inside the pane's, so check every element of the target.
+            const caret = document.activeElement;
+            const holders = target ? [...document.querySelectorAll(`[data-blockid="${CSS.escape(target)}"]`)] : [];
+            if (target && !(caret && holders.some((el) => el.contains(caret)))) {
                 return { reason: `pane ${target} didn't take keyboard focus` };
             }
             return planKeyPress(keys, keyPlatform());

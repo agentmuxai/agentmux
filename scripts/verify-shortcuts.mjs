@@ -61,12 +61,18 @@ const MANUAL = {
     "files:closeTab": "closes a tab",
     "open:agent": "opens an agent",
     "pane:voice": "asks for the microphone",
+    "files:mention": "puts paths in an agent's message box",
+    "files:openInNewTab": "opens the selected files in their apps",
+    // A line break in the clipboard (files:copy puts one between paths) would
+    // run each line in the shell.
+    "term:paste": "pastes the clipboard into a shell",
 };
 
 /** Files rows that change files on disk: only with --files-mutate. */
 const FILES_MUTATE = new Set(["files:newFolder", "files:rename", "files:trash", "files:cut", "files:paste", "files:undo"]);
-/** Files rows that leave the folder the pane was given: run last. */
-const FILES_NAVIGATE = new Set(["files:back", "files:forward", "files:up"]);
+/** Files rows that leave the folder or tab the pane was given: run last
+ *  (files:newTabHere makes a new tab the pane's visible one). */
+const FILES_NAVIGATE = new Set(["files:back", "files:forward", "files:up", "files:newTabHere"]);
 
 /** A command to run first, so the row has something to act on. Escape is
  *  tried on the replace-pane confirmation (it never confirms: no Enter is
@@ -136,14 +142,15 @@ async function attach(target) {
 }
 
 async function connect(port) {
-    // Pages can refuse a new session for a moment after another DevTools
-    // client leaves, and windows an earlier run opened take a moment to settle.
+    // A dev build's pages reload whenever a file in the checkout changes, and
+    // have no shortcut API until the app has started again: keep trying for
+    // about 30 s.
     for (let attempt = 1; ; attempt++) {
         try {
             return await connectOnce(port);
         } catch (e) {
-            if (attempt >= 5 || e.message.startsWith("no CDP server")) throw e;
-            await sleep(1500);
+            if (attempt >= 10 || e.message.startsWith("no CDP server")) throw e;
+            await sleep(3000);
         }
     }
 }
@@ -190,6 +197,25 @@ async function close(cdp) {
     await Promise.race([closed, sleep(1000)]);
 }
 
+/** The extra app windows open now (window:new may claim a pre-warmed one,
+ *  which then drops its `pool=1`), by DevTools target id. */
+async function appWindows(port) {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+    return targets.filter((t) => t.type === "page" && /[?&]windowLabel=window-/.test(t.url) && !/[?&]pool=1/.test(t.url));
+}
+
+/** Closes the app windows a row opened (window:new), so runs don't pile them up. */
+async function closeNewWindows(port, before) {
+    await sleep(300);
+    for (const t of await appWindows(port)) {
+        if (before.has(t.id)) continue;
+        const w = await attach(t).catch(() => null);
+        if (!w) continue;
+        await w.evaluate("window.api?.closeWindow?.()").catch(() => {});
+        await close(w);
+    }
+}
+
 const js = (v) => (v === undefined ? "undefined" : JSON.stringify(v));
 
 /** Sends one planned key the way the host's press_keys does. */
@@ -225,8 +251,10 @@ async function main() {
     for (const s of list) {
         const row = { command: s.command, label: s.label, keys: s.raw, l1: null, l2: [], note: "" };
         rows.push(row);
+        const windowsBefore = new Set((await appWindows(args.port)).map((t) => t.id));
         try {
             await checkRow(cdp, s, row);
+            await closeNewWindows(args.port, windowsBefore);
         } catch (e) {
             // One row's failure doesn't end the run.
             row.note = `FAIL: threw ${String(e.message ?? e).split("\n")[0]}`;
