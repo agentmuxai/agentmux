@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The SDK's `agentmux-widget` signer (sdk/widget-sdk/bin/agentmux-widget.mjs)
+ * The SDK's `agentmux-widget` signer (sdk/widget-sdk/cli/agentmux-widget.mjs)
  * against the fixture srv verifies in `widget_signature.rs`
  * (`the_sdk_signed_fixture_verifies_here`): both must compute the same hash,
  * signature and fingerprint (docs/specs/SPEC_WIDGET_SHARING_2026_10_10.md §2.4).
@@ -12,7 +12,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fingerprint, keyFromSeed, packageHash, signPackage, verifyPackage } from "../../../sdk/widget-sdk/bin/agentmux-widget.mjs";
+import { fingerprint, keyFromSeed, packageHash, signPackage, verifyPackage } from "../../../sdk/widget-sdk/cli/agentmux-widget.mjs";
 
 const FIXTURE = join(__dirname, "../../../sdk/widget-sdk/fixtures/acme.fixture");
 const SEED = Buffer.alloc(32, 7).toString("base64");

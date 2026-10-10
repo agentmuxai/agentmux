@@ -6,7 +6,7 @@
   "main": "./v1.js",
   "types": "./v1.d.ts",
   "bin": {
-    "agentmux-widget": "./bin/agentmux-widget.mjs"
+    "agentmux-widget": "./cli/agentmux-widget.mjs"
   },
   "exports": {
     ".": {
@@ -19,7 +19,7 @@
     "v1.js",
     "v1.d.ts",
     "am-widget.css",
-    "bin/agentmux-widget.mjs",
+    "cli/agentmux-widget.mjs",
     "README.md"
   ],
   "license": "Apache-2.0",
