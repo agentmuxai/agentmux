@@ -146,9 +146,7 @@ fn browser_page(mstore: &Store, block_id: &str) -> Option<String> {
     if !title.is_empty() {
         return Some(title);
     }
-    let url = meta("url");
-    let host = url.split("://").nth(1).unwrap_or(&url).split(['/', '?', '#']).next().unwrap_or("");
-    (!host.is_empty()).then(|| host.to_string())
+    crate::backend::tower_agentmux::page_host(&meta("url"))
 }
 
 /// A window's workspace name, for its renderer's row.

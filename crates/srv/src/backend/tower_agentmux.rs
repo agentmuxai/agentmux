@@ -179,6 +179,13 @@ pub fn renderer_serves(
     (!names.is_empty()).then(|| names.join(", "))
 }
 
+/// A page URL's host, for a browser pane's renderer row: never its user,
+/// password, port, path or query (`https://user:pass@host:8080/x` → `host`).
+pub fn page_host(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    parsed.host_str().filter(|h| !h.is_empty()).map(str::to_string)
+}
+
 /// The PID a process sees for itself, which is what a renderer reports.
 ///
 /// On Linux, Chromium's namespace sandbox runs renderers in a PID namespace
@@ -456,6 +463,16 @@ mod tests {
             renderer_serves(&entries, 2, &page, &none).as_deref(),
             Some("browser pane b.test, browser pane a.test")
         );
+    }
+
+    #[test]
+    fn a_page_is_named_by_its_host_alone() {
+        assert_eq!(page_host("https://github.com/agentmuxai").as_deref(), Some("github.com"));
+        assert_eq!(page_host("https://user:secret@example.com:8080/a?b=c#d").as_deref(), Some("example.com"));
+        assert_eq!(page_host("http://127.0.0.1:5173/").as_deref(), Some("127.0.0.1"));
+        assert_eq!(page_host("about:blank"), None);
+        assert_eq!(page_host("not a url"), None);
+        assert_eq!(page_host(""), None);
     }
 
     #[test]
