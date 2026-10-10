@@ -32,6 +32,8 @@ fn publish(shared_dir: &std::path::Path, agent: &str, channel: &str, pubkey: Opt
             channel: channel.to_string(),
             registration_nonce: 0,
             jekt_public_key: pubkey.map(|k| BASE64.encode(k)).unwrap_or_default(),
+            uid: String::new(),
+            uid_public_key: String::new(),
         },
     );
 }
