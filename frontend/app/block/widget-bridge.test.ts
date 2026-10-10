@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
-import { ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
 
 function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
     return {
@@ -196,5 +196,67 @@ describe("permissions", () => {
         const h = host();
         const state = await ready(h);
         expect(errorOf(await handleBridgeRequest(h, state, "app.quit", {})).code).toBe(ERR.METHOD_NOT_FOUND);
+    });
+});
+
+describe("the calls W3 adds", () => {
+    const granted = ["storage", "files", "clipboard:write", "agents:read", "agents:send", "net:https://api.github.com"];
+
+    it("passes srv's methods through the pane's session, once granted", async () => {
+        const h = host(pkg({ granted }));
+        h.srv = vi.fn(async (method: string) => (method === "storage.get" ? { value: { n: 1 } } : { agents: [] }));
+        const state = await ready(h);
+        expect(await handleBridgeRequest(h, state, "storage.get", { key: "k" })).toEqual({ result: { value: { n: 1 } } });
+        expect(h.srv).toHaveBeenCalledWith("storage.get", { key: "k" });
+        await handleBridgeRequest(h, state, "agents.list", {});
+        expect(errorOf(await handleBridgeRequest(h, state, "storage.set", { value: 1 })).code).toBe(ERR.INVALID_PARAMS);
+    });
+
+    it("hands back srv's refusal with its code and data", async () => {
+        const h = host(pkg({ granted }));
+        h.srv = vi.fn(async () => {
+            throw new Error('call widgets.call error: widget-error:{"code":1002,"message":"a widget\'s storage is limited to 5 MB","data":{"limit":"storage"}}');
+        });
+        const state = await ready(h);
+        const e = errorOf(await handleBridgeRequest(h, state, "storage.set", { key: "k", value: "x" }));
+        expect(e).toEqual({ code: ERR.LIMIT_EXCEEDED, message: "a widget's storage is limited to 5 MB", data: { limit: "storage" } });
+        h.srv = vi.fn(async () => {
+            throw new Error("socket closed");
+        });
+        expect(errorOf(await handleBridgeRequest(h, state, "agents.list", {})).code).toBe(ERR.INTERNAL);
+    });
+
+    it("gives picked files' contents, never a path, and reports a cancel", async () => {
+        const h = host(pkg({ granted }));
+        h.pickFiles = vi.fn(async () => [new File([new Uint8Array([104, 105])], "a.txt", { type: "text/plain" })]);
+        const state = await ready(h);
+        const r = (await handleBridgeRequest(h, state, "files.pick", { accept: [".txt"] })) as { result: { files: unknown[] } };
+        expect(r.result.files).toEqual([{ name: "a.txt", type: "text/plain", size: 2, dataBase64: "aGk=" }]);
+        expect(h.pickFiles).toHaveBeenCalledWith([".txt"], false);
+        h.pickFiles = vi.fn(async () => null);
+        expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.CANCELLED);
+        h.pickFiles = vi.fn(async () => {
+            throw new BridgeError(ERR.UNAVAILABLE, "files.pick opens a dialog only from a click");
+        });
+        expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.UNAVAILABLE);
+    });
+
+    it("saves the decoded bytes, and copies text", async () => {
+        const h = host(pkg({ granted }));
+        h.saveFile = vi.fn(async () => true);
+        h.writeClipboard = vi.fn(async () => {});
+        const state = await ready(h);
+        expect(await handleBridgeRequest(h, state, "files.save", { name: "out.txt", dataBase64: "aGk=" })).toEqual({ result: { saved: true } });
+        expect(h.saveFile).toHaveBeenCalledWith("out.txt", "", new Uint8Array([104, 105]));
+        expect(errorOf(await handleBridgeRequest(h, state, "files.save", { name: "x", dataBase64: "%%" })).code).toBe(ERR.INVALID_PARAMS);
+        await handleBridgeRequest(h, state, "clipboard.writeText", { text: "copied" });
+        expect(h.writeClipboard).toHaveBeenCalledWith("copied");
+    });
+
+    it("says unavailable where this host can't do it", async () => {
+        const h = host(pkg({ granted }));
+        const state = await ready(h);
+        expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.UNAVAILABLE);
+        expect(errorOf(await handleBridgeRequest(h, state, "net.fetch", { url: "https://api.github.com/user" })).code).toBe(ERR.UNAVAILABLE);
     });
 });

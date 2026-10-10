@@ -8,8 +8,10 @@
 
 import { RpcClient } from "../rpc-client";
 import type { WidgetInstallResult } from "@/types/rpc/WidgetInstallResult";
+import type { WidgetCallResult } from "@/types/rpc/WidgetCallResult";
 import type { WidgetPackagesResult } from "@/types/rpc/WidgetPackagesResult";
 import type { WidgetReadFileResult } from "@/types/rpc/WidgetReadFileResult";
+import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 
 export type { WidgetKind } from "@/types/rpc/WidgetKind";
 export type { WidgetPackageInfo } from "@/types/rpc/WidgetPackageInfo";
@@ -46,5 +48,21 @@ export const WidgetsApi = {
     /** A trusted widget's module, as approved. */
     WidgetsReadFileCommand(client: RpcClient, data: { id: string; hash: string; path: string }, opts?: RpcOpts): Promise<WidgetReadFileResult> {
         return client.rpcCall("widgets.readfile", data, opts);
+    },
+
+    /** A session for one pane of a sandboxed widget, for its calls through
+     *  srv (storage, net, agents): srv checks each against the package. */
+    WidgetsSessionCommand(client: RpcClient, data: { id: string; hash: string; blockid: string }, opts?: RpcOpts): Promise<WidgetSessionResult> {
+        return client.rpcCall("widgets.session", data, opts);
+    },
+
+    WidgetsEndSessionCommand(client: RpcClient, data: { token: string }, opts?: RpcOpts): Promise<unknown> {
+        return client.rpcCall("widgets.endsession", data, opts);
+    },
+
+    /** One bridge method srv answers. A refusal's message is `widget-error:`
+     *  and the bridge error as JSON. */
+    WidgetsCallCommand(client: RpcClient, data: { token: string; method: string; params: unknown }, opts?: RpcOpts): Promise<WidgetCallResult> {
+        return client.rpcCall("widgets.call", data, opts);
     },
 };

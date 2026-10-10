@@ -75,6 +75,9 @@ fn svc() -> Result<&'static Arc<widget_packages::WidgetPackages>, String> {
 }
 
 pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // A sandboxed widget's sessions and calls (W3).
+    super::widget_access_handlers::register(engine, state);
+
     // widgets.list: every package and its state.
     engine.register_typed("widgets.list", |_req: serde_json::Value, _ctx| async move {
         Ok(WidgetPackagesResult { packages: svc()?.list() })
@@ -134,6 +137,10 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .map_err(|e| e.to_string())?
                 .map_err(|e| format!("can't remove it: {e}"))?;
             s.forget(&req.id)?;
+            // What it stored goes with it (Settings asked the user first).
+            if let Err(e) = st.mstore.widget_storage_purge(&req.id) {
+                tracing::warn!(id = %req.id, error = %e, "can't delete an uninstalled widget's storage");
+            }
             tracing::info!(id = %req.id, "widget package uninstalled");
             Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
         }

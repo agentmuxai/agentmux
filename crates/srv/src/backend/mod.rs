@@ -17,6 +17,8 @@ pub mod bookmarks_store;
 pub mod layout_file;
 pub mod browser_start_page;
 pub mod user_widgets;
+pub mod widget_access;
+pub mod widget_net;
 pub mod widget_packages;
 pub mod bundle_export;
 pub mod bundle_import;

@@ -17,12 +17,16 @@ export const ERR = {
     PERMISSION_DENIED: 1001,
     LIMIT_EXCEEDED: 1002,
     NOT_FOUND: 1003,
+    NETWORK_ERROR: 1004,
     UNAVAILABLE: 1005,
+    CANCELLED: 1006,
     NOT_READY: 1007,
     INTERNAL: 1099,
 } as const;
 
 const META_LIMIT_BYTES = 64 * 1024;
+const FILES_LIMIT_BYTES = 25 * 1024 * 1024;
+const CLIPBOARD_LIMIT_CHARS = 1024 * 1024;
 const MAX_ACTIONS = 4;
 const MAX_MENU_ITEMS = 20;
 
@@ -44,6 +48,41 @@ export interface BridgeHost {
     openPane?(view: string, meta: Record<string, unknown>, split: "right" | "down" | "tab"): Promise<string>;
     agentmuxVersion?(): string;
     hostName?(): string;
+    /** A method srv answers (storage, net, agents), through the pane's
+     *  session; throws a `BridgeError` when srv refuses it. */
+    srv?(method: string, params: Record<string, unknown>): Promise<unknown>;
+    /** The host's open dialog; null when the user cancels it. */
+    pickFiles?(accept: string[], multiple: boolean): Promise<File[] | null>;
+    /** The host's save dialog; false when the user cancels it. */
+    saveFile?(name: string, type: string, data: Uint8Array): Promise<boolean>;
+    writeClipboard?(text: string): Promise<void>;
+}
+
+/** A refusal with the bridge's own error code (§6.6). */
+export class BridgeError extends Error {
+    constructor(
+        readonly code: number,
+        message: string,
+        readonly data?: unknown
+    ) {
+        super(message);
+    }
+}
+
+/** srv's refusal (`widget-error:` and the error as JSON) as a BridgeError. */
+export function bridgeErrorOf(e: unknown): BridgeError {
+    if (e instanceof BridgeError) return e;
+    const message = e instanceof Error ? e.message : String(e);
+    const at = message.indexOf("widget-error:");
+    if (at >= 0) {
+        try {
+            const v = JSON.parse(message.slice(at + "widget-error:".length));
+            if (typeof v?.code === "number") return new BridgeError(v.code, String(v.message ?? ""), v.data);
+        } catch {
+            // Not srv's error object: an internal error, below.
+        }
+    }
+    return new BridgeError(ERR.INTERNAL, message);
 }
 
 export type BridgeReply = { result: unknown } | { error: { code: number; message: string; data?: unknown } };
@@ -139,6 +178,29 @@ export function originMatches(granted: string, url: URL): boolean {
 }
 
 export async function handleBridgeRequest(host: BridgeHost, state: BridgeState, method: string, params: unknown): Promise<BridgeReply> {
+    try {
+        return await answer(host, state, method, params);
+    } catch (e) {
+        const err = bridgeErrorOf(e);
+        return fail(err.code, err.message, err.data);
+    }
+}
+
+const b64 = {
+    encode(bytes: Uint8Array): string {
+        let s = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        return btoa(s);
+    },
+    decode(text: string): Uint8Array {
+        const s = atob(text);
+        const out = new Uint8Array(s.length);
+        for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+        return out;
+    },
+};
+
+async function answer(host: BridgeHost, state: BridgeState, method: string, params: unknown): Promise<BridgeReply> {
     const p = isObj(params) ? params : {};
     const { pkg, pane, ctx } = host;
     if (method === "hello") {
@@ -245,13 +307,51 @@ export async function handleBridgeRequest(host: BridgeHost, state: BridgeState, 
         case "storage.set":
         case "storage.delete":
         case "storage.list":
-        case "net.fetch":
-        case "files.pick":
-        case "files.save":
-        case "clipboard.writeText":
         case "agents.list":
         case "agents.send":
-            return fail(ERR.UNAVAILABLE, `${method} isn't available in this AgentMux yet`);
+        case "net.fetch": {
+            if (method.startsWith("storage.") && method !== "storage.list" && !str(p.key, 256)) {
+                return fail(ERR.INVALID_PARAMS, `${method} needs { key } (at most 256 characters)`);
+            }
+            if (!host.srv) return fail(ERR.UNAVAILABLE, `${method} isn't available in this AgentMux`);
+            return ok(await host.srv(method, p));
+        }
+        case "files.pick": {
+            if (!host.pickFiles) return fail(ERR.UNAVAILABLE, "this AgentMux has no file dialog for widgets");
+            const accept = Array.isArray(p.accept) ? p.accept.filter((a): a is string => str(a, 100)) : [];
+            const files = await host.pickFiles(accept, p.multiple === true);
+            if (!files) return fail(ERR.CANCELLED, "the user cancelled");
+            if (files.reduce((n, f) => n + f.size, 0) > FILES_LIMIT_BYTES) {
+                return fail(ERR.LIMIT_EXCEEDED, "picked files are limited to 25 MB in all", { limit: "files" });
+            }
+            const out = [];
+            for (const f of files) {
+                out.push({ name: f.name, type: f.type, size: f.size, dataBase64: b64.encode(new Uint8Array(await f.arrayBuffer())) });
+            }
+            return ok({ files: out });
+        }
+        case "files.save": {
+            if (!str(p.name, 255) || !p.name || typeof p.dataBase64 !== "string") {
+                return fail(ERR.INVALID_PARAMS, "files.save needs { name, dataBase64 }");
+            }
+            let data: Uint8Array;
+            try {
+                data = b64.decode(p.dataBase64);
+            } catch {
+                return fail(ERR.INVALID_PARAMS, "dataBase64 isn't base64");
+            }
+            if (data.length > FILES_LIMIT_BYTES) return fail(ERR.LIMIT_EXCEEDED, "a saved file is limited to 25 MB", { limit: "files" });
+            if (!host.saveFile) return fail(ERR.UNAVAILABLE, "this AgentMux has no save dialog for widgets");
+            return ok({ saved: await host.saveFile(p.name, str(p.type, 100) ? p.type : "", data) });
+        }
+        case "clipboard.writeText": {
+            if (typeof p.text !== "string" || p.text.length > CLIPBOARD_LIMIT_CHARS) {
+                return fail(ERR.INVALID_PARAMS, "clipboard.writeText needs { text } (at most 1 MB)");
+            }
+            if (!host.writeClipboard) return fail(ERR.UNAVAILABLE, "this AgentMux can't write the clipboard for widgets");
+            await host.writeClipboard(p.text);
+            return ok();
+        }
         default:
             return fail(ERR.METHOD_NOT_FOUND, `unknown method ${method}`);
     }
