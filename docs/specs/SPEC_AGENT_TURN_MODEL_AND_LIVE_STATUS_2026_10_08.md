@@ -531,6 +531,8 @@ Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right a
 
 **The goal no longer rides beside another line.** §6.9's "goal beside" (the ambient summary, muted, after a rank 2–5 line) is removed at the operator's request: the Swarm view already shows each agent's goal, and the tail popped in a moment after each line finished typing, which added to the sense of the row changing. The goal still shows as a line of its own (rank 6) when nothing more specific is happening.
 
+**An end-to-end replay test** (`working-row.stream-replay.test.tsx`) now covers the gap both bugs fell through. Claude Code stream-json lines go in through the transcript subject, and the real `useAgentStream`, translator, pane model, reducer, presenter and `AgentWorkingRow` carry them to the screen; only the transcript feed and the backend are fakes. A turn with usage-report `rate_limit_event`s checks that no "Rate limited" appears, that no line already on screen is typed out again, and that the test run is named. With either bug put back, it fails: every 1 s "re-typed" for the row bug, a false "Rate limited" for the translator bug.
+
 **The dot became an ASCII spinner** (`components/AsciiSpinner.tsx`), at the operator's request: one character cycling `| / - \` every 120 ms in the pane's color, on its own signal so a frame never re-renders the text. Reduced motion shows a still `*`. The pending-messages header keeps its dot.
 
 The presenter also had three causes of its own, none in the values of `TIMING`:
