@@ -430,3 +430,13 @@ tr:hover .tower-reveal,
 .tower-process-row--exited {
     opacity: 0.55;
 }
+
+// The tool call a process runs, after its name: muted, cut off if long.
+.tower-started-by {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+    font-style: italic;
+}
