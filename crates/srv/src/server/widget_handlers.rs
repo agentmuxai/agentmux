@@ -275,12 +275,13 @@ pub(crate) async fn handle_host_widget_approval(
             if decision == "approve" {
                 tracing::info!(id = %id, "widget package approved by the user");
             }
-            // An agent waiting on this install hears the answer.
+            let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+            // An agent waiting on this install hears the answer, once the
+            // package list says so too: its next step is often OpenWidget.
             let answer = if decision == "approve" { widget_requests::Answer::Approved } else { widget_requests::Answer::Declined };
             if widget_requests::requests().answer(&id, &hash, answer) {
                 super::widget_agent_handlers::publish_requests(&state);
             }
-            let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
             (StatusCode::OK, Json(json!({ "ok": true, "packages": packages }))).into_response()
         }
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),

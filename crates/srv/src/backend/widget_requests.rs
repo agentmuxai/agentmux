@@ -24,6 +24,7 @@ pub struct WidgetInstallRequest {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    pub author: Option<String>,
     pub kind: WidgetKind,
     pub permissions: Vec<String>,
     /// The agent that asked.
@@ -40,6 +41,7 @@ impl WidgetInstallRequest {
             name: pkg.name.clone(),
             version: pkg.version.clone(),
             description: pkg.description.clone(),
+            author: pkg.author.clone(),
             kind: pkg.kind.clone(),
             permissions: pkg.permissions.clone(),
             agent: agent.to_string(),
@@ -139,6 +141,7 @@ mod tests {
             name: id.into(),
             version: "1.0.0".into(),
             description: None,
+            author: None,
             kind: WidgetKind::Sandboxed,
             permissions: vec![],
             agent: agent.into(),

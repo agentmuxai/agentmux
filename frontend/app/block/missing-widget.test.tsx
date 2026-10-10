@@ -70,7 +70,8 @@ describe("MissingWidget", () => {
         for (const [over, text] of [
             [{ state: "changed" }, "Notes changed since you approved it"],
             [{ state: "disabled" }, "Notes is turned off."],
-            [{ state: "invalid", error: "`version` isn't semver" }, "Notes can't be loaded: `version` isn't semver."],
+            // An invalid package lists no panes; it's found by the id in the view.
+            [{ state: "invalid", error: "`version` isn't semver", panes: [] }, "Notes can't be loaded: `version` isn't semver."],
         ] as [Partial<WidgetPackageInfo>, string][]) {
             setWidgetPackages([pkg(over)]);
             render(() => <MissingWidget blockId="b1" view={VIEW} />);

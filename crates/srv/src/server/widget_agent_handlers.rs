@@ -219,6 +219,9 @@ mod tests {
         assert_eq!(s, StatusCode::OK, "{body}");
         assert_eq!(body["status"], "installed");
         assert_eq!(body["views"], json!(["ext:acme.agentmade/main"]));
+        // By then the list says so too, for the agent's next step, OpenWidget.
+        let listed = widget_packages::service().unwrap().list().into_iter().find(|p| p.id == "acme.agentmade").unwrap();
+        assert_eq!(listed.state, WidgetState::Approved);
         assert!(widget_requests::requests().list().iter().all(|r| r.id != "acme.agentmade"));
     }
 }

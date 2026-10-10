@@ -20,7 +20,11 @@ import "./missing-widget.scss";
 
 export function MissingWidget(props: { blockId: string; view: string }): JSX.Element {
     const packages = widgetPackages();
-    const pkg = () => packages().find((p) => p.panes.some((pane) => pane.view === props.view));
+    // By its views, or, for an invalid package (which lists none), by the
+    // id in the view's name, `ext:<id>/<pane>`.
+    const idOfView = props.view.slice("ext:".length).split("/")[0];
+    const pkg = () =>
+        packages().find((p) => p.panes.some((pane) => pane.view === props.view)) ?? packages().find((p) => p.id === idOfView);
     const why = (): string => {
         const p = pkg();
         if (!p) return "This widget isn't installed.";
