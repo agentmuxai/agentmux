@@ -268,6 +268,20 @@ describe("moving Media tabs between panes", () => {
         b.dispose();
     });
 
+    it("a tab moved onto a pane showing only its empty tab takes that tab's place", () => {
+        const a = new MediaPaneModel(ctxFor("fill-a"));
+        const b = new MediaPaneModel(ctxFor("fill-b"));
+        a.open("C:/out/1.png");
+        expect(b.tabs.tabs()).toHaveLength(1); // "Click to load media"
+        const one = a.tabs.activeId()!;
+        expect(moveDocTab("fill-a", one, "fill-b")).toEqual({ moved: true });
+        expect(b.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/1.png"]);
+        expect(b.tabs.activeId()).toBe(one);
+        expect(b.tabs.reopen()).toBe(false); // the empty tab is gone, not closed
+        a.dispose();
+        b.dispose();
+    });
+
     it("a disposed pane no longer takes tabs", () => {
         const a = new MediaPaneModel(ctxFor("gone-a"));
         const b = new MediaPaneModel(ctxFor("gone-b"));

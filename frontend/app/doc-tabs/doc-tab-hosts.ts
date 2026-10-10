@@ -93,12 +93,14 @@ export function dropDocTab(sourceBlockId: string, tabId: string, targetBlockId: 
 /**
  * The host of a pane whose tabs are a `DocTabsController`'s. Everything a tab
  * is travels in the tab, so there is no live state. `refuseGive` adds the
- * type's own rule (Media: an empty tab has nothing to move).
+ * type's own rule (Media: an empty tab has nothing to move). `isPlaceholder`
+ * names a tab that shows nothing yet (Media's "Click to load media"): when
+ * one is in front, an arriving tab takes its place rather than joining it.
  */
 export function controllerHost<P>(
     ctl: DocTabsController<P>,
     docType: string,
-    opts: { refuseGive?: (tab: DocTab<P>) => string | null } = {}
+    opts: { refuseGive?: (tab: DocTab<P>) => string | null; isPlaceholder?: (tab: DocTab<P>) => boolean } = {}
 ): DocTabHost {
     return {
         docType,
@@ -109,7 +111,15 @@ export function controllerHost<P>(
             const tab = ctl.detach(tabId);
             return tab ? { docType, tab } : null;
         },
-        take: (transfer, at) => ctl.attach(transfer.tab as DocTab<P>, at),
+        take: (transfer, at) => {
+            const tab = transfer.tab as DocTab<P>;
+            const front = ctl.active();
+            const placeholder = front && opts.isPlaceholder?.(front) ? front : undefined;
+            ctl.attach(tab, at ?? (placeholder ? { targetId: placeholder.id, position: "after" } : undefined));
+            // Gone, not closed: nothing to reopen. Only once the tab is in
+            // (a document already open here comes to the front instead).
+            if (placeholder && ctl.tabs().some((t) => t.id === tab.id)) ctl.detach(placeholder.id);
+        },
     };
 }
 

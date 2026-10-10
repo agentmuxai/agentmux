@@ -89,11 +89,15 @@ export class MediaPaneModel {
             [typeof start === "string" && start ? { path: start } : { path: "", blank: ++blanks }]
         );
         // Its tabs can move to and from other Media panes (doc-tab-hosts.ts).
-        // An empty tab has nothing to move. A pane left with no tabs gets an
+        // An empty tab has nothing to move, and gives way to one moved in, as
+        // it does to a file opened here. A pane left with no tabs gets an
         // empty one, as when its last tab closes (MediaPane below).
         this.unregisterHost = registerDocTabHost(
             ctx.blockId,
-            controllerHost(this.tabs, "media", { refuseGive: (t) => (isEmpty(t.payload) ? "It has no file yet." : null) })
+            controllerHost(this.tabs, "media", {
+                refuseGive: (t) => (isEmpty(t.payload) ? "It has no file yet." : null),
+                isPlaceholder: (t) => isEmpty(t.payload),
+            })
         );
     }
 
