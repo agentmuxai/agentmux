@@ -740,8 +740,7 @@ jobs:
       # that only resolves because npm hoisted someone else's dependency.
       # knip.json's ignores: @emnapi/* are pinned on purpose (#2448, npm ci
       # on Linux); "react" is a dead `/// <reference types>` in
-      # frontend/types/jsx.d.ts; the two `vitest-environment-*` entries are
-      # prose comments that mention the pragma; `task` is the go-task binary.
+      # frontend/types/jsx.d.ts; `task` is the go-task binary.
       - name: npm dependencies match imports (knip)
         if: matrix.shard == 2
         run: npx knip --dependencies --no-progress
