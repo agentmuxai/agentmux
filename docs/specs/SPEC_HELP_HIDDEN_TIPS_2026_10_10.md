@@ -1,6 +1,6 @@
 # Hidden tips in the Help pane: the gestures nobody would guess
 
-**Status:** active: P1 in #NNNN; owner decisions in §9.
+**Status:** active: P1 in #4631; owner decisions in §9.
 **Date:** 2026-10-10.
 **Requested by:** repo owner: "lets add more hidden tips to the help. there are a lot of unobvious key shortcut helpers, like using ctrl when border resize, or anything else u find, write that to a separate spec".
 **Author:** AgentA@Area54, with Masty@starpower (macOS) and Maricon@charlie (Linux) to verify per platform.
@@ -142,7 +142,7 @@ The questions as asked:
 
 ## 10. Results
 
-**P1 (#NNNN).**
+**P1 (#4631).**
 - `keybindings/tips.ts` holds 34 tips: the first set, minus the zoom tips and the agent pane's Ctrl+F, which wait for §5's ⌘ fixes (P2).
 - They render as a "Mouse and gestures" card in Help. It replaces the hand-written "Shift + drag" line and the out-of-date tab tip; the two gear tips stay under "More Tips".
 - Every tip's anchor is checked by `tips.test.ts`.
