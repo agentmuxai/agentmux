@@ -30,6 +30,8 @@ pub const EVENT_REMOTES_CHANGE: &str = "remoteschange";
 pub const EVENT_WIDGET_PACKAGES: &str = "widgetpackages";
 /// A widget package's storage changed: `{ id, keys }`, never the values.
 pub const EVENT_WIDGET_STORAGE: &str = "widgetstorage";
+/// Agents' widget install requests waiting for the user: `{ requests }`.
+pub const EVENT_WIDGET_REQUESTS: &str = "widgetrequests";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.

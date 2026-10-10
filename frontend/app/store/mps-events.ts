@@ -144,6 +144,8 @@ export const WpsEvent = {
     WidgetPackages: "widgetpackages",
     /** A widget package's storage changed: `{ id, keys }`. */
     WidgetStorage: "widgetstorage",
+    /** Agents' widget install requests waiting for the user: `{ requests }`. */
+    WidgetRequests: "widgetrequests",
     LanInstances: "laninstances",
     LanInstancesError: "laninstances:error",
     LanInstancesFirewall: "laninstances:firewall",

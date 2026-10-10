@@ -251,6 +251,7 @@ export {
     appHandleKeyDown,
     disableGlobalKeybindings,
     enableGlobalKeybindings,
+    installShortcutApi,
     keyboardMouseDownHandler,
     registerControlShiftTracking,
     registerHostShortcuts,

@@ -36,3 +36,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Windows icon + version info (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

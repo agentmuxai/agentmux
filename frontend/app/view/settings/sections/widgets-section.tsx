@@ -21,7 +21,8 @@ import { setWidgetPackages, widgetPackages, widgetPackagesLoaded } from "@/app/s
 import { agentmuxHome } from "@/app/view/agent/agent-launch-env";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader } from "../settings-controls";
-import { describePermission, TRUSTED_WIDGET_WARNING } from "./widget-permissions";
+import { WidgetApprovalDetails } from "./widget-approval-details";
+import { describePermission } from "./widget-permissions";
 
 export const WIDGETS_SETTINGS = {
     installed: {
@@ -67,45 +68,7 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
             <div class="widget-approval-title">
                 <i class={`fa-solid fa-${props.pkg.icon}`} /> {updated() ? `${props.pkg.name} changed` : `Install ${props.pkg.name}?`}
             </div>
-            <div class="widget-approval-meta">
-                {props.pkg.version}
-                <Show when={props.pkg.author}> · by {props.pkg.author}</Show>
-                {" · "}
-                {props.pkg.kind === "trusted" ? "trusted" : "sandboxed"}
-                <Show when={props.pkg.implied}> · from widgets.json</Show>
-            </div>
-            <Show when={props.pkg.description}>
-                <div class="widget-approval-description">{props.pkg.description}</div>
-            </Show>
-            <Show
-                when={props.pkg.kind === "sandboxed"}
-                fallback={
-                    <div class="widget-approval-warning">
-                        <i class="fa-solid fa-triangle-exclamation" /> <strong>{TRUSTED_WIDGET_WARNING}</strong>
-                    </div>
-                }
-            >
-                <div class="widget-approval-permissions">
-                    <Show when={props.pkg.permissions.length > 0} fallback={<div>It asks for no permissions.</div>}>
-                        <div>It can:</div>
-                        <ul>
-                            <For each={props.pkg.permissions}>
-                                {(p) => {
-                                    const d = describePermission(p);
-                                    return (
-                                        <li classList={{ strong: !!d.strong }}>
-                                            <Show when={d.strong}>
-                                                <i class="fa-solid fa-triangle-exclamation" />{" "}
-                                            </Show>
-                                            {d.text}
-                                        </li>
-                                    );
-                                }}
-                            </For>
-                        </ul>
-                    </Show>
-                </div>
-            </Show>
+            <WidgetApprovalDetails pkg={props.pkg} />
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}

@@ -1,4 +1,4 @@
-# @agentmux/widget-sdk
+# @agentmuxai/widget-sdk
 
 The client for **sandboxed AgentMux widgets**. A widget's page runs in a sandboxed iframe inside an AgentMux pane; this SDK connects it to AgentMux and wraps the widget API (protocol 1).
 
@@ -20,12 +20,14 @@ AgentMux serves the SDK itself, so a plain HTML widget imports it directly:
 ## Use it with a bundler
 
 ```bash
-npm install @agentmux/widget-sdk
+npm install @agentmuxai/widget-sdk
 ```
 
 ```js
-import { connect } from "@agentmux/widget-sdk";
+import { connect } from "@agentmuxai/widget-sdk";
 ```
+
+That bundles a copy into your widget, which works with any AgentMux that speaks protocol 1, and gives you its types. Or keep importing it from `/agentmux/widget-sdk/v1.js`, the copy AgentMux serves, and tell the bundler to leave that import alone (Vite: `build.rollupOptions.external`; see `docs/examples/widgets/react-vite/`).
 
 ## The API
 
@@ -33,7 +35,7 @@ import { connect } from "@agentmux/widget-sdk";
 |---|---|
 | `connect({ applyTheme?, timeoutMs? })` | The handshake. Resolves to the client; applies the app's theme as CSS variables and keeps it current. |
 | `am.info` | The widget's id, version and pane; AgentMux's version; granted permissions; theme; this pane's meta. |
-| `am.on(event, cb)` | `visibility`, `focus`, `theme`, `meta`, `action`, `dispose`. Returns an unsubscribe. |
+| `am.on(event, cb)` | `visibility`, `focus`, `theme`, `meta`, `action`, `storage` (the widget's storage changed, in any of its panes), `dispose`. Returns an unsubscribe. |
 | `am.meta.get()`, `am.meta.set(patch)` | This pane's own state, kept with the pane. |
 | `am.ui.setTitle`, `setHeaderActions`, `setContextMenu`, `toast`, `openUrl` | The pane's chrome, drawn by AgentMux. |
 | `am.theme.get()` | The current theme. |

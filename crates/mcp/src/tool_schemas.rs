@@ -306,6 +306,40 @@ pub(crate) const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+// Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4): the
+// Help pane's table, in the window that holds the caller's own pane.
+pub(crate) const LIST_SHORTCUTS_TOOL: &str = r#"{
+  "name": "ListShortcuts",
+  "description": "List AgentMux's keyboard shortcuts as the Help pane shows them on this platform, including the user's own remaps: for each, its command id, label, category, the keys as shown (\"Ctrl+Shift+D\", \"⌘D\") and in the table's syntax (`raw`, what PressKeys takes), the context it needs (`when`), and the pane that handles it (`pane`: files, editor or doctabs), if any. Use the command ids with RunCommand and the raw keys with PressKeys.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
+  "name": "RunCommand",
+  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane in that window's active tab first; without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the confirmations a user sees: tab:close asks before closing. pane:close is refused (use ClosePane, which gives the user 15 seconds to undo, or QuitSelf for your own pane), and so is files:deletePermanently (it can't be undone). Returns whether it ran, and why not if it didn't.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "command": { "type": "string", "description": "Command id from ListShortcuts" },
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+    },
+    "required": ["command"]
+  }
+}"#;
+
+pub(crate) const PRESS_KEYS_TOOL: &str = r#"{
+  "name": "PressKeys",
+  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to pane:close or files:deletePermanently anywhere is refused. Pass target to focus a pane in that window's active tab first. Returns the modifiers sent (on macOS `meta` is ⌘), the commands the table binds the key to, and `resolved`: the command that actually ran and who ran it (the app or a pane), or null if nothing did. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "keys": { "type": "string", "description": "A raw key from ListShortcuts, in the table's syntax" },
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+    },
+    "required": ["keys"]
+  }
+}"#;
+
 // Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
 // — no-mouse, selector/JS-level control of a browser pane, layered on the
 // same identity/own-pane scoping UIClick/UIQuery/UIScreenshot use.
@@ -744,6 +778,40 @@ pub(crate) const OPEN_MEDIA_TOOL: &str = r#"{
       "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
     },
     "required": ["file"]
+  }
+}"#;
+
+pub(crate) const WIDGET_LIST_TOOL: &str = r#"{
+  "name": "WidgetList",
+  "description": "List the AgentMux widgets installed on this machine: id, name, version, kind (sandboxed or trusted), state (approved, needs_approval, changed, invalid with its error, disabled), permissions, folder and the views it adds. Use it to see whether a widget you built installed, and what view to pass to OpenWidget.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const WIDGET_INSTALL_TOOL: &str = r#"{
+  "name": "WidgetInstall",
+  "description": "Install a widget package you built (a folder with a widget.json, that widget.json, or a .zip) and ask the user to approve it. AgentMux validates and copies it, then shows the user a prompt naming you, the widget and every permission it asks for; you can't approve it yourself. Returns once the user answers or the wait ends: status installed (with its views), declined, pending (still waiting; the user can answer later in Settings → Widgets), or the validation error to fix. Installing again with changes replaces the old version and asks again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":      { "type": "string",  "description": "The package folder, its widget.json, or a .zip; relative paths are in your workspace" },
+      "replace":   { "type": "boolean", "description": "Replace an installed package with the same id (default true)" },
+      "wait_secs": { "type": "integer", "description": "How long to wait for the user's answer, in seconds (default 300, at most 600)" }
+    },
+    "required": ["path"]
+  }
+}"#;
+
+pub(crate) const OPEN_WIDGET_TOOL: &str = r#"{
+  "name": "OpenWidget",
+  "description": "Open a pane of an installed, approved widget next to this conversation. view is one of the widget's views from WidgetList (ext:<id>/<pane>). meta sets keys of the pane's own widget state (what the widget reads with meta.get), e.g. {\"repo\": \"owner/name\"}. Fails, saying why, if the widget isn't approved or is turned off. If the widget then shows an error, read it, fix the package, and WidgetInstall again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "view":  { "type": "string", "description": "The view to open, e.g. ext:acme.todo/main" },
+      "meta":  { "type": "object", "description": "The pane's initial widget state, as the widget's own keys" },
+      "split": { "type": "string", "enum": ["right", "down"], "description": "Where to place the pane relative to this agent pane (default: right)" }
+    },
+    "required": ["view"]
   }
 }"#;
 

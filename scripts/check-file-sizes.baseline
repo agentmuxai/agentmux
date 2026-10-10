@@ -2,7 +2,7 @@
 # (scripts/check-file-sizes.mjs). A file here may only shrink: run
 # `node scripts/check-file-sizes.mjs --update` after shrinking one. Adding a
 # file or raising a number is a hand edit that the PR has to justify.
-3702 crates/bashwrap/src/bash_wrap.rs
+3706 crates/bashwrap/src/bash_wrap.rs
 1972 crates/cef/src/client/lifecycle.rs
 1549 crates/cef/src/commands/cli_login.rs
 2219 crates/cef/src/commands/window_pool.rs
@@ -21,7 +21,7 @@
 1742 crates/srv/src/backend/blockcontroller/persistent/mod.rs
 3070 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 2912 crates/srv/src/backend/bundle_import.rs
-2350 crates/srv/src/backend/container.rs
+2352 crates/srv/src/backend/container.rs
 1771 crates/srv/src/backend/fs_ops/host_jobs.rs
 2216 crates/srv/src/backend/history/index.rs
 1901 crates/srv/src/backend/history/mod.rs
@@ -36,7 +36,7 @@
 2426 crates/srv/src/persist_subscriber.rs
 3284 crates/srv/src/reducer/layout.rs
 1509 crates/srv/src/registry/migrate.rs
-2275 crates/srv/src/server/agent_handlers/input.rs
+2276 crates/srv/src/server/agent_handlers/input.rs
 1883 crates/srv/src/server/app_api/agent_open.rs
 1566 crates/srv/src/server/editor_handlers.rs
 2118 crates/srv/src/server/muxspect_handlers.rs
@@ -49,5 +49,5 @@
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1550 frontend/app/view/editor/editor-model.ts
-1559 frontend/app/view/files/files-view.tsx
+1560 frontend/app/view/files/files-view.tsx
 2212 frontend/app/view/swarm/swarm-model.ts

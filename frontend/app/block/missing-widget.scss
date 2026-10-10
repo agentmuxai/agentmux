@@ -1,0 +1,27 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// missing-widget.tsx: a widget's pane whose widget isn't running.
+
+.missing-widget {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    height: 100%;
+    padding: 24px;
+    text-align: center;
+    color: var(--main-text-color);
+
+    > .fa-solid {
+        font-size: 24px;
+        color: var(--secondary-text-color);
+    }
+}
+
+.missing-widget-text {
+    max-width: 420px;
+    line-height: 1.5;
+}
