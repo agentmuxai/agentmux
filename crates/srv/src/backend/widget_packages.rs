@@ -622,6 +622,16 @@ impl WidgetPackages {
         SERVICE.get_or_init(|| Arc::new(self))
     }
 
+    /// The process-wide service for tests, in one temp folder that lives as
+    /// long as the process: every test that needs the global service shares
+    /// it, so each finds its own package by id.
+    #[cfg(test)]
+    pub fn for_tests() -> &'static Arc<WidgetPackages> {
+        static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+        WidgetPackages::new(dir.path().join("widgets"), &dir.path().join("data"), "test-secret-key".into()).install_global()
+    }
+
     /// Scan again, with the v1 entries currently in the user's widgets.json.
     pub fn rescan(&self, v1_entries: &HashMap<String, WidgetConfigType>) -> Vec<WidgetPackageInfo> {
         let mut found = scan(&self.widgets_dir);

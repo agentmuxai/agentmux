@@ -58,8 +58,9 @@ export class SettingsViewModel {
     query: () => string;
     setQuery: (q: string) => void;
 
-    constructor() {
-        const [section, setSection] = createSignal<SettingsSection>("appearance");
+    /** `initial`: the section to open on (a pane's `settings:section` meta). */
+    constructor(initial?: SettingsSection) {
+        const [section, setSection] = createSignal<SettingsSection>(initial ?? "appearance");
         this.activeSection = section;
         this.setSection = setSection;
         // No blockAtom/meta-persistence here (unlike Armory/Warden's

@@ -19,13 +19,7 @@ AgentMux serves the SDK itself, so a plain HTML widget imports it directly:
 
 ## Use it with a bundler
 
-```bash
-npm install @agentmux/widget-sdk
-```
-
-```js
-import { connect } from "@agentmux/widget-sdk";
-```
+Keep importing it from `/agentmux/widget-sdk/v1.js`, and tell the bundler to leave that import alone, since AgentMux serves the file (Vite: `build.rollupOptions.external`; see `docs/examples/widgets/react-vite/`). For types and completion, copy `v1.d.ts` next to your code. The SDK isn't published to npm yet.
 
 ## The API
 
@@ -33,7 +27,7 @@ import { connect } from "@agentmux/widget-sdk";
 |---|---|
 | `connect({ applyTheme?, timeoutMs? })` | The handshake. Resolves to the client; applies the app's theme as CSS variables and keeps it current. |
 | `am.info` | The widget's id, version and pane; AgentMux's version; granted permissions; theme; this pane's meta. |
-| `am.on(event, cb)` | `visibility`, `focus`, `theme`, `meta`, `action`, `dispose`. Returns an unsubscribe. |
+| `am.on(event, cb)` | `visibility`, `focus`, `theme`, `meta`, `action`, `storage` (the widget's storage changed, in any of its panes), `dispose`. Returns an unsubscribe. |
 | `am.meta.get()`, `am.meta.set(patch)` | This pane's own state, kept with the pane. |
 | `am.ui.setTitle`, `setHeaderActions`, `setContextMenu`, `toast`, `openUrl` | The pane's chrome, drawn by AgentMux. |
 | `am.theme.get()` | The current theme. |
