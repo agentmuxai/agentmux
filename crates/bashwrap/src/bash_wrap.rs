@@ -481,10 +481,14 @@ struct LineEvent {
 /// the wrapper's own process exit. Without this, Claude's native Bash
 /// tool would see success for every wrapped command regardless of the
 /// actual outcome.
-pub async fn run(mut args: Args) -> Result<i32> {
+pub async fn run(args: Args) -> Result<i32> {
+    let command = decode_command(&args.b64_cmd)?;
+    run_command(args, command).await
+}
+
+pub(crate) async fn run_command(mut args: Args, command: String) -> Result<i32> {
     detach_declared_background_session(&args);
     log_relevant_env();
-    let command = decode_command(&args.b64_cmd)?;
 
     // `block_id` controls the MPS publish scope. Prefer the explicit
     // CLI arg, but fall back to AGENTMUX_BLOCKID env (set by

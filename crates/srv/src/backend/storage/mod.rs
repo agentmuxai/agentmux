@@ -42,6 +42,7 @@ pub mod skills;
 pub mod snapshot;
 pub mod store;
 pub mod viewer_devices;
+pub mod widget_storage;
 pub mod work_queue;
 
 pub use agent_bundles::{agent_picked_bundles, format_agent_bundle_block, join_startup_blocks};

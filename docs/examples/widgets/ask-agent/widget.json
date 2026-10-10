@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "agentmux.ask-agent",
+  "name": "Ask an agent",
+  "version": "1.0.0",
+  "description": "Shows your agents and whether they're working, and sends one a message.",
+  "author": "AgentMux",
+  "icon": "paper-plane",
+  "kind": "sandboxed",
+  "entry": "index.html",
+  "permissions": ["agents:read", "agents:send"],
+  "contributes": {
+    "panes": [{ "name": "main", "label": "Ask an agent" }]
+  }
+}

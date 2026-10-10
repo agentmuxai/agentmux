@@ -28,6 +28,13 @@ pub const EVENT_REMOTES_CHANGE: &str = "remoteschange";
 /// The widget packages changed: installed, approved, edited, removed
 /// (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8). Payload `{ packages }`.
 pub const EVENT_WIDGET_PACKAGES: &str = "widgetpackages";
+/// A widget package's storage changed: `{ id, keys }`, never the values.
+pub const EVENT_WIDGET_STORAGE: &str = "widgetstorage";
+/// Agents' widget install requests waiting for the user: `{ requests }`.
+pub const EVENT_WIDGET_REQUESTS: &str = "widgetrequests";
+/// A call to action srv holds open started or ended:
+/// `{ key, block_id, kind, text, window_ids, active }` (`backend/user_attention.rs`).
+pub const EVENT_USER_ATTENTION: &str = "userattention";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.

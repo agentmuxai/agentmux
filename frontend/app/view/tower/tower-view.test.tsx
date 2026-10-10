@@ -32,6 +32,15 @@ const remoteRecords = [
     { name: "win-server", kind: "ssh", platform: { os: "mingw64_nt-10.0", arch: "x86_64" } },
 ];
 vi.mock("@/app/store/remotes-store", () => ({ remotesList: () => () => remoteRecords }));
+// An agent's color comes from its pane's meta; the tests' panes all have one.
+vi.mock("@/app/store/mos", () => ({
+    makeORef: (t: string, id: string) => `${t}:${id}`,
+    getObjectValue: () => ({ meta: { "frame:activebordercolor": "#ff8800" } }),
+}));
+vi.mock("@/app/block/pane-identity", () => ({
+    blockRoleColor: (meta: Record<string, unknown> | undefined) => meta?.["frame:activebordercolor"],
+    isLightThemeActive: () => false,
+}));
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { TowerSnapshot } from "@/app/store/rpc-api";
@@ -59,8 +68,25 @@ function snapshot(host = false): TowerSnapshot {
                 cpu_account: true,
                 mem: 1 * GB,
                 processes: [
-                    { id: "10:1", pid: 10, name: "claude.exe", cpu: 0.5, mem: GB / 2, role: "main" },
-                    { id: "11:1", pid: 11, name: "node.exe", cpu: 1.5, mem: GB / 2, role: "started" },
+                    {
+                        id: "10:1",
+                        pid: 10,
+                        name: "claude.exe",
+                        cpu: 0.5,
+                        mem: GB / 2,
+                        role: "main",
+                        started_at_ms: 100,
+                    },
+                    {
+                        id: "11:1",
+                        pid: 11,
+                        ppid: 10,
+                        name: "node.exe",
+                        cpu: 1.5,
+                        mem: GB / 2,
+                        role: "started",
+                        started_at_ms: 200,
+                    },
                 ],
             },
             {
@@ -71,9 +97,22 @@ function snapshot(host = false): TowerSnapshot {
                 cpu: 0.1,
                 cpu_account: false,
                 mem: 2 * GB,
-                processes: [{ id: "5:1", pid: 5, name: "agentmux-srv.exe", cpu: 0.1, mem: 2 * GB, role: "main" }],
+                processes: [
+                    {
+                        id: "5:1",
+                        pid: 5,
+                        name: "agentmux-srv.exe",
+                        cpu: 0.1,
+                        mem: 2 * GB,
+                        role: "main",
+                        detail: "Server",
+                    },
+                ],
             },
         ],
+        // The machine: 3.3 cores busy and 8 GB, so 1.2 cores and 5 GB are
+        // everything else's.
+        machine: { cpu: 3.3, mem: 8 * GB, processes: 40 },
         host: host
             ? {
                   processes: [
@@ -128,44 +167,160 @@ describe("Tower", () => {
         setVisibility("active");
     });
 
-    it("lists tasks by CPU as a share of the machine", async () => {
+    it("the Agents view lists each agent, then AgentMux and everything else, with their CPU and memory", async () => {
         renderTower();
-        const agent = await screen.findByTestId("tower-task-block-a");
+        const agent = await screen.findByTestId("tower-rail-block-a");
         // 2 cores busy of 4: 50%.
         expect(within(agent).getByText("50%")).toBeInTheDocument();
         expect(within(agent).getByText("1.0 GB")).toBeInTheDocument();
-        expect(within(agent).getByText("agent")).toBeInTheDocument();
-        const rows = screen.getAllByTestId(/tower-task-/).map((r) => r.dataset.testid);
-        expect(rows).toEqual(["tower-task-block-a", "tower-task-agentmux"]);
-        expect(screen.getByText(/2 tasks · 3 processes/)).toBeInTheDocument();
+        expect(within(agent).getByText("AgentX")).toBeInTheDocument();
+        const rows = screen.getAllByTestId(/^tower-rail-/).map((r) => r.dataset.testid);
+        expect(rows).toEqual(["tower-rail-block-a", "tower-rail-agentmux", "tower-rail-other"]);
+        // Everything else: the machine less every task (3.3 - 2.1 cores, 8 - 3 GB).
+        const other = screen.getByTestId("tower-rail-other");
+        expect(within(other).getByText("30%")).toBeInTheDocument();
+        expect(within(other).getByText("5.0 GB")).toBeInTheDocument();
         expect(sample).toHaveBeenCalledWith(expect.anything(), { host: false });
     });
 
     it("shows a share of one core when asked", async () => {
         renderTower();
-        await screen.findByTestId("tower-task-block-a");
+        await screen.findByTestId("tower-rail-block-a");
         fireEvent.click(screen.getByRole("radio", { name: "% of a core" }));
         expect(setMetaMock).toHaveBeenCalledWith({ "tower:cpu": "core" });
-        expect(within(screen.getByTestId("tower-task-block-a")).getByText("200%")).toBeInTheDocument();
+        expect(within(screen.getByTestId("tower-rail-block-a")).getByText("200%")).toBeInTheDocument();
     });
 
-    it("expands a task into its processes", async () => {
+    it("the first agent is selected: its processes as a tree, a parent with everything it started", async () => {
         renderTower();
-        const agent = await screen.findByTestId("tower-task-block-a");
-        expect(screen.queryByText("node.exe")).toBeNull();
-        fireEvent.click(within(agent).getByRole("button", { name: "Show processes" }));
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.getByTestId("tower-rail-block-a")).toHaveAttribute("aria-selected", "true");
+        const claude = screen.getByText("claude.exe").closest("tr")!;
+        // claude.exe's own 0.5 core plus node.exe's 1.5: 2 of 4 cores.
+        expect(within(claude).getByText("50%")).toBeInTheDocument();
         const node = screen.getByText("node.exe").closest("tr")!;
         // 1.5 cores of 4.
         expect(within(node).getByText("38%")).toBeInTheDocument();
+        fireEvent.click(within(claude).getByRole("button", { name: "Hide what it started" }));
+        expect(screen.queryByText("node.exe")).toBeNull();
         expect(screen.queryByRole("button", { name: /command line/i })).toBeNull();
+    });
+
+    it("selecting an entry shows it, and is kept with the pane", async () => {
+        renderTower();
+        fireEvent.click(await screen.findByTestId("tower-rail-agentmux"));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:agent": "agentmux" });
+        expect(screen.getByTestId("tower-rail-agentmux")).toHaveAttribute("aria-selected", "true");
+        expect(screen.getByText("agentmux-srv.exe")).toBeInTheDocument();
+        expect(screen.queryByText("claude.exe")).toBeNull();
+        // Arrow keys move the selection.
+        fireEvent.keyDown(screen.getByRole("listbox", { name: "Agents" }), { key: "ArrowDown" });
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:agent": "other" });
+    });
+
+    it("everything else points to the Processes view", async () => {
+        setMeta({ "tower:agent": "other" });
+        renderTower();
+        expect(await screen.findByText(/37 processes AgentMux didn't start/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Show in Processes" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:view": "processes", "tower:only": "other" });
+    });
+
+    it("terminals are one entry, each terminal heading its processes", async () => {
+        const snap = snapshot();
+        snap.tasks.push(
+            {
+                id: "term-1",
+                kind: "terminal",
+                label: "pwsh",
+                tracking: "high",
+                cpu: 0.25,
+                cpu_account: true,
+                mem: GB,
+                processes: [{ id: "30:1", pid: 30, name: "pwsh.exe", cpu: 0.25, mem: GB, role: "main" }],
+            },
+            {
+                id: "term-2",
+                kind: "terminal",
+                label: "bash",
+                tracking: "high",
+                cpu: 0.25,
+                cpu_account: true,
+                mem: GB,
+                processes: [{ id: "31:1", pid: 31, name: "bash.exe", cpu: 0.25, mem: GB, role: "main" }],
+            }
+        );
+        sample.mockResolvedValue(snap);
+        setMeta({ "tower:agent": "terminals" });
+        renderTower();
+        const terminals = await screen.findByTestId("tower-rail-terminals");
+        // Half a core of 4, and 2 GB, together.
+        expect(within(terminals).getByText("13%")).toBeInTheDocument();
+        expect(within(terminals).getByText("2.0 GB")).toBeInTheDocument();
+        expect(screen.getByTestId("tower-task-term-1")).toHaveTextContent("pwsh");
+        expect(screen.getByText("bash.exe")).toBeInTheDocument();
+    });
+
+    it("folds same-named processes under one line: rustc.exe ×3", async () => {
+        const snap = snapshot();
+        for (const pid of [40, 41, 42]) {
+            snap.tasks[0].processes.push({
+                id: `${pid}:1`,
+                pid,
+                ppid: 11,
+                name: "rustc.exe",
+                cpu: 1,
+                mem: GB,
+                started_at_ms: 300,
+            });
+        }
+        sample.mockResolvedValue(snap);
+        renderTower();
+        const many = await screen.findByTestId("tower-many-rustc.exe");
+        expect(within(many).getByText("×3")).toBeInTheDocument();
+        // 3 cores of 4.
+        expect(within(many).getByText("75%")).toBeInTheDocument();
+        expect(screen.getAllByText("rustc.exe")).toHaveLength(1);
+        fireEvent.click(within(many).getByRole("button", { name: "Show the rustc.exe processes" }));
+        expect(screen.getAllByText("rustc.exe")).toHaveLength(4);
+    });
+
+    it("an ×n line opens on its own, not with a same-named one under another parent", async () => {
+        const snap = snapshot();
+        const procs = snap.tasks[0].processes;
+        procs.push(
+            { id: "50:1", pid: 50, ppid: 11, name: "cargo.exe", cpu: 0, mem: GB, started_at_ms: 300 },
+            { id: "60:1", pid: 60, ppid: 11, name: "cargo.exe", cpu: 0, mem: GB, started_at_ms: 300 }
+        );
+        for (const [pid, ppid] of [
+            [51, 50],
+            [52, 50],
+            [61, 60],
+            [62, 60],
+        ]) {
+            procs.push({ id: `${pid}:1`, pid, ppid, name: "rustc.exe", cpu: 1, mem: GB, started_at_ms: 400 });
+        }
+        sample.mockResolvedValue(snap);
+        renderTower();
+        await waitFor(() => expect(screen.getAllByTestId("tower-many-rustc.exe")).toHaveLength(2));
+        const [first] = screen.getAllByTestId("tower-many-rustc.exe");
+        fireEvent.click(within(first).getByRole("button", { name: "Show the rustc.exe processes" }));
+        // Two from the opened line, and the other line still closed.
+        expect(screen.getAllByText("rustc.exe")).toHaveLength(4);
+        expect(screen.getAllByRole("button", { name: "Show the rustc.exe processes" })).toHaveLength(1);
+    });
+
+    it("says what each of AgentMux's own processes is, with its executable alongside", async () => {
+        renderTower();
+        fireEvent.click(await screen.findByTestId("tower-rail-agentmux"));
+        const srv = screen.getByText("Server").closest("tr")!;
+        expect(within(srv).getByText("agentmux-srv.exe")).toHaveClass("tower-muted");
     });
 
     it("keeps each row, and updates it, across a refresh", async () => {
         vi.useFakeTimers();
         renderTower();
         await vi.advanceTimersByTimeAsync(0);
-        const agent = screen.getByTestId("tower-task-block-a");
-        fireEvent.click(within(agent).getByRole("button", { name: "Show processes" }));
         const node = screen.getByText("node.exe").closest("tr")!;
         // The next poll brings new numbers in new objects.
         sample.mockImplementation(() => {
@@ -182,16 +337,17 @@ describe("Tower", () => {
 
     it("reveals an agent's pane, and offers no pane for AgentMux itself", async () => {
         renderTower();
-        const agent = await screen.findByTestId("tower-task-block-a");
-        fireEvent.click(within(agent).getByRole("button", { name: "Show this pane" }));
+        await screen.findByTestId("tower-rail-block-a");
+        fireEvent.click(screen.getByRole("button", { name: "Show this pane" }));
         expect(reveal).toHaveBeenCalledWith("block-a");
-        expect(
-            within(screen.getByTestId("tower-task-agentmux")).queryByRole("button", { name: "Show this pane" })
-        ).toBeNull();
+        fireEvent.click(screen.getByTestId("tower-rail-agentmux"));
+        await waitFor(() => expect(screen.queryByRole("button", { name: "Show this pane" })).toBeNull());
     });
 
-    it("the Host view lists every process, filters, and says what it can't measure", async () => {
-        setMeta({ "tower:view": "host" });
+    it("the Processes view lists every process, filters, and says what it can't measure", async () => {
+        // "host" and "off" are how the view and a flat list were saved before
+        // they were renamed.
+        setMeta({ "tower:view": "host", "tower:group": "off" });
         renderTower();
         expect(await screen.findByText("WindowServer")).toBeInTheDocument();
         expect(sample).toHaveBeenCalledWith(expect.anything(), { host: true });
@@ -211,7 +367,7 @@ describe("Tower", () => {
 
     it("lists the machines, and can't pick an SSH host the helper doesn't run on", async () => {
         renderTower();
-        await screen.findByTestId("tower-task-block-a");
+        await screen.findByTestId("tower-rail-block-a");
         const picker = screen.getByRole("combobox", { name: "Machine" }) as HTMLSelectElement;
         const options = Array.from(picker.options).map((o) => [o.value, o.disabled]);
         expect(options).toEqual([
@@ -254,7 +410,7 @@ describe("Tower", () => {
             { host: true, connection: "build-box", filter: "", block_id: "tower-1" },
             { timeout: 180000 }
         );
-        expect(screen.queryByRole("tab", { name: "Tasks" })).toBeNull();
+        expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
         const cargo = screen.getByText("cargo").closest("tr")!;
         expect(within(cargo).queryByRole("button", { name: "Show command line" })).toBeNull();
         expect(screen.getByText(/410 processes/)).toBeInTheDocument();
@@ -334,7 +490,7 @@ describe("Tower", () => {
     it("pairs with another AgentMux computer from its link, and shows it", async () => {
         pairCmd.mockResolvedValue({ ...studio, connection: "peer:p2", hostname: "laptop" });
         renderTower();
-        await screen.findByTestId("tower-task-block-a");
+        await screen.findByTestId("tower-rail-block-a");
         fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: "__pair__" } });
         const form = screen.getByTestId("tower-pair");
         const pair = within(form).getByRole("button", { name: "Pair" });
@@ -355,7 +511,7 @@ describe("Tower", () => {
     it("says why pairing failed and keeps the form", async () => {
         pairCmd.mockRejectedValue(new Error("The code was refused"));
         renderTower();
-        await screen.findByTestId("tower-task-block-a");
+        await screen.findByTestId("tower-rail-block-a");
         fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: "__pair__" } });
         fireEvent.input(screen.getByLabelText("Pairing link"), { target: { value: "agentmux://pair?v=1" } });
         fireEvent.click(screen.getByRole("button", { name: "Pair" }));
@@ -363,13 +519,13 @@ describe("Tower", () => {
         expect(screen.getByTestId("tower-pair")).toBeInTheDocument();
     });
 
-    it("a paired AgentMux computer shows its tasks, but none of its panes can be revealed here", async () => {
+    it("a paired AgentMux computer shows its agents, but none of its panes can be revealed here", async () => {
         sample.mockImplementation(() => Promise.resolve({ ...snapshot(true), remote: true, hostname: "studio" }));
         setMeta({ "tower:connection": "peer:p1" });
         renderTower();
-        const agent = await screen.findByTestId("tower-task-block-a");
-        expect(screen.getByRole("tab", { name: "Tasks" })).toBeInTheDocument();
-        expect(within(agent).queryByRole("button", { name: "Show this pane" })).toBeNull();
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.getByRole("tab", { name: "Agents" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Show this pane" })).toBeNull();
         expect(sample).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ connection: "peer:p1", host: false }),
@@ -397,7 +553,7 @@ describe("Tower", () => {
         expect(setMetaMock).not.toHaveBeenCalledWith({ "tower:connection": null });
     });
 
-    it("the Host view groups processes of one app, and can list them flat", async () => {
+    it("the Processes view groups processes of one app, and can list them flat", async () => {
         const many = snapshot(true);
         many.host!.processes = [
             { id: "20:1", pid: 20, name: "chrome.exe", cpu: 0.5, mem: GB },
@@ -405,7 +561,7 @@ describe("Tower", () => {
             { id: "4:1", pid: 4, name: "System", cpu: 0.01, mem: 1024 },
         ];
         sample.mockResolvedValue(many);
-        setMeta({ "tower:view": "host" });
+        setMeta({ "tower:view": "processes", "tower:group": "app" });
         renderTower();
         const chrome = await screen.findByTestId("tower-app-chrome.exe");
         expect(within(chrome).getByText("(2)")).toBeInTheDocument();
@@ -419,10 +575,164 @@ describe("Tower", () => {
         expect(screen.queryByTestId("tower-app-system")).toBeNull();
         expect(screen.getByText("System")).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Group by app" }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "off" });
+        fireEvent.click(screen.getByRole("radio", { name: "None" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "none" });
         await waitFor(() => expect(screen.queryByTestId("tower-app-chrome.exe")).toBeNull());
         expect(screen.getAllByText("chrome.exe")).toHaveLength(2);
+    });
+
+    it("the Processes view groups every process under its agent, the busiest open", async () => {
+        const snap = snapshot(true);
+        snap.host!.processes.push({ id: "20:1", pid: 20, name: "chrome.exe", cpu: 0.2, mem: GB });
+        sample.mockResolvedValue(snap);
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        const agent = await screen.findByTestId("tower-owner-block-a");
+        expect(within(agent).getByText("AgentX")).toBeInTheDocument();
+        expect(within(agent).getByText("(1)")).toBeInTheDocument();
+        const owners = screen.getAllByTestId(/^tower-owner-/).map((r) => r.dataset.testid);
+        expect(owners).toEqual(["tower-owner-block-a", "tower-owner-other"]);
+        // The busiest agent starts open; the other processes don't.
+        await waitFor(() => expect(screen.getByText("claude.exe")).toBeInTheDocument());
+        expect(screen.queryByText("chrome.exe")).toBeNull();
+        expect(agent.getAttribute("style")).toContain("--tower-owner-color");
+        // Other processes open to their apps.
+        fireEvent.click(
+            within(screen.getByTestId("tower-owner-other")).getByRole("button", { name: /Show Other processes/ })
+        );
+        expect(screen.getByText("chrome.exe")).toBeInTheDocument();
+        expect(screen.getByText("WindowServer")).toBeInTheDocument();
+    });
+
+    it("a search shows each match under its owner, and only owners with a match", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-block-a");
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "system" } });
+        await waitFor(() => expect(screen.queryByTestId("tower-owner-block-a")).toBeNull());
+        // The match's group opens by itself while the search is on.
+        expect(screen.getByTestId("tower-owner-other")).toBeInTheDocument();
+        expect(screen.getByText("System")).toBeInTheDocument();
+    });
+
+    it("the busiest agents are chosen once their CPU is known, not from the first sample's names", async () => {
+        vi.useFakeTimers();
+        const withAgents = (rated: boolean) => {
+            const snap = snapshot(true);
+            snap.tasks.unshift(
+                {
+                    id: "a-quiet",
+                    kind: "agent",
+                    label: "Aquiet",
+                    tracking: "high",
+                    cpu: rated ? 0 : undefined,
+                    cpu_account: true,
+                    mem: 1,
+                    processes: [],
+                },
+                {
+                    id: "b-idle",
+                    kind: "agent",
+                    label: "Bidle",
+                    tracking: "high",
+                    cpu: rated ? 0 : undefined,
+                    cpu_account: true,
+                    mem: 1,
+                    processes: [],
+                }
+            );
+            snap.host!.processes.push(
+                { id: "90:1", pid: 90, name: "quiet.exe", cpu: rated ? 0 : undefined, mem: 1, task: "a-quiet" },
+                { id: "91:1", pid: 91, name: "idle.exe", cpu: rated ? 0.01 : undefined, mem: 1, task: "b-idle" },
+                { id: "92:1", pid: 92, name: "build.exe", cpu: rated ? 3 : undefined, mem: 1, task: "block-a" }
+            );
+            // The first sample: no process has a rate yet.
+            if (!rated) snap.host!.processes.forEach((p) => (p.cpu = undefined));
+            return snap;
+        };
+        sample.mockResolvedValueOnce(withAgents(false)).mockResolvedValue(withAgents(true));
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        // No rates yet: nothing opened by name.
+        expect(screen.queryByText("quiet.exe")).toBeNull();
+        await vi.advanceTimersByTimeAsync(2000);
+        // AgentX (3 cores) and Bidle are the busiest two; Aquiet stays shut.
+        expect(screen.getByText("build.exe")).toBeInTheDocument();
+        expect(screen.getByText("idle.exe")).toBeInTheDocument();
+        expect(screen.queryByText("quiet.exe")).toBeNull();
+    });
+
+    it("while searching, a group's arrow can't close it, and an app under Other opens", async () => {
+        const snap = snapshot(true);
+        snap.host!.processes.push(
+            { id: "20:1", pid: 20, name: "rustc.exe", cpu: 0.2, mem: GB },
+            { id: "21:1", pid: 21, name: "rustc.exe", cpu: 0.2, mem: GB }
+        );
+        sample.mockResolvedValue(snap);
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-other");
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "rustc" } });
+        await waitFor(() => expect(screen.getAllByText("rustc.exe")).toHaveLength(3));
+        expect(within(screen.getByTestId("tower-owner-other")).getByRole("button")).toBeDisabled();
+        expect(within(screen.getByTestId("tower-app-rustc.exe")).getByRole("button")).toBeDisabled();
+    });
+
+    it("groups by agent, app or nothing; another machine has no agents to group by", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-block-a");
+        const radios = screen.getAllByRole("radio").map((r) => r.textContent);
+        expect(radios).toEqual(expect.arrayContaining(["Agent", "App", "None"]));
+        fireEvent.click(screen.getByRole("radio", { name: "App" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "app" });
+        fireEvent.click(screen.getByRole("radio", { name: "Agent" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": null });
+        cleanup();
+
+        sample.mockImplementation(() => Promise.resolve({ ...snapshot(true), remote: true, tasks: [] }));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await screen.findByText("System");
+        expect(screen.queryByRole("radio", { name: "Agent" })).toBeNull();
+    });
+
+    it("going from an agent to Processes shows only that agent's processes, until Show all", async () => {
+        renderTower();
+        await screen.findByTestId("tower-rail-block-a");
+        fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
+        // The agent the Agents view showed (the first, none chosen) goes along.
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:view": "processes", "tower:only": "block-a" });
+        expect(await screen.findByTestId("tower-only")).toHaveTextContent("Only AgentX");
+        await waitFor(() => expect(screen.getByText("claude.exe")).toBeInTheDocument());
+        expect(screen.queryByTestId("tower-owner-other")).toBeNull();
+        expect(screen.queryByText("System")).toBeNull();
+
+        fireEvent.click(within(screen.getByTestId("tower-only")).getByRole("button", { name: "Show all" }));
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:only": null });
+        expect(await screen.findByTestId("tower-owner-other")).toBeInTheDocument();
+        expect(screen.queryByTestId("tower-only")).toBeNull();
+    });
+
+    it("the filter is dropped on another machine and back on the Agents view", async () => {
+        setMeta({ "tower:view": "processes", "tower:only": "block-a" });
+        renderTower();
+        await screen.findByTestId("tower-only");
+        fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: "peer:p1" } });
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:connection": "peer:p1", "tower:only": null });
+        setMeta({ "tower:view": "processes", "tower:only": "block-a" });
+        fireEvent.click(await screen.findByRole("tab", { name: "Agents" }));
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:view": null, "tower:only": null });
+    });
+
+    it("a pane opened on Processes isn't filtered, and switching within it carries nothing", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-other");
+        expect(screen.queryByTestId("tower-only")).toBeNull();
+        fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
+        expect(setMetaMock).not.toHaveBeenCalledWith(expect.objectContaining({ "tower:only": expect.anything() }));
     });
 
     it("polls only while visible", async () => {

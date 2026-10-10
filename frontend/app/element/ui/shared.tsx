@@ -7,8 +7,10 @@
 import clsx from "clsx";
 import type { JSX } from "solid-js";
 
-/** What a control is for, not what colour it is. Each maps to theme tokens. */
-export type UiTone = "accent" | "neutral" | "danger" | "quiet";
+/** What a control is for, not what colour it is. Each maps to theme tokens.
+ *  `attention` (filled) is only for the main action of a call to action an
+ *  agent waits on. */
+export type UiTone = "accent" | "neutral" | "danger" | "quiet" | "attention";
 
 /**
  * `comfortable` (the default) for full panes and modals; `compact` for the

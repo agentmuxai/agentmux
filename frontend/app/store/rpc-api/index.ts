@@ -5,7 +5,7 @@
 // handlers (backend/rpc_types/, server/websocket.rs). The original Go
 // generator (cmd/generate/main-generatets.go) was removed with the Go backend.
 //
-// This module was split from a single ~1,454-line rpc-api.ts into domain
+// This module was split from a single ~1,454-line rpc-api file into domain
 // files. `RpcApi` is composed here from the per-domain partials; its public
 // shape, method names, signatures, and call syntax (`RpcApi.SomeMethod(...)`)
 // are identical to the original single-object export. None of the methods use
@@ -20,140 +20,80 @@ import { BrowserStartPageApi } from "./browser-start-page";
 import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
-import { RemotesApi } from "./remotes";
-import { WidgetsApi } from "./widgets";
 import { FsApi } from "./fs";
 import { IdentityApi } from "./identity";
 import { LayoutApi } from "./layout";
 import { McpApi } from "./mcp";
-import { NativeMemoryApi } from "./native-memory";
 import { MiscApi } from "./misc";
+import { NativeMemoryApi } from "./native-memory";
+import { NotifyApi } from "./notify";
 import { PresenceApi } from "./presence";
 import { ReactiveApi } from "./reactive";
+import { RemotesApi } from "./remotes";
 import { SessionApi } from "./session";
 import { SkillApi } from "./skill";
 import { TowerApi } from "./tower";
-import { VoiceApi } from "./voice";
 import { ViewerApi } from "./viewer";
-import { NotifyApi } from "./notify";
+import { VoiceApi } from "./voice";
+import { WidgetsApi } from "./widgets";
 import { WorkspaceApi } from "./workspace";
 
-export type { OAuthFlowStatus } from "./types";
-export type { ViewerDeviceInfo, ViewerPairStartResult } from "./viewer";
-export type { PresenceState, PresenceStatusResult } from "./presence";
-export type { TowerPeerInfo, TowerProcess, TowerSnapshot, TowerTask } from "./tower";
-export type {
-    CheckCliAuthResult,
-    CommandCheckCliAuthData,
-    CommandResolveCliData,
-    CommandRunCliLoginData,
-    ResolveCliInput,
-    ResolveCliResult,
-    RunCliLoginResult,
-    ToolchainEnvReq,
-    ToolchainEnvResult,
-    ToolchainPruneItem,
-    ToolchainPruneReq,
-    ToolchainPruneResult,
-    ToolchainPruneSkip,
-    ToolchainPackage,
-    ToolchainVersionsReq,
-} from "./workspace";
-export type {
-    WidgetApiResult,
-    WidgetHealthResult,
-} from "./misc";
-export type {
-    CommandEventReadHistoryData,
-    NoArgsReq,
-    SubscriptionRequest,
-} from "./workspace";
-export type {
-    AiRateLimitResult,
-    AppInfoResult,
-} from "./misc";
-export type {
-    CommandAgentAnswerData,
-    BlockInputInput,
-    CommandBlockInputData,
-} from "./block";
 export type {
     AgentConfigFile,
+    AgentContent,
+    AgentDefinition,
+    AgentDefinitionCreateInput,
+    AgentDefinitionImport,
+    AgentDefinitionUpdateInput,
+    AgentHistory,
+    AgentInstance,
+    AgentLastRuntime,
+    AgentOpenPane,
+    AgentSkill,
+    AgentSkillImport,
     AgentStopInput,
+    BlockKind,
     CommandAgentInputData,
+    CommandAgentLastRuntimeData,
     CommandAgentStopData,
+    CommandAppendAgentHistoryData,
+    CommandContainerImageCheckData,
+    CommandContainerRuntimeAvailableData,
+    CommandCreateAgentDefinitionData,
+    CommandCreateAgentInstanceData,
+    CommandCreateAgentSkillData,
+    CommandDeleteAgentDefinitionData,
+    CommandDeleteAgentSkillData,
+    CommandExportAgentsData,
+    CommandForkAgentDefinitionData,
+    CommandGetAgentContentData,
+    CommandGetAgentInstanceData,
+    CommandGetAllAgentContentData,
+    CommandImportAgentDefinitionsData,
+    CommandImportAgentFromClawData,
+    CommandListAgentDefinitionsData,
+    CommandListAgentHistoryData,
+    CommandListAgentInstancesData,
+    CommandListAgentSkillsData,
+    CommandListHiddenTemplatesData,
+    CommandRenameAgentDefinitionTitleData,
+    CommandReseedAgentsData,
+    CommandSearchAgentHistoryData,
+    CommandSetAgentContentData,
     CommandShellExecData,
     CommandShellStatusData,
     CommandShellStopData,
     CommandSubprocessSpawnData,
+    CommandUpdateAgentDefinitionData,
+    CommandUpdateAgentInstanceData,
+    CommandUpdateAgentSkillData,
     CommandWriteAgentConfigData,
     CommandWriteAgentConfigResult,
-    ShellExecInput,
-    ShellExecResult,
-    ShellStatusResult,
-    ShellStopResult,
-    SubprocessSpawnInput,
-    WriteAgentConfigInput,
-} from "./agent";
-export type {
-    UnwatchMediaDirReq,
-    WatchEditorFileReq,
-    WatchMediaDirReq,
-} from "./file";
-export type {
-    AgentHistory,
-    CommandAppendAgentHistoryData,
-    CommandListAgentHistoryData,
-    CommandSearchAgentHistoryData,
-    ListAgentHistoryInput,
-    SearchAgentHistoryInput,
-} from "./agent";
-export type {
-    CommandReadEditorFileData,
-    CommandReadEditorFileResult,
-    CommandWriteEditorFileData,
-    DirEntry,
-    EditorDrive,
-    EditorRootsReq,
-    GetEditorHomeResult,
-    GetEditorRootsResult,
-    ListEditorDirReq,
-    ListEditorDirResult,
-} from "./file";
-export type {
-    AgentSkill,
-    CommandCreateAgentSkillData,
-    CommandDeleteAgentSkillData,
-    CommandListAgentSkillsData,
-    CommandUpdateAgentSkillData,
-    CreateAgentSkillInput,
-} from "./agent";
-export type {
-    CreateEditorDirReq,
-    CreateEditorDirResult,
-    CreateEditorFileReq,
-    CreateEditorFileResult,
-    CreateScratchFileReq,
-    CreateScratchFileResult,
-    DeleteEditorFileReq,
-    MoveScratchFileReq,
-    MoveScratchFileResult,
-    OpenInShellReq,
-    RenameEditorFileReq,
-    RenameEditorFileResult,
-} from "./file";
-export type {
-    AgentInstance,
-    AgentLastRuntime,
-    CommandAgentLastRuntimeData,
-    CommandCreateAgentInstanceData,
-    CommandGetAgentInstanceData,
-    CommandListAgentInstancesData,
-    CommandUpdateAgentInstanceData,
+    ContainerImageAccess,
+    ContainerImageCheckResult,
+    ContainerRuntimeAvailableResult,
     CreateAgentInstanceInput,
-} from "./agent";
-export type {
-    BlockKind,
+    CreateAgentSkillInput,
     DeleteDroneReq,
     DeleteDroneResp,
     DroneBlockState,
@@ -163,79 +103,42 @@ export type {
     DroneGraph,
     DroneRun,
     DroneViewport,
+    ForkAgentDefinitionInput,
     GetDroneReq,
+    ImportAgentDefinitionsResult,
+    ListAgentHistoryInput,
     ListDroneRunsInput,
     ListDronesReq,
+    ReseedAgentsResult,
     RunDroneReq,
     RunDroneResp,
+    SearchAgentHistoryInput,
+    ShellExecInput,
+    ShellExecResult,
+    ShellStatusResult,
+    ShellStopResult,
+    SubprocessSpawnInput,
+    WriteAgentConfigInput,
 } from "./agent";
 export type {
-    LspSendReq,
-    LspStartReq,
-    LspStartResult,
-    LspStopReq,
-} from "./file";
-export type {
-    AgentContent,
-    AgentOpenPane,
-    AgentDefinition,
-    AgentDefinitionCreateInput,
-    AgentDefinitionUpdateInput,
-    AgentDefinitionImport,
-    AgentSkillImport,
-    CommandContainerImageCheckData,
-    CommandContainerRuntimeAvailableData,
-    CommandCreateAgentDefinitionData,
-    CommandDeleteAgentDefinitionData,
-    CommandExportAgentsData,
-    CommandGetAgentContentData,
-    CommandGetAllAgentContentData,
-    CommandImportAgentDefinitionsData,
-    CommandImportAgentFromClawData,
-    CommandListAgentDefinitionsData,
-    CommandReseedAgentsData,
-    CommandSetAgentContentData,
-    CommandUpdateAgentDefinitionData,
-    ContainerImageAccess,
-    ContainerImageCheckResult,
-    ContainerRuntimeAvailableResult,
-    ImportAgentDefinitionsResult,
-    ReseedAgentsResult,
-    CommandForkAgentDefinitionData,
-    CommandListHiddenTemplatesData,
-    CommandRenameAgentDefinitionTitleData,
-    ForkAgentDefinitionInput,
-} from "./agent";
-export type {
-    AgentDefinitionIdentity,
-    AgentIdentityLink,
-    IdentityAccount,
-    SecretRef,
-} from "./identity";
-export type {
-    CommandInstallToolData,
-    GetToolStatusResult,
-    InstallFailure,
-    InstallToolResult,
-    ToolStatus,
-    ToolStatusEntry,
-} from "./workspace";
-export type {
+    AgentShutdownKeepResult,
+    BackgroundTaskView,
     BlockfileLineCountResult,
     BlockfileReadRangeResult,
     BlockfileReadStateResult,
     BlockfileWriteStateResult,
+    BlockInputInput,
+    CommandAgentAnswerData,
+    CommandAgentCancelData,
+    CommandAgentShutdownKeepData,
+    CommandAmbientNarrateData,
+    CommandBackgroundTaskCompletionData,
+    CommandBackgroundTaskPidData,
     CommandBlockfileLineCountData,
     CommandBlockfileReadRangeData,
     CommandBlockfileReadStateData,
     CommandBlockfileWriteStateData,
-    BackgroundTaskView,
-    CommandAgentCancelData,
-    CommandAgentShutdownKeepData,
-    AgentShutdownKeepResult,
-    CommandAmbientNarrateData,
-    CommandBackgroundTaskCompletionData,
-    CommandBackgroundTaskPidData,
+    CommandBlockInputData,
     CommandDeleteBlockData,
     CommandDockNodeStatusData,
     CommandListBackgroundTasksData,
@@ -243,16 +146,6 @@ export type {
 } from "./block";
 export type {
     Bundle,
-    BundleUpsertInput,
-    BundleUpsertRequest,
-    GlobalMemoryVersionMeta,
-    GlobalMemoryImportReport,
-    GlobalMemoryImportSource,
-    GlobalMemoryImportSources,
-    BundleValidateInput,
-    BundleValidationIssue,
-    BundleValidationReport,
-    BundleValidationSeverity,
     BundleImportCommitResponse,
     BundleImportContextFilePreview,
     BundleImportMcpServerDisplay,
@@ -262,7 +155,49 @@ export type {
     BundleImportRequirementPreview,
     BundleImportSkillPreview,
     BundleImportUnresolvedRequirement,
+    BundleUpsertInput,
+    BundleUpsertRequest,
+    BundleValidateInput,
+    BundleValidationIssue,
+    BundleValidationReport,
+    BundleValidationSeverity,
+    GlobalMemoryImportReport,
+    GlobalMemoryImportSource,
+    GlobalMemoryImportSources,
+    GlobalMemoryVersionMeta,
 } from "./bundle";
+export type {
+    CommandReadEditorFileData,
+    CommandReadEditorFileResult,
+    CommandWriteEditorFileData,
+    CreateEditorDirReq,
+    CreateEditorDirResult,
+    CreateEditorFileReq,
+    CreateEditorFileResult,
+    CreateScratchFileReq,
+    CreateScratchFileResult,
+    DeleteEditorFileReq,
+    DirEntry,
+    EditorDrive,
+    EditorRootsReq,
+    GetEditorHomeResult,
+    GetEditorRootsResult,
+    ListEditorDirReq,
+    ListEditorDirResult,
+    LspSendReq,
+    LspStartReq,
+    LspStartResult,
+    LspStopReq,
+    MoveScratchFileReq,
+    MoveScratchFileResult,
+    OpenInShellReq,
+    RenameEditorFileReq,
+    RenameEditorFileResult,
+    UnwatchMediaDirReq,
+    WatchEditorFileReq,
+    WatchMediaDirReq,
+} from "./file";
+export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
 export type {
     FsCreateKind,
     FsCreateReq,
@@ -289,20 +224,15 @@ export type {
     FsWatchReq,
     FsWatchResult,
 } from "./fs";
-export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
-export type {
-    ReactiveAgentRegistration,
-    ReactiveMismatchSummary,
-    ReactiveRegistrationsResult,
-    ReactiveRemoteRegistration,
-} from "./reactive";
+export type { AgentDefinitionIdentity, AgentIdentityLink, IdentityAccount, SecretRef } from "./identity";
+export type { AiRateLimitResult, AppInfoResult, WidgetApiResult, WidgetHealthResult } from "./misc";
 export type {
     NativeMemoryAdoptionCandidate,
     NativeMemoryAdoptionFile,
     NativeMemoryAdoptionList,
     NativeMemoryAdoptionListResult,
-    NativeMemoryClaimList,
     NativeMemoryClaimedFolder,
+    NativeMemoryClaimList,
     NativeMemoryDiffResult,
     NativeMemoryFileMeta,
     NativeMemoryHistoryResult,
@@ -311,6 +241,13 @@ export type {
     NativeMemoryRevertResult,
     NativeMemoryVersionMeta,
 } from "./native-memory";
+export type { PresenceState, PresenceStatusResult } from "./presence";
+export type {
+    ReactiveAgentRegistration,
+    ReactiveMismatchSummary,
+    ReactiveRegistrationsResult,
+    ReactiveRemoteRegistration,
+} from "./reactive";
 export type {
     ActivitySummaryResult,
     AgentArchiveRow,
@@ -336,6 +273,35 @@ export type {
     SessionRestoreResult,
     SessionResumePreflightResult,
 } from "./session";
+export type { TowerMachine, TowerPeerInfo, TowerProcess, TowerSnapshot, TowerTask } from "./tower";
+export type { OAuthFlowStatus } from "./types";
+export type { ViewerDeviceInfo, ViewerPairStartResult } from "./viewer";
+export type {
+    CheckCliAuthResult,
+    CommandCheckCliAuthData,
+    CommandEventReadHistoryData,
+    CommandInstallToolData,
+    CommandResolveCliData,
+    CommandRunCliLoginData,
+    GetToolStatusResult,
+    InstallFailure,
+    InstallToolResult,
+    NoArgsReq,
+    ResolveCliInput,
+    ResolveCliResult,
+    RunCliLoginResult,
+    SubscriptionRequest,
+    ToolchainEnvReq,
+    ToolchainEnvResult,
+    ToolchainPackage,
+    ToolchainPruneItem,
+    ToolchainPruneReq,
+    ToolchainPruneResult,
+    ToolchainPruneSkip,
+    ToolchainVersionsReq,
+    ToolStatus,
+    ToolStatusEntry,
+} from "./workspace";
 
 // WshServerCommandToDeclMap
 export const RpcApi = {

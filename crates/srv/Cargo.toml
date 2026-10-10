@@ -126,6 +126,13 @@ hyper-util = { version = "0.1", features = ["tokio", "service"] }
 # manager for srv's delegated scope. Same zbus 5 the launcher already uses.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Trash through NSFileManager ourselves, to learn where each item went, so
+# undo can put it back (backend/fs_ops/trash_worker.rs). Already in the tree at
+# these versions via the trash crate, so they add no new supply-chain surface.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
+
 [target.'cfg(windows)'.dependencies]
 # Read-only COM access to Windows Defender Firewall and the network list, to
 # tell whether LAN peers can reach us (backend/lan_firewall_windows.rs,
@@ -186,3 +193,11 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 # wants synchronous HTTP from a non-tokio test fn. Production code
 # stays on the async client.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+
+# `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
+# embeds the Windows icon/version resource from build.rs.
+# objc2 is macOS-only (fs_ops/trash_worker.rs) and unverifiable from a
+# Windows/Linux machete run; drop it from this list once a macOS build proves
+# objc2-foundation alone is enough.
+[package.metadata.cargo-machete]
+ignored = ["winres", "objc2"]

@@ -107,6 +107,26 @@
         }
     }
 
+    // A widget's item (widget-contributions.tsx), coloured by the tone its
+    // pane set.
+    .status-widget-item {
+        &.tone-info {
+            color: var(--info-color);
+        }
+
+        &.tone-success {
+            color: var(--success-color);
+        }
+
+        &.tone-warning {
+            color: var(--warning-color);
+        }
+
+        &.tone-error {
+            color: var(--error-color);
+        }
+    }
+
     // Intentionally --font-sans, not --font-mono: this class name predates
     // SPEC/retro-statusbar-metrics-font-change-2026-09-16, which found these
     // readouts had (by an invalid-CSS accident) always rendered in the UI's

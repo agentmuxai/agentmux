@@ -48,7 +48,7 @@ import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
-import { paneCommandFor, shortcutFor } from "@/app/keybindings";
+import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
 import { Button, IconButton } from "@/app/element/ui";
 
@@ -319,6 +319,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return order().slice(first, last);
     });
     const byName = createMemo(() => new Map(entries().map((e) => [e.name, e])));
+    // A row's entry, kept while it leaves: a selection change in the update that drops its name
+    // re-runs the row once more, and reading the <Show>'s accessor then throws (a stale read).
+    const entryOf = (name: string) => createMemo<FsEntry | undefined>((prev) => byName().get(name) ?? prev) as () => FsEntry;
     // Files an agent changed in the last half hour (§8.4), by child name.
     // A minute's tick lets an old badge go without waiting for a change.
     const [minute, setMinute] = createSignal(Date.now());
@@ -424,7 +427,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     // ── Keyboard (§5.3.1) ──────────────────────────────────────────────────
 
-    /** Runs a `files:*` command from the shortcut table; false if unknown. */
+    /** Runs a `files:*` command, for its keys and RunCommand alike; false if unknown. */
     const runFilesCommand = (command: string): boolean => {
         const sel = model.selection();
         switch (command) {
@@ -499,6 +502,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         return false;
     };
+    onCleanup(registerPaneCommandRunner(model.blockId, runFilesCommand));
 
     // Files commands from anywhere in the pane (toolbar, sidebar), not only
     // the list: the global shortcuts that share these keys stand aside in
@@ -556,11 +560,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             return true;
         };
         let handled = true;
-        // Command keys are the `files:*` rows of the shortcut table, so they
-        // show in the help pane and can't collide with a global shortcut. The
-        // list's own keys (arrows, paging, Enter, type-ahead) stay here.
+        // Command keys are the `files:*` rows of the shortcut table, so they show in
+        // the help pane. The list's own keys (arrows, paging, Enter, type-ahead, Esc)
+        // stay here; with a modifier besides Shift, a global command wins (⌃⇧↑, ⌘/).
         const command = paneCommandFor(e, "files");
-        handled = command ? runFilesCommand(command) : listKey();
+        handled = command ? runFilesCommand(command) : !((e.ctrlKey || e.metaKey || e.altKey) && isGlobalKey(e)) && listKey();
         if (handled) {
             e.preventDefault();
             e.stopPropagation();
@@ -786,6 +790,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             // CSS zoom from the shared `term:zoom`: everything scales together, and
             // the @container on this element measures in zoomed pixels.
             style={{ zoom: readZoom(props.ctx.meta()) }}
+            // The folder shown, for tooling (verify-shortcuts.mjs's temp-tree guard).
+            data-path={model.path()}
+            data-connection={model.connection()}
             onContextMenu={(e) => e.preventDefault()}
             onKeyDown={onPaneKeyDown}
         >
@@ -1047,44 +1054,44 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     <Show when={model.phase() === "ready" && grid()}>
                         <div class="files-grid" style={{ height: `${Math.ceil(entries().length / gridCols()) * TILE_H}px` }}>
                             <For each={visibleNames()}>
-                                {(name, i) => (
-                                    <Show when={byName().get(name)}>
-                                        {(entry) => {
-                                            const index = () => range().first + i();
-                                            return (
-                                                <GridTile
-                                                    model={model}
-                                                    entry={entry()}
-                                                    index={index()}
-                                                    left={(index() % gridCols()) * TILE_W}
-                                                    top={Math.floor(index() / gridCols()) * TILE_H}
-                                                    selected={model.selection().names.has(name)}
-                                                    focused={model.selection().focus === name}
-                                                    renaming={model.renaming() === name}
-                                                    git={model.gitStateOf().get(name)}
-                                                    touch={touchOf(name)}
-                                                    dropTarget={dropRow() === name}
-                                                    onClick={(e) => onRowClick(e, entry())}
-                                                    onOpen={() => openEntry(entry())}
-                                                    onContextMenu={(e) => onRowContextMenu(e, entry())}
-                                                    onDragStart={(e) => onRowDragStart(e, entry())}
-                                                    onDragOver={() => onRowDragOver(entry())}
-                                                    onDragEnd={() => endPathDrag()}
-                                                    onRenameDone={() => listEl?.focus()}
-                                                />
-                                            );
-                                        }}
-                                    </Show>
-                                )}
+                                {(name, i) => {
+                                    const entry = entryOf(name);
+                                    const index = () => range().first + i();
+                                    return (
+                                        <Show when={byName().has(name)}>
+                                            <GridTile
+                                                model={model}
+                                                entry={entry()}
+                                                index={index()}
+                                                left={(index() % gridCols()) * TILE_W}
+                                                top={Math.floor(index() / gridCols()) * TILE_H}
+                                                selected={model.selection().names.has(name)}
+                                                focused={model.selection().focus === name}
+                                                renaming={model.renaming() === name}
+                                                git={model.gitStateOf().get(name)}
+                                                touch={touchOf(name)}
+                                                dropTarget={dropRow() === name}
+                                                onClick={(e) => onRowClick(e, entry())}
+                                                onOpen={() => openEntry(entry())}
+                                                onContextMenu={(e) => onRowContextMenu(e, entry())}
+                                                onDragStart={(e) => onRowDragStart(e, entry())}
+                                                onDragOver={() => onRowDragOver(entry())}
+                                                onDragEnd={() => endPathDrag()}
+                                                onRenameDone={() => listEl?.focus()}
+                                            />
+                                        </Show>
+                                    );
+                                }}
                             </For>
                         </div>
                     </Show>
                     <Show when={model.phase() === "ready" && !grid()}>
                         <div class="files-rows" style={{ height: `${entries().length * ROW_HEIGHT}px` }}>
                             <For each={visibleNames()}>
-                                {(name, i) => (
-                                    <Show when={byName().get(name)}>
-                                        {(entry) => (
+                                {(name, i) => {
+                                    const entry = entryOf(name);
+                                    return (
+                                        <Show when={byName().has(name)}>
                                             <FileRow
                                                 model={model}
                                                 entry={entry()}
@@ -1103,9 +1110,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                                 onDragEnd={() => endPathDrag()}
                                                 onRenameDone={() => listEl?.focus()}
                                             />
-                                        )}
-                                    </Show>
-                                )}
+                                        </Show>
+                                    );
+                                }}
                             </For>
                         </div>
                     </Show>

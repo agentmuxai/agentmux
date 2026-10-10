@@ -8,7 +8,7 @@
  * In order (spec §3.2):
  *   1. the program that reads the body: `python - <<'PY'`, `node <<EOF`,
  *      `psql <<SQL`, `bash <<EOF`;
- *   2. the file it is written to: `cat > a.ts <<'EOF'`, `tee x.json <<EOF`;
+ *   2. the file it is written to: `cat > a.ts <<'EOF'`, `tee x.json <<EOF`; (comment-hygiene: allow)
  *   3. the delimiter's name: `<<'PY'`, `<<JSON`;
  *   4. what the heredoc is piped into: `cat <<EOF | kubectl apply -f -`;
  *   5. a shebang on the body's first line.

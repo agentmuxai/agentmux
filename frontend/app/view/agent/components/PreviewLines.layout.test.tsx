@@ -12,7 +12,8 @@
  * mode, equal indentation steps whatever the gutter width, diff backgrounds
  * across the line, and the same box for streamed and finished output.
  *
- * It skips, rather than fails, on a machine with no Chromium-based browser.
+ * It skips, rather than fails, on a machine with no usable browser
+ * (layout-browser.ts findBrowser: on macOS, Chrome's headless shell only).
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
@@ -21,7 +22,7 @@ import * as sass from "sass";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { chunksDoc, codeDoc, diffDocFromSides, outputDoc, proseDoc } from "../preview-text/docs";
 import type { PreviewDoc, PreviewMode } from "../preview-text/types";
-import { findBrowser, measureInBrowser } from "./layout-browser";
+import { findBrowser, measureInBrowser, NO_BROWSER_HINT } from "./layout-browser";
 import { PreviewLines } from "./PreviewLines";
 
 // No Shiki in this test: the plain text is what's measured.
@@ -33,6 +34,7 @@ vi.mock("./shiki-highlighter", () => ({
 vi.spyOn(console, "warn").mockImplementation(() => {});
 
 const BROWSER = findBrowser();
+if (!BROWSER) console.info(NO_BROWSER_HINT);
 const WIDTH = 400;
 
 const TOKENS = `:root{--font-mono:Menlo,Consolas,"DejaVu Sans Mono",monospace;--main-text-color:#ddd;--secondary-text-color:#999;--accent-color:#58c142;--error-color:#f87171}

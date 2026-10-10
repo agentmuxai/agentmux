@@ -19,6 +19,7 @@
 
 import { onCleanup, onMount } from "solid-js";
 import { eventBelongsToBlock } from "@/util/focusutil";
+import { isModKey } from "@/util/platformutil";
 
 export interface UseAgentKeyboardOptions {
     blockId: string;
@@ -31,7 +32,7 @@ export function useAgentKeyboard(opts: UseAgentKeyboardOptions): void {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!eventBelongsToBlock(e, opts.blockId)) return;
 
-            if (e.ctrlKey && e.key === "f") {
+            if (isModKey(e) && e.key === "f") {
                 e.preventDefault();
                 opts.onToggleSearch();
             }

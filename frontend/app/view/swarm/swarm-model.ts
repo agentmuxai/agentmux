@@ -32,7 +32,7 @@ import { onSubagentNamed, withSubagentName } from "./subagent-naming";
 // two levels — `AgentDispatch` (one per Agent-tool-or-Workflow-tool call)
 // containing N `SubAgent` members. The TS interface here keeps the
 // `ActiveSubagent` name (unlike the Rust `SubagentInfo`→`SubAgent` rename)
-// to limit churn across this file/swarm-view.tsx — it maps 1:1 to the
+// to limit churn across this file and swarm-view.tsx — it maps 1:1 to the
 // backend's `SubAgent` either way.
 export interface ActiveSubagent {
     agent_id: string;

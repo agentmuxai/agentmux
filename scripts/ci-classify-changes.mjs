@@ -28,7 +28,7 @@
  *
  * Usage:
  *   ci-classify-changes.mjs            # newline-separated paths on stdin
- *   ci-classify-changes.mjs a.md b.rs  # or as arguments
+ *   ci-classify-changes.mjs a.md b.rs  # or as arguments (comment-hygiene: allow)
  *   ... | ci-classify-changes.mjs      # or a JSON array of {filename, patch}
  *                                      # (the PR files API), which R7 needs
  *

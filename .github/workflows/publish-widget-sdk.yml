@@ -1,0 +1,45 @@
+name: Publish the widget SDK to npm
+
+# Publishes @agentmuxai/widget-sdk (sdk/widget-sdk/) to the public npm registry
+# when a widget-sdk-v<version> tag (widget-sdk-v1.0.0, ...) is pushed. The tag
+# must match sdk/widget-sdk/package.json's version.
+#
+# Publishes through npm trusted publishing: the job's GitHub OIDC identity,
+# which npmjs.com accepts for this repo and this workflow file, so no npm token
+# is stored anywhere. Provenance is attached automatically. Needs npm 11.5.1+.
+# (A brand-new package can't be first-published this way, so the name was
+# reserved with a hand-published, code-free 0.0.0, as for muxcode.)
+# docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §7.
+
+on:
+  push:
+    tags: ['widget-sdk-v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+  id-token: write # trusted publishing (OIDC) and provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/widget-sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+      - name: Tag matches package.json version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "widget-sdk-v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match sdk/widget-sdk/package.json version $version"
+            exit 1
+          fi
+      - name: The module loads and exports connect
+        run: node -e "import('./v1.js').then(m => { if (typeof m.connect !== 'function') process.exit(1) })"
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11
+      - run: npm publish --access public

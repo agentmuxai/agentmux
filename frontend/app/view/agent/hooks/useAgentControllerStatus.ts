@@ -34,6 +34,7 @@
  */
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { withLoginWindow } from "../flows/login-window";
 import { loginBackend } from "../flows/login-backend";
 import { getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
 import { sleep } from "@/util/util";
@@ -631,7 +632,11 @@ export function useAgentControllerStatus(
         return (await buildAuthEnv(prov)) ?? {};
     };
 
-    const relogin = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
+    // The login's window opens inside the click (its URL comes later), and is
+    // closed on every way out of the flow if no URL used it (login-window.ts).
+    const relogin = (reloginOpts: { retryAfterLogin?: boolean } = {}) =>
+        reloginInFlight ? Promise.resolve() : withLoginWindow(opts.provider(), () => reloginFlow(reloginOpts));
+    const reloginFlow = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
         if (reloginInFlight) return;
         const retryAfterLogin = reloginOpts.retryAfterLogin ?? true;
         const prov = opts.provider();

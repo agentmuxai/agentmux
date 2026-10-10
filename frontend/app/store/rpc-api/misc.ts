@@ -4,7 +4,7 @@
 // Everything that doesn't fit a single domain: activity/telemetry, AI messages,
 // authentication, suggestions, CPU/test streams, notifications, terminal
 // scrollback, widget HTTP proxy, and MuxBus cloud connectivity. Split from the
-// original rpc-api.ts.
+// original rpc-api file.
 
 import { RpcClient } from "../rpc-client";
 

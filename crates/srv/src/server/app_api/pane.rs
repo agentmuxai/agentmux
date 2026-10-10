@@ -640,8 +640,30 @@ pub(crate) async fn handle_close_pane(
         return quit_self(&state, &verified_own_block_id, &caller_agent_id, "ClosePane", reason.trim(), "");
     }
 
-    let target_block_id = req.block_id.clone().unwrap_or_else(|| verified_own_block_id.clone());
-    let is_cross_pane = req.block_id.is_some();
+    let target = req.block_id.clone().unwrap_or_else(|| verified_own_block_id.clone());
+    let (code, body) = close_pane_as(&state, &caller_agent_id, &verified_own_block_id, &target, req.reason.as_deref(), "ClosePane").await;
+    (code, Json(body)).into_response()
+}
+
+/// Close the pane that holds `target_block_id` on behalf of `caller_agent_id`
+/// (whose own pane is `own_block_id`), the way ClosePane does: a pane the
+/// caller is in closes at once; another agent's pane waits 15 s for its user
+/// to keep it (§6.5) and answers 202 with the pending request. Audited as
+/// `pane.close`. Shared by ClosePane and RunCommand's `pane:close`
+/// (`server/ui_shortcuts.rs`), so both carry the same protection. `via` names
+/// the tool in the pending request and the audit.
+pub(crate) async fn close_pane_as(
+    state: &AppState,
+    caller_agent_id: &str,
+    own_block_id: &str,
+    target_block_id: &str,
+    reason: Option<&str>,
+    via: &str,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    use axum::http::StatusCode;
+    let target_block_id = target_block_id.to_string();
+    let verified_own_block_id = own_block_id.to_string();
+    let caller_agent_id = caller_agent_id.to_string();
 
     // codex P2 on PR #3193: resolve the target's agent name BEFORE deleting
     // the block, not after. `delete_block::run` stops the block's
@@ -672,27 +694,25 @@ pub(crate) async fn handle_close_pane(
                 .unwrap_or_else(|| vec![target_block_id.clone()]),
             None => {
                 let err = format!("block not found: {target_block_id}");
-                if is_cross_pane {
-                    let request_id = uuid::Uuid::new_v4().to_string();
-                    state.reactive_handler.log_fleet_action_audit(
-                        Some(&caller_agent_id), &target_agent, &target_block_id,
-                        "pane.close", false, Some(&err), &request_id, req.reason.as_deref(),
-                    );
-                }
-                return (StatusCode::NOT_FOUND, Json(json!({ "error": err }))).into_response();
+                let request_id = uuid::Uuid::new_v4().to_string();
+                state.reactive_handler.log_fleet_action_audit(
+                    Some(&caller_agent_id), &target_agent, &target_block_id,
+                    "pane.close", false, Some(&err), &request_id, reason,
+                );
+                return (StatusCode::NOT_FOUND, json!({ "error": err }));
             }
         }
     };
 
     // Another agent's pane: its user has 15 s to keep it (§6.5). Closing a
     // pane you are in yourself is your own business.
-    if is_cross_pane && !pane_block_ids.contains(&verified_own_block_id) {
-        let reason = req.reason.clone().unwrap_or_default();
+    if !pane_block_ids.contains(&verified_own_block_id) {
+        let reason = reason.unwrap_or_default().to_string();
         let pending = crate::sagas::pending_shutdown::request(
-            &state,
+            state,
             &target_block_id,
             &caller_agent_id,
-            "ClosePane",
+            via,
             &reason,
             crate::sagas::pending_shutdown::Action::ClosePane { block_ids: pane_block_ids },
         );
@@ -704,30 +724,28 @@ pub(crate) async fn handle_close_pane(
             true,
             None,
             &pending.request_id,
-            Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, "ClosePane"))),
+            Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, via))),
         );
-        return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
+        return (StatusCode::ACCEPTED, pending_body(&pending));
     }
 
-    let result = crate::sagas::close_pane::run(&state, pane_block_ids).await;
+    let result = crate::sagas::close_pane::run(state, pane_block_ids).await;
 
-    if is_cross_pane {
-        let request_id = uuid::Uuid::new_v4().to_string();
-        match &result {
-            Ok(_) => state.reactive_handler.log_fleet_action_audit(
-                Some(&caller_agent_id), &target_agent, &target_block_id,
-                "pane.close", true, None, &request_id, req.reason.as_deref(),
-            ),
-            Err(e) => state.reactive_handler.log_fleet_action_audit(
-                Some(&caller_agent_id), &target_agent, &target_block_id,
-                "pane.close", false, Some(e), &request_id, req.reason.as_deref(),
-            ),
-        }
+    let request_id = uuid::Uuid::new_v4().to_string();
+    match &result {
+        Ok(_) => state.reactive_handler.log_fleet_action_audit(
+            Some(&caller_agent_id), &target_agent, &target_block_id,
+            "pane.close", true, None, &request_id, reason,
+        ),
+        Err(e) => state.reactive_handler.log_fleet_action_audit(
+            Some(&caller_agent_id), &target_agent, &target_block_id,
+            "pane.close", false, Some(e), &request_id, reason,
+        ),
     }
 
     match result {
-        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+        Ok(v) => (StatusCode::OK, v),
+        Err(e) => (StatusCode::BAD_REQUEST, json!({ "error": e })),
     }
 }
 

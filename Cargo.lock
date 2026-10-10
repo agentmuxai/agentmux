@@ -49,6 +49,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "which 6.0.3",
+ "winres",
 ]
 
 [[package]]
@@ -63,7 +64,6 @@ dependencies = [
  "core-foundation",
  "core-graphics",
  "dirs 5.0.1",
- "futures-util",
  "json_comments",
  "libc",
  "parking_lot",
@@ -75,7 +75,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
  "tower-http",
  "tracing",
  "tracing-appender",
@@ -115,7 +114,6 @@ version = "0.59.18"
 dependencies = [
  "agentmux-common",
  "chrono",
- "dirs 5.0.1",
  "futures-util",
  "ksni",
  "libc",
@@ -145,7 +143,6 @@ version = "0.59.18"
 dependencies = [
  "agentmux-common",
  "anyhow",
- "dirs 5.0.1",
  "image 0.25.10",
  "reqwest",
  "serde",
@@ -155,6 +152,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "winres",
  "xcap",
 ]
 
@@ -211,6 +209,8 @@ dependencies = [
  "memchr",
  "minidumper",
  "notify",
+ "objc2",
+ "objc2-foundation",
  "parking_lot",
  "portable-pty",
  "proptest",

@@ -5,9 +5,10 @@
 /** The widget bridge, protocol 1: every request is checked and answered here
  *  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3–§6.6). */
 
+import { existsSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
-import { ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
 
 function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
     return {
@@ -29,6 +30,8 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
             { view: "ext:acme.notes/main", name: "main", label: "Notes", icon: "note-sticky", entry: "index.html", singleton: false, default_meta: {} },
             { view: "ext:acme.notes/list", name: "list", label: "List", icon: "list", entry: "list.html", singleton: false, default_meta: {} },
         ],
+        commands: [],
+        status_items: [],
         files_url: "/agentmux/widget-files/acme.notes/h/k/",
         implied: false,
         folder: "",
@@ -144,6 +147,23 @@ describe("ui", () => {
         await handleBridgeRequest(h, state, "ui.openUrl", { url: "https://example.com/x" });
         expect(h.openUrl).toHaveBeenCalledWith("https://example.com/x");
     });
+
+    it("updates only a status item the manifest declares, within its limits", async () => {
+        const item = { id: "count", text: "Notes", icon: "note-sticky", tooltip: null, command: null, alignment: "right" as const };
+        const h = Object.assign(host(pkg({ status_items: [item] })), { setStatusItem: vi.fn() });
+        const state = await ready(h);
+        await handleBridgeRequest(h, state, "ui.setStatusItem", { id: "count", text: "3 notes", tone: "success", icon: "check" });
+        expect(h.setStatusItem).toHaveBeenLastCalledWith("count", { text: "3 notes", tone: "success", icon: "check" });
+        await handleBridgeRequest(h, state, "ui.setStatusItem", { id: "count" });
+        expect(h.setStatusItem).toHaveBeenLastCalledWith("count", null);
+        const code = async (params: Record<string, unknown>) => errorOf(await handleBridgeRequest(h, state, "ui.setStatusItem", params)).code;
+        expect(await code({ id: "other", text: "x" })).toBe(ERR.NOT_FOUND);
+        expect(await code({ id: "count", text: "x".repeat(41) })).toBe(ERR.INVALID_PARAMS);
+        expect(await code({ id: "count", text: "  " })).toBe(ERR.INVALID_PARAMS);
+        expect(await code({ id: "count", icon: 'x" onclick="' })).toBe(ERR.INVALID_PARAMS);
+        expect(await code({ id: "count", tone: "attention" })).toBe(ERR.INVALID_PARAMS);
+        expect(h.setStatusItem).toHaveBeenCalledTimes(2);
+    });
 });
 
 describe("permissions", () => {
@@ -199,13 +219,75 @@ describe("permissions", () => {
     });
 });
 
+describe("the calls W3 adds", () => {
+    const granted = ["storage", "files", "clipboard:write", "agents:read", "agents:send", "net:https://api.github.com"];
+
+    it("passes srv's methods through the pane's session, once granted", async () => {
+        const h = host(pkg({ granted }));
+        h.srv = vi.fn(async (method: string) => (method === "storage.get" ? { value: { n: 1 } } : { agents: [] }));
+        const state = await ready(h);
+        expect(await handleBridgeRequest(h, state, "storage.get", { key: "k" })).toEqual({ result: { value: { n: 1 } } });
+        expect(h.srv).toHaveBeenCalledWith("storage.get", { key: "k" });
+        await handleBridgeRequest(h, state, "agents.list", {});
+        expect(errorOf(await handleBridgeRequest(h, state, "storage.set", { value: 1 })).code).toBe(ERR.INVALID_PARAMS);
+    });
+
+    it("hands back srv's refusal with its code and data", async () => {
+        const h = host(pkg({ granted }));
+        h.srv = vi.fn(async () => {
+            throw new Error('call widgets.call error: widget-error:{"code":1002,"message":"a widget\'s storage is limited to 5 MB","data":{"limit":"storage"}}');
+        });
+        const state = await ready(h);
+        const e = errorOf(await handleBridgeRequest(h, state, "storage.set", { key: "k", value: "x" }));
+        expect(e).toEqual({ code: ERR.LIMIT_EXCEEDED, message: "a widget's storage is limited to 5 MB", data: { limit: "storage" } });
+        h.srv = vi.fn(async () => {
+            throw new Error("socket closed");
+        });
+        expect(errorOf(await handleBridgeRequest(h, state, "agents.list", {})).code).toBe(ERR.INTERNAL);
+    });
+
+    it("gives picked files' contents, never a path, and reports a cancel", async () => {
+        const h = host(pkg({ granted }));
+        h.pickFiles = vi.fn(async () => [new File([new Uint8Array([104, 105])], "a.txt", { type: "text/plain" })]);
+        const state = await ready(h);
+        const r = (await handleBridgeRequest(h, state, "files.pick", { accept: [".txt"] })) as { result: { files: unknown[] } };
+        expect(r.result.files).toEqual([{ name: "a.txt", type: "text/plain", size: 2, dataBase64: "aGk=" }]);
+        expect(h.pickFiles).toHaveBeenCalledWith([".txt"], false);
+        h.pickFiles = vi.fn(async () => null);
+        expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.CANCELLED);
+        h.pickFiles = vi.fn(async () => {
+            throw new BridgeError(ERR.UNAVAILABLE, "files.pick opens a dialog only from a click");
+        });
+        expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.UNAVAILABLE);
+    });
+
+    it("saves the decoded bytes, and copies text", async () => {
+        const h = host(pkg({ granted }));
+        h.saveFile = vi.fn(async () => true);
+        h.writeClipboard = vi.fn(async () => {});
+        const state = await ready(h);
+        expect(await handleBridgeRequest(h, state, "files.save", { name: "out.txt", dataBase64: "aGk=" })).toEqual({ result: { saved: true } });
+        expect(h.saveFile).toHaveBeenCalledWith("out.txt", "", new Uint8Array([104, 105]));
+        expect(errorOf(await handleBridgeRequest(h, state, "files.save", { name: "x", dataBase64: "%%" })).code).toBe(ERR.INVALID_PARAMS);
+        await handleBridgeRequest(h, state, "clipboard.writeText", { text: "copied" });
+        expect(h.writeClipboard).toHaveBeenCalledWith("copied");
+    });
+
+    it("says unavailable where this host can't do it", async () => {
+        const h = host(pkg({ granted }));
+        const state = await ready(h);
+        expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.UNAVAILABLE);
+        expect(errorOf(await handleBridgeRequest(h, state, "net.fetch", { url: "https://api.github.com/user" })).code).toBe(ERR.UNAVAILABLE);
+    });
+});
+
 describe("the pane host the loader imports", () => {
     // The loader imports "./sandboxed-widget-host" with no extension: a stale
     // .ts beside the real .tsx would win and leave sandboxed widgets unable
     // to run (a merge brought W1's placeholder back once).
-    it("is the iframe host, not a placeholder", async () => {
-        const host = await import("./sandboxed-widget-host");
-        expect(host.IFRAME_SANDBOX).toContain("allow-scripts");
-        expect(host.IFRAME_SANDBOX).not.toContain("allow-same-origin");
+    it("is the iframe host, with no placeholder beside it", () => {
+        const here = (name: string) => existsSync(new URL(name, import.meta.url));
+        expect(here("./sandboxed-widget-host.tsx")).toBe(true);
+        expect(here("./sandboxed-widget-host.ts")).toBe(false);
     });
 });

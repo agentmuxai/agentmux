@@ -30,10 +30,11 @@ const LOADING_SPINNER_FADE_MS = 200;
 // (use-drag-snapshot.ts).
 const DRAG_SNAPSHOT_CAP_MS = 500;
 
-// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab. The
-// page is a native window drawn above the DOM and can't see them, so the
-// catcher below is shown from each one's start until its source releases it.
-const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab"] as const;
+// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab, an
+// Editor or Media document tab. The page is a native window drawn above the
+// DOM and can't see them, so the catcher below is shown from each one's start
+// until its source releases it.
+const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
 
 /**
  * Covers the page for the length of an in-app drag (a pane, a Pane Tab, a
@@ -238,7 +239,12 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
 
             <Show when={model.attentionAtom()}>
                 {(a) => (
-                    <div class="browser-attention" role="alertdialog" aria-live="assertive">
+                    <div
+                        class="browser-attention"
+                        classList={{ "browser-attention--agent": a().kind !== "navigation" }}
+                        role="alertdialog"
+                        aria-live="assertive"
+                    >
                         <div class="browser-attention-head">
                             <i class="fa-solid fa-hand" aria-hidden="true" />
                             <Show
@@ -291,14 +297,20 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <div class="browser-attention-target">Sends to {a().action}</div>
                         </Show>
                         <div class="browser-attention-actions">
+                            {/* An agent's hand-off or approval is the loud call to action;
+                                a page asking to leave the pane's sites keeps the quieter
+                                accent, since Block is the safe answer there. */}
                             <Button
-                                tone="accent"
-                                density="compact"
+                                tone={a().kind === "navigation" ? "accent" : "attention"}
+                                density={a().kind === "navigation" ? "compact" : "comfortable"}
                                 onClick={() => model.resolveAttention(a().kind === "handoff" ? "done" : "approve").catch(() => {})}
                             >
                                 {a().kind === "handoff" ? "Done" : a().kind === "navigation" ? "Allow" : "Approve"}
                             </Button>
-                            <Button density="compact" onClick={() => model.resolveAttention("cancel").catch(() => {})}>
+                            <Button
+                                density={a().kind === "navigation" ? "compact" : "comfortable"}
+                                onClick={() => model.resolveAttention("cancel").catch(() => {})}
+                            >
                                 {a().kind === "navigation" ? "Block" : "Cancel"}
                             </Button>
                         </div>

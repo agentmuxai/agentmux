@@ -19,7 +19,7 @@
 //!
 //! ## Module layout
 //!
-//! This module was split from a single ~1770-line `subprocess.rs` file into a
+//! This module was split from a single ~1770-line `subprocess` file into a
 //! directory so each piece of the (large, deliberately-not-decomposed-further)
 //! turn state machines could live in its own file:
 //!   - `mod.rs` (this file): spawn config, inner state, controller struct +

@@ -1,6 +1,6 @@
 # User widgets and the widget API
 
-**Status:** active — W1 (packages and approval, §13) in PR #4575; W2 (the sandboxed runtime and the SDK) in PR #4581; W3 to W6 not started.
+**Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 (commands and status bar items, §6.8) in this PR; W6 not started.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
 **Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
@@ -48,7 +48,7 @@ Recommendations accepted by the repo owner on 2026-10-09 ("use best recommendati
 - **Kind:** `sandboxed` (runs in an iframe, reaches AgentMux only through the bridge) or `trusted` (a Solid ES module in the app's renderer, the v1 model).
 - **Pane contribution:** a pane type the package adds. Its view name is `ext:<id>/<name>`. One package may contribute several.
 - **Bridge:** the message protocol between a sandboxed widget's iframe and AgentMux (§6).
-- **SDK:** `@agentmux/widget-sdk`, the JavaScript client for the bridge (§7).
+- **SDK:** `@agentmuxai/widget-sdk`, the JavaScript client for the bridge (§7).
 - **Permission:** a named capability the manifest asks for and the user grants at install (§6.4).
 - **Approval:** the user's install decision, recorded by srv against the package's content hash (§8).
 
@@ -77,7 +77,7 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
 - Only files inside the package folder; `..`, absolute paths and symlinks are refused. The `<content-hash>` segment must equal the approved hash (§8.2), so a URL always means one exact version of the code. Each file is hashed again on every read and compared with its hash at approval, so an edited file is never served (409), whether or not srv's folder watcher noticed the edit.
 - No auth key: the URL is what the iframe loads, and package files aren't secrets. `<key>` is an HMAC of the instance secret over the id and hash (srv hands the full URL to the UI in `widgets.list`), so a web page elsewhere on the machine can't name a package's files.
 - Every response carries `Content-Security-Policy` (§6.1), `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache`, `Referrer-Policy: no-referrer`, a content type from the extension, and `Access-Control-Allow-Origin: *`: the widget's document has an opaque origin, so its module scripts load in CORS mode with `Origin: null`.
-- The SDK and its stylesheet are served the same way at `GET /agentmux/widget-sdk/v1.js` and `GET /agentmux/widget-sdk/am-widget.css` (§7).
+- The SDK and its stylesheet are served the same way at `GET /agentmux/widget-sdk/v1.js` and `GET /agentmux/widget-sdk/am-widget.css` (§7), and its reference for agents at `v1.d.ts` and `README.md` (§10).
 
 ### 5.3 The manifest, `widget.json`
 
@@ -99,6 +99,12 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
   "contributes": {
     "panes": [
       { "name": "main", "label": "PRs", "icon": "code-pull-request", "entry": "index.html", "defaultMeta": {} }
+    ],
+    "commands": [
+      { "id": "refresh", "title": "Refresh pull requests", "icon": "rotate-right" }
+    ],
+    "statusItems": [
+      { "id": "count", "text": "PRs", "icon": "code-pull-request", "tooltip": "Open pull requests", "command": "refresh" }
     ]
   }
 }
@@ -112,14 +118,15 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
 | `version` | string | yes | Semver (`1.2.0`). |
 | `description` | string | no | One or two sentences, at most 300 characters. |
 | `author`, `homepage` | string | no | Shown in the prompt. `homepage` must be `https:`. |
-| `icon` | string | no | A Font Awesome name (as built-in widgets use), or a path to an SVG/PNG in the package. |
+| `icon` | string | no | A Font Awesome name (as built-in widgets use). An image in the package isn't supported yet. |
 | `defaultHue` | integer 0–359 | no | The pane color hue, as `SPEC_WIDGET_DEFAULT_PANE_COLORS`. |
 | `kind` | `"sandboxed"` \| `"trusted"` | no, default `"sandboxed"` | §4. |
 | `entry` | string | no | The default entry for panes that don't name one: `index.html` (sandboxed) or `index.js` (trusted). |
 | `permissions` | string[] | no | §6.4. Unknown names make the package invalid. Ignored for `trusted` (it has full access). |
-| `minAgentMux` | string | no | The lowest AgentMux version the widget works with; an older AgentMux lists it as needing an update. |
-| `contributes.panes` | object[] | yes, at least one | Each: `name` (`^[a-z0-9-]+$`, the part after `/` in the view name), `label`, optional `icon`, `entry`, `defaultMeta` (merged into a new pane's meta, keys under `widget:` only), `singleton` (bool: a click focuses the open pane instead of adding one). |
-| `contributes.commands`, `contributes.statusItems` | | reserved | W5. Ignored until then; not an error. |
+| `minAgentMux` | string | no | The lowest AgentMux version the widget works with; an older AgentMux lists it as needing an update. Read, but not checked yet. |
+| `contributes.panes` | object[] | yes, at least one | Each: `name` (`^[a-z0-9-]+$`, the part after `/` in the view name), `label`, optional `icon`, `entry`, `defaultMeta` (merged into a new pane's meta, keys under `widget:` only), `singleton` (bool: a click focuses the open pane instead of adding one; read, but not acted on yet). |
+| `contributes.commands` | object[] | no | Command palette entries, at most 20 (§6.8). Each: `id` (`^[a-z0-9-]+$`, unique), `title` (1–60 characters), optional `icon`, `pane` (the pane it runs in, by `name`; the first pane when left out), `keywords` (more words the palette search matches, at most 200 characters). |
+| `contributes.statusItems` | object[] | no | Status bar items, at most 4 (§6.8). Each: `id` (`^[a-z0-9-]+$`, unique), `text` (1–40 characters), optional `icon`, `tooltip` (at most 120 characters), `command` (one of the package's command ids, run on a click; without one, a click shows the first pane), `alignment` (`"left"` or `"right"`, default `"right"`). |
 
 **Validation** happens in srv when it scans the folder (§8.1). An invalid package is listed in Settings with its first error ("`version` isn't semver"), never loaded.
 
@@ -173,6 +180,7 @@ Methods marked "—" in the permission column need none.
 | `ui.setContextMenu` | `{ items: ({ id, label, disabled? } \| { separator: true })[] }` (at most 20) | `{}` | — |
 | `ui.toast` | `{ text: string, kind?: "info"\|"success"\|"warning"\|"error" }` | `{}` | — |
 | `ui.openUrl` | `{ url: string }` (`http:` or `https:`) | `{}`: opens a browser pane next to the widget | — |
+| `ui.setStatusItem` | `{ id: string, text?: string, icon?: string, tooltip?: string, tone?: "info"\|"success"\|"warning"\|"error", hidden?: boolean }` | `{}` (§6.8) | — |
 | `theme.get` | `{}` | `Theme` | — |
 | `panes.open` | `{ view: string, meta?: object, split?: "right"\|"down"\|"tab" }` | `{ pane: string }` | — for the package's own views; `panes` for any other view |
 | `storage.get` | `{ key: string }` | `{ value: any \| null }` | `storage` |
@@ -183,16 +191,16 @@ Methods marked "—" in the permission column need none.
 | `files.pick` | `{ accept?: string[], multiple?: boolean }` | `{ files: { name, type, size, dataBase64 }[] }` | `files` |
 | `files.save` | `{ name: string, type?: string, dataBase64: string }` | `{ saved: boolean }` | `files` |
 | `clipboard.writeText` | `{ text: string }` | `{}` | `clipboard:write` |
-| `agents.list` | `{}` | `{ agents: { id, name, provider, state: "working"\|"idle"\|"stopped" }[] }` | `agents:read` |
+| `agents.list` | `{}` | `{ agents: { id, name, state: "working"\|"idle"\|"stopped" }[] }` (the agents running on this machine) | `agents:read` |
 | `agents.send` | `{ agent: string, text: string }` | `{ id: string }` | `agents:send` |
 
 Details:
 
 - **`meta`** is the pane's own meta, under the widget's namespace: the widget sees and writes `filter`, srv stores `widget:<id>:filter`. Other meta keys are invisible to it. At most 64 KB per pane. Meta survives restarts and moves with the pane, like any pane's.
 - **`storage`** is per package, not per pane: srv keeps it in its database, at most 5 MB per package, values up to 1 MB each. Uninstalling deletes it after the user confirms.
-- **`net.fetch`** is made by srv, not the iframe: no cookies, no credentials of the user's browser profile, no `Origin` header of AgentMux. The request URL's origin must match one of the package's `net:` permissions exactly (`net:https://api.github.com` allows that origin and nothing else; `net:https://*.example.com` allows its subdomains, never the bare wildcard). Redirects are followed only to allowed origins. Loopback (`127.0.0.1`, `localhost`, `::1`) and private addresses are refused unless the permission names that exact origin, port included (`net:http://127.0.0.1:8188`). Responses up to 10 MB; default timeout 30 s, at most 120 s.
-- **`files.pick`** opens the host's file dialog; the widget gets the chosen files' contents (up to 25 MB in all), never a path. A cancelled dialog is error `1006`. `files.save` opens a save dialog; `saved: false` if cancelled.
-- **`agents.send`** delivers `text` to one of the user's own agents on this machine, as a message marked as sent by the widget (`FROM=widget:<id>`, `TRUST=self-declared`), which the agent treats like any unverified message. At most 10 messages a minute per package, 8 KB each.
+- **`net.fetch`** is made by srv, not the iframe: no cookies, no credentials of the user's browser profile, no `Origin` header of AgentMux. The request URL's origin must match one of the package's `net:` permissions exactly (`net:https://api.github.com` allows that origin and nothing else; `net:https://*.example.com` allows its subdomains, never the bare wildcard). Redirects are followed only to allowed origins, at most 5, and `Authorization` and `Cookie` don't follow a redirect to another origin. srv resolves the host once and connects to the addresses it checked, so a name can't resolve one way for the check and another for the request. Loopback, private, link-local and other local addresses are refused unless the permission names that address itself, port included: an IP address (`net:http://127.0.0.1:8188`, or another machine on the user's network by its address), or `localhost` for loopback. A public name that resolves to a private address is refused, and so is any wildcard. A widget can't set the connection's own headers (`Host`, `Content-Length`, `Connection`, `Transfer-Encoding`, `Proxy-*` and the like). Request and response bodies up to 10 MB; default timeout 30 s, at most 120 s.
+- **`files.pick`** opens the host's file dialog; the widget gets the chosen files' contents (up to 25 MB in all), never a path. A cancelled dialog is error `1006`. A dialog opens only on a user's click (a click in the widget's frame, or on one of its header actions); called otherwise, it's error `1005`. `files.save` opens a save dialog (or, where the host has none, downloads the file), also only on a click; `saved: false` if cancelled. Both run in the app's own document, so they work in a browser as in the desktop app.
+- **`agents.send`** delivers `text` to one of the user's own agents running on this machine (error `1003` if none has that name), as a message marked as sent by the widget (`FROM=widget:<id>`, `DELIVERY=host`, `TRUST=self-declared`), which the agent treats like any unverified message; the usual keyword escalation applies. At most 10 messages a minute per package, 8 KB each.
 - **`ui.setHeaderActions` / `ui.setContextMenu`** are drawn by AgentMux, in its own style; a click comes back as the `action` event.
 
 `Theme` is `{ mode: "dark" | "light", vars: { [name: string]: string } }`: the app's colors as CSS custom properties (`--am-bg`, `--am-fg`, `--am-muted`, `--am-accent`, `--am-border`, `--am-error`, `--am-warning`, `--am-success`, `--am-font`, `--am-font-mono`, `--am-radius`, plus the pane's hue as `--am-pane-hue`). The SDK applies them to the document (§7).
@@ -220,6 +228,8 @@ A trusted package's prompt has one line instead: "**This widget runs as part of 
 | `theme` | `Theme` | The user changes theme or the pane's color |
 | `meta` | `{ meta: object }` | The pane's widget meta changed from outside the widget (another window, an agent, an undo) |
 | `action` | `{ id: string, source: "header" \| "menu" }` | The user clicked one of its header actions or menu items |
+| `command` | `{ id: string, source: "palette" \| "status" }` | The user ran one of its commands from the palette, or clicked a status item that names one (§6.8) |
+| `storage` | `{ keys: string[] }` | The package's storage changed, from any of its panes in any window (this one included); only the keys, so a pane reads what it needs again. Sent only to a package granted `storage` |
 | `dispose` | `{}` | The pane is closing or the widget is being reloaded; the port closes 1 s later |
 
 A dormant widget keeps running (it's an iframe), but should pause timers and polling; the SDK makes that one line.
@@ -244,9 +254,29 @@ A dormant widget keeps running (it's an iframe), but should pause timers and pol
 - The **manifest** format has its own `manifestVersion`, with the same additive rule.
 - A widget can check what's there: `hello` returns `agentmux.version` and the granted `permissions`; calling an unknown method returns `-32601`, never a crash.
 
-## 7. The SDK, `@agentmux/widget-sdk`
+### 6.8 Commands and status bar items
 
-One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it, and also published to npm for widgets built with a bundler.
+A package can add entries to the command palette and items to the status bar (`contributes.commands`, `contributes.statusItems`, §5.3). They are part of the manifest, so the user approved them with the package; they need no permission. They are there while the package is approved and enabled, and leave with it.
+
+**Commands.** Each is a palette entry under **Widgets**, labelled `<widget name>: <title>`, with the id `ext:<id>/<command id>`. Running one:
+
+1. finds a pane of the command's view: the focused pane if it is one, else one in the current tab (a background pane tab becomes its pane's visible one), which is focused;
+2. or, if there is none, opens one (with the pane's `defaultMeta`) and waits up to 15 s for it to load;
+3. sends that pane the `command` event. A pane opened for the command gets it right after its `hello`; the SDK keeps a `command` that arrives before the widget listens for its first `on("command")`.
+
+A trusted widget gets it as `command(id, source)` on its pane tab instance, if it has one.
+
+Commands run only on a user's click: the palette or a status item. They aren't keyboard shortcuts, and the `keybindings` setting refuses a widget's command (an `ext:` id) with a warning, so none joins the shortcut table that an agent's `RunCommand` and `PressKeys` read.
+
+**Status bar items.** Each shows its manifest's `text` and `icon` (the package's icon when it has none), on the right before AgentMux's own items, or on the left after them. Its tooltip is always `<widget name>: <tooltip>` (the text when there is no tooltip), so a widget's item can't pass for one of AgentMux's. A click runs its `command`, or shows the first pane when it names none.
+
+A pane of the widget changes how an item looks with `ui.setStatusItem`: the call sets the whole look, any field left out shows the manifest's, and a call with only the `id` puts the manifest's look back. `text` is 1–40 characters of plain text, `tooltip` at most 120, `icon` a Font Awesome name, `tone` colours it, `hidden: true` takes it out. An id the manifest doesn't declare is `not_found`. A look lasts while the pane that set it is open, in that window; when it closes, the manifest's look returns. A widget runs only while one of its panes is open (§12), so an item with no pane open shows the manifest's look.
+
+The status bar itself is a registry (`frontend/app/statusbar/status-bar-registry.ts`): AgentMux's own items and widgets' are entries with a side and an order, so a new item, built-in or not, is one registration.
+
+## 7. The SDK, `@agentmuxai/widget-sdk`
+
+One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it; a widget built with a bundler either imports the same URL and marks it external, or installs `@agentmuxai/widget-sdk` from npm and bundles a copy. The npm package is published from CI (`.github/workflows/publish-widget-sdk.yml`, on a `widget-sdk-v<version>` tag) through npm trusted publishing, with no stored token; the name was reserved with a code-free 0.0.0, as for muxcode.
 
 ```js
 import { connect } from "/agentmux/widget-sdk/v1.js";
@@ -335,16 +365,26 @@ Agents can build widgets for the user and open them:
 | MCP tool | Params | Does |
 |---|---|---|
 | `WidgetList` | — | Installed packages: id, name, version, kind, state, permissions, views |
-| `WidgetInstall` | `{ path: string }` (a folder or `.zip` in the agent's workspace) | Validates and copies the package and asks the user to approve it (§8.3); returns once they answer: `installed`, `cancelled`, or the validation error |
+| `WidgetInstall` | `{ path: string, replace?: boolean, wait_secs?: number }` (a folder, its `widget.json` or a `.zip`; a relative path is in the agent's workspace) | Validates and copies the package and asks the user to approve it (§8.3); returns once they answer or the wait ends (300 s by default, at most 600): `installed` (with its views), `declined`, `pending` (the request stays open for the user), or the validation error. An already-approved version is `installed` at once; a package the user turned off stays off |
 | `OpenWidget` | `{ view: string, meta?: object, split?: "right"\|"down" }` | Opens a pane of an installed, approved widget next to the agent's pane |
 
-An agent can't approve its own install or raise a widget's permissions; every install is the user's decision in the prompt. A workspace skill, "Write an AgentMux widget", gives agents the manifest rules, the SDK and the samples, and the test loop (`WidgetInstall`, `OpenWidget`, read the pane's error, fix, install again).
+An agent can't approve its own install or raise a widget's permissions; every install is the user's decision in the prompt.
+
+How it works:
+- srv's `POST /api/v1/widgets/install` installs the package, and if it isn't approved at that version, holds a request (`backend/widget_requests.rs`) and waits.
+- Every UI hears of the requests waiting (the `widgetrequests` event, and `widgets.requests` for a UI that starts later). Each one opens a prompt naming the agent (from its signed identity, the one UI automation and SSH consent use; a request without one that verifies says "not a verified agent", never a name the caller chose), with exactly what Settings → Widgets shows for the package: version, kind, each permission in plain words, or the trusted-widget warning.
+- The answer goes to srv the only way an approval can, through the host (§8.3). The host's approval route answers every request for that version, so approving in Settings answers the agent too; an answer for one version ends requests for the widget's other versions.
+- A newer version replaces an older request for the same widget; a version asked for twice is one prompt.
+
+What agents are told: an Operator Config entry, "Building widgets", given to host agents, says what a widget is, how to write the smallest one, the loop (`WidgetInstall`, `OpenWidget`, `UIScreenshot` of its pane, fix, install again), and to ask for as few permissions as possible and never make a widget trusted unless the user asks. The full reference is served by srv where an agent can read it: `/agentmux/widget-sdk/README.md` and `/agentmux/widget-sdk/v1.d.ts`. The App API entry lists the three tools.
 
 ## 11. Security summary
 
-- A sandboxed widget holds no credential: no auth key, no host token, no session. Everything it does is a bridge call the host checks against its grants, and srv checks again for every call that reaches srv (storage, net, agents), using a token scoped to that widget and pane: srv issues it when the pane opens, its route allowlist accepts it only on the widget routes, and it names the package id, the approved hash and the granted permissions (the scoped container credential, `container_route_allowed` in `auth.rs`, is the model).
+- A sandboxed widget holds no credential: no auth key, no host token, no session. Everything it does is a bridge call the host checks against its grants, and srv checks again for every call that reaches srv (storage, net, agents). The pane host opens a session for its pane (`widgets.session`, with the package id and the approved hash) and makes those calls through it (`widgets.call`). A session token is no credential anywhere else; it only names the package and the version. On every call srv looks the package up again and refuses unless it is still approved at that hash, enabled, and granted the permission the call needs, so a frontend bug can't widen a widget's reach, and an edited, re-approved, turned-off or removed package ends the old version's sessions.
+- The session RPCs need the instance auth key, like every RPC. Whatever holds that key (the app, an agent) could already reach the network, the agents and srv's database directly, so it gains nothing by speaking for a widget; what the session adds is that a widget's pane host is held to that widget's grants.
 - Its code comes only from its approved files (CSP, and the hash in every file URL).
 - A trusted widget has full access by design, and the prompt says so in those words.
+- A widget's commands and status items are declared in its approved manifest; a pane can change only how its own declared items look, never add one. A command runs only on the user's click, never from an agent's `RunCommand`. A status item's tooltip always names the widget, and its icon must be a Font Awesome name.
 - No code runs without the user's approval in AgentMux's own UI, and only the host can carry that approval to srv.
 
 ## 12. What this doesn't do
@@ -358,9 +398,9 @@ An agent can't approve its own install or raise a widget's permissions; every in
 | Phase | Builds | Done when |
 |---|---|---|
 | **W1: packages and approval** | `widget.json` parsing and validation; srv's package scan, watcher and state (§8.1); the content hash; the approval record and its host-only answer route; the widget files route; Settings → Widgets (list, approve, enable, disable, reload, uninstall, install from folder or zip); the loader loading trusted packages from the files route; v1 `widgets.json` modules as implied packages; `unregisterPaneTab` and reload; the `hello` sample's manifest; the stale statuses fixed | the hello sample installs from a folder, asks for approval, loads, reloads after an edit (asking again), and uninstalls, with no restart; a package whose files change stops loading until approved again (tested) |
-| **W2: sandboxed runtime and SDK** | the iframe pane host, CSP, navigation guard; protocol 1 handshake; `meta`, `ui`, `theme`, `panes.open` (own views), the events; `@agentmux/widget-sdk` v1 and `am-widget.css` served by srv; samples `hello-sandboxed`, `notes` (with W3), `react-vite`; the quickstart README | `hello-sandboxed` and `react-vite` install and run, follow the theme, keep state in meta; a test widget can't reach `window.api`, the auth key, or the network (tested) |
+| **W2: sandboxed runtime and SDK** | the iframe pane host, CSP, navigation guard; protocol 1 handshake; `meta`, `ui`, `theme`, `panes.open` (own views), the events; `@agentmuxai/widget-sdk` v1 and `am-widget.css` served by srv; samples `hello-sandboxed`, `notes` (with W3), `react-vite`; the quickstart README | `hello-sandboxed` and `react-vite` install and run, follow the theme, keep state in meta; a test widget can't reach `window.api`, the auth key, or the network (tested) |
 | **W3: scoped access** | the per-widget scoped token; `storage`, `net.fetch`, `files`, `clipboard:write`, `panes`, `agents:read`, `agents:send`; samples `notes`, `pr-dashboard`, `ask-agent` | each permission is refused without its grant, both in the frontend and in srv (tested); the samples work |
 | **W4: agents** | `WidgetList`, `WidgetInstall`, `OpenWidget`; the "Write an AgentMux widget" skill | an agent builds and installs a widget the user asked for, the user approves it, and the agent opens it |
 | **Docs** | agentmux-docs: **Widgets** (using and managing), **Build a widget** (quickstart), **Widget API reference** (§5–§7 for users), **Widget security**; each lands right after the code it describes | — |
-| **W5: beyond panes** | `contributes.commands` and `contributes.statusItems`, with a status bar registry replacing the fixed list | a widget adds a palette command and a status bar item |
+| **W5: beyond panes** | `contributes.commands` and `contributes.statusItems`, with a status bar registry replacing the fixed list; `ui.setStatusItem` and the `command` event; the `pr-dashboard` sample adds both | a widget adds a palette command and a status bar item |
 | **W6: sharing** | widgets in agent bundles; signed packages; a catalog of sandboxed widgets | — |

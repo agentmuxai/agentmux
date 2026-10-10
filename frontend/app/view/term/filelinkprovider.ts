@@ -5,13 +5,13 @@ import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 
 // Patterns ordered by specificity — earlier matches take priority
 const FILE_PATH_REGEXES: RegExp[] = [
-    // Windows absolute: C:\Users\foo\bar.ts, C:/Users/foo/bar.ts
+    // Windows absolute: C:\Users\foo\bar.ts, C:/Users/foo/bar.ts (comment-hygiene: allow)
     /[A-Za-z]:[\\\/][\w.\-\\\/]+[\w.\-]/g,
 
     // Unix absolute: /home/user/file.ts, /usr/bin/node
     /\/[\w.\-]+(?:\/[\w.\-]+)+/g,
 
-    // Relative with extension: ./src/app.ts, ../config/settings.json, src/components/App.tsx
+    // Relative with extension: ./src/app.ts, ../config/settings.json, src/components/App.tsx (comment-hygiene: allow)
     /\.{0,2}\/[\w.\-]+(?:\/[\w.\-]+)*\.[\w]+/g,
 
     // Home dir: ~/Documents/file.txt, ~/.config/settings.json

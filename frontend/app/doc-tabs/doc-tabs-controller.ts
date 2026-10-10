@@ -12,25 +12,30 @@ import { createSignal, type Accessor } from "solid-js";
 import {
     activateDoc,
     activeTab,
+    attachDoc,
     closeDoc,
     closeOthers,
     closeToRight,
     cycleDoc,
+    detachDoc,
     DOC_TABS_META,
     emptyDocTabs,
     hydrateDocTabs,
     moveDoc,
+    moveDocTo,
     openDoc,
     persistDocTabs,
     promoteDoc,
     reopenClosed,
     setPinned,
     updateDoc,
+    type DocDropAt,
     type DocTab,
     type DocTabsState,
     type OpenArgs,
 } from "./doc-tabs";
 import { keyPlatform } from "@/app/keybindings";
+import { noteResolved } from "@/app/keybindings/app-api";
 import { matchPaneKey } from "@/app/keybindings/registry";
 
 /** What a pane type says about its documents (§5.6). */
@@ -46,7 +51,7 @@ export interface DocTabsSpec<P> {
     newDocument?(active: P | undefined): P | null;
     /** The pane always shows a document: its last tab can't be closed. */
     keepOne?: boolean;
-    /** Show the strip with one tab too (the Editor). */
+    /** Show the strip with one tab too (Media, as the Editor does). */
     alwaysShowStrip?: boolean;
 }
 
@@ -74,7 +79,12 @@ export class DocTabsController<P> {
         initial?: P[]
     ) {
         const saved = hydrateDocTabs<P>(host.meta()?.[DOC_TABS_META], (st) => spec.deserialize(st));
-        let start = saved ?? emptyDocTabs<P>();
+        // A restored tab's title and icon come from its document, as this
+        // build names it, not from the save: a change (Media's tabs lost their
+        // icons) reaches tabs saved before it.
+        let start = saved
+            ? { ...saved, tabs: saved.tabs.map((t) => ({ ...t, title: spec.titleOf(t.payload), icon: spec.iconOf?.(t.payload) })) }
+            : emptyDocTabs<P>();
         if (!saved && initial) {
             for (const p of initial) start = openDoc(start, this.argsFor(p));
         }
@@ -96,7 +106,8 @@ export class DocTabsController<P> {
         };
     }
 
-    private apply(next: DocTabsState<P>): void {
+    /** `movedOut`: a tab that left for another pane, which is not closed. */
+    private apply(next: DocTabsState<P>, movedOut?: string): void {
         if (next === this.state()) return;
         const before = this.state();
         this.setState(next);
@@ -104,7 +115,7 @@ export class DocTabsController<P> {
         // (a closed preview, a tab past the reopen cap).
         if (this.onClosed) {
             const still = new Set([...next.tabs, ...next.closed].map((t) => t.id));
-            for (const t of [...before.tabs, ...before.closed]) if (!still.has(t.id)) this.onClosed(t);
+            for (const t of [...before.tabs, ...before.closed]) if (!still.has(t.id) && t.id !== movedOut) this.onClosed(t);
         }
         this.scheduleSave();
     }
@@ -181,6 +192,28 @@ export class DocTabsController<P> {
         this.apply(moveDoc(this.state(), id, delta));
     }
 
+    /** A tab dragged to just before or after another. False when nothing
+     *  moved. */
+    moveTo(id: string, targetId: string, position: "before" | "after"): boolean {
+        const before = this.state();
+        this.apply(moveDocTo(before, id, targetId, position));
+        return this.state() !== before;
+    }
+
+    /** Take tab `id` out, to move it to another pane. Null if there is no
+     *  such tab. */
+    detach(id: string): DocTab<P> | null {
+        const out = detachDoc(this.state(), id);
+        if (!out) return null;
+        this.apply(out.state, id);
+        return out.tab;
+    }
+
+    /** Put in a tab moved from another pane (`attachDoc`). */
+    attach(tab: DocTab<P>, at?: DocDropAt): void {
+        this.apply(attachDoc(this.state(), tab, at));
+    }
+
     pin(id: string, pinned: boolean): void {
         this.apply(setPinned(this.state(), id, pinned));
     }
@@ -231,7 +264,13 @@ export function docTabKeyAction(
     // spread would drop.
     const ev = { key: e.key, code: e.code ?? "", ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey };
     const command = matchPaneKey(ev, "doctabs", keyPlatform());
+    if (command) noteResolved(command, "doctabs");
     return command ? (DOC_TAB_ACTIONS[command] ?? null) : null;
+}
+
+/** The action for a `doctab:*` command id, or null for any other command. */
+export function docTabAction(command: string): DocTabKeyAction | null {
+    return DOC_TAB_ACTIONS[command] ?? null;
 }
 
 /**
@@ -242,6 +281,14 @@ export function docTabKeyAction(
 export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsController<P>, onRefused?: () => void): boolean {
     const action = docTabKeyAction(e);
     if (!action) return false;
+    runDocTabAction(action, ctl, onRefused);
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+}
+
+/** Carry out a document-tab action on `ctl`: a key's, or the App API's RunCommand. */
+export function runDocTabAction<P>(action: DocTabKeyAction, ctl: DocTabsController<P>, onRefused?: () => void): void {
     const id = ctl.activeId();
     switch (action.kind) {
         case "new":
@@ -260,7 +307,4 @@ export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsController<P>, 
             if (id) ctl.move(id, action.delta);
             break;
     }
-    e.preventDefault();
-    e.stopPropagation();
-    return true;
 }

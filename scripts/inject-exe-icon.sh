@@ -9,10 +9,16 @@
 # the icon resource with electron's `rcedit`. Idempotent — safe to run on the
 # non-sandbox raw bin too (it just re-sets the same icon).
 #
-# Usage: bash scripts/inject-exe-icon.sh <path-to-exe>
+# Usage: bash scripts/inject-exe-icon.sh <path-to-exe> [description]
+#
+# `description` becomes FileDescription, the name Task Manager shows for every
+# process running this exe (the host and all its CEF subprocesses). Callers
+# pass the build ("AgentMux v0.59.18", "AgentMux v0.59.18 (local)") so several
+# instances running side by side can be told apart. Defaults to "AgentMux".
 set -euo pipefail
 
-EXE="${1:?usage: inject-exe-icon.sh <exe>}"
+EXE="${1:?usage: inject-exe-icon.sh <exe> [description]}"
+DESC="${2:-AgentMux}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ICO="$REPO_ROOT/crates/cef/resources/win/agentmux.ico"
 
@@ -61,7 +67,7 @@ max=6
 # header show. Overwrite them so the user sees "AgentMux" everywhere. Same rcedit
 # call as the icon (one PE rewrite, one retry loop).
 until "$RCEDIT" "$win_exe" --set-icon "$win_ico" \
-    --set-version-string "FileDescription" "AgentMux" \
+    --set-version-string "FileDescription" "$DESC" \
     --set-version-string "ProductName" "AgentMux" \
     --set-version-string "CompanyName" "AgentMux Corp" \
     --set-version-string "InternalName" "AgentMux" \
@@ -78,4 +84,4 @@ until "$RCEDIT" "$win_exe" --set-icon "$win_ico" \
     sleep 2
 done
 rm -f "$err"
-echo "  [icon] set AgentMux icon + version strings (FileDescription/ProductName=AgentMux) on $(basename "$EXE")"
+echo "  [icon] set AgentMux icon + version strings (FileDescription: $DESC) on $(basename "$EXE")"

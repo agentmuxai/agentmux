@@ -12,16 +12,106 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/** A Chromium-based browser on this machine, or null (layout tests then skip).
- *  `AGENTMUX_TEST_BROWSER` forces one. */
-export function findBrowser(): string | null {
-    const candidates = [
-        process.env.AGENTMUX_TEST_BROWSER,
+/** What browser lookup can see; the real machine by default, a fake in tests. */
+export interface BrowserLookup {
+    env: Record<string, string | undefined>;
+    platform: NodeJS.Platform;
+    arch: string;
+    home: string;
+    exists: (path: string) => boolean;
+    /** Entries of a directory, or [] when it doesn't exist. */
+    list: (dir: string) => string[];
+}
+
+const realLookup = (): BrowserLookup => ({
+    env: process.env,
+    platform: process.platform,
+    arch: process.arch,
+    home: homedir(),
+    exists: existsSync,
+    list: (dir) => {
+        try {
+            return readdirSync(dir);
+        } catch {
+            return [];
+        }
+    },
+});
+
+/** Compare "131.0.6778.204"-style versions, newest first. */
+const newestFirst = (a: string, b: string): number => {
+    const pa = a.split(".").map(Number);
+    const pb = b.split(".").map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pb[i] ?? 0) - (pa[i] ?? 0);
+        if (d !== 0) return d;
+    }
+    return 0;
+};
+
+/** Puppeteer's names for this host's platform, as in its cache's
+ *  `<platform>-<version>` folders, best first. Windows takes either build:
+ *  Puppeteer installs `win32` on some 64-bit hosts (Windows 10 on ARM), and a
+ *  32-bit build runs on them all. */
+function puppeteerPlatforms(l: BrowserLookup): string[] {
+    if (l.platform === "darwin") return [l.arch === "arm64" ? "mac_arm" : "mac"];
+    if (l.platform === "linux") return [l.arch === "arm64" ? "linux_arm" : "linux"];
+    if (l.platform === "win32") return l.arch === "ia32" ? ["win32"] : ["win64", "win32"];
+    return [];
+}
+
+/** Chrome's headless shell, on PATH or in the Puppeteer cache (newest build
+ *  for this OS and architecture first: a cache can hold others'). */
+function findHeadlessShell(l: BrowserLookup): string | null {
+    const exe = l.platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell";
+    const sep = l.platform === "win32" ? ";" : ":";
+    for (const dir of (l.env.PATH ?? "").split(sep).filter(Boolean)) {
+        if (l.exists(join(dir, exe))) return join(dir, exe);
+    }
+    // The configured cache, then the default the install hint uses.
+    const roots = [
+        ...new Set([l.env.PUPPETEER_CACHE_DIR, join(l.home, ".cache", "puppeteer")].filter(Boolean)),
+    ] as string[];
+    const hosts = puppeteerPlatforms(l);
+    for (const root of roots) {
+        const cache = join(root, "chrome-headless-shell");
+        const builds = hosts.flatMap((host) =>
+            l
+                .list(cache)
+                .filter((name) => name.startsWith(`${host}-`))
+                .map((name) => ({ name, version: name.slice(host.length + 1) }))
+                .sort((a, b) => newestFirst(a.version, b.version))
+        );
+        for (const { name } of builds) {
+            for (const inner of l.list(join(cache, name))) {
+                const candidate = join(cache, name, inner, exe);
+                if (l.exists(candidate)) return candidate;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * The browser layout tests run in, or null (they then skip). In order:
+ * `AGENTMUX_TEST_BROWSER`; Chrome's headless shell, which has no app bundle and
+ * so never gets a Dock tile; then, anywhere but macOS, an installed Chrome or
+ * Edge. On macOS the Chrome app is never launched: a direct launch with its
+ * own profile gets a Dock tile and is kept in the Dock's recent apps
+ * (docs/specs/SPEC_LAYOUT_TESTS_HEADLESS_SHELL_2026_10_09.md).
+ */
+export function findBrowser(lookup: BrowserLookup = realLookup()): string | null {
+    const forced = lookup.env.AGENTMUX_TEST_BROWSER;
+    if (forced && lookup.exists(forced)) return forced;
+    const shell = findHeadlessShell(lookup);
+    if (shell) return shell;
+    if (lookup.platform === "darwin") return null;
+    const apps = [
         "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
         "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
         "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -29,10 +119,14 @@ export function findBrowser(): string | null {
         "/usr/bin/google-chrome",
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     ];
-    return candidates.find((c): c is string => !!c && existsSync(c)) ?? null;
+    return apps.find((c) => lookup.exists(c)) ?? null;
 }
+
+/** Why layout tests skip on a machine with no usable browser. */
+export const NO_BROWSER_HINT =
+    "layout tests skipped: no headless browser. Install Chrome's headless shell with " +
+    "`npx @puppeteer/browsers install chrome-headless-shell@stable --path ~/.cache/puppeteer`, or set AGENTMUX_TEST_BROWSER.";
 
 const RESULT_RE = /<pre id="result">([\s\S]*?)<\/pre>/;
 
@@ -59,7 +153,8 @@ export function measureInBrowser<T>(
         const child = spawn(
             browser,
             [
-                "--headless=new",
+                // The headless shell is always headless and takes no mode.
+                ...(basename(browser).startsWith("chrome-headless-shell") ? [] : ["--headless=new"]),
                 "--disable-gpu",
                 "--no-sandbox",
                 "--no-first-run",

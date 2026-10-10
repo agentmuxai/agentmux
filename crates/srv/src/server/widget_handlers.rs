@@ -17,6 +17,7 @@ use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::widget_packages::{self, FileError, WidgetKind, WidgetPackageInfo};
+use crate::backend::widget_requests;
 
 use super::AppState;
 
@@ -75,6 +76,10 @@ fn svc() -> Result<&'static Arc<widget_packages::WidgetPackages>, String> {
 }
 
 pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // A sandboxed widget's sessions and calls (W3), agents' install requests (W4).
+    super::widget_access_handlers::register(engine, state);
+    super::widget_agent_handlers::register(engine);
+
     // widgets.list: every package and its state.
     engine.register_typed("widgets.list", |_req: serde_json::Value, _ctx| async move {
         Ok(WidgetPackagesResult { packages: svc()?.list() })
@@ -129,13 +134,38 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             if !dir.starts_with(&s.widgets_dir) {
                 return Err("that widget isn't in the widgets folder".to_string());
             }
-            tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| format!("can't remove it: {e}"))?;
-            s.forget(&req.id)?;
+            // Its open panes stop first, so none can write its data back;
+            // then what it stored goes (Settings asked the user): if that
+            // fails, nothing is removed, so a reinstall can't find it again.
+            let sessions = crate::backend::widget_access::sessions();
+            sessions.begin_removal(&req.id);
+            let removed = async {
+                st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))?;
+                tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| format!("can't remove it: {e}"))?;
+                s.forget(&req.id)?;
+                // A write that passed its check just before the panes stopped
+                // can land after the first purge; the package is gone now, so
+                // nothing can write again.
+                st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))
+            }
+            .await;
+            if let Err(e) = removed {
+                sessions.end_removal(&req.id);
+                return Err(e);
+            }
             tracing::info!(id = %req.id, "widget package uninstalled");
-            Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
+            // Sessions stay refused until the list no longer has it.
+            let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
+            sessions.end_removal(&req.id);
+            // An agent waiting to have it installed hears it won't be, and
+            // its prompt closes.
+            if widget_requests::requests().decline_all(&req.id) {
+                super::widget_agent_handlers::publish_requests(&st);
+            }
+            Ok(WidgetPackagesResult { packages })
         }
     });
 
@@ -195,13 +225,18 @@ pub(crate) async fn handle_widget_file(UrlPath((id, hash, key, path)): UrlPath<(
 /// The widget SDK and its stylesheet (spec §7), served next to the widgets.
 const SDK_V1_JS: &str = include_str!("../../../../sdk/widget-sdk/v1.js");
 const SDK_V1_CSS: &str = include_str!("../../../../sdk/widget-sdk/am-widget.css");
+const SDK_V1_TYPES: &str = include_str!("../../../../sdk/widget-sdk/v1.d.ts");
+const SDK_README: &str = include_str!("../../../../sdk/widget-sdk/README.md");
 
-/// `GET /agentmux/widget-sdk/<file>`: `v1.js` and `am-widget.css`. No auth:
-/// a widget's iframe imports them, like its own files.
+/// `GET /agentmux/widget-sdk/<file>`: `v1.js` and `am-widget.css`, which a
+/// widget's iframe imports like its own files, and `v1.d.ts` and
+/// `README.md`, the reference an agent writing a widget reads. No auth.
 pub(crate) async fn handle_widget_sdk(UrlPath(file): UrlPath<String>) -> Response {
     let (body, ty) = match file.as_str() {
         "v1.js" => (SDK_V1_JS, "text/javascript; charset=utf-8"),
         "am-widget.css" => (SDK_V1_CSS, "text/css; charset=utf-8"),
+        "v1.d.ts" => (SDK_V1_TYPES, "text/plain; charset=utf-8"),
+        "README.md" => (SDK_README, "text/markdown; charset=utf-8"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     let mut resp = body.into_response();
@@ -241,6 +276,19 @@ pub(crate) async fn handle_host_widget_approval(
                 tracing::info!(id = %id, "widget package approved by the user");
             }
             let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+            // An agent waiting on this install hears the answer, once the
+            // package list says so too: its next step is often OpenWidget.
+            // "Installed" only if the list, rescanned just now, still has that
+            // version approved: a reinstall in the meantime replaced it.
+            let approved_now = packages.iter().any(|p| p.id == id && p.hash == hash && p.state == widget_packages::WidgetState::Approved);
+            let answer = if decision == "approve" && approved_now {
+                widget_requests::Answer::Approved
+            } else {
+                widget_requests::Answer::Declined
+            };
+            if widget_requests::requests().answer(&id, &hash, answer) {
+                super::widget_agent_handlers::publish_requests(&state);
+            }
             (StatusCode::OK, Json(json!({ "ok": true, "packages": packages }))).into_response()
         }
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),
@@ -283,9 +331,8 @@ mod tests {
     // approval is never served.
     #[tokio::test]
     async fn only_the_host_can_approve_and_only_approved_bytes_are_served() {
-        let tmp = tempfile::tempdir().unwrap();
-        let widgets = tmp.path().join("widgets");
-        let pkg = widgets.join("acme.test");
+        let svc = widget_packages::WidgetPackages::for_tests();
+        let pkg = svc.widgets_dir.join("acme.test");
         std::fs::create_dir_all(&pkg).unwrap();
         std::fs::write(
             pkg.join("widget.json"),
@@ -294,9 +341,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(pkg.join("index.html"), "<p>approved</p>").unwrap();
-        let svc = widget_packages::WidgetPackages::new(widgets.clone(), &tmp.path().join("data"), "test-secret-key".into())
-            .install_global();
-        let hash = svc.rescan(&Default::default())[0].hash.clone();
+        let hash = svc.rescan(&Default::default()).into_iter().find(|p| p.id == "acme.test").unwrap().hash;
         let key = widget_packages::files_key("test-secret-key", "acme.test", &hash);
         let file_uri = format!("/agentmux/widget-files/acme.test/{hash}/{key}/index.html");
 
@@ -327,6 +372,9 @@ mod tests {
         assert_eq!(s, StatusCode::OK);
         assert!(String::from_utf8_lossy(&body).contains("export async function connect"));
         assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        let (s, _, body) = send(&app, get("/agentmux/widget-sdk/v1.d.ts")).await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(String::from_utf8_lossy(&body).contains("export declare function connect"), "the types an agent reads");
         let (s, _, _) = send(&app, get("/agentmux/widget-sdk/../widget-approvals.json")).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
 

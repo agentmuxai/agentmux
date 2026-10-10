@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The working row's pulsing dot is the status text's color — the pane's
- * identity color, falling back to the theme accent. jsdom has no cascade over
+ * The working row's ASCII spinner (AsciiSpinner.tsx) is the status text's
+ * color: the pane's identity color, falling back to the theme accent. jsdom has no cascade over
  * SCSS, so this reads the source, as tool-panel-height.test.ts does.
  */
 import { readFileSync } from "node:fs";
@@ -25,17 +25,23 @@ function block(start: number): string {
     throw new Error("unbalanced braces");
 }
 
-describe("working row dot color", () => {
+describe("working row indicator color", () => {
     const loading = block(scss.indexOf("&--loading {"));
 
     it("the status text uses the identity color", () => {
         expect(loading).toContain(`color: ${IDENTITY};`);
     });
 
-    it("the dot inside the loading row uses the same color, fill and halo", () => {
-        const dot = block(loading.indexOf(".agent-spinner-dot {") + scss.indexOf("&--loading {"));
-        expect(dot).toContain(`background: ${IDENTITY};`);
-        expect(dot).toContain(`color-mix(in srgb, ${IDENTITY} 60%, transparent)`);
+    it("the spinner inside the loading row uses the same color, in one fixed cell", () => {
+        const at = loading.indexOf(".agent-spinner-ascii {");
+        expect(at).toBeGreaterThan(-1);
+        const spinner = block(at + scss.indexOf("&--loading {"));
+        expect(spinner).toContain(`color: ${IDENTITY};`);
+        expect(spinner).toContain("width: 1ch;");
+    });
+
+    it("the loading row no longer styles the pulsing dot", () => {
+        expect(loading).not.toContain(".agent-spinner-dot");
     });
 
     it("the shared dot keeps the accent, for the pending-messages header", () => {

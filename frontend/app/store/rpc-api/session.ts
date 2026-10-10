@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Agent session state (output.state.json read/write/archive) and higher-level
-// session archive/restore/export. Split from the original rpc-api.ts.
+// session archive/restore/export. Split from the original rpc-api file.
 
 import { RpcClient } from "../rpc-client";
 

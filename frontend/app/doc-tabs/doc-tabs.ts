@@ -113,6 +113,18 @@ export function activateDoc<P>(s: DocTabsState<P>, id: string): DocTabsState<P> 
     return s.tabs.some((t) => t.id === id) ? withActive(s, id) : s;
 }
 
+/** `s` without tab `id`; the tab used before it becomes active if it was. */
+function withoutTab<P>(s: DocTabsState<P>, id: string): DocTabsState<P> {
+    const tabs = s.tabs.filter((t) => t.id !== id);
+    const mru = s.mru.filter((m) => m !== id);
+    let activeId = s.activeId;
+    if (activeId === id) {
+        const index = s.tabs.findIndex((t) => t.id === id);
+        activeId = mru.find((m) => tabs.some((t) => t.id === m)) ?? tabs[Math.min(index, tabs.length - 1)]?.id ?? null;
+    }
+    return withActive({ ...s, tabs, mru }, activeId);
+}
+
 /**
  * Close a tab. Refused (returns `s` unchanged) when `keepOne` and it is the
  * last tab. The closed tab goes on the reopen list unless it was a preview.
@@ -121,15 +133,40 @@ export function activateDoc<P>(s: DocTabsState<P>, id: string): DocTabsState<P> 
 export function closeDoc<P>(s: DocTabsState<P>, id: string, opts: { keepOne?: boolean } = {}): DocTabsState<P> {
     const tab = s.tabs.find((t) => t.id === id);
     if (!tab || (opts.keepOne && s.tabs.length <= 1)) return s;
-    const tabs = s.tabs.filter((t) => t.id !== id);
-    const mru = s.mru.filter((m) => m !== id);
     const closed = tab.preview ? s.closed : [tab, ...s.closed].slice(0, MAX_CLOSED);
-    let activeId = s.activeId;
-    if (activeId === id) {
-        const index = s.tabs.findIndex((t) => t.id === id);
-        activeId = mru.find((m) => tabs.some((t) => t.id === m)) ?? tabs[Math.min(index, tabs.length - 1)]?.id ?? null;
-    }
-    return withActive({ ...s, tabs, mru, closed }, activeId);
+    return { ...withoutTab(s, id), closed };
+}
+
+/**
+ * Take a tab out of this pane to move it to another: as a close, but not
+ * onto the reopen list, and the tab is returned. Null if there is no such tab.
+ */
+export function detachDoc<P>(s: DocTabsState<P>, id: string): { state: DocTabsState<P>; tab: DocTab<P> } | null {
+    const tab = s.tabs.find((t) => t.id === id);
+    return tab ? { state: withoutTab(s, id), tab } : null;
+}
+
+/** Where a moved tab lands: beside a tab, or (omitted) after the active one. */
+export interface DocDropAt {
+    targetId: string;
+    position: "before" | "after";
+}
+
+/**
+ * Put in a tab moved from another pane, and make it active. It keeps its id,
+ * title, icon, pin and payload; a preview arrives as a normal tab (moving it
+ * was deliberate). When its document is already open here, that tab comes to
+ * the front instead and nothing is added.
+ */
+export function attachDoc<P>(s: DocTabsState<P>, tab: DocTab<P>, at?: DocDropAt): DocTabsState<P> {
+    const open = s.tabs.find((t) => t.key === tab.key);
+    if (open) return withActive(s, open.id);
+    const moved: DocTab<P> = { ...tab, preview: false };
+    const target = at ? s.tabs.findIndex((t) => t.id === at.targetId) : -1;
+    const after = s.tabs.findIndex((t) => t.id === s.activeId);
+    const index = target >= 0 ? (at!.position === "before" ? target : target + 1) : after >= 0 ? after + 1 : s.tabs.length;
+    const tabs = pinnedFirst([...s.tabs.slice(0, index), moved, ...s.tabs.slice(index)]);
+    return withActive({ ...s, tabs }, moved.id);
 }
 
 /** Close every tab but `id` (pinned tabs stay). */
@@ -170,6 +207,21 @@ export function moveDoc<P>(s: DocTabsState<P>, id: string, delta: number): DocTa
     reordered.splice(to, 0, tab);
     const others = s.tabs.filter((t) => t.pinned !== tab.pinned);
     return { ...s, tabs: tab.pinned ? [...reordered, ...others] : [...others, ...reordered] };
+}
+
+/**
+ * Move a tab to just before or after `targetId` (a drag). It stays in its
+ * pinned or unpinned group: dropped among the other group, it lands at the
+ * nearest end of its own.
+ */
+export function moveDocTo<P>(s: DocTabsState<P>, id: string, targetId: string, position: "before" | "after"): DocTabsState<P> {
+    const tab = s.tabs.find((t) => t.id === id);
+    if (!tab || id === targetId) return s;
+    const rest = s.tabs.filter((t) => t.id !== id);
+    const at = rest.findIndex((t) => t.id === targetId);
+    if (at < 0) return s;
+    const tabs = pinnedFirst([...rest.slice(0, position === "before" ? at : at + 1), tab, ...rest.slice(position === "before" ? at : at + 1)]);
+    return tabs.every((t, i) => t === s.tabs[i]) ? s : { ...s, tabs };
 }
 
 export function setPinned<P>(s: DocTabsState<P>, id: string, pinned: boolean): DocTabsState<P> {

@@ -31,7 +31,7 @@
 //
 // USAGE
 //   npx tsx tools/tests/bench-markdown-parse.mjs
-//   npx tsx tools/tests/bench-markdown-parse.mjs --file <path-to-real-output.md>
+//   npx tsx tools/tests/bench-markdown-parse.mjs --file <path-to-real-output.md> (comment-hygiene: allow)
 //   npx tsx tools/tests/bench-markdown-parse.mjs --stream 64          # simulate one 64KB message streaming
 //   npx tsx tools/tests/bench-markdown-parse.mjs --code-ratio 0.5     # heavier code content
 //

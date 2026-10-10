@@ -14,6 +14,8 @@ const listeners = new Map<string, (payload: unknown) => void>();
 vi.mock("@/app/store/global", () => ({
     openLink: (...a: unknown[]) => openLink(...a),
     createBlock: (...a: unknown[]) => createBlock(...a),
+    // Markdown reads its `markdown:streamtailinplace` kill switch on mount.
+    getSettingsKeyAtom: () => () => undefined,
     getApi: () => ({
         listen: (name: string, cb: (payload: unknown) => void) => {
             listeners.set(name, cb);

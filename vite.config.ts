@@ -41,10 +41,10 @@ function getTargetPlatform(): string {
  * Vite plugin that resolves `.platform.{ts,tsx,scss,css}` imports to the
  * platform-specific file at build time.
  *
- * Example: `import "./foo.platform.scss"` resolves to `./foo.win32.scss`
+ * Example: `import "./foo.platform.scss"` resolves to `./foo.win32.scss` (comment-hygiene: allow)
  * when building for Windows.
  *
- * Files must exist as `foo.win32.ts`, `foo.darwin.ts`, `foo.linux.ts`.
+ * Files must exist as `foo.win32.ts`, `foo.darwin.ts`, `foo.linux.ts`. (comment-hygiene: allow)
  * If the platform file does not exist, the original import is left unchanged
  * (Vite will error naturally).
  */
@@ -271,7 +271,7 @@ export default defineConfig({
         }),
         // `hot: false` under Vitest. vite-plugin-solid enables solid-refresh
         // whenever `command === "serve" && mode !== "production"` (dist/esm/
-        // index.mjs:164), which is true for a Vitest run — it then injects the
+        // index.mjs:164), which is true for a Vitest run — it then injects the (comment-hygiene: allow)
         // `/@solid-refresh` virtual module, and Vitest's module runner rejects
         // that specifier ("The argument 'filename' must be a file URL object...
         // Received 'file:///@solid-refresh'"), failing EVERY Solid component

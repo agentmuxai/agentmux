@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Tower: CPU and memory per task (each pane and everything it started, plus
-// AgentMux itself), and every process on the machine
-// (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md). Read-only.
+// Tower: what each agent runs and what it costs (the Agents view), and every
+// process on the machine (the Processes view)
+// (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md,
+// SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md). Read-only.
 
 import type { SelectOption } from "@/app/element/ui";
 import {
@@ -16,12 +17,14 @@ import {
     Tabs,
     TextInput,
 } from "@/app/element/ui";
-import type { TowerPeerInfo, TowerProcess, TowerTask } from "@/app/store/rpc-api";
+import type { TowerPeerInfo, TowerProcess } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
-import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
-import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
+import { agentColor, AgentsView } from "./tower-agents";
 import type { TowerViewModel } from "./tower-model";
+import { ProcessName } from "./tower-process-name";
+import { SortHeader } from "./tower-sort-header";
 import {
     count,
     type CpuMode,
@@ -29,27 +32,22 @@ import {
     formatCpu,
     formatMem,
     groupProcesses,
-    nextSort,
+    type OwnerGroup,
+    ownerGroups,
+    ownerOf,
     processDetail,
     type ProcessGroup,
+    type ProcessGrouping,
     sortGroups,
-    type SortKey,
+    sortOwnerGroups,
     sortProcesses,
-    sortTasks,
     type TowerView as TowerViewKind,
-    trackingLabel,
 } from "./tower-util";
 
 import "./tower-view.scss";
 
-/** The host list shows this many rows; the filter narrows the rest. */
+/** The process list shows this many rows; the filter narrows the rest. */
 export const HOST_ROW_LIMIT = 400;
-
-const KIND_LABELS: Record<TowerTask["kind"], string> = {
-    agent: "agent",
-    terminal: "terminal",
-    agentmux: "app",
-};
 
 /** The picker's choice that opens the pairing form rather than a machine. */
 export const PAIR_OPTION = "__pair__";
@@ -112,17 +110,24 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Tabs<TowerViewKind>
                     items={
                         !m.hasTasks()
-                            ? [{ id: "host", label: "Host", icon: "server", tooltip: "Every process on that machine" }]
+                            ? [
+                                  {
+                                      id: "processes",
+                                      label: "Processes",
+                                      icon: "server",
+                                      tooltip: "Every process on that machine",
+                                  },
+                              ]
                             : [
                                   {
-                                      id: "tasks",
-                                      label: "Tasks",
-                                      icon: "layer-group",
-                                      tooltip: "Each pane and what it started",
+                                      id: "agents",
+                                      label: "Agents",
+                                      icon: "robot",
+                                      tooltip: "Each agent and what it runs",
                                   },
                                   {
-                                      id: "host",
-                                      label: "Host",
+                                      id: "processes",
+                                      label: "Processes",
                                       icon: "server",
                                       tooltip: "Every process on this machine",
                                   },
@@ -174,10 +179,10 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
                     {(snap) => (
                         <Switch>
-                            <Match when={m.effectiveView() === "tasks"}>
-                                <TasksTable model={m} cpu={cpu} />
+                            <Match when={m.effectiveView() === "agents"}>
+                                <AgentsView model={m} cpu={cpu} />
                             </Match>
-                            <Match when={m.effectiveView() === "host"}>
+                            <Match when={m.effectiveView() === "processes"}>
                                 <Show when={snap().host} fallback={<div class="tower-empty">Measuring…</div>}>
                                     <HostTable model={m} cpu={cpu} />
                                 </Show>
@@ -246,149 +251,28 @@ function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
     );
 }
 
-function SortHeader(props: { model: TowerViewModel; key: SortKey; label: string; numeric?: boolean; title?: string }) {
-    const active = () => props.model.sort().key === props.key;
-    return (
-        <th
-            class={clsx(props.numeric && "tower-num")}
-            aria-sort={active() ? (props.model.sort().desc ? "descending" : "ascending") : "none"}
-        >
-            <Button
-                tone="quiet"
-                density="compact"
-                class="tower-sort"
-                title={props.title}
-                icon={active() ? (props.model.sort().desc ? "arrow-down" : "arrow-up") : undefined}
-                onClick={() => props.model.setSort(nextSort(props.model.sort(), props.key))}
-            >
-                {props.label}
-            </Button>
-        </th>
-    );
-}
-
-function TasksTable(props: { model: TowerViewModel; cpu: (f: number | undefined) => string }) {
-    const m = props.model;
-    const tasks = createMemo(() => sortTasks(m.snapshot()?.tasks ?? [], m.sort()));
-    const totals = createMemo(() => {
-        const ts = m.snapshot()?.tasks ?? [];
-        const rates = ts.map((t) => t.cpu).filter((c): c is number => c != null);
-        return {
-            processes: ts.reduce((n, t) => n + t.processes.length, 0),
-            cpu: rates.length ? rates.reduce((a, b) => a + b, 0) : undefined,
-            mem: ts.reduce((n, t) => n + t.mem, 0),
-        };
-    });
-    return (
-        <>
-            <div class="tower-summary">
-                {count(tasks().length, "task")} · {count(totals().processes, "process")} · CPU {props.cpu(totals().cpu)}{" "}
-                · Memory {formatMem(totals().mem)}
-                <span
-                    class="tower-muted"
-                    title={`Memory is each process's ${m.snapshot()?.memory_metric}: the part only it uses.`}
-                >
-                    {" "}
-                    ({m.snapshot()?.memory_metric})
-                </span>
-            </div>
-            <table class="tower-table" aria-label="Tasks">
-                <thead>
-                    <tr>
-                        <SortHeader model={m} key="name" label="Task" />
-                        <SortHeader model={m} key="cpu" label="CPU" numeric />
-                        <SortHeader model={m} key="mem" label="Memory" numeric />
-                        <SortHeader
-                            model={m}
-                            key="count"
-                            label="Processes"
-                            numeric
-                            title="Processes, or PID in a task's list"
-                        />
-                    </tr>
-                </thead>
-                <tbody>
-                    <For
-                        each={tasks()}
-                        fallback={
-                            <tr>
-                                <td colSpan={4} class="tower-empty">
-                                    No tasks running.
-                                </td>
-                            </tr>
-                        }
-                    >
-                        {(task) => <TaskRows model={m} task={task} cpu={props.cpu} />}
-                    </For>
-                </tbody>
-            </table>
-        </>
-    );
-}
-
-function TaskRows(props: { model: TowerViewModel; task: TowerTask; cpu: (f: number | undefined) => string }) {
-    const m = props.model;
-    const open = () => m.expanded().has(props.task.id);
-    const processes = createMemo(() => (open() ? sortProcesses(props.task.processes, m.sort()) : []));
-    return (
-        <>
-            <tr class="tower-task-row" data-testid={`tower-task-${props.task.id}`}>
-                <td class="tower-name">
-                    <div class="tower-name-line">
-                        <IconButton
-                            icon={open() ? "chevron-down" : "chevron-right"}
-                            label={open() ? "Hide processes" : "Show processes"}
-                            density="compact"
-                            tooltip={false}
-                            aria-expanded={open()}
-                            onClick={() => m.toggleExpanded(props.task.id)}
-                        />
-                        <span class="tower-label" title={trackingLabel(props.task.tracking)}>
-                            {props.task.label}
-                        </span>
-                        <span class={clsx("tower-badge", `tower-badge--${props.task.kind}`)}>
-                            {KIND_LABELS[props.task.kind]}
-                        </span>
-                        <Show when={props.task.kind !== "agentmux" && !m.snapshot()?.remote}>
-                            <IconButton
-                                icon="arrow-up-right-from-square"
-                                label="Show this pane"
-                                density="compact"
-                                class="tower-reveal"
-                                onClick={() => void revealBlock(props.task.id)}
-                            />
-                        </Show>
-                    </div>
-                </td>
-                <td
-                    class="tower-num"
-                    title={props.task.cpu_account ? "Includes processes that exited since the last refresh" : undefined}
-                >
-                    {props.cpu(props.task.cpu)}
-                </td>
-                <td class="tower-num">{formatMem(props.task.mem)}</td>
-                <td class="tower-num">{props.task.processes.length}</td>
-            </tr>
-            <For each={processes()}>{(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested />}</For>
-        </>
-    );
-}
-
 function ProcessRow(props: {
     model: TowerViewModel;
     process: TowerProcess;
     cpu: (f: number | undefined) => string;
     nested?: boolean;
-    /** A group of one in the grouped Host view: aligned with the group names,
-     *  and counted as 1 (its PID is in the hover details). */
+    /** A group of one in the list grouped by app: aligned with the group
+     *  names, and counted as 1 (its PID is in the hover details). */
     single?: boolean;
+    /** Two levels in: an app's process inside the "Other processes" group. */
+    deep?: boolean;
     taskLabel?: string;
+    /** Under an agent in the list grouped by agent: the agent's color. */
+    ownerColor?: string;
 }) {
     return (
         <tr
+            style={props.ownerColor ? { "--tower-owner-color": props.ownerColor } : undefined}
             class={clsx(
                 "tower-process-row",
                 props.nested && "tower-process-row--nested",
+                props.deep && "tower-process-row--deep",
+                props.ownerColor && "tower-process-row--owned",
                 props.single && "tower-process-row--single",
                 props.process.role && `tower-role--${props.process.role}`
             )}
@@ -396,7 +280,7 @@ function ProcessRow(props: {
         >
             <td class="tower-name">
                 <div class="tower-name-line">
-                    <span class="tower-label">{props.process.name || `PID ${props.process.pid}`}</span>
+                    <ProcessName process={props.process} />
                     <Show when={props.taskLabel}>
                         {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
                     </Show>
@@ -409,11 +293,21 @@ function ProcessRow(props: {
     );
 }
 
-/** One app in the grouped Host view: a single process as its own row, or a
- *  row with the app's count and totals that opens to its processes. */
-function GroupRows(props: { model: TowerViewModel; group: ProcessGroup; cpu: (f: number | undefined) => string }) {
+/** One app in the list grouped by app (or in the "Other processes" group): a
+ *  single process as its own row, or a row with the app's count and totals
+ *  that opens to its processes. */
+function GroupRows(props: {
+    model: TowerViewModel;
+    group: ProcessGroup;
+    cpu: (f: number | undefined) => string;
+    /** Inside "Other processes": one level in, with its own open state, and
+     *  open while a search is typed, so a match isn't hidden in it. */
+    inOwner?: boolean;
+}) {
     const m = props.model;
-    const open = () => m.expanded().has(`app:${props.group.key}`);
+    const key = () => `app:${props.inOwner ? "other:" : ""}${props.group.key}`;
+    const searching = () => !!props.inOwner && m.filter().trim() !== "";
+    const open = () => searching() || m.expanded().has(key());
     const processes = createMemo(() => (open() ? sortProcesses(props.group.processes, m.sort()) : []));
     const label = (task: string | undefined) => (task ? m.taskLabel(task) : undefined);
     return (
@@ -425,11 +319,15 @@ function GroupRows(props: { model: TowerViewModel; group: ProcessGroup; cpu: (f:
                     process={props.group.processes[0]}
                     cpu={props.cpu}
                     single
+                    nested={props.inOwner}
                     taskLabel={label(props.group.processes[0].task)}
                 />
             }
         >
-            <tr class="tower-group-row" data-testid={`tower-app-${props.group.key}`}>
+            <tr
+                class={clsx("tower-group-row", props.inOwner && "tower-group-row--nested")}
+                data-testid={`tower-app-${props.group.key}`}
+            >
                 <td class="tower-name">
                     <div class="tower-name-line">
                         <IconButton
@@ -438,7 +336,8 @@ function GroupRows(props: { model: TowerViewModel; group: ProcessGroup; cpu: (f:
                             density="compact"
                             tooltip={false}
                             aria-expanded={open()}
-                            onClick={() => m.toggleExpanded(`app:${props.group.key}`)}
+                            disabled={searching()}
+                            onClick={() => m.toggleExpanded(key())}
                         />
                         <span class="tower-label">{props.group.name}</span>
                         <span class="tower-muted">({props.group.processes.length})</span>
@@ -452,9 +351,88 @@ function GroupRows(props: { model: TowerViewModel; group: ProcessGroup; cpu: (f:
                 <td class="tower-num">{props.group.processes.length}</td>
             </tr>
             <For each={processes()}>
-                {(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested taskLabel={label(p.task)} />}
+                {(p) => (
+                    <ProcessRow
+                        model={m}
+                        process={p}
+                        cpu={props.cpu}
+                        nested
+                        deep={props.inOwner}
+                        taskLabel={label(p.task)}
+                    />
+                )}
             </For>
         </Show>
+    );
+}
+
+/** One owner in the list grouped by agent: a header in the agent's color
+ *  with its count and totals, opening to its processes; the "Other
+ *  processes" group opens to them grouped by app. While a filter is typed
+ *  every group with a match is open, so each match shows under its owner. */
+function OwnerRows(props: { model: TowerViewModel; group: OwnerGroup; cpu: (f: number | undefined) => string }) {
+    const m = props.model;
+    const key = () => `owner:${props.group.key}`;
+    // A search holds every group with a match open; its arrow can't close
+    // it then, so it is disabled rather than doing nothing.
+    const searching = () => m.filter().trim() !== "";
+    const open = () => searching() || m.expanded().has(key());
+    const color = () =>
+        props.group.kind === "agent"
+            ? agentColor(props.group.key, props.group.label, m.snapshot()?.remote ?? false)
+            : undefined;
+    const processes = createMemo(() =>
+        open() && props.group.kind !== "other"
+            ? sortProcesses(props.group.processes, m.sort()).slice(0, HOST_ROW_LIMIT)
+            : []
+    );
+    const apps = createMemo(() =>
+        open() && props.group.kind === "other"
+            ? sortGroups(groupProcesses(props.group.processes), m.sort()).slice(0, HOST_ROW_LIMIT)
+            : []
+    );
+    const appByKey = createMemo(() => new Map(apps().map((g) => [g.key, g])));
+    return (
+        <>
+            <tr
+                class={clsx("tower-owner-row", `tower-owner-row--${props.group.kind}`)}
+                data-testid={`tower-owner-${props.group.key}`}
+                style={color() ? { "--tower-owner-color": color() } : undefined}
+            >
+                <td class="tower-name">
+                    <div class="tower-name-line">
+                        <IconButton
+                            icon={open() ? "chevron-down" : "chevron-right"}
+                            label={
+                                open()
+                                    ? `Hide ${props.group.label}'s processes`
+                                    : `Show ${props.group.label}'s processes`
+                            }
+                            density="compact"
+                            tooltip={false}
+                            aria-expanded={open()}
+                            disabled={searching()}
+                            onClick={() => m.toggleExpanded(key())}
+                        />
+                        <span class="tower-label">{props.group.label}</span>
+                        <span class="tower-muted">({props.group.processes.length})</span>
+                    </div>
+                </td>
+                <td class="tower-num">{props.cpu(props.group.cpu)}</td>
+                <td class="tower-num">{formatMem(props.group.mem)}</td>
+                <td class="tower-num">{props.group.processes.length}</td>
+            </tr>
+            <For each={processes()}>
+                {(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested ownerColor={color()} />}
+            </For>
+            <For each={apps().map((g) => g.key)}>
+                {(appKey) => (
+                    <Show when={appByKey().get(appKey)}>
+                        {(g) => <GroupRows model={m} group={g()} cpu={props.cpu} inOwner />}
+                    </Show>
+                )}
+            </For>
+        </>
     );
 }
 
@@ -463,15 +441,38 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
     const host = () => m.snapshot()?.host;
     /** Another machine sends only its busiest and largest processes. */
     const partial = () => (host()?.processes.length ?? 0) < (host()?.matched ?? 0);
+    const tasksById = createMemo(() => new Map((m.snapshot()?.tasks ?? []).map((t) => [t.id, t])));
+    // Carried over from the Agents view: only that owner's processes.
+    const onlyLabel = createMemo(() => {
+        const only = m.only();
+        if (!only) return undefined;
+        const p = (host()?.processes ?? []).find((x) => ownerOf(x, tasksById())[0] === only);
+        return p ? ownerOf(p, tasksById())[2] : (tasksById().get(only)?.label ?? "that owner");
+    });
     const rows = createMemo(() => {
-        const all = host()?.processes ?? [];
+        const only = m.only();
+        const all = (host()?.processes ?? []).filter((p) => !only || ownerOf(p, tasksById())[0] === only);
         return sortProcesses(filterProcesses(all, m.filter(), m.taskLabel), m.sort());
     });
-    // Grouped by app: rows keyed by the app's name, so a group stays the same
-    // row (and stays open) across refreshes.
+    // Grouped by app or by owner: rows keyed by the app's name or the owner,
+    // so a group stays the same row (and stays open) across refreshes.
     const groups = createMemo(() => sortGroups(groupProcesses(rows()), m.sort()));
     const groupByKey = createMemo(() => new Map(groups().map((g) => [g.key, g])));
-    const shown = () => (m.groupByApp() ? groups().length : rows().length);
+    const owners = createMemo(() => sortOwnerGroups(ownerGroups(rows(), m.snapshot()?.tasks ?? []), m.sort()));
+    const ownerByKey = createMemo(() => new Map(owners().map((g) => [g.key, g])));
+    const grouped = () => m.grouping() !== "none";
+    const shown = () => (m.grouping() === "app" ? groups().length : m.grouping() === "none" ? rows().length : 0);
+    // The first list grouped by agent whose agents have a CPU rate (the very
+    // first sample has none) opens its two busiest; after that, what is open
+    // is the user's to choose.
+    createEffect(() => {
+        if (m.grouping() !== "agent" || m.ownersOpened) return;
+        const agents = owners().filter((g) => g.kind === "agent");
+        if (!agents.some((g) => g.cpu != null)) return;
+        m.ownersOpened = true;
+        const busiest = [...agents].sort((a, b) => (b.cpu ?? -1) - (a.cpu ?? -1)).slice(0, 2);
+        m.open(busiest.map((g) => `owner:${g.key}`));
+    });
     return (
         <>
             <div class="tower-summary">
@@ -491,6 +492,16 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                 </Show>
             </div>
             <div class="tower-host-bar">
+                <Show when={onlyLabel()}>
+                    {(label) => (
+                        <span class="tower-only" data-testid="tower-only">
+                            Only {label()}
+                            <Button density="compact" tone="quiet" onClick={() => m.showAll()}>
+                                Show all
+                            </Button>
+                        </span>
+                    )}
+                </Show>
                 <FilterInput
                     value={m.filter()}
                     onInput={(q) => m.setFilter(q)}
@@ -498,15 +509,29 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                     class="tower-filter"
                     testId="tower-filter"
                 />
-                <Button
+                <SegmentedControl<ProcessGrouping>
                     density="compact"
-                    icon="layer-group"
-                    pressed={m.groupByApp()}
-                    onClick={() => m.setGroupByApp(!m.groupByApp())}
-                    title="Group processes of the same app, as Task Manager does"
-                >
-                    Group by app
-                </Button>
+                    ariaLabel="Group by"
+                    options={[
+                        ...(m.hasTasks()
+                            ? [
+                                  {
+                                      value: "agent" as const,
+                                      label: "Agent",
+                                      title: "Under the agent or terminal that started each",
+                                  },
+                              ]
+                            : []),
+                        {
+                            value: "app" as const,
+                            label: "App",
+                            title: "Processes of the same app together, as Task Manager does",
+                        },
+                        { value: "none" as const, label: "None", title: "One flat list" },
+                    ]}
+                    value={m.grouping()}
+                    onChange={(v) => m.setGrouping(v)}
+                />
             </div>
             <table class="tower-table" aria-label="Processes">
                 <thead>
@@ -517,16 +542,37 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                         <SortHeader
                             model={m}
                             key="count"
-                            label={m.groupByApp() ? "Count" : "PID"}
+                            label={grouped() ? "Count" : "PID"}
                             numeric
-                            title={m.groupByApp() ? "Processes in the app, or the PID of one" : undefined}
+                            title={grouped() ? "Processes in the group, or the PID of one" : undefined}
                         />
                     </tr>
                 </thead>
                 <tbody>
-                    <Show
-                        when={m.groupByApp()}
-                        fallback={
+                    <Switch>
+                        <Match when={m.grouping() === "agent"}>
+                            <For each={owners().map((g) => g.key)}>
+                                {(key) => (
+                                    <Show when={ownerByKey().get(key)}>
+                                        {(group) => <OwnerRows model={m} group={group()} cpu={props.cpu} />}
+                                    </Show>
+                                )}
+                            </For>
+                        </Match>
+                        <Match when={m.grouping() === "app"}>
+                            <For
+                                each={groups()
+                                    .slice(0, HOST_ROW_LIMIT)
+                                    .map((g) => g.key)}
+                            >
+                                {(key) => (
+                                    <Show when={groupByKey().get(key)}>
+                                        {(group) => <GroupRows model={m} group={group()} cpu={props.cpu} />}
+                                    </Show>
+                                )}
+                            </For>
+                        </Match>
+                        <Match when={m.grouping() === "none"}>
                             <For each={rows().slice(0, HOST_ROW_LIMIT)}>
                                 {(p) => (
                                     <ProcessRow
@@ -537,20 +583,8 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                                     />
                                 )}
                             </For>
-                        }
-                    >
-                        <For
-                            each={groups()
-                                .slice(0, HOST_ROW_LIMIT)
-                                .map((g) => g.key)}
-                        >
-                            {(key) => (
-                                <Show when={groupByKey().get(key)}>
-                                    {(group) => <GroupRows model={m} group={group()} cpu={props.cpu} />}
-                                </Show>
-                            )}
-                        </For>
-                    </Show>
+                        </Match>
+                    </Switch>
                 </tbody>
             </table>
             <Show when={shown() > HOST_ROW_LIMIT}>

@@ -30,6 +30,7 @@ import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
+import { isModKey } from "@/util/platformutil";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -244,7 +245,7 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
             // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
             // (app.tsx) — let it bubble there instead of zooming just this
             // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!ev.ctrlKey || ev.shiftKey) return;
+            if (!isModKey(ev) || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const currentZoom = model.termZoomAtom();

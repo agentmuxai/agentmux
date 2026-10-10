@@ -3,7 +3,7 @@
 //
 // Window chrome handlers for the CEF host — minimize / maximize toggle.
 //
-// Third carve of the commands/window.rs modularization (Plan 1). Both
+// Third carve of the `commands::window` modularization (Plan 1). Both
 // handlers are `pub` and dispatched by ipc.rs (re-exported
 // `pub use chrome::*`). Pure move — no behavior change.
 

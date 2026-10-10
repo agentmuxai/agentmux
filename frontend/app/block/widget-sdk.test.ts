@@ -39,6 +39,8 @@ function pkg(granted: string[] = []): WidgetPackageInfo {
         error: null,
         hash: "h",
         panes: [{ view: "ext:acme.notes/main", name: "main", label: "Notes", icon: "note-sticky", entry: "index.html", singleton: false, default_meta: {} }],
+        commands: [],
+        status_items: [{ id: "count", text: "Notes", icon: "note-sticky", tooltip: null, command: null, alignment: "right" }],
         files_url: "/x/",
         implied: false,
         folder: "",
@@ -49,6 +51,7 @@ function pkg(granted: string[] = []): WidgetPackageInfo {
 function startHost(p: WidgetPackageInfo) {
     let meta: Record<string, unknown> = { "widget:acme.notes:clicks": 4 };
     const setTitle = vi.fn();
+    const setStatusItem = vi.fn();
     const host: BridgeHost = {
         pkg: p,
         pane: p.panes[0],
@@ -65,6 +68,7 @@ function startHost(p: WidgetPackageInfo) {
         setActions: vi.fn(),
         setMenu: vi.fn(),
         agentmuxVersion: () => "0.60.0",
+        setStatusItem,
     };
     const state: BridgeState = { ready: false, inFlight: 0 };
     const channel = new MessageChannel();
@@ -78,10 +82,10 @@ function startHost(p: WidgetPackageInfo) {
     const handOver = () =>
         window.dispatchEvent(new MessageEvent("message", { data: { type: "agentmux:connect", protocols: [1] }, source: fakeParent as never, ports: [channel.port2] }));
     const notify = (method: string, params: unknown) => channel.port1.postMessage({ jsonrpc: "2.0", method, params });
-    return { handOver, notify, setTitle, meta: () => meta };
+    return { handOver, notify, setTitle, setStatusItem, meta: () => meta };
 }
 
-describe("@agentmux/widget-sdk v1", () => {
+describe("@agentmuxai/widget-sdk v1", () => {
     it("connects, applies the theme, and reads its pane's meta", async () => {
         const h = startHost(pkg());
         const pending = connect();
@@ -122,6 +126,36 @@ describe("@agentmux/widget-sdk v1", () => {
         h.notify("action", { id: "refresh", source: "header" });
         expect(await action).toEqual({ id: "refresh", source: "header" });
         expect(onDormant).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a command sent before anyone listens for the first listener", async () => {
+        const h = startHost(pkg());
+        const pending = connect();
+        h.handOver();
+        const am = await pending;
+        // The pane was opened for the command: it arrives right after hello.
+        h.notify("command", { id: "refresh", source: "palette" });
+        await new Promise((r) => setTimeout(r, 10));
+        const seen: unknown[] = [];
+        am.on("command", (c) => seen.push(c));
+        await Promise.resolve();
+        expect(seen).toEqual([{ id: "refresh", source: "palette" }]);
+        h.notify("command", { id: "refresh", source: "status" });
+        await new Promise((r) => setTimeout(r, 10));
+        expect(seen).toHaveLength(2);
+    });
+
+    it("updates a declared status item, and refuses one it didn't declare", async () => {
+        const h = startHost(pkg());
+        const pending = connect();
+        h.handOver();
+        const am = await pending;
+        await am.ui.setStatusItem("count", { text: "3 notes", tone: "warning" });
+        expect(h.setStatusItem).toHaveBeenLastCalledWith("count", { text: "3 notes", tone: "warning" });
+        await am.ui.setStatusItem("count");
+        expect(h.setStatusItem).toHaveBeenLastCalledWith("count", null);
+        const err = (await am.ui.setStatusItem("other", { text: "x" }).catch((e: unknown) => e)) as AgentMuxError;
+        expect(err.name).toBe("not_found");
     });
 
     it("says plainly when the page isn't inside AgentMux, or nobody connects", async () => {

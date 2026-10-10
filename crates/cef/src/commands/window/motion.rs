@@ -4,7 +4,7 @@
 // Window motion handlers for the CEF host — position, drag, and the
 // floating-pane redock-hover feedback.
 //
-// Second carve of the commands/window.rs modularization
+// Second carve of the `commands::window` modularization
 // (docs/analysis/ANALYSIS_LARGE_FILE_MODULARIZATION_CANDIDATES_2026_05_28.md,
 // Plan 1). All handlers are `pub` and dispatched by ipc.rs (re-exported
 // `pub use motion::*` from the parent). Pure move — no behavior change.

@@ -96,7 +96,9 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("acceptsInput")).toEqual(["term"]);
         expect(holders("shellKeys")).toEqual(["term"]);
         expect(holders("sharesCwd")).toEqual(["term"]);
-        expect(holders("splitBlockDef")).toEqual(["agent"]);
+        // Agent: a fresh picker. Editor and media: an empty pane of their
+        // kind (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
+        expect(holders("splitBlockDef")).toEqual(["agent", "editor", "media"]);
         // An alias carries its view's capabilities.
         expect(paneTabCapability("forge", "header")).toBe("surface");
     });

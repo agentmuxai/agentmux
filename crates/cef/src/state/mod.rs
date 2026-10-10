@@ -438,26 +438,20 @@ pub struct AppState {
     pub browser_pane_overlays:
         Mutex<std::collections::HashMap<String, (String, cef::OverlayController)>>,
 
-    /// macOS only — last-known REAL on-screen physical-px rect per pane
-    /// label, mirroring whatever was last committed via the raw ObjC
-    /// `setFrame:` path in `creation_views.rs` / `pane_geometry.rs`.
+    /// Linux/macOS — each pane's real on-screen physical-px rect, as last
+    /// committed from the frontend's report. `SetPaneOverlayClipViewsTask`
+    /// reads it because `OverlayController::bounds()` can't be trusted:
     ///
-    /// `OverlayController::bounds()` cannot be trusted for this on macOS:
-    /// CEF Views' own `set_size`/`set_position` are permanent no-ops on
-    /// `NativeWidgetMacNSWindow` (see the extensive comments in
-    /// `browser_pane/creation_views.rs`), so `bounds()` reflects a stale,
-    /// DIP-scale value from whatever CEF's internal Views layout last
-    /// computed — NOT the physical-px frame we forced via ObjC. Comparing
-    /// that stale/wrong-scale rect against the overlay-clip rects (which
-    /// ARE genuine physical px, matching `browser-view.tsx`'s
-    /// `Math.round(v * dpr)` convention) silently fails to detect a real
-    /// intersection, so `compute_pane_visible` reports `visible: true`
-    /// even while a DOM menu is drawn directly on top of the pane — the
-    /// menu displays correctly (occlusion isn't needed for painting, the
-    /// DOM already paints over screen pixels) but the pane, still
-    /// receiving events, intercepts clicks meant for the DOM underneath.
-    /// `SetPaneOverlayClipViewsTask` reads from here instead.
-    #[cfg(target_os = "macos")]
+    /// - macOS: Views' `set_size`/`set_position` are no-ops on
+    ///   `NativeWidgetMacNSWindow` (we set the frame via ObjC `setFrame:`), so
+    ///   `bounds()` is a stale DIP rect. Compared against the physical-px
+    ///   overlay-clip rects it missed real overlaps, and the pane kept taking
+    ///   clicks meant for a DOM menu drawn over it.
+    /// - Linux: an inactive stack tab's rect is 0×0, but Views ignores
+    ///   `set_size(0×0)` while `set_position(0,0)` lands, so `bounds()` reads a
+    ///   full-size pane at the window's corner, and opening any menu showed
+    ///   the hidden tab's page there.
+    #[cfg(not(target_os = "windows"))]
     pub browser_pane_physical_rects: Mutex<std::collections::HashMap<String, (i32, i32, i32, i32)>>,
 
     /// Linux/macOS only — latest overlay-clip rects per window_label.
@@ -785,7 +779,7 @@ impl Default for AppState {
             windows: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             browser_pane_overlays: Mutex::new(HashMap::new()),
-            #[cfg(target_os = "macos")]
+            #[cfg(not(target_os = "windows"))]
             browser_pane_physical_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             pane_overlay_rects: Mutex::new(HashMap::new()),

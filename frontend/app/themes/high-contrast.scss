@@ -17,6 +17,9 @@
 
     --accent-color: rgb(0, 220, 255);
     --accent-color-rgb: 0, 220, 255;
+    // Pure magenta for "an agent needs you", dark text on it (6.7:1).
+    --attention-color: rgb(255, 0, 255);
+    --attention-text-color: rgb(0, 0, 0);
     --link-color: #00dcff;
 
     --border-color: rgba(255, 255, 255, 0.4);
