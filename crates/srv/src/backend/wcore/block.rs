@@ -61,6 +61,8 @@ pub fn delete_block(
     crate::server::browser_attention::cancel_for(block_id);
     // And its share of a site limit (its chain's other panes keep theirs).
     crate::server::browser_allowlist::drop_pane(block_id);
+    // The host drops an Incognito jar once no tab uses it: tell it now.
+    crate::server::browser_owner::changed().notify_one();
     Ok(())
 }
 

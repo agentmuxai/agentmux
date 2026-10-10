@@ -5,13 +5,16 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type 
 import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
 import { getApi } from "@/app/store/app-api";
-import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
-import type { BrowserViewModel } from "./browser-model";
+import { DEFAULT_BROWSER_URL, type BrowserViewModel } from "./browser-model";
+import { canOpenIncognito, IDENTITY_META_KEY, INCOGNITO_ICON, parseIdentity } from "./browser-identity";
+import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
+import { getPlatform } from "@/util/platformutil";
 
 /**
  * A saved bookmark's favicon, falling back to the app's existing "no
@@ -141,6 +144,14 @@ export function BrowserNavBar(props: {
             "browser-pane-shortcut",
             (payload) => {
                 if (payload.block_id !== model.blockId) return;
+                if (payload.action === "home") {
+                    goHome();
+                    return;
+                }
+                if (payload.action === "new-incognito") {
+                    if (canOpenIncognito(getPlatform())) openIncognitoTab(model, home());
+                    return;
+                }
                 if (payload.action !== "focus-address") return;
                 diag(`shortcut-focus-address`);
                 // Same OS-focus handoff the address bar's own onMouseDown
@@ -257,6 +268,11 @@ export function BrowserNavBar(props: {
     // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3.
     const [startPageError, setStartPageError] = createSignal<string | null>(null);
 
+    // Home: the Home page (the start page, SPEC_BROWSER_PANE_START_PAGE), else
+    // the default page (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §2).
+    const home = () => browserStartPageAtom() || DEFAULT_BROWSER_URL;
+    const goHome = () => navigateTo(home());
+
     const setCurrentAsStartPage = async () => {
         const url = model.urlAtom();
         if (!url) return;
@@ -267,7 +283,7 @@ export function BrowserNavBar(props: {
         try {
             await RpcApi.SetBrowserStartPageCommand(TabRpcClient, { url });
         } catch (e) {
-            setStartPageError(`Failed to save start page: ${(e as Error).message ?? e}`);
+            setStartPageError(`Failed to save the Home page: ${(e as Error).message ?? e}`);
         }
     };
 
@@ -335,7 +351,7 @@ export function BrowserNavBar(props: {
             // for it), which would make the house icon never render at all
             // for this always-boolean row (ReAgent P2, PR #3288).
             items.push({
-                label: model.urlAtom() === browserStartPageAtom() ? "This Is Your Start Page" : "Set as Start Page",
+                label: model.urlAtom() === browserStartPageAtom() ? "This Is Your Home Page" : "Set as Home Page",
                 icon: "house",
                 onClick: setCurrentAsStartPage,
             });
@@ -384,6 +400,27 @@ export function BrowserNavBar(props: {
                     onClick={() => getApi().browserPanes.reload(model.blockId).catch(() => {})}
                     title="Reload"
                 >{"↻"}</button>
+                <button
+                    class="browser-nav-btn"
+                    onClick={goHome}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        ContextMenuModel.showContextMenu(
+                            [
+                                {
+                                    label: "Set this page as Home",
+                                    enabled: !!model.urlAtom() && model.urlAtom() !== browserStartPageAtom(),
+                                    click: () => void setCurrentAsStartPage(),
+                                },
+                            ],
+                            e
+                        );
+                    }}
+                    title={`Home: ${home()}`}
+                    aria-label="Home"
+                >
+                    <i class="fa fa-solid fa-house" aria-hidden="true" />
+                </button>
                 <FlyoutMenu
                     items={bookmarkMenuItems()}
                     placement="bottom-start"
@@ -420,7 +457,7 @@ export function BrowserNavBar(props: {
                             bookmarksError()
                                 ? `Bookmarks: ${bookmarksError()}`
                                 : startPageError()
-                                  ? `Start page: ${startPageError()}`
+                                  ? `Home page: ${startPageError()}`
                                   : "Bookmarks"
                         }
                     >
@@ -431,6 +468,14 @@ export function BrowserNavBar(props: {
                         />
                     </button>
                 </FlyoutMenu>
+                <BrowserProfileButton model={model} home={home} />
+                <Show when={parseIdentity(model.meta()?.[IDENTITY_META_KEY]).kind === "incognito"}>
+                    <i
+                        class={`fa fa-solid fa-${INCOGNITO_ICON} browser-address-identity`}
+                        title="Incognito: nothing is saved, and it's gone when the tab closes"
+                        aria-label="Incognito"
+                    />
+                </Show>
                 <input
                     ref={addressInputRef}
                     class="browser-address-bar"

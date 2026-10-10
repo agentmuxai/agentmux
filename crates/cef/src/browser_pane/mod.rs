@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod callbacks;
 pub mod creation;
+pub mod identity;
 pub mod trace;
 #[cfg(target_os = "windows")]
 pub mod hwnd;

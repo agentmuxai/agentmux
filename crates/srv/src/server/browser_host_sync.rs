@@ -40,6 +40,7 @@ pub(crate) async fn push(state: &AppState) {
         "panes": crate::server::browser_owner::owned_panes(),
         "allowed": crate::server::browser_allowlist::snapshot(),
         "asking": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Navigation),
+        "jars": crate::server::browser_identity::live_jars(state),
     });
     if let Err(e) = crate::server::ui_handlers::proxy_to_host_timeout(state, &host, "owned_panes", body, Some(std::time::Duration::from_secs(5))).await {
         tracing::debug!(error = %e, "[browser-popup] couldn't send the owned panes to the host");

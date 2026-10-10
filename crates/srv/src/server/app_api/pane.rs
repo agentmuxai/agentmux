@@ -17,6 +17,8 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("pane.open: {e}"))?;
                 if let Some(meta) = cmd.meta.as_mut() {
                     crate::server::browser_owner::strip_srv_only_keys(meta);
+                    // A browser tab's jar: checked here, where new tabs arrive.
+                    crate::server::browser_identity::check_new_tab(&state, meta)?;
                 }
                 let result = open_pane(&state, cmd).await?;
                 Ok(Some(serde_json::to_value(&result).unwrap()))

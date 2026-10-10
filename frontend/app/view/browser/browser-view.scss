@@ -66,6 +66,42 @@
     color: var(--error-color, #e5484d);
 }
 
+// The Profile button and its menu (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4).
+.browser-profile-btn-incognito {
+    color: var(--accent-color);
+}
+
+.browser-profile-header {
+    cursor: default;
+
+    .label {
+        display: flex;
+        flex-direction: column;
+        font-weight: 600;
+    }
+}
+
+.browser-profile-sub {
+    font-weight: normal;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: normal;
+    max-width: 260px;
+}
+
+.browser-profile-dim {
+    cursor: default;
+    color: var(--secondary-text-color);
+}
+
+// The Incognito mark at the left of the address field.
+.browser-address-identity {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    color: var(--accent-color);
+}
+
 .browser-address-bar {
     flex: 1;
     height: 28px;

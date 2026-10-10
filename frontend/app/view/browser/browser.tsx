@@ -6,6 +6,7 @@
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { BrowserViewModel } from "./browser-model";
 import { BrowserViewComponent } from "./browser-view";
+import { IDENTITY_META_KEY, INCOGNITO_ICON, parseIdentity } from "./browser-identity";
 
 /** The browser as a native pane tab (Pane Tab contract Phase 2c). */
 export const browserPaneTab: PaneTabManifest = {
@@ -18,6 +19,14 @@ export const browserPaneTab: PaneTabManifest = {
     // remounting reloads the page. Its page is a native surface, collapsed
     // whenever the tab isn't visible.
     capabilities: { lifecycle: "keepAlive", nativeSurface: true, noPadding: true },
+    // An Incognito tab says so in the tab strip, in place of the site's icon
+    // (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §4).
+    tab: {
+        icon: (ctx) =>
+            parseIdentity(ctx.meta?.[IDENTITY_META_KEY]).kind === "incognito"
+                ? { kind: "fa", name: INCOGNITO_ICON }
+                : undefined,
+    },
     create: (ctx) => {
         const model = new BrowserViewModel(ctx);
         return {
