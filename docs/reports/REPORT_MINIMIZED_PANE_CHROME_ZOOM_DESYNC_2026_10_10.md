@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-10
 **Code examined:** `main` at `fd6eae06f`
-**Status:** fixed alongside this report: fix A steps 1–3 and fix B (below). A step 4 (the three
+**Status:** implemented: fix A steps 1–3 and fix B (below) landed with this report. A step 4 (the three
 sibling offsets) is deferred: under hoisted pane chrome the header isn't inside the block frame
 at all, so those offsets need checking per case rather than a blanket change.
 
