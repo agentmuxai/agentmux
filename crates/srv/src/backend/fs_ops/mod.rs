@@ -496,12 +496,7 @@ impl ProtectedPaths {
         let mut install_dirs = Vec::new();
         if let Ok(exe) = std::env::current_exe() {
             let exe = exe.canonicalize().unwrap_or(exe);
-            // On macOS the whole bundle is the installation, not just
-            // Contents/MacOS.
-            let bundle = exe.ancestors().skip(1).find(|a| {
-                a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"))
-            });
-            if let Some(dir) = bundle.or_else(|| exe.parent()).map(path_key) {
+            if let Some(dir) = install_dir_of(&exe).map(path_key) {
                 install_dirs.push(if covers_home(&dir) { path_key(&exe) } else { dir });
             }
         }
@@ -617,6 +612,19 @@ impl ProtectedPaths {
             exempt_roots: exempt.iter().map(|p| path_key(p)).collect(),
         }
     }
+}
+
+/// The installation a (canonical) executable belongs to: on macOS the whole
+/// bundle, not just Contents/MacOS. The outermost `.app`, because srv's real
+/// file sits in a nested helper app (`AgentMux.app/Contents/Helpers/AgentMux
+/// Server.app`, scripts/package-macos.sh), and protecting only that would
+/// leave the rest of AgentMux.app open to changes.
+fn install_dir_of(exe: &Path) -> Option<&Path> {
+    exe.ancestors()
+        .skip(1)
+        .filter(|a| a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
+        .last()
+        .or_else(|| exe.parent())
 }
 
 /// The OS's own folders (spec §9).

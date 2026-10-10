@@ -54,9 +54,15 @@
 #                                                then spawns + supervises srv + host
 #       agentmux-cef                          ← host (spawned by the launcher;
 #                                                re-execs for renderer/gpu helpers)
-#       agentmux-srv-<VERSION>-darwin.arm64   ← backend (sidecar::resolve_backend_binary)
+#       agentmux-srv-<VERSION>-darwin.arm64   ← backend (sidecar::resolve_backend_binary),
+#                                                a symlink into Helpers/AgentMux Server.app
+#       tools/bin/agentmux-{mcp,bashwrap}     ← agents' PATH; symlinks into Helpers/
 #       frontend/                             ← bundled UI (resolve_frontend_base_url)
 #       *.dylib + vk_swiftshader_icd.json     ← GL libs (Chromium DIR_MODULE = exe dir)
+#     Helpers/
+#       AgentMux Server.app, AgentMux MCP.app, AgentMux Shell Wrapper.app
+#                                             ← srv, mcp, bashwrap: real files, so
+#                                                Activity Monitor shows their icon
 #     Frameworks/
 #       Chromium Embedded Framework.framework ← cef-rs ../Frameworks/... lookup +
 #                                                CefSettings framework_dir_path
@@ -210,7 +216,49 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 
 cp dist/cef/agentmux-cef "$APP/Contents/MacOS/agentmux-cef"
-cp "$SRV" "$APP/Contents/MacOS/$(basename "$SRV")"
+
+# srv, agentmux-mcp and agentmux-bashwrap each run from a nested helper app in
+# Contents/Helpers/, so Activity Monitor shows them with the AgentMux icon
+# instead of a bare file name and a generic one. Each keeps its file name
+# inside the app (Tower matches "agentmux-srv"; agents' hooks run
+# "agentmux-bashwrap" by name). The old locations become relative symlinks:
+# srv and the agents still start them there, so each one's current_exe() —
+# and everything it resolves next to itself (tools/bin, remote helpers,
+# frontend) — is unchanged, while the kernel, and with it Activity Monitor,
+# sees the real file inside the app. See
+# docs/reports/REPORT_PROCESS_ICONS_NAMES_AND_LABELS_2026_10_10.md §8.1.
+# srv's app keeps the fixed identifier ai.agentmux.srv (see its codesign step).
+tool_app() {  # <app name> <bundle id> <executable> → prints the app's MacOS dir
+    local ta="$APP/Contents/Helpers/$1.app"
+    mkdir -p "$ta/Contents/MacOS" "$ta/Contents/Resources"
+    cat > "$ta/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>$1</string>
+    <key>CFBundleDisplayName</key><string>$1</string>
+    <key>CFBundleExecutable</key><string>$3</string>
+    <key>CFBundleIconFile</key><string>AgentMux</string>
+    <key>CFBundleIdentifier</key><string>$2</string>
+    <key>CFBundleVersion</key><string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>LSMinimumSystemVersion</key><string>11.0</string>
+    <key>LSUIElement</key><true/>
+</dict>
+</plist>
+PLIST
+    echo "$ta/Contents/MacOS"
+}
+SRV_APP_BIN="$(tool_app "AgentMux Server" ai.agentmux.srv agentmux-srv)"
+MCP_APP_BIN="$(tool_app "AgentMux MCP" ai.agentmux.mcp agentmux-mcp)"
+BASHWRAP_APP_BIN="$(tool_app "AgentMux Shell Wrapper" ai.agentmux.bashwrap agentmux-bashwrap)"
+TOOL_APPS=("$APP/Contents/Helpers/AgentMux Server.app" "$APP/Contents/Helpers/AgentMux MCP.app" \
+           "$APP/Contents/Helpers/AgentMux Shell Wrapper.app")
+cp "$SRV" "$SRV_APP_BIN/agentmux-srv"
+ln -s "../Helpers/AgentMux Server.app/Contents/MacOS/agentmux-srv" "$APP/Contents/MacOS/$(basename "$SRV")"
 
 # The LAUNCHER is the bundle entry point (CFBundleExecutable below): a tiny,
 # fast binary that paints the native splash INSTANTLY — before the multi-second
@@ -223,8 +271,10 @@ cp dist/cef/agentmux-launcher "$APP/Contents/MacOS/agentmux-launcher"
 
 # Bundled tools — agentmux-srv adds <exe_dir>/tools/bin to Claude's PATH.
 # On macOS, exe_dir = Contents/MacOS, so tools land at Contents/MacOS/tools/bin/.
+# Each is a symlink into its helper app (above).
 mkdir -p "$APP/Contents/MacOS/tools/bin"
-cp target/release/agentmux-mcp "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
+cp target/release/agentmux-mcp "$MCP_APP_BIN/agentmux-mcp"
+ln -s "../../../Helpers/AgentMux MCP.app/Contents/MacOS/agentmux-mcp" "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 # Streaming bash wrapper — every agent's PreToolUse/PreCompact hooks run
 # "agentmux-bashwrap ..." by bare name (agent_config.rs). Without it here the
 # hook fails with command-not-found, Claude treats that as a non-blocking hook
@@ -232,7 +282,9 @@ cp target/release/agentmux-mcp "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 # idle-timeout guard, no background-task pid or exit reporting. Windows has
 # always shipped it (package-portable.sh); scripts/check-bundled-tools.sh fails
 # CI if a packager drops either tool again.
-cp target/release/agentmux-bashwrap "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
+cp target/release/agentmux-bashwrap "$BASHWRAP_APP_BIN/agentmux-bashwrap"
+ln -s "../../../Helpers/AgentMux Shell Wrapper.app/Contents/MacOS/agentmux-bashwrap" \
+      "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
 
 # Remote helpers — agentmux-remote for every SSH host platform, since any
 # AgentMux may connect to any host; srv uploads the matching one to a host for
@@ -378,7 +430,7 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AgentMux.icns"
 # Activity Monitor shows "AgentMux Helper (GPU)" etc. with the AgentMux icon
 # instead of a generic app icon. Copied before signing, so it is sealed with
 # the bundle (docs/reports/REPORT_PROCESS_ICONS_NAMES_AND_LABELS_2026_10_10.md).
-for ha in "${HELPER_APPS[@]}"; do
+for ha in "${HELPER_APPS[@]}" "${TOOL_APPS[@]}"; do
     mkdir -p "$ha/Contents/Resources"
     cp "$APP/Contents/Resources/AgentMux.icns" "$ha/Contents/Resources/AgentMux.icns"
 done
@@ -494,14 +546,19 @@ done
 #    "Always Allow" never carried over and every new version asked for the
 #    login keychain on first launch (retro-keychain-prompt-recurs-per-build-
 #    identity-2026-08-21.md). Same identifier on every channel and version.
-"${SIGN[@]}" --identifier ai.agentmux.srv --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
+#    srv now lives in its own helper app, whose CFBundleIdentifier is that same
+#    ai.agentmux.srv, so the bundle signature below carries it too.
+#    agentmux-mcp and agentmux-bashwrap (on Claude's PATH through the
+#    MacOS/tools/bin symlinks) are signed the same way, inside-out, before the
+#    seal, or `codesign --verify --deep --strict` fails and notarization
+#    rejects the bundle. The symlinks themselves are sealed as resources.
+"${SIGN[@]}" --identifier ai.agentmux.srv --entitlements "$ENTITLEMENTS" "$SRV_APP_BIN/agentmux-srv"
+"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$MCP_APP_BIN/agentmux-mcp"
+"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$BASHWRAP_APP_BIN/agentmux-bashwrap"
+for ta in "${TOOL_APPS[@]}"; do
+    "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ta"
+done
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
-# agentmux-mcp and agentmux-bashwrap are nested Mach-Os under MacOS/tools/bin/
-# (Claude's PATH). They must be signed inside-out before the seal or `codesign
-# --verify --deep --strict` fails on the unsigned binary and
-# hardened-runtime/notarization rejects it.
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
 # The two macOS remote helpers are nested Mach-Os as well, signed the same way
 # (no entitlements: they run on a remote Mac, not in this app). The Linux builds
 # under Contents/Resources/remote are not code and are sealed as resources.
