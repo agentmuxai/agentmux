@@ -214,8 +214,14 @@ export class TowerViewModel {
      *  shown there as a filter (`only`), as Lens keeps a namespace; `only`
      *  names another owner instead. */
     setView(view: TowerView, only?: string): void {
+        // Back on the Agents view the filter is dropped; going to Processes
+        // again carries whichever agent is shown then.
         const carried =
-            view === "processes" && this.effectiveView() === "agents" ? (only ?? this.shownEntry()) : undefined;
+            view === "processes" && this.effectiveView() === "agents"
+                ? (only ?? this.shownEntry())
+                : view === "agents" && this.only()
+                  ? ""
+                  : undefined;
         this.setMeta({
             "tower:view": view === "processes" ? "processes" : null,
             ...(carried !== undefined ? { "tower:only": carried || null } : {}),
@@ -258,7 +264,8 @@ export class TowerViewModel {
 
     /** `""` for this computer. */
     setConnection(connection: string): void {
-        this.setMeta({ "tower:connection": connection || null });
+        // An owner named on one machine means nothing on another.
+        this.setMeta({ "tower:connection": connection || null, ...(this.only() ? { "tower:only": null } : {}) });
     }
 
     async refreshPeers(): Promise<void> {

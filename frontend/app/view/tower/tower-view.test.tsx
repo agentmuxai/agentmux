@@ -715,6 +715,17 @@ describe("Tower", () => {
         expect(screen.queryByTestId("tower-only")).toBeNull();
     });
 
+    it("the filter is dropped on another machine and back on the Agents view", async () => {
+        setMeta({ "tower:view": "processes", "tower:only": "block-a" });
+        renderTower();
+        await screen.findByTestId("tower-only");
+        fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: "peer:p1" } });
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:connection": "peer:p1", "tower:only": null });
+        setMeta({ "tower:view": "processes", "tower:only": "block-a" });
+        fireEvent.click(await screen.findByRole("tab", { name: "Agents" }));
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:view": null, "tower:only": null });
+    });
+
     it("a pane opened on Processes isn't filtered, and switching within it carries nothing", async () => {
         setMeta({ "tower:view": "processes" });
         renderTower();
