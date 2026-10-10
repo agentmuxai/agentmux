@@ -724,6 +724,11 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const unsubSliceEvents = model.onSliceEvent((event) => {
         if (event.type === "TabClosed") {
             cmStates.delete(event.tabId);
+            // The tab in front left. It isn't the outgoing tab to snapshot
+            // when the next one shows: a tab moved to another pane keeps its
+            // id, and a snapshot taken now would come back over its newer
+            // text if it is moved back.
+            if (activeTabIdForCm === event.tabId) activeTabIdForCm = null;
         }
     });
 

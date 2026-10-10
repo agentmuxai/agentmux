@@ -102,10 +102,16 @@ beforeEach(() => {
     h.unwatched = [];
 });
 afterEach(async () => {
-    // A moved clean tab is read fresh where it lands: let every read finish,
-    // and its result reach its pane, before the panes go.
-    while (h.inflight.size > 0) await Promise.allSettled([...h.inflight]);
-    await new Promise((r) => setTimeout(r, 0));
+    // A moved clean tab is read fresh where it lands, sometimes a tick or two
+    // after the move: the panes go only once no read has run for a few ticks,
+    // so none lands on a pane already disposed.
+    for (let quiet = 0; quiet < 3; ) {
+        if (h.inflight.size > 0) {
+            quiet = 0;
+            await Promise.allSettled([...h.inflight]);
+        } else quiet++;
+        await new Promise((r) => setTimeout(r, 5));
+    }
     for (const c of cleanups.splice(0)) c();
 });
 
