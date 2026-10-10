@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503, phase 2b (attention, §5.5) in PR #4511 and phase 3 (the live status, §6.8 and §6.9) in PR #4510. The live status's change timing was corrected in PR #4557 (§6.10). Still open: §7's replay tests and live checks, and phase 4 (tuning `TIMING` from real log data). See §4.7 for how the build differs from the design below.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503, phase 2b (attention, §5.5) in PR #4511 and phase 3 (the live status, §6.8 and §6.9) in PR #4510. The live status's change timing was corrected in PR #4559 (§6.10). Still open: §7's replay tests and live checks, and phase 4 (tuning `TIMING` from real log data). See §4.7 for how the build differs from the design below.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -521,7 +521,7 @@ The muted goal, quiet-command detection, the thinking headline, subagent step de
 
 Still open: tuning `TIMING` from real `[turn]` and `[wave-turn]` log data.
 
-### 6.10 As built: the row changed too often (PR #4557)
+### 6.10 As built: the row changed too often (PR #4559)
 
 Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right after the line prints". Three causes, all in the presenter, none in the values of `TIMING`:
 
