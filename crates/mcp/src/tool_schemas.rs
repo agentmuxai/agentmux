@@ -316,7 +316,7 @@ pub(crate) const LIST_SHORTCUTS_TOOL: &str = r#"{
 
 pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
   "name": "RunCommand",
-  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane in that window's active tab first; without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the confirmations a user sees: tab:close asks before closing. pane:close is refused (use ClosePane, which gives the user 15 seconds to undo, or QuitSelf for your own pane), and so is files:deletePermanently (it can't be undone), and files:trash on macOS, where restoring from the Trash isn't supported yet. Returns whether it ran, and why not if it didn't.",
+  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane in that window's active tab first; without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the confirmations a user sees: tab:close asks before closing. pane:close is refused (use ClosePane, which gives the user 15 seconds to undo, or QuitSelf for your own pane), and so is files:deletePermanently (it can't be undone). Returns whether it ran, and why not if it didn't.",
   "inputSchema": {
     "type": "object",
     "properties": {

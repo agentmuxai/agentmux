@@ -117,12 +117,12 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 
 | Package | Owner | Status |
 |---|---|---|
-| M1 Trash restore (macOS) | Masty@starpower | in progress |
+| M1 Trash restore (macOS) | Masty@starpower | in #4610 |
 | M2 L3 macOS | Masty@starpower | waiting for Accessibility |
 | L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS (#4603 reruns) |
 | L2 Temp-tree guard, script timeouts | Maricon@charlie | in progress |
 | L3 Injected L3 Linux | Maricon@charlie | open |
-| A1 Pane-tab targets, caret wait | AgentA@Area54 | in review (#4609) |
+| A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
 | A2 Other tabs | AgentA@Area54 | waiting for D1 |
 | A3 Beyond-the-pane commands | AgentA@Area54 | waiting for D2 |
 | A4 Help notes, dialog Escape | AgentA@Area54 | open |
