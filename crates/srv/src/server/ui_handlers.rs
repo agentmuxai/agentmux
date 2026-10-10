@@ -1312,9 +1312,7 @@ pub(crate) async fn handle_host_browser_popup(
     // the person took over belongs to nobody.
     let owner = owning_agent(&block, &opener)
         .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
-    if let Some(why) = crate::server::browser_allowlist::refuse_popup(&opener, &url) {
-        return refused(why);
-    }
+    if let Some(why) = crate::server::browser_allowlist::refuse_popup(&opener, &url) { return refused(why); }
     // The count and the slot are taken together: two popups reported at once
     // can't both fit under the cap. The slot is given back if the pane
     // doesn't open.
@@ -1361,6 +1359,8 @@ pub(crate) async fn handle_host_browser_popup(
     };
     meta.insert(popup::POPUP_OF_META_KEY.to_string(), json!(opener));
     meta.insert(popup::POPUP_FROM_META_KEY.to_string(), json!(popup::origin_of(&opener_url)));
+    // On the new pane from the start, so the host has it before the first load.
+    crate::server::browser_allowlist::mirror(&mut meta, crate::server::browser_allowlist::list_for(&opener).as_deref());
     if let Some(agent) = &owner {
         meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(agent));
     }
