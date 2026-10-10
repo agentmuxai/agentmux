@@ -135,23 +135,11 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
         if (holder) holder.current = el;
     });
 
-    // Shown on a local pane too, as "Local": the header is where a pane is
-    // switched to a remote, and the picker opens beside this chip.
+    // A remote pane only. A local pane has no chip; Change connection (⌘⇧G)
+    // still opens the picker there, placed by the pane (typeaheadmodal.tsx).
     return (
-        <div
-            ref={(el) => setBtnEl(el)}
-            class={clsx("connection-button", { "connection-button--local": isLocal() })}
-            onClick={clickHandler}
-            title={isLocal() ? "On this computer. Click to run it on a remote." : getTitleText()}
-        >
-            <Show
-                when={!isLocal()}
-                fallback={
-                    <span class="connection-icon-box">
-                        <i class={util.makeIconClass("laptop", false)} />
-                    </span>
-                }
-            >
+        <Show when={!isLocal()}>
+            <div ref={(el) => setBtnEl(el)} class="connection-button" onClick={clickHandler} title={getTitleText()}>
                 <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
                     {getConnIcon()}
                     <i
@@ -164,12 +152,12 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
                         }}
                     />
                 </span>
-            </Show>
-            <Show when={display()?.color}>
-                <span class="connection-swatch" style={{ background: display()!.color }} />
-            </Show>
-            <div class="connection-name ellipsis">{isLocal() ? "Local" : (display()?.name ?? props.connection)}</div>
-        </div>
+                <Show when={display()?.color}>
+                    <span class="connection-swatch" style={{ background: display()!.color }} />
+                </Show>
+                <div class="connection-name ellipsis">{display()?.name ?? props.connection}</div>
+            </div>
+        </Show>
     );
 }
 
