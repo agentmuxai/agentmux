@@ -236,6 +236,12 @@ pub fn wait_once_more(label: &str) -> bool {
     true
 }
 
+/// Whether pane `label` has waited for its profile: a creation run now is a
+/// retry.
+pub fn is_waiting(label: &str) -> bool {
+    registry().waits.contains_key(label)
+}
+
 /// Pane `label` was created: forget its waits.
 pub fn done_waiting(label: &str) {
     registry().waits.remove(label);
@@ -390,12 +396,15 @@ mod tests {
 
     #[test]
     fn a_pane_waits_for_its_profile_a_bounded_number_of_times() {
+        assert!(!is_waiting("idt-wait"));
         for _ in 0..MAX_PROFILE_WAITS {
             assert!(wait_once_more("idt-wait"));
         }
+        assert!(is_waiting("idt-wait"), "its next creation is a retry");
         assert!(!wait_once_more("idt-wait"));
         assert!(wait_once_more("idt-wait"), "the count starts over");
         done_waiting("idt-wait");
+        assert!(!is_waiting("idt-wait"));
     }
 
     #[test]

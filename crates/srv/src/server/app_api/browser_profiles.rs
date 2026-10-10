@@ -5,7 +5,8 @@
 //! browser profiles (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md
 //! §3, §6), a `shared_dir` file like the bookmarks. Deleting a profile closes
 //! its open tabs first, then the host drops its jar and its folder on the
-//! next owned-pane push.
+//! next owned-pane push. Only the window changes profiles: a connection
+//! registered as an agent may list them, never create, change or delete one.
 
 use super::*;
 use crate::backend::browser_profiles_store as store;
@@ -15,7 +16,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Ok(BrowserProfilesResult { profiles: list()?, created: None })
     });
 
-    engine.register_typed(COMMAND_BROWSER_PROFILES_CREATE, move |req: CommandBrowserProfileCreateData, _ctx| async move {
+    engine.register_typed(COMMAND_BROWSER_PROFILES_CREATE, move |req: CommandBrowserProfileCreateData, ctx| async move {
+        not_for_agents(&ctx)?;
+        let _writing = WRITING.lock().await;
         let path = path()?;
         let mut profiles = store::read_profiles(&path)?;
         let created = store::add(&mut profiles, &req.name, req.color.as_deref(), agentmux_common::time::now_ms())?;
@@ -23,7 +26,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Ok(BrowserProfilesResult { profiles, created: Some(created) })
     });
 
-    engine.register_typed(COMMAND_BROWSER_PROFILES_UPDATE, move |req: CommandBrowserProfileUpdateData, _ctx| async move {
+    engine.register_typed(COMMAND_BROWSER_PROFILES_UPDATE, move |req: CommandBrowserProfileUpdateData, ctx| async move {
+        not_for_agents(&ctx)?;
+        let _writing = WRITING.lock().await;
         let path = path()?;
         let mut profiles = store::read_profiles(&path)?;
         store::update(&mut profiles, &req.id, req.name.as_deref(), req.color.as_deref())?;
@@ -32,21 +37,43 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let st = state.clone();
-    engine.register_typed(COMMAND_BROWSER_PROFILES_DELETE, move |req: CommandBrowserProfileDeleteData, _ctx| {
+    engine.register_typed(COMMAND_BROWSER_PROFILES_DELETE, move |req: CommandBrowserProfileDeleteData, ctx| {
         let state = st.clone();
         async move {
+            not_for_agents(&ctx)?;
             let path = path()?;
-            let mut profiles = store::read_profiles(&path)?;
-            store::remove(&mut profiles, &req.id)?;
+            if !store::read_profiles(&path)?.iter().any(|p| p.id == req.id) {
+                return Err(format!("no profile {:?}", req.id));
+            }
             // Its tabs close first: they must not go on browsing in a jar
             // that is about to be dropped.
             close_tabs_of(&state, &req.id).await;
-            store::write_profiles(&path, &profiles)?;
+            // Read again: the list may have changed while the tabs closed.
+            let profiles = {
+                let _writing = WRITING.lock().await;
+                let mut profiles = store::read_profiles(&path)?;
+                store::remove(&mut profiles, &req.id)?;
+                store::write_profiles(&path, &profiles)?;
+                profiles
+            };
             // The host drops the jar and its folder on this push.
             crate::server::browser_host_sync::push(&state).await;
             Ok(BrowserProfilesResult { profiles, created: None })
         }
     });
+}
+
+/// Held across each read-change-write of the profiles file, so one change
+/// can't overwrite another.
+static WRITING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Refuse a connection registered as an agent.
+fn not_for_agents(ctx: &RpcContext) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        Ok(())
+    } else {
+        Err("FORBIDDEN: only the user creates, changes or deletes browser profiles".to_string())
+    }
 }
 
 fn path() -> Result<std::path::PathBuf, String> {
@@ -73,6 +100,40 @@ async fn close_tabs_of(state: &AppState, id: &str) {
             if let Err(e) = crate::sagas::delete_block::run(state, tab, b.oid.clone()).await {
                 tracing::warn!(block = %b.oid, error = %e, "[browser-profiles] couldn't close a tab of a deleted profile");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An agent's connection carries its id (`bus:register`). Only refusals are
+    /// exercised: they return before the profiles file is read or written.
+    async fn call_as_agent(command: &str, data: serde_json::Value) -> String {
+        let state = crate::server::tests::test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        engine.set_rpc_context(RpcContext { agent_id: "AgentX".to_string(), ..Default::default() });
+        engine.handle_message(RpcMessage {
+            command: command.to_string(),
+            reqid: "req-1".to_string(),
+            data: Some(data),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(20), rx.recv()).await.unwrap().unwrap();
+        resp.error
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_may_not_create_change_or_delete_a_profile() {
+        for (command, data) in [
+            (COMMAND_BROWSER_PROFILES_CREATE, json!({ "name": "Work" })),
+            (COMMAND_BROWSER_PROFILES_UPDATE, json!({ "id": "p-0123456789ab", "name": "Mine" })),
+            (COMMAND_BROWSER_PROFILES_DELETE, json!({ "id": "p-0123456789ab" })),
+        ] {
+            let err = call_as_agent(command, data).await;
+            assert!(err.contains("FORBIDDEN"), "{command}: {err}");
         }
     }
 }

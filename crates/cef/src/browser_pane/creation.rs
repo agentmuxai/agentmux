@@ -155,6 +155,20 @@ wrap_task! {
                 // Personal session.
                 let cache_root = self.state.cef_cache_dir.lock().clone();
                 use crate::browser_pane::identity::{self, PaneJar};
+                // A retry, after waiting for its profile: the tab may have
+                // closed or been re-created meanwhile, and a browser made now
+                // would be one nothing tracks.
+                let still_wanted = || {
+                    self.state.host_state.lock().browser_panes.get(&self.block_id).is_some_and(|e| {
+                        e.label == self.label && e.lifecycle == crate::state::BrowserPaneLifecycle::Live
+                    })
+                };
+                if identity::is_waiting(&self.label) && !still_wanted() {
+                    tracing::info!(block_id = %self.block_id, "[browser-identity] pane closed while its profile opened; not creating it");
+                    identity::done_waiting(&self.label);
+                    dequeue();
+                    return;
+                }
                 let mut request_context = match identity::context_for_block(&self.block_id, cache_root.as_deref()) {
                     Ok(PaneJar::Shared) => None,
                     Ok(PaneJar::Ready(ctx)) => Some(ctx),
