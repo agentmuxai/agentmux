@@ -325,6 +325,7 @@ partial list.
 | [`SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION`](SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md) | Dynamic ellipsis truncation for tool summaries |
 | [`SPEC_EDITOR_FILE_TREE_2026-05-26`](SPEC_EDITOR_FILE_TREE_2026-05-26.md) | Spec: Editor Pane — File Tree Explorer + Extensions |
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
+| [`SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10`](SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md) | Spec: Splitting an editor or media pane opens an empty one |
 | [`SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30`](SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md) | Spec: An agent opening a file shows the Editor pane it lands in |
 | [`SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17`](SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17.md) | SPEC: Remove the `esbuild >=0.28.2` override — it broke `task dev` and never protected the bundle |
 | [`SPEC_EXTERNAL_HOST_BUILD_2026_10_09`](SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md) | SPEC: Build the frontend for a host other than the desktop app |
@@ -939,7 +940,6 @@ partial list.
 | [`SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18`](SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md) | Spec: live-reload for editor/preview panes on external file changes |
 | [`SPEC_EDITOR_LSP_AND_THEMES_2026-05-26`](SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md) | Spec: Editor Pane — LSP integration + VS Code themes |
 | [`SPEC_EDITOR_MARKDOWN_PREVIEW_SCROLLBAR_ALIGNMENT_2026_08_22`](SPEC_EDITOR_MARKDOWN_PREVIEW_SCROLLBAR_ALIGNMENT_2026_08_22.md) | SPEC: Editor pane — align markdown preview's scrollbar with source mode |
-| [`SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10`](SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md) | Spec: Splitting an editor or media pane opens an empty one |
 | [`SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14`](SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md) | SPEC: Editor Widget Default UX — Scratch File + Collapsed Tree |
 | [`SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20`](SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20.md) | SPEC: Eliminate Transparent Console Windows on Windows |
 | [`SPEC_ERROR_CATALOG_2026_05_17`](SPEC_ERROR_CATALOG_2026_05_17.md) | SPEC: Global Error Code/Message Catalog |

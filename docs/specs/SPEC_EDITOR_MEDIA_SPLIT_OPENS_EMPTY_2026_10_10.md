@@ -1,6 +1,6 @@
 # Spec: Splitting an editor or media pane opens an empty one
 
-**Status:** draft
+**Status:** implemented — PR #4602
 **Date:** 2026-10-10
 **Author:** Clamk
 
