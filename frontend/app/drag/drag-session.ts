@@ -18,7 +18,7 @@
 
 import { createSignal } from "solid-js";
 
-export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "drone-kind" | "list-item";
+export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "doc-tab" | "drone-kind" | "list-item";
 /** "unobserved": the safety net saw a pointerdown with the drag still open. */
 export type DragEndReason = "drop" | "cancel" | "dragend" | "button-up" | "files-idle" | "unobserved";
 
@@ -27,7 +27,7 @@ export interface DragSource {
     tabId?: string;
     blockId?: string;
     wsId?: string;
-    /** list-item: the dragged entry. */
+    /** list-item: the dragged entry. doc-tab: the dragged document tab. */
     itemId?: string;
 }
 

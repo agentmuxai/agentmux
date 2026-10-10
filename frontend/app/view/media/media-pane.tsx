@@ -235,7 +235,14 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
 
     return (
         <div class="media-pane flex flex-col w-full h-full" tabIndex={-1} onKeyDown={onKeyDown}>
-            <DocTabStrip ctl={tabs} tooltipOf={(t) => t.payload.path || "No file yet"} addTitle={`New tab (${keyLabel("ctrl+t")})`} />
+            <DocTabStrip
+                ctl={tabs}
+                docType="media"
+                blockId={ctx.blockId}
+                canDrag={(t) => !isEmpty(t.payload)}
+                tooltipOf={(t) => t.payload.path || "No file yet"}
+                addTitle={`New tab (${keyLabel("ctrl+t")})`}
+            />
             <div class="media-pane-doc flex-1" style={{ position: "relative", "min-height": 0 }}>
                 {/* Keyed by tab: switching tabs mounts that tab's file. */}
                 <Show

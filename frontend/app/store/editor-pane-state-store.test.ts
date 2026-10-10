@@ -290,6 +290,20 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         assertActiveInvariant(r.state);
     });
 
+    it("MoveTabTo puts a dragged tab beside another, and a no-op drop changes nothing", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/a.ts" }).state;
+        s = update(s, { type: "OpenFile", path: "C:/b.ts" }).state;
+        s = update(s, { type: "OpenFile", path: "C:/c.ts" }).state;
+        const [a, b, c] = s.tabs;
+        let r = update(s, { type: "MoveTabTo", tabId: c.id, targetId: a.id, position: "before" });
+        expect(r.state.tabs.map((t) => t.id)).toEqual([c.id, a.id, b.id]);
+        expect(r.state.activeTabId).toBe(s.activeTabId);
+        assertActiveInvariant(r.state);
+        r = update(s, { type: "MoveTabTo", tabId: b.id, targetId: a.id, position: "after" });
+        expect(r.state).toBe(s);
+    });
+
     // ─── invariant 9: MarkDirty / ClearDirty emit only on transitions ─
 
     it("MarkDirty flips flag and emits TabDirtied, second call is a no-op", () => {

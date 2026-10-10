@@ -9,6 +9,9 @@
 export const tileItemType = "TILE_ITEM";
 export const tabItemType = "TAB_ITEM";
 export const paneTabItemType = "PANE_TAB_ITEM";
+/** A document tab (an Editor's or a Media pane's file): moves only between
+ *  panes of the same type, and never tears off (PaneTabStrip's `docDrag`). */
+export const docTabItemType = "DOC_TAB_ITEM";
 
 type Tagged = { type?: unknown } | Record<string, unknown> | null | undefined;
 
@@ -17,3 +20,4 @@ const tagOf = (data: Tagged) => (data as { type?: unknown } | null | undefined)?
 export const isTileSource = (data: Tagged) => tagOf(data) === tileItemType;
 export const isTabSource = (data: Tagged) => tagOf(data) === tabItemType;
 export const isPaneTabSource = (data: Tagged) => tagOf(data) === paneTabItemType;
+export const isDocTabSource = (data: Tagged) => tagOf(data) === docTabItemType;

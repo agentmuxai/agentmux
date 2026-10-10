@@ -129,6 +129,16 @@ class FocusManager {
 export function giveBlockFocus(blockId: string): void {
     cancelFocusRetry();
     if (userCaretInBlock(blockId)) return;
+    if (pressOnDraggable) {
+        // A press on a tab of an unselected pane selects it: focusing its
+        // input now, mid-press, stops Chromium from starting the drag, so the
+        // first press would only select and a second one drag. The caret
+        // comes when the press ends, if the pane is still the selection.
+        afterPress = () => {
+            if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId === blockId) giveBlockFocus(blockId);
+        };
+        return;
+    }
     if (focusBlockTarget(blockId)) return;
     // Nothing to type into yet: the block's dummy input keeps the keys in the
     // pane (its shortcuts work) instead of on <body>, and the target is tried
@@ -185,6 +195,46 @@ function caretInOtherPane(active: Element, blockId: string): boolean {
     const pane = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
     return pane != null && !pane.contains(active);
 }
+
+/** A pointer press on a draggable element (a pane or document tab) is held. */
+let pressOnDraggable = false;
+/** The pane focus asked for during that press. */
+let afterPress: (() => void) | null = null;
+
+/**
+ * Track presses on draggable elements, for `giveBlockFocus`. A press ends at
+ * pointerup, at dragend, or (when the dragged element went away with the
+ * drop, so its dragend reaches no listener) at the next move with no button
+ * held. Installed at load: it must see the press before the pane's focus does.
+ */
+function trackDraggablePresses(): void {
+    if (typeof document === "undefined") return;
+    let dragging = false;
+    const end = (): void => {
+        if (!pressOnDraggable) return;
+        pressOnDraggable = false;
+        dragging = false;
+        const run = afterPress;
+        afterPress = null;
+        run?.();
+    };
+    document.addEventListener(
+        "pointerdown",
+        (e) => {
+            afterPress = null;
+            dragging = false;
+            pressOnDraggable = e.button === 0 && !!(e.target as Element | null)?.closest?.('[draggable="true"]');
+        },
+        true
+    );
+    document.addEventListener("dragstart", () => (dragging = true), true);
+    // A drag starting cancels the pointer; only a cancel without one ends the press.
+    document.addEventListener("pointercancel", () => !dragging && end(), true);
+    document.addEventListener("pointerup", end, true);
+    document.addEventListener("dragend", end, true);
+    document.addEventListener("pointermove", (e) => e.buttons === 0 && end(), true);
+}
+trackDraggablePresses();
 
 let focusRetry: number | null = null;
 
