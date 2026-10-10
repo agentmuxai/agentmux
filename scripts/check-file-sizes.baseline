@@ -28,7 +28,7 @@
 3301 crates/srv/src/backend/lan_discovery.rs
 1889 crates/srv/src/backend/providers.rs
 2450 crates/srv/src/backend/reactive/handler.rs
-3089 crates/srv/src/backend/storage/migrations.rs
+3092 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3385 crates/srv/src/identity/resolver/inject.rs
 1539 crates/srv/src/migrations/runner.rs

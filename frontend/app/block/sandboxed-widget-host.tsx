@@ -18,14 +18,19 @@ import { createEffect, createSignal, on, Show } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { pushNotification } from "@/app/store/flash-notifications";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
 import { getHostName } from "@/app/store/misc-utils";
 import { UI_VERSION } from "@/app/store/srv-info";
 import { addWidgetAsPaneTab } from "@/layout/index";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
+import { writeText } from "@/util/clipboard";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
-import { bridgeTheme, handleBridgeRequest, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { BridgeError, bridgeErrorOf, bridgeTheme, ERR, handleBridgeRequest, type BridgeHost, type BridgeState } from "./widget-bridge";
 
 import "./sandboxed-widget.scss";
 
@@ -65,6 +70,17 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
 
     const notify = (method: string, params: unknown) => port?.postMessage({ jsonrpc: "2.0", method, params });
 
+    // The pane's session with srv, for the calls srv answers. Opened on the
+    // first such call; srv checks every call against the package again.
+    let session: Promise<string> | null = null;
+    const sessionToken = (): Promise<string> =>
+        (session ??= RpcApi.WidgetsSessionCommand(TabRpcClient, { id: pkg.id, hash: pkg.hash, blockid: ctx.blockId })
+            .then((r) => r.token)
+            .catch((e) => {
+                session = null;
+                throw bridgeErrorOf(e);
+            }));
+
     const host: BridgeHost = {
         pkg,
         pane,
@@ -99,6 +115,17 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
         },
         agentmuxVersion: () => UI_VERSION,
         hostName: () => getHostName(),
+        srv: async (method, params) => {
+            const token = await sessionToken();
+            try {
+                return (await RpcApi.WidgetsCallCommand(TabRpcClient, { token, method, params })).result;
+            } catch (e) {
+                throw bridgeErrorOf(e);
+            }
+        },
+        pickFiles: (accept, multiple) => pickFiles(accept, multiple),
+        saveFile: (name, type, data) => saveFile(name, type, data),
+        writeClipboard: (text) => writeText(text),
     };
 
     const closePort = () => {
@@ -168,6 +195,13 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
             { defer: true }
         )
     );
+    // Another pane of this package (or this one) changed its storage.
+    const unsubscribeStorage = muxEventSubscribe({
+        eventType: WpsEvent.WidgetStorage,
+        handler: (event: { data?: { id?: string; keys?: string[] } }) => {
+            if (state.ready && event?.data?.id === pkg.id && pkg.granted.includes("storage")) notify("storage", { keys: event.data.keys ?? [] });
+        },
+    });
     const themeObserver = new MutationObserver(() => state.ready && notify("theme", bridgeTheme(pkg)));
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
 
@@ -230,6 +264,8 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
         },
         dispose: () => {
             disposed = true;
+            unsubscribeStorage();
+            void session?.then((token) => RpcApi.WidgetsEndSessionCommand(TabRpcClient, { token })).catch(() => {});
             themeObserver.disconnect();
             notify("dispose", {});
             const p = port;
@@ -238,6 +274,60 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
             iframe?.remove();
         },
     };
+}
+
+/**
+ * The open dialog, as a file input in the app's own document: it works in a
+ * browser as in the desktop app. A dialog opens only on a user's click; a
+ * click in the widget's frame counts for the app too.
+ */
+function pickFiles(accept: string[], multiple: boolean): Promise<File[] | null> {
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+        return Promise.reject(new BridgeError(ERR.UNAVAILABLE, "files.pick opens a dialog only from a click"));
+    }
+    return new Promise((resolve) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = multiple;
+        if (accept.length) input.accept = accept.join(",");
+        input.style.display = "none";
+        const done = (files: File[] | null) => {
+            input.remove();
+            resolve(files);
+        };
+        input.addEventListener("change", () => done(input.files ? [...input.files] : []));
+        input.addEventListener("cancel", () => done(null));
+        document.body.appendChild(input);
+        input.click();
+    });
+}
+
+/** The save dialog where the host has one; otherwise a download. Like
+ *  the open dialog, only on a user's click. */
+async function saveFile(name: string, type: string, data: Uint8Array): Promise<boolean> {
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+        throw new BridgeError(ERR.UNAVAILABLE, "files.save opens a dialog only from a click");
+    }
+    const picker = (window as { showSaveFilePicker?: (o: { suggestedName: string }) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
+    if (picker) {
+        try {
+            const handle = await picker({ suggestedName: name });
+            const writable = await handle.createWritable();
+            await writable.write(data as BlobPart);
+            await writable.close();
+            return true;
+        } catch (e) {
+            if (e instanceof DOMException && e.name === "AbortError") return false;
+            throw new BridgeError(ERR.INTERNAL, e instanceof Error ? e.message : String(e));
+        }
+    }
+    const url = URL.createObjectURL(new Blob([data as BlobPart], type ? { type } : {}));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return true;
 }
 
 /** The widget's own meta keys (`widget:<id>:<key>`), without the prefix. */
