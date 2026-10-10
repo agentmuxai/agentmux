@@ -42,7 +42,10 @@ export function reconcileWhenHistoryLoads(blockId: string, reconcile: () => void
         on(
             () => isInitReady(model.state),
             (ready) => {
-                if (ready) reconcile();
+                if (!ready) return;
+                reconcile();
+                // The flag follows what's left waiting, after the reconcile.
+                syncAwaitingUser(blockId);
             }
         )
     );

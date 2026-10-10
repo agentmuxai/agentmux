@@ -4,6 +4,7 @@
 /** `term:awaiting_user` follows both of the agent's own waits, a question
  *  and a tool permission (awaiting-user.ts). */
 
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const writes: unknown[] = [];
@@ -15,11 +16,14 @@ vi.mock("@/app/store/services", () => ({
     },
 }));
 vi.mock("@/app/store/global", () => ({ MOS: { getMuxObjectAtom: () => () => ({}) }, getSettingsKeyAtom: () => () => undefined }));
+const [ready, setReady] = createSignal(false);
+vi.mock("@/app/store/agent-pane-registration", () => ({ getPaneModel: () => ({ state: {} }) }));
+vi.mock("@/app/store/agent-pane-state/types", () => ({ isInitReady: () => ready() }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { __resetWaitingForYou, endWaitingForYou, startWaitingForYou } from "@/app/notification/waiting-for-you";
-import { syncAwaitingUser } from "./awaiting-user";
+import { reconcileWhenHistoryLoads, syncAwaitingUser } from "./awaiting-user";
 
 afterEach(() => {
     __resetWaitingForYou();
@@ -45,5 +49,19 @@ describe("syncAwaitingUser", () => {
         syncAwaitingUser("b2");
         await Promise.resolve();
         expect(writes).toEqual([null]);
+    });
+
+    it("after history loads, a wait left from before the mount ends and the flag follows", async () => {
+        startWaitingForYou("b3", "question", "Which?");
+        const dispose = createRoot((d) => {
+            reconcileWhenHistoryLoads("b3", () => endWaitingForYou("b3", "question"));
+            return d;
+        });
+        await Promise.resolve();
+        expect(writes).toEqual([], "nothing before history loads");
+        setReady(true);
+        await Promise.resolve();
+        expect(writes).toEqual([null]);
+        dispose();
     });
 });
