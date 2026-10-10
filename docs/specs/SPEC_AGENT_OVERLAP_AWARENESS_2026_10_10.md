@@ -1,6 +1,6 @@
 # SPEC: agents can see who else is working on the same thing
 
-**Status:** in progress (phase 1: #PRNUM)
+**Status:** in progress (phase 1: #4630)
 **Date:** 2026-10-10
 **Asked by:** the owner: "agents may be working on the same thing … an API to verify they aren't stepping on anyone else's toes."
 
