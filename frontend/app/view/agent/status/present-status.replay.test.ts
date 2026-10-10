@@ -10,7 +10,6 @@
 // The checks are the rules the row promises, not a snapshot of its text:
 // - a line stays at least DWELL once fully typed out, unless something ranked
 //   higher (or needs-you / held / an anomaly) replaces it;
-// - a line types out only when the rank changes;
 // - the row doesn't flash back to the goal between two calls.
 
 import { describe, expect, it } from "vitest";
@@ -24,7 +23,6 @@ interface Segment {
     text: string;
     key: string;
     rank: number;
-    reveal: boolean;
     from: number;
     to: number;
 }
@@ -71,13 +69,14 @@ function replay(s: Scenario): Segment[] {
             last.to = now + TICK_MS;
             last.text = r.line.text;
         } else {
-            segments.push({ text: r.line.text, key: r.line.key, rank: r.line.rank, reveal: r.line.reveal ?? true, from: now, to: now + TICK_MS });
+            segments.push({ text: r.line.text, key: r.line.key, rank: r.line.rank, from: now, to: now + TICK_MS });
         }
     }
     return segments;
 }
 
-const readyAt = (seg: Segment) => seg.from + (seg.reveal ? seg.text.length * TIMING.revealCharMs : 0);
+/** Every new line types out, so it is fully on screen this long after it came. */
+const readyAt = (seg: Segment) => seg.from + seg.text.length * TIMING.revealCharMs;
 
 /** Every rule the row promises, as a list of what broke (empty: all held). */
 function violations(segments: Segment[]): string[] {
@@ -90,9 +89,6 @@ function violations(segments: Segment[]): string[] {
         if (!preempts && cur.from < readyAt(prev) + TIMING.dwellMs - TICK_MS) {
             out.push(`"${prev.text}" replaced by "${cur.text}" ${readyAt(prev) + TIMING.dwellMs - cur.from} ms early`);
         }
-        // Type-out only when the rank changes.
-        if (cur.reveal && cur.rank === prev.rank) out.push(`"${cur.text}" typed out within rank ${cur.rank}`);
-        if (!cur.reveal && cur.rank !== prev.rank) out.push(`"${cur.text}" swapped in across ranks ${prev.rank}→${cur.rank}`);
         // No flash of a calmer line between two calls.
         const after = segments[i + 1];
         if (prev.rank === RANK.now && cur.rank > RANK.now && after?.rank === RANK.now && cur.to - cur.from < 1_000) {

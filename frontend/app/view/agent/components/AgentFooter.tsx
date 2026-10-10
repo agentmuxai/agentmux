@@ -267,14 +267,14 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (!live()) revealInstantly = true;
     });
 
-    // A new line types out only when its rank changes (the presenter's `reveal`),
-    // else it swaps in; a moved counter (same key) never re-types it.
+    // Every new line types out; a moved counter (same key) never re-types it.
+    // The presenter's dwell counts from the end of this type-out.
     createEffect(
         on(
             statusKey,
             () => {
                 const text = untrack(leftText);
-                if (untrack(reducedMotion) || !text || revealInstantly || untrack(status).reveal === false) {
+                if (untrack(reducedMotion) || !text || revealInstantly) {
                     revealInstantly = false;
                     setRevealed(Number.POSITIVE_INFINITY);
                     return;

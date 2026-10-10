@@ -810,6 +810,29 @@ describe("AgentWorkingRow type-out follows the clock", () => {
         }
     });
 
+    // The operator's call: every new step line types out, not only a change
+    // of kind (a second tool after a first used to appear whole).
+    it("a new step line of the same kind types out too", () => {
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+        const step = (label: string, id: string) => ({
+            phase: null,
+            phaseSince: 0,
+            tools: [{ id, activity: { family: "bash" as const, label }, startedAt: Date.now() - 3_000 }],
+            plan: null,
+            planAt: 0,
+        });
+        const [activity, setActivity] = createSignal(step("Running the srv tests", "t1"));
+        const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" activity={activity()} />);
+        const primary = () => container.querySelector(".agent-working-row-primary")?.textContent;
+        vi.advanceTimersByTime(5_000); // the first step is on screen and past its dwell
+        setActivity(step("Building the frontend", "t2"));
+        expect(primary()).toBe(""); // starts typing, not whole
+        vi.advanceTimersByTime(10 * 28 + 5);
+        expect(primary()).toBe("Building t"); // ten characters in
+        vi.advanceTimersByTime(2_000);
+        expect(primary()).toBe("Building the frontend");
+    });
+
     it("shows an ASCII spinner, not the pulsing dot", () => {
         const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" />);
         expect(container.querySelector(".agent-working-row .agent-spinner-dot")).toBeNull();

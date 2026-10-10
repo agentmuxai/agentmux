@@ -24,10 +24,10 @@
  * or the model writing its input), so the row doesn't flash back to the goal
  * between two calls.
  *
- * Type-out: a line types out only when its rank changes (goal → now → needs
- * you). Within a rank it swaps in at once (§6.4 "Reveal"). DWELL counts from
- * the end of the type-out, so a long line is never replaced the moment it has
- * finished printing.
+ * Type-out: every new line types out (the operator's call, over §6.4's "swap
+ * within a rank"); the same line with a counter moving keeps its key and is
+ * not typed again. DWELL counts from the end of the type-out, so a line is
+ * never replaced the moment it has finished printing.
  *
  * docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.
  */
@@ -85,11 +85,8 @@ export interface StatusInput {
 export interface StatusLine {
     text: string;
     rank: number;
-    /** Same key: the same line, its counters moved. */
+    /** Same key: the same line, its counters moved. A new key types out. */
     key: string;
-    /** A new key whose rank differs from the line it replaces types out;
-     *  a new key of the same rank swaps in at once. */
-    reveal?: boolean;
 }
 
 export interface StatusMemory {
@@ -202,18 +199,15 @@ export function presentStatus(input: StatusInput, memory: StatusMemory | null): 
     const best = candidates[0];
     const remember = (chosen: StatusLine, eligible: boolean) => {
         if (memory && memory.line.key === chosen.key) {
-            const line = { ...chosen, reveal: memory.line.reveal };
+            const line = chosen;
             // Text that grows while it is still typing out (a subagent step,
             // test progress) is typed to its new end, so it is ready later.
             const typing = now < memory.readyAt;
             const readyAt = typing ? Math.max(memory.readyAt, memory.since + chosen.text.length * TIMING.revealCharMs) : memory.readyAt;
             return { line, memory: { ...memory, line, readyAt, liveAt: eligible ? now : memory.liveAt } };
         }
-        const reveal = !memory || memory.line.rank !== chosen.rank;
-        const line = { ...chosen, reveal };
-        const typed = reveal && !input.instantReveal;
-        const readyAt = typed ? now + chosen.text.length * TIMING.revealCharMs : now;
-        return { line, memory: { line, since: now, readyAt, liveAt: now } };
+        const readyAt = input.instantReveal ? now : now + chosen.text.length * TIMING.revealCharMs;
+        return { line: chosen, memory: { line: chosen, since: now, readyAt, liveAt: now } };
     };
     if (!memory || best.rank <= RANK.anomaly) return remember(best, true);
     const settled = now - memory.readyAt >= TIMING.dwellMs;

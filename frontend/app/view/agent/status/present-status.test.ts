@@ -155,21 +155,24 @@ describe("presentStatus: when to change", () => {
         ]);
     });
 
-    it("types out only when the rank changes; within a rank the line swaps in at once", () => {
+    it("every new line types out, even within a rank; its dwell counts from the end of that", () => {
         let memory: StatusMemory | null = null;
         const step = (f: Partial<StatusInput>) => {
             const r = presentStatus(input(f), memory);
             memory = r.memory;
-            return r.line;
+            return r;
         };
         const read = (file: string, id: string, at: number) => tool("Read", { file_path: file }, at, id);
-        expect(step({ nowMs: T0 }).reveal).toBe(true); // the goal
-        const a = step({ nowMs: T0 + 2_000, activity: act({ tools: [read("a.ts", "a", T0)] }) });
-        expect([a.text, a.reveal]).toEqual(["Reading a.ts", true]); // goal → now
+        step({ nowMs: T0 });
+        step({ nowMs: T0 + 2_000, activity: act({ tools: [read("a.ts", "a", T0)] }) });
+        // A new line of the same rank: typed out too, so ready only once printed.
         const ab = step({ nowMs: T0 + 6_000, activity: act({ tools: [read("a.ts", "a", T0), read("b.ts", "b", T0 + 100)] }) });
-        expect([ab.text, ab.reveal]).toEqual(["Reading 2 files", false]); // now → now
-        const q = step({ nowMs: T0 + 6_100, activity: act({ tools: [read("a.ts", "a", T0)] }), needsYou: "Waiting for your answer" });
-        expect(q.reveal).toBe(true); // now → needs you
+        expect(ab.line.text).toBe("Reading 2 files");
+        expect(ab.memory.readyAt).toBe(T0 + 6_000 + "Reading 2 files".length * TIMING.revealCharMs);
+        // The same line with nothing new: the same key, not typed again.
+        const again = step({ nowMs: T0 + 7_000, activity: act({ tools: [read("a.ts", "a", T0), read("b.ts", "b", T0 + 100)] }) });
+        expect(again.line.key).toBe(ab.line.key);
+        expect(again.memory.since).toBe(T0 + 6_000);
     });
 
     it("after a call ends, the line holds while the next call is still too young to show", () => {
