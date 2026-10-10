@@ -529,6 +529,8 @@ Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right a
 
 **A false "Rate limited — retrying" kept preempting the row.** Claude Code (2.1.288 here) sends `rate_limit_event` as a usage report on ordinary requests, with `rate_limit_info.status` "allowed" (one live session had 46, all "allowed", at 57% of the five-hour window). `claude-translator.ts` had mapped every `rate_limit_event` to `provider_waiting`, a rank-1 status that preempts everything and clears on the next activity, so it flashed in and out through normal work. Only `status: "rejected"` (or the old shape with no `rate_limit_info`) is a rate limit now.
 
+**The goal no longer rides beside another line.** §6.9's "goal beside" (the ambient summary, muted, after a rank 2–5 line) is removed at the operator's request: the Swarm view already shows each agent's goal, and the tail popped in a moment after each line finished typing, which added to the sense of the row changing. The goal still shows as a line of its own (rank 6) when nothing more specific is happening.
+
 **The dot became an ASCII spinner** (`components/AsciiSpinner.tsx`), at the operator's request: one character cycling `| / - \` every 120 ms in the pane's color, on its own signal so a frame never re-renders the text. Reduced motion shows a still `*`. The pending-messages header keeps its dot.
 
 The presenter also had three causes of its own, none in the values of `TIMING`:

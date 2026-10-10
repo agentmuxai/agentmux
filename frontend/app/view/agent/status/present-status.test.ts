@@ -306,11 +306,11 @@ describe("phase 3b: subagent steps, test progress, the thinking headline, the go
         expect(statusCandidates(input({ activity: a }))[0].text).toBe("Thinking: Weighing the join rule");
     });
 
-    it("the goal rides beside a line about the moment, never beside itself or a status", () => {
+    it("the goal is never added after another line; it shows only as a line of its own", () => {
         const busy = act({ tools: [tool("Bash", { description: "Run it" }, T0 - 5_000)] });
-        expect(presentStatus(input({ activity: busy }), null).line.detail).toBe("Fix the login redirect loop");
-        expect(presentStatus(input(), null).line.detail).toBeUndefined(); // the goal itself
-        expect(presentStatus(input({ activity: busy, held: "Stopping…" }), null).line.detail).toBeUndefined();
+        expect(presentStatus(input({ activity: busy }), null).line).not.toHaveProperty("detail");
+        expect(presentStatus(input({ activity: busy }), null).line.text).toBe("Running it");
+        expect(presentStatus(input(), null).line.text).toBe("Fix the login redirect loop");
     });
 });
 

@@ -84,9 +84,6 @@ export interface StatusInput {
 
 export interface StatusLine {
     text: string;
-    /** Shown after the text, muted, and truncated first: the session's goal,
-     *  beside a line about what is happening right now (ranks 2–5). */
-    detail?: string;
     rank: number;
     /** Same key: the same line, its counters moved. */
     key: string;
@@ -196,19 +193,10 @@ export function statusCandidates(input: StatusInput): StatusLine[] {
     return out;
 }
 
-/** The goal beside a line about the moment (ranks 2–5), never beside itself
- *  or a status that owns the row. */
-function withDetail(l: StatusLine, goal: string | null): StatusLine {
-    return goal && l.rank >= RANK.anomaly && l.rank <= RANK.plan ? { ...l, detail: goal } : l;
-}
-
-/** The line to show now, and the memory to pass next time. */
+/** The line to show now, and the memory to pass next time. The goal is a
+ *  line of its own (rank 6), never a muted tail on another: the Swarm view
+ *  already shows each agent's goal (§6.10). */
 export function presentStatus(input: StatusInput, memory: StatusMemory | null): { line: StatusLine; memory: StatusMemory } {
-    const r = choose(input, memory);
-    return { line: withDetail(r.line, input.goal), memory: r.memory };
-}
-
-function choose(input: StatusInput, memory: StatusMemory | null): { line: StatusLine; memory: StatusMemory } {
     const now = input.nowMs;
     const candidates = statusCandidates(input);
     const best = candidates[0];

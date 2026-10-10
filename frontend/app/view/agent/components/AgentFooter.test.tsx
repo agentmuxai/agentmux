@@ -944,8 +944,8 @@ describe("AgentWorkingRow across a turn's passes", () => {
             />
         ));
         expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("↳ jekt from AgentX");
-        // The goal beside it, muted (truncated first).
-        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
+        // Nothing after it: the goal is in the Swarm view.
+        expect(container.querySelector(".agent-working-row-detail")).toBeNull();
 
         const later = render(() => (
             <AgentWorkingRow
@@ -1036,7 +1036,7 @@ describe("AgentWorkingRow live status", () => {
             <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 3_000)} />
         ));
         expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("Running the srv test suite");
-        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Running the srv test suite");
     });
 
     it("keeps the goal while a call is too young to mention", () => {
