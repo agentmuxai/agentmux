@@ -41,7 +41,7 @@ export function DocTabStrip<P>(props: {
                         return t.preview ? `${base} (preview, double-click to keep)` : base;
                     }}
                     getAttention={(t) => !!t.dirty}
-                    getTabClass={(t) => ({ "doc-tab--preview": t.preview, "doc-tab--pinned": t.pinned })}
+                    getTabClass={(t) => ({ "doc-tab--preview": t.preview, "doc-tab--pinned": t.pinned, "doc-tab--no-icon": !t.icon })}
                     onActivate={(id) => ctl.activate(id)}
                     onClose={(id) => void ctl.close(id)}
                     onTabDoubleClick={(t) => {

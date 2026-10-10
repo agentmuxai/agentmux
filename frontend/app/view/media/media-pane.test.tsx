@@ -104,7 +104,17 @@ describe("the Media pane's document tabs", () => {
         const v = mount({ "media:path": "C:/pics/a.png" });
         await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
         expect(v.pills()).toEqual(["a.png"]);
+        expect(v.container.querySelector(".doc-tab-strip .pane-tab-icon .fa-image")).not.toBeNull();
         expect(v.inst.liveTitle!().text).toBe("a.png");
+    });
+
+    it("an empty tab is New Tab, with no icon and no room kept for one", () => {
+        const v = mount();
+        expect(v.pills()).toEqual(["New Tab"]);
+        const tab = v.container.querySelector(".doc-tab-strip .pane-tab")!;
+        expect(tab.classList.contains("doc-tab--no-icon")).toBe(true);
+        expect(tab.querySelector(".pane-tab-icon i")).toBeNull();
+        expect(v.inst.liveTitle!().text).toBe("Media");
     });
 
     it("files sent here become tabs; the empty tab takes the first; the queue empties", async () => {

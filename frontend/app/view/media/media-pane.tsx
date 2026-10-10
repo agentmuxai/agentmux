@@ -13,7 +13,7 @@
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { DocTabsController, handleDocTabKey, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
-import { basenameOf } from "@/app/element/local-media";
+import { AUDIO_EXTENSIONS, basenameOf, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
@@ -56,11 +56,20 @@ const isEmpty = (d: MediaDoc | undefined): boolean => !!d && !d.path && !d.file;
 
 let blanks = 0;
 
-/** Its tabs are named, without icons. One with no file yet is "New Tab", as
- *  in a browser: a place to load a file, not a document to save. */
+export function mediaIcon(path: string): string {
+    const ext = extOf(path);
+    if (IMAGE_EXTENSIONS.includes(ext)) return "image";
+    if (VIDEO_EXTENSIONS.includes(ext)) return "film";
+    if (AUDIO_EXTENSIONS.includes(ext)) return "music";
+    return "photo-film";
+}
+
+/** A tab with no file yet is "New Tab", as in a browser: a place to load a
+ *  file, not a document to save. It has no icon; a file's tab has its kind's. */
 export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     keyOf: (d) => d.path || `blank:${d.blank ?? 0}`,
     titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "New Tab")),
+    iconOf: (d) => (isEmpty(d) ? undefined : mediaIcon(d.path || d.file?.name || "")),
     serialize: (d) => d.path,
     deserialize: (st) => (typeof st === "string" && st ? { path: st } : null),
     // Ctrl+T, "+": a tab to pick a file into.
@@ -111,6 +120,7 @@ export class MediaPaneModel {
             payload,
             key: MEDIA_DOC_TABS.keyOf(payload),
             title: MEDIA_DOC_TABS.titleOf(payload),
+            icon: MEDIA_DOC_TABS.iconOf!(payload),
         });
         if (this.tabs.activeId() === tabId) fireAndForget(() => this.ctx.setMeta({ [META_PATH]: path }));
         return true;
@@ -134,7 +144,7 @@ export class MediaPaneModel {
         const active = this.tabs.active();
         if (active && isEmpty(active.payload)) {
             const payload: MediaDoc = { path: "", blank: active.payload.blank, file };
-            this.tabs.update(active.id, { payload, title: MEDIA_DOC_TABS.titleOf(payload) });
+            this.tabs.update(active.id, { payload, title: MEDIA_DOC_TABS.titleOf(payload), icon: MEDIA_DOC_TABS.iconOf!(payload) });
             fireAndForget(() => this.ctx.setMeta({ [META_PATH]: "" }));
             return;
         }

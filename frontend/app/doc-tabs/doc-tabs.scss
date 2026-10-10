@@ -14,4 +14,10 @@
     .doc-tab--preview .pane-tab-label {
         font-style: italic;
     }
+
+    // A tab without an icon (Media's "New Tab") starts with its label: no
+    // empty icon box.
+    .doc-tab--no-icon .pane-tab-icon {
+        display: none;
+    }
 }
