@@ -455,18 +455,18 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                             onInput={(e) => setIdentityfile(e.currentTarget.value)}
                         />
                     </label>
-                    <label class="remotes-setting">
-                        <span>Jump host</span>
+                    <label class="remotes-setting" title="An SSH server to hop through to reach this one (ssh's ProxyJump)">
+                        <span>Connect through</span>
                         <input
                             type="text"
-                            placeholder="bastion"
+                            placeholder="user@bastion"
                             value={proxyjump()}
                             onInput={(e) => setProxyjump(e.currentTarget.value)}
                         />
                     </label>
                 </div>
                 <div class="remotes-add-note">
-                    With an identity file or jump host, the remote is added to the end of ~/.ssh/config (a copy of
+                    With an identity file or a host to connect through, the remote is added to the end of ~/.ssh/config (a copy of
                     the file is kept first), and you'll see exactly what is written before it is.
                 </div>
             </details>

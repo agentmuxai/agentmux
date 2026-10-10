@@ -242,14 +242,14 @@ describe("RemotesView", () => {
         });
     });
 
-    it("writes ssh config, under a plain alias, only for an identity file or jump host from Advanced", async () => {
+    it("writes ssh config, under a plain alias, only for an identity file or a host to connect through, from Advanced", async () => {
         const { model } = await renderWith([]);
         fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
         const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
         fireEvent.input(field("Connect to"), { target: { value: "10.0.0.5" } });
         fireEvent.input(field("Name"), { target: { value: "lab" } });
         fireEvent.input(field("Identity file"), { target: { value: "~/.ssh/lab" } });
-        fireEvent.input(field("Jump host"), { target: { value: "bastion" } });
+        fireEvent.input(field("Connect through"), { target: { value: "bastion" } });
         fireEvent.click(screen.getByRole("button", { name: "Add" }));
         await new Promise((r) => setTimeout(r, 0));
         expect(rpc.RemoteAddCommand).toHaveBeenCalledWith(
