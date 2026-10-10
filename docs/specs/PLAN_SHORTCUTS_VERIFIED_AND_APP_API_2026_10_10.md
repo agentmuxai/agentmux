@@ -1,7 +1,7 @@
 # Plan — every shortcut in the Help pane works on every platform, and agents can drive them
 
 **Date:** 2026-10-10
-**Status:** active — owner decisions recorded (§8); phase 2 (App API) in #NNNN.
+**Status:** active — owner decisions recorded (§8); phase 2 (App API) in #4593.
 **Author:** AgentA@Area54 (Windows), with Masty@starpower and Maricon@charlie for the other platforms
 **Builds on:**
 - [../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md](../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md) (the audit, by reading code; phases 3–6 shipped in #4323–#4328)
