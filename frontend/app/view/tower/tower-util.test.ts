@@ -8,7 +8,9 @@ import {
     count,
     cpuPercent,
     filterProcesses,
+    formatAgo,
     formatCpu,
+    formatCpuTime,
     formatMem,
     groupProcesses,
     nextSort,
@@ -381,5 +383,63 @@ describe("processes grouped by owner", () => {
         expect(keys("cpu")).toEqual(["a2", "a1", "terminals", "agentmux", "other"]);
         expect(keys("mem")).toEqual(["a1", "a2", "terminals", "agentmux", "other"]);
         expect(keys("name")).toEqual(["a1", "a2", "terminals", "agentmux", "other"]);
+    });
+});
+
+describe("exited processes and CPU time", () => {
+    it("formats CPU time and how long ago", () => {
+        expect(formatCpuTime(undefined)).toBe("—");
+        expect(formatCpuTime(400_000_000)).toBe("0.4 s");
+        expect(formatCpuTime(12_300_000_000)).toBe("12 s");
+        expect(formatCpuTime(245e9)).toBe("4 min 5 s");
+        expect(formatCpuTime(3720e9)).toBe("1 h 2 min");
+        expect(formatAgo(1_000, 5_400)).toBe("4 s ago");
+        expect(formatAgo(0, 125_000)).toBe("2 min ago");
+    });
+
+    const q = (pid: number, ppid: number, name: string, cpuTimeS: number, exited = false): TowerProcess => ({
+        id: `${pid}:1`,
+        pid,
+        ppid,
+        name,
+        cpu: exited ? undefined : 0.1,
+        cpu_time_ns: cpuTimeS * 1e9,
+        peak_mem: pid * 10,
+        exited_ms: exited ? 5_000 : undefined,
+        started_at_ms: pid,
+    });
+
+    it("a pid an exited process had and a live one reused: each child goes to its own parent", () => {
+        const old: TowerProcess = { ...q(100, 1, "cargo", 1, true), id: "100:old", started_at_ms: 10 };
+        const reused: TowerProcess = { ...q(100, 1, "node", 1), id: "100:new", started_at_ms: 50 };
+        const ofOld: TowerProcess = { ...q(7, 100, "rustc", 1, true), started_at_ms: 20 };
+        const ofReused: TowerProcess = { ...q(8, 100, "npm", 1), started_at_ms: 60 };
+        const roots = buildProcessTree([reused, ofReused, old, ofOld]);
+        const kids = (id: string) => roots.find((r) => r.process.id === id)!.children.map((c) => c.process.name);
+        expect(kids("100:new")).toEqual(["npm"]);
+        expect(kids("100:old")).toEqual(["rustc"]);
+    });
+
+    it("a subtree's CPU time includes what its exited processes used", () => {
+        const [cargo] = buildProcessTree([q(1, 0, "cargo", 1), q(2, 1, "rustc", 2), q(3, 1, "rustc", 30, true)]);
+        expect(cargo.cpuTime).toBe(33e9);
+    });
+
+    it("exited processes fold apart from live ones, with their CPU time and peak", () => {
+        const [cargo] = buildProcessTree([
+            q(1, 0, "cargo", 1),
+            q(2, 1, "rustc", 2),
+            q(3, 1, "rustc", 2),
+            q(4, 1, "rustc", 5, true),
+            q(5, 1, "rustc", 6, true),
+        ]);
+        const lines = treeLines(cargo.children, { key: "name", desc: false });
+        const many = lines.filter((l) => l.kind === "many");
+        expect(many.map((l) => l.kind === "many" && [l.nodes.length, l.exited])).toEqual([
+            [2, false],
+            [2, true],
+        ]);
+        const gone = many.find((l) => l.kind === "many" && l.exited)!;
+        expect(gone.kind === "many" && [gone.cpuTime, gone.peak]).toEqual([11e9, 50]);
     });
 });

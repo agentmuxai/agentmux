@@ -47,6 +47,26 @@ pub struct CallRecord {
     #[serde(default)]
     pub run_in_background: bool,
     pub created_ms: u64,
+    /// What the model said the call does: Tower labels the process that ran
+    /// it with this (`report_call`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// The longest description reported for a call.
+const MAX_DESCRIPTION_CHARS: usize = 200;
+
+/// Reported once per linked call, so srv can say which tool call a process
+/// tree is (Tower's "started by"): this wrapper's pid, the call and what it
+/// does. srv keeps it and does not forward it to the pane, which would take
+/// an unknown op for output. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.3.
+#[derive(Serialize)]
+struct CallMessage<'a> {
+    op: &'static str, // "call"
+    tool_id: &'a str,
+    pid: u32,
+    description: &'a str,
+    timestamp: u64,
 }
 
 /// The script, when this process was started as the CLI's shell prefix:
@@ -293,13 +313,31 @@ pub async fn run(script: String) -> Result<i32> {
         },
         None => script,
     };
+    // Not awaited before the command starts: a slow srv must not hold it up.
+    let report = record.description.clone().map(|d| tokio::spawn(report_call(record.tool_use_id.clone(), d)));
     let args = crate::bash_wrap::Args {
         tool_id: record.tool_use_id,
         b64_cmd: String::new(),
         block_id: None,
         declared_background: record.run_in_background,
     };
-    crate::bash_wrap::run_command(args, script).await
+    let result = crate::bash_wrap::run_command(args, script).await;
+    if let Some(task) = report {
+        // Bounded past the publish's own timeout; main exits right after.
+        let _ = tokio::time::timeout(Duration::from_secs(6), task).await;
+    }
+    result
+}
+
+/// Tell srv which call this process runs (`CallMessage`). Best effort.
+async fn report_call(tool_id: String, description: String) {
+    let Some(client) = crate::mps_client::WpsClient::from_env() else { return };
+    let block_id = std::env::var("AGENTMUX_BLOCKID").ok().filter(|b| !b.is_empty());
+    let description: String = description.chars().take(MAX_DESCRIPTION_CHARS).collect();
+    let msg = CallMessage { op: "call", tool_id: &tool_id, pid: std::process::id(), description: &description, timestamp: now_ms() };
+    if let Err(e) = client.publish_chunk(block_id.as_deref(), &msg).await {
+        tracing::warn!(target: "bashwrap", tool_id, error = %e, "call report failed");
+    }
 }
 
 /// Run `script` with bash on this process's own stdio, for its exit code.
@@ -322,6 +360,7 @@ pub fn new_record(tool_use_id: &str, command: &str, run_in_background: bool) -> 
         command: command.to_string(),
         run_in_background,
         created_ms: now_ms(),
+        description: None,
     }
 }
 

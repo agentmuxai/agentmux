@@ -31,7 +31,10 @@
 
 import {
     activateDoc,
+    attachDoc,
     closeDoc,
+    detachDoc,
+    type DocDropAt,
     type DocTab,
     type DocTabsState,
     emptyDocTabs,
@@ -186,6 +189,11 @@ export type EditorPaneCommand =
     | { type: "ReorderTab"; tabId: string; toIndex: number; source?: EditorCommandSource }
     /** A tab dragged to just before or after another (`moveDocTo`). */
     | { type: "MoveTabTo"; tabId: string; targetId: string; position: "before" | "after"; source?: EditorCommandSource }
+    /** A tab leaving for another Editor pane (`detachDoc`): gone from this
+     *  pane without the reopen list or a dirty check (its text goes with it). */
+    | { type: "DetachTab"; tabId: string; source?: EditorCommandSource }
+    /** A tab arriving from another Editor pane (`attachDoc`), keeping its id. */
+    | { type: "AttachTab"; tab: DocTab<EditorBuffer>; at?: DocDropAt; source?: EditorCommandSource }
     | { type: "MarkDirty"; tabId: string; source?: EditorCommandSource }
     | { type: "ClearDirty"; tabId: string; source?: EditorCommandSource }
     | {
@@ -483,6 +491,22 @@ export function update(state: EditorPaneState, command: EditorPaneCommand): Redu
         case "MoveTabTo": {
             const moved = moveDocTo(doc, command.tabId, command.targetId, command.position);
             return moved === doc ? same(state) : next(state, moved);
+        }
+
+        case "DetachTab": {
+            const out = detachDoc(doc, command.tabId);
+            if (!out) return same(state);
+            // TabClosed: the model and view release what they held for it.
+            const events: EditorPaneEvent[] = [{ type: "TabClosed", tabId: out.tab.id, filePath: out.tab.payload.filePath }];
+            if (doc.activeId === out.tab.id) events.push(...activated(out.state));
+            return next(state, out.state, events);
+        }
+
+        case "AttachTab": {
+            const open = doc.tabs.find((t) => t.key === command.tab.key);
+            const d = attachDoc(doc, command.tab, command.at);
+            if (open) return d === doc ? same(state) : next(state, d, activated(d));
+            return next(state, d, opened(d, command.tab.id));
         }
 
         case "MarkDirty": {

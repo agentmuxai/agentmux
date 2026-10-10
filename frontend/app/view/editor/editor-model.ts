@@ -151,13 +151,13 @@ export class EditorViewModel {
 
     // ── Per-tab content store (view-local) ────────────────────────────
     // Content blobs by tabId. Keys removed on TabClosed.
-    private _contentByTab = new Map<string, string>();
+    readonly _contentByTab = new Map<string, string>();
     // Bump-counter signal so contentAtom re-evaluates when we mutate the Map.
     private _contentVersion = createSignal<number>(0);
     // Detected text encoding per tab (SPEC_EDITOR_FILE_ENCODINGS), captured on
     // read so save round-trips the original encoding/bom/line-ending instead of
     // silently rewriting the file as UTF-8.
-    private _encodingByTab = new Map<
+    readonly _encodingByTab = new Map<
         string,
         { encoding: string; bom: string; lineEnding: string; hadDecodeErrors: boolean }
     >();
@@ -189,8 +189,8 @@ export class EditorViewModel {
 
     // Per-tab editor mode: "preview" | "source" | "split".
     // Not persisted — tabs return to their language-appropriate default on reopen.
-    private _tabModes = new Map<string, EditorMode>();
-    private _tabModesVersion = createSignal<number>(0);
+    readonly _tabModes = new Map<string, EditorMode>();
+    readonly _tabModesVersion = createSignal<number>(0);
 
     treeModel = new FileTreeModel();
 
@@ -753,7 +753,7 @@ export class EditorViewModel {
      *  No-op if already watching that exact path (covers repeat loads of an
      *  unchanged tab). Unwatches the previous path first when it differs
      *  (preview-tab file swap: same tabId, new file). */
-    private _syncWatch(tabId: string, canonicalPath: string): void {
+    _syncWatch(tabId: string, canonicalPath: string): void {
         // A host's files aren't watched (this computer's watcher can't see
         // them); reopening the file shows changes made there.
         if (this.connection()) return;

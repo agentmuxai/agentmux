@@ -21,6 +21,7 @@ import { createSignal, onMount, type JSX } from "solid-js";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import type { EditorViewModel } from "./editor-model";
 import { moveEditorTabTo } from "./editor-doc-tabs";
+import { dropDocTab } from "@/app/doc-tabs/doc-tab-hosts";
 import type { EditorTab } from "@/app/store/editor-pane-state-store";
 import { keyLabel } from "@/app/keybindings";
 
@@ -107,6 +108,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
                 // box's text selection.
                 canDrag: (id) => props.saveAsTabId !== id,
                 onReorder: (id, targetId, position) => moveEditorTabTo(props.model.blockId, id, targetId, position),
+                onReceive: (sourceBlockId, tabId, at) => dropDocTab(sourceBlockId, tabId, props.model.blockId, at),
             }}
         />
     );

@@ -117,23 +117,26 @@ function ydotoolReady() {
     return fs.existsSync(socket) ? null : `no ydotoold socket at ${socket}: start ydotoold (systemctl --user start ydotool)`;
 }
 
-/** Puts keyboard focus in the Help pane (opening it if needed); its block id, or null. */
+/** Puts keyboard focus in the Help pane (help:shortcuts opens it, or focuses
+ *  the one already open); its block id, or null. */
 async function focusHelp(cdp, helpId) {
-    for (let tab = 0; tab <= 8; tab++) {
-        if (tab > 0) await cdp.evaluate(`${S}.run(${js(`tab:goto:${tab}`)})`);
-        if (helpId && (await cdp.evaluate(`${S}.focus(${js(helpId)})`))) break;
-        if (tab === 8) {
-            await cdp.evaluate(`${S}.run("help:shortcuts")`);
-            await sleep(400);
-            helpId = await cdp.evaluate(`${S}.focused()`);
-        }
+    const inHelp = (id) =>
+        cdp.evaluate(`(() => {
+            const a = document.activeElement;
+            return !!a && !a.closest(".xterm, [contenteditable=true]") && !!a.closest(${js(`[data-blockid="${id}"]`)});
+        })()`);
+    if (helpId && (await cdp.evaluate(`${S}.focus(${js(helpId)})`))) {
+        await sleep(150);
+        if (await inHelp(helpId)) return helpId;
     }
-    await sleep(150);
-    const inHelp = await cdp.evaluate(`(() => {
-        const a = document.activeElement;
-        return !!a && !a.closest(".xterm, [contenteditable=true]") && !!a.closest(${js(`[data-blockid="${helpId}"]`)});
-    })()`);
-    return inHelp ? helpId : null;
+    for (const first of [null, "tab:goto:1"]) {
+        if (first) await cdp.evaluate(`${S}.run(${js(first)})`);
+        await cdp.evaluate(`${S}.run("help:shortcuts")`);
+        await sleep(500);
+        const id = await cdp.evaluate(`${S}.focused()`);
+        if (id && (await inHelp(id))) return id;
+    }
+    return null;
 }
 
 async function main() {
@@ -180,9 +183,10 @@ async function main() {
     const keys = new Map();
     for (const s of list) {
         for (const raw of s.raw) {
-            const norm = normTable(raw);
-            if (!keys.has(norm)) keys.set(norm, { raw, rows: [], manual: [] });
-            const k = keys.get(norm);
+            // Every step: chords that share a first key are different keys.
+            const id = raw.split(" ").map(normTable).join(" ");
+            if (!keys.has(id)) keys.set(id, { raw, rows: [], manual: [] });
+            const k = keys.get(id);
             k.rows.push(s.command);
             // A manual row that isn't pane-local would run wherever focus is.
             if (MANUAL[s.command] && !s.pane && !/^term:/.test(s.command)) k.manual.push(s.command);
@@ -190,7 +194,9 @@ async function main() {
     }
     const results = [];
     let helpId = null;
-    for (const [norm, k] of keys) {
+    for (const [id, k] of keys) {
+        // The desktop sees a chord's first key.
+        const norm = id.split(" ")[0];
         if (args.only && !k.rows.some((c) => args.only.test(c))) continue;
         const r = { key: k.raw, rows: k.rows, result: "", resolved: null };
         results.push(r);

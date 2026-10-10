@@ -37,4 +37,23 @@ task?: string,
  * "Network service", "Server", "Launcher", …). Absent for any other
  * process, and for one of AgentMux's the backend can't place.
  */
-detail?: string, };
+detail?: string, 
+/**
+ * CPU time used so far (user + kernel), nanoseconds: for an exited
+ * process, all it used.
+ */
+cpu_time_ns?: number, 
+/**
+ * The most private memory seen while it was sampled, bytes.
+ */
+peak_mem?: number, 
+/**
+ * In a task's `exited` list: when it was first seen gone, unix ms.
+ */
+exited_ms?: number, 
+/**
+ * The agent tool call this process runs, as the agent described it
+ * ("Run the srv tests"): set on the wrapper at the root of the call's
+ * process tree (`backend::tool_calls`).
+ */
+started_by?: string, };

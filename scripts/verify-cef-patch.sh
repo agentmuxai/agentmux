@@ -63,7 +63,9 @@ fi
 if read_syms | grep -q .; then
     echo "verify-cef-patch: ✗ $SO has a symbol table but NO BeginWindowDrag slot." >&2
     echo "                  This is the UNPATCHED upstream CEF — left-click window drag" >&2
-    echo "                  will silently no-op. Build the patched libcef" >&2
+    echo "                  will silently no-op, and an Incognito tab, or a Personal tab" >&2
+    echo "                  in a second window, crashes the host (agentmuxai/cef#11)." >&2
+    echo "                  Build the patched libcef" >&2
     echo "                  (docs/cef-build/build-patched-libcef.md), or point" >&2
     echo "                  AGENTMUX_CEF_RUNTIME_DIR at a patched Release_GN_x64." >&2
     exit 1

@@ -425,3 +425,18 @@ tr:hover .tower-reveal,
     border-left: 2px solid var(--accent-color);
     white-space: nowrap;
 }
+
+// A process that exited in the last minute: still in its tree, dimmed.
+.tower-process-row--exited {
+    opacity: 0.55;
+}
+
+// The tool call a process runs, after its name: muted, cut off if long.
+.tower-started-by {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+    font-style: italic;
+}

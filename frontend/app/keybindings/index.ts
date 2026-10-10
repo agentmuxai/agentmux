@@ -4,7 +4,7 @@
 // Shortcut labels for the current platform. Every place the UI shows a key
 // uses these, so a hint can't disagree with the binding.
 
-import { isMacOS } from "@/util/platformutil";
+import { isLinux, isMacOS } from "@/util/platformutil";
 import { noteResolved } from "./app-api";
 export { registerPaneCommandRunner } from "./app-api";
 import type { KeyPane } from "./defaults";
@@ -30,7 +30,7 @@ export function isGlobalKey(e: KeyboardEvent): boolean {
 }
 
 export function keyPlatform(): KeyPlatform {
-    return isMacOS() ? "mac" : "other";
+    return isMacOS() ? "mac" : isLinux() ? "linux" : "other";
 }
 
 /** The shortcut for a command ("Ctrl+Shift+T", "⌘T"), or "" if it has none. */

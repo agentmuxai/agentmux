@@ -317,6 +317,69 @@ describe("Tower", () => {
         expect(within(srv).getByText("agentmux-srv.exe")).toHaveClass("tower-muted");
     });
 
+    it("a process that exited in the last minute stays in the tree, dimmed, with what it used", async () => {
+        const snap = snapshot();
+        snap.ts_ms = 10_000;
+        snap.tasks[0].exited = [40, 41, 42].map((pid) => ({
+            id: `${pid}:1`,
+            pid,
+            ppid: 11,
+            name: "rustc.exe",
+            role: "started" as const,
+            cpu_time_ns: 2e9,
+            peak_mem: GB,
+            exited_ms: 6_000,
+            started_at_ms: 300,
+        }));
+        snap.tasks[0].exited.push({
+            id: "43:1",
+            pid: 43,
+            ppid: 11,
+            name: "cc.exe",
+            cpu_time_ns: 1e9,
+            exited_ms: 6_000,
+            started_at_ms: 300,
+        });
+        sample.mockResolvedValue(snap);
+        renderTower();
+        const gone = await screen.findByTestId("tower-many-rustc.exe-exited");
+        expect(gone).toHaveClass("tower-process-row--exited");
+        expect(within(gone).getByText("×3")).toBeInTheDocument();
+        expect(within(gone).getByText("exited")).toBeInTheDocument();
+        const cc = screen.getByText("cc.exe").closest("tr")!;
+        expect(cc).toHaveClass("tower-process-row--exited");
+        expect(within(cc).getByText("exited 4 s ago")).toBeInTheDocument();
+        // It isn't counted as running.
+        expect(within(screen.getByTestId("tower-rail-block-a")).getByText("50%")).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "More columns" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:cols": "more" });
+        expect(screen.getByRole("columnheader", { name: "CPU time" })).toBeInTheDocument();
+        // The three exited compilers' 6 s, and their peak.
+        expect(within(gone).getByText("6.0 s")).toBeInTheDocument();
+        expect(within(gone).getByText("1.0 GB")).toBeInTheDocument();
+    });
+
+    it("the process a tool call runs says which call, in both views", async () => {
+        const snap = snapshot(true);
+        snap.tasks[0].processes[1].started_by = "Run the srv tests";
+        snap.host!.processes.push({
+            id: "11:1",
+            pid: 11,
+            name: "node.exe",
+            cpu: 1.5,
+            mem: GB / 2,
+            task: "block-a",
+            started_by: "Run the srv tests",
+        });
+        sample.mockResolvedValue(snap);
+        renderTower();
+        const row = (await screen.findByText("node.exe")).closest("tr")!;
+        expect(within(row).getByText("⟵ Run the srv tests")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
+        await waitFor(() => expect(screen.getAllByText("⟵ Run the srv tests").length).toBeGreaterThan(0));
+    });
+
     it("keeps each row, and updates it, across a refresh", async () => {
         vi.useFakeTimers();
         renderTower();

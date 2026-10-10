@@ -163,4 +163,7 @@ Method: real keys sent through System Events into a dev window. The window was r
   - the four `pane:swap:*` keys, which GNOME takes for "move window to workspace" (the gsettings result above). Wayland gives no way to read and restore the workspace, so they're never pressed;
   - the manual rows;
   - Shift+Delete, which is refused.
-- So on stock GNOME, `pane:swap:*` is the only Linux key the OS takes. Its rebind (owner decision §8.3) is with Maricon.
+- So on stock GNOME, `pane:swap:*` is the only Linux key the OS takes. Its rebind (owner decision §8.3):
+  - On Linux, `pane:swap:*` is now **Ctrl+Shift+S, then Shift+Arrow**, next to the split chord (Ctrl+Shift+S, then Arrow). Windows keeps Ctrl+Alt+Shift+Arrow and macOS ⌃⌥⇧Arrow: the table gives a row Linux-only keys (`linux`), and the host's `host-keys.json` has a Linux list.
+  - Checked on charlie: `gnome-grabs.mjs` finds 0 of 120 Linux keys taken. A real `ydotool` press of the chord with the Files list focused resolves `pane:swap:up` and `pane:swap:down`. KDE Plasma's default global shortcuts don't use Ctrl+Shift+S either, but that wasn't checked on a KDE host.
+  - Two dispatcher fixes made the chord typable. A modifier pressed on its own no longer ends a waiting chord (before, any chord whose second key has a modifier was untypable). While a chord waits, its second key is resolved before a pane can take it (the Files list's Shift+↑, an editor's arrows).

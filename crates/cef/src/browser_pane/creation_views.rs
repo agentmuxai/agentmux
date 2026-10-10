@@ -68,7 +68,8 @@ use cef::{
 
 use crate::state::AppState;
 
-/// Create a Views-based browser pane on the CEF UI thread.
+/// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
+/// profile's) or, when `None`, in its window's.
 ///
 /// Caller is `CreateBrowserPaneTask::execute` (`browser_pane/creation.rs`),
 /// which is itself posted via `post_task(ThreadId::UI, ...)` from
@@ -80,6 +81,7 @@ pub fn create_browser_pane_view(
     url: String,
     rect: Rect,
     window_label: String,
+    jar: Option<cef::RequestContext>,
 ) {
     tracing::info!(
         block_id = %block_id,
@@ -137,38 +139,25 @@ pub fn create_browser_pane_view(
 
     let url_cef = CefString::from(url.as_str());
 
-    // 5. Resolve the parent window's RequestContext. Critical for the
-    //    multi-window observer-list crash fix:
-    //    every isolated RequestContext yields a different `Profile*` pointer
-    //    but they all share one `ThemeService` instance (chrome's
-    //    `ThemeServiceFactory` redirects to the original profile). The pane
-    //    used to pass `None` here, getting the global default Profile —
-    //    different from the parent window's Profile — and
-    //    `CefWidgetImpl::AddAssociatedProfile` would then re-add the widget
-    //    as an observer of the shared ThemeService, tripping the
-    //    "Observers can only be added once!" CHECK and FATAL-crashing the
-    //    host. Reusing the parent window's RequestContext means the
-    //    pane's Profile matches the window's main browser's Profile, so
-    //    the map check fires and AddObserver is skipped.
-    // A pane with an Incognito identity can't have a jar of its own on this
-    // path yet (the profiles spec §7.2): it is not created, rather than
-    // browsing in the window's shared jar. `check_capacity` already refused it
-    // to the frontend; this is the backstop.
-    if crate::browser_pane::identity::has_identity(&block_id) {
-        tracing::warn!(block_id = %block_id, "[browser-identity] Incognito pane not created: Windows only for now");
-        return;
-    }
-    let parent_request_context = state
-        .get_browser(&window_label)
-        .and_then(|b| b.host())
-        .and_then(|h| h.request_context());
+    // 5. The pane's jar: its Incognito or profile jar, else (`None`) the
+    //    global one, as on Windows, whichever window it is in. A window can
+    //    host panes whose Profiles differ from its own browser's (a secondary
+    //    window runs on an off-the-record context of its own). Stock CEF
+    //    can't: `CefWidgetImpl::AddAssociatedProfile` observed the
+    //    `ThemeService` once per Profile, but an off-the-record Profile shares
+    //    its original's, so the widget was added twice ("Observers can only
+    //    be added once!"). Our CEF fork observes each `ThemeService` once
+    //    (agentmuxai/cef#11, in the 154 r2 runtimes). Before it, panes here
+    //    borrowed their window's context, which made a Personal tab in a
+    //    secondary window silently in-memory (identities spec §4.2), and
+    //    Incognito tabs were Windows only.
     tracing::info!(
         block_id = %block_id, label = %label,
         window_label = %window_label,
-        has_parent_context = parent_request_context.is_some(),
-        "[browser-pane] views: resolved parent window's RequestContext"
+        own_jar = jar.is_some(),
+        "[browser-pane] views: pane jar resolved"
     );
-    let mut request_context = parent_request_context;
+    let mut request_context = jar;
 
     // 6. Create the BrowserView. Underlying Browser is constructed lazily on
     //    AddedToWidget below.

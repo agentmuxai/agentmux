@@ -218,8 +218,19 @@ export const TIPS: TipRow[] = [
         area: "Files",
         gesture: "mod+click / shift+click",
         where: "on rows in the Files pane",
-        label: "Add or remove one row / select a range; {key:mod+Space} toggles the focused row",
+        label: "Add or remove one row / select a range",
         source: { file: "frontend/app/view/files/files-view.tsx", anchor: "e.shiftKey" },
+    },
+    {
+        // Not on macOS: Spotlight takes ⌘Space and the input-source switch ⌃Space
+        // by default, so the key never reaches the page (Masty's macOS check, #4631).
+        id: "files:toggleFocused",
+        area: "Files",
+        gesture: "ctrl+key:Space",
+        where: "in the Files list",
+        label: "Add or remove the focused row without moving it",
+        os: ["win32", "linux"],
+        source: { file: "frontend/app/view/files/files-view.tsx", anchor: 'e.key === " " && isMod(e)' },
     },
     {
         id: "files:keys",

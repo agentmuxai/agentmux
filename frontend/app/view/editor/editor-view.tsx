@@ -27,6 +27,8 @@ import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
+import { EDITOR_STATE_FIELDS, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
+import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
@@ -163,7 +165,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 if (model.activeTabAtom()?.isScratch) {
                     triggerSaveAs();
                 } else {
-                    void model.saveFile();
+                    void trackSave(model, model.activeIdAtom(), model.saveFile());
                 }
                 return true;
             // Phase 1: Save As is only implemented for scratch tabs.
@@ -402,6 +404,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // wired below.
     const cmStates = new Map<string, EditorState>();
     let activeTabIdForCm: string | null = null;
+    // A tab moving to another Editor takes its state from here: the live one
+    // for the tab in front, the saved one for the rest (editor-doc-tabs.ts).
+    onCleanup(provideEditorStates(model, (tabId) => (tabId === activeTabIdForCm ? cmView?.state : cmStates.get(tabId))));
 
     // Guards setupEditor against concurrent invocation. It is async and awaits
     // `loadLanguage()` BETWEEN destroying the previous view and constructing
@@ -424,6 +429,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         const container = containerRef();
         if (!container) return;
         const gen = ++setupGeneration;
+        const tabId = untrack(model.activeIdAtom);
 
         // Destroy previous instance
         if (cmView) {
@@ -484,11 +490,23 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             model.cmViewRef.current = null;
         }
 
+        // A tab moved in from another Editor brings its undo history and
+        // selection (editor-doc-tabs.ts), rebuilt here with this view's own
+        // extensions. Taken only now, past the superseded check above, so a
+        // superseded build leaves it for the next one.
+        const moved = tabId ? takeMovedEditorState(model, tabId) : undefined;
+        let state: EditorState | undefined;
+        // Only when it is the text shown: a clean tab is read fresh on
+        // arrival, and its file may have changed meanwhile.
+        if (moved !== undefined && (moved as { doc?: unknown }).doc === content) {
+            try {
+                state = EditorState.fromJSON(moved, { extensions }, EDITOR_STATE_FIELDS);
+            } catch {
+                state = undefined; // its text is still `content`
+            }
+        }
         cmView = new EditorView({
-            state: EditorState.create({
-                doc: content,
-                extensions,
-            }),
+            state: state ?? EditorState.create({ doc: content, extensions }),
             parent: container,
         });
         setLiveDoc(content); // seed preview from the freshly-built doc
@@ -695,12 +713,22 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         )
     );
 
+    // An Editor tab from another pane, dropped anywhere on this one, joins it.
+    onMount(() => {
+        if (rootRef) onCleanup(registerDocTabDropZone(rootRef, "editor", model.blockId));
+    });
+
     // Clear cached CodeMirror state when its tab closes, so re-opening
     // the same file later starts fresh (matches user expectation —
     // closed-then-reopened ≠ "still has unsaved changes").
     const unsubSliceEvents = model.onSliceEvent((event) => {
         if (event.type === "TabClosed") {
             cmStates.delete(event.tabId);
+            // The tab in front left. It isn't the outgoing tab to snapshot
+            // when the next one shows: a tab moved to another pane keeps its
+            // id, and a snapshot taken now would come back over its newer
+            // text if it is moved back.
+            if (activeTabIdForCm === event.tabId) activeTabIdForCm = null;
         }
     });
 
@@ -753,8 +781,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     };
 
     const handleSaveAsConfirm = async (path: string) => {
+        const tabId = saveAsTabId();
         setSaveAsTabId(null);
-        if (path) await model.saveFileAs(path);
+        if (path) await trackSave(model, tabId, model.saveFileAs(path));
     };
 
     // ── File-tree context menu ────────────────────────────────────────

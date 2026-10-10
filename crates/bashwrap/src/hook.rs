@@ -156,7 +156,14 @@ pub fn record_response(stdin_payload: &str) -> Value {
         && !command.starts_with(WRAPPED_PREFIX);
     if usable {
         let background = input.tool_input.get("run_in_background").and_then(|v| v.as_bool()).unwrap_or(false);
-        let record = crate::prefix::new_record(&input.tool_use_id, command, background);
+        let mut record = crate::prefix::new_record(&input.tool_use_id, command, background);
+        record.description = input
+            .tool_input
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(str::to_string);
         if let Err(e) = crate::prefix::register(&input.session_id, &record) {
             tracing::warn!(target: "bashwrap", tool_id = %input.tool_use_id, error = %e, "couldn't record the Bash call; it runs unstreamed");
         }
@@ -785,6 +792,7 @@ line' && cat $HOME/.env"#;
         .to_string();
         let resp = record_response(&payload);
         let claimed = crate::prefix::claim("sess-rec", Some("cargo build"));
+        let described = claimed.as_ref().and_then(|c| c.description.clone());
         let wrapped = json!({
             "tool_name": "Bash", "tool_use_id": "toolu_w", "session_id": "sess-rec",
             "tool_input": { "command": "agentmux-bashwrap exec --tool-id=x --b64-cmd=eA" }
@@ -798,6 +806,7 @@ line' && cat $HOME/.env"#;
         assert_eq!(resp, json!({}));
         let claimed = claimed.expect("the call was recorded");
         assert_eq!((claimed.tool_use_id.as_str(), claimed.run_in_background), ("toolu_rec", true));
+        assert_eq!(described.as_deref(), Some("Build"), "the call's description, for Tower");
         assert_eq!(resp_wrapped, json!({}));
         assert_eq!(left, None, "an already-wrapped command isn't recorded");
     }

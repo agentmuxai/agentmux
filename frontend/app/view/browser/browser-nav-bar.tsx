@@ -13,9 +13,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 import { DEFAULT_BROWSER_URL, type BrowserViewModel } from "./browser-model";
-import { canOpenIncognito } from "./browser-identity";
 import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
-import { getPlatform } from "@/util/platformutil";
 
 /**
  * A saved bookmark's favicon, falling back to the app's existing "no
@@ -150,7 +148,7 @@ export function BrowserNavBar(props: {
                     return;
                 }
                 if (payload.action === "new-incognito") {
-                    if (canOpenIncognito(getPlatform())) openIncognitoTab(model, home());
+                    openIncognitoTab(model, home());
                     return;
                 }
                 if (payload.action !== "focus-address") return;
