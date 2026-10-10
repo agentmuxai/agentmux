@@ -281,10 +281,10 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 .map(str::to_string)
                         });
                     if let Some(agent_slug) = agent_slug {
-                        crate::backend::agent_config::record_config_id_drift(
+                        crate::server::agent_self_keys::record_config_id_drift(
                             "m4d.config_id_drift.write_agent_config",
                             &agent_slug,
-                            crate::backend::agent_config::single_row_slug_folded(&mstore, &agent_slug).as_deref(),
+                            crate::server::agent_self_keys::single_row_slug_folded(&mstore, &agent_slug).as_deref(),
                         );
                         if let Some(rewritten) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
                             &cmd.files[pos].content,
