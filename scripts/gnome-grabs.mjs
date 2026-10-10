@@ -118,7 +118,8 @@ async function main() {
     const grabs = readGnomeGrabs();
     const rows = [];
     for (const row of DEFAULT_KEYBINDINGS) {
-        for (const k of row.other ?? []) {
+        // Linux's own keys where the table gives them, else the Windows/Linux ones.
+        for (const k of row.linux ?? row.other ?? []) {
             const owners = grabs.get(normTable(k));
             rows.push({ command: row.command, label: row.label, key: k, pane: row.pane ?? "", devOnly: !!row.devOnly, owners: owners ?? [] });
         }

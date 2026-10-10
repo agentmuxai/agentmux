@@ -40,6 +40,15 @@ describe("listShortcuts", () => {
         const clear = listShortcuts("other").find((s) => s.command === "term:clear");
         expect(clear?.when).toContain("terminalFocus");
     });
+
+    it("gives Linux its own keys where its desktop takes the shared ones (pane:swap, plan §8.3)", () => {
+        const swap = (platform: "linux" | "other") => listShortcuts(platform).find((s) => s.command === "pane:swap:up");
+        expect(swap("other")?.raw).toEqual(["ctrl+alt+shift+ArrowUp"]);
+        expect(swap("linux")).toMatchObject({ raw: ["ctrl+shift+s shift+ArrowUp"], keys: ["Ctrl+Shift+S then Shift+↑"] });
+        // Everything else is the same on Windows and Linux.
+        const keys = (platform: "linux" | "other") => listShortcuts(platform).filter((s) => !s.command.startsWith("pane:swap:")).map((s) => s.raw.join());
+        expect(keys("linux")).toEqual(keys("other"));
+    });
 });
 
 describe("runCommand", () => {
