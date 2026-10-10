@@ -415,3 +415,13 @@ tr:hover .tower-reveal,
 .tower-process-row--deep .tower-name {
     padding-left: 54px;
 }
+
+// The owner carried over from the Agents view, with the way back to all.
+.tower-only {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--accent-color);
+    white-space: nowrap;
+}

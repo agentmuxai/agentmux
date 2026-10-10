@@ -242,7 +242,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                             {count(props.entry.processes, "process")} AgentMux didn't start: other apps, services and
                             the system.
                         </p>
-                        <Button density="compact" onClick={() => m.setView("processes")}>
+                        <Button density="compact" onClick={() => m.setView("processes", props.entry.id)}>
                             Show in Processes
                         </Button>
                     </div>
