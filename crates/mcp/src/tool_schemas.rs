@@ -321,7 +321,7 @@ pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "command": { "type": "string", "description": "Command id from ListShortcuts" },
-      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first, or of one of its pane tabs (that tab becomes the one the pane shows)" }
     },
     "required": ["command"]
   }
@@ -334,7 +334,7 @@ pub(crate) const PRESS_KEYS_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "keys": { "type": "string", "description": "A raw key from ListShortcuts, in the table's syntax" },
-      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first, or of one of its pane tabs (that tab becomes the one the pane shows)" }
     },
     "required": ["keys"]
   }
