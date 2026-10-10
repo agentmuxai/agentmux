@@ -764,10 +764,6 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
     });
 });
 
-/**
- * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4: the row times and
- * counts the turn the user sees, over its CLI passes, from srv's ledger.
- */
 // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.10: the presenter's
 // dwell counts from when a line is fully printed, by the wall clock. The row's
 // type-out must follow the same clock, or a throttled timer (a background
@@ -795,6 +791,10 @@ describe("AgentWorkingRow type-out follows the clock", () => {
     });
 });
 
+/**
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4: the row times and
+ * counts the turn the user sees, over its CLI passes, from srv's ledger.
+ */
 describe("AgentWorkingRow across a turn's passes", () => {
     const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
         turnId: 7,
