@@ -53,6 +53,7 @@ function Mount(props: { blockId: string; driver?: string; allowed?: string[] }) 
         urlAtom: () => "https://agentmux.ai/",
         driverAgentAtom: () => props.driver,
         allowedOriginsAtom: () => props.allowed ?? [],
+        identityAtom: () => undefined,
     } as any;
     usePaneRectSync({ model, placeholderRef: () => ph, windowLabel: "main", diag: () => {} });
     return <div ref={ph} />;

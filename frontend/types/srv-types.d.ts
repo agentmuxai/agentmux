@@ -829,6 +829,10 @@ declare global {
          *  elsewhere asks the user. Written by srv only
          *  (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §5). */
         "browser:allowed_origins"?: string[] | null;
+        /** Which jar this browser tab browses as, fixed when it is opened:
+         *  absent for Personal, `incognito:<jar>`, or `profile:<id>`
+         *  (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5). */
+        "browser:identity"?: string | null;
         // Floating-pane window state (host-written; `pane:floating_*` family).
         "pane:floating_placement"?: "normal" | "maximized";
         "pane:floating_normal_rect"?: { left: number; top: number; right: number; bottom: number };

@@ -18,6 +18,9 @@ pub(super) async fn handle_pane_open(
 ) -> impl IntoResponse {
     if let Some(meta) = req.meta.as_mut() {
         crate::server::browser_owner::strip_srv_only_keys(meta);
+        if let Err(e) = crate::server::browser_identity::check_new_tab(&state, meta) {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
     }
     // A pane on an SSH host reads and writes there as the user, with their
     // SSH keys: over HTTP (where agents call from) that takes the agent's
