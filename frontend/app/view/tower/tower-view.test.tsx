@@ -348,7 +348,7 @@ describe("Tower", () => {
         expect(within(gone).getByText("exited")).toBeInTheDocument();
         const cc = screen.getByText("cc.exe").closest("tr")!;
         expect(cc).toHaveClass("tower-process-row--exited");
-        expect(within(cc).getByText("exited 4 s ago")).toBeInTheDocument();
+        expect(within(cc).getByText("4 s ago")).toHaveAttribute("title", "Exited 4 s ago");
         // It isn't counted as running.
         expect(within(screen.getByTestId("tower-rail-block-a")).getByText("50%")).toBeInTheDocument();
 
@@ -378,6 +378,49 @@ describe("Tower", () => {
         expect(within(row).getByText("⟵ Run the srv tests")).toBeInTheDocument();
         fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
         await waitFor(() => expect(screen.getAllByText("⟵ Run the srv tests").length).toBeGreaterThan(0));
+    });
+
+    it("the selected agent's last 10 minutes: CPU and memory charts, once there are two samples", async () => {
+        vi.useFakeTimers();
+        let ts = 1_000_000;
+        sample.mockImplementation(() => {
+            const snap = snapshot();
+            snap.ts_ms = ts;
+            ts += 2000;
+            return Promise.resolve(snap);
+        });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        // One sample: no chart yet.
+        expect(screen.queryByTestId("tower-history")).toBeNull();
+        await vi.advanceTimersByTimeAsync(2000);
+        const charts = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
+        expect(charts.map((c) => c.getAttribute("aria-label"))).toEqual([
+            "CPU over the last 10 minutes: now 50%, peak 50%",
+            "Memory over the last 10 minutes: now 1.0 GB, peak 1.0 GB",
+        ]);
+        // A share of one core when the pane shows that.
+        fireEvent.click(screen.getByRole("radio", { name: "% of a core" }));
+        expect(
+            screen.getAllByRole("img", { name: /over the last 10 minutes/ })[0].getAttribute("aria-label")
+        ).toContain("now 200%");
+
+        // Under the pointer: when, and how much.
+        fireEvent.pointerMove(charts[0], { clientX: 10_000 });
+        expect(screen.getByTestId("tower-chart-tip")).toHaveTextContent("0 s ago · 200%");
+        fireEvent.pointerLeave(charts[0]);
+        expect(screen.queryByTestId("tower-chart-tip")).toBeNull();
+    });
+
+    it("a refresh that brings the same measurement adds no point to the history", async () => {
+        vi.useFakeTimers();
+        sample.mockImplementation(() => Promise.resolve(snapshot()));
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(2000);
+        // Every sample had the same time: still one point, so no chart.
+        expect(screen.queryByTestId("tower-history")).toBeNull();
     });
 
     it("keeps each row, and updates it, across a refresh", async () => {

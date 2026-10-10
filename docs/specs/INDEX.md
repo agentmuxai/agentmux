@@ -481,6 +481,7 @@ partial list.
 | [`SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08`](SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md) | SPEC: Tool preview scrollbar-to-edge padding removal |
 | [`SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27`](SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md) | SPEC: Wheel edge skid — a nested preview absorbs a few wheel notches before the pane scrolls |
 | [`SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17`](SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md) | SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale) |
+| [`SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08`](SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md) | SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
@@ -639,7 +640,6 @@ partial list.
 | [`SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26`](SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md) | Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row |
 | [`SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03`](SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md) | Spec: Scroll Chaining for Nested Tool-Preview Regions |
 | [`SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07`](SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md) | Top bar: widget labels drop before tabs shrink |
-| [`SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08`](SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md) | SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent |
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |

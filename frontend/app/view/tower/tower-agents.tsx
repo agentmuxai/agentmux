@@ -13,12 +13,14 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { pickAgentColor } from "@/app/view/agent/agent-color";
 import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
+import { HistoryCharts } from "./tower-history";
 import { HISTORY_POINTS, type TowerViewModel } from "./tower-model";
 import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import {
     buildProcessTree,
     count,
+    cpuPercent,
     formatAgo,
     formatCpuTime,
     formatMem,
@@ -181,7 +183,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
             <span class="tower-rail-name">{props.entry.label}</span>
             <span class="tower-rail-cpu tower-num">{props.cpu(props.entry.cpu)}</span>
             <span class="tower-rail-mem tower-num tower-muted">{formatMem(props.entry.mem)}</span>
-            <Sparkline points={m.history().get(props.entry.id) ?? []} color={entryColor(props.entry, remote())} />
+            <Sparkline points={m.recentCpu(props.entry.id)} color={entryColor(props.entry, remote())} />
         </div>
     );
 }
@@ -236,6 +238,12 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                     {count(props.entry.processes, "process")}
                 </span>
             </div>
+            <HistoryCharts
+                points={m.history().get(props.entry.id) ?? []}
+                color={entryColor(props.entry, remote())}
+                cpuPercent={(f) => cpuPercent(f, m.snapshot()?.cpu_count ?? 1, m.cpuMode())}
+                formatCpu={props.cpu}
+            />
             <Show
                 when={props.entry.kind !== "other"}
                 fallback={
@@ -392,7 +400,9 @@ function TreeRows(props: {
 type ManyLine = Extract<TreeLine, { kind: "many" }>;
 type ProcessLine = Extract<TreeLine, { kind: "process" }>;
 
-const indentStyle = (depth: number) => ({ "padding-left": `${8 + depth * 16}px` });
+/** 12px a level, and no deeper than six levels: a narrow pane keeps room
+ *  for the name. */
+const indentStyle = (depth: number) => ({ "padding-left": `${8 + Math.min(depth, 6) * 12}px` });
 
 /** Same-named siblings with nothing under them: one line, opening to each. */
 function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number; cpu: Cpu; scope: string }) {
@@ -481,7 +491,12 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                         <ProcessName process={props.node.process} />
                         <Show when={exitedMs()}>
                             {(ms) => (
-                                <span class="tower-muted">exited {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}</span>
+                                <span
+                                    class="tower-muted tower-exited-ago"
+                                    title={`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`}
+                                >
+                                    {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}
+                                </span>
                             )}
                         </Show>
                     </div>
