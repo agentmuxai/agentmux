@@ -160,7 +160,10 @@ fi
 # path too). Fixes the Explorer / Task Manager / Alt-Tab exe-file icon — the
 # #1633 regression. The running WINDOW icon is fixed separately at runtime
 # (set_window_icon → WM_SETICON).
-bash "$REPO_ROOT/scripts/inject-exe-icon.sh" "$PORTABLE/runtime/agentmux-$VERSION.exe"
+# The description names the build in Task Manager; local builds say so.
+HOST_DESC="AgentMux v$VERSION"
+[ "$CHANNEL" = "stable" ] || HOST_DESC="$HOST_DESC (local)"
+bash "$REPO_ROOT/scripts/inject-exe-icon.sh" "$PORTABLE/runtime/agentmux-$VERSION.exe" "$HOST_DESC"
 
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
