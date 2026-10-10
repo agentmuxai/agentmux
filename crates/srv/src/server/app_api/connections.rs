@@ -333,6 +333,9 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
         ),
         "ok_label": "Remove",
         "cancel_label": "Keep It",
+        // The window draws a destructive answer in the danger tone, not the
+        // loud attention fill.
+        "destructive": true,
     });
     let answer = ask_user(state, block, question).await?;
     if !(answer.answered && answer.approve) {
@@ -419,6 +422,7 @@ async fn confirm_session_end(
         ),
         "ok_label": "End Session",
         "cancel_label": "Keep It",
+        "destructive": true,
     });
     let answer = ask_user(state, block, question).await?;
     if answer.answered && answer.approve {

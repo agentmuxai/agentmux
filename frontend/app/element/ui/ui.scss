@@ -31,6 +31,24 @@
     @include line.tone(quiet);
 }
 
+// Filled, and glowing gently while it waits for the user; still under
+// reduced motion.
+.ui-tone-attention {
+    @include line.tone(attention);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
+    animation: ui-attention-glow 1.8s ease-in-out infinite;
+
+    @media (prefers-reduced-motion: reduce) {
+        animation: none;
+    }
+}
+
+@keyframes ui-attention-glow {
+    50% {
+        box-shadow: 0 0 18px color-mix(in srgb, var(--attention-color) 75%, transparent);
+    }
+}
+
 .ui-icon-button {
     width: var(--ui-height);
     padding: 0;
