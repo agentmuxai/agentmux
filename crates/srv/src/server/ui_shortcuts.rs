@@ -100,7 +100,7 @@ mod tests {
     fn refuses_only_the_commands_the_owner_ruled_out() {
         assert!(refused_command("files:deletePermanently").is_some());
         assert!(refused_command("pane:close").unwrap().contains("ClosePane"));
-        for allowed in ["tab:close", "files:trash", "split:right", "pane:replaceWithLauncher"] {
+        for allowed in ["tab:close", "split:right", "pane:replaceWithLauncher", "files:trash"] {
             assert!(refused_command(allowed).is_none(), "{allowed} keeps its own confirmation or undo");
         }
     }

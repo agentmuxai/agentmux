@@ -29,6 +29,8 @@ const NOTE_DURATION_MS = 300;
 const NOTE_GAP_MS = 200;
 /** Pause after the full triad before looping (ms). */
 const LOOP_PAUSE_MS = 1000;
+/** One loop of the arpeggio, the beat the pane's tab flashes to. */
+export const WAITING_LOOP_MS = ARPEGGIO_HZ.length * (NOTE_DURATION_MS + NOTE_GAP_MS) + LOOP_PAUSE_MS;
 /** Fade-in ramp (s). */
 const FADE_IN_S = 0.4;
 /** Fade-out ramp (s). */

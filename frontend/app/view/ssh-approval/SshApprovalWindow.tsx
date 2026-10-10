@@ -20,6 +20,7 @@
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { getApi } from "@/app/store/app-api";
+import { Button as UiButton } from "@/app/element/ui";
 import { Button } from "@/element/button";
 
 import "./ssh-approval-window.scss";
@@ -34,6 +35,8 @@ export type SshApprovalMeta = {
     checkbox: string;
     okLabel: string;
     cancelLabel: string;
+    /** The OK answer destroys something (Remove, End Session): danger tone. */
+    destructive: boolean;
 };
 
 const KINDS: SshApprovalKind[] = ["consent", "secret", "yesno", "info"];
@@ -53,6 +56,7 @@ export function parseSshApprovalMeta(raw: string | null): SshApprovalMeta | null
             checkbox: typeof p.checkbox === "string" ? p.checkbox : "",
             okLabel: str(p.ok_label, kind === "consent" ? "Allow" : kind === "yesno" ? "Yes" : "OK"),
             cancelLabel: str(p.cancel_label, kind === "consent" ? "Deny" : kind === "yesno" ? "No" : "Cancel"),
+            destructive: p.destructive === true,
         };
     } catch {
         return null;
@@ -144,9 +148,11 @@ export const SshApprovalWindow = (): JSX.Element => {
                         {meta.cancelLabel}
                     </Button>
                 </Show>
-                <Button onClick={() => decide(true)} className="green solid" disabled={busy()}>
+                {/* The call to action an agent waits on: the attention fill, or
+                    the danger tone when the answer destroys something. */}
+                <UiButton onClick={() => decide(true)} tone={meta.destructive ? "danger" : "attention"} disabled={busy()}>
                     {meta.okLabel}
-                </Button>
+                </UiButton>
             </footer>
         </div>
     );

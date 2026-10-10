@@ -50,6 +50,9 @@ pub struct PressReq {
 
 type Reply = (StatusCode, Json<ApiResponse<Value>>);
 
+/// How many dialogs are open in the page.
+const DIALOGS: &str = r#"document.querySelectorAll("[role=dialog]").length"#;
+
 fn unauthorized() -> Reply {
     (
         StatusCode::UNAUTHORIZED,
@@ -84,7 +87,8 @@ async fn open_app_window(state: &Arc<AppState>, block_id: &str) -> Result<CdpSes
 /// an error.
 async fn eval(cdp: &mut CdpSession, expr: &str) -> Result<Value, String> {
     let v = cdp
-        .call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))
+        // `plan` returns a Promise (it waits for the caret to land).
+        .call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true, "awaitPromise": true }))
         .await
         .map_err(|e| format!("CDP eval: {e}"))?;
     if let Some(exc) = v.get("exceptionDetails") {
@@ -184,6 +188,7 @@ async fn press(cdp: &mut CdpSession, plan_call: &str) -> Result<Value, String> {
     }
     // The page's clock, so `last().at` compares with it.
     let before = eval(cdp, "Date.now()").await?.as_f64().unwrap_or(0.0);
+    let dialogs_before = eval(cdp, DIALOGS).await?.as_u64().unwrap_or(0);
     for ev in &events {
         for params in key_events(ev) {
             cdp.call("Input.dispatchKeyEvent", params)
@@ -195,6 +200,9 @@ async fn press(cdp: &mut CdpSession, plan_call: &str) -> Result<Value, String> {
     // gets a moment to note what it resolved.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let last = eval(cdp, &api_call("last()")).await?;
+    // A dialog handles Escape itself, so the dispatcher never notes it; say
+    // so instead of reporting that nothing happened.
+    let closed_dialog = eval(cdp, DIALOGS).await?.as_u64().unwrap_or(0) < dialogs_before;
     let resolved = match last.get("at").and_then(|a| a.as_f64()) {
         Some(at) if at >= before => json!({ "command": last.get("command"), "by": last.get("by") }),
         _ => Value::Null,
@@ -204,6 +212,7 @@ async fn press(cdp: &mut CdpSession, plan_call: &str) -> Result<Value, String> {
         "modifiers": plan.get("modifiers"),
         "candidates": plan.get("commands"),
         "resolved": resolved,
+        "closed_dialog": closed_dialog,
     }))
 }
 

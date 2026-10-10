@@ -1,7 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { batch } from "solid-js";
+import { chromeZoomAtom } from "@/app/store/chrome-zoom";
+import { batch, untrack } from "solid-js";
 import { balanceNode, walkNodes } from "./layoutNode";
 import { HeaderHeightPx, MinimizedRowSlotWidthPx } from "./layoutMinimize";
 import { isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
@@ -57,14 +58,20 @@ export interface MainAxisAllocation {
  * fully-minimized Row branch inside a Row parent got one chip's width for
  * N side-by-side chips.
  *
+ * `chromeZoom` scales the chip itself (not the gap): the pane header is drawn
+ * with `zoom: var(--zoomfactor)`, so it renders `HeaderHeightPx × chromeZoom`
+ * px tall. Sizing the chip at the unzoomed 33px let a zoomed-out header leave
+ * the pane's content showing beneath it, and clipped a zoomed-in one
+ * (REPORT_MINIMIZED_PANE_CHROME_ZOOM_DESYNC_2026_10_10.md).
+ *
  * Pure; exported for unit tests.
  */
-export function collapsedExtentPx(node: LayoutNode, axisIsVertical: boolean, gapPx: number): number {
+export function collapsedExtentPx(node: LayoutNode, axisIsVertical: boolean, gapPx: number, chromeZoom = 1): number {
     const kids = node.children;
     if (!kids?.length) {
-        return axisIsVertical ? HeaderHeightPx + gapPx : MinimizedRowSlotWidthPx + gapPx;
+        return (axisIsVertical ? HeaderHeightPx : MinimizedRowSlotWidthPx) * chromeZoom + gapPx;
     }
-    const extents = kids.map((c) => collapsedExtentPx(c, axisIsVertical, gapPx));
+    const extents = kids.map((c) => collapsedExtentPx(c, axisIsVertical, gapPx, chromeZoom));
     // A Column lays its children out vertically; a Row, horizontally.
     const laidOutAlongThisAxis = (node.flexDirection === FlexDirection.Column) === axisIsVertical;
     return laidOutAlongThisAxis
@@ -83,13 +90,13 @@ export function collapsedExtentPx(node: LayoutNode, axisIsVertical: boolean, gap
  *
  * Gap compensation: each tile's rendered box is inset by `gapSizePx`
  * downstream (`innerRect` computes `calc(size - gapSizePx)` in
- * layoutNodeModels.ts), and the header has a FIXED --header-height in
- * block.scss — so the slot allocation must be header + gap for the visible
+ * layoutNodeModels.ts), and the header is --header-height scaled by chrome
+ * zoom — so the slot allocation must be zoomed header + gap for the visible
  * box to come out exactly header-sized instead of clipping.
  */
-function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean, gapPx: number): number {
+function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean, gapPx: number, chromeZoom: number): number {
     // A Row parent allocates along the horizontal axis; a Column, vertical.
-    return collapsedExtentPx(node, !parentIsRow, gapPx);
+    return collapsedExtentPx(node, !parentIsRow, gapPx, chromeZoom);
 }
 
 /**
@@ -109,8 +116,8 @@ function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean, gapPx: number)
  * case over-allocated — see [`collapsedExtentPx`]. Pure; exported for unit
  * tests.
  */
-export function minimizedCrossAxisPx(child: LayoutNode, gapPx: number): number {
-    return collapsedExtentPx(child, true, gapPx);
+export function minimizedCrossAxisPx(child: LayoutNode, gapPx: number, chromeZoom = 1): number {
+    return collapsedExtentPx(child, true, gapPx, chromeZoom);
 }
 
 /**
@@ -133,11 +140,12 @@ export function computeMainAxisAllocation(
     nodePixels: number,
     getSize: (n: LayoutNode) => number,
     gapPx = 0,
-    slipChildIds?: Set<string>
+    slipChildIds?: Set<string>,
+    chromeZoom = 1
 ): MainAxisAllocation {
     const isSlip = (c: LayoutNode) => slipChildIds?.has(c.id) ?? false;
     const fixed = children.map((c) =>
-        isSlip(c) ? 0 : isEffectivelyMinimized(c) ? minimizedFixedPx(c, nodeIsRow, gapPx) : 0
+        isSlip(c) ? 0 : isEffectivelyMinimized(c) ? minimizedFixedPx(c, nodeIsRow, gapPx, chromeZoom) : 0
     );
     const fixedTotal = fixed.reduce((a, b) => a + b, 0);
     const flexTotal = children.reduce((s, c, i) => (fixed[i] || isSlip(c) ? s : s + getSize(c)), 0);
@@ -377,6 +385,10 @@ function updateTreeHelper(
     const nodeIsRow = node.flexDirection === FlexDirection.Row;
     const nodePixels = nodeIsRow ? nodeRect.width : nodeRect.height;
     const gapPx = model.gapSizePx();
+    // Minimized chips are header-sized, and the header scales with chrome
+    // zoom. Untracked: an effect that happens to call updateTree must not
+    // start re-running on zoom; useTileLayout re-runs layout on zoom itself.
+    const chromeZoom = untrack(chromeZoomAtom);
 
     // Row-only: resolve which children dock onto a sibling instead of
     // claiming their own row-slot. Column direction never slips — a
@@ -389,7 +401,15 @@ function updateTreeHelper(
     const slipTargets = nodeIsRow ? resolveRowSlipTargets(node.children) : new Map<string, LayoutNode>();
     const slipChildIds = new Set(slipTargets.keys());
 
-    const alloc = computeMainAxisAllocation(node.children, nodeIsRow, nodePixels, getNodeSize, gapPx, slipChildIds);
+    const alloc = computeMainAxisAllocation(
+        node.children,
+        nodeIsRow,
+        nodePixels,
+        getNodeSize,
+        gapPx,
+        slipChildIds,
+        chromeZoom
+    );
     const pixelToSizeRatio = alloc.pixelToSizeRatio;
 
     // Phase A — base rect for every child. A slip child gets zero main-axis
@@ -411,7 +431,7 @@ function updateTreeHelper(
             width: nodeIsRow ? alloc.px[i] : nodeRect.width,
             height: nodeIsRow
                 ? minimizedChild
-                    ? Math.min(minimizedCrossAxisPx(child, gapPx), nodeRect.height)
+                    ? Math.min(minimizedCrossAxisPx(child, gapPx, chromeZoom), nodeRect.height)
                     : nodeRect.height
                 : alloc.px[i],
         };
@@ -443,7 +463,7 @@ function updateTreeHelper(
             const targetProps = additionalPropsMap[targetId];
             if (!targetProps?.rect) continue;
             const originalTop = targetProps.rect.top;
-            const totalSlipHeight = slipChildren.reduce((s, c) => s + minimizedCrossAxisPx(c, gapPx), 0);
+            const totalSlipHeight = slipChildren.reduce((s, c) => s + minimizedCrossAxisPx(c, gapPx, chromeZoom), 0);
             const clampedSlipHeight = Math.min(totalSlipHeight, targetProps.rect.height);
             // Scale EACH chip down proportionally when the group's combined
             // height exceeds the target's available space (several minimized
@@ -466,7 +486,7 @@ function updateTreeHelper(
             };
             let chipTop = originalTop;
             for (const slipChild of slipChildren) {
-                const chipHeight = minimizedCrossAxisPx(slipChild, gapPx) * scale;
+                const chipHeight = minimizedCrossAxisPx(slipChild, gapPx, chromeZoom) * scale;
                 const chipRect: Dimensions = {
                     top: chipTop,
                     left: shrunkRect.left,

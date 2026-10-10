@@ -319,7 +319,7 @@
         },
         "notify:sound:agent.waiting.for.input": {
           "type": "boolean",
-          "description": "Play a sound when an agent has been idle and waiting for user input for a while. Default true."
+          "description": "Play a looping tone while an agent waits for you: a question, a tool permission, a browser hand-off or approval, an SSH consent or a widget install. Quiet while you're looking at that pane. Default true."
         },
         "notify:sound:agent.shutdown.pending": {
           "type": "boolean",

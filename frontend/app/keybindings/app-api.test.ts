@@ -98,6 +98,12 @@ describe("runCommand refusals", () => {
         expect(d.ran).toEqual([]);
     });
 
+    it("runs files:trash on every platform, since the Trash can be restored from", () => {
+        expect(runCommand("files:trash", "focused", deps({ platform: "mac" })).reason).not.toMatch(/not available/);
+        expect(planKeyPress("Delete", "mac")).not.toHaveProperty("reason");
+        expect(runCommand("files:trash", "focused", deps()).reason).not.toMatch(/not available/);
+    });
+
     it("runs tab:close, which keeps its own confirmation", () => {
         expect(runCommand("tab:close", undefined, deps())).toEqual({ ran: true });
     });

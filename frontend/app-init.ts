@@ -77,6 +77,18 @@ import { installFocusFollowsSelection } from "@/app/store/focusManager";
 let platform: NodeJS.Platform;
 let savedInitOpts: AgentMuxInitOpts = null;
 
+// Dev only (no `import.meta.hot` in a release build): log why Vite is about to
+// reload the page, so an unexpected reload can be traced to the file that
+// caused it (docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md, K13). getApi() is
+// called at reload time, never while this module loads.
+import.meta.hot?.on("vite:beforeFullReload", (payload) => {
+    try {
+        getApi().sendLog(`[vite] full reload: ${JSON.stringify(payload)}`);
+    } catch {
+        // No host API yet: nothing to log to.
+    }
+});
+
 window.MOS = MOS;
 window.globalAtoms = atoms;
 window.RpcApi = RpcApi;
@@ -514,8 +526,9 @@ async function initAppInner() {
         // wait for either `pool:promote` (tear-off, injects workspaceId) or
         // `pool:new-window` (Cmd+N, no workspaceId → fresh workspace).
         // initHostNewWindow branches on workspaceId presence automatically.
-        const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote } = await import("@/app/init/pool");
+        const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote, markPoolWaiting } = await import("@/app/init/pool");
         if (isPoolMode()) {
+            markPoolWaiting("window");
             getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
             const { initialView, initialMeta } = await awaitPoolPromote();
             getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
@@ -525,6 +538,7 @@ async function initAppInner() {
             // Window" on a widget opens with ONLY that widget.
             await initHostNewWindow(initialView, initialMeta);
         } else if (isPanePoolMode()) {
+            markPoolWaiting("pane");
             // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
             // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
             getApi().sendLog("[initApp] pane-pool mode — deferring init until pool:pane-promote");
@@ -992,6 +1006,9 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     tlog("LoadWidgets", t);
     // An agent's request to install a widget opens a prompt here.
     void import("@/app/block/widget-install-requests").then((m) => m.startWidgetInstallRequests());
+    // srv's calls to action (browser, SSH consent, widget installs) join the
+    // waiting tone and notification.
+    void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());
 
     // Window services that don't paint. They load alongside the render and
     // install when loaded; initMux doesn't wait for them, because its end is

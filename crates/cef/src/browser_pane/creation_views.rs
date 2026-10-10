@@ -440,8 +440,8 @@ pub fn create_browser_pane_view(
     // Seed the physical-rect cache with the creation-time rect — see the
     // doc comment on `AppState::browser_pane_physical_rects` for why this
     // (not `controller.bounds()`) is the airspace-hide path's source of
-    // truth for this pane's on-screen rect on macOS.
-    #[cfg(target_os = "macos")]
+    // truth for this pane's on-screen rect.
+    #[cfg(not(target_os = "windows"))]
     state
         .browser_pane_physical_rects
         .lock()
@@ -504,7 +504,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // Keep the airspace path's rect source (see `AppState::browser_pane_physical_rects`)
     // fresh on every resize — this is the only place non-Windows learns the
     // pane's current physical on-screen rect.
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().insert(label.to_string(), pane_rect);
     // macOS visibility is rect-only: overlays no longer hide the pane there —
     // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
@@ -614,7 +614,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().remove(label);
     let Some((window_label, controller)) = entry else {
         tracing::debug!(

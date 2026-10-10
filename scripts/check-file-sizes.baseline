@@ -7,7 +7,7 @@
 1549 crates/cef/src/commands/cli_login.rs
 2219 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
-1679 crates/cef/src/state/mod.rs
+1673 crates/cef/src/state/mod.rs
 2202 crates/cef/src/ui_tasks/window.rs
 2606 crates/common/src/data_paths.rs
 2268 crates/common/src/ipc.rs
@@ -19,7 +19,7 @@
 2633 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
 2030 crates/srv/src/backend/blockcontroller/durable_ssh.rs
 1742 crates/srv/src/backend/blockcontroller/persistent/mod.rs
-3070 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
+3066 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 2912 crates/srv/src/backend/bundle_import.rs
 2352 crates/srv/src/backend/container.rs
 1771 crates/srv/src/backend/fs_ops/host_jobs.rs
@@ -42,12 +42,12 @@
 2118 crates/srv/src/server/muxspect_handlers.rs
 1665 crates/srv/src/server/native_memory_handlers.rs
 2821 crates/srv/src/server/reactive.rs
-1620 crates/srv/src/server/ui_handlers.rs
+1598 crates/srv/src/server/ui_handlers.rs
 2298 crates/srv/src/server/websocket.rs
 2036 frontend/app/store/agent-pane-state/reducer.ts
 1505 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1550 frontend/app/view/editor/editor-model.ts
-1560 frontend/app/view/files/files-view.tsx
+1566 frontend/app/view/files/files-view.tsx
 2212 frontend/app/view/swarm/swarm-model.ts

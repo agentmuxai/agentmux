@@ -312,6 +312,29 @@
     background: var(--panel-bg-alt);
 }
 
+// Add remote's one field.
+.remotes-add-destination {
+    width: 100%;
+    max-width: 420px;
+}
+
+// Add remote's name, identity file and jump host, folded away (most hosts
+// need none of them).
+.remotes-add-more > summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    user-select: none;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.remotes-add-more[open] > summary {
+    margin-bottom: var(--space-1);
+}
+
 .remotes-add-note {
     font-size: 12px;
     color: var(--secondary-text-color);

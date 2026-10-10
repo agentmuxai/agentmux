@@ -38,6 +38,17 @@
         --ui-line: var(--ui-line-danger);
         --ui-line-hover: var(--error-color);
         --ui-bg: color-mix(in srgb, var(--error-color) var(--ui-tint-rest), transparent);
+    } @else if $tone == attention {
+        // The one tone that fills: the main action of a call to action an
+        // agent waits on (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §1).
+        --ui-tone: var(--attention-color);
+        --ui-fg: var(--attention-text-color);
+        --ui-fg-hover: var(--attention-text-color);
+        --ui-line: var(--attention-color);
+        --ui-line-hover: var(--attention-color);
+        --ui-bg: var(--attention-color);
+        --ui-bg-hover: color-mix(in srgb, var(--attention-color) 85%, var(--main-text-color));
+        font-weight: 700;
     } @else if $tone == quiet {
         --ui-tone: var(--main-text-color);
         --ui-fg: var(--secondary-text-color);
@@ -57,7 +68,7 @@
 @mixin hover-look {
     color: var(--ui-fg-hover);
     border-color: var(--ui-line-hover);
-    background: color-mix(in srgb, var(--ui-tone) var(--ui-tint-hover), transparent);
+    background: var(--ui-bg-hover, color-mix(in srgb, var(--ui-tone) var(--ui-tint-hover), transparent));
 }
 
 // Pressed / selected look: the tone's full line, the hover tint, and a

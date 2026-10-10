@@ -97,9 +97,10 @@ export const SOUNDS_SETTINGS = {
     waitingToneEnabled: {
         id: "sounds.waiting_tone_enabled",
         label: "Enable",
-        description: "Play a looping ambient tone while an agent pane is blocked waiting for your input",
+        description:
+            "Play a looping tone while an agent waits for you: a question, a tool permission, a browser hand-off or approval, an SSH consent or a widget install",
         section: "sounds",
-        keywords: ["waiting for input sound", "ambient tone", "blocked sound", "notify:sound:agent.waiting.for.input"],
+        keywords: ["waiting for input sound", "ambient tone", "blocked sound", "permission", "approval", "notify:sound:agent.waiting.for.input"],
     },
     shutdownToneEnabled: {
         id: "sounds.shutdown_tone_enabled",

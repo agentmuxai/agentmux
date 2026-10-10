@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useOnResize } from "@/app/hook/useDimensions";
+import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { atoms, MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { LayoutModel } from "./layoutModel";
 import { LayoutNode, NodeModel, TileLayoutContents } from "./types";
@@ -112,6 +113,11 @@ export function useTileLayout(tabAtom: () => Tab, tileContent: TileLayoutContent
         const cleanup = layoutModel.registerTileLayout(tileContent);
         if (typeof cleanup === "function") onCleanup(cleanup);
     });
+
+    // Minimized-pane chips are sized from the chrome zoom (the header they
+    // show scales with it), so re-lay out when it changes. Geometry only — no
+    // tree change, so no rebalance (REPORT_MINIMIZED_PANE_CHROME_ZOOM_DESYNC_2026_10_10.md).
+    createEffect(on(chromeZoomAtom, () => layoutModel.updateTree(false), { defer: true }));
 
     return layoutModel;
 }

@@ -321,7 +321,7 @@ pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "command": { "type": "string", "description": "Command id from ListShortcuts" },
-      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first, or of one of its pane tabs (that tab becomes the one the pane shows)" }
     },
     "required": ["command"]
   }
@@ -329,12 +329,12 @@ pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
 
 pub(crate) const PRESS_KEYS_TOOL: &str = r#"{
   "name": "PressKeys",
-  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to pane:close or files:deletePermanently anywhere is refused. Pass target to focus a pane in that window's active tab first. Returns the modifiers sent (on macOS `meta` is ⌘), the commands the table binds the key to, and `resolved`: the command that actually ran and who ran it (the app or a pane), or null if nothing did. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
+  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to a command RunCommand refuses is refused, wherever it is bound. Pass target to focus a pane in that window's active tab first. Returns the modifiers sent (on macOS `meta` is ⌘); the commands the table binds the key to; `resolved`, the command that actually ran and who ran it (the app or a pane), or null; and `closed_dialog`, true when the key closed a dialog that handles it itself (Escape in the palette or a confirmation), which the app's dispatcher never sees. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "keys": { "type": "string", "description": "A raw key from ListShortcuts, in the table's syntax" },
-      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first, or of one of its pane tabs (that tab becomes the one the pane shows)" }
     },
     "required": ["keys"]
   }

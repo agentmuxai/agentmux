@@ -3,6 +3,7 @@
 
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
+import { setChromeZoomSignal } from "@/app/store/chrome-zoom";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { isInResizeHandleZone } from "@/layout/lib/layoutGeometry";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
@@ -423,6 +424,42 @@ describe("LayoutModel", () => {
 
         // No resize handle survives between agent and the now-docked rightCol.
         expect(props[root.id].resizeHandles).toHaveLength(0);
+    });
+
+    // REPORT_MINIMIZED_PANE_CHROME_ZOOM_DESYNC_2026_10_10.md: the header is
+    // drawn at 33px × chrome zoom, so updateTree must size chips from the
+    // live chrome zoom — docked (Row) and stacked (Column) alike.
+    it("sizes minimized chips from the current chrome zoom", () => {
+        const model = createLayoutModel();
+        const gap = model.gapSizePx();
+        const headerH = 33; // HeaderHeightPx
+        try {
+            for (const zoom of [0.5, 2]) {
+                setChromeZoomSignal(zoom);
+
+                // Column: the minimized pane's slot is one zoomed header.
+                const top = newLayoutNode(FlexDirection.Row, 5, undefined, { blockId: "top" });
+                const bottom = newLayoutNode(FlexDirection.Row, 5, undefined, { blockId: "bottom" });
+                top.minimized = true;
+                model.treeState.rootNode = newLayoutNode(FlexDirection.Column, 10, [top, bottom]);
+                model.updateTree();
+                let props = model.additionalProps();
+                expect(props[top.id].rect.height).toBeCloseTo(headerH * zoom + gap, 3);
+                expect(props[bottom.id].rect.top).toBeCloseTo(headerH * zoom + gap, 3);
+
+                // Row: the minimized pane docks as a zoomed-header chip.
+                const left = newLayoutNode(FlexDirection.Column, 5, undefined, { blockId: "left" });
+                const right = newLayoutNode(FlexDirection.Column, 5, undefined, { blockId: "right" });
+                left.minimized = true;
+                model.treeState.rootNode = newLayoutNode(FlexDirection.Row, 10, [left, right]);
+                model.updateTree();
+                props = model.additionalProps();
+                expect(props[left.id].rect.height).toBeCloseTo(headerH * zoom + gap, 3);
+                expect(props[right.id].rect.top).toBeCloseTo(headerH * zoom + gap, 3);
+            }
+        } finally {
+            setChromeZoomSignal(1);
+        }
     });
 
     // Regression (reagent P1, PR #2211): when several minimized panes

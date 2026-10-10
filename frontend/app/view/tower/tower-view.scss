@@ -389,3 +389,39 @@ tr:hover .tower-reveal,
 .tower-many-row .tower-label {
     font-weight: 500;
 }
+
+// ── The Processes view grouped by agent: each owner a header row, an agent's
+// in its color as a stripe down the group, the way the Agents rail shows it. ──
+
+.tower-owner-row {
+    .tower-label {
+        font-weight: 600;
+    }
+
+    td:first-child {
+        box-shadow: inset 3px 0 0 var(--tower-owner-color, transparent);
+    }
+}
+
+.tower-process-row--owned td:first-child {
+    box-shadow: inset 3px 0 0 var(--tower-owner-color);
+}
+
+// An app inside "Other processes": one level in, its processes two.
+.tower-group-row--nested .tower-name {
+    padding-left: 24px;
+}
+
+.tower-process-row--deep .tower-name {
+    padding-left: 54px;
+}
+
+// The owner carried over from the Agents view, with the way back to all.
+.tower-only {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--accent-color);
+    white-space: nowrap;
+}

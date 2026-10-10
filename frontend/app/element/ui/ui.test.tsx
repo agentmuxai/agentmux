@@ -54,6 +54,12 @@ describe("Button", () => {
         expect(b.hasAttribute("aria-pressed")).toBe(false);
     });
 
+    it("fills only for the attention tone, a call to action an agent waits on", () => {
+        render(() => <Button tone="attention">Approve</Button>);
+        const b = screen.getByRole("button", { name: "Approve" });
+        expect(b.classList.contains("ui-tone-attention")).toBe(true);
+    });
+
     it("takes its tone and density as classes", () => {
         render(() => (
             <Button tone="danger" density="compact">
