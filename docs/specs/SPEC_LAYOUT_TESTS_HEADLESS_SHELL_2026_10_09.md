@@ -1,6 +1,6 @@
 # Layout tests run in Chrome's headless shell, not the Chrome app
 
-**Status:** proposed.
+**Status:** implemented — in #4565.
 **Date:** 2026-10-09.
 **Requested by:** repo owner (asafebgi): "macOS sometimes will automatically pin icons to the launcher of certain apps … it appears to have docked 3 copies of a chrome shortcut"; "ok, lets stop it for good"; "write a spec to file, then implement".
 **Author:** Masty.
