@@ -38,6 +38,8 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
         error: null,
         hash: "h",
         panes: [{ view: VIEW, name: "main", label: "Notes", icon: "note-sticky", entry: "index.html", singleton: false, default_meta: {} }],
+        commands: [],
+        status_items: [],
         files_url: null,
         implied: false,
         folder: "",

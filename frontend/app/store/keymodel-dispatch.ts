@@ -1,11 +1,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { keyPlatform } from "@/app/keybindings";
+import { keyPlatform, setKeyContextProvider } from "@/app/keybindings";
 import {
     lastResolvedCommand,
     listShortcuts,
     noteResolved,
+    paneRefusal,
     planKeyPress,
     runCommand,
     type KeyPressPlan,
@@ -14,9 +15,9 @@ import {
 import type { KeyEventLike } from "@/app/keybindings/keys";
 import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
-import { atoms, getApi, getBlockComponentModel, refocusNode, setControlShiftDelayAtom } from "@/app/store/global";
+import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { effectiveStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
+import { revealBlockLocally } from "@/app/util/reveal-block";
 import { isEditableTarget } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
@@ -123,6 +124,8 @@ function focusedViewType(): string {
     const blockId = getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId;
     return (blockId && getBlockComponentModel(blockId)?.viewModel?.viewType) || "";
 }
+
+setKeyContextProvider(() => currentKeyContext());
 
 /** Where focus is, for the shortcut table's `when` clauses. */
 export function currentKeyContext(): KeyContext {
@@ -261,17 +264,14 @@ const NO_KEY: MuxKeyboardEvent = { type: "keydown", key: "", code: "", repeat: f
 
 /**
  * Focuses a pane for the App API, as a click would: layout focus and the
- * caret. `blockId` may be the pane's own block or one of its pane tabs; a tab
- * becomes the pane's visible one first, or the caret would stay with the tab
- * on show. False if no pane in the active tab holds `blockId`.
+ * caret. `blockId` may be any pane in this window, in any tab, or one of a
+ * pane's tabs: the window switches to that tab, the pane shows that tab, and
+ * a minimized or hidden pane is brought back (revealBlockLocally; the kinks
+ * plan's D1, A2). It never reaches another window. False if no tab of this
+ * window holds `blockId`.
  */
-export function focusPaneForApi(blockId: string): boolean {
-    const layout = getLayoutModelForStaticTab();
-    const node = layout.getNodeByBlockId(blockId);
-    if (!node) return false;
-    if (node.data && effectiveStack(node.data).includes(blockId)) setActiveBlockInStack(layout, node.id, blockId);
-    refocusNode(blockId);
-    return true;
+export async function focusPaneForApi(blockId: string): Promise<boolean> {
+    return revealBlockLocally(blockId);
 }
 
 /** Whether the caret is in `blockId`'s pane: in any element of that block, since a pane tab's content sits in its own block. */
@@ -306,16 +306,19 @@ export function installShortcutApi() {
     });
     (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
         list: () => listShortcuts(keyPlatform()),
-        run: (command: string, target?: string): RunResult => runCommand(command, target || undefined, deps()),
+        run: (command: string, target?: string): RunResult | Promise<RunResult> => runCommand(command, target || undefined, deps()),
         // PressKeys: what to send, after focusing `target`. The host then
         // sends the events and reads `last()`.
         plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
-            if (target && !focusPaneForApi(target)) return { reason: `pane ${target} is not in the active tab of this window` };
+            if (target && !(await focusPaneForApi(target))) return { reason: `pane ${target} is not in this window` };
             // A key goes where the caret is: refuse rather than press it into another pane.
             if (target && !(await caretArrives(target))) return { reason: `pane ${target} didn't take keyboard focus` };
-            return planKeyPress(keys, keyPlatform());
+            const plan = planKeyPress(keys, keyPlatform());
+            // The pane's own guard (the terminal's paste guard) sees the key too.
+            const refused = "commands" in plan ? await paneRefusal(target ?? focusedBlockId(), plan.commands) : undefined;
+            return refused ? { reason: refused } : plan;
         },
-        focus: (blockId: string): boolean => focusPaneForApi(blockId),
+        focus: (blockId: string): Promise<boolean> => focusPaneForApi(blockId),
         focused: focusedBlockId,
         last: () => lastResolvedCommand(),
     };

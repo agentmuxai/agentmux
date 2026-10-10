@@ -1194,18 +1194,39 @@ async fn ui_run_command_returns_the_host_result() {
 }
 
 #[tokio::test]
-async fn ui_run_command_refuses_pane_close_before_the_host() {
+async fn ui_run_command_refuses_a_permanent_delete_before_the_host() {
     let state = test_state();
     // A host that would accept anything: the refusal has to come from srv.
     let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ran":true}}"#, "tok-abc").await;
     *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
-    for command in ["pane:close", "files:deletePermanently"] {
-        let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
-        body["command"] = serde_json::json!(command);
-        let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{command}");
-        assert!(json["error"].as_str().unwrap().contains("not available to agents"), "{command}: {json}");
-    }
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("files:deletePermanently");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(json["error"].as_str().unwrap().contains("not available to agents"), "{json}");
+}
+
+#[tokio::test]
+async fn ui_run_command_pane_close_goes_through_close_pane() {
+    let state = test_state();
+    // A host that would accept anything: pane:close must not reach it.
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ran":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+
+    // No target: it says which pane it needs, rather than closing the focused one.
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("pane:close");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(json["error"].as_str().unwrap().contains("needs `target`"), "{json}");
+
+    // A target: ClosePane's own path, which looks the pane up (none here).
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("pane:close");
+    body["target"] = serde_json::json!("no-such-block");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+    assert!(json["error"].as_str().unwrap().contains("block not found"), "{json}");
 }
 
 #[tokio::test]

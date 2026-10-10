@@ -39,16 +39,18 @@ export interface ResolvedNote {
 }
 
 /**
- * Commands the App API refuses (owner decision, plan §8.2), with the reason
- * it gives. A permanent delete can't be undone. `pane:close` closes the
- * focused pane at once, which may be someone else's, so it goes through
- * `ClosePane` and its undo instead. Everything else that destroys or closes
- * (`tab:close`, `files:trash`, replacing a pane) runs with the confirmation
- * or undo a user gets.
+ * What the page refuses to run for the App API, with the reason it gives.
+ * Agents are first-class owners, so this is only what has no protection: a
+ * permanent delete can't be undone. `pane:close` is handled by srv, through
+ * ClosePane's undo (srv `ui_shortcuts.rs`), so it never reaches the page from
+ * RunCommand; here it stops PressKeys pressing a key that closes at once.
+ * Everything else that closes or destroys runs with the confirmation or undo
+ * a user gets (`tab:close`, `files:trash`, replacing a pane), and a pane can
+ * add its own guard (`registerPaneCommandRunner`'s `refuse`).
  */
 export const API_REFUSED: ReadonlyMap<string, string> = new Map([
     ["files:deletePermanently", "it can't be undone"],
-    ["pane:close", "it closes the focused pane at once: use ClosePane, which gives the user 15 seconds to undo (QuitSelf for your own pane)"],
+    ["pane:close", "a key press closes the focused pane at once: RunCommand pane:close with a target closes it with the user's 15-second undo"],
 ]);
 
 /** Commands refused on macOS only, for something macOS can't undo yet. None
@@ -67,7 +69,13 @@ export function refusalFor(command: string, platform: KeyPlatform): string | und
 const TERMINAL_OWN = new Set(["term:copy", "term:paste", "term:clear"]);
 
 let lastResolved: ResolvedNote | null = null;
-const paneRunners = new Map<string, (command: string) => boolean>();
+
+/** A pane's own command runner: true/false, or a result when it needs to say why (or to wait). */
+export type PaneRun = (command: string) => boolean | RunResult | Promise<RunResult>;
+/** Why a pane won't let the App API run `command` right now, or undefined. */
+export type PaneRefuse = (command: string) => Promise<string | undefined>;
+
+const paneRunners = new Map<string, { run: PaneRun; refuse?: PaneRefuse }>();
 
 /** Called by the dispatcher and the panes whenever a key resolves to a command. */
 export function noteResolved(command: string, by: string): void {
@@ -81,13 +89,27 @@ export function lastResolvedCommand(): ResolvedNote | null {
 /**
  * A pane registers the function that runs its own commands (`files:*`,
  * `editor:*`, `doctab:*`, `term:*`), so RunCommand reaches the same code its
- * keys do. Returns the unregister function, for the pane's cleanup.
+ * keys do, and optionally a guard that PressKeys and RunCommand ask first
+ * (the terminal's paste guard). Returns the unregister function, for the
+ * pane's cleanup.
  */
-export function registerPaneCommandRunner(blockId: string, run: (command: string) => boolean): () => void {
-    paneRunners.set(blockId, run);
+export function registerPaneCommandRunner(blockId: string, run: PaneRun, refuse?: PaneRefuse): () => void {
+    const entry = { run, refuse };
+    paneRunners.set(blockId, entry);
     return () => {
-        if (paneRunners.get(blockId) === run) paneRunners.delete(blockId);
+        if (paneRunners.get(blockId) === entry) paneRunners.delete(blockId);
     };
+}
+
+/** The first refusal a pane's guard gives for any of `commands`, or undefined. */
+export async function paneRefusal(blockId: string | null, commands: string[]): Promise<string | undefined> {
+    const refuse = blockId ? paneRunners.get(blockId)?.refuse : undefined;
+    if (!refuse) return undefined;
+    for (const command of commands) {
+        const why = await refuse(command);
+        if (why) return `${command}: ${why}`;
+    }
+    return undefined;
 }
 
 export function listShortcuts(platform: KeyPlatform): ShortcutInfo[] {
@@ -112,8 +134,8 @@ export interface RunDeps {
     platform: KeyPlatform;
     /** The pane a key press would reach now (the focused pane), if any. */
     focusedBlockId: () => string | null;
-    /** Focuses `blockId` in the active tab; false if it isn't there. */
-    focusBlock: (blockId: string) => boolean;
+    /** Focuses `blockId` in this window, switching tabs if needed; false if it isn't in this window. */
+    focusBlock: (blockId: string) => boolean | Promise<boolean>;
     /** The dispatcher's own handler: true when the command applied. */
     runGlobal: (command: string) => boolean;
 }
@@ -121,24 +143,33 @@ export interface RunDeps {
 /**
  * Runs a table command as its key would: a global command through the
  * dispatcher's handler, a pane command through the target pane's own runner.
- * `target` is a pane in the active tab (default: the focused pane).
+ * `target` is a pane in this window, in any tab (default: the focused pane).
  */
-export function runCommand(command: string, target: string | undefined, deps: RunDeps): RunResult {
+export function runCommand(command: string, target: string | undefined, deps: RunDeps): RunResult | Promise<RunResult> {
     const refused = refusalFor(command, deps.platform);
     if (refused) return { ran: false, reason: `${command} is not available to agents: ${refused}` };
     const info = listShortcuts(deps.platform).find((s) => s.command === command);
     if (!info) {
         return { ran: false, reason: `unknown command ${command}: ListShortcuts lists the commands` };
     }
-    if (target && !deps.focusBlock(target)) {
-        return { ran: false, reason: `pane ${target} is not in the active tab of this window` };
+    if (target) {
+        const notHere: RunResult = { ran: false, reason: `pane ${target} is not in this window` };
+        const focused = deps.focusBlock(target);
+        if (typeof focused !== "boolean") return focused.then((ok) => (ok ? runFocused(command, target, info, deps) : notHere));
+        if (!focused) return notHere;
     }
+    return runFocused(command, target, info, deps);
+}
+
+function runFocused(command: string, target: string | undefined, info: ShortcutInfo, deps: RunDeps): RunResult | Promise<RunResult> {
     if (info.pane || TERMINAL_OWN.has(command)) {
         const blockId = target ?? deps.focusedBlockId();
         if (!blockId) return { ran: false, reason: `${command} needs a pane: none is focused` };
-        const run = paneRunners.get(blockId);
-        if (!run) return { ran: false, reason: `pane ${blockId} doesn't handle ${command}` };
-        return run(command) ? { ran: true } : { ran: false, reason: `${command} didn't apply in pane ${blockId} now` };
+        const runner = paneRunners.get(blockId);
+        if (!runner) return { ran: false, reason: `pane ${blockId} doesn't handle ${command}` };
+        const out = runner.run(command);
+        if (typeof out !== "boolean") return out;
+        return out ? { ran: true } : { ran: false, reason: `${command} didn't apply in pane ${blockId} now` };
     }
     return deps.runGlobal(command) ? { ran: true } : { ran: false, reason: `${command} didn't apply in the current context` };
 }

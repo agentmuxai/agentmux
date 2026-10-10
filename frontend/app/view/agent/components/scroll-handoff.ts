@@ -123,7 +123,7 @@ function watchPane(pane: HTMLElement): void {
     pane.addEventListener(
         "wheel",
         (e: WheelEvent) => {
-            if (e.ctrlKey || e.deltaY === 0) return;
+            if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
             for (let n = e.target as Element | null; n && n !== pane; n = n.parentElement) {
                 if (boxes.has(n)) return;
             }
@@ -169,9 +169,9 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
     };
 
     const onWheel = (e: WheelEvent): void => {
-        // Ctrl+wheel is a ZOOM gesture (the pane zoom in app.tsx), never a
-        // scroll; deltaY 0 is a horizontal scroll inside the box.
-        if (e.ctrlKey || e.deltaY === 0) return;
+        // Ctrl/⌘+wheel is a ZOOM gesture (the pane zoom in app.tsx, which
+        // takes either), never a scroll; deltaY 0 is a horizontal scroll inside the box.
+        if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
         const pane = el.closest<HTMLElement>(".agent-document");
         if (!pane) return;
         watchPane(pane);

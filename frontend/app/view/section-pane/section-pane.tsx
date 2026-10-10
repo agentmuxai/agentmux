@@ -15,6 +15,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { TabbedPane } from "@/app/element/ui";
 import { readZoom } from "@/app/store/zoom-factor";
 import "./section-pane.scss";
+import { isModKey } from "@/util/platformutil";
 
 export interface PaneSection<Id extends string> {
     id: Id;
@@ -92,7 +93,7 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
     onMount(() => {
         if (!viewRef) return;
         const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey || ev.shiftKey) return;
+            if (!isModKey(ev) || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const STEP = 0.1;

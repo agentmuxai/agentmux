@@ -20,18 +20,14 @@ use super::AppState;
 // Each acts in the window that holds the caller's own pane (owner decision §8.1): the
 // host resolves that window from the verified block and calls the page's
 // `window.__agentmux_shortcuts` (frontend keybindings/app-api.ts), which
-// checks `target` is a pane in that window's active tab.
+// reveals `target` (a pane in that window, in any tab) before acting on it.
 
-/// Commands no agent may run (owner decision §8.2). The frontend refuses
-/// them too, and also refuses PressKeys of any key bound to one; this is
-/// the same rule where the request comes in.
+/// Commands no agent may run: agents are first-class owners, so only what
+/// has no protection. A permanent delete can't be undone. The frontend
+/// refuses it too, and PressKeys of any key bound to it.
 fn refused_command(command: &str) -> Option<&'static str> {
     match command {
         "files:deletePermanently" => Some("it can't be undone"),
-        "pane:close" => Some(
-            "it closes the focused pane at once: use ClosePane, which gives the user 15 seconds to undo \
-             (QuitSelf for your own pane)",
-        ),
         _ => None,
     }
 }
@@ -61,6 +57,9 @@ pub(crate) async fn handle_ui_run_command(
     };
     if let Some(why) = refused_command(&req.command) {
         return err_response(StatusCode::FORBIDDEN, format!("{} is not available to agents: {why}", req.command));
+    }
+    if req.command == "pane:close" {
+        return close_pane(&state, &req, &block_id).await;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, command = %req.command, "[ui-automation] run command");
     proxy_data(
@@ -92,6 +91,39 @@ pub(crate) async fn handle_ui_press_keys(
     .await
 }
 
+/// RunCommand `pane:close`: the pane named by `target`, closed the way
+/// ClosePane closes it (`app_api::pane::close_pane_as`). A pane the agent is
+/// in closes at once; another agent's pane waits 15 s for its user to keep
+/// it, and the answer says so. The key itself closes the focused pane at
+/// once, with no undo, so the page never runs it for the App API.
+async fn close_pane(state: &AppState, req: &UiRunCommandRequest, own_block_id: &str) -> axum::response::Response {
+    let Some(target) = req.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            "pane:close needs `target`, the pane to close (another agent's pane gets the user's 15-second undo)".to_string(),
+        );
+    };
+    let (code, body) = crate::server::app_api::pane::close_pane_as(
+        state,
+        &req.auth.agent_id,
+        own_block_id,
+        target,
+        Some("RunCommand pane:close"),
+        "RunCommand",
+    )
+    .await;
+    match code {
+        StatusCode::OK => Json(json!({ "ok": true, "data": { "ran": true, "closed": body } })).into_response(),
+        StatusCode::ACCEPTED => Json(json!({ "ok": true, "data": {
+            "ran": false,
+            "pending": body,
+            "reason": "it's another agent's pane: its user has 15 seconds to keep it, and it closes after that unless they do",
+        } }))
+        .into_response(),
+        _ => err_response(code, body.get("error").and_then(|e| e.as_str()).unwrap_or("close failed").to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::refused_command;
@@ -99,7 +131,7 @@ mod tests {
     #[test]
     fn refuses_only_the_commands_the_owner_ruled_out() {
         assert!(refused_command("files:deletePermanently").is_some());
-        assert!(refused_command("pane:close").unwrap().contains("ClosePane"));
+        assert!(refused_command("pane:close").is_none(), "pane:close goes through ClosePane's undo");
         for allowed in ["tab:close", "split:right", "pane:replaceWithLauncher", "files:trash"] {
             assert!(refused_command(allowed).is_none(), "{allowed} keeps its own confirmation or undo");
         }

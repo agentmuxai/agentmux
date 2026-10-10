@@ -3,7 +3,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
-import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
+import { noteResolved, registerPaneCommandRunner, type RunResult } from "@/app/keybindings/app-api";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { isChordActive, resolveKeyEvent } from "@/app/store/keymodel-dispatch";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -315,7 +315,13 @@ class TermViewModel {
         // this block (the pane chrome's runtime badge, multi-input), which
         // then read those fields (ReAgent P1 on #3807).
         this.unregisterModel = termModels.register(blockId, this);
-        this.unregisterCommands = registerPaneCommandRunner(blockId, (command) => this.runTermCommand(command));
+        // The App API's RunCommand/PressKeys: the same commands as the keys,
+        // with a guard on paste (agents are first-class, with protections).
+        this.unregisterCommands = registerPaneCommandRunner(
+            blockId,
+            (command) => (command === "term:paste" ? this.agentPaste() : this.runTermCommand(command)),
+            async (command) => (command === "term:paste" ? this.pasteRefusal() : undefined)
+        );
     }
 
     isBasicTerm(): boolean {
@@ -434,6 +440,27 @@ class TermViewModel {
         // stopPropagation keeps the app's document listener off it.
         event.stopPropagation();
         return true;
+    }
+
+    /**
+     * Why an agent may not paste now, or undefined. A line break in the
+     * clipboard runs that line unless the shell turned on bracketed paste, and
+     * an agent can't see what's on the clipboard the way a user can.
+     */
+    async pasteRefusal(): Promise<string | undefined> {
+        const terminal = this.termRef.current?.terminal;
+        if (!terminal) return "the terminal isn't ready";
+        if (terminal.modes.bracketedPasteMode) return undefined;
+        const text = await clipboardReadText().catch(() => "");
+        return /[\r\n]/.test(text)
+            ? "the clipboard has a line break and this shell hasn't turned on bracketed paste, so pasting would run that line; paste one line, or run the commands with the Shell tool"
+            : undefined;
+    }
+
+    async agentPaste(): Promise<RunResult> {
+        const why = await this.pasteRefusal();
+        if (why) return { ran: false, reason: `term:paste: ${why}` };
+        return this.runTermCommand("term:paste") ? { ran: true } : { ran: false, reason: "term:paste didn't apply" };
     }
 
     /** The terminal's own commands, run by its keys and by the App API's RunCommand. */

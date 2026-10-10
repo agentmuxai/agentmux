@@ -145,3 +145,22 @@ Free on macOS: everything else, including ⌘M and ⌘W, ⌘T ⌘N ⌘D ⇧⌘D 
 - **`pane:refocus` (⌘I)** resolved nothing at L2 when a terminal had focus: it was the one pane row without `skipShell`, so the terminal sent ⌘I to the shell.
 - **`files:trash` can't be undone on macOS** (restore isn't supported there yet), contrary to §8.2's reason for allowing it; it is now refused to agents on macOS, in the page and in srv.
 - **The script** attached to a hidden pool window, ran pane rows after global rows had switched tabs, stopped at the first thrown row, timed L2 with a fixed 80 ms, and let `files:up` move the pane out of its folder before the rows that create and trash. On both partners' hosts that put two or three throwaway "New folder" entries above the scratch folder and then trashed them; nothing else changed. It now picks a shown window that holds the given panes, runs pane rows first, records a throw as that row's failure, polls for up to 500 ms, runs the disk-changing Files rows only with `--files-mutate` and before back/forward/up, creates a second document before the document-cycling rows, checks `app:escape` on a confirmation dialog, closes the windows `window:new` opens, and leaves `term:paste` (a line break in the clipboard would run in the shell), `files:openInNewTab` (opens the selected files in their apps) and `files:mention` (writes into an agent's message box) to a person. A dev build reloads its pages whenever a file in the checkout changes, so the script waits up to about 30 s for the shortcut API.
+
+**L3 on macOS, real key presses (starpower, Masty, 2026-10-10, main @ `639ada198`, kinks plan M2).**
+
+Method: real keys sent through System Events into a dev window. The window was raised by process id and checked before every key. Each result was read from `__agentmux_shortcuts.last()` and from a capture-phase keydown log, so "the OS took it" and "it reached the page but didn't resolve" can be told apart. Failing keys were repeated three times.
+
+- ⌃⇧Arrow (`pane:focus:*`) reaches the app, 4 of 4 every round. The hidden Mission Control and Spaces shortcuts (ids 34/35/80/82) don't take it, so no rebind is needed. The earlier "suspected" above is resolved.
+- The Files pane's ⌘A/C/X/V/Z reach it past the Edit menu: no menu conflict.
+- ⌃PageUp/PageDown (`doctab:next/prev`) and ⇧⌘PageUp/PageDown (`tab:move*`) reach the app as Page key codes. A physical fn+Arrow, where macOS 15+ window tiling owns fn⌃Arrow, still needs a hand press.
+- ⌃⌥⌘← (`pane:resize:left`) never reaches the page: Magnet takes it, on that Mac only. ⌃⌥⌘↑ reaches the app. This is a Help-pane note, not a rebind.
+- **Found: the Files pane swallowed some global shortcuts.** With it focused, ⌘/, ⌃⇧↑/↓, ⇧⌘PageUp/PageDown and ⌃⌥⌘↑ reached the page and resolved nothing. Its list handler took any arrow, Page key or "/" as its own, whatever the modifiers, and stopped the dispatcher. It now leaves a key the table gives a global command to the dispatcher (`isGlobalKey`). This affected every platform.
+
+**L3 on Linux, real key presses (charlie, Maricon, 2026-10-10, main @ `3dc1bc120` plus the L3 branch, #4624, kinks plan L3).** GNOME 50.1 on Wayland.
+- Method: `scripts/verify-shortcuts-l3-linux.mjs` presses each distinct Linux key once through `ydotool`, with the dev window holding OS focus (checked through `document.hasFocus()` before each key). A passive keydown listener records whether the key arrived, and `last()` what it resolved to.
+- **92 of 92 keys pressed reached AgentMux**; the desktop took none.
+- Not pressed:
+  - the four `pane:swap:*` keys, which GNOME takes for "move window to workspace" (the gsettings result above). Wayland gives no way to read and restore the workspace, so they're never pressed;
+  - the manual rows;
+  - Shift+Delete, which is refused.
+- So on stock GNOME, `pane:swap:*` is the only Linux key the OS takes. Its rebind (owner decision §8.3) is with Maricon.

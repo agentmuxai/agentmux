@@ -1,6 +1,6 @@
 # User widgets and the widget API
 
-**Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 and W6 not started.
+**Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 (commands and status bar items, §6.8) in this PR; W6 not started.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
 **Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
@@ -99,6 +99,12 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
   "contributes": {
     "panes": [
       { "name": "main", "label": "PRs", "icon": "code-pull-request", "entry": "index.html", "defaultMeta": {} }
+    ],
+    "commands": [
+      { "id": "refresh", "title": "Refresh pull requests", "icon": "rotate-right" }
+    ],
+    "statusItems": [
+      { "id": "count", "text": "PRs", "icon": "code-pull-request", "tooltip": "Open pull requests", "command": "refresh" }
     ]
   }
 }
@@ -119,7 +125,8 @@ GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
 | `permissions` | string[] | no | §6.4. Unknown names make the package invalid. Ignored for `trusted` (it has full access). |
 | `minAgentMux` | string | no | The lowest AgentMux version the widget works with; an older AgentMux lists it as needing an update. Read, but not checked yet. |
 | `contributes.panes` | object[] | yes, at least one | Each: `name` (`^[a-z0-9-]+$`, the part after `/` in the view name), `label`, optional `icon`, `entry`, `defaultMeta` (merged into a new pane's meta, keys under `widget:` only), `singleton` (bool: a click focuses the open pane instead of adding one; read, but not acted on yet). |
-| `contributes.commands`, `contributes.statusItems` | | reserved | W5. Ignored until then; not an error. |
+| `contributes.commands` | object[] | no | Command palette entries, at most 20 (§6.8). Each: `id` (`^[a-z0-9-]+$`, unique), `title` (1–60 characters), optional `icon`, `pane` (the pane it runs in, by `name`; the first pane when left out), `keywords` (more words the palette search matches, at most 200 characters). |
+| `contributes.statusItems` | object[] | no | Status bar items, at most 4 (§6.8). Each: `id` (`^[a-z0-9-]+$`, unique), `text` (1–40 characters), optional `icon`, `tooltip` (at most 120 characters), `command` (one of the package's command ids, run on a click; without one, a click shows the first pane), `alignment` (`"left"` or `"right"`, default `"right"`). |
 
 **Validation** happens in srv when it scans the folder (§8.1). An invalid package is listed in Settings with its first error ("`version` isn't semver"), never loaded.
 
@@ -173,6 +180,7 @@ Methods marked "—" in the permission column need none.
 | `ui.setContextMenu` | `{ items: ({ id, label, disabled? } \| { separator: true })[] }` (at most 20) | `{}` | — |
 | `ui.toast` | `{ text: string, kind?: "info"\|"success"\|"warning"\|"error" }` | `{}` | — |
 | `ui.openUrl` | `{ url: string }` (`http:` or `https:`) | `{}`: opens a browser pane next to the widget | — |
+| `ui.setStatusItem` | `{ id: string, text?: string, icon?: string, tooltip?: string, tone?: "info"\|"success"\|"warning"\|"error", hidden?: boolean }` | `{}` (§6.8) | — |
 | `theme.get` | `{}` | `Theme` | — |
 | `panes.open` | `{ view: string, meta?: object, split?: "right"\|"down"\|"tab" }` | `{ pane: string }` | — for the package's own views; `panes` for any other view |
 | `storage.get` | `{ key: string }` | `{ value: any \| null }` | `storage` |
@@ -220,6 +228,7 @@ A trusted package's prompt has one line instead: "**This widget runs as part of 
 | `theme` | `Theme` | The user changes theme or the pane's color |
 | `meta` | `{ meta: object }` | The pane's widget meta changed from outside the widget (another window, an agent, an undo) |
 | `action` | `{ id: string, source: "header" \| "menu" }` | The user clicked one of its header actions or menu items |
+| `command` | `{ id: string, source: "palette" \| "status" }` | The user ran one of its commands from the palette, or clicked a status item that names one (§6.8) |
 | `storage` | `{ keys: string[] }` | The package's storage changed, from any of its panes in any window (this one included); only the keys, so a pane reads what it needs again. Sent only to a package granted `storage` |
 | `dispose` | `{}` | The pane is closing or the widget is being reloaded; the port closes 1 s later |
 
@@ -244,6 +253,26 @@ A dormant widget keeps running (it's an iframe), but should pause timers and pol
 - The **protocol** version is negotiated in the handshake. Within protocol 1, AgentMux only adds: new methods, new optional params, new result fields, new events. A widget ignores fields it doesn't know. Anything else is protocol 2, and AgentMux keeps speaking 1 for at least a year after 2 ships.
 - The **manifest** format has its own `manifestVersion`, with the same additive rule.
 - A widget can check what's there: `hello` returns `agentmux.version` and the granted `permissions`; calling an unknown method returns `-32601`, never a crash.
+
+### 6.8 Commands and status bar items
+
+A package can add entries to the command palette and items to the status bar (`contributes.commands`, `contributes.statusItems`, §5.3). They are part of the manifest, so the user approved them with the package; they need no permission. They are there while the package is approved and enabled, and leave with it.
+
+**Commands.** Each is a palette entry under **Widgets**, labelled `<widget name>: <title>`, with the id `ext:<id>/<command id>`. Running one:
+
+1. finds a pane of the command's view: the focused pane if it is one, else one in the current tab (a background pane tab becomes its pane's visible one), which is focused;
+2. or, if there is none, opens one (with the pane's `defaultMeta`) and waits up to 15 s for it to load;
+3. sends that pane the `command` event. A pane opened for the command gets it right after its `hello`; the SDK keeps a `command` that arrives before the widget listens for its first `on("command")`.
+
+A trusted widget gets it as `command(id, source)` on its pane tab instance, if it has one.
+
+Commands run only on a user's click: the palette or a status item. They aren't keyboard shortcuts, and the `keybindings` setting refuses a widget's command (an `ext:` id) with a warning, so none joins the shortcut table that an agent's `RunCommand` and `PressKeys` read.
+
+**Status bar items.** Each shows its manifest's `text` and `icon` (the package's icon when it has none), on the right before AgentMux's own items, or on the left after them. Its tooltip is always `<widget name>: <tooltip>` (the text when there is no tooltip), so a widget's item can't pass for one of AgentMux's. A click runs its `command`, or shows the first pane when it names none.
+
+A pane of the widget changes how an item looks with `ui.setStatusItem`: the call sets the whole look, any field left out shows the manifest's, and a call with only the `id` puts the manifest's look back. `text` is 1–40 characters of plain text, `tooltip` at most 120, `icon` a Font Awesome name, `tone` colours it, `hidden: true` takes it out. An id the manifest doesn't declare is `not_found`. A look lasts while the pane that set it is open, in that window; when it closes, the manifest's look returns. A widget runs only while one of its panes is open (§12), so an item with no pane open shows the manifest's look.
+
+The status bar itself is a registry (`frontend/app/statusbar/status-bar-registry.ts`): AgentMux's own items and widgets' are entries with a side and an order, so a new item, built-in or not, is one registration.
 
 ## 7. The SDK, `@agentmuxai/widget-sdk`
 
@@ -355,6 +384,7 @@ What agents are told: an Operator Config entry, "Building widgets", given to hos
 - The session RPCs need the instance auth key, like every RPC. Whatever holds that key (the app, an agent) could already reach the network, the agents and srv's database directly, so it gains nothing by speaking for a widget; what the session adds is that a widget's pane host is held to that widget's grants.
 - Its code comes only from its approved files (CSP, and the hash in every file URL).
 - A trusted widget has full access by design, and the prompt says so in those words.
+- A widget's commands and status items are declared in its approved manifest; a pane can change only how its own declared items look, never add one. A command runs only on the user's click, never from an agent's `RunCommand`. A status item's tooltip always names the widget, and its icon must be a Font Awesome name.
 - No code runs without the user's approval in AgentMux's own UI, and only the host can carry that approval to srv.
 
 ## 12. What this doesn't do
@@ -372,5 +402,5 @@ What agents are told: an Operator Config entry, "Building widgets", given to hos
 | **W3: scoped access** | the per-widget scoped token; `storage`, `net.fetch`, `files`, `clipboard:write`, `panes`, `agents:read`, `agents:send`; samples `notes`, `pr-dashboard`, `ask-agent` | each permission is refused without its grant, both in the frontend and in srv (tested); the samples work |
 | **W4: agents** | `WidgetList`, `WidgetInstall`, `OpenWidget`; the "Write an AgentMux widget" skill | an agent builds and installs a widget the user asked for, the user approves it, and the agent opens it |
 | **Docs** | agentmux-docs: **Widgets** (using and managing), **Build a widget** (quickstart), **Widget API reference** (§5–§7 for users), **Widget security**; each lands right after the code it describes | — |
-| **W5: beyond panes** | `contributes.commands` and `contributes.statusItems`, with a status bar registry replacing the fixed list | a widget adds a palette command and a status bar item |
+| **W5: beyond panes** | `contributes.commands` and `contributes.statusItems`, with a status bar registry replacing the fixed list; `ui.setStatusItem` and the `command` event; the `pr-dashboard` sample adds both | a widget adds a palette command and a status bar item |
 | **W6: sharing** | widgets in agent bundles; signed packages; a catalog of sandboxed widgets | — |

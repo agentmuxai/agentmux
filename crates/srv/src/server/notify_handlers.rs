@@ -77,6 +77,15 @@ pub struct NotifyAckParams {
     pub clicked: bool,
 }
 
+/// `notify.attention`: the calls to action srv holds open now
+/// (`backend/user_attention.rs`), each as its `userattention` event's data.
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct NotifyAttentionResult {
+    #[ts(type = "Array<unknown>")]
+    pub attention: Vec<serde_json::Value>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NotifyAckResult {
@@ -260,6 +269,12 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     });
 
     let rr = r.clone();
+    // notify.attention: the calls to action srv holds open now
+    // (backend/user_attention.rs), for a window that starts while one is.
+    engine.register_typed("notify.attention", |_p: NotifyNoArgs, _ctx| async move {
+        Ok(NotifyAttentionResult { attention: crate::backend::user_attention::open_requests() })
+    });
+
     engine.register_typed("notify.test", move |_p: NotifyNoArgs, _ctx| {
         let r = rr.clone();
         async move {

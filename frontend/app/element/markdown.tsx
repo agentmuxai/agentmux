@@ -22,6 +22,10 @@ export const __markdownRenderStats = {
     processorBuilds: 0,
     /** Frozen-prefix segments rendered to DOM (each exactly once per segment). */
     domSegmentRenders: 0,
+    /** Open-tail renders that built (and swapped in) new DOM. */
+    tailRebuilds: 0,
+    /** Open-tail commits served by updating one existing text node instead. */
+    tailInPlaceUpdates: 0,
 };
 
 export function __resetMarkdownRenderStats(): void {
@@ -29,6 +33,99 @@ export function __resetMarkdownRenderStats(): void {
     __markdownRenderStats.parsedChars = 0;
     __markdownRenderStats.processorBuilds = 0;
     __markdownRenderStats.domSegmentRenders = 0;
+    __markdownRenderStats.tailRebuilds = 0;
+    __markdownRenderStats.tailInPlaceUpdates = 0;
+}
+
+/**
+ * The DOM tag a hast element renders as, for the tags whose text may be
+ * patched in place (see `describeTail`). Only tags whose text lands directly in
+ * an element of a known tag are listed; `p` goes through a component that
+ * renders `div.paragraph`. Headings are deliberately absent — their text is
+ * also their slug id and TOC entry.
+ */
+const PATCHABLE_TEXT_PARENT: Record<string, string> = {
+    p: "DIV",
+    code: "CODE",
+    li: "LI",
+    td: "TD",
+    th: "TH",
+    strong: "STRONG",
+    em: "EM",
+    del: "DEL",
+    span: "SPAN",
+    a: "A",
+};
+
+/** The slice of a hast node `describeTail` reads. */
+type HastLike = {
+    type: string;
+    value?: string;
+    tagName?: string;
+    properties?: Record<string, unknown>;
+    children?: HastLike[];
+};
+
+type TailDescription = {
+    /** Structure of the tail with every text value elided — equal shapes differ only in text. */
+    shape: string;
+    /** Every text value, in document order. */
+    texts: string[];
+    /** Index into `texts` of the run that may be patched in place, or -1. */
+    patchIndex: number;
+    /** DOM tag the patchable run's parent renders as. */
+    patchParentTag: string;
+};
+
+/**
+ * One pass over the tail's hast: its shape (tags, properties, raw values —
+ * everything except text), its text runs, and which run, if any, may be
+ * updated in place. The patchable run is the LAST non-blank text: appending to
+ * it is what a growing code fence, paragraph, list item or table cell does.
+ */
+function describeTail(children: HastLike[]): TailDescription {
+    const texts: string[] = [];
+    let patchIndex = -1;
+    let patchParentTag = "";
+    const parts: string[] = [];
+    const walk = (nodes: HastLike[], parentTag: string, inHeading: boolean): void => {
+        for (const n of nodes) {
+            if (n.type === "text") {
+                const value = n.value ?? "";
+                parts.push("#");
+                const i = texts.push(value) - 1;
+                if (value.trim() !== "") {
+                    const tag = inHeading ? undefined : PATCHABLE_TEXT_PARENT[parentTag];
+                    patchIndex = tag ? i : -1;
+                    patchParentTag = tag ?? "";
+                }
+            } else if (n.type === "element") {
+                const tag = n.tagName ?? "";
+                parts.push(`<${tag}${JSON.stringify(n.properties ?? {})}`);
+                walk(n.children ?? [], tag, inHeading || /^h[1-6]$/.test(tag));
+                parts.push(">");
+            } else {
+                parts.push(`[${n.type}:${JSON.stringify(n.value ?? "")}]`);
+            }
+        }
+    };
+    walk(children, "", false);
+    return { shape: parts.join(""), texts, patchIndex, patchParentTag };
+}
+
+/** The last text node under `nodes` (document order) with this exact value and parent tag. */
+function findTextNode(nodes: unknown[], value: string, parentTag: string): Text | null {
+    let found: Text | null = null;
+    for (const root of nodes) {
+        if (!(root instanceof Node)) continue;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        if (root instanceof Text && root.data === value && root.parentElement?.tagName === parentTag) found = root;
+        for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+            const text = t as Text;
+            if (text.data === value && text.parentElement?.tagName === parentTag) found = text;
+        }
+    }
+    return found;
 }
 import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import remarkGithubAlerts, { ALERT_CLASSES } from "@/app/element/remark-github-alerts";
@@ -39,7 +136,7 @@ import { markEnd, markStart } from "@/perf";
 import clsx from "clsx";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { OverlayScrollbars } from "overlayscrollbars";
-import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 import { Fragment, jsx, jsxs } from "solid-js/h/jsx-runtime";
 import { unified } from "unified";
@@ -52,6 +149,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { onLinkAuxClick, onLinkClick } from "./link-open";
+import { getSettingsKeyAtom } from "../store/global";
 import { rehypeLinkify } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
 import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
@@ -395,6 +493,82 @@ const Markdown = (props: MarkdownProps) => {
             }
         });
 
+    /**
+     * The open tail's rendered DOM, kept across commits. While a commit changes
+     * only the tail's last run of text — a code fence, paragraph, list item or
+     * table cell growing — that one text node is updated and the rest of the
+     * DOM is reused. Rebuilding and swapping the whole block every commit was
+     * ~23 % of streaming work (`replaceChild` of the open block,
+     * TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.8/§4), and it
+     * scaled with the open block's size: a 100-line code fence was rebuilt ~11×
+     * a second per streaming pane.
+     *
+     * Everything else still rebuilds: any change of structure, of a property,
+     * of an earlier text run, or of text in a heading (slug id + TOC). Rendered
+     * under its own root, like frozen segments, so it can outlive a commit;
+     * disposed when replaced or on unmount.
+     */
+    let tail: {
+        desc: TailDescription;
+        nodes: JSX.Element[];
+        toc: TocItem[];
+        textNode: Text | null;
+        dispose: () => void;
+    } | null = null;
+
+    const disposeTail = (): void => {
+        if (!tail) return;
+        tail.dispose();
+        tail = null;
+    };
+    onCleanup(disposeTail);
+
+    // Kill switch (`markdown:streamtailinplace` = false): always rebuild the
+    // tail, as before. Read once per instance, untracked — a flip applies to
+    // messages rendered after it, never mid-render.
+    const tailInPlace = untrack(() => getSettingsKeyAtom("markdown:streamtailinplace")()) !== false;
+
+    /** Render (or patch) the open tail from its hast; returns its DOM nodes. */
+    const renderTail = (children: HastLike[], toc: TocItem[]): { nodes: JSX.Element[]; toc: TocItem[] } => {
+        const desc = describeTail(children);
+        const prev = tail;
+        const samePatchableShape =
+            tailInPlace &&
+            prev !== null &&
+            desc.patchIndex >= 0 &&
+            prev.desc.shape === desc.shape &&
+            prev.desc.patchIndex === desc.patchIndex &&
+            prev.desc.texts.every((t, i) => i === desc.patchIndex || t === desc.texts[i]);
+        // Located lazily: Solid inserts a render's children through render
+        // effects that run only after this memo finishes, so the text node
+        // does not exist yet when the tail is first built.
+        if (samePatchableShape && prev.textNode === null) {
+            prev.textNode = findTextNode(prev.nodes, prev.desc.texts[prev.desc.patchIndex], prev.desc.patchParentTag);
+        }
+        if (samePatchableShape && prev.textNode?.isConnected) {
+            const next = desc.texts[desc.patchIndex];
+            if (prev.textNode.data !== next) prev.textNode.data = next;
+            prev.desc = desc;
+            stats.tailInPlaceUpdates++;
+            // Same shape and no heading text changed, so the TOC is unchanged.
+            return { nodes: prev.nodes, toc: prev.toc };
+        }
+
+        disposeTail();
+        const rendered = createRoot((dispose) => {
+            try {
+                return { nodes: resolveHyperElements(flatNodes(hastToElement(children))), dispose };
+            } catch (e) {
+                dispose();
+                throw e;
+            }
+        });
+        const nodes = rendered.nodes;
+        tail = { desc, nodes, toc, textNode: null, dispose: rendered.dispose };
+        stats.tailRebuilds++;
+        return { nodes, toc };
+    };
+
     /** Solid accepts nested arrays, but flatten so the reconcile sees one flat node list.
      *  (Hand-rolled: `Array#flat(Infinity)` over `JSX.Element` trips TS2589.) */
     const flatNodes = (v: JSX.Element): JSX.Element[] => {
@@ -570,10 +744,9 @@ const Markdown = (props: MarkdownProps) => {
                 disposeFrozen();
                 // Nothing is provably closed, so all of it is the open tail.
                 const whole = runSegment(openTail(txt), tailProc);
-                // Owned by this memo run, like the tail below: disposed and
-                // replaced wholesale on the next commit.
-                element = hastToElement(whole.children);
-                toc = whole.toc;
+                const t = renderTail(whole.children, whole.toc);
+                element = t.nodes;
+                toc = t.toc;
             } else {
                 // The cache is only valid if this really is the same document
                 // growing. A non-append edit (history restore, switching
@@ -603,13 +776,15 @@ const Markdown = (props: MarkdownProps) => {
                         disposers: frozen ? frozen.disposers.concat(rendered.dispose) : [rendered.dispose],
                     };
                 }
-                // Only the trailing open block is parsed AND rendered per
-                // commit. Its element is owned by this memo run, so the next
-                // commit disposes it and Solid's array reconcile swaps just
-                // these trailing nodes, leaving `frozen.elements` untouched.
-                const tail = runSegment(openTail(txt.slice(splitAt)), tailProc);
-                element = frozen.elements.concat(flatNodes(hastToElement(tail.children)));
-                toc = frozen.toc.concat(tail.toc);
+                // Only the trailing open block is parsed per commit, and only
+                // rebuilt when more than its last text run changed (see
+                // `renderTail`). Solid's array reconcile keeps identical node
+                // references, so `frozen.elements` — and a patched tail — are
+                // left in place.
+                const parsedTail = runSegment(openTail(txt.slice(splitAt)), tailProc);
+                const t = renderTail(parsedTail.children, parsedTail.toc);
+                element = frozen.elements.concat(t.nodes);
+                toc = frozen.toc.concat(t.toc);
             }
 
             // `toc` is assembled from per-segment copies above, never the live
@@ -623,6 +798,7 @@ const Markdown = (props: MarkdownProps) => {
             // A failed incremental parse must not leave a poisoned cache
             // behind for the next commit to build on.
             disposeFrozen();
+            disposeTail();
             return { element: <pre>{txt}</pre>, toc: [] as TocItem[] };
         } finally {
             markEnd("markdown-render", `len=${txt.length}`);

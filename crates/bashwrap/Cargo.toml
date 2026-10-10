@@ -43,3 +43,8 @@ libc = "0.2"
 # Windows icon + version info (build.rs).
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
+
+# `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
+# embeds the Windows icon/version resource from build.rs.
+[package.metadata.cargo-machete]
+ignored = ["winres"]

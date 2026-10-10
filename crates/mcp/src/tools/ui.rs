@@ -195,6 +195,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let data = post_shortcuts(cx, "run", &req).await?;
             if data.get("ran").and_then(|v| v.as_bool()) == Some(true) {
                 Ok(format!("Ran {command}."))
+            } else if let Some(pending) = data.get("pending") {
+                // pane:close of another agent's pane: its user has 15 s to keep it.
+                let why = data.get("reason").and_then(|v| v.as_str()).unwrap_or("waiting for the user");
+                let id = pending.get("request_id").and_then(|v| v.as_str()).unwrap_or("?");
+                Ok(format!("{command} is pending: {why} (request {id})."))
             } else {
                 let why = data.get("reason").and_then(|v| v.as_str()).unwrap_or("no reason given");
                 Ok(format!("Didn't run {command}: {why}"))
