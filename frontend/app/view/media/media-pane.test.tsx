@@ -249,7 +249,7 @@ describe("moving Media tabs between panes", () => {
     const ctxFor = (blockId: string) =>
         ({ blockId, meta: () => ({}) as MetaType, setMeta: async () => {}, isFocused: () => true, visibility: () => "active" }) as PaneTabHostContext;
 
-    it("a Media tab moves to another Media pane; an empty one can't", () => {
+    it("a Media tab moves to another Media pane, an empty one too", () => {
         const a = new MediaPaneModel(ctxFor("move-a"));
         const b = new MediaPaneModel(ctxFor("move-b"));
         a.open("C:/out/1.png");
@@ -262,8 +262,10 @@ describe("moving Media tabs between panes", () => {
         expect(b.tabs.activeId()).toBe(three);
 
         a.tabs.newDocument();
-        const result = moveDocTab("move-a", a.tabs.activeId()!, "move-b");
-        expect(result).toEqual({ moved: false, reason: "It has no file yet." });
+        const empty = a.tabs.activeId()!;
+        expect(moveDocTab("move-a", empty, "move-b")).toEqual({ moved: true });
+        expect(b.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/2.png", "C:/out/3.png", ""]);
+        expect(b.tabs.activeId()).toBe(empty);
         a.dispose();
         b.dispose();
     });
@@ -278,6 +280,29 @@ describe("moving Media tabs between panes", () => {
         expect(b.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/1.png"]);
         expect(b.tabs.activeId()).toBe(one);
         expect(b.tabs.reopen()).toBe(false); // the empty tab is gone, not closed
+        a.dispose();
+        b.dispose();
+    });
+
+    it("an empty tab moved onto a pane showing only its empty tab joins it", () => {
+        const a = new MediaPaneModel(ctxFor("blank-a"));
+        const b = new MediaPaneModel(ctxFor("blank-b"));
+        const blank = a.tabs.activeId()!;
+        expect(moveDocTab("blank-a", blank, "blank-b")).toEqual({ moved: true });
+        expect(b.tabs.tabs()).toHaveLength(2);
+        expect(b.tabs.activeId()).toBe(blank);
+        a.dispose();
+        b.dispose();
+    });
+
+    it("a file open in both panes stays put, and nothing is lost", () => {
+        const a = new MediaPaneModel(ctxFor("both-a"));
+        const b = new MediaPaneModel(ctxFor("both-b"));
+        a.open("C:/out/1.png");
+        b.open("C:/out/1.png");
+        expect(moveDocTab("both-a", a.tabs.activeId()!, "both-b")).toEqual({ moved: false, reason: "It is already open there." });
+        expect(a.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/1.png"]);
+        expect(b.tabs.tabs().map((t) => t.payload.path)).toEqual(["C:/out/1.png"]);
         a.dispose();
         b.dispose();
     });

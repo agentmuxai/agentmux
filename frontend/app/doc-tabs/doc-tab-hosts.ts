@@ -63,6 +63,10 @@ export function docTabHost(blockId: string): DocTabHost | undefined {
 
 export type MoveResult = { moved: true } | { moved: false; reason?: string };
 
+/** Why a tab can't move to a pane that has its document open already. Moved
+ *  in anyway, it would merge into that tab and vanish from where it was. */
+export const ALREADY_OPEN_THERE = "It is already open there.";
+
 /**
  * Move tab `tabId` from block `sourceBlockId` to block `targetBlockId`, beside
  * `at` or after the target's active tab. Nothing changes unless both panes
@@ -92,10 +96,11 @@ export function dropDocTab(sourceBlockId: string, tabId: string, targetBlockId: 
 
 /**
  * The host of a pane whose tabs are a `DocTabsController`'s. Everything a tab
- * is travels in the tab, so there is no live state. `refuseGive` adds the
- * type's own rule (Media: an empty tab has nothing to move). `isPlaceholder`
- * names a tab that shows nothing yet (Media's "Click to load media"): when
- * one is in front, an arriving tab takes its place rather than joining it.
+ * is travels in the tab, so there is no live state. A pane with the tab's
+ * document open already refuses it. `refuseGive` adds the type's own rule.
+ * `isPlaceholder` names a tab that shows nothing yet (Media's "Click to load
+ * media"): when one is in front, an arriving tab with a document takes its
+ * place rather than joining it; another placeholder joins it.
  */
 export function controllerHost<P>(
     ctl: DocTabsController<P>,
@@ -106,7 +111,7 @@ export function controllerHost<P>(
         docType,
         peek: (tabId) => ctl.tabs().find((t) => t.id === tabId) ?? null,
         refuseGive: (tab) => opts.refuseGive?.(tab as DocTab<P>) ?? null,
-        refuseTake: () => null,
+        refuseTake: (tab) => (ctl.tabs().some((t) => t.key === tab.key) ? ALREADY_OPEN_THERE : null),
         give: (tabId) => {
             const tab = ctl.detach(tabId);
             return tab ? { docType, tab } : null;
@@ -114,10 +119,9 @@ export function controllerHost<P>(
         take: (transfer, at) => {
             const tab = transfer.tab as DocTab<P>;
             const front = ctl.active();
-            const placeholder = front && opts.isPlaceholder?.(front) ? front : undefined;
+            const placeholder = front && opts.isPlaceholder?.(front) && !opts.isPlaceholder(tab) ? front : undefined;
             ctl.attach(tab, at ?? (placeholder ? { targetId: placeholder.id, position: "after" } : undefined));
-            // Gone, not closed: nothing to reopen. Only once the tab is in
-            // (a document already open here comes to the front instead).
+            // Gone, not closed: nothing to reopen. Only once the tab is in.
             if (placeholder && ctl.tabs().some((t) => t.id === tab.id)) ctl.detach(placeholder.id);
         },
     };
