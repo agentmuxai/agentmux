@@ -68,7 +68,8 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
     // which block's `connection` this same mounted instance should reflect
     // without remounting at all.
     const [connModalOpen, setConnModalOpen] = createSignal(props.changeConnModalAtom());
-    const isLocal = createMemo(() => util.isBlank(props.connection));
+    // "local" is this computer too, as everywhere else (remoteDisplay, srv's default).
+    const isLocal = createMemo(() => util.isBlank(props.connection) || props.connection === "local");
     const connStatus = createMemo(() => getConnStatusAtom(props.connection)());
     const connColorNum = createMemo(() => computeConnColorNum(connStatus()));
     const color = createMemo(() => `var(--conn-icon-color-${connColorNum()})`);

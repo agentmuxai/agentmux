@@ -33,7 +33,7 @@ function chip(connection: string | undefined) {
 
 describe("ConnectionButton", () => {
     it("shows nothing on a local pane", () => {
-        for (const local of [undefined, ""]) {
+        for (const local of [undefined, "", "local"]) {
             const { container, ref, unmount } = chip(local);
             expect(container.querySelector(".connection-button")).toBeNull();
             expect(container.textContent).toBe("");
