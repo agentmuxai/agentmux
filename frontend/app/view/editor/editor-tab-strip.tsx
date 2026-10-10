@@ -20,6 +20,7 @@
 import { createSignal, onMount, type JSX } from "solid-js";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import type { EditorViewModel } from "./editor-model";
+import { moveEditorTabTo } from "./editor-doc-tabs";
 import type { EditorTab } from "@/app/store/editor-pane-state-store";
 import { keyLabel } from "@/app/keybindings";
 
@@ -105,7 +106,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
                 // Not while its Save As box is open: the drag would take the
                 // box's text selection.
                 canDrag: (id) => props.saveAsTabId !== id,
-                onReorder: (id, targetId, position) => props.model.moveTabTo(id, targetId, position),
+                onReorder: (id, targetId, position) => moveEditorTabTo(props.model.blockId, id, targetId, position),
             }}
         />
     );
