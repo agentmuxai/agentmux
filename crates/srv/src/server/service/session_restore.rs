@@ -454,8 +454,10 @@ pub(crate) async fn replay_tabs(
 ) -> (Vec<Event>, Vec<Option<ReplayedTab>>) {
     let mut all_events = Vec::new();
     let mut replayed = Vec::with_capacity(tabs.len());
-    // Incognito tabs in the replay get fresh jars; tabs that shared one still do.
+    // Incognito tabs in the replay get fresh jars, within the cap; tabs that
+    // shared one still do.
     let mut fresh_jars = std::collections::HashMap::new();
+    let jars_available = crate::server::browser_identity::jars_available(state);
     for tab in tabs {
         let tab_events = dispatch_to_reducer(
             state,
@@ -491,7 +493,9 @@ pub(crate) async fn replay_tabs(
                     obj.remove(key);
                 }
             }
-            crate::server::browser_identity::refresh_for_replay(&mut meta, &mut fresh_jars);
+            if !crate::server::browser_identity::refresh_for_replay(&mut meta, &mut fresh_jars, jars_available) {
+                continue;
+            }
             let blk_events = dispatch_to_reducer(
                 state,
                 Command::CreateBlock { tab_id: tab_id.clone(), meta },

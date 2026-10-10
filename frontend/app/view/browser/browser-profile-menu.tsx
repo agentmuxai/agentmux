@@ -12,6 +12,7 @@ import { createMemo, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { IconButton } from "@/app/element/ui";
+import { keyLabel } from "@/app/keybindings";
 import { pushNotification } from "@/app/store/global";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import { getPlatform } from "@/util/platformutil";
@@ -19,7 +20,6 @@ import {
     canOpenIncognito,
     IDENTITY_META_KEY,
     INCOGNITO_ICON,
-    incognitoShortcutLabel,
     newIncognitoIdentity,
     newTabUrl,
     parseIdentity,
@@ -77,7 +77,7 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
             rows.push({
                 label: "Open new Incognito tab",
                 icon: INCOGNITO_ICON,
-                shortcut: incognitoShortcutLabel(platform),
+                shortcut: keyLabel("mod+shift+n"),
                 onClick: () => openIncognitoTab(model, props.home()),
             });
         } else {

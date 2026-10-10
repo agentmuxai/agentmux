@@ -4,7 +4,6 @@
 import { describe, expect, it } from "vitest";
 import {
     canOpenIncognito,
-    incognitoShortcutLabel,
     newIncognitoIdentity,
     newTabUrl,
     parseIdentity,
@@ -33,10 +32,8 @@ describe("browser tab identity (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09 §5)"
         expect(newTabUrl(undefined, "https://home.example")).toBe("https://home.example");
     });
 
-    it("offers Incognito on Windows only for now, with the platform's shortcut", () => {
+    it("offers Incognito on Windows only for now", () => {
         expect(canOpenIncognito("win32")).toBe(true);
         expect(canOpenIncognito("linux")).toBe(false);
-        expect(incognitoShortcutLabel("darwin")).toBe("⌘⇧N");
-        expect(incognitoShortcutLabel("win32")).toBe("Ctrl+Shift+N");
     });
 });

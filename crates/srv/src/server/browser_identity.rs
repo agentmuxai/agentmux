@@ -32,15 +32,23 @@ fn identity_of(meta: &MetaMapType) -> Option<&str> {
 }
 
 /// The Incognito identities blocks use now: the jars the host must keep.
-pub(crate) fn live_jars(state: &AppState) -> Vec<String> {
-    let blocks = state.mstore.get_all::<Block>().unwrap_or_default();
+/// `None` when the store can't be read: the host then keeps every jar, rather
+/// than taking an empty list as "no tab uses any" and signing them all out.
+pub(crate) fn live_jars(state: &AppState) -> Option<Vec<String>> {
+    let blocks = match state.mstore.get_all::<Block>() {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(error = %e, "[browser-identity] couldn't list blocks; the host keeps its jars");
+            return None;
+        }
+    };
     let set: HashSet<String> = blocks
         .iter()
         .filter_map(|b| identity_of(&b.meta))
         .filter(|i| is_incognito(i))
         .map(str::to_string)
         .collect();
-    set.into_iter().collect()
+    Some(set.into_iter().collect())
 }
 
 /// Check the identity a client gives a new browser tab (`pane.open`): an
@@ -59,7 +67,7 @@ pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), 
     if !cfg!(windows) {
         return Err("Incognito tabs are Windows only for now".to_string());
     }
-    let open = live_jars(state);
+    let open = live_jars(state).ok_or("couldn't count the Incognito tabs open")?;
     if !open.iter().any(|j| j == identity) && open.len() >= MAX_INCOGNITO_JARS {
         return Err(format!(
             "at most {MAX_INCOGNITO_JARS} Incognito tabs can be open at once: close one to open another"
@@ -76,16 +84,33 @@ pub(crate) fn inherit(meta: &mut MetaMapType, opener: &Block) {
     }
 }
 
+/// How many more Incognito jars a layout replay may open: the cap less those
+/// open now (none when they can't be counted, or off Windows).
+pub(crate) fn jars_available(state: &AppState) -> usize {
+    if !cfg!(windows) {
+        return 0;
+    }
+    live_jars(state).map_or(0, |open| MAX_INCOGNITO_JARS.saturating_sub(open.len()))
+}
+
 /// For a layout being replayed: each Incognito identity becomes a fresh one,
 /// so the replay doesn't share a jar with a tab still open. Tabs that shared
-/// a jar keep sharing one. `fresh` maps old to new across the replay.
-pub(crate) fn refresh_for_replay(meta: &mut Value, fresh: &mut HashMap<String, String>) {
-    let Some(obj) = meta.as_object_mut() else { return };
+/// a jar keep sharing one. `fresh` maps old to new across the replay; at most
+/// `available` fresh jars are made. Returns false for a tab that would need
+/// one more: it is left out of the replay, not opened as a blank pane or in
+/// the shared jar.
+pub(crate) fn refresh_for_replay(meta: &mut Value, fresh: &mut HashMap<String, String>, available: usize) -> bool {
+    let Some(obj) = meta.as_object_mut() else { return true };
     let Some(old) = obj.get(IDENTITY_META_KEY).and_then(Value::as_str).filter(|i| is_incognito(i)).map(str::to_string) else {
-        return;
+        return true;
     };
+    if !fresh.contains_key(&old) && fresh.len() >= available {
+        tracing::info!("[browser-identity] a replayed Incognito tab left out: no jar to spare");
+        return false;
+    }
     let new = fresh.entry(old).or_insert_with(|| format!("incognito:{}", uuid::Uuid::new_v4())).clone();
     obj.insert(IDENTITY_META_KEY.to_string(), json!(new));
+    true
 }
 
 #[cfg(test)]
@@ -106,14 +131,20 @@ mod tests {
         let mut a = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:aaaaaaaa-1111" });
         let mut b = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:aaaaaaaa-1111" });
         let mut c = json!({ "view": "browser" });
-        refresh_for_replay(&mut a, &mut fresh);
-        refresh_for_replay(&mut b, &mut fresh);
-        refresh_for_replay(&mut c, &mut fresh);
+        assert!(refresh_for_replay(&mut a, &mut fresh, 8));
+        assert!(refresh_for_replay(&mut b, &mut fresh, 8));
+        assert!(refresh_for_replay(&mut c, &mut fresh, 8));
         let ia = a[IDENTITY_META_KEY].as_str().unwrap();
         assert_ne!(ia, "incognito:aaaaaaaa-1111");
         assert!(is_incognito(ia));
         assert_eq!(a[IDENTITY_META_KEY], b[IDENTITY_META_KEY]);
         assert!(c.get(IDENTITY_META_KEY).is_none());
+        // Past the jars there are to spare, a tab needing a new one is left out;
+        // one sharing a jar already made still comes.
+        let mut d = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:dddddddd-4444" });
+        assert!(!refresh_for_replay(&mut d, &mut fresh, 1));
+        let mut e = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:aaaaaaaa-1111" });
+        assert!(refresh_for_replay(&mut e, &mut fresh, 1));
     }
 
     #[test]

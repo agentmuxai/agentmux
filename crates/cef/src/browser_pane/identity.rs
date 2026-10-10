@@ -21,6 +21,9 @@ use std::sync::{Mutex, OnceLock};
 struct Registry {
     /// Block → its identity, as the frontend last said when creating it.
     by_block: HashMap<String, String>,
+    /// srv's last list of the identities blocks use (`retain_jars`), so a
+    /// closed tab's jar doesn't count toward the cap until the next push.
+    live: Option<HashSet<String>>,
     /// Identity → its jar. Only `incognito:` identities have one here.
     jars: HashMap<String, Jar>,
 }
@@ -71,6 +74,47 @@ pub fn set_for_block(block: &str, identity: Option<&str>) {
     }
 }
 
+/// Drop the jars no tab uses any more, by srv's last list, past their grace.
+fn prune(r: &mut Registry) -> Vec<String> {
+    let Some(live) = r.live.as_ref() else { return Vec::new() };
+    let dropped: Vec<String> = r
+        .jars
+        .iter()
+        .filter(|(identity, jar)| !live.contains(*identity) && jar.created.elapsed() >= NEW_JAR_GRACE)
+        .map(|(identity, _)| identity.clone())
+        .collect();
+    for identity in &dropped {
+        r.jars.remove(identity);
+    }
+    // Only the blocks of the jars dropped here: a block whose jar isn't made
+    // yet keeps its identity, or its pane would be created in the shared jar.
+    r.by_block.retain(|_, identity| !dropped.contains(identity));
+    dropped
+}
+
+/// Can `block` have its jar? Checked when `browser_pane_create` arrives, so
+/// a refusal goes back to the pane, which shows it, rather than leaving it
+/// blank. Also refuses an Incognito tab where panes can't have a jar of their
+/// own yet (Linux and macOS): it must not browse in the shared jar instead.
+pub fn check_capacity(block: &str) -> Result<(), String> {
+    let mut r = registry();
+    let Some(identity) = r.by_block.get(block).cloned() else { return Ok(()) };
+    if !cfg!(windows) {
+        return Err("Incognito tabs are Windows only for now".to_string());
+    }
+    prune(&mut r);
+    if r.jars.contains_key(&identity) || r.jars.len() < MAX_INCOGNITO_JARS {
+        Ok(())
+    } else {
+        Err(format!("at most {MAX_INCOGNITO_JARS} Incognito tabs can be open at once: close one to open another"))
+    }
+}
+
+/// Does `block` browse as an Incognito identity?
+pub fn has_identity(block: &str) -> bool {
+    registry().by_block.contains_key(block)
+}
+
 /// The jar `block`'s pane is created in: `None` for the global jar. Creates
 /// an Incognito jar the first time its identity is used (CEF UI thread).
 /// `Err` when the identity needs a jar of its own and none can be made: the
@@ -82,6 +126,7 @@ pub fn context_for_block(block: &str) -> Result<Option<cef::RequestContext>, Str
     if let Some(jar) = r.jars.get(&identity) {
         return Ok(Some(jar.ctx.clone()));
     }
+    prune(&mut r);
     if r.jars.len() >= MAX_INCOGNITO_JARS {
         return Err(format!("at most {MAX_INCOGNITO_JARS} Incognito tabs at once"));
     }
@@ -105,22 +150,11 @@ pub fn context_for_block(block: &str) -> Result<Option<cef::RequestContext>, Str
 /// it held. So is what this host remembers of the blocks that used it.
 pub fn retain_jars(live: &HashSet<String>) {
     let mut r = registry();
-    let dropped: Vec<String> = r
-        .jars
-        .iter()
-        .filter(|(identity, jar)| !live.contains(*identity) && jar.created.elapsed() >= NEW_JAR_GRACE)
-        .map(|(identity, _)| identity.clone())
-        .collect();
-    if dropped.is_empty() {
-        return;
+    r.live = Some(live.clone());
+    let dropped = prune(&mut r);
+    if !dropped.is_empty() {
+        tracing::info!(dropped = dropped.len(), "[browser-identity] dropped jars no tab uses");
     }
-    for identity in &dropped {
-        r.jars.remove(identity);
-    }
-    // Only the blocks of the jars dropped here: a block whose jar isn't made
-    // yet keeps its identity, or its pane would be created in the shared jar.
-    r.by_block.retain(|_, identity| !dropped.contains(identity));
-    tracing::info!(dropped = dropped.len(), "[browser-identity] dropped jars no tab uses");
 }
 
 #[cfg(test)]
