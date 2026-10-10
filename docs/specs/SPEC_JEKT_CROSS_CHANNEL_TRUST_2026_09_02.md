@@ -202,7 +202,8 @@ round trip (so it is **synchronous** — no network, no rate limiter, none of th
 
 ```
 1. claimed = req.source_agent, non-empty                      else → return
-2. if agent_jekt_key_load(claimed).is_some() → return
+2. if agent_jekt_key_load(claimed).is_some()
+      and req.source_channel is empty or this instance's own channel → return
       (same-instance sender; verify_jekt_signature owns it)
 3. entries = shared registry entries for `claimed` across ALL channels
 4. if entries is empty                       → return   (sig_verified stays None)
@@ -215,6 +216,18 @@ round trip (so it is **synchronous** — no network, no rate limiter, none of th
 Step 2 is the ordering guarantee: a same-instance sender keeps the existing
 HMAC path untouched. This function only ever fires for senders this instance did
 not spawn.
+
+**Amended 2026-10-10.** Holding an HMAC key for the name used to be the whole
+of step 2, read as "this instance spawned the sender." A key outlives the agent
+moving to another instance, though: Agent4 ran in one instance on 10-08 and in
+another from 10-09, and every message it sent back to the first rendered
+`TRUST=unverified` (forced sensitive, `ESCALATE=required`), checked against a
+stale key. Step 2 now also requires the message to name this channel. And when
+step 5 verifies a sender that this instance holds a stale key for, the failed
+HMAC verdict is cleared (`sig_verified = None`): the sender proved itself with
+its own instance's published key, which is the stronger proof. A forger gains
+nothing either way: claiming this channel lands on the HMAC check, and claiming
+another needs the agent's private key.
 
 Step 5 iterates entries because one agent name can legitimately exist in several
 channels at once (that is exactly why `AgentEntry.channel` exists). A verifying

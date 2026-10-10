@@ -569,7 +569,7 @@ pub(super) fn verify_cross_channel_signature(state: &AppState, req: &mut Injecti
     let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
         return;
     };
-    verify_cross_channel_signature_in(state, req, &shared_dir, now_unix_secs());
+    verify_cross_channel_signature_in(state, req, &shared_dir, &agent_registry::local_channel_id(), now_unix_secs());
 }
 
 /// [`verify_cross_channel_signature`] with the shared registry dir and clock
@@ -579,6 +579,7 @@ pub(super) fn verify_cross_channel_signature_in(
     state: &AppState,
     req: &mut InjectionRequest,
     shared_dir: &std::path::Path,
+    local_channel: &str,
     now_secs: i64,
 ) {
     if req.delivery_tier.as_deref() != Some("channel") {
@@ -587,8 +588,15 @@ pub(super) fn verify_cross_channel_signature_in(
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    // §D2 step 2: a same-instance sender is the HMAC path's to judge.
-    if matches!(state.mstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
+    // §D2 step 2: a same-instance sender is the HMAC path's to judge. Same
+    // instance means the message names this channel (or none, as before the
+    // channel tier); holding an HMAC key for the name is not enough: a key
+    // outlives the agent moving to another instance, and checking that
+    // agent's messages against it marked every one a forgery.
+    let source_channel = req.source_channel.as_deref().unwrap_or("");
+    let from_this_channel = source_channel.is_empty() || source_channel == local_channel;
+    let holds_hmac_key = matches!(state.mstore.agent_jekt_key_load(&claimed), Ok(Some(_)));
+    if holds_hmac_key && from_this_channel {
         return;
     }
     // Only entries that actually published a key count — a pre-Phase-A
@@ -606,7 +614,6 @@ pub(super) fn verify_cross_channel_signature_in(
     let msgid = req.request_id.clone().unwrap_or_default();
     let ts = req.ts_secs.unwrap_or(0);
     let within_freshness_window = ts > 0 && (now_secs - ts).abs() <= CHANNEL_SIG_MAX_AGE_SECS;
-    let source_channel = req.source_channel.as_deref().unwrap_or("");
     let verified = within_freshness_window
         && req.channel_sig.as_deref().is_some_and(|sig| {
             published_keys.iter().any(|key| {
@@ -632,6 +639,12 @@ pub(super) fn verify_cross_channel_signature_in(
         );
     }
     req.channel_verified = Some(verified);
+    // The sender proved itself with its own instance's published key, so a
+    // failed check against this instance's stale HMAC key for the same name
+    // is not a forgery. Unproven, the HMAC verdict stands.
+    if verified && holds_hmac_key {
+        req.sig_verified = None;
+    }
 }
 
 /// Server-derived `delivery_tier` for the LAN-key case only —

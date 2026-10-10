@@ -12,6 +12,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 const NOW: i64 = 1_800_000_000;
 
+/// This instance's own channel in these tests: no sender below uses it
+/// unless the test is about a same-instance sender.
+const LOCAL: &str = "chan-local";
+
 /// `(private, public)` — `generate_lan_keypair` itself returns
 /// `(public, private)`; flipped here so call sites read naturally.
 fn keypair(seed_byte: u8) -> ([u8; 32], [u8; 32]) {
@@ -70,7 +74,7 @@ async fn a_valid_signature_against_the_published_key_verifies() {
     publish(dir.path(), "agent4", "chan-a", Some(&public));
     let mut req = channel_req("agent4", "chan-a", NOW);
     req.channel_sig = Some(sign(&req, &private));
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(true));
 }
 
@@ -82,7 +86,7 @@ async fn a_resolvable_sender_with_no_signature_is_an_active_failure() {
     let (_, public) = keypair(1);
     publish(dir.path(), "agent4", "chan-a", Some(&public));
     let mut req = channel_req("agent4", "chan-a", NOW);
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(false));
 }
 
@@ -95,7 +99,7 @@ async fn a_signature_from_the_wrong_key_fails() {
     publish(dir.path(), "agent4", "chan-a", Some(&public));
     let mut req = channel_req("agent4", "chan-a", NOW);
     req.channel_sig = Some(sign(&req, &imposter_private));
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(false));
 }
 
@@ -107,7 +111,7 @@ async fn a_pre_upgrade_entry_with_an_empty_key_cannot_be_checked() {
     let dir = tempfile::tempdir().unwrap();
     publish(dir.path(), "agent4", "chan-a", None);
     let mut req = channel_req("agent4", "chan-a", NOW);
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, None, "an empty published key must yield None, not Some(false)");
 }
 
@@ -117,7 +121,7 @@ async fn an_unknown_sender_with_no_entry_anywhere_is_left_unset() {
     let dir = tempfile::tempdir().unwrap();
     let mut req = channel_req("slack-bridge", "chan-a", NOW);
     req.channel_sig = Some("irrelevant".to_string());
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, None);
 }
 
@@ -131,9 +135,46 @@ async fn a_same_instance_sender_is_left_to_the_hmac_path() {
     let dir = tempfile::tempdir().unwrap();
     let (_, public) = keypair(1);
     publish(dir.path(), "agent4", "chan-a", Some(&public));
-    let mut req = channel_req("agent4", "chan-a", NOW);
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    let mut req = channel_req("agent4", LOCAL, NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, None, "must not shadow the HMAC verifier for a local agent");
+}
+
+#[tokio::test]
+async fn an_agent_that_moved_to_another_instance_verifies_despite_a_stale_hmac_key() {
+    // This instance spawned agent4 once and still holds its HMAC key; agent4
+    // now runs in chan-a and signs with the key it published there. Its
+    // message must verify, and the stale key's failed HMAC check must not
+    // mark it a forgery (the 2026-10-10 TRUST=unverified incident).
+    let state = test_state();
+    state.mstore.agent_jekt_key_ensure("agent4").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (private, public) = keypair(1);
+    publish(dir.path(), "agent4", "chan-a", Some(&public));
+    let mut req = channel_req("agent4", "chan-a", NOW);
+    req.channel_sig = Some(sign(&req, &private));
+    req.sig_verified = Some(false); // what the HMAC check against the stale key found
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
+    assert_eq!(req.channel_verified, Some(true));
+    assert_eq!(req.sig_verified, None, "the stale key's verdict is not a forgery once the sender is proven");
+}
+
+#[tokio::test]
+async fn a_forger_claiming_an_agent_this_instance_knows_still_fails_both_checks() {
+    // Naming another channel doesn't buy a pass: without the agent's private
+    // key the channel check fails, and the HMAC verdict stays a forgery.
+    let state = test_state();
+    state.mstore.agent_jekt_key_ensure("agent4").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (_, public) = keypair(1);
+    let (wrong_private, _) = keypair(2);
+    publish(dir.path(), "agent4", "chan-a", Some(&public));
+    let mut req = channel_req("agent4", "chan-a", NOW);
+    req.channel_sig = Some(sign(&req, &wrong_private));
+    req.sig_verified = Some(false);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
+    assert_eq!(req.channel_verified, Some(false));
+    assert_eq!(req.sig_verified, Some(false));
 }
 
 #[tokio::test]
@@ -146,7 +187,7 @@ async fn a_valid_signature_outside_the_freshness_window_fails() {
     let stale = NOW - CHANNEL_SIG_MAX_AGE_SECS - 1;
     let mut req = channel_req("agent4", "chan-a", stale);
     req.channel_sig = Some(sign(&req, &private));
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(false));
 
     // ...and just inside it still verifies, so the boundary is the
@@ -154,7 +195,7 @@ async fn a_valid_signature_outside_the_freshness_window_fails() {
     let fresh = NOW - CHANNEL_SIG_MAX_AGE_SECS + 5;
     let mut req = channel_req("agent4", "chan-a", fresh);
     req.channel_sig = Some(sign(&req, &private));
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(true));
     assert_eq!(CHANNEL_SIG_MAX_AGE_SECS, 300, "spec §D6 pins the host-tier window");
 }
@@ -172,7 +213,7 @@ async fn an_agent_live_in_two_channels_verifies_against_either_published_key() {
     publish(dir.path(), "agent4", "chan-b", Some(&public_b));
     let mut req = channel_req("agent4", "chan-b", NOW);
     req.channel_sig = Some(sign(&req, &private_b));
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(true));
 }
 
@@ -187,7 +228,7 @@ async fn a_lan_signature_replayed_as_a_cross_channel_one_fails() {
     let mut req = channel_req("agent4", "chan-a", NOW);
     req.channel_sig = sign_lan_jekt(&private, "msg-xc-1", "agent4", "lark", NOW, "here is the brief");
     assert!(req.channel_sig.is_some());
-    verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
     assert_eq!(req.channel_verified, Some(false));
 }
 
@@ -204,7 +245,7 @@ async fn a_signature_minted_for_one_channel_replayed_as_another_fails() {
     let sig = sign(&genuine, &private);
     let mut replayed = channel_req("agent4", "chan-b", NOW);
     replayed.channel_sig = Some(sig);
-    verify_cross_channel_signature_in(&state, &mut replayed, dir.path(), NOW);
+    verify_cross_channel_signature_in(&state, &mut replayed, dir.path(), LOCAL, NOW);
     assert_eq!(replayed.channel_verified, Some(false));
 }
 
@@ -218,7 +259,7 @@ async fn verification_is_scoped_to_the_channel_tier() {
         let mut req = channel_req("agent4", "chan-a", NOW);
         req.delivery_tier = Some(tier.to_string());
         req.channel_sig = Some(sign(&req, &private));
-        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), LOCAL, NOW);
         assert_eq!(req.channel_verified, None, "tier {tier} must leave channel_verified unset");
     }
 }
