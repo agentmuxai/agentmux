@@ -1,0 +1,7 @@
+{
+  "manifestVersion": 1,
+  "id": "acme.fixture",
+  "name": "Signing fixture",
+  "version": "1.0.0",
+  "contributes": { "panes": [{ "name": "main" }] }
+}

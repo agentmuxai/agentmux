@@ -27,6 +27,8 @@ pub struct WidgetInstallRequest {
     pub author: Option<String>,
     pub kind: WidgetKind,
     pub permissions: Vec<String>,
+    /// Who signed it (SPEC_WIDGET_SHARING_2026_10_10.md §2.3).
+    pub signature: crate::backend::widget_signature::WidgetSignatureInfo,
     /// The agent that asked.
     pub agent: String,
     #[ts(type = "number")]
@@ -44,6 +46,7 @@ impl WidgetInstallRequest {
             author: pkg.author.clone(),
             kind: pkg.kind.clone(),
             permissions: pkg.permissions.clone(),
+            signature: pkg.signature.clone(),
             agent: agent.to_string(),
             requested_ms: agentmux_common::time::now_ms_u64(),
         }
@@ -144,6 +147,7 @@ mod tests {
             author: None,
             kind: WidgetKind::Sandboxed,
             permissions: vec![],
+            signature: crate::backend::widget_signature::describe(id, None, &Default::default()),
             agent: agent.into(),
             requested_ms: 0,
         }

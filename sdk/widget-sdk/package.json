@@ -1,10 +1,13 @@
 {
   "name": "@agentmuxai/widget-sdk",
-  "version": "1.1.0",
-  "description": "The client for sandboxed AgentMux widgets: connect to AgentMux from a widget's page and use the widget API.",
+  "version": "1.2.0",
+  "description": "The client for sandboxed AgentMux widgets: connect to AgentMux from a widget's page and use the widget API. Its agentmux-widget command signs widget packages.",
   "type": "module",
   "main": "./v1.js",
   "types": "./v1.d.ts",
+  "bin": {
+    "agentmux-widget": "./bin/agentmux-widget.mjs"
+  },
   "exports": {
     ".": {
       "types": "./v1.d.ts",
@@ -16,6 +19,7 @@
     "v1.js",
     "v1.d.ts",
     "am-widget.css",
+    "bin/agentmux-widget.mjs",
     "README.md"
   ],
   "license": "Apache-2.0",

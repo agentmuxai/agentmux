@@ -27,9 +27,10 @@ vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: () => () => {} }));
 vi.mock("@/app/block/widget-loader", () => ({ widgetLoadErrors: () => ({}) }));
 vi.mock("@/app/view/agent/agent-launch-env", () => ({ agentmuxHome: () => "C:/Users/me/.agentmux" }));
 const decideWidget = vi.fn(async () => {});
+const forgetWidgetKey = vi.fn(async () => {});
 const showOpenFileDialog = vi.fn(async () => "C:/src/acme.notes/widget.json");
 vi.mock("@/app/store/app-api", () => ({
-    getApi: () => ({ approvals: { decideWidget }, showOpenFileDialog, openNativePath: vi.fn() }),
+    getApi: () => ({ approvals: { decideWidget, forgetWidgetKey }, showOpenFileDialog, openNativePath: vi.fn() }),
 }));
 
 import { setWidgetPackages } from "@/app/store/widget-packages-store";
@@ -54,6 +55,7 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
         panes: [],
         commands: [],
         status_items: [],
+        signature: { state: "unsigned", publisher: "acme", fingerprint: null, pinned: null },
         files_url: null,
         implied: false,
         folder: "C:/Users/me/.agentmux/widgets/acme.notes",
@@ -69,7 +71,7 @@ function given(packages: WidgetPackageInfo[]): void {
 
 describe("WidgetsSection", () => {
     beforeEach(() => {
-        for (const f of [list, install, uninstall, setEnabled, decideWidget, showOpenFileDialog]) f.mockClear();
+        for (const f of [list, install, uninstall, setEnabled, decideWidget, forgetWidgetKey, showOpenFileDialog]) f.mockClear();
         list.mockResolvedValue({ packages: [] });
     });
     afterEach(() => cleanup());
@@ -130,5 +132,37 @@ describe("WidgetsSection", () => {
         render(() => <WidgetsSection />);
         await screen.findByText("Notes");
         expect(screen.queryByText("Uninstall")).not.toBeInTheDocument();
+    });
+
+    it("says who signed a widget, and warns when it isn't the publisher's usual key", async () => {
+        const fp = "K7Q2-MZ4D-PX3A-9TWE";
+        given([
+            pkg({ signature: { state: "signed_new", publisher: "acme", fingerprint: fp, pinned: null } }),
+            pkg({ id: "acme.board", name: "Board", hash: "def", signature: { state: "key_changed", publisher: "acme", fingerprint: "AAAA-BBBB-CCCC-DDDD", pinned: fp } }),
+        ]);
+        render(() => <WidgetsSection />);
+        const notes = (await screen.findByText("Notes")).closest(".widget-row") as HTMLElement;
+        expect(within(notes).getByText(`Signed by acme · ${fp}`)).toBeInTheDocument();
+        fireEvent.click(within(notes).getByText("Approve"));
+        expect(within(notes).getByText(/This is the first acme widget here/)).toBeInTheDocument();
+        expect(within(notes).getByText("Install")).toBeInTheDocument();
+
+        const board = screen.getByText("Board").closest(".widget-row") as HTMLElement;
+        fireEvent.click(within(board).getByText("Approve"));
+        const prompt = within(board).getByRole("dialog");
+        expect(within(prompt).getByText(/Not signed by the key that signed your other acme widgets/)).toBeInTheDocument();
+        fireEvent.click(within(prompt).getByText("Install anyway"));
+        await waitFor(() => expect(decideWidget).toHaveBeenCalledWith("acme.board", "def", true));
+    });
+
+    it("lists pinned publisher keys and forgets one through the host", async () => {
+        given([pkg()]);
+        list.mockResolvedValue({ packages: [pkg()], publishers: [{ publisher: "acme", fingerprint: "K7Q2-MZ4D-PX3A-9TWE" }] });
+        const { refreshWidgetPackages } = await import("@/app/store/widget-packages-store");
+        await refreshWidgetPackages();
+        render(() => <WidgetsSection />);
+        const row = (await screen.findByText("K7Q2-MZ4D-PX3A-9TWE")).closest(".widget-publisher-row") as HTMLElement;
+        fireEvent.click(within(row).getByText("Forget key"));
+        await waitFor(() => expect(forgetWidgetKey).toHaveBeenCalledWith("acme"));
     });
 });

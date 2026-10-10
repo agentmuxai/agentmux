@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::wconfig::WidgetConfigType;
+use super::widget_signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
 
 pub const MANIFEST_FILE: &str = "widget.json";
 pub const MANIFEST_VERSION: u32 = 1;
@@ -30,6 +31,8 @@ pub const MAX_PACKAGE_FILES: usize = 2000;
 pub const MAX_COMMANDS: usize = 20;
 pub const MAX_STATUS_ITEMS: usize = 4;
 const APPROVALS_FILE: &str = "widget-approvals.json";
+/// Publisher → the key its first approved signed package was signed with.
+const PUBLISHERS_FILE: &str = "widget-publishers.json";
 
 /// Every permission a manifest may ask for (spec §6.4). `net:<origin>` is
 /// checked separately.
@@ -328,7 +331,8 @@ fn validate_contributions(m: &Manifest) -> Result<(), String> {
 // ── Files and the content hash (spec §5.1, §8.2) ────────────────────────────
 
 /// Every file in `dir` (relative path → SHA-256 hex), within the limits, with
-/// no symlinks.
+/// no symlinks. `widget.sig` at the root is left out: it signs the hash of
+/// the rest (SPEC_WIDGET_SHARING_2026_10_10.md §2.1).
 pub fn hash_files(dir: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     let mut total: u64 = 0;
@@ -353,6 +357,9 @@ pub fn hash_files(dir: &Path) -> Result<BTreeMap<String, String>, String> {
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join("/");
+            if rel == sig::SIG_FILE {
+                continue;
+            }
             let bytes = std::fs::read(&path).map_err(|e| format!("can't read {rel}: {e}"))?;
             total += bytes.len() as u64;
             if total > MAX_PACKAGE_BYTES {
@@ -393,6 +400,9 @@ pub struct Approval {
     pub approved_at: i64,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The publisher key that signed it (base64), if it was signed.
+    #[serde(default)]
+    pub signer: Option<String>,
 }
 
 fn yes() -> bool {
@@ -489,6 +499,8 @@ pub struct WidgetPackageInfo {
     pub panes: Vec<WidgetPaneInfo>,
     pub commands: Vec<WidgetCommandInfo>,
     pub status_items: Vec<WidgetStatusItemInfo>,
+    /// Who signed it, against this instance's pinned publishers.
+    pub signature: WidgetSignatureInfo,
     /// Where its files are served, ending in `/`, while it is approved and
     /// enabled; relative to srv's web endpoint.
     pub files_url: Option<String>,
@@ -603,8 +615,8 @@ pub fn files_key(secret: &str, id: &str, hash: &str) -> String {
     hex::encode(&mac.finalize().into_bytes()[..16])
 }
 
-/// Combine what's on disk with this instance's approvals.
-pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Option<&str>) -> WidgetPackageInfo {
+/// Combine what's on disk with this instance's approvals and pins.
+pub fn describe(found: &Found, approvals: &Approvals, pins: &Pins, secret: &str, v1_view: Option<&str>) -> WidgetPackageInfo {
     let folder = found.dir.display().to_string();
     let invalid = |error: String| WidgetPackageInfo {
         id: found.id.clone(),
@@ -624,6 +636,7 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         panes: vec![],
         commands: vec![],
         status_items: vec![],
+        signature: sig::describe(&found.id, None, pins),
         files_url: None,
         implied: found.implied,
         folder: folder.clone(),
@@ -644,11 +657,16 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         return invalid(format!("its entry {entry:?} isn't in the package"));
     }
     let hash = package_hash(files);
+    let signer = match sig::check(&found.dir, &m.id, &m.version, &hash) {
+        None => None,
+        Some(Ok(key)) => Some(key),
+        Some(Err(e)) => return invalid(e),
+    };
     let kind = m.kind();
     let approval = approvals.get(&m.id);
     let state = match approval {
         None => WidgetState::NeedsApproval,
-        Some(a) if a.hash != hash || a.kind != kind => WidgetState::Changed,
+        Some(a) if a.hash != hash || a.kind != kind || a.signer != signer => WidgetState::Changed,
         Some(a) if !a.enabled => WidgetState::Disabled,
         Some(_) => WidgetState::Approved,
     };
@@ -715,6 +733,7 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         panes,
         commands,
         status_items,
+        signature: sig::describe(&m.id, signer.as_deref(), pins),
         files_url,
         implied: found.implied,
         folder,
@@ -749,6 +768,7 @@ pub fn widget_entries(packages: &[WidgetPackageInfo]) -> HashMap<String, WidgetC
 pub struct WidgetPackages {
     pub widgets_dir: PathBuf,
     approvals_path: PathBuf,
+    pins_path: PathBuf,
     secret: String,
     inner: Mutex<Inner>,
 }
@@ -759,6 +779,7 @@ struct Inner {
     v1_views: HashMap<String, String>,
     packages: Vec<WidgetPackageInfo>,
     approvals: Approvals,
+    pins: Pins,
 }
 
 static SERVICE: OnceLock<Arc<WidgetPackages>> = OnceLock::new();
@@ -778,7 +799,9 @@ impl WidgetPackages {
     pub fn new(widgets_dir: PathBuf, data_dir: &Path, secret: String) -> Self {
         let approvals_path = data_dir.join(APPROVALS_FILE);
         let approvals = read_approvals(&approvals_path);
-        Self { widgets_dir, approvals_path, secret, inner: Mutex::new(Inner { approvals, ..Default::default() }) }
+        let pins_path = data_dir.join(PUBLISHERS_FILE);
+        let pins = sig::read_pins(&pins_path);
+        Self { widgets_dir, approvals_path, pins_path, secret, inner: Mutex::new(Inner { approvals, pins, ..Default::default() }) }
     }
 
     pub fn install_global(self) -> &'static Arc<WidgetPackages> {
@@ -815,7 +838,7 @@ impl WidgetPackages {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let packages = found
             .iter()
-            .map(|f| describe(f, &inner.approvals, &self.secret, v1_views.get(&f.id).map(String::as_str)))
+            .map(|f| describe(f, &inner.approvals, &inner.pins, &self.secret, v1_views.get(&f.id).map(String::as_str)))
             .collect::<Vec<_>>();
         inner.found = found;
         inner.v1_views = v1_views;
@@ -837,6 +860,16 @@ impl WidgetPackages {
         if package_hash(files) != hash {
             return Err("the widget changed since you were asked; review it again".to_string());
         }
+        let signer = match sig::check(&found.dir, &m.id, &m.version, hash) {
+            None => None,
+            Some(Ok(key)) => Some(key),
+            Some(Err(e)) => return Err(e),
+        };
+        // The first signed package of a publisher pins it to its key; a
+        // later one signed otherwise doesn't move the pin
+        // (SPEC_WIDGET_SHARING_2026_10_10.md §2.2).
+        let publisher = sig::publisher_of(id).to_string();
+        let pin = signer.clone().filter(|_| !inner.pins.contains_key(&publisher));
         let approval = Approval {
             hash: hash.to_string(),
             kind: m.kind(),
@@ -844,9 +877,30 @@ impl WidgetPackages {
             files: files.clone(),
             approved_at: chrono::Utc::now().timestamp(),
             enabled: true,
+            signer,
         };
+        if let Some(key) = pin {
+            inner.pins.insert(publisher, key);
+            sig::write_pins(&self.pins_path, &inner.pins)?;
+        }
         inner.approvals.insert(id.to_string(), approval);
         write_approvals(&self.approvals_path, &inner.approvals)
+    }
+
+    /// The publishers this instance has pinned to a key, for Settings.
+    pub fn publishers(&self) -> Vec<WidgetPublisherPin> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.pins.iter().map(|(publisher, key)| WidgetPublisherPin { publisher: publisher.clone(), fingerprint: sig::fingerprint(key) }).collect()
+    }
+
+    /// Forget a publisher's key (the user's **Forget key**, through the host
+    /// route): its next signed package pins it again.
+    pub fn forget_publisher(&self, publisher: &str) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if inner.pins.remove(publisher).is_none() {
+            return Err(format!("no key is kept for {publisher:?}"));
+        }
+        sig::write_pins(&self.pins_path, &inner.pins)
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
@@ -1282,6 +1336,88 @@ mod tests {
 
         // An approval of a stale hash is refused.
         assert!(svc.approve("acme.test", "0000").is_err());
+    }
+
+    fn sign(dir: &Path, seed: u8, id: &str) {
+        let hash = package_hash(&hash_files(dir).unwrap());
+        std::fs::write(dir.join(sig::SIG_FILE), sig::test_keys::sig_file(seed, id, "1.0.0", &hash)).unwrap();
+    }
+
+    #[test]
+    fn a_signature_leaves_the_hash_alone_and_names_its_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path());
+        let dir = package(&svc.widgets_dir, "acme.test");
+        let unsigned = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!(unsigned.signature.state, sig::SignatureState::Unsigned);
+        sign(&dir, 1, "acme.test");
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!(p.hash, unsigned.hash, "widget.sig isn't part of the content hash");
+        assert_eq!(p.signature.state, sig::SignatureState::SignedNew);
+        assert_eq!(p.signature.fingerprint.as_deref(), Some(sig::fingerprint(&sig::test_keys::public_key(1)).as_str()));
+
+        // Approving pins the publisher; the package is then plainly signed.
+        svc.approve("acme.test", &p.hash).unwrap();
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Approved, sig::SignatureState::Signed));
+        assert_eq!(svc.publishers().len(), 1);
+        // The signature file is never served.
+        let key = p.files_url.clone().unwrap().trim_end_matches('/').rsplit('/').next().unwrap().to_string();
+        assert!(svc.read_file("acme.test", &p.hash, &key, sig::SIG_FILE).is_err());
+    }
+
+    #[test]
+    fn a_signature_that_doesnt_match_makes_the_package_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path());
+        let dir = package(&svc.widgets_dir, "acme.test");
+        sign(&dir, 1, "acme.test");
+        std::fs::write(dir.join("index.html"), "<p>edited after signing</p>").unwrap();
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!(p.state, WidgetState::Invalid);
+        assert!(p.error.unwrap().contains("signature"));
+    }
+
+    #[test]
+    fn another_key_for_a_pinned_publisher_is_flagged_and_asks_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path());
+        let dir = package(&svc.widgets_dir, "acme.test");
+        sign(&dir, 1, "acme.test");
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        svc.approve("acme.test", &p.hash).unwrap();
+
+        // Same files, re-signed by someone else: asks again, flagged.
+        sign(&dir, 2, "acme.test");
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Changed, sig::SignatureState::KeyChanged));
+        // Approving it doesn't move the pin.
+        svc.approve("acme.test", &p.hash).unwrap();
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Approved, sig::SignatureState::KeyChanged));
+
+        // Another acme widget, unsigned: flagged too.
+        package(&svc.widgets_dir, "acme.other");
+        let other = svc.rescan(&HashMap::new()).into_iter().find(|p| p.id == "acme.other").unwrap();
+        assert_eq!(other.signature.state, sig::SignatureState::KeyChanged);
+
+        // Forgetting the key: the next signed one pins again.
+        svc.forget_publisher("acme").unwrap();
+        assert!(svc.publishers().is_empty());
+        assert!(svc.forget_publisher("acme").is_err());
+    }
+
+    #[test]
+    fn removing_the_signature_of_an_approved_package_asks_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = service(tmp.path());
+        let dir = package(&svc.widgets_dir, "acme.test");
+        sign(&dir, 1, "acme.test");
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        svc.approve("acme.test", &p.hash).unwrap();
+        std::fs::remove_file(dir.join(sig::SIG_FILE)).unwrap();
+        let p = svc.rescan(&HashMap::new())[0].clone();
+        assert_eq!((p.state.clone(), p.signature.state), (WidgetState::Changed, sig::SignatureState::KeyChanged));
     }
 
     #[test]

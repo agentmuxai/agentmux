@@ -41,6 +41,7 @@ function pkg(granted: string[] = []): WidgetPackageInfo {
         panes: [{ view: "ext:acme.notes/main", name: "main", label: "Notes", icon: "note-sticky", entry: "index.html", singleton: false, default_meta: {} }],
         commands: [],
         status_items: [{ id: "count", text: "Notes", icon: "note-sticky", tooltip: null, command: null, alignment: "right" }],
+        signature: { state: "unsigned", publisher: "acme", fingerprint: null, pinned: null },
         files_url: "/x/",
         implied: false,
         folder: "",

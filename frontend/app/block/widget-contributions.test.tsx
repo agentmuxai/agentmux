@@ -42,6 +42,7 @@ function pkg(): WidgetPackageInfo {
         panes: [{ view: "ext:acme.prs/main", name: "main", label: "PRs", icon: "code-pull-request", entry: "index.html", singleton: false, default_meta: { "widget:acme.prs:repo": "a/b" } }],
         commands: [{ id: "refresh", title: "Refresh", icon: "rotate-right", view: "ext:acme.prs/main", keywords: "reload" }],
         status_items: [{ id: "count", text: "PRs", icon: "code-pull-request", tooltip: "Open pull requests", command: "refresh", alignment: "right" }],
+        signature: { state: "unsigned", publisher: "acme", fingerprint: null, pinned: null },
         files_url: "/x/",
         implied: false,
         folder: "",

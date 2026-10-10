@@ -52,6 +52,7 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
         ],
         commands: [],
         status_items: [],
+        signature: { state: "unsigned", publisher: "acme", fingerprint: null, pinned: null },
         files_url: "/agentmux/widget-files/x/h1/k/",
         implied: false,
         folder: `C:/Users/me/.agentmux/widgets/${id}`,

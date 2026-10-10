@@ -1,0 +1,2 @@
+# Byte-exact: the signing fixture's hash must be the same on every OS.
+** -text

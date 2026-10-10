@@ -14,7 +14,7 @@
  * hands the page when it loads. No dependencies.
  */
 
-export const SDK_VERSION = "1.1.0";
+export const SDK_VERSION = "1.2.0";
 export const PROTOCOL = 1;
 
 const ERROR_NAMES = {

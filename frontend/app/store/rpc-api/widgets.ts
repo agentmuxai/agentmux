@@ -21,6 +21,9 @@ export type { WidgetKind } from "@/types/rpc/WidgetKind";
 export type { WidgetPackageInfo } from "@/types/rpc/WidgetPackageInfo";
 export type { WidgetPaneInfo } from "@/types/rpc/WidgetPaneInfo";
 export type { WidgetState } from "@/types/rpc/WidgetState";
+export type { SignatureState } from "@/types/rpc/SignatureState";
+export type { WidgetPublisherPin } from "@/types/rpc/WidgetPublisherPin";
+export type { WidgetSignatureInfo } from "@/types/rpc/WidgetSignatureInfo";
 export type { WidgetStatusItemInfo } from "@/types/rpc/WidgetStatusItemInfo";
 
 export const WidgetsApi = {

@@ -150,6 +150,10 @@ declare global {
          *  (`hash`) the user was shown, or cancel. Relayed by the host, which srv
          *  trusts and agents can't impersonate. SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3. */
         decideWidget(id: string, hash: string, approve: boolean): Promise<void>;
+        /** Forget the key a widget publisher is pinned to (Settings → Widgets),
+         *  relayed by the host like an approval: forgetting lets another key pin
+         *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */
+        forgetWidgetKey?(publisher: string): Promise<void>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */
