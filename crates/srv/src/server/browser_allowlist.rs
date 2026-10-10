@@ -165,14 +165,20 @@ pub(crate) fn refuse_popup(opener: &str, url: &str) -> Option<&'static str> {
         .then_some("it isn't on the sites the pane that opened it is limited to")
 }
 
-/// `pane`, a popup pane `opener` just opened, shares the site limit of the
-/// chain it opened from, if that has one: in its header, and on the host
-/// before its next navigation.
-pub(crate) async fn join_popup_pane(state: &AppState, pane: &str, opener: &str) {
-    if let Some(list) = join(pane, opener) {
+/// `pane`, a popup pane that `join`ed its opener's chain (`list`) as soon as
+/// it opened, once its ownership is settled: with an owner it shares the
+/// chain's limit, in its header and on the host; with none (the opener was
+/// taken over meanwhile) it leaves the chain. The host push waits until here,
+/// so nothing yields between opening the pane and settling who owns it.
+pub(crate) async fn settle_popup_pane(state: &AppState, pane: &str, list: Option<Vec<String>>, owned: bool) {
+    let Some(list) = list else { return };
+    if owned {
         publish(state, &[pane.to_string()], Some(&list));
-        crate::server::browser_host_sync::push(state).await;
+    } else {
+        drop_pane(pane);
+        publish(state, &[pane.to_string()], None);
     }
+    crate::server::browser_host_sync::push(state).await;
 }
 
 /// Why an agent's own `BrowserNavigate` of `pane` to `url` is refused, if it
