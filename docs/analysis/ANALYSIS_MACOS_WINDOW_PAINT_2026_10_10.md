@@ -26,7 +26,7 @@ Code citations are against `main` @ `fd6eae06f`. "Measured" means measured on th
 |---|---|
 | Empty window, hidden tabs holding 16 terminals, a second window, window moves with 4 browser panes, warm tab switches | **Fine.** 86–89 frames for ~84, tab switches 10–34 ms (one 193 ms outlier), panes follow a move with 0 px drift. The Windows skip-hidden-tabs fix works here (§5.3). |
 | A visible tab with 4 terminals | **Not fine, by an amount that varies.** 41–75 frames of ~83 over the first sessions (median 51, frame gap 33 ms), 68–71 of ~80 in a later one. The renderer main thread was 96% busy in every trace, and the terminals' live refits are the largest single item (§6.1). |
-| A visible tab with 4 browser panes | **The page keeps up (77–92 frames), the panes do not.** The panes on the dragged edge are behind it in **91–93% of samples during the drag** (median 17–20 pt, p90 60–100 pt) and settle 0.26–0.4 s after it; the browser process's UI thread is 68% busy (§5.6, §6.2). |
+| A visible tab with 4 browser panes | **The page keeps up (77–92 frames), the panes do not.** The panes on the dragged edge are behind it in **91–93% of samples taken from the drag's start to 300 ms after it** (median 17–20 pt, p90 60–100 pt) and settle 0.26–0.4 s after it; the browser process's UI thread is 68% busy (§5.6, §6.2). |
 
 **What is not the lever** (each tested, §9): host INFO logging, device-pixel ratio, `window:keepinactivetabslaidout`, the DOM terminal renderer, a transparent background on secondary windows, Skia Graphite (turning it off drops the whole app to software rendering).
 
@@ -169,9 +169,9 @@ Browser-pane tab, same drag, a calmer moment (load 3.7): the page is fine (92 fr
 
 Four pane windows, sampled at ~120–170 Hz, 80 steps of 4 points (a wider range makes the layout collapse the right-hand panes near 770 px, which shows as 0×0 windows and is the layout working as designed).
 
-**Only the two panes attached to the window's right edge are judged.** Their right edge must keep the same offset from the window's right edge at every width. The inner panes legitimately move with the layout's proportions. (A first version of this measure judged all four panes over the whole sampling period; it understated how often the edge panes are behind and is not used here. Its settle times are still valid, because every pane must return to its resting place, and they agree: 250–420 ms.)
+**Only the two panes attached to the window's right edge are judged.** Their right edge must keep the same offset from the window's right edge at every width. The inner panes legitimately move with the layout's proportions. (A first version of this measure judged all four panes over the whole sampling period; it understated how often the edge panes are behind and is not used here. Its settle times are still valid, because every pane must return to its resting place, and they agree: 250–420 ms. The window judged here includes 300 ms after the last resize, which can add a few off-position samples; most of the drag is well over that.)
 
-| Run set | Edge panes behind by >2 pt, during the drag | Median / p90 / p99 / max | Last behind after the window's final size |
+| Run set | Edge panes behind by >2 pt, from the drag's start to 300 ms after it | Median / p90 / p99 / max | Last behind after the window's final size |
 |---|---|---|---|
 | Default, 3 runs, load 4.6–4.9 | **91–93%** | 17–20 / 60–100 / 96–120 / 100–120 pt | 259–287 ms |
 
@@ -210,7 +210,7 @@ On macOS the frontend's batch reaches `apply()` and the loop calls `resize_brows
 - re-keys the main window and re-orders the overlay (`:400-423`);
 - and posts **the same task again 50 ms later** with the rect captured now (`:816-829`), to repair the frame that `set_visible(1)` reset.
 
-So every rect update does a re-show, a rescan and a repair, per pane. During a resize the reaffirm can also re-apply a rect that is already stale (`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` F2). Measured effects: the browser UI thread 68% busy, the main window receiving fewer sizes than without panes (25–26 against 63–76 in the same session), the panes on the dragged edge behind it in 91–93% of samples during the drag and settling 0.26–0.4 s after it. The Windows analysis found the same shape (a request queue, median 542 ms) and fixed it with one batched apply; macOS never got that half.
+So every rect update does a re-show, a rescan and a repair, per pane. During a resize the reaffirm can also re-apply a rect that is already stale (`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` F2). Measured effects: the browser UI thread 68% busy, the main window receiving fewer sizes than without panes (25–26 against 63–76 in the same session), the panes on the dragged edge behind it in 91–93% of samples from the drag's start to 300 ms after it, and settling 0.26–0.4 s after it. The Windows analysis found the same shape (a request queue, median 542 ms) and fixed it with one batched apply; macOS never got that half.
 
 The host also logged 1,000–1,800 lines per 1.4 s drag in this build, ~450 a second of them one-per-window `ObjC task NSApp window` lines. **That is not the cause**: with `RUST_LOG=warn` (10 lines per run) the pane lag was the same (§5.6). It is worth removing anyway, since dev builds also write each line synchronously to stderr and every build formats it twice.
 
