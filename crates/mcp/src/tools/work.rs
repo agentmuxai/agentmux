@@ -40,7 +40,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "max_attempts": arguments.get("max_attempts").and_then(|v| v.as_i64()).filter(|&n| n > 0),
                 "created_by": self_id,
             });
-            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -81,7 +81,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // silently ignore a group restriction.
                 "groups": [],
             });
-            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work claim request failed: {e}"))?;
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -163,7 +163,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "result": result_text,
                 "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
             });
-            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -220,7 +220,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let resp = client
                 .get(&url)
                 .query(&[("state", state), ("limit", &limit.to_string())])
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("work list request failed: {e}"))?;

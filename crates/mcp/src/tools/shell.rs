@@ -59,7 +59,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .timeout(crate::srv_http::SHELL_CREATE_TIMEOUT)
                 .json(&req)
                 .send()
@@ -95,7 +95,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/shell/stop", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&ShellStopRequest { shell_id: shell_id.to_string() })
                 .send()
                 .await
@@ -137,7 +137,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/shell/input", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&ShellInputRequest { shell_id: shell_id.to_string(), text: text.to_string() })
                 .send()
                 .await
@@ -187,7 +187,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/shell/status", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&ShellStatusRequest { shell_id: shell_id.to_string() })
                 .send()
                 .await

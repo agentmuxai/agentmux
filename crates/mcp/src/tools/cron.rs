@@ -32,7 +32,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "created_by": self_id, "max_fires": max_fires,
                 "max_age_secs": max_age_secs,
             });
-            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("cron create request failed: {e}"))?;
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -55,7 +55,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
             let url = format!("{}/agentmux/cron/{}", local_url.trim_end_matches('/'), id);
-            let resp = client.delete(&url).header("X-AuthKey", auth_key).send().await
+            let resp = client.delete(&url).header(AUTH_KEY_HEADER, auth_key).send().await
                 .map_err(|e| anyhow::anyhow!("cron delete request failed: {e}"))?;
             let status = resp.status();
             if status.as_u16() == 404 {
@@ -70,7 +70,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "CronList" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
-            let resp = client.get(&url).header("X-AuthKey", auth_key).send().await
+            let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await
                 .map_err(|e| anyhow::anyhow!("cron list request failed: {e}"))?;
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();

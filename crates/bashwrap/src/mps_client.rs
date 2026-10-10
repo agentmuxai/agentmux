@@ -13,6 +13,7 @@
 //! a `kind: "system"` chunk that surfaces the degradation to the
 //! user without aborting the command itself.
 
+use agentmux_common::AUTH_KEY_HEADER;
 use agentmux_common::api_types::WpsPublishRequest;
 use anyhow::Result;
 use serde::Serialize;
@@ -148,7 +149,7 @@ impl WpsClient {
         let mut req = self
             .inner
             .post(&url)
-            .header("X-AuthKey", &self.auth_key)
+            .header(AUTH_KEY_HEADER, &self.auth_key)
             .header("Content-Type", "application/json")
             .timeout(timeout)
             .json(body);
@@ -188,7 +189,7 @@ impl WpsClient {
         let mut req = self
             .inner
             .post(&url)
-            .header("X-AuthKey", &self.auth_key)
+            .header(AUTH_KEY_HEADER, &self.auth_key)
             .header("Content-Type", "application/json")
             .json(&body);
         if let Some(d) = timeout_override {

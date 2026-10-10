@@ -1,7 +1,7 @@
 # Plan — faster CI tests, and the open architecture / DRY follow-ups
 
 **Date:** 2026-10-09
-**Status:** active — most steps merged, a few deferred with reasons (§5). Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546), 8 (#4542), 9 (#4545), 10 (#4547 names, #4551 payloads), 12 (#4548), 13 (#4549), 14 (#4537), 15 (#4550), 17 in part (#4552, #4553), 20 (#4539). In review: 7 (#4543), 16 (#4540).
+**Status:** active — most steps merged, a few deferred with reasons (§5). Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546), 7 (#4543), 8 (#4542), 9 (#4545), 10 (#4547 names, #4551 payloads), 12 (#4548), 13 (#4549), 14 (#4537; its follow-up, the scoped `--update`, is #4554 (in review)), 15 (#4550), 16 (#4540), 17 in part (#4552, #4553), 20 (#4539). In review: 19 (#4555).
 **Author:** Agent5@narko
 **Builds on:**
 - [SPEC_CI_TEST_RUNNER_2026_06_22.md](SPEC_CI_TEST_RUNNER_2026_06_22.md) §6.4 (the serial-for-now decision this plan retires)
@@ -169,6 +169,7 @@ If vitest is still above 3 min after step 7, add a two-way `--shard` matrix in t
 | PR lane, ubuntu Rust job | 10.0–12.6 min | 5.8–7.6 min (most of what's left is compiling) |
 | RPC bindings step | 3.4 min | 1 s (#4534) |
 | Rust tests, PR lane | srv binary alone 174 s, serial | 92 s for all 7,534, parallel; flakes reported FLAKY (#4541) |
+| vitest step, PR lane | 5:42 on main | 3:38 unsharded with node as the default environment (#4543); about 1:55 per shard split 2 ways (1/2 1:52, 2/2 1:59); 10,710 tests, unchanged |
 | Nightly, Windows | 55–59 min of 60 | release 27.7 min, test 30.5 min, in parallel (#4535) |
 | Nightly, macOS | cancelled at 60 min | release 24.7 min, test 36.0 min |
 

@@ -47,8 +47,9 @@
 //!   which is exactly the set of inputs that could reach rows two and
 //!   four from the single-PID path. Every `pid_t` that reaches
 //!   [`kill_pid`] is strictly positive → row one only.
-//! - [`kill_process_group`] additionally requires `pgid >= 2`, because it
-//!   negates: `-1` would be row three, and `-0` is `0`, row two. Every
+//! - [`signal_process_group`] (and [`kill_process_group`] and
+//!   [`force_kill_tree`], which go through it on Unix) additionally
+//!   requires `pgid >= 2`, because it negates: `-1` would be row three, and `-0` is `0`, row two. Every
 //!   value it passes to `kill(2)` is `<= -2` → row four only, and never
 //!   the broadcast.
 //!
@@ -147,13 +148,52 @@ pub fn kill_process_group(pid: u32) {
     }
     #[cfg(unix)]
     {
-        // SAFETY: kill(2) is a well-defined POSIX syscall; `pgid >= 2` by
-        // the guard above, so `-pgid <= -2` — row four of the module-doc
-        // table, exactly that one process group. It can never be 0 (the
-        // caller's own group) or -1 (the broadcast).
-        unsafe { libc::kill(-pgid, libc::SIGTERM) };
+        let _ = signal_process_group(pid, libc::SIGTERM);
         std::thread::sleep(std::time::Duration::from_millis(300));
-        unsafe { libc::kill(-pgid, libc::SIGKILL) };
+        let _ = signal_process_group(pid, libc::SIGKILL);
+    }
+}
+
+/// Send one `signal` to the process group led by `pid`, with no grace and
+/// no escalation: the building block of [`kill_process_group`], for callers
+/// that pick their own signal and timing (the launcher's teardown backstop).
+/// Same guards: `0`, `1` and anything out of range for `pid_t` are refused
+/// with `InvalidInput` and nothing is sent. An already-empty group is an
+/// `ESRCH` error, which callers usually ignore.
+#[cfg(unix)]
+pub fn signal_process_group(pid: u32, signal: libc::c_int) -> io::Result<()> {
+    let pgid = checked_pid(pid)?;
+    if pgid < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pgid 1 would be negated to -1, the broadcast to every process — refusing",
+        ));
+    }
+    // SAFETY: kill(2) is a well-defined POSIX syscall; `pgid >= 2` by the
+    // guards above, so `-pgid <= -2`: row four of the module-doc table,
+    // exactly that one process group. It can never be 0 (the caller's own
+    // group) or -1 (the broadcast).
+    if unsafe { libc::kill(-pgid, signal) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Kill a process and everything it spawned at once, with no grace:
+/// `SIGKILL` to the process group led by `pid` on Unix (the child must be a
+/// group or session leader), `taskkill /F /T /PID` on Windows. For a caller
+/// that has already asked nicely, or never can (bashwrap's idle kill of a
+/// wrapped command). The guards are [`signal_process_group`]'s on Unix and
+/// [`kill_pid`]'s on Windows; the result is for logging, since "already
+/// gone" is an error too.
+pub fn force_kill_tree(pid: u32) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        kill_pid(pid)
+    }
+    #[cfg(unix)]
+    {
+        signal_process_group(pid, libc::SIGKILL)
     }
 }
 
@@ -249,6 +289,41 @@ mod tests {
         assert_eq!(checked_pid(i32::MAX as u32).unwrap(), i32::MAX);
         assert!(checked_pid(i32::MAX as u32 + 1).is_err());
         assert!(checked_pid(u32::MAX).is_err());
+    }
+
+    // ── signal_process_group / force_kill_tree: the same guards ──────────
+
+    #[test]
+    fn force_kill_tree_refuses_zero_and_a_pid_that_would_wrap_negative() {
+        for pid in [0, u32::MAX - 1] {
+            let err = force_kill_tree(pid).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{pid}: {err}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_process_group_refuses_zero_one_and_overflow() {
+        for pid in [0, 1, u32::MAX - 1] {
+            let err = signal_process_group(pid, 0).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{pid}: {err}");
+        }
+    }
+
+    /// What bashwrap's idle kill relies on: one SIGKILL to the group of a
+    /// child spawned as its own group leader, with no grace period.
+    #[cfg(unix)]
+    #[test]
+    fn force_kill_tree_sigkills_the_group() {
+        use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("spawn sleep");
+        force_kill_tree(child.id()).expect("signal the group");
+        let status = child.wait().expect("reap sleep");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 
     #[cfg(windows)]

@@ -15,7 +15,7 @@ pub(crate) async fn cron_set_enabled(
 ) -> Result<String> {
     let url = format!("{}/agentmux/cron/{}", local_url.trim_end_matches('/'), id);
     let body = serde_json::json!({"action": action});
-    let resp = client.patch(&url).header("X-AuthKey", auth_key).json(&body).send().await
+    let resp = client.patch(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
         .map_err(|e| anyhow::anyhow!("cron {action} request failed: {e}"))?;
     let status = resp.status();
     if status.as_u16() == 404 {
@@ -100,7 +100,7 @@ pub(crate) async fn await_shutdown(
     let mut last = Value::Null;
     while std::time::Instant::now() < give_up {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if let Ok(r) = client.get(&url).header("X-AuthKey", auth_key).send().await {
+        if let Ok(r) = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await {
             last = r.json().await.unwrap_or(last);
         }
         match last["status"].as_str().unwrap_or("") {

@@ -1,4 +1,5 @@
 use super::*;
+use agentmux_common::AUTH_KEY_HEADER;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_pane_open(engine, state);
@@ -596,7 +597,7 @@ pub(crate) async fn handle_shutdown_status(
         let url = format!("{}/api/v1/agent/shutdown/{request_id}", remote.local_url.trim_end_matches('/'));
         let mut req = state.http_client.get(&url);
         if !remote.auth_key.is_empty() {
-            req = req.header("X-AuthKey", &remote.auth_key);
+            req = req.header(AUTH_KEY_HEADER, &remote.auth_key);
         }
         return match req.send().await {
             Ok(r) => {

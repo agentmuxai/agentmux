@@ -387,7 +387,7 @@ pub async fn handle_muxspect_find(
             join_set.spawn(async move {
                 let fetch = http_client
                     .get(format!("{}/api/v1/muxspect/describe", entry.local_url))
-                    .header("X-AuthKey", &entry.auth_key)
+                    .header(agentmux_common::AUTH_KEY_HEADER, &entry.auth_key)
                     .query(&[("block_id", entry.block_id.as_str())])
                     .send();
 
@@ -1105,7 +1105,7 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
 
                 let fetch = http_client
                     .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
-                    .header("X-AuthKey", &entry.auth_key)
+                    .header(agentmux_common::AUTH_KEY_HEADER, &entry.auth_key)
                     .query(&[
                         ("agent", entry.agent_id.as_str()),
                         ("max_lines", "1"),

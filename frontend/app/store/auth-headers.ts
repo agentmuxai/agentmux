@@ -3,6 +3,7 @@
 //
 // The one place an HTTP request to srv gets its `X-AuthKey` header.
 
+import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 import { getApi } from "./app-api";
 
 /**
@@ -16,5 +17,5 @@ import { getApi } from "./app-api";
  */
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
     const key = globalThis.window != null ? getApi()?.getAuthKey?.() : undefined;
-    return key ? { ...extra, "X-AuthKey": key } : { ...extra };
+    return key ? { ...extra, [AUTH_KEY_HEADER]: key } : { ...extra };
 }
