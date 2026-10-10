@@ -228,6 +228,55 @@ describe("presentStatus: when to change", () => {
         expect(lines[1]).not.toMatch(/^Waiting on the model/);
     });
 
+    it("with no type-out (reduced motion, a turn's first line), the dwell starts at once", () => {
+        const plan = (i: number) => act({ plan: { activeForm: "Tracing the session cookie through the redirect", index: i, total: 5 }, planAt: T0 });
+        const frames = (instantReveal: boolean) => [
+            { nowMs: T0, activity: plan(1), instantReveal },
+            { nowMs: T0 + TIMING.dwellMs + 100, activity: plan(2), instantReveal },
+        ];
+        // Typed: 54 characters take ~1.5 s, so the next step waits.
+        expect(play(frames(false))[1]).toBe("Tracing the session cookie through the redirect (1/5)");
+        // Shown at once: its dwell is over, so the next step comes.
+        expect(play(frames(true))[1]).toBe("Tracing the session cookie through the redirect (2/5)");
+    });
+
+    it("a line that grows while it types out is ready only once its new end is typed", () => {
+        const agent = (steps: string[]) =>
+            act({
+                tools: [
+                    tool("Task", { description: "map it", subagent_type: "Explore" }, T0 - 2_000, "ag"),
+                    ...steps.map((f, i) => ({ ...tool("Read", { file_path: f }, T0, `s${i}`), parentId: "ag" })),
+                ],
+            });
+        let memory: StatusMemory | null = null;
+        const step = (f: Partial<StatusInput>) => {
+            const r = presentStatus(input(f), memory);
+            memory = r.memory;
+            return r;
+        };
+        step({ nowMs: T0 - 100 }); // the goal
+        const short = step({ nowMs: T0, activity: agent([]) });
+        const readyShort = short.memory.readyAt;
+        const grown = step({ nowMs: T0 + 200, activity: agent(["a_rather_long_module_name.ts"]) });
+        expect(grown.line.key).toBe(short.line.key);
+        expect(grown.memory.readyAt).toBe(T0 + grown.line.text.length * TIMING.revealCharMs);
+        expect(grown.memory.readyAt).toBeGreaterThan(readyShort);
+    });
+
+    it("a burst of quick calls after a line ended can't keep that line up past the cap", () => {
+        // Each call ends before it could show, the next starts at once: always
+        // "warming". Capped at HOLD plus the longest promote threshold.
+        const burst = (now: number) => act({ tools: [tool("Read", { file_path: "x.ts" }, now - 200, `q${Math.floor(now / 1_000)}`)] });
+        const cap = T0 + TIMING.holdMs + Math.max(TIMING.toolPromoteMs, TIMING.composingPromoteMs);
+        const frames = [
+            { nowMs: T0, activity: bashAt(T0 - 2_000) },
+            { nowMs: T0 + 100, activity: burst(T0 + 100) },
+            { nowMs: cap - 100, activity: burst(cap - 100) },
+            { nowMs: cap + 100, activity: burst(cap + 100) },
+        ];
+        expect(play(frames)).toEqual(["Running the tests", "Running the tests", "Running the tests", "Fix the login redirect loop"]);
+    });
+
     it("a counter moving keeps the line's key, so the row doesn't type it out again", () => {
         let memory: StatusMemory | null = null;
         const a = presentStatus(input({ nowMs: T0, activity: bashAt(T0 - 11_000) }), memory);

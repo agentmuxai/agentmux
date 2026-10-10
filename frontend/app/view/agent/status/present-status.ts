@@ -77,6 +77,9 @@ export interface StatusInput {
     goal: string | null;
     /** The cycling phrase, without its ellipsis. */
     phrase: string;
+    /** The row will show the next new line at once rather than type it out
+     *  (reduced motion, or the first line of a turn), so its dwell starts now. */
+    instantReveal?: boolean;
 }
 
 export interface StatusLine {
@@ -212,11 +215,16 @@ function choose(input: StatusInput, memory: StatusMemory | null): { line: Status
     const remember = (chosen: StatusLine, eligible: boolean) => {
         if (memory && memory.line.key === chosen.key) {
             const line = { ...chosen, reveal: memory.line.reveal };
-            return { line, memory: { ...memory, line, liveAt: eligible ? now : memory.liveAt } };
+            // Text that grows while it is still typing out (a subagent step,
+            // test progress) is typed to its new end, so it is ready later.
+            const typing = now < memory.readyAt;
+            const readyAt = typing ? Math.max(memory.readyAt, memory.since + chosen.text.length * TIMING.revealCharMs) : memory.readyAt;
+            return { line, memory: { ...memory, line, readyAt, liveAt: eligible ? now : memory.liveAt } };
         }
         const reveal = !memory || memory.line.rank !== chosen.rank;
         const line = { ...chosen, reveal };
-        const readyAt = reveal ? now + chosen.text.length * TIMING.revealCharMs : now;
+        const typed = reveal && !input.instantReveal;
+        const readyAt = typed ? now + chosen.text.length * TIMING.revealCharMs : now;
         return { line, memory: { line, since: now, readyAt, liveAt: now } };
     };
     if (!memory || best.rank <= RANK.anomaly) return remember(best, true);
@@ -241,11 +249,16 @@ function choose(input: StatusInput, memory: StatusMemory | null): { line: Status
     // running but still too young to show.
     if (memory.line.rank === RANK.now && best.rank > RANK.now) {
         // The next call is on its way: running but too young to show, or the
-        // model writing its input. Bounded by each one's promote threshold.
+        // model writing its input. Bounded twice: by each one's promote
+        // threshold, and overall, so a burst of quick calls (each gone before
+        // it could show) can't keep an ended line up for the whole burst. The
+        // cap still covers any next call that began within HOLD.
         const a = input.activity;
+        const cap = memory.liveAt + TIMING.holdMs + Math.max(TIMING.toolPromoteMs, TIMING.composingPromoteMs);
         const nextCallWarming =
-            (a?.tools ?? []).some((t) => t.activity.family !== "plan" && now - t.startedAt < TIMING.toolPromoteMs) ||
-            (a?.phase === "composing" && now - a.phaseSince < TIMING.composingPromoteMs);
+            now < cap &&
+            ((a?.tools ?? []).some((t) => t.activity.family !== "plan" && now - t.startedAt < TIMING.toolPromoteMs) ||
+                (a?.phase === "composing" && now - a.phaseSince < TIMING.composingPromoteMs));
         if (now - memory.liveAt < TIMING.holdMs || !settled || nextCallWarming) return remember(memory.line, false);
     }
     return remember(best, true);

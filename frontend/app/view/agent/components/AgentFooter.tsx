@@ -222,6 +222,15 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // tick() re-runs this memo every second so a phase's "up to Ys" countdown
     // (formatPhaseLabel) stays live — see useTick.ts's "always-on tick" pattern.
     const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
+    // The very first text after ENTERING the loading state renders in full
+    // instantly — the type-out reveal is a transition effect for text
+    // changes while already visibly working (summary → phrase). Playing
+    // it on entry meant "Working…" trailed the Enter keypress by
+    // ~REVEAL_CHAR_MS × 8 ≈ 250ms of a nearly-empty row, reading as "the
+    // indicator comes up late" even though the state flip is synchronous
+    // with the send (user report 2026-08-10). Plain (non-reactive) flag:
+    // only the loading edge below writes it, only the reveal effect reads it.
+    let revealInstantly = true;
     // The live status (status/present-status.ts): what to say, and when, from
     // what the agent is doing and what the row showed last.
     let statusMemory: StatusMemory | null = null;
@@ -238,6 +247,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 turnStartedAt: l && turnOpen(l, now) ? l.startedAtMs : untrack(loadStartMs),
                 goal: props.activitySummary?.trim() || null,
                 phrase: phrase(),
+                // The type-out effect below skips these; the dwell must too.
+                instantReveal: untrack(reducedMotion) || revealInstantly,
             },
             statusMemory,
         );
@@ -250,15 +261,6 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const [revealed, setRevealed] = createSignal(Number.POSITIVE_INFINITY);
     const REVEAL_CHAR_MS = TIMING.revealCharMs;
 
-    // The very first text after ENTERING the loading state renders in full
-    // instantly — the type-out reveal is a transition effect for text
-    // changes while already visibly working (summary → phrase). Playing
-    // it on entry meant "Working…" trailed the Enter keypress by
-    // ~REVEAL_CHAR_MS × 8 ≈ 250ms of a nearly-empty row, reading as "the
-    // indicator comes up late" even though the state flip is synchronous
-    // with the send (user report 2026-08-10). Plain (non-reactive) flag:
-    // only the loading edge below writes it, only the reveal effect reads it.
-    let revealInstantly = true;
     createEffect(() => {
         if (!live()) revealInstantly = true;
     });
