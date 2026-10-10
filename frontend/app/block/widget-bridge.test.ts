@@ -198,3 +198,14 @@ describe("permissions", () => {
         expect(errorOf(await handleBridgeRequest(h, state, "app.quit", {})).code).toBe(ERR.METHOD_NOT_FOUND);
     });
 });
+
+describe("the pane host the loader imports", () => {
+    // The loader imports "./sandboxed-widget-host" with no extension: a stale
+    // .ts beside the real .tsx would win and leave sandboxed widgets unable
+    // to run (a merge brought W1's placeholder back once).
+    it("is the iframe host, not a placeholder", async () => {
+        const host = await import("./sandboxed-widget-host");
+        expect(host.IFRAME_SANDBOX).toContain("allow-scripts");
+        expect(host.IFRAME_SANDBOX).not.toContain("allow-same-origin");
+    });
+});
