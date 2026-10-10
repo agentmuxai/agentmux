@@ -58,7 +58,7 @@ panes):
 
 - **The header** says who the tab is browsing as, with one line on what that means:
   - "Your saved sign-ins" for a profile;
-  - "Incognito: nothing is saved, and it's gone when the tab closes" for an Incognito tab.
+  - "Nothing is saved, and it's gone when the tab closes" for an Incognito tab.
 - **Open new Incognito tab** opens a new tab in this pane, browsing in a fresh in-memory jar of
   its own. Every Incognito tab is separate from every other one, not a shared "incognito jar".
 - **A profile in the list** opens a new tab in this pane, browsing as that profile. The tab
@@ -77,10 +77,13 @@ panes):
 
 ## 4. Showing which identity a tab is in
 
-| Identity | Profile button face | Pane-tab pill | Address bar |
-|---|---|---|---|
-| A profile | a circle in its colour with its initial | the same small circle before the title | nothing extra |
-| Incognito | `fa-user-secret` on a dark circle | `fa-user-secret` before the title | `fa-user-secret` at the left of the address field |
+| Identity | Profile button face | Pane-tab pill |
+|---|---|---|
+| A profile | a circle in its colour with its initial | the same small circle before the title |
+| Incognito | `fa-user-secret`, in the accent colour | `fa-user-secret` in place of the site's icon |
+
+The Profile button sits just before the address field, so it is the address bar's mark too: a
+second glyph beside it would only repeat it.
 
 - **With only one profile, its face stays quiet:** a neutral person glyph, and no mark in the
   tab, so nothing changes for anyone who never uses this.

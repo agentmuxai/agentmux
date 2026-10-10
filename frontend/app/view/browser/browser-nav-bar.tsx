@@ -12,7 +12,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 import { DEFAULT_BROWSER_URL, type BrowserViewModel } from "./browser-model";
-import { canOpenIncognito, IDENTITY_META_KEY, INCOGNITO_ICON, parseIdentity } from "./browser-identity";
+import { canOpenIncognito } from "./browser-identity";
 import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
 import { getPlatform } from "@/util/platformutil";
 
@@ -469,13 +469,6 @@ export function BrowserNavBar(props: {
                     </button>
                 </FlyoutMenu>
                 <BrowserProfileButton model={model} home={home} />
-                <Show when={parseIdentity(model.meta()?.[IDENTITY_META_KEY]).kind === "incognito"}>
-                    <i
-                        class={`fa fa-solid fa-${INCOGNITO_ICON} browser-address-identity`}
-                        title="Incognito: nothing is saved, and it's gone when the tab closes"
-                        aria-label="Incognito"
-                    />
-                </Show>
                 <input
                     ref={addressInputRef}
                     class="browser-address-bar"

@@ -68,7 +68,7 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
         rowKinds.set(header, {
             kind: "header",
             sub: isIncognito()
-                ? "Incognito: nothing is saved, and it's gone when the tab closes"
+                ? "Nothing is saved, and it's gone when the tab closes"
                 : "Your saved sign-ins",
         });
         const rows: MenuItem[] = [header, { label: "", divider: true }];

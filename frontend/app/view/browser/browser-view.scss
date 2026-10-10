@@ -94,14 +94,6 @@
     color: var(--secondary-text-color);
 }
 
-// The Incognito mark at the left of the address field.
-.browser-address-identity {
-    display: flex;
-    align-items: center;
-    padding: 0 6px;
-    color: var(--accent-color);
-}
-
 .browser-address-bar {
     flex: 1;
     height: 28px;
