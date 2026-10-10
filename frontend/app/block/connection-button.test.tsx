@@ -8,6 +8,7 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/block/blockframe", () => ({ NumActiveConnColors: 8 }));
@@ -39,6 +40,19 @@ describe("ConnectionButton", () => {
             expect(ref.current).toBeNull();
             unmount();
         }
+    });
+
+    it("clears the picker's anchor when a remote pane becomes local", () => {
+        // A stale anchor (the removed chip) would defeat the picker's
+        // fallback to the pane, and Change connection would open misplaced.
+        const [conn, setConn] = createSignal<string | undefined>("db1");
+        const ref = { current: null as HTMLDivElement | null };
+        const atom = Object.assign(() => false, { _set: () => {} }) as any;
+        const { container } = render(() => <ConnectionButton ref={ref} connection={conn()} changeConnModalAtom={atom} />);
+        expect(ref.current).toBe(container.querySelector(".connection-button"));
+        setConn("");
+        expect(container.querySelector(".connection-button")).toBeNull();
+        expect(ref.current).toBeNull();
     });
 
     it("shows a remote by its nickname, with its colour, and opens the picker from it", () => {

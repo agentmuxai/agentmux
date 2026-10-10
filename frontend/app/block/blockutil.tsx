@@ -8,7 +8,7 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
@@ -139,7 +139,17 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
     // still opens the picker there, placed by the pane (typeaheadmodal.tsx).
     return (
         <Show when={!isLocal()}>
-            <div ref={(el) => setBtnEl(el)} class="connection-button" onClick={clickHandler} title={getTitleText()}>
+            <div
+                ref={(el) => {
+                    setBtnEl(el);
+                    // Gone when the pane turns local: a stale anchor would keep
+                    // the picker from falling back to the pane.
+                    onCleanup(() => setBtnEl(null));
+                }}
+                class="connection-button"
+                onClick={clickHandler}
+                title={getTitleText()}
+            >
                 <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
                     {getConnIcon()}
                     <i
