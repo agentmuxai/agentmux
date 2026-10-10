@@ -181,6 +181,8 @@ export const cefHostMisc = {
     openExternalChecked: async (url: string) => {
         await invokeCommand("open_external", { url });
     },
+    // The system browser opens whenever asked: nothing to reserve.
+    reserveExternalWindow: (): ExternalWindow | null => null,
     readClipboardText: () => invokeCommand<string>("read_clipboard", {}),
     readClipboardAttachments: () =>
         invokeCommand<{ text: string; paths: string[] }>("read_clipboard_attachments", {}),

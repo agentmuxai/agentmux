@@ -19,10 +19,14 @@
 
 import { createBlock } from "@/app/store/global";
 import { getApi } from "@/app/store/app-api";
+import { navigateLoginWindow } from "./login-window";
 
 export type OAuthOpenResult = "pane" | "external" | "failed";
 
 export async function openOAuthBrowserPane(url: string): Promise<OAuthOpenResult> {
+    // A browser host's window, opened at the click that started this login
+    // (login-window.ts): the only kind a browser doesn't block by now.
+    if (navigateLoginWindow(url)) return "external";
     try {
         // Awaited (unlike getApi().openExternal's fire-and-forget form) so a
         // real failure — no default browser handler, disallowed scheme, spawn
