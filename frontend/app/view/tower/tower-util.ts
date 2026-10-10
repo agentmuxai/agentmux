@@ -117,6 +117,64 @@ export function sortGroups(groups: ProcessGroup[], sort: Sort): ProcessGroup[] {
     return [...groups].sort(compareWith(sort, value, (g) => g.name));
 }
 
+/** How the Processes view groups its list: by who started each process (the
+ *  agent, a terminal, AgentMux, or nothing AgentMux knows), by app, or not
+ *  at all. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.2. */
+export type ProcessGrouping = "agent" | "app" | "none";
+
+/** The processes one owner started, for the Processes view grouped by agent. */
+export interface OwnerGroup {
+    /** The agent's task id, or `terminals`, `agentmux`, `other`. */
+    key: string;
+    kind: RailKind;
+    label: string;
+    processes: TowerProcess[];
+    cpu?: number;
+    mem?: number;
+}
+
+/** Every process under its owner: one group per agent, then every
+ *  terminal's processes together, AgentMux's, and the rest (a process with
+ *  no task, or one whose task isn't listed). Groups without processes are
+ *  left out. */
+export function ownerGroups(processes: TowerProcess[], tasks: TowerTask[]): OwnerGroup[] {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const groups = new Map<string, OwnerGroup>();
+    for (const p of processes) {
+        const t = p.task ? byId.get(p.task) : undefined;
+        const [key, kind, label]: [string, RailKind, string] = !t
+            ? [OTHER_ID, "other", "Other processes"]
+            : t.kind === "agent"
+              ? [t.id, "agent", t.label]
+              : t.kind === "terminal"
+                ? [TERMINALS_ID, "terminals", "Terminals"]
+                : [AGENTMUX_ID, "agentmux", "AgentMux"];
+        let g = groups.get(key);
+        if (!g) {
+            g = { key, kind, label, processes: [] };
+            groups.set(key, g);
+        }
+        g.processes.push(p);
+    }
+    return [...groups.values()].map((g) => ({
+        ...g,
+        cpu: sumKnown(g.processes.map((p) => p.cpu)),
+        mem: sumKnown(g.processes.map((p) => p.mem)),
+    }));
+}
+
+const FIXED_ORDER: Record<RailKind, number> = { agent: 0, terminals: 1, agentmux: 2, other: 3 };
+
+/** Agents in `sort` order (by their totals, or count), then Terminals,
+ *  AgentMux and the other processes, always last and in that order. */
+export function sortOwnerGroups(groups: OwnerGroup[], sort: Sort): OwnerGroup[] {
+    const value = (g: OwnerGroup) => (sort.key === "cpu" ? g.cpu : sort.key === "mem" ? g.mem : g.processes.length);
+    const byAgent = compareWith(sort, value, (g: OwnerGroup) => g.label);
+    return [...groups].sort(
+        (a, b) => FIXED_ORDER[a.kind] - FIXED_ORDER[b.kind] || (a.kind === "agent" ? byAgent(a, b) : 0)
+    );
+}
+
 /** Every word of `query` appears in the name, the PID or the task's label. */
 export function filterProcesses(
     processes: TowerProcess[],

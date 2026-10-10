@@ -13,12 +13,14 @@ import {
     groupProcesses,
     nextSort,
     orderRail,
+    ownerGroups,
     processDetail,
+    processLabel,
     railEntries,
     sortGroups,
+    sortOwnerGroups,
     sortProcesses,
     sortTasks,
-    processLabel,
     treeLines,
 } from "./tower-util";
 
@@ -296,11 +298,9 @@ describe("process trees", () => {
             withDetail(5, 0.05, "Network service"),
         ]);
         const lines = treeLines(root.children, { key: "cpu", desc: true });
-        expect(lines.map((l) => (l.kind === "many" ? `${l.name} x${l.nodes.length}` : processLabel(l.node.process)))).toEqual([
-            "GPU",
-            "Renderer x2",
-            "Network service",
-        ]);
+        expect(
+            lines.map((l) => (l.kind === "many" ? `${l.name} x${l.nodes.length}` : processLabel(l.node.process)))
+        ).toEqual(["GPU", "Renderer x2", "Network service"]);
     });
 
     it("folds same-named childless siblings, sorted by the subtree", () => {
@@ -321,5 +321,65 @@ describe("process trees", () => {
         // Opened, the same siblings are listed one by one.
         const unfolded = treeLines(many.kind === "many" ? many.nodes : [], { key: "cpu", desc: true }, { fold: false });
         expect(unfolded.map((l) => l.kind)).toEqual(["process", "process"]);
+    });
+});
+
+describe("processes grouped by owner", () => {
+    const task = (id: string, kind: TowerTask["kind"], label = id): TowerTask => ({
+        id,
+        kind,
+        label,
+        tracking: "high",
+        cpu_account: false,
+        mem: 0,
+        processes: [],
+    });
+    const tasks = [
+        task("a1", "agent", "AgentX"),
+        task("a2", "agent", "AgentY"),
+        task("t1", "terminal"),
+        task("t2", "terminal"),
+        task("agentmux", "agentmux", "AgentMux"),
+    ];
+
+    it("puts each process under its agent; terminals together; the rest in Other", () => {
+        const groups = ownerGroups(
+            [
+                proc(1, "claude", 1, 10, "a1"),
+                proc(2, "rustc", 2, 20, "a1"),
+                proc(3, "claude", 0.5, 5, "a2"),
+                proc(4, "pwsh", undefined, 1, "t1"),
+                proc(5, "bash", 0.25, 1, "t2"),
+                proc(6, "agentmux-srv", 0.1, 50, "agentmux"),
+                proc(7, "chrome", 3, 100),
+                proc(8, "gone", 1, 1, "closed-pane"),
+            ],
+            tasks
+        );
+        const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
+        expect(Object.keys(byKey).sort()).toEqual(["a1", "a2", "agentmux", "other", "terminals"]);
+        expect([byKey.a1.label, byKey.a1.cpu, byKey.a1.mem, byKey.a1.processes.length]).toEqual(["AgentX", 3, 30, 2]);
+        // An unknown CPU isn't counted as 0.
+        expect([byKey.terminals.cpu, byKey.terminals.processes.length]).toEqual([0.25, 2]);
+        // A task that isn't listed any more counts as other.
+        expect(byKey.other.processes.map((p) => p.name)).toEqual(["chrome", "gone"]);
+    });
+
+    it("sorts the agents by the column, the fixed groups always last", () => {
+        const groups = ownerGroups(
+            [
+                proc(1, "x", 0.5, 300, "a1"),
+                proc(2, "y", 2, 100, "a2"),
+                proc(3, "z", 9, 999),
+                proc(4, "w", 5, 5, "t1"),
+                proc(5, "s", 1, 1, "agentmux"),
+            ],
+            tasks
+        );
+        const keys = (key: "cpu" | "mem" | "name") =>
+            sortOwnerGroups(groups, { key, desc: key !== "name" }).map((g) => g.key);
+        expect(keys("cpu")).toEqual(["a2", "a1", "terminals", "agentmux", "other"]);
+        expect(keys("mem")).toEqual(["a1", "a2", "terminals", "agentmux", "other"]);
+        expect(keys("name")).toEqual(["a1", "a2", "terminals", "agentmux", "other"]);
     });
 });
