@@ -86,10 +86,17 @@ pub struct Session {
 
 #[derive(Default)]
 pub struct Sessions {
-    open: Mutex<HashMap<String, Session>>,
+    /// The open sessions and the packages being uninstalled, under one lock,
+    /// so a session can't open between an uninstall's check and its prune.
+    state: Mutex<State>,
     sends: Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+#[derive(Default)]
+struct State {
+    open: HashMap<String, Session>,
     /// Packages being uninstalled: no session opens or answers for them.
-    removing: Mutex<std::collections::HashSet<String>>,
+    removing: std::collections::HashSet<String>,
 }
 
 pub fn sessions() -> &'static Sessions {
@@ -106,36 +113,39 @@ fn runnable<'a>(packages: &'a [WidgetPackageInfo], id: &str, hash: &str) -> Opti
 }
 
 impl Sessions {
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Ends every session of `id` and refuses new ones until
     /// [`Sessions::end_removal`]: an uninstall calls this before it deletes
     /// the widget's data, so an open pane can't write it back meanwhile.
     pub fn begin_removal(&self, id: &str) {
-        self.removing.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string());
-        self.open.lock().unwrap_or_else(|p| p.into_inner()).retain(|_, s| s.widget_id != id);
+        let mut st = self.state();
+        st.removing.insert(id.to_string());
+        st.open.retain(|_, s| s.widget_id != id);
     }
 
+    /// Call once srv's package list no longer has the widget, so no session
+    /// can open for it from a stale list.
     pub fn end_removal(&self, id: &str) {
-        self.removing.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
-    }
-
-    fn is_removing(&self, id: &str) -> bool {
-        self.removing.lock().unwrap_or_else(|p| p.into_inner()).contains(id)
+        self.state().removing.remove(id);
     }
 
     /// A token for one pane of an approved package at `hash`.
     pub fn open(&self, packages: &[WidgetPackageInfo], id: &str, hash: &str, block_id: &str) -> Result<String, AccessError> {
-        if runnable(packages, id, hash).is_none() || self.is_removing(id) {
+        let mut st = self.state();
+        if runnable(packages, id, hash).is_none() || st.removing.contains(id) {
             return Err(AccessError::unavailable(format!("{id} isn't approved at this version")));
         }
         let token = hex::encode(uuid::Uuid::new_v4().as_bytes()) + &hex::encode(uuid::Uuid::new_v4().as_bytes());
-        let mut open = self.open.lock().unwrap_or_else(|p| p.into_inner());
-        if open.len() >= MAX_SESSIONS {
+        if st.open.len() >= MAX_SESSIONS {
             // Panes that closed without saying so: drop the oldest.
-            if let Some(oldest) = open.iter().min_by_key(|(_, s)| s.opened).map(|(t, _)| t.clone()) {
-                open.remove(&oldest);
+            if let Some(oldest) = st.open.iter().min_by_key(|(_, s)| s.opened).map(|(t, _)| t.clone()) {
+                st.open.remove(&oldest);
             }
         }
-        open.insert(
+        st.open.insert(
             token.clone(),
             Session { widget_id: id.to_string(), hash: hash.to_string(), block_id: block_id.to_string(), opened: Instant::now() },
         );
@@ -143,23 +153,21 @@ impl Sessions {
     }
 
     pub fn close(&self, token: &str) {
-        self.open.lock().unwrap_or_else(|p| p.into_inner()).remove(token);
+        self.state().open.remove(token);
     }
 
     /// The session's package, if it may still run: approved at the hash the
     /// session was opened for. An edited, re-approved, disabled or removed
     /// package ends every session of the old version.
     pub fn authorize(&self, packages: &[WidgetPackageInfo], token: &str) -> Result<(Session, WidgetPackageInfo), AccessError> {
-        let session = self
-            .open
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(token)
-            .cloned()
-            .ok_or_else(|| AccessError::unavailable("this widget's session ended; reload it"))?;
-        if self.is_removing(&session.widget_id) {
-            return Err(AccessError::unavailable(format!("{} is being uninstalled", session.widget_id)));
-        }
+        let session = {
+            let st = self.state();
+            let session = st.open.get(token).cloned().ok_or_else(|| AccessError::unavailable("this widget's session ended; reload it"))?;
+            if st.removing.contains(&session.widget_id) {
+                return Err(AccessError::unavailable(format!("{} is being uninstalled", session.widget_id)));
+            }
+            session
+        };
         let pkg = runnable(packages, &session.widget_id, &session.hash)
             .cloned()
             .ok_or_else(|| AccessError::unavailable(format!("{} changed or was turned off; reload it", session.widget_id)))?;

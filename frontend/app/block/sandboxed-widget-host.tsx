@@ -302,8 +302,12 @@ function pickFiles(accept: string[], multiple: boolean): Promise<File[] | null> 
     });
 }
 
-/** The save dialog where the host has one; otherwise a download. */
+/** The save dialog where the host has one; otherwise a download. Like
+ *  the open dialog, only on a user's click. */
 async function saveFile(name: string, type: string, data: Uint8Array): Promise<boolean> {
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+        throw new BridgeError(ERR.UNAVAILABLE, "files.save opens a dialog only from a click");
+    }
     const picker = (window as { showSaveFilePicker?: (o: { suggestedName: string }) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
     if (picker) {
         try {

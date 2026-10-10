@@ -150,10 +150,15 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))
             }
             .await;
-            sessions.end_removal(&req.id);
-            removed?;
+            if let Err(e) = removed {
+                sessions.end_removal(&req.id);
+                return Err(e);
+            }
             tracing::info!(id = %req.id, "widget package uninstalled");
-            Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
+            // Sessions stay refused until the list no longer has it.
+            let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
+            sessions.end_removal(&req.id);
+            Ok(WidgetPackagesResult { packages })
         }
     });
 
