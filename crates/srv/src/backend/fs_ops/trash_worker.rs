@@ -229,7 +229,7 @@ mod macos {
         let mut map = trashed().lock().unwrap_or_else(|e| e.into_inner());
         let Some(stack) = map.get_mut(&key) else {
             return Err(
-                "It was moved to the Trash before AgentMux started, so it can't be put back from here. \
+                "AgentMux hasn't moved it to the Trash since it started, so it can't put it back. \
                  Put Back in the Finder can."
                     .to_string(),
             );
@@ -345,7 +345,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().canonicalize().unwrap().join("never-trashed.txt");
         let results = run(move || restore_paths(&[file])).await.unwrap();
-        assert!(results[0].as_ref().unwrap_err().contains("before AgentMux started"));
+        assert!(results[0].as_ref().unwrap_err().contains("hasn't moved it to the Trash"));
     }
 
     /// Touches the real Trash, so it is opt-in, like the round trip.
