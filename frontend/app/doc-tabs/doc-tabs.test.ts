@@ -3,9 +3,12 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+    activateDoc,
     closeDoc,
     closeOthers,
+    attachDoc,
     closeToRight,
+    detachDoc,
     cycleDoc,
     emptyDocTabs,
     hydrateDocTabs,
@@ -109,6 +112,41 @@ describe("document tabs: the model", () => {
         expect(keys(moveDocTo(s, "a", "c", "after"))).toEqual(["a", "b", "c"]);
     });
 
+    it("detaches a tab to move it: not onto the reopen list, the tab used before it in front", () => {
+        let s = open(open(open(emptyDocTabs<P>(), "a"), "b"), "c");
+        s = activateDoc(s, "a");
+        s = activateDoc(s, "c");
+        const out = detachDoc(s, "c")!;
+        expect(out.tab.key).toBe("c");
+        expect(keys(out.state)).toEqual(["a", "b"]);
+        expect(out.state.activeId).toBe("a");
+        expect(out.state.closed).toEqual([]);
+        expect(detachDoc(s, "nope")).toBeNull();
+    });
+
+    it("attaches a moved tab beside a target or after the active one, keeping its id and pin", () => {
+        const s = open(open(emptyDocTabs<P>(), "x"), "y"); // "y" active
+        const moved = detachDoc(open(emptyDocTabs<P>(), "m"), "m")!.tab;
+        expect(keys(attachDoc(s, moved))).toEqual(["x", "y", "m"]);
+        expect(keys(attachDoc(activateDoc(s, "x"), moved))).toEqual(["x", "m", "y"]);
+        const before = attachDoc(s, moved, { targetId: "x", position: "before" });
+        expect(keys(before)).toEqual(["m", "x", "y"]);
+        expect(before.activeId).toBe("m");
+        expect(before.tabs[0].id).toBe(moved.id);
+        const pinned = attachDoc(s, { ...moved, pinned: true }, { targetId: "y", position: "after" });
+        expect(keys(pinned)).toEqual(["m", "x", "y"]);
+    });
+
+    it("a moved preview arrives as a normal tab; a moved document already open activates that tab", () => {
+        const preview = detachDoc(open(emptyDocTabs<P>(), "m", { preview: true }), "m")!.tab;
+        const s = open(open(emptyDocTabs<P>(), "x"), "m");
+        expect(attachDoc(open(emptyDocTabs<P>(), "x"), preview).tabs[1].preview).toBe(false);
+        const again = attachDoc(activateDoc(s, "x"), preview);
+        expect(keys(again)).toEqual(["x", "m"]);
+        expect(again.activeId).toBe("m");
+        expect(again.tabs[1].id).toBe("m");
+    });
+
     it("closes others and to the right, sparing pinned tabs", () => {
         let s = open(open(open(open(emptyDocTabs<P>(), "a"), "b"), "c"), "d");
         s = setPinned(s, "a", true);
@@ -174,6 +212,20 @@ describe("document tabs: the controller", () => {
         const again = new DocTabsController(spec, h, [{ path: "/ignored" }]);
         expect(again.tabs().map((t) => t.key)).toEqual(["/a", "/b"]);
         expect(again.active()?.key).toBe("/b");
+    });
+
+    it("a tab detached to move elsewhere is not reported closed; attach brings one in", () => {
+        const ctl = new DocTabsController(spec, host(), [{ path: "/a" }, { path: "/b" }]);
+        const closed = vi.fn();
+        ctl.onClosed = closed;
+        const tab = ctl.detach(ctl.tabs()[1].id)!;
+        expect(tab.key).toBe("/b");
+        expect(closed).not.toHaveBeenCalled();
+        expect(ctl.reopen()).toBe(false);
+        const other = new DocTabsController(spec, host(), [{ path: "/x" }]);
+        other.attach(tab);
+        expect(other.tabs().map((t) => t.key)).toEqual(["/x", "/b"]);
+        expect(other.activeId()).toBe(tab.id);
     });
 
     it("moves a dragged tab, and says whether anything moved", () => {

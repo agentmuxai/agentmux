@@ -1,6 +1,6 @@
 # SPEC: Document tabs: one shared tab system for the documents inside a pane
 
-**Status:** active. Phase 1 is built (#4231): the shared layer, first with Hangar on it; Hangar has since gone back to pane tabs (§6.2). Phase 2 is built: the Editor on it (#4233, §6.1). Phase 3 is built for Media (§6.3); Phase 5 is being built (drag to reorder is built; moving between panes is planned in `docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md`); Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
+**Status:** active. Phase 1 is built (#4231): the shared layer, first with Hangar on it; Hangar has since gone back to pane tabs (§6.2). Phase 2 is built: the Editor on it (#4233, §6.1). Phase 3 is built for Media (§6.3); Phase 5 is being built (drag to reorder is built, and moving a tab between Media panes; between Editors is next, per `docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md`); Phase 4 (Browser) is dropped (§6.4). Where the build differs from the design below, the section says so. The repo owner settled the three-layer model and the name on 2026-10-02 (§1). Written against `main` @ `cede0f2b8`.
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"there are actually 3 types: Window tabs, Pane tabs, and inner-pane tabs"*; *"The media pane tabs would also be in-pane tabs"*; *"ok document tabs. so u will create 1 document tab system that editor, hangar, media, (does browser have it too?) and whatever types"*; and *"lets also backreference old docs to this, so old stuff like that idea you found is squashed"*. Later the same day the repo owner narrowed it: *"only Editor and Media really need document tabs. Terminal and Browser do not"*, then *"I think only editor and media need the document tabs .. which make semantic sense in the end"* (§6.2, §6.4).
@@ -161,6 +161,8 @@ The host renders the strip, owns the keys and the persistence, and hands the vie
 ### 5.8 Between panes (Phase 5)
 Dragging a document tab onto another pane's strip of the **same type** moves it there; onto empty layout space, it becomes a new pane. **Move to new pane** does the same from the menu. The payload's `serialize` form is what moves, so it works across windows later.
 
+**As built for Media:** a document pane registers a host for its block (`doc-tabs/doc-tab-hosts.ts`), and every drop of a document tab on another pane goes through one path (`dropDocTab` → `moveDocTab`): both panes are asked first, then the tab leaves one (`detachDoc`, not onto the reopen list) and enters the other (`attachDoc`, keeping its id). A pane that has the document open already refuses it, rather than merging it into its copy, where it would vanish from the pane it left. An empty Media tab moves too; a file moved onto a pane showing only its empty tab takes that tab's place. A drop anywhere on the pane joins after its active tab; a drop on one of its tabs lands beside it. A refusal is shown with its reason. Within one window the tab moves as it is in memory; across windows and onto layout space is not built.
+
 ## 6. Pane types
 
 ### 6.1 Editor (Phase 2)
@@ -218,7 +220,7 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 | 2 | **Editor** on it (§6.1) | **built.** Its own PR. The slice keeps its commands on the shared model rather than being deleted (§6.1) |
 | 3 | **Media** tabs (§6.3) and §5.7's open-into-existing-pane for Editor, Hangar, Media | **built for Media**, from the frontend (§6.3); `OpenMedia` and Hangar's `OpenFiles` still open new panes |
 | 4 | ~~**Browser** tabs (§6.4)~~ | **dropped** (§6.4) |
-| 5 | Between panes (§5.8): drag to another pane, Move to new pane; drag to reorder (§4.1) | a drag kind of its own. **Drag to reorder: built.** Between panes: planned, `docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md` |
+| 5 | Between panes (§5.8): drag to another pane, Move to new pane; drag to reorder (§4.1) | a drag kind of its own. **Drag to reorder: built. Between Media panes: built** (`doc-tabs/doc-tab-hosts.ts`). Between Editors: next, `docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md` |
 
 ## 10. Open questions for the repo owner
 1. **macOS keys.** Mac users expect `Cmd+W`, `Cmd+T` and `Cmd+Shift+T` for document tabs (Safari, VS Code), but in this app `Cmd:` chords are window-level (`Cmd:t` is a new window tab). Proposed: `Ctrl` on every platform (§4.3), revisited after use. The alternative is `Cmd` on macOS only for document tabs, which means moving the window-tab chords there.

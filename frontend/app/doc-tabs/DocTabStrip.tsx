@@ -9,7 +9,8 @@
  * Tabs drag as document tabs (`PaneTabStrip`'s `docDrag`): their own drag
  * kind, which never tears off into a window. Dropped on another tab of the
  * strip, a tab moves there; reorder by keys still works
- * (Ctrl+Shift+PageUp/PageDown).
+ * (Ctrl+Shift+PageUp/PageDown). A tab of another pane of the same type
+ * dropped on one of these moves into this pane, beside it (doc-tab-hosts.ts).
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md.
  */
 
@@ -17,6 +18,7 @@ import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { Show, type JSX } from "solid-js";
 import type { DocTab } from "./doc-tabs";
 import type { DocTabsController } from "./doc-tabs-controller";
+import { dropDocTab } from "./doc-tab-hosts";
 import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
 
@@ -64,6 +66,7 @@ export function DocTabStrip<P>(props: {
                             return !!tab && (props.canDrag?.(tab) ?? true);
                         },
                         onReorder: (id, targetId, position) => ctl.moveTo(id, targetId, position),
+                        onReceive: (sourceBlockId, tabId, at) => dropDocTab(sourceBlockId, tabId, props.blockId, at),
                     }}
                 />
             </div>
