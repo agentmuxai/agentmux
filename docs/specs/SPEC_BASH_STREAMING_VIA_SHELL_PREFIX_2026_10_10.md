@@ -1,6 +1,6 @@
 # SPEC: stream Bash output through Claude Code's shell prefix instead of rewriting the command
 
-**Status:** proposed
+**Status:** implemented (#4592)
 **Date:** 2026-10-10
 **Replaces (for Claude Code):** the command rewrite in `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §2 and §5.
 **Background:** `docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`.
