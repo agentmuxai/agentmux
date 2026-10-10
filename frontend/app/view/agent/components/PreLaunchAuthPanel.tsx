@@ -21,7 +21,7 @@
  */
 
 import { Button } from "@/element/button";
-import { navigateLoginWindow, reserveLoginWindow } from "../flows/login-window";
+import { createConnectWindow, navigateLoginWindow } from "../flows/login-window";
 import { loginBackend } from "../flows/login-backend";
 import { translateError } from "@/app/errors/translate";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
@@ -34,7 +34,6 @@ import {
     createEffect,
     createSignal,
     Match,
-    onCleanup,
     Show,
     Switch,
     untrack,
@@ -197,6 +196,10 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         untrack(() => controller.selected(prov.id, id, outcomeFor(id, suppliesProvider)));
     });
 
+    // The window each Connect opens inside its click, closed once that
+    // connect is over without a URL (login-window.ts).
+    const connectWindow = createConnectWindow(() => controller.state().kind);
+
     // Connect / Retry click handler. Issue #1624 PR-C Part B: OAuth no
     // longer requires a pre-selected account — the backend mints one
     // directly (`direct_account: true` in auth-flow-controller.ts's
@@ -206,34 +209,12 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     // starts without a bundle id" invariant) — that invariant no
     // longer applies; the per-account isolation dir is resolved
     // server-side regardless of whether an account was pre-selected.
-    // The window a Connect reserved inside its click (login-window.ts). Its
-    // URL may come after `startConnect` settles (the controller polls for it),
-    // so it's released when the connect is over: when `startConnect` settles
-    // with nothing in flight, or when the state leaves `waiting`, having been
-    // there for this connect. On unmount too.
-    let connectWindow: { release: () => void; sawWaiting: boolean } | null = null;
-    const releaseConnectWindow = (w = connectWindow) => {
-        if (!w) return;
-        w.release();
-        if (connectWindow === w) connectWindow = null;
-    };
-    createEffect(() => {
-        const w = connectWindow;
-        if (!w) return;
-        if (controller.state().kind === "waiting") w.sawWaiting = true;
-        else if (w.sawWaiting) releaseConnectWindow(w);
-    });
-    onCleanup(() => releaseConnectWindow());
-
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        releaseConnectWindow();
-        const w = { release: prov.headlessLoginUrlUnsupported ? () => {} : reserveLoginWindow(), sawWaiting: false };
-        connectWindow = w;
-        void startConnect(controller, prov, props.accountId(), inAppUi).finally(() => {
-            if (controller.state().kind !== "waiting") releaseConnectWindow(w);
-        });
+        // Inside the click: the login's window opens now (login-window.ts).
+        const settled = connectWindow.begin(prov);
+        void startConnect(controller, prov, props.accountId(), inAppUi).finally(settled);
     };
 
     // "Use my existing login" REMOVED 2026-08-31 — it copied the operator's

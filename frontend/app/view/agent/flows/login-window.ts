@@ -22,6 +22,8 @@
  * null), and every caller keeps its usual path. One slot: a login reserves
  * anew, closing an unused one.
  */
+import { createEffect, onCleanup } from "solid-js";
+
 import { getApi } from "@/app/store/app-api";
 
 /**
@@ -71,6 +73,46 @@ export function withLoginWindow<T>(
         throw e;
     }
     return running.finally(release);
+}
+
+/**
+ * For a login whose URL can arrive after its start call settles (the launch
+ * modal's Connect: the controller polls for the URL). `begin(provider)` runs
+ * in the click: it reserves the window and returns the callback for when the
+ * start call settles. The window is released once that connect is over: when
+ * the start call settles with nothing `waiting`, or when the state leaves
+ * `waiting` after having been there for this connect, or on cleanup. Call it
+ * in a component (it uses an effect).
+ */
+export function createConnectWindow(kind: () => string): {
+    begin(provider: { headlessLoginUrlUnsupported?: boolean }): () => void;
+} {
+    let current: { release: () => void; sawWaiting: boolean } | null = null;
+    const done = (c: typeof current) => {
+        if (!c) return;
+        c.release();
+        if (current === c) current = null;
+    };
+    createEffect(() => {
+        // Read first, so the effect tracks the state from its first run
+        // (`current` is a plain variable, which doesn't make it re-run).
+        const k = kind();
+        const c = current;
+        if (!c) return;
+        if (k === "waiting") c.sawWaiting = true;
+        else if (c.sawWaiting) done(c);
+    });
+    onCleanup(() => done(current));
+    return {
+        begin(provider) {
+            done(current);
+            const c = { release: provider.headlessLoginUrlUnsupported ? noop : reserveLoginWindow(), sawWaiting: false };
+            current = c;
+            return () => {
+                if (kind() !== "waiting") done(c);
+            };
+        },
+    };
 }
 
 /** The reserved window, handed over once; null when there's none. */

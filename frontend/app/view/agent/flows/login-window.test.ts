@@ -18,7 +18,9 @@ const hub = vi.hoisted(() => ({
 vi.mock("@/app/store/global", () => ({ createBlock: hub.createBlock }));
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: hub.invokeCommand }));
 
-import { reserveLoginWindow, takeLoginWindow, withLoginWindow } from "./login-window";
+import { createRoot, createSignal } from "solid-js";
+
+import { createConnectWindow, reserveLoginWindow, takeLoginWindow, withLoginWindow } from "./login-window";
 import { openOAuthBrowserPane } from "./open-oauth-pane";
 import { installCefWireHost } from "../../../../test/cef-wire-host";
 
@@ -170,5 +172,79 @@ describe("withLoginWindow", () => {
         await withLoginWindow({ headlessLoginUrlUnsupported: true }, async () => undefined);
         await withLoginWindow(undefined, async () => undefined);
         expect(reserve).not.toHaveBeenCalled();
+    });
+});
+
+describe("createConnectWindow (a connect whose URL comes after its start call)", () => {
+    /** A connect's state, a real Solid signal, and the tracker in its own root. */
+    function setup() {
+        const [kind, setKind] = createSignal("unauthenticated");
+        let dispose!: () => void;
+        const tracker = createRoot((d) => {
+            dispose = d;
+            return createConnectWindow(kind);
+        });
+        return { setKind, tracker, dispose };
+    }
+
+    it("releases when the state leaves waiting without a URL (cancel, failure): the effect tracks from its first run", () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        const { setKind, tracker, dispose } = setup();
+        const settled = tracker.begin(URL_PROVIDER);
+        setKind("waiting");
+        settled(); // the start call settles while the URL is still being polled for
+        expect(win.close).not.toHaveBeenCalled();
+        setKind("unauthenticated"); // cancelled
+        expect(win.close).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
+    it("keeps the window for a URL that arrives while waiting", () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        const { setKind, tracker, dispose } = setup();
+        const settled = tracker.begin(URL_PROVIDER);
+        setKind("waiting");
+        settled();
+        expect(takeLoginWindow()).toBe(win); // the URL effect takes it
+        setKind("authenticated");
+        expect(win.close).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("releases when the start call settles with nothing waiting (it failed before starting)", () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        const { setKind, tracker, dispose } = setup();
+        const settled = tracker.begin(URL_PROVIDER);
+        setKind("failed");
+        settled();
+        expect(win.close).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
+    it("a new Connect closes the previous unused window, and the old one's ending doesn't touch the new", () => {
+        const first = fakeWindow();
+        const second = fakeWindow();
+        reserve.mockReturnValueOnce(first).mockReturnValueOnce(second);
+        const { setKind, tracker, dispose } = setup();
+        const firstSettled = tracker.begin(URL_PROVIDER);
+        setKind("failed");
+        tracker.begin(URL_PROVIDER); // Retry
+        expect(first.close).toHaveBeenCalledTimes(1);
+        firstSettled();
+        expect(second.close).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("releases on cleanup (the panel unmounts mid-connect)", () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        const { setKind, tracker, dispose } = setup();
+        tracker.begin(URL_PROVIDER);
+        setKind("waiting");
+        dispose();
+        expect(win.close).toHaveBeenCalledTimes(1);
     });
 });
