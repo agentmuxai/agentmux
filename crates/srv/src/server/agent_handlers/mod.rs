@@ -10,6 +10,7 @@ mod identity;
 mod instance;
 mod session;
 mod bundle;
+mod bash_prefix;
 pub(crate) mod container_turn;
 pub(crate) mod input;
 mod side_question;

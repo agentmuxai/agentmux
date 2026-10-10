@@ -39,3 +39,7 @@ dirs = "5"
 # `detach_declared_background_session` and
 # docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
 libc = "0.2"
+
+# Windows icon + version info (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

@@ -1,4 +1,4 @@
-# @agentmux/widget-sdk
+# @agentmuxai/widget-sdk
 
 The client for **sandboxed AgentMux widgets**. A widget's page runs in a sandboxed iframe inside an AgentMux pane; this SDK connects it to AgentMux and wraps the widget API (protocol 1).
 
@@ -19,7 +19,15 @@ AgentMux serves the SDK itself, so a plain HTML widget imports it directly:
 
 ## Use it with a bundler
 
-Keep importing it from `/agentmux/widget-sdk/v1.js`, and tell the bundler to leave that import alone, since AgentMux serves the file (Vite: `build.rollupOptions.external`; see `docs/examples/widgets/react-vite/`). For types and completion, copy `v1.d.ts` next to your code. The SDK isn't published to npm yet.
+```bash
+npm install @agentmuxai/widget-sdk
+```
+
+```js
+import { connect } from "@agentmuxai/widget-sdk";
+```
+
+That bundles a copy into your widget, which works with any AgentMux that speaks protocol 1, and gives you its types. Or keep importing it from `/agentmux/widget-sdk/v1.js`, the copy AgentMux serves, and tell the bundler to leave that import alone (Vite: `build.rollupOptions.external`; see `docs/examples/widgets/react-vite/`).
 
 ## The API
 

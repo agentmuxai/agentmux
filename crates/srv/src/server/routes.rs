@@ -402,6 +402,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
+        // Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4) —
+        // in the window that holds the caller's own pane.
+        .route("/api/v1/ui/shortcuts/list", post(ui_shortcuts::handle_ui_shortcuts_list))
+        .route("/api/v1/ui/shortcuts/run", post(ui_shortcuts::handle_ui_run_command))
+        .route("/api/v1/ui/shortcuts/press", post(ui_shortcuts::handle_ui_press_keys))
         // Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
         // — own-pane-only, same identity model as the ui/* routes above.
         // navigate/back/forward/reload/eval additionally require the

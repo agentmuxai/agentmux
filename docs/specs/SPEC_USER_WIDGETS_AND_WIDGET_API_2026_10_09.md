@@ -48,7 +48,7 @@ Recommendations accepted by the repo owner on 2026-10-09 ("use best recommendati
 - **Kind:** `sandboxed` (runs in an iframe, reaches AgentMux only through the bridge) or `trusted` (a Solid ES module in the app's renderer, the v1 model).
 - **Pane contribution:** a pane type the package adds. Its view name is `ext:<id>/<name>`. One package may contribute several.
 - **Bridge:** the message protocol between a sandboxed widget's iframe and AgentMux (§6).
-- **SDK:** `@agentmux/widget-sdk`, the JavaScript client for the bridge (§7).
+- **SDK:** `@agentmuxai/widget-sdk`, the JavaScript client for the bridge (§7).
 - **Permission:** a named capability the manifest asks for and the user grants at install (§6.4).
 - **Approval:** the user's install decision, recorded by srv against the package's content hash (§8).
 
@@ -245,9 +245,9 @@ A dormant widget keeps running (it's an iframe), but should pause timers and pol
 - The **manifest** format has its own `manifestVersion`, with the same additive rule.
 - A widget can check what's there: `hello` returns `agentmux.version` and the granted `permissions`; calling an unknown method returns `-32601`, never a crash.
 
-## 7. The SDK, `@agentmux/widget-sdk`
+## 7. The SDK, `@agentmuxai/widget-sdk`
 
-One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it; a widget built with a bundler imports the same URL and marks it external. Publishing it to npm, for types and completion, is not done yet: the `@agentmux` scope is the operator's to set up.
+One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it; a widget built with a bundler either imports the same URL and marks it external, or installs `@agentmuxai/widget-sdk` from npm and bundles a copy. The npm package is published from CI (`.github/workflows/publish-widget-sdk.yml`, on a `widget-sdk-v<version>` tag) through npm trusted publishing, with no stored token; the name was reserved with a code-free 0.0.0, as for muxcode.
 
 ```js
 import { connect } from "/agentmux/widget-sdk/v1.js";
@@ -368,7 +368,7 @@ What agents are told: an Operator Config entry, "Building widgets", given to hos
 | Phase | Builds | Done when |
 |---|---|---|
 | **W1: packages and approval** | `widget.json` parsing and validation; srv's package scan, watcher and state (§8.1); the content hash; the approval record and its host-only answer route; the widget files route; Settings → Widgets (list, approve, enable, disable, reload, uninstall, install from folder or zip); the loader loading trusted packages from the files route; v1 `widgets.json` modules as implied packages; `unregisterPaneTab` and reload; the `hello` sample's manifest; the stale statuses fixed | the hello sample installs from a folder, asks for approval, loads, reloads after an edit (asking again), and uninstalls, with no restart; a package whose files change stops loading until approved again (tested) |
-| **W2: sandboxed runtime and SDK** | the iframe pane host, CSP, navigation guard; protocol 1 handshake; `meta`, `ui`, `theme`, `panes.open` (own views), the events; `@agentmux/widget-sdk` v1 and `am-widget.css` served by srv; samples `hello-sandboxed`, `notes` (with W3), `react-vite`; the quickstart README | `hello-sandboxed` and `react-vite` install and run, follow the theme, keep state in meta; a test widget can't reach `window.api`, the auth key, or the network (tested) |
+| **W2: sandboxed runtime and SDK** | the iframe pane host, CSP, navigation guard; protocol 1 handshake; `meta`, `ui`, `theme`, `panes.open` (own views), the events; `@agentmuxai/widget-sdk` v1 and `am-widget.css` served by srv; samples `hello-sandboxed`, `notes` (with W3), `react-vite`; the quickstart README | `hello-sandboxed` and `react-vite` install and run, follow the theme, keep state in meta; a test widget can't reach `window.api`, the auth key, or the network (tested) |
 | **W3: scoped access** | the per-widget scoped token; `storage`, `net.fetch`, `files`, `clipboard:write`, `panes`, `agents:read`, `agents:send`; samples `notes`, `pr-dashboard`, `ask-agent` | each permission is refused without its grant, both in the frontend and in srv (tested); the samples work |
 | **W4: agents** | `WidgetList`, `WidgetInstall`, `OpenWidget`; the "Write an AgentMux widget" skill | an agent builds and installs a widget the user asked for, the user approves it, and the agent opens it |
 | **Docs** | agentmux-docs: **Widgets** (using and managing), **Build a widget** (quickstart), **Widget API reference** (§5–§7 for users), **Widget security**; each lands right after the code it describes | — |

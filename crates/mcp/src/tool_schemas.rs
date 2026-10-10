@@ -306,6 +306,40 @@ pub(crate) const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+// Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4): the
+// Help pane's table, in the window that holds the caller's own pane.
+pub(crate) const LIST_SHORTCUTS_TOOL: &str = r#"{
+  "name": "ListShortcuts",
+  "description": "List AgentMux's keyboard shortcuts as the Help pane shows them on this platform, including the user's own remaps: for each, its command id, label, category, the keys as shown (\"Ctrl+Shift+D\", \"⌘D\") and in the table's syntax (`raw`, what PressKeys takes), the context it needs (`when`), and the pane that handles it (`pane`: files, editor or doctabs), if any. Use the command ids with RunCommand and the raw keys with PressKeys.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
+  "name": "RunCommand",
+  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane in that window's active tab first; without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the confirmations a user sees: tab:close asks before closing. pane:close is refused (use ClosePane, which gives the user 15 seconds to undo, or QuitSelf for your own pane), and so is files:deletePermanently (it can't be undone). Returns whether it ran, and why not if it didn't.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "command": { "type": "string", "description": "Command id from ListShortcuts" },
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+    },
+    "required": ["command"]
+  }
+}"#;
+
+pub(crate) const PRESS_KEYS_TOOL: &str = r#"{
+  "name": "PressKeys",
+  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to pane:close or files:deletePermanently anywhere is refused. Pass target to focus a pane in that window's active tab first. Returns the modifiers sent (on macOS `meta` is ⌘), the commands the table binds the key to, and `resolved`: the command that actually ran and who ran it (the app or a pane), or null if nothing did. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "keys": { "type": "string", "description": "A raw key from ListShortcuts, in the table's syntax" },
+      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first" }
+    },
+    "required": ["keys"]
+  }
+}"#;
+
 // Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
 // — no-mouse, selector/JS-level control of a browser pane, layered on the
 // same identity/own-pane scoping UIClick/UIQuery/UIScreenshot use.

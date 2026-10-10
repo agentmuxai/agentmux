@@ -5,6 +5,8 @@
 // uses these, so a hint can't disagree with the binding.
 
 import { isMacOS } from "@/util/platformutil";
+import { noteResolved } from "./app-api";
+export { registerPaneCommandRunner } from "./app-api";
 import type { KeyPane } from "./defaults";
 import { helpSections, type HelpSection } from "./help";
 import { formatKey, parseKey, type KeyEventLike, type KeyPlatform } from "./keys";
@@ -46,7 +48,9 @@ export function keyEventLike(e: KeyboardEvent): KeyEventLike {
 
 /** The command a pane's own handler should run for `e` (its `pane` rows). */
 export function paneCommandFor(e: KeyboardEvent, pane: KeyPane): string | null {
-    return matchPaneKey(keyEventLike(e), pane, keyPlatform());
+    const command = matchPaneKey(keyEventLike(e), pane, keyPlatform());
+    if (command) noteResolved(command, pane);
+    return command;
 }
 
 /** A command's keys in CodeMirror's syntax ("Ctrl-Shift-s", "Meta-s"), so an

@@ -29,6 +29,14 @@ describe("splitBlockDefFor", () => {
         expect(splitBlockDefFor(block({ view: "plainview" }), () => term)).toBe(term);
     });
 
+    it("the view's splitBlockDef is given the pane being split", () => {
+        const seen: Block[] = [];
+        registerPaneTab(stubPaneTab("settingsview", { capabilities: { splitBlockDef: (src) => (seen.push(src), { meta: { view: "settingsview" } }) } }));
+        const source = block({ view: "settingsview", "x:setting": 1 });
+        splitBlockDefFor(source, () => ({ meta: { view: "term" } }));
+        expect(seen).toEqual([source]);
+    });
+
     it("no source block (nothing focused) gets the fallback", () => {
         const term = { meta: { view: "term" } };
         expect(splitBlockDefFor(undefined, () => term)).toBe(term);
