@@ -1242,6 +1242,7 @@ declare global {
         "agent:onewayflow"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
+        "markdown:streamtailinplace"?: boolean;
     };
 
     // waveobj.StickerClickOptsType

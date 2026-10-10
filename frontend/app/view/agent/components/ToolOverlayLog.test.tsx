@@ -24,6 +24,9 @@ vi.mock("@/app/store/global", () => ({
     atoms: {
         prefersReducedMotionAtom: () => reducedMotion,
     },
+    // Previews render through Markdown, which reads its
+    // `markdown:streamtailinplace` kill switch on mount.
+    getSettingsKeyAtom: () => () => undefined,
 }));
 
 afterEach(() => {
