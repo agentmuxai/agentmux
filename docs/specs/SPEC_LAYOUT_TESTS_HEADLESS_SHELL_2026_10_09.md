@@ -21,7 +21,7 @@ The AgentMux app itself is not involved: it renders with its own embedded CEF, h
 1. `AGENTMUX_TEST_BROWSER`, when set (unchanged: an explicit choice wins).
 2. **Chrome's headless shell** (`chrome-headless-shell`), a separate command-line build of Chrome made for headless use, which has no app bundle and so no Dock tile. Where it's looked for:
    - on `PATH`;
-   - the Puppeteer browser cache (`~/.cache/puppeteer/chrome-headless-shell/<platform>-<version>/…/chrome-headless-shell[.exe]`), newest version first. `npx @puppeteer/browsers install chrome-headless-shell@stable --path ~/.cache/puppeteer` puts it there; only builds for this OS and architecture are taken.
+   - the Puppeteer browser cache (`~/.cache/puppeteer/chrome-headless-shell/<platform>-<version>/…/chrome-headless-shell[.exe]`), newest version first, in `PUPPETEER_CACHE_DIR` when set and then the default. `npx @puppeteer/browsers install chrome-headless-shell@stable --path ~/.cache/puppeteer` puts it there; only builds for this OS and architecture are taken.
 3. **Anywhere but macOS**, the installed Chrome or Edge, as before. There is no Dock there, and CI (Ubuntu) keeps running these tests with its `google-chrome`.
 4. **On macOS, nothing:** the layout tests skip rather than launch the Chrome app. The skip says how to install the shell.
 

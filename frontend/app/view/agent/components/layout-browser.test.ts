@@ -74,6 +74,16 @@ describe("findBrowser", () => {
         expect(findBrowser({ ...l, platform: "darwin", arch: "x64" })).toBeNull();
     });
 
+    it("searches the default cache too when PUPPETEER_CACHE_DIR points elsewhere", () => {
+        const mac = shellIn("131.0.6778.204");
+        const l = lookup({
+            env: { PUPPETEER_CACHE_DIR: "/custom/cache" },
+            files: [mac.path],
+            dirs: { [CACHE]: [mac.dir], [join(CACHE, mac.dir)]: ["chrome-headless-shell-mac_arm"] },
+        });
+        expect(findBrowser(l)).toBe(mac.path);
+    });
+
     it("the install hint puts the shell where the lookup searches", () => {
         expect(NO_BROWSER_HINT).toContain("--path ~/.cache/puppeteer");
     });

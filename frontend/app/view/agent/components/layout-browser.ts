@@ -71,17 +71,24 @@ function findHeadlessShell(l: BrowserLookup): string | null {
     for (const dir of (l.env.PATH ?? "").split(sep).filter(Boolean)) {
         if (l.exists(join(dir, exe))) return join(dir, exe);
     }
-    const cache = join(l.env.PUPPETEER_CACHE_DIR ?? join(l.home, ".cache", "puppeteer"), "chrome-headless-shell");
+    // The configured cache, then the default the install hint uses.
+    const roots = [
+        ...new Set([l.env.PUPPETEER_CACHE_DIR, join(l.home, ".cache", "puppeteer")].filter(Boolean)),
+    ] as string[];
     const host = puppeteerPlatform(l);
-    const builds = l
-        .list(cache)
-        .filter((name) => host !== null && name.startsWith(`${host}-`))
-        .map((name) => ({ name, version: name.slice(host!.length + 1) }))
-        .sort((a, b) => newestFirst(a.version, b.version));
-    for (const { name } of builds) {
-        for (const inner of l.list(join(cache, name))) {
-            const candidate = join(cache, name, inner, exe);
-            if (l.exists(candidate)) return candidate;
+    if (host === null) return null;
+    for (const root of roots) {
+        const cache = join(root, "chrome-headless-shell");
+        const builds = l
+            .list(cache)
+            .filter((name) => name.startsWith(`${host}-`))
+            .map((name) => ({ name, version: name.slice(host.length + 1) }))
+            .sort((a, b) => newestFirst(a.version, b.version));
+        for (const { name } of builds) {
+            for (const inner of l.list(join(cache, name))) {
+                const candidate = join(cache, name, inner, exe);
+                if (l.exists(candidate)) return candidate;
+            }
         }
     }
     return null;
