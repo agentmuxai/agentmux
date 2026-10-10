@@ -29,7 +29,7 @@ use agentmux_procstats::{ProcInfo, ProcKey, RateMeter};
 
 use crate::backend::process_tracker::registry::BlockMembers;
 use crate::backend::process_tracker::{agent_started, TrackedProcess, TrackingConfidence};
-use crate::backend::rpc_types::{TowerHost, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
+use crate::backend::rpc_types::{TowerHost, TowerMachine, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
 
 /// `TowerTask::id` of AgentMux's own processes.
 pub const AGENTMUX_TASK_ID: &str = "agentmux";
@@ -522,6 +522,13 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
         interval_ms: INTERVAL.as_millis() as u32,
         remote: false,
         tasks,
+        // Already measured for every process each round (`advance`), so the
+        // totals cost nothing even when the full list isn't asked for.
+        machine: Some(TowerMachine {
+            cpu: sum_known(rates.iter().copied()),
+            mem: procs.iter().filter_map(|p| p.mem_private).sum(),
+            processes: procs.len() as u32,
+        }),
         host,
     }
 }
@@ -724,6 +731,20 @@ mod tests {
         assert_eq!(node.task.as_deref(), Some("agent-a"));
         assert!(host.processes.iter().find(|x| x.pid == 900).unwrap().task.is_none());
         assert_eq!(node.id, "203:2030");
+
+        // The machine's totals come with every sample, the full list or not,
+        // and are the host list's own.
+        let machine = second.machine.clone().unwrap();
+        assert_eq!(machine.cpu, host.cpu);
+        assert_eq!(machine.mem, host.mem);
+        assert_eq!(machine.processes as usize, snap.len());
+        // (`build` measures again: a sample at the same instant has no CPU
+        // interval, so only what doesn't depend on one is compared.)
+        let without_list = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(2), false, "host", &label);
+        assert!(without_list.host.is_none());
+        let again = without_list.machine.unwrap();
+        assert_eq!((again.mem, again.processes), (machine.mem, machine.processes));
+        assert_eq!(first.machine.unwrap().cpu, None, "no made-up 0% on the first sample");
     }
 
     /// A build that started and finished between two samples: the tree has
