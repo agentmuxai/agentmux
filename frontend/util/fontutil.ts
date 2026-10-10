@@ -30,35 +30,55 @@ function loadAndLog(fontFace: FontFace, label: string) {
     );
 }
 
+/**
+ * Nerd Font icons live in the Unicode Private Use Areas. Each of the four Hack
+ * Nerd Mono files used to carry the same 10,071 icon glyphs (identical
+ * outlines and advances in all four), about 3 MB of the 4.2 MB total, loaded
+ * eagerly four times over (#4207 F2). The four files are now text-only, and the
+ * icons are one shared file.
+ *
+ * Registering that file under the `Hack` family itself, once per weight/style
+ * with a `unicode-range`, keeps every existing font stack working unchanged:
+ * the browser picks the face by code point, and all four registrations share a
+ * URL, so it is fetched once. The two ranges don't overlap, so which face
+ * draws a code point never depends on registration order.
+ *
+ * The files are subsets of the previous ones (fonttools pyftsubset), with every
+ * glyph outline, advance, hinting and layout table unchanged.
+ */
+const HACK_TEXT_RANGE = "U+0000-DFFF, U+F900-EFFFF";
+const HACK_ICON_RANGE = "U+E000-F8FF, U+F0000-10FFFF";
+const HACK_FACES: { file: string; style: string; weight: string; label: string }[] = [
+    { file: "hacknerdmono-regular", style: "normal", weight: "400", label: "Hack Regular" },
+    { file: "hacknerdmono-bold", style: "normal", weight: "700", label: "Hack Bold" },
+    { file: "hacknerdmono-italic", style: "italic", weight: "400", label: "Hack Italic" },
+    { file: "hacknerdmono-bolditalic", style: "italic", weight: "700", label: "Hack BoldItalic" },
+];
+
 function loadHackNerdFont() {
     if (isHackNerdFontLoaded) {
         return;
     }
     isHackNerdFontLoaded = true;
-    const hackRegular = new FontFace("Hack", "url('/fonts/hacknerdmono-regular.woff2')", {
-        style: "normal",
-        weight: "400",
-    });
-    const hackBold = new FontFace("Hack", "url('/fonts/hacknerdmono-bold.woff2')", {
-        style: "normal",
-        weight: "700",
-    });
-    const hackItalic = new FontFace("Hack", "url('/fonts/hacknerdmono-italic.woff2')", {
-        style: "italic",
-        weight: "400",
-    });
-    const hackBoldItalic = new FontFace("Hack", "url('/fonts/hacknerdmono-bolditalic.woff2')", {
-        style: "italic",
-        weight: "700",
-    });
-    addToFontFaceSet(document.fonts, hackRegular);
-    addToFontFaceSet(document.fonts, hackBold);
-    addToFontFaceSet(document.fonts, hackItalic);
-    addToFontFaceSet(document.fonts, hackBoldItalic);
-    loadAndLog(hackRegular, "Hack Regular");
-    loadAndLog(hackBold, "Hack Bold");
-    loadAndLog(hackItalic, "Hack Italic");
-    loadAndLog(hackBoldItalic, "Hack BoldItalic");
+    for (const { file, style, weight, label } of HACK_FACES) {
+        const text = new FontFace("Hack", `url('/fonts/${file}.woff2')`, {
+            style,
+            weight,
+            unicodeRange: HACK_TEXT_RANGE,
+        });
+        const icons = new FontFace("Hack", "url('/fonts/hacknerdmono-symbols.woff2')", {
+            style,
+            weight,
+            unicodeRange: HACK_ICON_RANGE,
+        });
+        addToFontFaceSet(document.fonts, text);
+        addToFontFaceSet(document.fonts, icons);
+        loadAndLog(text, label);
+        // Same URL for all four: the first load fetches it, the rest resolve
+        // from that request. Loaded eagerly like the text faces, so a prompt's
+        // first icon doesn't wait on a fetch.
+        loadAndLog(icons, `${label} (Nerd Font icons)`);
+    }
 }
 
 function loadInterFont() {
