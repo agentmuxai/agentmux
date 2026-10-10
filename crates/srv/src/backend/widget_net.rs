@@ -44,6 +44,9 @@ const REFUSED_HEADERS: &[&str] = &[
     "expect",
 ];
 
+/// Headers dropped when a redirect leaves the origin they were sent to.
+const CREDENTIAL_HEADERS: &[&str] = &["authorization", "cookie"];
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchRequest {
@@ -248,6 +251,13 @@ pub async fn fetch(pkg_name: &str, granted: &[String], req: FetchRequest) -> Res
                 if grant_for(granted, &next).is_none() {
                     return Err(AccessError::network(format!("a redirect to {} isn't allowed", next.origin().ascii_serialization())));
                 }
+                // As browsers do: credentials meant for one origin don't
+                // follow a redirect to another, even an allowed one.
+                if next.origin() != url.origin() {
+                    for name in CREDENTIAL_HEADERS {
+                        headers.remove(*name);
+                    }
+                }
                 // As browsers do: 303, and 301/302 after a POST, become a GET.
                 if status == reqwest::StatusCode::SEE_OTHER
                     || ((status == reqwest::StatusCode::MOVED_PERMANENTLY || status == reqwest::StatusCode::FOUND) && method == reqwest::Method::POST)
@@ -395,6 +405,43 @@ mod tests {
         assert_eq!(resp.url, format!("http://127.0.0.1:{target}/there"));
         // No content type: the bytes come back as base64.
         assert_eq!(resp.body_base64.as_deref(), Some("aGk="));
+    }
+
+    /// A one-shot server that answers whether the request carried Authorization.
+    async fn serve_auth_echo() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+                let body = if req.contains("\r\nauthorization:") { "with-auth" } else { "no-auth" };
+                let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(reply.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn credentials_dont_follow_a_redirect_to_another_origin() {
+        let target = serve_auth_echo().await;
+        let reply: &'static str = Box::leak(
+            format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{target}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_boxed_str(),
+        );
+        let first = serve(reply).await;
+        let both = vec![format!("net:http://127.0.0.1:{first}"), format!("net:http://127.0.0.1:{target}")];
+        let headers = BTreeMap::from([("Authorization".to_string(), "Bearer secret".to_string())]);
+        let resp = fetch("Test", &both, FetchRequest { url: format!("http://127.0.0.1:{first}/"), headers: headers.clone(), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(resp.body.as_deref(), Some("no-auth"), "dropped on the way to another origin");
+        // Straight to it, it's sent.
+        let resp = fetch("Test", &both, FetchRequest { url: format!("http://127.0.0.1:{target}/"), headers, ..Default::default() }).await.unwrap();
+        assert_eq!(resp.body.as_deref(), Some("with-auth"));
     }
 
     #[test]
