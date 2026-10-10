@@ -132,7 +132,7 @@ fn a_purged_row_gets_no_key_and_its_keys_go_with_it() {
 #[test]
 fn slugs_that_fold_together_outside_ascii_are_nobody_s_either() {
     // SQLite's lower() folds only ASCII; the key tables fold with Rust's
-    // to_lowercase, so "Ä" and "ä" share one key row (Codex on #4567).
+    // to_lowercase, so "Ä" and "ä" share one key row (#4567).
     let store = Store::open_in_memory().unwrap();
     row(&store, "uid-upper", "Ä", ROW_MS);
     row(&store, "uid-lower", "ä", ROW_MS);
