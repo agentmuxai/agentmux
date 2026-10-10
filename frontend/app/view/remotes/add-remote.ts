@@ -48,10 +48,11 @@ export function defaultAlias(dest: Destination): string {
     return dest.port && isAddress ? `${base}-${dest.port}` : base;
 }
 
-/** The remote's connection name, `user@host:port`, with port 22 when none is
- *  given and an IPv6 address in brackets: what AgentMux connects to, and the
- *  name a remote gets when none is typed. */
+/** The remote's connection name, `user@host:port`, an IPv6 address in
+ *  brackets: what AgentMux connects to, and the name a remote gets when none
+ *  is typed. With no port typed it has none, so ssh uses the host's `Port`
+ *  from ssh config, else 22, rather than forcing `-p 22`. */
 export function connectionName(dest: Destination): string {
-    const host = dest.hostname.includes(":") ? `[${dest.hostname}]` : dest.hostname;
-    return `${dest.user ? `${dest.user}@` : ""}${host}:${dest.port || "22"}`;
+    const host = dest.hostname.includes(":") && dest.port ? `[${dest.hostname}]` : dest.hostname;
+    return `${dest.user ? `${dest.user}@` : ""}${host}${dest.port ? `:${dest.port}` : ""}`;
 }

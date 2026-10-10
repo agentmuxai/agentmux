@@ -34,10 +34,11 @@ describe("defaultAlias", () => {
 });
 
 describe("connectionName", () => {
-    it("is user@host:port, port 22 when none is given, IPv6 in brackets", () => {
+    it("is user@host:port, with no port when none was typed (ssh config's, else 22), IPv6 in brackets with a port", () => {
         expect(connectionName({ user: "asafe", hostname: "127.0.0.1", port: "2222" })).toBe("asafe@127.0.0.1:2222");
-        expect(connectionName({ user: "asafe", hostname: "127.0.0.1", port: "" })).toBe("asafe@127.0.0.1:22");
-        expect(connectionName({ user: "", hostname: "db1", port: "" })).toBe("db1:22");
+        expect(connectionName({ user: "asafe", hostname: "127.0.0.1", port: "" })).toBe("asafe@127.0.0.1");
+        expect(connectionName({ user: "", hostname: "db1", port: "" })).toBe("db1");
         expect(connectionName({ user: "me", hostname: "fe80::1", port: "2222" })).toBe("me@[fe80::1]:2222");
+        expect(connectionName({ user: "", hostname: "fe80::1", port: "" })).toBe("fe80::1");
     });
 });

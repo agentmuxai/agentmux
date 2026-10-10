@@ -230,15 +230,15 @@ describe("RemotesView", () => {
         expect(model.expanded()).toBe("me@db1.example.com:2222");
     });
 
-    it("takes port 22 when none is typed", async () => {
+    it("leaves the port to ssh (its config, else 22) when none is typed", async () => {
         await renderWith([]);
         fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
         fireEvent.input(screen.getByLabelText("Connect to"), { target: { value: "asafe@127.0.0.1" } });
         fireEvent.click(screen.getByRole("button", { name: "Add" }));
         await new Promise((r) => setTimeout(r, 0));
         expect(rpc.RemoteSetConfigCommand).toHaveBeenCalledWith(expect.anything(), {
-            connection: "asafe@127.0.0.1:22",
-            values: { "display:name": "asafe@127.0.0.1:22" },
+            connection: "asafe@127.0.0.1",
+            values: { "display:name": "asafe@127.0.0.1" },
         });
     });
 
