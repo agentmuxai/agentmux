@@ -60,6 +60,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
             let task_client = client.clone();
             let task_auth = auth_key.to_string();
+            let task_local_url = local_url.to_string();
             let task_target = target.clone();
             let task_source = self_id;
             let task_prompt = prompt.clone();
@@ -72,6 +73,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     tokio::time::sleep(interval).await;
                 }
                 loop {
+                    crate::self_keys::refresh_if_stale(&task_client, &task_local_url, &task_auth).await;
                     let req = sign_outgoing_jekt(task_source.as_deref(), &task_target, &task_prompt)
                         .into_request(task_target.clone(), task_prompt.clone(), task_source.clone());
                     let _ = task_client

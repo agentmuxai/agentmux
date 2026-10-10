@@ -325,3 +325,30 @@ pub(crate) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(Stri
         .map(Result::unwrap)
         .collect()
 }
+
+impl Store {
+    /// The slugs of every row whose slug equals `name` trimmed and folded
+    /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
+    /// "Aria" and "aria" are two rows).
+    pub fn agent_slugs_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
+        // Folded in Rust as the key tables fold, never SQLite's ASCII-only lower().
+        let folded = name.trim().to_lowercase();
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
+        let slugs = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(slugs.into_iter().filter(|s| s.trim().to_lowercase() == folded).collect())
+    }
+}
+
+impl Store {
+    /// The ids of every row whose slug is `name`, trimmed and folded with
+    /// Rust's `to_lowercase` (identity M4d-6: which agent this instance knows
+    /// by a name a jekt claims).
+    pub fn agent_ids_for_slug_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
+        let folded = name.trim().to_lowercase();
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows.into_iter().filter(|(_, slug)| slug.trim().to_lowercase() == folded).map(|(id, _)| id).collect())
+    }
+}

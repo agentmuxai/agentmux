@@ -490,6 +490,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "/agentmux/identity/fallbacks",
             get(caller::handle_identity_fallbacks),
         )
+        .route(
+            "/agentmux/agents/self/keys",
+            get(agent_self_keys::handle_agent_self_keys),
+        )
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))

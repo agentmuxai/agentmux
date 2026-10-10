@@ -1456,6 +1456,9 @@ struct LanPubkeyCacheEntry {
     /// `None` = negative cache entry: no peer has a LAN public key on file
     /// for this agent_id (never minted one, or genuinely unknown).
     public_key: Option<Vec<u8>>,
+    /// Identity M4d-6: the UID and UID key from the same peer's answer, when
+    /// it gave both.
+    uid_key: Option<(String, Vec<u8>)>,
     expires: std::time::Instant,
 }
 
@@ -1698,11 +1701,14 @@ impl LanDiscoveryController {
                 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
                 let Ok(pubkey_bytes) = BASE64.decode(pubkey_b64) else { continue };
                 tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
+                let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
+                let uid_key = body.get("uid_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
                 if let Ok(mut cache) = self.pubkey_cache.write() {
                     cache.insert(
                         agent_id.to_string(),
                         LanPubkeyCacheEntry {
                             public_key: Some(pubkey_bytes.clone()),
+                            uid_key: uid.zip(uid_key).map(|(u, k)| (u.to_string(), k)),
                             expires: std::time::Instant::now()
                                 + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                         },
@@ -1718,12 +1724,35 @@ impl LanDiscoveryController {
                 agent_id.to_string(),
                 LanPubkeyCacheEntry {
                     public_key: None,
+                    uid_key: None,
                     expires: std::time::Instant::now()
                         + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                 },
             );
         }
         LanPubkeyLookup::NotFound
+    }
+
+    /// The UID and UID key the peer that answered [`Self::find_agent_lan_pubkey`]
+    /// for `agent_id` gave beside its name key, while that answer is cached
+    /// (identity M4d-6).
+    pub fn cached_lan_uid_key(&self, agent_id: &str) -> Option<(String, Vec<u8>)> {
+        let cache = self.pubkey_cache.read().ok()?;
+        let e = cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?;
+        e.uid_key.clone()
+    }
+
+    /// Cache a peer's answer for `agent_id` as `find_agent_lan_pubkey` would.
+    #[cfg(test)]
+    pub fn seed_lan_pubkey_for_test(&self, agent_id: &str, public_key: Vec<u8>, uid_key: Option<(String, Vec<u8>)>) {
+        self.pubkey_cache.write().unwrap().insert(
+            agent_id.to_string(),
+            LanPubkeyCacheEntry {
+                public_key: Some(public_key),
+                uid_key,
+                expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+            },
+        );
     }
 
     /// Evict a stale cache entry (e.g. after a forward to that peer failed).

@@ -749,6 +749,17 @@ pub fn refresh(
     packages
 }
 
+/// `refresh` on a blocking thread: a rescan reads and hashes every file of
+/// every package, which mustn't stall an async worker.
+pub async fn refresh_off_thread(
+    config_watcher: &Arc<super::wconfig::ConfigState>,
+    event_bus: &Arc<super::eventbus::EventBus>,
+    broker: &Arc<super::mps::Broker>,
+) -> Vec<WidgetPackageInfo> {
+    let (c, e, b) = (config_watcher.clone(), event_bus.clone(), broker.clone());
+    tokio::task::spawn_blocking(move || refresh(&c, &e, &b)).await.unwrap_or_default()
+}
+
 /// Tell every UI the package list (Settings → Widgets and the loader follow it).
 pub fn publish(broker: &super::mps::Broker, packages: &[WidgetPackageInfo]) {
     broker.publish(super::mps::MuxEvent {
@@ -795,7 +806,7 @@ pub fn start(
             // Coalesce a burst (an editor's save, a copy of a whole folder).
             tokio::time::sleep(std::time::Duration::from_millis(400)).await;
             while events.try_recv().is_ok() {}
-            refresh(&config_watcher, &event_bus, &broker);
+            refresh_off_thread(&config_watcher, &event_bus, &broker).await;
         }
     });
 }
@@ -874,14 +885,33 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
     hash_files(&root)?;
     std::fs::create_dir_all(widgets_dir).map_err(|e| e.to_string())?;
     let dest = widgets_dir.join(&manifest.id);
-    if dest.exists() {
+    // A replaced version moves aside first and comes back if the new one
+    // can't be put in place, so a failed install never leaves nothing.
+    let old = staging.path().join("old");
+    let replacing = dest.exists();
+    if replacing {
         if !replace {
             return Err(format!("{} is already installed", manifest.id));
         }
-        std::fs::remove_dir_all(&dest).map_err(|e| format!("can't replace the installed version: {e}"))?;
+        std::fs::rename(&dest, &old).map_err(|e| format!("can't replace the installed version: {e}"))?;
     }
-    copy_tree(&root, &dest, &mut Budget::default())?;
+    if let Err(e) = put_in_place(&root, &dest) {
+        let _ = std::fs::remove_dir_all(&dest);
+        if replacing {
+            let _ = std::fs::rename(&old, &dest);
+        }
+        return Err(e);
+    }
     Ok(manifest.id)
+}
+
+/// Moves the staged package to `dest`, or copies it when they're on
+/// different drives.
+fn put_in_place(root: &Path, dest: &Path) -> Result<(), String> {
+    if std::fs::rename(root, dest).is_ok() {
+        return Ok(());
+    }
+    copy_tree(root, dest, &mut Budget::default())
 }
 
 /// What a package may still take while it is copied or unpacked: the limits
@@ -1142,6 +1172,11 @@ mod tests {
         assert!(widgets.join("acme.test/index.html").exists());
         assert!(install(&widgets, &src.join(MANIFEST_FILE), false).unwrap_err().contains("already installed"));
         assert_eq!(install(&widgets, &src.join(MANIFEST_FILE), true).unwrap(), "acme.test");
+        // The replaced version's own files don't linger.
+        std::fs::write(widgets.join("acme.test/old-only.txt"), "x").unwrap();
+        assert_eq!(install(&widgets, &src, true).unwrap(), "acme.test");
+        assert!(!widgets.join("acme.test/old-only.txt").exists());
+        assert!(widgets.join("acme.test/index.html").exists());
 
         // A zip with the package in one top-level folder.
         let zip_path = tmp.path().join("pkg.zip");

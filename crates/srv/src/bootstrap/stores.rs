@@ -628,6 +628,16 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         let mstore = mstore.clone();
         move |agent_id| mstore.agent_lan_public_key_load(agent_id).ok().flatten()
     });
+    // Identity M4d-5: the block's agent UID and that UID's public key, beside
+    // the name-keyed one.
+    crate::backend::reactive::registry::init_uid_key_resolver({
+        let mstore = mstore.clone();
+        move |block_id| {
+            let uid = mstore.instance_get_active_for_block(block_id).ok().flatten()?.id;
+            let key = mstore.agent_uid_lan_public_key_load(&uid).ok().flatten()?;
+            Some((uid, key))
+        }
+    });
 
     Stores {
         mstore,

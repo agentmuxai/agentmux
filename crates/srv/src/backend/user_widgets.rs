@@ -193,7 +193,9 @@ pub fn spawn_user_widgets_watcher(
             match read_user_widgets(&watched_path) {
                 Ok(user) => {
                     tracing::info!(path = %watched_path.display(), "user widgets.json changed, reloading");
-                    on_changed(&config_watcher, &event_bus, &broker, user);
+                    // A rescan hashes every package's files: off the async workers.
+                    let (c, e, b) = (config_watcher.clone(), event_bus.clone(), broker.clone());
+                    let _ = tokio::task::spawn_blocking(move || on_changed(&c, &e, &b, user)).await;
                 }
                 Err(e) => {
                     tracing::warn!(path = %watched_path.display(), error = %e, "user widgets.json reload parse error (keeping previous widgets)");

@@ -85,7 +85,7 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let st = st.clone();
         async move {
             svc()?;
-            Ok(WidgetPackagesResult { packages: widget_packages::refresh(&st.config_watcher, &st.event_bus, &st.broker) })
+            Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
         }
     });
 
@@ -94,7 +94,7 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let st = st.clone();
         async move {
             svc()?.set_enabled(&req.id, req.enabled)?;
-            Ok(WidgetPackagesResult { packages: widget_packages::refresh(&st.config_watcher, &st.event_bus, &st.broker) })
+            Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
         }
     });
 
@@ -110,7 +110,7 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .await
                 .map_err(|e| e.to_string())??;
             tracing::info!(id = %id, "widget package installed (awaiting approval)");
-            let packages = widget_packages::refresh(&st.config_watcher, &st.event_bus, &st.broker);
+            let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
             Ok(WidgetInstallResult { id, packages })
         }
     });
@@ -135,7 +135,7 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .map_err(|e| format!("can't remove it: {e}"))?;
             s.forget(&req.id)?;
             tracing::info!(id = %req.id, "widget package uninstalled");
-            Ok(WidgetPackagesResult { packages: widget_packages::refresh(&st.config_watcher, &st.event_bus, &st.broker) })
+            Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
         }
     });
 
@@ -240,7 +240,7 @@ pub(crate) async fn handle_host_widget_approval(
             if decision == "approve" {
                 tracing::info!(id = %id, "widget package approved by the user");
             }
-            let packages = widget_packages::refresh(&state.config_watcher, &state.event_bus, &state.broker);
+            let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
             (StatusCode::OK, Json(json!({ "ok": true, "packages": packages }))).into_response()
         }
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),
