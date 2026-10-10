@@ -169,6 +169,7 @@ pub fn restore_paths(targets: &[std::path::PathBuf]) -> Vec<Result<(), String>> 
 #[cfg(target_os = "macos")]
 mod macos {
     use std::collections::HashMap;
+    use std::os::unix::fs::MetadataExt;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
 
@@ -177,10 +178,24 @@ mod macos {
     use super::super::platform;
     use super::path_key;
 
+    /// An item in the Trash: where it is, and its device and inode then, so
+    /// a different item that later takes that name isn't mistaken for it.
+    struct Trashed {
+        path: PathBuf,
+        dev: u64,
+        ino: u64,
+    }
+
+    impl Trashed {
+        fn still_there(&self) -> bool {
+            std::fs::symlink_metadata(&self.path).is_ok_and(|m| m.dev() == self.dev && m.ino() == self.ino)
+        }
+    }
+
     /// Where each item trashed since srv started went, by its original
     /// path's [`path_key`], oldest first.
-    fn trashed() -> &'static Mutex<HashMap<String, Vec<PathBuf>>> {
-        static TRASHED: OnceLock<Mutex<HashMap<String, Vec<PathBuf>>>> = OnceLock::new();
+    fn trashed() -> &'static Mutex<HashMap<String, Vec<Trashed>>> {
+        static TRASHED: OnceLock<Mutex<HashMap<String, Vec<Trashed>>>> = OnceLock::new();
         TRASHED.get_or_init(Default::default)
     }
 
@@ -196,10 +211,11 @@ mod macos {
             tracing::warn!(path = %path.display(), error = %description, "fs.trash: trashItemAtURL failed");
             return Some(Err(format!("Couldn't move it to the Trash: {description}")));
         }
-        match resulting.and_then(|u| u.path()) {
-            Some(dest) => {
+        let dest = resulting.and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string()));
+        match dest.and_then(|dest| std::fs::symlink_metadata(&dest).ok().map(|m| (dest, m))) {
+            Some((dest, meta)) => {
                 let mut map = trashed().lock().unwrap_or_else(|e| e.into_inner());
-                map.entry(path_key(path)).or_default().push(PathBuf::from(dest.to_string()));
+                map.entry(path_key(path)).or_default().push(Trashed { path: dest, dev: meta.dev(), ino: meta.ino() });
             }
             None => tracing::warn!(path = %path.display(), "fs.trash: trashed, but macOS didn't say where to"),
         }
@@ -218,11 +234,12 @@ mod macos {
                     .to_string(),
             );
         };
-        // Drop what's no longer in the Trash: emptied, or moved out of it.
-        while stack.last().is_some_and(|p| std::fs::symlink_metadata(p).is_err()) {
+        // Drop what's no longer in the Trash: emptied, moved out of it, or
+        // replaced by another item of the same name.
+        while stack.last().is_some_and(|t| !t.still_there()) {
             stack.pop();
         }
-        let Some(from) = stack.last().cloned() else {
+        let Some(from) = stack.last().map(|t| t.path.clone()) else {
             map.remove(&key);
             return Err("It isn't in the Trash anymore.".to_string());
         };
@@ -243,6 +260,26 @@ mod macos {
             map.remove(&key);
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn another_item_with_the_same_name_is_not_the_trashed_one() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("item.txt");
+            std::fs::write(&path, "trashed").unwrap();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            let t = Trashed { path: path.clone(), dev: meta.dev(), ino: meta.ino() };
+            assert!(t.still_there());
+
+            // The first file stays (moved), so the new one can't reuse its inode.
+            std::fs::rename(&path, dir.path().join("moved.txt")).unwrap();
+            std::fs::write(&path, "another").unwrap();
+            assert!(!t.still_there());
+        }
     }
 }
 
