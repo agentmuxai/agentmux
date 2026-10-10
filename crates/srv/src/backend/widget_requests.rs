@@ -106,6 +106,23 @@ impl Requests {
         found
     }
 
+    /// Declines every request for `id`, whatever version (its package was
+    /// uninstalled); returns whether any waited.
+    pub fn decline_all(&self, id: &str) -> bool {
+        let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        let before = pending.len();
+        pending.retain_mut(|(r, waiters)| {
+            if r.id != id {
+                return true;
+            }
+            for tx in waiters.drain(..) {
+                let _ = tx.send(Answer::Declined);
+            }
+            false
+        });
+        pending.len() != before
+    }
+
     pub fn list(&self) -> Vec<WidgetInstallRequest> {
         self.pending.lock().unwrap_or_else(|p| p.into_inner()).iter().map(|(r, _)| r.clone()).collect()
     }
@@ -140,6 +157,18 @@ mod tests {
         assert_eq!(b.await.unwrap(), Answer::Approved);
         assert!(r.list().is_empty());
         assert!(!r.answer("acme.x", "h1", Answer::Approved), "nothing left to answer");
+    }
+
+    #[tokio::test]
+    async fn uninstalling_declines_the_widgets_requests() {
+        let r = Requests::default();
+        let waiting = r.ask(req("acme.x", "h1", "Lark"));
+        let other = r.ask(req("acme.y", "h1", "Lark"));
+        assert!(r.decline_all("acme.x"));
+        assert_eq!(waiting.await.unwrap(), Answer::Declined);
+        assert_eq!(r.list().iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), ["acme.y"]);
+        assert!(!r.decline_all("acme.x"), "nothing left for it");
+        drop(other);
     }
 
     #[tokio::test]

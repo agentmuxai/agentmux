@@ -160,6 +160,11 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             // Sessions stay refused until the list no longer has it.
             let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
             sessions.end_removal(&req.id);
+            // An agent waiting to have it installed hears it won't be, and
+            // its prompt closes.
+            if widget_requests::requests().decline_all(&req.id) {
+                super::widget_agent_handlers::publish_requests(&st);
+            }
             Ok(WidgetPackagesResult { packages })
         }
     });
