@@ -735,6 +735,16 @@ jobs:
       - name: tsc --noEmit
         if: matrix.shard == 1
         run: npx tsc --noEmit -p tsconfig.citypecheck.json
+      # npm dependencies match the imports (#4207 S2, the npm half of the
+      # cargo machete gate): fails on an unused dependency, or on an import
+      # that only resolves because npm hoisted someone else's dependency.
+      # knip.json's ignores: @emnapi/* are pinned on purpose (#2448, npm ci
+      # on Linux); "react" is a dead `/// <reference types>` in
+      # frontend/types/jsx.d.ts; the two `vitest-environment-*` entries are
+      # prose comments that mention the pragma; `task` is the go-task binary.
+      - name: npm dependencies match imports (knip)
+        if: matrix.shard == 2
+        run: npx knip --dependencies --no-progress
       # Standalone, narrow config (eslint.theme-colors.config.js) --
       # deliberately NOT eslint.config.js's general ruleset, which has
       # 1200+ pre-existing violations unrelated to this and would make this

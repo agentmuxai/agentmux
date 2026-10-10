@@ -1,0 +1,12 @@
+{
+    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "ignoreDependencies": [
+        "@emnapi/core",
+        "@emnapi/runtime",
+        "@emnapi/wasi-threads",
+        "react",
+        "vitest-environment-node`",
+        "vitest-environment-jsdom`"
+    ],
+    "ignoreBinaries": ["task"]
+}
