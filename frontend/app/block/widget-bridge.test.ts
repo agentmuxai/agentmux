@@ -5,6 +5,7 @@
 /** The widget bridge, protocol 1: every request is checked and answered here
  *  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3–§6.6). */
 
+import { existsSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
 import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
@@ -258,5 +259,16 @@ describe("the calls W3 adds", () => {
         const state = await ready(h);
         expect(errorOf(await handleBridgeRequest(h, state, "files.pick", {})).code).toBe(ERR.UNAVAILABLE);
         expect(errorOf(await handleBridgeRequest(h, state, "net.fetch", { url: "https://api.github.com/user" })).code).toBe(ERR.UNAVAILABLE);
+    });
+});
+
+describe("the pane host the loader imports", () => {
+    // The loader imports "./sandboxed-widget-host" with no extension: a stale
+    // .ts beside the real .tsx would win and leave sandboxed widgets unable
+    // to run (a merge brought W1's placeholder back once).
+    it("is the iframe host, with no placeholder beside it", () => {
+        const here = (name: string) => existsSync(new URL(name, import.meta.url));
+        expect(here("./sandboxed-widget-host.tsx")).toBe(true);
+        expect(here("./sandboxed-widget-host.ts")).toBe(false);
     });
 });

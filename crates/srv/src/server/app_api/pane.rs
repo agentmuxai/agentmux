@@ -10,13 +10,19 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
     engine.register_handler(
         COMMAND_PANE_OPEN,
-        Box::new(move |data, _ctx| {
+        Box::new(move |data, ctx| {
             let state = state.clone();
             Box::pin(async move {
                 let mut cmd: CommandPaneOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("pane.open: {e}"))?;
                 if let Some(meta) = cmd.meta.as_mut() {
                     crate::server::browser_owner::strip_srv_only_keys(meta);
+                    // A browser tab's jar: checked here, where new tabs arrive.
+                    crate::server::browser_identity::check_new_tab(&state, meta)?;
+                    // An agent browses as a named profile only if the user lets it.
+                    if !ctx.agent_id.is_empty() {
+                        crate::server::browser_identity::check_agent_may_use(meta)?;
+                    }
                 }
                 let result = open_pane(&state, cmd).await?;
                 Ok(Some(serde_json::to_value(&result).unwrap()))

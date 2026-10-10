@@ -891,6 +891,15 @@ pub struct OwnedPanesReq {
     /// The panes srv is asking the person about a navigation.
     #[serde(default)]
     pub asking: Vec<String>,
+    /// The `browser:identity` values blocks still use: other jars are dropped
+    /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6). Absent from an
+    /// older srv: keep every jar.
+    #[serde(default)]
+    pub jars: Option<Vec<String>>,
+    /// The named browser profiles there are: a deleted one's jar and folder
+    /// go. Absent from an older srv, or one that couldn't read them: keep all.
+    #[serde(default)]
+    pub profiles: Option<Vec<String>>,
 }
 
 /// `POST /agentmux/browser/owned_panes` — srv's whole set of agent-owned
@@ -916,6 +925,13 @@ pub async fn owned_panes(
     crate::client::allowed_origins::replace_lists(&state.site_limits, req.allowed);
     // A pane whose question is over reports its attempts again.
     state.site_limits.reports.lock().retain(|p| req.asking.contains(p));
+    if let Some(jars) = req.jars {
+        crate::browser_pane::identity::retain_jars(&jars.into_iter().collect());
+    }
+    if let Some(profiles) = req.profiles {
+        let root = state.cef_cache_dir.lock().clone();
+        crate::browser_pane::identity::retain_profiles(&profiles.into_iter().collect(), root.as_deref());
+    }
     ok_body(ApiResponse::ok(AckData::new()))
 }
 

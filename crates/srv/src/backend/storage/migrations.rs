@@ -1186,15 +1186,15 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- bundle lives in the identity store, and an agent's rows go with
         -- it in purge_agent_dependents. Additive, applied on every open,
         -- so no version bump.
-        -- A widget package's `storage` (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3), JSON values; additive, no version bump.
-        CREATE TABLE IF NOT EXISTS db_widget_storage (widget_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (widget_id, key));
-
         CREATE TABLE IF NOT EXISTS db_agent_bundles (
             agent_id  TEXT NOT NULL,
             bundle_id TEXT NOT NULL,
             position  INTEGER NOT NULL,
             PRIMARY KEY (agent_id, bundle_id)
         );
+
+        -- A widget package's `storage` (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3), JSON values; additive, no version bump.
+        CREATE TABLE IF NOT EXISTS db_widget_storage (widget_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (widget_id, key));
 
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
         -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).

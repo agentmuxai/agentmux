@@ -150,6 +150,14 @@ pub fn create_browser_pane_view(
     //    host. Reusing the parent window's RequestContext means the
     //    pane's Profile matches the window's main browser's Profile, so
     //    the map check fires and AddObserver is skipped.
+    // A pane with an Incognito identity can't have a jar of its own on this
+    // path yet (the profiles spec §7.2): it is not created, rather than
+    // browsing in the window's shared jar. `check_capacity` already refused it
+    // to the frontend; this is the backstop.
+    if crate::browser_pane::identity::has_identity(&block_id) {
+        tracing::warn!(block_id = %block_id, "[browser-identity] Incognito pane not created: Windows only for now");
+        return;
+    }
     let parent_request_context = state
         .get_browser(&window_label)
         .and_then(|b| b.host())

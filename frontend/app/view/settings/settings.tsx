@@ -16,9 +16,11 @@ export const settingsPaneTab: PaneTabManifest = {
     icon: "cog",
     defaultHue: 0,
     create: (ctx) => {
-        // A pane opened at a section, e.g. by a widget's "Open Settings".
+        // Read once: the section to open at, not a live binding.
         const asked = ctx.meta()?.["settings:section"];
-        const model = new SettingsViewModel(typeof asked === "string" && asked in SETTINGS_SECTION_LABELS ? (asked as SettingsSection) : undefined);
+        const model = new SettingsViewModel(
+            typeof asked === "string" && asked in SETTINGS_SECTION_LABELS ? (asked as SettingsSection) : undefined
+        );
         return {
             component: () => <SettingsView model={model} />,
             liveTitle: () => ({ text: SETTINGS_SECTION_LABELS[model.activeSection()] }),

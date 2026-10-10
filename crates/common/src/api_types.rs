@@ -824,6 +824,11 @@ pub struct UiBrowserOpenRequest {
     /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_origins: Option<Vec<String>>,
+    /// Browse as `"incognito"` (a fresh jar of its own) or a named browser
+    /// profile the user lets agents use; absent: Personal
+    /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 /// Response for `POST /api/v1/ui/browser/open`: the new pane's block id,
