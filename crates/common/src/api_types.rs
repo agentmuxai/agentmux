@@ -359,6 +359,13 @@ pub struct InjectRequest {
     /// `channel_sig` is still sent beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_sig_v2: Option<String>,
+    /// Identity M4d-6: base64 Ed25519 signature, made only with the sender's
+    /// UID-keyed LAN key, over the LAN material plus `source_uid`
+    /// (`agentmux_common::jekt_sign::sign_lan_jekt_v2`). A receiver checks it
+    /// only after the v1 `lan_sig` verified, and records the UID as claimed by
+    /// that LAN path, never as verified attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_sig_v2: Option<String>,
     /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
     /// produced with the sender's own `AGENTMUX_WAN_KEY` — a *different* key
     /// from `AGENTMUX_LAN_KEY` — over a domain-separated payload
