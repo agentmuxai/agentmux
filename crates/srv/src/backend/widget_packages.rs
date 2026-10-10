@@ -745,6 +745,12 @@ pub fn refresh(
     let packages = svc.rescan(&super::user_widgets::last_v1_entries());
     super::user_widgets::recompute(config_watcher);
     super::config_watcher_fs::broadcast_full_config(config_watcher, event_bus);
+    publish(broker, &packages);
+    packages
+}
+
+/// Tell every UI the package list (Settings → Widgets and the loader follow it).
+pub fn publish(broker: &super::mps::Broker, packages: &[WidgetPackageInfo]) {
     broker.publish(super::mps::MuxEvent {
         event: super::mps::EVENT_WIDGET_PACKAGES.to_string(),
         scopes: vec![],
@@ -752,7 +758,6 @@ pub fn refresh(
         persist: 0,
         data: Some(serde_json::json!({ "packages": packages })),
     });
-    packages
 }
 
 /// Start the service: scan, merge, and watch the widgets folder.

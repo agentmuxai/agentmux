@@ -21,6 +21,7 @@ use tokio::sync::broadcast;
 use super::config_watcher_fs::{broadcast_full_config, resolve_settings_dir};
 use super::eventbus::EventBus;
 use super::fs_watch::{FsWatchEvent, FsWatchEventKind, FsWatchPool};
+use super::mps::Broker;
 use super::wconfig::{self, ConfigState, WidgetConfigType};
 
 pub const USER_WIDGETS_FILE: &str = "widgets.json";
@@ -142,7 +143,21 @@ fn is_user_widgets_event(event: &FsWatchEvent) -> bool {
     is_file && matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified)
 }
 
-pub fn spawn_user_widgets_watcher(pool: Arc<FsWatchPool>, config_watcher: Arc<ConfigState>, event_bus: Arc<EventBus>) {
+/// widgets.json changed: merge again, and tell every UI both the new config
+/// and the package list, since its v1 `module` entries are packages too.
+fn on_changed(config_watcher: &Arc<ConfigState>, event_bus: &Arc<EventBus>, broker: &Broker, user: HashMap<String, WidgetConfigType>) {
+    apply(config_watcher, user);
+    broadcast_full_config(config_watcher, event_bus);
+    let packages = super::widget_packages::service().map(|s| s.list()).unwrap_or_default();
+    super::widget_packages::publish(broker, &packages);
+}
+
+pub fn spawn_user_widgets_watcher(
+    pool: Arc<FsWatchPool>,
+    config_watcher: Arc<ConfigState>,
+    event_bus: Arc<EventBus>,
+    broker: Arc<Broker>,
+) {
     let path = user_widgets_path();
     let Some(dir) = path.parent() else {
         return;
@@ -178,8 +193,7 @@ pub fn spawn_user_widgets_watcher(pool: Arc<FsWatchPool>, config_watcher: Arc<Co
             match read_user_widgets(&watched_path) {
                 Ok(user) => {
                     tracing::info!(path = %watched_path.display(), "user widgets.json changed, reloading");
-                    apply(&config_watcher, user);
-                    broadcast_full_config(&config_watcher, &event_bus);
+                    on_changed(&config_watcher, &event_bus, &broker, user);
                 }
                 Err(e) => {
                     tracing::warn!(path = %watched_path.display(), error = %e, "user widgets.json reload parse error (keeping previous widgets)");
@@ -195,6 +209,17 @@ mod tests {
 
     fn widget(label: &str) -> WidgetConfigType {
         WidgetConfigType { label: label.to_string(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_change_to_widgets_json_tells_the_ui_the_package_list_too() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let broker = Broker::new();
+        let log = seen.clone();
+        broker.add_observer(Arc::new(move |ev| log.lock().unwrap().push(ev.event.clone())));
+        let config = Arc::new(ConfigState::new());
+        on_changed(&config, &Arc::new(EventBus::new()), &broker, HashMap::from([("mine".to_string(), widget("Mine"))]));
+        assert!(seen.lock().unwrap().iter().any(|e| e == super::super::mps::EVENT_WIDGET_PACKAGES));
     }
 
     #[test]
