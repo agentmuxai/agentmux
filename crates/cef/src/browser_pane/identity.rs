@@ -148,16 +148,12 @@ fn prune(r: &mut Registry) -> Vec<String> {
 
 /// Can `block` have its jar? Checked when `browser_pane_create` arrives, so
 /// a refusal goes back to the pane, which shows it, rather than leaving it
-/// blank. Also refuses an Incognito tab where panes can't have a jar of their
-/// own yet (Linux and macOS): it must not browse in the shared jar instead.
+/// blank.
 pub fn check_capacity(block: &str) -> Result<(), String> {
     let mut r = registry();
     let Some(identity) = r.by_block.get(block).cloned() else { return Ok(()) };
     if profile_id(&identity).is_some() {
         return Ok(());
-    }
-    if !cfg!(windows) {
-        return Err("Incognito tabs are Windows only for now".to_string());
     }
     prune(&mut r);
     if r.jars.contains_key(&identity) || r.jars.len() < MAX_INCOGNITO_JARS {
@@ -165,11 +161,6 @@ pub fn check_capacity(block: &str) -> Result<(), String> {
     } else {
         Err(format!("at most {MAX_INCOGNITO_JARS} Incognito tabs can be open at once: close one to open another"))
     }
-}
-
-/// Whether `block`'s pane is an Incognito tab.
-pub fn is_incognito_block(block: &str) -> bool {
-    registry().by_block.get(block).is_some_and(|i| is_incognito(i))
 }
 
 /// The jar `block`'s pane is created in (CEF UI thread). Creates an
@@ -430,13 +421,12 @@ mod tests {
         assert_eq!(profile_id("profile:"), None);
         assert_eq!(profile_id("incognito:0f0e2d1c-aaaa"), None);
         set_for_block("idt-p", Some("profile:p-work1"));
-        // Profiles have a jar of their own on every platform; Incognito only
-        // on Windows (the profiles spec §7.2).
+        // Profiles and Incognito tabs have a jar of their own on every
+        // platform (Linux and macOS through agentmuxai/cef#11).
         assert!(check_capacity("idt-p").is_ok());
-        assert!(!is_incognito_block("idt-p"));
         set_for_block("idt-i", Some("incognito:0f0e2d1c-bbbb"));
-        assert!(is_incognito_block("idt-i"));
-        assert_eq!(check_capacity("idt-i").is_ok(), cfg!(windows));
+        assert!(check_capacity("idt-i").is_ok());
+        set_for_block("idt-i", None);
         // No cache root: no folder to put the profile in, so no pane.
         assert!(context_for_block("idt-p", None).is_err());
         set_for_block("idt-p", None);

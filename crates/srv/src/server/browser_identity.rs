@@ -84,9 +84,6 @@ pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), 
     if !is_incognito(identity) {
         return Err(format!("{IDENTITY_META_KEY} must be incognito:<id> or profile:<id>"));
     }
-    if !cfg!(windows) {
-        return Err("Incognito tabs are Windows only for now".to_string());
-    }
     let open = live_jars(state).ok_or("couldn't count the Incognito tabs open")?;
     if !open.iter().any(|j| j == identity) && open.len() >= MAX_INCOGNITO_JARS {
         return Err(format!(
@@ -107,9 +104,6 @@ pub(crate) fn inherit(meta: &mut MetaMapType, opener: &Block) {
 /// How many more Incognito jars a layout replay may open: the cap less those
 /// open now (none when they can't be counted, or off Windows).
 pub(crate) fn jars_available(state: &AppState) -> usize {
-    if !cfg!(windows) {
-        return 0;
-    }
     live_jars(state).map_or(0, |open| MAX_INCOGNITO_JARS.saturating_sub(open.len()))
 }
 
@@ -299,6 +293,6 @@ mod tests {
         assert!(check_new_tab(&state, &with(json!("profile:Bad Id"))).is_err());
         assert!(check_new_tab(&state, &with(json!(5))).is_err());
         let ok = check_new_tab(&state, &with(json!("incognito:cccccccc-3333")));
-        assert_eq!(ok.is_ok(), cfg!(windows), "{ok:?}");
+        assert!(ok.is_ok(), "{ok:?}");
     }
 }

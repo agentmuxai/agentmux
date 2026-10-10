@@ -86,13 +86,6 @@ wrap_task! {
 
             #[cfg(not(target_os = "windows"))]
             {
-                // Incognito can't have a jar of its own on this path yet (the
-                // profiles spec §7.2): refused before one is made.
-                // `create_browser_pane_view` keeps the same check as backstop.
-                if identity::is_incognito_block(&self.block_id) {
-                    tracing::warn!(block_id = %self.block_id, "[browser-identity] Incognito pane not created: Windows only for now");
-                    return;
-                }
                 let jar = match identity::pane_jar_step(&self.block_id, &self.label, cache_root.as_deref(), still_wanted) {
                     PaneJarStep::Create(jar) => jar,
                     PaneJarStep::Retry => return retry_later(),

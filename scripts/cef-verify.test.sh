@@ -75,8 +75,8 @@ HEAD_SHA="$(git -C "$FIX" rev-parse HEAD)"
 
 # 1. Complete carry-set -> all present, exit 0.
 out=$("$SCRIPT" --repo "$FIX" --ref "$HEAD_SHA" 2>&1); rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '21 OK, 0 MISS'; then
-  ok "complete carry-set: 21 OK, exit 0"
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '23 OK, 0 MISS'; then
+  ok "complete carry-set: 23 OK, exit 0"
 else bad "complete carry-set" "rc=$rc last=$(printf '%s' "$out" | tail -1)"; fi
 
 # 2. REGRESSION (bug 4): identifiers sit ~600 lines into each file. A
@@ -154,7 +154,7 @@ STALE="$TMP/stale"; cp -R "$FIX" "$STALE"
 git -C "$STALE" remote set-url agentmuxai "$TMP/unreachable/agentmuxai/cef.git"
 git -C "$STALE" update-ref refs/remotes/agentmuxai/7778 "$(git -C "$STALE" rev-parse HEAD)"
 out=$("$SCRIPT" --repo "$STALE" --ref 7778 2>&1); rc=$?
-if [ $rc -ne 0 ] && ! printf '%s' "$out" | grep -q '21 OK, 0 MISS'; then
+if [ $rc -ne 0 ] && ! printf '%s' "$out" | grep -q '23 OK, 0 MISS'; then
   ok "failed fetch is fatal, even with a resolvable stale ref"
 else bad "stale-ref after failed fetch" "rc=$rc last=$(printf '%s' "$out" | tail -1)"; fi
 

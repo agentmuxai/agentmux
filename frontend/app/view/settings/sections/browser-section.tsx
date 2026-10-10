@@ -26,7 +26,7 @@ export const BROWSER_SETTINGS = {
         id: "browser.profiles",
         label: "Browser profiles",
         description:
-            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; on Windows it can also use an Incognito tab.",
+            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; it can always use an Incognito tab.",
         section: "browser",
         keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work", "agent", "agents"],
     },

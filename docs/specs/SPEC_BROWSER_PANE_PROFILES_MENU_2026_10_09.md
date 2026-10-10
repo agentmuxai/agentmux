@@ -186,10 +186,20 @@ second glyph beside it would only repeat it.
      on Windows: main and second window, popups (which inherit the jar), deleting a profile with
      tabs open, restart. They ship there; the Views path resolves the jar the same way
      (`identity::pane_jar_step`).
-   - **Incognito stays Windows only** on Linux and macOS, refused before a jar is made, with the
-     Views path's guard as the backstop. Options for later: the CEF patch (that spec's §4.4 route
-     1), a floating window created in the jar (route 2), or Incognito as an ephemeral disk-backed
-     profile.
+   - **Incognito: fixed in our CEF fork** (that spec's §4.4 route 1, chosen 2026-10-10 over a
+     floating window or an ephemeral disk-backed profile). `agentmuxai/cef#11` makes the widget
+     observe each `ThemeService` once, counted per `ThemeService` rather than per Profile; removal
+     uses the `ThemeService` stored when the Profile was added. Upstream CEF has the same code on
+     master; nobody had reported it. Shipped in the 154 `-r2` runtimes, built from `8037` at
+     `6fba204`, and verified on macOS and Linux: Incognito in main and second windows, separate jars,
+     popups inherit, closing, restart with no crash loop.
+   - **Personal tabs in a second window** (identities spec §4.2) were silently in-memory on Linux and
+     macOS: the Views path gave a pane its window's context to avoid this same crash, and a
+     secondary window runs on an off-the-record context of its own. With the fix, a Personal pane
+     gets the global context in every window, as on Windows.
+   - **A dev build on stock CEF** (the cef-dll-sys fallback when no patched build is staged) still
+     crashes on an Incognito tab, or a Personal tab in a second window, the same as before the
+     patch. Its unpatched-CEF warning says so. Release builds use the pinned `-r2` runtimes.
 3. **Memory:** every jar is its own Chrome profile, with at least one more renderer process.
    - **Incognito:** up to 8 tabs at once (the identities spec's proposal); past that, the menu
      item says why it can't open another.
@@ -201,7 +211,7 @@ second glyph beside it would only repeat it.
 |---|---|---|
 | **P1** | Home button, button order, "Home page" naming; the Profile button and menu with Personal and **Open new Incognito tab** (Windows); badges; Incognito tabs back signed out | The toolbar and Incognito, with nothing blocked |
 | **P2** | The spike on disk-backed profiles (§7.1), then **New profile…**, the profile list, Manage profiles, restore signed in | Named profiles, once the spike works |
-| **P3** | Linux/macOS: named profiles (done); Incognito by one of §7.2's options | The same menu on every platform |
+| **P3** | Linux/macOS: named profiles; then Incognito and Personal in every window through the CEF fork patch (§7.2) | The same menu on every platform |
 | **P4** | `OpenBrowser({profile})` and "Agents may use it" | Agents in their own jars |
 
 Until P2, the menu shows Personal, Open new Incognito tab, and a disabled **New profile…** with
