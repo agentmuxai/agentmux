@@ -29,9 +29,15 @@ enum Kind {
     Srv(&'static str),
     /// No `--type`: the window host or the launcher, or neither.
     Plain,
-    /// The OS wouldn't give the command line, and the name says nothing.
-    Unreadable,
+    /// The OS wouldn't give the command line, and the name says nothing:
+    /// read again on later samples, up to [`READ_ATTEMPTS`] in all, since a
+    /// read can fail on a process that is still starting.
+    Unreadable(u8),
 }
+
+/// How many times a command line that couldn't be read is tried. A process
+/// the OS never lets us read (another user's) is given up on after that.
+const READ_ATTEMPTS: u8 = 5;
 
 /// Remembers each process's [`Kind`], so a command line is read once per
 /// process rather than once per sample. Forgets processes that are gone.
@@ -54,9 +60,19 @@ impl Describer {
         self.kinds.retain(|k, _| present.contains(k));
         for &i in members {
             let p = &snap[i];
-            if p.pid != own_pid {
-                self.kinds.entry(p.key()).or_insert_with(|| kind_of(p, cmdline(p.key()).as_deref()));
+            if p.pid == own_pid {
+                continue;
             }
+            let attempts = match self.kinds.get(&p.key()) {
+                None => 0,
+                Some(Kind::Unreadable(n)) if *n < READ_ATTEMPTS => *n,
+                Some(_) => continue,
+            };
+            let kind = match kind_of(p, cmdline(p.key()).as_deref()) {
+                Kind::Unreadable(_) => Kind::Unreadable(attempts + 1),
+                known => known,
+            };
+            self.kinds.insert(p.key(), kind);
         }
 
         let by_pid: HashMap<u32, usize> = members.iter().map(|&i| (snap[i].pid, i)).collect();
@@ -103,7 +119,7 @@ impl Describer {
 
 fn kind_of(p: &ProcInfo, cmdline: Option<&str>) -> Kind {
     let Some(cmd) = cmdline else {
-        return mac_helper_type(&p.name).map_or(Kind::Unreadable, Kind::Cef);
+        return mac_helper_type(&p.name).map_or(Kind::Unreadable(1), Kind::Cef);
     };
     let name = p.name.to_ascii_lowercase();
     // The AgentMux group holds every unclaimed descendant of the launcher, not
@@ -307,6 +323,51 @@ mod tests {
         assert_eq!(reads.get(), first, "a second sample reads nothing");
         d.describe(&snap, &members[..2], 30, &read);
         assert_eq!(d.kinds.len(), 2, "processes no longer present are forgotten");
+    }
+
+    #[test]
+    fn a_command_line_that_could_not_be_read_is_tried_again_a_few_times() {
+        let (snap, cmd) = windows_tree();
+        let members: Vec<usize> = (0..snap.len()).collect();
+        // The GPU process (21) can't be read at first, then can.
+        let readable = std::cell::Cell::new(false);
+        let reads_of_21 = std::cell::Cell::new(0);
+        let read = |k: ProcKey| {
+            if k.pid == 21 {
+                reads_of_21.set(reads_of_21.get() + 1);
+                if !readable.get() {
+                    return None;
+                }
+            }
+            cmd.get(&k.pid).map(|s| s.to_string())
+        };
+        let mut d = Describer::default();
+        let first = d.describe(&snap, &members, 30, &read);
+        assert_eq!(first.get(&2), None, "unreadable at first: no label yet");
+        readable.set(true);
+        let second = d.describe(&snap, &members, 30, &read);
+        assert_eq!(second.get(&2).map(String::as_str), Some("GPU"));
+        assert_eq!(reads_of_21.get(), 2);
+        d.describe(&snap, &members, 30, &read);
+        assert_eq!(reads_of_21.get(), 2, "read once it's known");
+    }
+
+    #[test]
+    fn a_process_that_can_never_be_read_is_given_up_on() {
+        let snap = vec![p(10, 1, "agentmux.exe"), p(30, 10, "agentmux-srv.exe"), p(40, 30, "agentmux-thing")];
+        let members: Vec<usize> = (0..snap.len()).collect();
+        let reads = std::cell::Cell::new(0);
+        let read = |k: ProcKey| {
+            if k.pid == 40 {
+                reads.set(reads.get() + 1);
+            }
+            None
+        };
+        let mut d = Describer::default();
+        for _ in 0..10 {
+            d.describe(&snap, &members, 30, &read);
+        }
+        assert_eq!(reads.get(), READ_ATTEMPTS as usize);
     }
 
     #[test]
