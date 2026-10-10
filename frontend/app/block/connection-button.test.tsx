@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pane header's connection chip (`ConnectionButton`): shown on a local
- * pane too, as "Local", so the header is where a pane is switched to a remote
- * and the connection picker always has a chip to open beside.
+ * The pane header's connection chip (`ConnectionButton`): shown on a remote
+ * pane, by the remote's name. A local pane has none; Change connection
+ * (⌘⇧G) still opens the picker there, placed by the pane.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/block/blockframe", () => ({ NumActiveConnColors: 8 }));
@@ -31,22 +32,36 @@ function chip(connection: string | undefined) {
 }
 
 describe("ConnectionButton", () => {
-    it("shows a local pane as Local, and opens the picker from it", () => {
-        const { container, ref, opened } = chip(undefined);
-        const el = container.querySelector<HTMLDivElement>(".connection-button")!;
-        expect(el).toBeTruthy();
-        expect(el.classList.contains("connection-button--local")).toBe(true);
-        expect(el.textContent).toBe("Local");
-        expect(ref.current).toBe(el);
-        fireEvent.click(el);
-        expect(opened.value).toBe(true);
+    it("shows nothing on a local pane", () => {
+        for (const local of [undefined, "", "local"]) {
+            const { container, ref, unmount } = chip(local);
+            expect(container.querySelector(".connection-button")).toBeNull();
+            expect(container.textContent).toBe("");
+            expect(ref.current).toBeNull();
+            unmount();
+        }
     });
 
-    it("shows a remote by its nickname, with its colour", () => {
-        const { container } = chip("db1");
+    it("clears the picker's anchor when a remote pane becomes local", () => {
+        // A stale anchor (the removed chip) would defeat the picker's
+        // fallback to the pane, and Change connection would open misplaced.
+        const [conn, setConn] = createSignal<string | undefined>("db1");
+        const ref = { current: null as HTMLDivElement | null };
+        const atom = Object.assign(() => false, { _set: () => {} }) as any;
+        const { container } = render(() => <ConnectionButton ref={ref} connection={conn()} changeConnModalAtom={atom} />);
+        expect(ref.current).toBe(container.querySelector(".connection-button"));
+        setConn("");
+        expect(container.querySelector(".connection-button")).toBeNull();
+        expect(ref.current).toBeNull();
+    });
+
+    it("shows a remote by its nickname, with its colour, and opens the picker from it", () => {
+        const { container, ref, opened } = chip("db1");
         const el = container.querySelector<HTMLDivElement>(".connection-button")!;
-        expect(el.classList.contains("connection-button--local")).toBe(false);
+        expect(ref.current).toBe(el);
         expect(el.querySelector(".connection-name")!.textContent).toBe("prod-db");
         expect(el.querySelector<HTMLElement>(".connection-swatch")!.style.background).toBe("rgb(229, 72, 77)");
+        fireEvent.click(el);
+        expect(opened.value).toBe(true);
     });
 });
