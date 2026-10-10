@@ -135,7 +135,7 @@ diverge in behaviour.
 
 ## 3. The carry-set (canonical inventory)
 
-**Five features.** Three of them are Layer B only, two are Layer A only, and one
+**Five features.** Two of them are Layer B only, two are Layer A only, and one
 spans both — which is why a feature count and a file count are different
 questions and both get stated here:
 
