@@ -38,7 +38,8 @@ struct Wire {
     jekt_key_expires_at: Option<i64>,
     lan_key: Option<String>,
     wan_key: Option<String>,
-    #[allow(dead_code)] // M4d-6 signs v2 with it.
+    #[serde(default)]
+    uid: String,
     uid_lan_key: Option<String>,
 }
 
@@ -97,6 +98,19 @@ pub(crate) fn lan_key() -> Option<Vec<u8>> {
 /// The WAN private key: fetched when ours, else the env's.
 pub(crate) fn wan_key() -> Option<Vec<u8>> {
     name_key(|k| k.wan_key.as_ref()).or_else(|| env_key("AGENTMUX_WAN_KEY"))
+}
+
+/// This agent's UID and its UID-keyed LAN private key, for the v2 signature
+/// (identity M4d-6). Only ever the fetched key, never an env one: the v2
+/// signature claims the UID, so it must come from srv's own record of it.
+pub(crate) fn uid_signer() -> Option<(String, Vec<u8>)> {
+    let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let keys = &cache.as_ref()?.keys;
+    let uid = keys.uid.trim();
+    if uid.is_empty() {
+        return None;
+    }
+    Some((uid.to_string(), agentmux_common::jekt_sign::decode_key(keys.uid_lan_key.as_ref()?)?))
 }
 
 fn env_key(var: &str) -> Option<Vec<u8>> {

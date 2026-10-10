@@ -224,6 +224,8 @@ pub(crate) struct OutgoingJektSignatures {
     lan_sig: Option<String>,
     source_channel: Option<String>,
     channel_sig: Option<String>,
+    source_uid: Option<String>,
+    channel_sig_v2: Option<String>,
     wan_sig: Option<String>,
     wan_source_host: Option<String>,
 }
@@ -242,6 +244,8 @@ impl OutgoingJektSignatures {
             lan_sig: self.lan_sig,
             source_channel: self.source_channel,
             channel_sig: self.channel_sig,
+            source_uid: self.source_uid,
+            channel_sig_v2: self.channel_sig_v2,
             wan_sig: self.wan_sig,
             wan_source_host: self.wan_source_host,
         }
@@ -277,6 +281,17 @@ pub(crate) fn sign_outgoing_jekt(
         let channel = source_channel.as_deref().unwrap_or("stable");
         agentmux_common::jekt_sign::sign_channel_jekt(key, &msgid, src, channel, target_agent, ts_secs, message)
     })();
+    // Identity M4d-6: the same cross-channel material plus this agent's UID,
+    // signed with its UID-keyed key (fetched, never from env), so a receiver
+    // learns which agent sent it, not just which name.
+    let (source_uid, channel_sig_v2) = match (crate::self_keys::uid_signer(), source_agent) {
+        (Some((uid, key)), Some(src)) => {
+            let channel = source_channel.as_deref().unwrap_or("stable");
+            let sig = agentmux_common::jekt_sign::sign_channel_jekt_v2(&key, &msgid, src, &uid, channel, target_agent, ts_secs, message);
+            (sig.is_some().then_some(uid), sig)
+        }
+        _ => (None, None),
+    };
     // The WAN signature uses its own key, not
     // AGENTMUX_LAN_KEY. An agent whose `.mcp.json` predates this feature has
     // no AGENTMUX_WAN_KEY and simply sends unsigned, exactly as it does today
@@ -308,7 +323,7 @@ pub(crate) fn sign_outgoing_jekt(
     let wan_source_host = wan_sig
         .as_ref()
         .map(|_| source_host.unwrap_or_else(|| "unknown".to_string()));
-    let source_channel = (channel_sig.is_some() || wan_sig.is_some())
+    let source_channel = (channel_sig.is_some() || channel_sig_v2.is_some() || wan_sig.is_some())
         .then(|| source_channel.unwrap_or_else(|| "stable".to_string()));
     OutgoingJektSignatures {
         request_id: msgid,
@@ -317,6 +332,8 @@ pub(crate) fn sign_outgoing_jekt(
         lan_sig,
         source_channel,
         channel_sig,
+        source_uid,
+        channel_sig_v2,
         wan_sig,
         wan_source_host,
     }
