@@ -322,8 +322,11 @@ async function setUpTree(cdp) {
     if (!shown) return { refused: `pane ${blockId} shows no Files view` };
     if (shown.connection) return { refused: `the Files pane is on ${shown.connection}, and the temp tree is on this computer` };
     const tree = makeTempTree();
-    const why = await moveFilesPane(cdp, blockId, tree.start);
+    // A CDP call can time out and throw: the tree must still go.
+    const why = await moveFilesPane(cdp, blockId, tree.start).catch((e) => e.message);
     if (why) {
+        // It may have got there before failing.
+        await moveFilesPane(cdp, blockId, shown.path).catch(() => {});
         removeTempTree(tree.root);
         return { refused: `couldn't move the Files pane into the temp tree: ${why}` };
     }
@@ -362,7 +365,7 @@ async function main() {
     const rows = [];
     // The Files rows run in the temp tree, which goes away before the first
     // row that would leave the pane out of reach (treeDone).
-    let tree = args.filesMutate && list.some((s) => s.pane === "files") ? await setUpTree(cdp) : null;
+    let tree = args.filesMutate && list.some((s) => s.pane === "files") ? await setUpTree(cdp).catch((e) => ({ refused: e.message })) : null;
     if (tree?.refused) console.error(`not running the rows that change files: ${tree.refused}`);
     try {
         for (const s of list) {
