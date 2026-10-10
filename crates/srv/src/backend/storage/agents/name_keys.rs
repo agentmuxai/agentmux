@@ -325,3 +325,15 @@ pub(crate) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(Stri
         .map(Result::unwrap)
         .collect()
 }
+
+impl Store {
+    /// The slugs of every row whose slug equals `name` trimmed and folded
+    /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
+    /// "Aria" and "aria" are two rows).
+    pub fn agent_slugs_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE lower(trim(slug)) = lower(trim(?1))")?;
+        let rows = stmt.query_map(params![name], |r| r.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}

@@ -255,16 +255,14 @@ pub(crate) fn sign_outgoing_jekt(
 ) -> OutgoingJektSignatures {
     let msgid = generate_jekt_msgid();
     let ts_secs = agentmux_common::time::now_secs();
+    // The keys: fetched from srv when they're this agent's, else the env's
+    // (identity M4d-3, self_keys.rs).
     let jekt_sig = (|| {
-        let key_b64 = std::env::var("AGENTMUX_JEKT_KEY").ok().filter(|s| !s.is_empty())?;
-        let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
+        let key = crate::self_keys::jekt_key()?;
         let src = source_agent?;
         Some(agentmux_common::jekt_sign::sign_jekt(&key, &msgid, src, target_agent, ts_secs, message))
     })();
-    let lan_key = std::env::var("AGENTMUX_LAN_KEY")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .and_then(|b64| agentmux_common::jekt_sign::decode_key(&b64));
+    let lan_key = crate::self_keys::lan_key();
     let lan_sig = (|| {
         let key = lan_key.as_deref()?;
         let src = source_agent?;
@@ -292,8 +290,7 @@ pub(crate) fn sign_outgoing_jekt(
     // against, so it has to be inside the signature.
     let source_host = std::env::var("AGENTMUX_HOST_LABEL").ok().filter(|s| !s.is_empty());
     let wan_sig = (|| {
-        let key_b64 = std::env::var("AGENTMUX_WAN_KEY").ok().filter(|s| !s.is_empty())?;
-        let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
+        let key = crate::self_keys::wan_key()?;
         let src = source_agent?;
         // Same defaulting discipline as `channel` above: an unset var must
         // resolve to the identical string srv publishes under, never to a
@@ -337,17 +334,14 @@ pub(crate) fn sign_outgoing_jekt(
 /// than a confusing round trip.
 pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::UiAutomationAuth> {
     let agent_id = agent_slug()?;
-    let key_b64 = std::env::var("AGENTMUX_JEKT_KEY")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "AGENTMUX_JEKT_KEY is not set — this agent needs to be respawned to get a \
-                 signing key before it can use UI automation (UIScreenshot/UIClick/UIQuery)"
-            )
-        })?;
-    let key = agentmux_common::jekt_sign::decode_key(&key_b64)
-        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_JEKT_KEY is set but not valid base64"))?;
+    // The jekt key it signs v1 with (identity M4d-3): fetched when ours.
+    let key = crate::self_keys::jekt_key().ok_or_else(|| {
+        anyhow::anyhow!(
+            "AGENTMUX_JEKT_KEY is not set (or not valid base64) and srv served no key — this agent \
+             needs to be respawned to get a signing key before it can use UI automation \
+             (UIScreenshot/UIClick/UIQuery)"
+        )
+    })?;
     let ts_secs = agentmux_common::time::now_secs();
     let sig = agentmux_common::jekt_sign::sign_jekt(
         &key,

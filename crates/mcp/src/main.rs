@@ -65,6 +65,7 @@ struct LoopEntry {
 /// when the agent pane closes.
 type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
+mod self_keys;
 mod tool_schemas;
 use tool_schemas::*;
 mod window_capture;
@@ -113,6 +114,13 @@ async fn main() {
         .default_headers(default_headers)
         .build()
         .expect("http client");
+
+    // Identity M4d-3: fetch this agent's signing keys from srv now, so the
+    // first signed send doesn't wait on it (self_keys.rs).
+    {
+        let (client, local_url, auth_key) = (client.clone(), local_url.clone(), auth_key.clone());
+        tokio::spawn(async move { self_keys::refresh_if_stale(&client, &local_url, &auth_key).await });
+    }
 
     // Running loops, keyed by loop_id. Lives for this MCP process's lifetime
     // (== the agent session), so loops are reaped when the agent pane closes.
