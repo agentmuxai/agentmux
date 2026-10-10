@@ -1615,6 +1615,13 @@ pub(super) async fn handle_reactive_agent(
                     obj.insert("lan_public_key".to_string(), json!(pubkey));
                 }
             }
+            // Identity M4d-5: the registration's UID key, separately; the
+            // name-keyed key above stays the query id's (spec §6.5.10).
+            if let Some(Ok(Some(pubkey))) = agent.uid.as_deref().map(|uid| state.mstore.agent_uid_lan_public_key_load(uid)) {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("uid_public_key".to_string(), json!(pubkey));
+                }
+            }
             Json(value).into_response()
         }
         None => (
