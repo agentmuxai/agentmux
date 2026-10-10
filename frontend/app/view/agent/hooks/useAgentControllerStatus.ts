@@ -34,7 +34,7 @@
  */
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
-import { reserveLoginWindow } from "../flows/login-window";
+import { withLoginWindow } from "../flows/login-window";
 import { loginBackend } from "../flows/login-backend";
 import { getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
 import { sleep } from "@/util/util";
@@ -632,7 +632,11 @@ export function useAgentControllerStatus(
         return (await buildAuthEnv(prov)) ?? {};
     };
 
-    const relogin = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
+    // The login's window opens inside the click (its URL comes later), and is
+    // closed on every way out of the flow if no URL used it (login-window.ts).
+    const relogin = (reloginOpts: { retryAfterLogin?: boolean } = {}) =>
+        reloginInFlight ? Promise.resolve() : withLoginWindow(opts.provider(), () => reloginFlow(reloginOpts));
+    const reloginFlow = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
         if (reloginInFlight) return;
         const retryAfterLogin = reloginOpts.retryAfterLogin ?? true;
         const prov = opts.provider();
@@ -640,8 +644,6 @@ export function useAgentControllerStatus(
             opts.log("auth", "re-login: no active provider", "warn");
             return;
         }
-        // Still inside the click: the login's URL comes later (login-window.ts).
-        if (!prov.headlessLoginUrlUnsupported) reserveLoginWindow();
         // Past every bail-out: same rule as the in-flight guard above — a call
         // that returns without starting a flow must not leave its intent
         // behind. Nothing would reset it (no beginRecoveryFlow, so no paired

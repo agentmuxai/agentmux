@@ -8,42 +8,77 @@
  * the URL from its output. A browser opens a new window only during a user
  * gesture, so a host whose "open externally" is `window.open` (a browser
  * host) must open the window at the click and point it at the URL later.
- * `reserveLoginWindow()` runs at the click, before the handler's first
- * `await`; `openOAuthBrowserPane` (and the launch modal's URL effect) navigate
- * the reserved window when the URL arrives; `runProviderLogin` releases
- * (closes) it if the flow ended without using it.
  *
- * A host that opens URLs in the system browser (the desktop) reserves
- * nothing (`reserveExternalWindow()` returns null), and every caller keeps
- * its usual path. One slot: a login reserves anew, closing an unused one.
+ * Each reservation has an owner, the flow the click started, which releases
+ * it on every way out (`withLoginWindow`, or the release function
+ * `reserveLoginWindow` returns). Releasing closes the window only if no URL
+ * used it, and only that owner's: a newer login's reservation is never
+ * closed by an older flow ending. A timer closes any reservation still unused
+ * after `MAX_AGE_MS` (from the click), so nothing is left blank for good.
+ *
+ * `openOAuthBrowserPane` (and the launch modal's URL effect) navigate the
+ * reserved window when the URL arrives. A host that opens URLs in the system
+ * browser (the desktop) reserves nothing (`reserveExternalWindow()` returns
+ * null), and every caller keeps its usual path. One slot: a login reserves
+ * anew, closing an unused one.
  */
 import { getApi } from "@/app/store/app-api";
 
-/** A reservation older than this is closed rather than used: its login is long gone. */
-const MAX_AGE_MS = 5 * 60_000;
+/**
+ * How long, from the click, a reservation waits for its URL. Long enough for
+ * the slowest step before a login prints its URL (installing the CLI first).
+ */
+const MAX_AGE_MS = 10 * 60_000;
 
-let reserved: { win: ExternalWindow; at: number } | null = null;
+let reserved: { win: ExternalWindow; id: number; timer: ReturnType<typeof setTimeout> } | null = null;
+let nextId = 1;
+const noop = () => {};
 
-/** Reserve a window for a login starting now, at a click. Never throws. */
-export function reserveLoginWindow(): void {
-    releaseLoginWindow();
+/**
+ * Reserve a window for a login starting now, at a click; call it before the
+ * click handler's first `await`. Returns the release for this reservation.
+ * Never throws.
+ */
+export function reserveLoginWindow(): () => void {
+    clearSlot(true);
+    let win: ExternalWindow | null = null;
     try {
-        const win = getApi().reserveExternalWindow();
-        if (win) reserved = { win, at: Date.now() };
+        win = getApi().reserveExternalWindow();
     } catch (e) {
         console.warn(`[login-window] reserve failed: ${(e as Error)?.message ?? String(e)}`);
     }
+    if (!win) return noop;
+    const id = nextId++;
+    const timer = setTimeout(() => release(id), MAX_AGE_MS);
+    reserved = { win, id, timer };
+    return () => release(id);
 }
 
-/** The reserved window, handed over once; null when there's none (or it's stale). */
+/**
+ * Runs a login flow started by a click: reserves its window first (for a
+ * provider whose login prints a URL), and releases it however the flow ends.
+ */
+export function withLoginWindow<T>(
+    provider: { headlessLoginUrlUnsupported?: boolean } | null | undefined,
+    flow: () => Promise<T>,
+): Promise<T> {
+    const release = provider && !provider.headlessLoginUrlUnsupported ? reserveLoginWindow() : noop;
+    let running: Promise<T>;
+    try {
+        running = flow();
+    } catch (e) {
+        release();
+        throw e;
+    }
+    return running.finally(release);
+}
+
+/** The reserved window, handed over once; null when there's none. */
 export function takeLoginWindow(): ExternalWindow | null {
     const r = reserved;
-    reserved = null;
     if (!r) return null;
-    if (Date.now() - r.at > MAX_AGE_MS) {
-        closeQuietly(r.win);
-        return null;
-    }
+    clearTimeout(r.timer);
+    reserved = null;
     return r.win;
 }
 
@@ -61,11 +96,17 @@ export function navigateLoginWindow(url: string): boolean {
     }
 }
 
-/** Closes the reserved window if nothing used it. */
-export function releaseLoginWindow(): void {
+/** Closes reservation `id` if it's still the unused one. */
+function release(id: number): void {
+    if (reserved?.id === id) clearSlot(true);
+}
+
+function clearSlot(close: boolean): void {
     const r = reserved;
     reserved = null;
-    if (r) closeQuietly(r.win);
+    if (!r) return;
+    clearTimeout(r.timer);
+    if (close) closeQuietly(r.win);
 }
 
 function closeQuietly(win: ExternalWindow): void {

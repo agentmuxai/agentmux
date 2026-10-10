@@ -3,8 +3,10 @@
 
 /**
  * The login window reserved at the click (login-window.ts): a browser host's
- * window is used for the URL that comes later, closed when it isn't, and a
- * host that reserves nothing (the desktop) keeps its system-browser path.
+ * window is used for the URL that comes later, closed by its owner on every
+ * way out when it isn't, never closed by an older flow, and closed by a timer
+ * if abandoned. A host that reserves nothing (the desktop) keeps its
+ * system-browser path.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,13 +18,14 @@ const hub = vi.hoisted(() => ({
 vi.mock("@/app/store/global", () => ({ createBlock: hub.createBlock }));
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: hub.invokeCommand }));
 
-import { releaseLoginWindow, reserveLoginWindow, takeLoginWindow } from "./login-window";
+import { reserveLoginWindow, takeLoginWindow, withLoginWindow } from "./login-window";
 import { openOAuthBrowserPane } from "./open-oauth-pane";
 import { installCefWireHost } from "../../../../test/cef-wire-host";
 
 installCefWireHost();
 
 const URL = "https://claude.ai/oauth/authorize?client_id=abc";
+const URL_PROVIDER = { headlessLoginUrlUnsupported: false };
 
 /** A browser host's window: records what happened to it. */
 function fakeWindow() {
@@ -36,7 +39,7 @@ beforeEach(() => {
     reserve = vi.spyOn(window.api, "reserveExternalWindow");
 });
 afterEach(() => {
-    releaseLoginWindow();
+    takeLoginWindow();
     vi.restoreAllMocks();
     vi.useRealTimers();
 });
@@ -45,9 +48,10 @@ describe("the login window", () => {
     it("on a browser host, the window reserved at the click gets the URL, and the system browser isn't asked", async () => {
         const win = fakeWindow();
         reserve.mockReturnValue(win);
-        reserveLoginWindow();
+        const release = reserveLoginWindow();
         expect(await openOAuthBrowserPane(URL)).toBe("external");
         expect(win.navigate).toHaveBeenCalledWith(URL);
+        release(); // the flow ends: the used window stays open
         expect(win.close).not.toHaveBeenCalled();
         expect(hub.invokeCommand).not.toHaveBeenCalled();
     });
@@ -63,33 +67,47 @@ describe("the login window", () => {
         expect(hub.invokeCommand).toHaveBeenCalledWith("open_external", { url: URL });
     });
 
-    it("is closed when the login ends without using it", () => {
+    it("is closed by its own release when no URL used it", () => {
         const win = fakeWindow();
         reserve.mockReturnValue(win);
-        reserveLoginWindow();
-        releaseLoginWindow();
+        const release = reserveLoginWindow();
+        release();
         expect(win.close).toHaveBeenCalledTimes(1);
         expect(takeLoginWindow()).toBeNull();
     });
 
-    it("closes an unused one when a new login reserves", () => {
+    it("an older flow's release never closes a newer login's window", () => {
         const first = fakeWindow();
         const second = fakeWindow();
         reserve.mockReturnValueOnce(first).mockReturnValueOnce(second);
-        reserveLoginWindow();
-        reserveLoginWindow();
+        const releaseFirst = reserveLoginWindow();
+        reserveLoginWindow(); // a new login: the unused first one is closed
         expect(first.close).toHaveBeenCalledTimes(1);
+        releaseFirst(); // the first flow ends later
+        expect(second.close).not.toHaveBeenCalled();
         expect(takeLoginWindow()).toBe(second);
     });
 
-    it("isn't used once it's stale", () => {
+    it("is closed by a timer if nothing releases or uses it", () => {
         vi.useFakeTimers();
         const win = fakeWindow();
         reserve.mockReturnValue(win);
         reserveLoginWindow();
-        vi.advanceTimersByTime(5 * 60_000 + 1);
-        expect(takeLoginWindow()).toBeNull();
+        vi.advanceTimersByTime(10 * 60_000 - 1);
+        expect(win.close).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
         expect(win.close).toHaveBeenCalledTimes(1);
+        expect(takeLoginWindow()).toBeNull();
+    });
+
+    it("a used window isn't closed by the timer", () => {
+        vi.useFakeTimers();
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        reserveLoginWindow();
+        expect(takeLoginWindow()).toBe(win);
+        vi.advanceTimersByTime(11 * 60_000);
+        expect(win.close).not.toHaveBeenCalled();
     });
 
     it("on the desktop (nothing reserved), the system browser opens as before", async () => {
@@ -108,5 +126,49 @@ describe("the login window", () => {
         expect(() => reserveLoginWindow()).not.toThrow();
         expect(await openOAuthBrowserPane(URL)).toBe("external");
         expect(hub.invokeCommand).toHaveBeenCalled();
+    });
+});
+
+describe("withLoginWindow", () => {
+    it("reserves before the flow runs, so the reservation is inside the click", async () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        let reservedFirst = false;
+        await withLoginWindow(URL_PROVIDER, async () => {
+            reservedFirst = reserve.mock.calls.length === 1;
+        });
+        expect(reservedFirst).toBe(true);
+    });
+
+    it("closes the unused window when the flow returns early, as a failed CLI lookup does", async () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        await withLoginWindow(URL_PROVIDER, async () => undefined);
+        expect(win.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes it when the flow throws, and passes the error on", async () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        await expect(
+            withLoginWindow(URL_PROVIDER, async () => {
+                throw new Error("resolve failed");
+            }),
+        ).rejects.toThrow("resolve failed");
+        expect(win.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the window the flow used open", async () => {
+        const win = fakeWindow();
+        reserve.mockReturnValue(win);
+        await withLoginWindow(URL_PROVIDER, () => openOAuthBrowserPane(URL));
+        expect(win.navigate).toHaveBeenCalledWith(URL);
+        expect(win.close).not.toHaveBeenCalled();
+    });
+
+    it("reserves nothing for a provider whose login runs in a terminal, or no provider", async () => {
+        await withLoginWindow({ headlessLoginUrlUnsupported: true }, async () => undefined);
+        await withLoginWindow(undefined, async () => undefined);
+        expect(reserve).not.toHaveBeenCalled();
     });
 });
