@@ -401,7 +401,7 @@
 
 .widget-row {
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-2, 6px);
+    border-radius: var(--radius-md);
     padding: var(--space-2);
 }
 
@@ -449,7 +449,7 @@
 
 .widget-approval {
     border: 1px solid var(--accent-color);
-    border-radius: var(--radius-2, 6px);
+    border-radius: var(--radius-md);
     padding: var(--space-2);
     margin: var(--space-2) 0;
 
