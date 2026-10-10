@@ -25,12 +25,12 @@ Code citations are against `main` @ `fd6eae06f`. "Measured" means measured on th
 | Case | Result |
 |---|---|
 | Empty window, hidden tabs holding 16 terminals, a second window, window moves with 4 browser panes, warm tab switches | **Fine.** 86–89 frames for ~84, tab switches 10–34 ms (one 193 ms outlier), panes follow a move with 0 px drift. The Windows skip-hidden-tabs fix works here (§5.3). |
-| A visible tab with 4 terminals | **Not fine.** Median 51 frames of ~83 (range 41–75), median frame gap 33 ms. The renderer main thread is 96% busy, and the terminals' live refits are the largest single item (§6.1). |
-| A visible tab with 4 browser panes | **The page keeps up (77–92 frames), the panes do not.** They sit off position in 29–38% of samples, up to ~150 px, and take 0.25–0.4 s to settle; the browser process's UI thread is 68% busy (§6.2). |
+| A visible tab with 4 terminals | **Not fine, by an amount that varies.** 41–75 frames of ~83 over the first sessions (median 51, frame gap 33 ms), 68–71 of ~80 in a later one. The renderer main thread was 96% busy in every trace, and the terminals' live refits are the largest single item (§6.1). |
+| A visible tab with 4 browser panes | **The page keeps up (77–92 frames), the panes do not.** The panes on the dragged edge are behind it in **91–93% of samples during the drag** (median 17–20 pt, p90 60–100 pt) and settle 0.26–0.4 s after it; the browser process's UI thread is 68% busy (§5.6, §6.2). |
 
 **What is not the lever** (each tested, §9): host INFO logging, device-pixel ratio, `window:keepinactivetabslaidout`, the DOM terminal renderer, a transparent background on secondary windows, Skia Graphite (turning it off drops the whole app to software rendering).
 
-**Recommendations, in order** (§7): (1) make the terminals' live refits cost-aware, since each refit is a ~6 ms synchronous GPU wait that uses under 2 ms of CPU; (2) rework the macOS browser-pane geometry task: frame-only updates for visible panes, one task per window per batch, no per-tick re-show and no 50 ms reaffirm; (3) measure a real mouse drag, which my driver cannot reproduce, with the recorder in §11. Four smaller items follow.
+**Recommendations, in order** (§7): (1) make the terminals' live refits cost-aware, since each refit is a ~6 ms synchronous GPU wait that uses under 2 ms of CPU; (2) rework the macOS browser-pane geometry task: frame-only updates for visible panes, one task per window per batch, no per-tick re-show and no 50 ms reaffirm; (3) measure a real mouse drag, which my driver cannot reproduce, with the recorder in §11 (armed twice for the owner, no drag was captured, so still open). Four smaller items follow.
 
 ---
 
@@ -133,7 +133,7 @@ The last row matters for how to read slowness. The Windows analysis found that a
 Notes:
 
 - About half the sent widths reach the page in every case, including the empty window (39–41 of 80). The Windows 1-tab row has the same ratio (38 events, 73 frames), so this is Chromium's one-resize-in-flight behaviour, not a macOS problem.
-- The 4-terminal rows moved with the machine: the first runs after a page reload were often 57–75; a stable stretch at load ~6–7 gave 41–44 six times running. I did not control for terminal state (scrollback length) between runs.
+- The 4-terminal rows moved with the machine: the first runs after a page reload were often 57–75; a stable stretch at load ~6–7 gave 41–44 six times running; a later session (fresh instance, load 3.5–5) gave 68–71 of ~80. In the traces the refit's wait varied with it, from ~7.5 ms to ~4.5 ms per refit. The wait is on the GPU process, so other apps' GPU work (the machine was running the installed AgentMux and other dev windows) plausibly moves it; I did not isolate that.
 
 ### 5.3 Hidden tabs cost nothing
 
@@ -167,15 +167,17 @@ Browser-pane tab, same drag, a calmer moment (load 3.7): the page is fine (92 fr
 
 ### 5.6 Native pane windows during a resize
 
-Four pane windows, sampled at ~120–170 Hz, 80 steps of 4 points (a wider range makes the layout collapse the right-hand panes near 770 px, which shows as 0×0 windows and is the layout working as designed):
+Four pane windows, sampled at ~120–170 Hz, 80 steps of 4 points (a wider range makes the layout collapse the right-hand panes near 770 px, which shows as 0×0 windows and is the layout working as designed).
 
-| Run set | Pane edge off by >2 px | p90 / p99 / max deviation | Last off-position sample after the final window size |
+**Only the two panes attached to the window's right edge are judged.** Their right edge must keep the same offset from the window's right edge at every width. The inner panes legitimately move with the layout's proportions. (A first version of this measure judged all four panes over the whole sampling period; it understated how often the edge panes are behind and is not used here. Its settle times are still valid, because every pane must return to its resting place, and they agree: 250–420 ms.)
+
+| Run set | Edge panes behind by >2 pt, during the drag | Median / p90 / p99 / max | Last behind after the window's final size |
 |---|---|---|---|
-| INFO logging (default), 3 runs | 30–38% | 55–68 / 120–124 / 128–148 px | 359–419 ms |
-| `RUST_LOG=warn`, 4 runs | 29–32% | 52–66 / 96–126 / 114–146 px | 250–361 ms |
-| Default again, 3 runs, busier machine | 30–36% | 96–111 / 131–148 / 148–156 px | not recorded |
+| Default, 3 runs, load 4.6–4.9 | **91–93%** | 17–20 / 60–100 / 96–120 / 100–120 pt | 259–287 ms |
 
-Across the stepped resize the main window passes through only 22–26 of the 80 sent widths, and each pane window through 7–15 distinct frames.
+Across the stepped resize the main window passes through only 25–26 of the 80 sent widths with panes open, against 63–76 for the terminals tab in the same session, and each pane window through 7–15 distinct frames. The UI thread that runs the pane tasks is the one that resizes the window.
+
+**The page against the window edge.** Without pixel capture, the nearest measure is the page's own layout width (`innerWidth`, read each frame) against the native window's width at the same moment. With 10-point steps on the terminals tab the page's width differed from the window's by more than 2 pt in 60–63% of samples, p90 10–20 pt: about one step, the floor the Windows analysis describes (§12 there). With 4-point steps on the browser-pane tab it was 29–37%, p90 8–20 pt. This is a scripted drag; a real one was not captured (§11).
 
 ---
 
@@ -183,7 +185,7 @@ Across the stepped resize the main window passes through only 22–26 of the 80 
 
 ### 6.1 Terminal live refits stall the renderer on the GPU (the visible-terminals case)
 
-`liveRefits` (`term-resize-policy.ts:60-114`) allows 2 terminals to refit per frame whatever it costs. Each refit resizes xterm's WebGL drawing buffer, which Chromium does synchronously with the GPU process. Measured: ~6 ms of waiting per refit and under 2 ms of CPU, so two refits can use 12 ms of a 16.7 ms frame doing nothing. The refit also forces a layout (xterm's `fit()` reads the container).
+`liveRefits` (`term-resize-policy.ts:60-114`) allows 2 terminals to refit per frame whatever it costs. Each refit resizes xterm's WebGL drawing buffer, which Chromium does synchronously with the GPU process. Measured: ~3–6 ms of waiting per refit (the wall time was ~4.5–7.5 ms in different sessions) and under 2 ms of CPU, so two refits can use most of a 16.7 ms frame doing nothing. The refit also forces a layout (xterm's `fit()` reads the container).
 
 Experiment (temporary edit to the scheduler, since reverted; frames of ~83 ideal):
 
@@ -208,7 +210,7 @@ On macOS the frontend's batch reaches `apply()` and the loop calls `resize_brows
 - re-keys the main window and re-orders the overlay (`:400-423`);
 - and posts **the same task again 50 ms later** with the rect captured now (`:816-829`), to repair the frame that `set_visible(1)` reset.
 
-So every rect update does a re-show, a rescan and a repair, per pane. During a resize the reaffirm can also re-apply a rect that is already stale (`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` F2). Measured effects: the browser UI thread 68% busy, the main window receiving fewer sizes than without panes (22–26 against 38–41), the panes off position in about a third of samples and settling 0.25–0.4 s after the drag. The Windows analysis found the same shape (a request queue, median 542 ms) and fixed it with one batched apply; macOS never got that half.
+So every rect update does a re-show, a rescan and a repair, per pane. During a resize the reaffirm can also re-apply a rect that is already stale (`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` F2). Measured effects: the browser UI thread 68% busy, the main window receiving fewer sizes than without panes (25–26 against 63–76 in the same session), the panes on the dragged edge behind it in 91–93% of samples during the drag and settling 0.26–0.4 s after it. The Windows analysis found the same shape (a request queue, median 542 ms) and fixed it with one batched apply; macOS never got that half.
 
 The host also logged 1,000–1,800 lines per 1.4 s drag in this build, ~450 a second of them one-per-window `ObjC task NSApp window` lines. **That is not the cause**: with `RUST_LOG=warn` (10 lines per run) the pane lag was the same (§5.6). It is worth removing anyway, since dev builds also write each line synchronously to stderr and every build formats it twice.
 
@@ -227,7 +229,7 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 | # | Change | Expected effect | Cost / risk |
 |---|---|---|---|
 | **M1** | **Cost-aware terminal live refits.** Replace the fixed 2 per frame in `createRefitScheduler` with a budget from the measured wall time of recent refits (an EMA per terminal), so a frame never starts a refit it cannot finish, and refits take turns at a rate the frame can afford. Keep the settle refit and the PTY debounce. | Toward the ceiling: median ~51 → up to ~80 frames of ~83 in the 4-terminal case. Middle policies measured +7 to +18 (unproven, §6.1). | Small (one file plus a test). **Product decision:** how stale a terminal's grid may look mid-drag. The Windows work chose "every frame" to keep text on the edge; this trades that for a steady frame rate. Pane backgrounds still follow the edge. |
-| **M2** | **Rework the macOS pane geometry task.** (a) A resize of an already-visible pane takes the frame-only path: no `set_visible(1)`, no 50 ms reaffirm. (b) One UI task per window per batch, mirroring `apply_windows`. (c) Remember the overlay `NSWindow` instead of scanning `[NSApp windows]` each time. (d) Drop the `windowNumberAtPoint` diagnostic and the per-window INFO logs. (e) Skip the key-window, `orderFront:` and `set_focus` steps on repeated resize ticks. | The browser UI thread frees up (68% busy today); panes land within a frame or two instead of ~0.3 s; the main window should step more finely. | Medium (Rust on the UI thread). The reaffirm exists because CEF's Views layout resets the frame after a re-show, so the hypothesis is that skipping the re-show removes the need; **prototype and verify with `pane-lag.mjs` before relying on it.** The Windows `apply_windows` is the template. |
+| **M2** | **Rework the macOS pane geometry task.** (a) A resize of an already-visible pane takes the frame-only path: no `set_visible(1)`, no 50 ms reaffirm. (b) One UI task per window per batch, mirroring `apply_windows`. (c) Remember the overlay `NSWindow` instead of scanning `[NSApp windows]` each time. (d) Drop the `windowNumberAtPoint` diagnostic and the per-window INFO logs. (e) Skip the key-window, `orderFront:` and `set_focus` steps on repeated resize ticks. | The browser UI thread frees up (68% busy today); panes land within a frame or two instead of ~0.3 s; the main window should step more finely. | Medium (Rust on the UI thread). The reaffirm exists because CEF's Views layout resets the frame after a re-show, so the hypothesis is that skipping the re-show removes the need; **prototype and verify with `drag.mjs --mode scripted` before relying on it.** The Windows `apply_windows` is the template. |
 | **M3** | **Measure a real drag** with the passive recorder (§11), on this Mac and on a ProMotion machine, before and after M1/M2. It settles whether the lock-step wait (§4) changes the picture and how far the page trails the edge. | Replaces the unmeasured parts of §6.4 with data. | None. 60 seconds of a person dragging. |
 | **M4** | **Don't reload the page on WebGL context loss, and release contexts held by hidden terminals.** Past 16 live terminals Chromium drops WebGL contexts, xterm falls back to its DOM renderer, and the frontend's recovery reloads the page up to three times (§10). Hidden-tab terminals each hold a context while painting nothing. | Removes a reload loop for users with many terminals; frees GPU contexts (not measured how much that helps the 34% GPU CPU). | Small to medium; touches terminal lifecycle. Affects every platform. |
 | **M5** | Add the missing macOS **minimum window size** (`minimum_size` is `cfg(windows)`, `app/mod.rs:81`). | Stops the layout collapsing panes at very small widths (seen at ~770 px in §5.6). | Small. |
@@ -251,7 +253,7 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 
 | Idea | Result |
 |---|---|
-| Host INFO logging is the pane lag | No. `RUST_LOG=warn` left the deviation, the off-position share and the settle time unchanged (§5.6). Still worth removing. |
+| Host INFO logging is the pane lag | No. With `RUST_LOG=warn` the pane deviation and off-position share were the same as with INFO logging (measured with the first, all-panes version of the measure, which is fine for comparing the two arms), and the settle time stayed at 250–361 ms against 359–419 ms. Still worth removing. |
 | Retina cost (DPR) | No difference at emulated DPR 1 (51–63 vs 57–66 frames). Emulation is imperfect. |
 | `window:keepinactivetabslaidout` | No difference on or off (on 50–56, off 49–58). #4396 already covers it. |
 | DOM terminal renderer instead of WebGL | Worse in both rounds: 30–59 frames vs 49–67 for WebGL (`term:disablewebgl`). |
@@ -273,7 +275,7 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 
 1. Is the main window's `NSWindow` opaque? `CGWindowList` alpha says 1, which is the window alpha, not whether the content composites with blending. The host never calls `setOpaque`; reading `isOpaque` needs a one-line debug hook in the host.
 2. Is Chromium's Mac resize lock-step active for CEF 154 Views windows driven by `set_bounds`, and does a real mouse drag behave differently (M3)?
-3. How far does the page trail the window edge on macOS? Windows used `PrintWindow` captures; macOS needs Screen Recording permission for pixels.
+3. How far does the page trail the window edge in pixels? The layout-width proxy in §5.6 says about one step in a scripted drag; what is on screen during a real drag needs pixel capture, which needs Screen Recording permission.
 4. Does a ProMotion (120 Hz) display change the picture? The frame budget halves.
 5. Does macOS have a blank-window gap at first paint that the Windows gate fixed there (M6)?
 6. Do pane windows reorder correctly when the main window is hidden behind another app mid-resize? Not tested.
@@ -282,13 +284,14 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 
 ## 11. Reproducing, and recording a real drag
 
-The scripts are in `scripts/perf/macos-paint/` and need a dev build (CDP on port 9223) and Node. They use `scripts/ui-screenshots/lib/cdp-client.mjs`. Compile the two samplers once (`swiftc -O panesampler.swift -o panesampler`, same for `winlist.swift`) and run from that directory.
+The scripts are in `scripts/perf/macos-paint/` and need a dev build (CDP on port 9223) and Node. They use `scripts/ui-screenshots/lib/cdp-client.mjs`. Compile the samplers once (`swiftc -O panesampler.swift -o panesampler`, the same for `winlist.swift`) and run from that directory.
 
 | Script | What it does |
 |---|---|
 | `env.mjs` | GPU backend, Graphite, idle frame rate, DPR |
-| `resize-frames.mjs` | The stepped-resize frame probe of §5.2; `--runs N`, `--brief`, `--step-px`, `--passive S` |
-| `pane-lag.mjs <cef pid>` | The frame probe plus the native pane-window sampler of §5.6; `FP_ARGS`, `HOST_LOG`, `SAMPLE_SECS` |
+| `resize-frames.mjs` | The stepped-resize frame probe of §5.2; `--runs N`, `--brief`, `--step-px` |
+| `drag.mjs <cef pid> --mode scripted` | §5.6: the stepped resize with page frames, the page's width against the window's, and the edge panes against the window's edge (`drag-analysis.mjs`, `panesampler.swift`) |
+| `drag.mjs <cef pid> --mode armed` | The same for a **real mouse drag**: it waits for the first resize, records until 1.5 s after the last, and reports |
 | `move-lag.mjs <cef pid>` | The window-move test of §5.5 |
 | `tab-switch.mjs` | Warm tab switches (§5.5) |
 | `trace-cpu.mjs`, `trace-threads.mjs` | Wall and CPU attribution of a trace from `scripts/ui-screenshots/trace-capture.mjs` |
@@ -296,7 +299,7 @@ The scripts are in `scripts/perf/macos-paint/` and need a dev build (CDP on port
 
 Keep the total at 16 terminals or fewer (M4).
 
-**Recording a real drag (M3).** Start `node resize-frames.mjs --passive 8 --brief` (add `pane-lag.mjs` with `FP_ARGS="--passive 8" SAMPLE_SECS=9` to include the panes) and drag a window edge for the eight seconds. It reports the page's frames, gaps and long frames over that period and, with panes open, how far their windows trailed. Do it with the terminals tab and with the browser-pane tab; the numbers to compare are frames against ideal and the median frame gap.
+**Recording a real drag (M3).** Select the tab to test (`node gototab.mjs <index>`), run `node drag.mjs <cef pid> --mode armed`, and drag the window's right edge out and back for a few seconds. Do it on the terminals tab and on the browser-pane tab, then compare with the `--mode scripted` numbers in §5.6. On 2026-10-10 it was armed twice for 15 minutes each and caught no drag, so this is still open.
 
 ---
 
