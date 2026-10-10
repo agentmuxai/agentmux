@@ -31,10 +31,6 @@ tokio = { version = "1", features = [
     # disk-persistence writer.
     "fs",
 ] }
-# Platform-default data_dir / config_dir resolution. Host already
-# uses this; launcher must compute the SAME paths so both processes
-# agree on the data dir for CEF cache, srv DB, etc.
-dirs = "5"
 # RFC3339 timestamps for backend_started_at logs, kept stable for
 # log-format compatibility with the host's existing format.
 # LSD-1: also used by the launcher saga log for RFC3339 started_at /
@@ -179,3 +175,8 @@ proptest = "1"
 # on-disk SQLite file (in addition to the `open_in_memory()` path) so
 # WAL-mode + busy-timeout pragmas exercise their real code paths.
 tempfile = "3"
+
+# `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
+# embeds the Windows icon/version resource from build.rs.
+[package.metadata.cargo-machete]
+ignored = ["winres"]

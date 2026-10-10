@@ -193,3 +193,11 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 # wants synchronous HTTP from a non-tokio test fn. Production code
 # stays on the async client.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+
+# `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
+# embeds the Windows icon/version resource from build.rs.
+# objc2 is macOS-only (fs_ops/trash_worker.rs) and unverifiable from a
+# Windows/Linux machete run; drop it from this list once a macOS build proves
+# objc2-foundation alone is enough.
+[package.metadata.cargo-machete]
+ignored = ["winres", "objc2"]
