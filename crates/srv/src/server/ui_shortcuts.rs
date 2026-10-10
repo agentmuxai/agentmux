@@ -32,6 +32,11 @@ fn refused_command(command: &str) -> Option<&'static str> {
             "it closes the focused pane at once: use ClosePane, which gives the user 15 seconds to undo \
              (QuitSelf for your own pane)",
         ),
+        // Restoring from the Trash isn't supported on macOS yet
+        // (backend/fs_ops/trash_worker.rs), so there it can't be undone.
+        "files:trash" if cfg!(target_os = "macos") => {
+            Some("on macOS it can't be undone yet (restoring from the Trash isn't supported there)")
+        }
         _ => None,
     }
 }
@@ -100,8 +105,10 @@ mod tests {
     fn refuses_only_the_commands_the_owner_ruled_out() {
         assert!(refused_command("files:deletePermanently").is_some());
         assert!(refused_command("pane:close").unwrap().contains("ClosePane"));
-        for allowed in ["tab:close", "files:trash", "split:right", "pane:replaceWithLauncher"] {
+        for allowed in ["tab:close", "split:right", "pane:replaceWithLauncher"] {
             assert!(refused_command(allowed).is_none(), "{allowed} keeps its own confirmation or undo");
         }
+        // Trash can be undone everywhere but macOS.
+        assert_eq!(refused_command("files:trash").is_some(), cfg!(target_os = "macos"));
     }
 }

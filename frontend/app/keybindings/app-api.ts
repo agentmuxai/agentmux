@@ -44,12 +44,22 @@ export interface ResolvedNote {
  * focused pane at once, which may be someone else's, so it goes through
  * `ClosePane` and its undo instead. Everything else that destroys or closes
  * (`tab:close`, `files:trash`, replacing a pane) runs with the confirmation
- * or undo a user gets.
+ * or undo a user gets: except `files:trash` on macOS, where restoring from
+ * the Trash isn't supported yet, so it can't be undone either.
  */
 export const API_REFUSED: ReadonlyMap<string, string> = new Map([
     ["files:deletePermanently", "it can't be undone"],
     ["pane:close", "it closes the focused pane at once: use ClosePane, which gives the user 15 seconds to undo (QuitSelf for your own pane)"],
 ]);
+
+const API_REFUSED_MAC: ReadonlyMap<string, string> = new Map([
+    ["files:trash", "on macOS it can't be undone yet (restoring from the Trash isn't supported there)"],
+]);
+
+/** Why the App API refuses `command` on `platform`, or undefined if it doesn't. */
+export function refusalFor(command: string, platform: KeyPlatform): string | undefined {
+    return API_REFUSED.get(command) ?? (platform === "mac" ? API_REFUSED_MAC.get(command) : undefined);
+}
 
 /**
  * The terminal's own commands. Their rows have no `pane` (a `when` clause
@@ -115,7 +125,7 @@ export interface RunDeps {
  * `target` is a pane in the active tab (default: the focused pane).
  */
 export function runCommand(command: string, target: string | undefined, deps: RunDeps): RunResult {
-    const refused = API_REFUSED.get(command);
+    const refused = refusalFor(command, deps.platform);
     if (refused) return { ran: false, reason: `${command} is not available to agents: ${refused}` };
     const info = listShortcuts(deps.platform).find((s) => s.command === command);
     if (!info) {
@@ -243,7 +253,7 @@ export function planKeyPress(keys: string, platform: KeyPlatform): KeyPressPlan 
     }
     if (commands.size === 0) return { reason: `"${keys}" isn't a key in the shortcut table: ListShortcuts lists them` };
     for (const c of commands) {
-        const refused = API_REFUSED.get(c);
+        const refused = refusalFor(c, platform);
         if (refused) return { reason: `"${keys}" runs ${c}, which is not available to agents: ${refused}` };
     }
     const events: KeyEventPlan[] = [];

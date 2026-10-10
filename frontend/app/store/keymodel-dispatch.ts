@@ -14,7 +14,7 @@ import {
 import type { KeyEventLike } from "@/app/keybindings/keys";
 import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
-import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
+import { atoms, getApi, getBlockComponentModel, refocusNode, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { isEditableTarget } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
@@ -269,11 +269,11 @@ export function installShortcutApi() {
     const deps = () => ({
         platform: keyPlatform(),
         focusedBlockId,
+        // Layout focus and the caret both: a key goes to the DOM's focused
+        // element, so layout focus alone left keys with the old pane.
         focusBlock: (blockId: string): boolean => {
-            const layout = getLayoutModelForStaticTab();
-            const node = layout.getNodeByBlockId(blockId);
-            if (!node) return false;
-            layout.focusNode(node.id);
+            if (!getLayoutModelForStaticTab().getNodeByBlockId(blockId)) return false;
+            refocusNode(blockId);
             return true;
         },
         runGlobal: (command: string): boolean => runKeyCommand(command, NO_KEY),
@@ -285,6 +285,13 @@ export function installShortcutApi() {
         // sends the events and reads `last()`.
         plan: (keys: string, target?: string): KeyPressPlan | { reason: string } => {
             if (target && !deps().focusBlock(target)) return { reason: `pane ${target} is not in the active tab of this window` };
+            // A key goes where the caret is: refuse rather than press it into another pane.
+            // A pane tab's content sits in its own block inside the pane's, so check every element of the target.
+            const caret = document.activeElement;
+            const holders = target ? [...document.querySelectorAll(`[data-blockid="${CSS.escape(target)}"]`)] : [];
+            if (target && !(caret && holders.some((el) => el.contains(caret)))) {
+                return { reason: `pane ${target} didn't take keyboard focus` };
+            }
             return planKeyPress(keys, keyPlatform());
         },
         focus: (blockId: string): boolean => deps().focusBlock(blockId),
