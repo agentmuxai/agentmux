@@ -3,28 +3,14 @@
 
 /**
  * The pane host for a sandboxed widget
- * (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6).
- *
- * The widget's entry document runs in an `<iframe>` with an opaque origin
- * (`sandbox` without `allow-same-origin`), served by srv from the approved
- * package only (`/agentmux/widget-files/…`, under a CSP that allows no
- * network). It reaches AgentMux through one MessagePort, handed over after
- * its first `load`; a second `load` means it navigated away, and the port is
- * closed at once. Every request is checked here against the package's
- * granted permissions (and again by srv for what reaches srv).
+ * (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6). Phase W1
+ * lists, approves and serves sandboxed packages; the iframe runtime and its
+ * bridge arrive in W2, so until then a sandboxed pane says so plainly rather
+ * than failing.
  */
 
-import { createEffect, createSignal, on, onCleanup } from "solid-js";
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
-import { getWebServerEndpoint } from "@/util/endpoints";
-import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
-import { bridgeTheme, handleBridgeRequest, type BridgeHost, type BridgeState } from "./widget-bridge";
-
-export const PROTOCOL = 1;
-const HELLO_TIMEOUT_MS = 10_000;
-const MAX_IN_FLIGHT = 64;
-
-export const IFRAME_SANDBOX = "allow-scripts allow-forms allow-modals allow-downloads";
+import type { PaneTabManifest } from "./pane-tab-registry";
 
 export function makeSandboxedPaneManifest(pkg: WidgetPackageInfo, pane: WidgetPaneInfo): PaneTabManifest {
     return {
@@ -33,147 +19,15 @@ export function makeSandboxedPaneManifest(pkg: WidgetPackageInfo, pane: WidgetPa
         label: pane.label,
         icon: pane.icon,
         defaultHue: pkg.default_hue ?? undefined,
-        capabilities: { noPadding: true },
-        create: (ctx) => createSandboxedInstance(pkg, pane, ctx),
-    };
-}
-
-function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, ctx: PaneTabHostContext): PaneTabInstance {
-    const [title, setTitle] = createSignal<{ text: string; icon?: string } | null>(null);
-    const [actions, setActions] = createSignal<{ id: string; icon: string; title: string }[]>([]);
-    const [menu, setMenu] = createSignal<({ id: string; label: string; disabled?: boolean } | { separator: true })[]>([]);
-    const [failure, setFailure] = createSignal<string | null>(null);
-
-    let port: MessagePort | null = null;
-    let iframe: HTMLIFrameElement | null = null;
-    let loads = 0;
-    let disposed = false;
-    const state: BridgeState = { ready: false, inFlight: 0 };
-
-    const notify = (method: string, params: unknown) => port?.postMessage({ jsonrpc: "2.0", method, params });
-
-    const host: BridgeHost = {
-        pkg,
-        pane,
-        ctx,
-        setTitle,
-        setActions,
-        setMenu,
-    };
-
-    const stop = (reason: string) => {
-        port?.close();
-        port = null;
-        state.ready = false;
-        setFailure(reason);
-    };
-
-    const connect = () => {
-        const channel = new MessageChannel();
-        port = channel.port1;
-        port.onmessage = async (ev) => {
-            const msg = ev.data;
-            if (!msg || msg.jsonrpc !== "2.0" || msg.id == null || typeof msg.method !== "string") return;
-            if (state.inFlight >= MAX_IN_FLIGHT) {
-                port?.postMessage({ jsonrpc: "2.0", id: msg.id, error: { code: 1002, message: "too many requests in flight", data: { limit: "inFlight" } } });
-                return;
-            }
-            state.inFlight++;
-            try {
-                const reply = await handleBridgeRequest(host, state, msg.method, msg.params ?? {});
-                port?.postMessage({ jsonrpc: "2.0", id: msg.id, ...reply });
-            } finally {
-                state.inFlight--;
-            }
-        };
-        port.start();
-        iframe!.contentWindow?.postMessage({ type: "agentmux:connect", protocols: [PROTOCOL] }, "*", [channel.port2]);
-        setTimeout(() => {
-            if (!state.ready && port && !disposed) stop(`${pkg.name} didn't start (no hello within ${HELLO_TIMEOUT_MS / 1000} s).`);
-        }, HELLO_TIMEOUT_MS);
-    };
-
-    // Events the widget follows.
-    createEffect(on(() => ctx.visibility(), (v) => state.ready && notify("visibility", { state: v }), { defer: true }));
-    createEffect(on(() => ctx.isFocused(), (f) => state.ready && notify("focus", { focused: f }), { defer: true }));
-    createEffect(
-        on(
-            () => JSON.stringify(ownMeta(pkg.id, ctx.meta())),
-            (json) => {
-                if (!state.ready || json === state.lastMetaSent) return;
-                state.lastMetaSent = json;
-                notify("meta", { meta: JSON.parse(json) });
+        create: () => ({
+            component: () => {
+                const el = document.createElement("div");
+                el.className = "sandboxed-widget-pending";
+                el.style.padding = "16px";
+                el.textContent = `${pkg.name} is a sandboxed widget. This build of AgentMux can install and approve it, but can't run sandboxed widgets yet.`;
+                return el;
             },
-            { defer: true }
-        )
-    );
-    const themeObserver = new MutationObserver(() => state.ready && notify("theme", bridgeTheme(pkg)));
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
-
-    const src = (): string =>
-        `${getWebServerEndpoint()}${pkg.files_url}${pane.entry}?pane=${encodeURIComponent(crypto.randomUUID())}`;
-
-    return {
-        liveTitle: () => title() ?? { text: pane.label },
-        headerActions: () =>
-            actions().map((a) => ({
-                icon: a.icon,
-                title: a.title,
-                click: () => notify("action", { id: a.id, source: "header" }),
-            })),
-        contextMenu: () =>
-            menu().map((item) =>
-                "separator" in item
-                    ? { type: "separator" as const }
-                    : { label: item.label, enabled: !item.disabled, click: () => notify("action", { id: item.id, source: "menu" }) }
-            ),
-        component: () => {
-            const root = document.createElement("div");
-            root.className = "sandboxed-widget";
-            root.style.cssText = "position:relative;width:100%;height:100%;";
-            iframe = document.createElement("iframe");
-            iframe.setAttribute("sandbox", IFRAME_SANDBOX);
-            iframe.setAttribute("allow", "clipboard-write");
-            iframe.setAttribute("referrerpolicy", "no-referrer");
-            iframe.title = pane.label;
-            iframe.style.cssText = "border:0;width:100%;height:100%;display:block;background:transparent;";
-            iframe.addEventListener("load", () => {
-                loads++;
-                if (loads === 1) connect();
-                else stop(`${pkg.name} left its page and was stopped. Reload it to start it again.`);
-            });
-            iframe.src = src();
-            root.appendChild(iframe);
-            const banner = document.createElement("div");
-            banner.className = "sandboxed-widget-failure";
-            banner.setAttribute("role", "alert");
-            banner.style.cssText = "position:absolute;inset:auto 0 0 0;padding:8px 12px;display:none;";
-            root.appendChild(banner);
-            createEffect(() => {
-                const f = failure();
-                banner.style.display = f ? "block" : "none";
-                banner.textContent = f ?? "";
-            });
-            return root;
-        },
-        dispose: () => {
-            disposed = true;
-            themeObserver.disconnect();
-            notify("dispose", {});
-            const p = port;
-            setTimeout(() => p?.close(), 1000);
-            port = null;
-            iframe?.remove();
-        },
+            dispose: () => {},
+        }),
     };
 }
-
-/** The widget's own meta keys (`widget:<id>:<key>`), without the prefix. */
-export function ownMeta(id: string, meta: Record<string, unknown> | null | undefined): Record<string, unknown> {
-    const prefix = `widget:${id}:`;
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(meta ?? {})) if (k.startsWith(prefix)) out[k.slice(prefix.length)] = v;
-    return out;
-}
-
-void onCleanup;
