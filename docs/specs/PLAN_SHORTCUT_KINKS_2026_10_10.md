@@ -127,5 +127,5 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 | A3 Beyond-the-pane commands | AgentA@Area54 | waiting for D2 |
 | A4 Save-key reporting, dialog Escape | AgentA@Area54 | done (#4613); the Ctrl+F Help note moved to SPEC_HELP_HIDDEN_TIPS_2026_10_10 (#4616) |
 | A5 Pool window marker | AgentA@Area54 | done (#4618) |
-| A6 Dev environment | AgentA@Area54 | terminals start at home (#4621), full-reload reason logged (#NNNN); `npm ci` and launching a dev instance from an agent still open |
+| A6 Dev environment | AgentA@Area54 | terminals start at home (#4621), full-reload reason logged (#4623); `npm ci` and launching a dev instance from an agent still open |
 | A7 New-tab focus | AgentA@Area54 | waiting for D3 |
