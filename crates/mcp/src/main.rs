@@ -38,8 +38,8 @@ use agentmux_common::api_types::{
     ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
     UiBrowserDispatchKeyRequest, UiBrowserEvalRequest, UiBrowserFocusElementRequest,
     UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest,
-    UiBrowserOpenRequest, UiClickRequest, UiQueryRequest, UiScreenshotRequest,
-    UiScreenshotResponse, WindowFocusRequest,
+    UiBrowserOpenRequest, UiClickRequest, UiPressKeysRequest, UiQueryRequest, UiRunCommandRequest,
+    UiScreenshotRequest, UiScreenshotResponse, UiShortcutsListRequest, WindowFocusRequest,
     WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };
@@ -217,6 +217,10 @@ async fn main() {
                     serde_json::from_str(UI_SCREENSHOT_TOOL).expect("static json");
                 let ui_click: Value = serde_json::from_str(UI_CLICK_TOOL).expect("static json");
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
+                let list_shortcuts: Value =
+                    serde_json::from_str(LIST_SHORTCUTS_TOOL).expect("static json");
+                let run_command: Value = serde_json::from_str(RUN_COMMAND_TOOL).expect("static json");
+                let press_keys: Value = serde_json::from_str(PRESS_KEYS_TOOL).expect("static json");
                 let close_pane: Value =
                     serde_json::from_str(CLOSE_PANE_TOOL).expect("static json");
                 let quit_self: Value = serde_json::from_str(QUIT_SELF_TOOL).expect("static json");
@@ -303,7 +307,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, conn_list, open_editor, open_media, open_files, widget_list, widget_install, open_widget, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, open_browser, browser_snapshot, browser_click, browser_fill, browser_select, browser_check, browser_set_files, browser_wait_for, browser_handoff, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, conn_list, open_editor, open_media, open_files, widget_list, widget_install, open_widget, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, list_shortcuts, run_command, press_keys, close_pane, quit_self, register_dev_server, open_browser, browser_snapshot, browser_click, browser_fill, browser_select, browser_check, browser_set_files, browser_wait_for, browser_handoff, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {

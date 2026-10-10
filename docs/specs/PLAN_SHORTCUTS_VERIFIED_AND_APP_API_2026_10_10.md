@@ -1,7 +1,7 @@
 # Plan — every shortcut in the Help pane works on every platform, and agents can drive them
 
 **Date:** 2026-10-10
-**Status:** proposed — owner decisions recorded (§8); nothing built yet.
+**Status:** active — owner decisions recorded (§8); phase 2 (App API) in #NNNN.
 **Author:** AgentA@Area54 (Windows), with Masty@starpower and Maricon@charlie for the other platforms
 **Builds on:**
 - [../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md](../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md) (the audit, by reading code; phases 3–6 shipped in #4323–#4328)
@@ -18,11 +18,11 @@ The Help pane's shortcut list is generated from the table (`keybindings/help.ts`
 
 | Kind of failure | Known or suspected cases |
 |---|---|
-| The OS or window manager takes the key first | Not measured by pressing yet. macOS: Ctrl+Arrow, Ctrl+Shift+Arrow and ⌃↑ (Mission Control, Spaces). **GNOME 50 (read from gsettings on charlie):** Ctrl+Alt+Arrows (switch workspace) and **Ctrl+Shift+Alt+Arrows (move window to workspace), which is our `pane:swap:*` on every platform**; also Super+Alt/Shift+Arrows, Ctrl+Alt+Tab/Esc/D, Ctrl+Shift+Alt+R, Alt+Tab, Alt+\`, Alt+Esc, Alt+Space, Alt+F2/F4/F6/F7/F8/F10, Ctrl+Alt+F1–F12, Super+1–9 and Super+Ctrl+1–9, Super+Space and Super+A/V/M/S/N/H/D/P/Tab. GNOME does *not* bind Alt+Shift+Arrow (our Linux pane resize), Ctrl+Arrow or Ctrl+Shift+Arrow by default; KDE and others may. Windows: Ctrl+Shift+0 (keyboard-layout switch on some setups) |
-| The host takes the key first | On macOS, AgentMux's own app menu: ⌘H, ⌘M, ⌘Q and ⌘W are menu items, and the standard edit items keep ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V/⌘A, which overlap the Files pane's undo, cut, copy, paste and select-all. In a browser pane, Ctrl/⌘+Shift+N is consumed as `window:new` before the pane's "new incognito" can run |
+| The OS or window manager takes the key first | Not measured by pressing yet. **macOS (read on starpower, §9):** ⌃Arrow (Mission Control, Spaces) is taken, and the hidden Shift variants may take ⌃⇧Arrow, our `pane:focus:*` on macOS; Magnet's defaults take ⌃⌥⌘←/→ (`pane:resize:left/right`); the F-row keys need fn at macOS's default setting. **GNOME 50 (read from gsettings on charlie):** Ctrl+Alt+Arrows (switch workspace) and **Ctrl+Shift+Alt+Arrows (move window to workspace), which is our `pane:swap:*` on every platform**; also Super+Alt/Shift+Arrows, Ctrl+Alt+Tab/Esc/D, Ctrl+Shift+Alt+R, Alt+Tab, Alt+\`, Alt+Esc, Alt+Space, Alt+F2/F4/F6/F7/F8/F10, Ctrl+Alt+F1–F12, Super+1–9 and Super+Ctrl+1–9, Super+Space and Super+A/V/M/S/N/H/D/P/Tab. GNOME does *not* bind Alt+Shift+Arrow (our Linux pane resize), Ctrl+Arrow or Ctrl+Shift+Arrow by default; KDE and others may. Windows: Ctrl+Shift+0 (keyboard-layout switch on some setups) |
+| The host takes the key first | On macOS, AgentMux's own app menu takes ⌘H, ⌥⌘H and ⌘Q, and its standard edit items keep ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V/⌘A, which overlap the Files pane's undo, cut, copy, paste and select-all. Minimize, Close Tab and Close Window have no key equivalent, so ⌘M (`pane:magnify`) and ⌘W (`pane:close`) reach the page. In a browser pane, Ctrl/⌘+Shift+N is consumed as `window:new` before the pane's "new incognito" can run |
 | The key reaches the page but its row's context rule doesn't match | Not measured |
 | Help shows something the table doesn't drive | The Help pane's own zoom keys are hardcoded (`helpview.tsx`) and ignore remaps; "Shift + drag" is hand-written; a meta key on Linux is labelled "Win" |
-| A command that only works from its key | `term:copy`/`paste`/`clear` are no-ops in the global map (the terminal runs them itself); the command palette's registry diverges from the key handlers (`tab:close` skips the confirm dialog, `split:*` ignores `app:defaultnewblock`, most table ids aren't registered) |
+| A command that only works from its key | `term:copy`/`paste`/`clear` are no-ops in the global map (the terminal runs them itself; RunCommand reaches them through the terminal's own runner since phase 2); the command palette's registry diverges from the key handlers (`tab:close` skips the confirm dialog, `split:*` ignores `app:defaultnewblock`, most table ids aren't registered) |
 
 **App API coverage:** about six table commands have an equivalent tool (`NewTab`, `SetActiveTab`, `SetName` for tab rename, `ClosePane`, partial splits through the open-pane tools). There is no tool that runs a shortcut's command or presses a key with modifiers: `BrowserDispatchKey` sends only Enter, Tab, Escape, Backspace, Space and the arrows, unmodified, into the agent's own pane. `FocusWindow` reorders the window list but appears not to raise the window (code trace only).
 
@@ -56,7 +56,9 @@ Three tools on the agent App API (`crates/mcp`), served by srv and carried out b
 **Scope and safety** (owner decisions, §8):
 - Act only in the window that holds the agent's own pane.
 - Commands that destroy data or close what the user is working on (`files:trash`, `files:deletePermanently`, `tab:close`, `pane:close` of a pane the agent doesn't own) keep the confirmations a user sees, and closing someone else's pane keeps `ClosePane`'s 15-second undo.
-- `PressKeys` only accepts combinations that appear in the table, plus plain text keys, so it can't type arbitrary shortcuts into other apps.
+- `PressKeys` only accepts combinations that appear in the table, so it can't type arbitrary shortcuts into other apps.
+
+**As built (phase 2).** The frontend publishes `window.__agentmux_shortcuts` (`keybindings/app-api.ts`); the host's `list_shortcuts`, `run_command` and `press_keys` routes call it in the window that holds the agent's own pane, and srv resolves that pane from the agent's verified identity, so there is no `pane` argument. Each pane registers the function its own keys run (`registerPaneCommandRunner`), so `RunCommand` and the keys share one code path. `pane:close` and `files:deletePermanently` are refused outright, by srv and by the page: `pane:close` closes the focused pane at once, which may be someone else's, so agents use `ClosePane` (and its undo) or `QuitSelf`. Everything else that closes or destroys runs with the confirmation a user gets (`tab:close`, replacing a pane) or can be undone (`files:trash`). `PressKeys` also refuses a key bound to a refused command anywhere in the table, whatever has focus, so ⌘W on macOS (`pane:close`, and `files:closeTab` in the Files pane) is a manual row. Its key events are `rawKeyDown`/`keyUp` with CDP's modifier bits and no text, so a shortcut never types its letter into a text box.
 
 The command registry (palette) and the key handlers should run the same code for the same id. Part of this work routes the palette through `runKeyCommand` for every table id, so a fix lands in one place.
 
@@ -64,13 +66,13 @@ The command registry (palette) and the key handlers should run the same code for
 
 `scripts/verify-shortcuts.mjs`, run against a dev instance (any platform):
 
-1. `ListShortcuts` to get the rows for this platform.
-2. For each row: set up its context (open the pane type a pane-local row needs, focus a terminal for `terminalFocus` rows, two terminals for `term:multiInput`), then:
-   - L1: `RunCommand`, observe the effect through `Layout` / `UIQuery` (tab count, focused pane, zoom level, open modal, pane type);
-   - L2: undo, then `PressKeys` with each listed key and check the same effect and the resolved command id.
-3. Write a matrix (row × key × layer × result) as JSON and Markdown.
+1. List the rows for this platform (`ListShortcuts`' code path).
+2. For each row, in the pane it needs (passed by block id: `--files`, `--editor`, `--media`, `--term`):
+   - L1: run the command (`RunCommand`'s code path) and record whether it ran, or why not;
+   - L2: press each listed key (`PressKeys`' code path) and check it resolved to that command.
+3. Write the matrix (row × key × layer × result) as Markdown, or JSON with `--json`.
 
-Each row's expected effect lives next to the script as a small check function. Rows whose effect can't be observed from the App API are listed as "manual" rather than passed.
+It talks to the page over the DevTools protocol directly, the same calls the host makes, so a partner can run it against a dev build without an agent in it. As built it checks resolution, not each command's visible effect; effect checks per row are a follow-up, and until then a row whose L1 "ran" is judged by eye when it matters. The grab reports, `scripts/gnome-grabs.mjs` (Maricon) and `scripts/mac-grabs.mjs` (Masty), are the read-only half of L3.
 
 Rules for the script, since it runs on hosts where other agents and the owner are working:
 - It talks to the dev instance whose DevTools port is in `AGENTMUX_CDP_PORT`; it never assumes the default port, which another agent's dev instance may hold.
@@ -85,7 +87,9 @@ Rules for the script, since it runs on hosts where other agents and the owner ar
 | starpower | macOS 26.5.2, Apple Silicon | Masty@starpower |
 | charlie | Ubuntu 26.04.1, GNOME 50.1, Wayland (AgentMux as a native Wayland client); a VMware guest on a Windows host | Maricon@charlie |
 
-On charlie, a manual press of a Ctrl+Alt or Super combination passes through VMware (Ctrl+Alt releases input) and the Windows host before GNOME, so those rows are flagged; `ydotool` runs inside the guest and isn't affected. Until `ydotool` is set up, charlie's L3 column is "taken by GNOME" from its gsettings.
+On charlie, a manual press of a Ctrl+Alt or Super combination passes through VMware (Ctrl+Alt releases input) and the Windows host before GNOME, so those rows are flagged; `ydotool` runs inside the guest and isn't affected. `ydotool` is set up on charlie (2026-10-10, with the owner's approval).
+
+**Injected L3 acts on the real desktop (Maricon, 2026-10-10).** `ydotool`, `xdotool`, `osascript` and `SendInput` send keys to whatever has focus, so on a key the OS takes, the OS acts for real: `pane:swap`'s Ctrl+Alt+Shift+Arrow would move the focused window to another workspace. Rules for the injected L3 pass (not written yet): skip by default the keys the grab report lists as taken, and record them as "taken by the OS" from that report; send them only with an explicit flag. Focus the dev instance first, refuse to send if that window doesn't have focus, restore the window and workspace afterwards, and run only when nobody is using the desktop.
 
 For each PR that changes behaviour:
 1. AgentA opens the PR with the Windows L1/L2/L3 results.
@@ -125,4 +129,12 @@ The questions as asked:
 
 Filled in by phase 3. Early results:
 
-**L3, taken by GNOME (charlie, Maricon, 2026-10-10, main @ `998175d3c`).** Every Linux key in the table (the first key of a chord) checked against the 150 accelerators GNOME 50 grabs on charlie: the window manager, mutter, the shell, media keys, and the enabled dash-to-dock and tiling-assistant extensions. **4 of 120 are taken, all `pane:swap:*`** (Ctrl+Alt+Shift+Arrow, `move-to-workspace-*`). The other 116 are free on stock GNOME, including every Alt+Shift+Arrow, Alt+Arrow and Ctrl+Alt+Shift+PageUp/PageDown row; the Linux table has no Super keys. A replacement for `pane:swap` on Linux should avoid Ctrl+Alt+Arrow and Ctrl+Alt+letter, which GNOME also takes; Alt+Shift+Arrow is free on GNOME but used by other desktops. This covers stock GNOME as configured on charlie, not KDE, Xfce or Sway, and not keys lost to an input method or VMware; injected L3 (`ydotool`) confirms it later. The check is a read-only script, `gnome-grabs.mjs`, to be added with the verification script.
+**L3, taken by GNOME (charlie, Maricon, 2026-10-10, main @ `998175d3c`).** Every Linux key in the table (the first key of a chord) checked against the 150 accelerators GNOME 50 grabs on charlie: the window manager, mutter, the shell, media keys, and the enabled dash-to-dock and tiling-assistant extensions. **4 of 120 are taken, all `pane:swap:*`** (Ctrl+Alt+Shift+Arrow, `move-to-workspace-*`). The other 116 are free on stock GNOME, including every Alt+Shift+Arrow, Alt+Arrow and Ctrl+Alt+Shift+PageUp/PageDown row; the Linux table has no Super keys. A replacement for `pane:swap` on Linux should avoid Ctrl+Alt+Arrow and Ctrl+Alt+letter, which GNOME also takes; Alt+Shift+Arrow is free on GNOME but used by other desktops. This covers stock GNOME as configured on charlie, not KDE, Xfce or Sway, and not keys lost to an input method or VMware; injected L3 (`ydotool`) confirms it later. The check is a read-only script, `scripts/gnome-grabs.mjs`.
+
+**L3, taken on macOS (starpower, Masty, 2026-10-10, main @ `998175d3c`).** Read-only: every macOS key in the table (117 keys over 98 rows, chords by their first key) against Apple's default system shortcuts with this Mac's overrides, AgentMux's menu bar, the window manager app running there (Magnet), and the F-row setting. **11 of 117 hit:**
+- **The OS, suspected:** `pane:focus:*`, ⌃⇧Arrow. macOS has hidden Shift variants of the Mission Control and Spaces hotkeys (ids 34/35 for ⌃⇧↑/↓, 80/82 for ⌃⇧←/→; 80 and 82 are stored as enabled there). If they take the keys, focusing a pane by direction doesn't work on macOS at all, so this is the first key to press at L3. The plain ⌃Arrow keys are taken, but no macOS row uses them.
+- **Magnet's defaults:** `pane:resize:left/right`, ⌃⌥⌘←/→ (next/previous display). ⌃⌥⌘↑/↓ are free. A Help-pane note rather than a rebind, since it's a third-party app.
+- **The menu bar, as expected:** the Files pane's select-all, copy, cut, paste and undo (⌘A/C/X/V/Z) overlap the Edit menu. Chromium gives the page the key first, so the Files pane should win when it handles the key; L3 decides.
+- **The F-row:** F1 (help), F2 (rename), F5 (refresh), F6/⇧F6 (next/previous pane) work there only because "Use F1, F2, etc. keys as standard function keys" is on. At macOS's default they need fn. Help has ⌘/ as well; rename, refresh and pane cycling have no macOS alternative yet.
+
+Free on macOS: everything else, including ⌘M and ⌘W, ⌘T ⌘N ⌘D ⇧⌘D ⌘[ ⌘] ⌃Tab ⌃⇧Tab ⌘1–9, the ⌃⇧S chords, `pane:swap` (⌃⌥⇧Arrow) and zoom. Not covered: keys lost to input methods, and ⌃PageUp/PageDown and ⇧⌘PageUp/PageDown, which a keyboard without Page keys types as fn+Arrow; macOS 15+ window tiling owns fn⌃Arrow in the Window menu. Those need a manual press. The check is `scripts/mac-grabs.mjs`.

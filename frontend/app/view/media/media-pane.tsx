@@ -11,13 +11,14 @@
  */
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { DocTabsController, handleDocTabKey, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
+import { docTabAction, DocTabsController, handleDocTabKey, runDocTabAction, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
 import { AUDIO_EXTENSIONS, basenameOf, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { hostHas } from "@/app/host/host-caps";
+import { registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
-import { createEffect, on, Show, untrack, type JSX } from "solid-js";
+import { createEffect, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { MediaView } from "./media-view";
 import { keyLabel } from "@/app/keybindings";
 
@@ -215,6 +216,16 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         handleDocTabKey(e, tabs);
     };
+
+    // The App API's RunCommand runs the same tab actions as the keys.
+    onCleanup(
+        registerPaneCommandRunner(ctx.blockId, (command) => {
+            const action = docTabAction(command);
+            if (!action) return false;
+            runDocTabAction(action, tabs);
+            return true;
+        })
+    );
 
     const pickInto = async (): Promise<void> => {
         if (!hostHas("nativeDialogs")) return;

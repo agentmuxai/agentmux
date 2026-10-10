@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { keyPlatform } from "@/app/keybindings";
+import {
+    lastResolvedCommand,
+    listShortcuts,
+    noteResolved,
+    planKeyPress,
+    runCommand,
+    type KeyPressPlan,
+    type RunResult,
+} from "@/app/keybindings/app-api";
 import type { KeyEventLike } from "@/app/keybindings/keys";
 import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
@@ -175,10 +184,14 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
         const leader = activeChord;
         resetChord();
         const second = resolveKey(ev, ctx, platform, leader);
-        if (second) runKeyCommand(second.row.command, muxEvent);
+        if (second) {
+            noteResolved(second.row.command, "global");
+            runKeyCommand(second.row.command, muxEvent);
+        }
         return true;
     }
     const resolved = resolveKey(ev, ctx, platform);
+    if (resolved && !resolved.chordStart) noteResolved(resolved.row.command, "global");
     if (resolved?.chordStart) {
         setActiveChord(chordLeaderOf(ev, platform));
         return true;
@@ -242,3 +255,40 @@ export function registerControlShiftTracking() {
     window.addEventListener("blur", () => unsetControlShift());
 }
 
+/** A key event for running a command without a key press (RunCommand). */
+const NO_KEY: MuxKeyboardEvent = { type: "keydown", key: "", code: "", repeat: false };
+
+/**
+ * Publishes the shortcut table to the host as `window.__agentmux_shortcuts`,
+ * for the App API's ListShortcuts, RunCommand and PressKeys
+ * (keybindings/app-api.ts). The host reaches it only in the window that
+ * holds the calling agent's pane.
+ */
+export function installShortcutApi() {
+    const focusedBlockId = (): string | null => getLayoutModelForStaticTab().focusedNode?.()?.data?.blockId ?? null;
+    const deps = () => ({
+        platform: keyPlatform(),
+        focusedBlockId,
+        focusBlock: (blockId: string): boolean => {
+            const layout = getLayoutModelForStaticTab();
+            const node = layout.getNodeByBlockId(blockId);
+            if (!node) return false;
+            layout.focusNode(node.id);
+            return true;
+        },
+        runGlobal: (command: string): boolean => runKeyCommand(command, NO_KEY),
+    });
+    (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
+        list: () => listShortcuts(keyPlatform()),
+        run: (command: string, target?: string): RunResult => runCommand(command, target || undefined, deps()),
+        // PressKeys: what to send, after focusing `target`. The host then
+        // sends the events and reads `last()`.
+        plan: (keys: string, target?: string): KeyPressPlan | { reason: string } => {
+            if (target && !deps().focusBlock(target)) return { reason: `pane ${target} is not in the active tab of this window` };
+            return planKeyPress(keys, keyPlatform());
+        },
+        focus: (blockId: string): boolean => deps().focusBlock(blockId),
+        focused: focusedBlockId,
+        last: () => lastResolvedCommand(),
+    };
+}
