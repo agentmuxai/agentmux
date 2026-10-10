@@ -10,9 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The pane's block object, which the registry watches: present until deleted.
 const [blocks, setBlocks] = createSignal<Record<string, object | undefined>>({});
+const settings: Record<string, unknown> = {};
 vi.mock("@/app/store/global", () => ({
     MOS: { getMuxObjectAtom: (oref: string) => () => blocks()[oref] },
+    getSettingsKeyAtom: (key: string) => () => settings[key],
 }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 import { addEventListener as addPaneListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import {
@@ -63,6 +67,12 @@ describe("waiting for you", () => {
         expect(types()).toEqual(["b2:waiting-for-input"]);
         applyUserAttention({ ...a, active: false }, "w1");
         expect(types()).toEqual(["b2:waiting-for-input", "b2:waiting-ended"]);
+
+        // Browser requests can be left out (Settings → Sounds); an end still applies.
+        settings["notify:waiting:browser"] = false;
+        applyUserAttention({ ...a, key: "k3", block_id: "b5" }, "w1");
+        expect(isWaitingForYou("b5")).toBe(false);
+        delete settings["notify:waiting:browser"];
 
         // No pane: every window, under an app: key.
         applyUserAttention({ ...a, key: "k2", block_id: "", window_ids: [] }, "w9");

@@ -115,8 +115,13 @@ Then the permission panel, which has the same gap. After that, the approval wind
 - **Tab switches no longer silence it.** The agent hooks keep waiting through an unmount (a tab switch) and end only when the pane is gone.
 - **The flash.** The tone's tab flash comes once per loop (`WAITING_LOOP_MS`), under the tool-tones flash setting.
 
+## Follow-ups (done)
+
+- **A window opened mid-request.** srv keeps its open announcements, and a window that starts reads them (`notify.attention`).
+- **Permissions in `AgentState::Waiting`.** A tool permission sets `term:awaiting_user`, like a question: it's in `AgentState::Waiting`, the Swarm's "Waiting for you" line and the LAN and viewer feeds. Both hooks write the flag from the registry (`awaiting-user.ts`), so one doesn't clear the other's.
+- **Browser hand-offs can be left out.** `notify:waiting:browser` (Settings → Sounds → Waiting for input) drops them from the tone, the flash and the notification.
+- **Tab switches.** An agent pane's document is unregistered while the pane is unmounted and reads empty; that no longer counts as "answered". A wait left from before a mount is reconciled once history has loaded, not at mount, when the document is still empty.
+
 ## Left for later
 
-- **Late windows.** A window opened while srv holds a request open doesn't hear it until the next one. srv keeps no list of open announcements.
-- **Permissions in `AgentState::Waiting`.** A tool permission doesn't set `term:awaiting_user` yet, so it isn't in `AgentState::Waiting` or the Swarm's "Waiting for you" line.
-- **Separate toggles.** No separate setting for browser hand-offs. No repeat chime before the 5-minute auto-stop.
+- **A repeat chime.** None before the 5-minute auto-stop.

@@ -102,6 +102,13 @@ export const SOUNDS_SETTINGS = {
         section: "sounds",
         keywords: ["waiting for input sound", "ambient tone", "blocked sound", "permission", "approval", "notify:sound:agent.waiting.for.input"],
     },
+    waitingBrowser: {
+        id: "sounds.waiting_browser",
+        label: "Browser hand-offs and approvals",
+        description: "Also when an agent hands you a browser pane or asks to approve something in it",
+        section: "sounds",
+        keywords: ["browser", "hand-off", "handoff", "approval", "notify:waiting:browser"],
+    },
     shutdownToneEnabled: {
         id: "sounds.shutdown_tone_enabled",
         label: "Shutdown warning chime",
@@ -289,6 +296,18 @@ export function SoundsSection(): JSX.Element {
                             min={0} max={1} step={0.05}
                             value={(s()["notify:sounds:waiting:volume"] as number) ?? 0.25}
                             onChange={(v) => set("notify:sounds:waiting:volume", v)}
+                        />
+                    }
+                />
+                <SettingRow
+                    id={SOUNDS_SETTINGS.waitingBrowser.id}
+                    indent
+                    label={SOUNDS_SETTINGS.waitingBrowser.label}
+                    description={SOUNDS_SETTINGS.waitingBrowser.description}
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:waiting:browser"] !== false}
+                            onChange={(v) => set("notify:waiting:browser", v)}
                         />
                     }
                 />

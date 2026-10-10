@@ -18,6 +18,11 @@ import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivatio
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
 
 export const NotifyApi = {
+    /** The calls to action srv holds open now (the waiting-for-you registry). */
+    NotifyAttentionCommand(client: RpcClient, opts?: RpcOpts): Promise<{ attention: unknown[] }> {
+        return client.rpcCall("notify.attention", {}, opts);
+    },
+
     NotifyEmitCommand(client: RpcClient, data: NotifyEmitParams, opts?: RpcOpts): Promise<NotifyOk> {
         return client.rpcCall("notify.emit", data, opts);
     },

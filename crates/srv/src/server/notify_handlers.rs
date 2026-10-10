@@ -260,6 +260,12 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     });
 
     let rr = r.clone();
+    // notify.attention: the calls to action srv holds open now
+    // (backend/user_attention.rs), for a window that starts while one is.
+    engine.register_typed("notify.attention", |_p: NotifyNoArgs, _ctx| async move {
+        Ok(serde_json::json!({ "attention": crate::backend::user_attention::open_requests() }))
+    });
+
     engine.register_typed("notify.test", move |_p: NotifyNoArgs, _ctx| {
         let r = rr.clone();
         async move {
