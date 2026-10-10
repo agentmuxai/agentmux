@@ -514,6 +514,7 @@ partial list.
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_COMPILE_GATE_2026_10_09`](PLAN_MACOS_COMPILE_GATE_2026_10_09.md) | Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
+| [`PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10`](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) | Plan — every shortcut in the Help pane works on every platform, and agents can drive them |
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
 | [`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md) | Report: agent/swarm pane loading, ambient-call flood, and stale status |
 | [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
@@ -652,7 +653,6 @@ partial list.
 |---|---|
 | [`ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19`](ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md) | Architecture: Armory/Stash Foundation Consolidation (North Star) |
 | [`PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17`](PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17.md) | Plan — enforce the same per-agent Claude auth isolation on macOS that already holds on Windows |
-| [`PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10`](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) | Plan — every shortcut in the Help pane works on every platform, and agents can drive them |
 | [`PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07`](PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) | Tab tear-off Phase 1 — Win32 native drag loop |
 | [`PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30`](PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md) | Proposal: A Composable Agent Model for the Armory |
 | [`REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04`](REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md) | Report: agent pane blank-load period + brain-logo loading indicator |
