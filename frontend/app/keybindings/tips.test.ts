@@ -40,6 +40,9 @@ describe("Help tips", () => {
                 const label = tipLabel(t, platform);
                 expect(label, `${t.id} on ${platform}`).not.toMatch(/\{key:|\bmod\+/);
             }
+            // A modifier typed as plain text would read wrong on one platform:
+            // write the key as {key:…} so it's named per platform.
+            expect(t.label.replace(/\{key:[^}]+\}/g, ""), t.id).not.toMatch(/\b(Ctrl|Cmd|Command|Alt|Option|Shift)\b|[⌘⌥⇧⌃]/);
         }
     });
 
