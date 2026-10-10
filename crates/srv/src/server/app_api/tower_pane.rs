@@ -13,6 +13,7 @@
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
 use crate::backend::{tower_peers, tower_remote};
+use crate::backend::tower_agentmux::{parse_renderer_map, renderer_serves, RendererEntry};
 use crate::backend::tower_sampler::{BlockLabel, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -20,9 +21,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let (mstore, hostname, tracker) = (state.mstore.clone(), state.hostname.clone(), state.process_tracker.clone());
     let auth_key = state.auth_key.clone();
     let lan = state.lan_discovery.clone();
+    let (http_client, host_ipc) = (state.http_client.clone(), state.host_ipc.clone());
     engine.register_typed(COMMAND_TOWER_SAMPLE, move |req: TowerSampleReq, ctx| {
         let (mstore, hostname, tracker, auth_key) = (mstore.clone(), hostname.clone(), tracker.clone(), auth_key.clone());
         let lan = lan.clone();
+        let (http_client, host_ipc) = (http_client.clone(), host_ipc.clone());
         async move {
             not_an_agent_api(&ctx)?;
             // A paired AgentMux computer: its viewer listener (`tower_peers`).
@@ -46,10 +49,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 });
                 return tower_remote::sample(conn, req.filter.as_deref().unwrap_or(""), ask).await;
             }
+            let renderers = renderer_map(&http_client, &host_ipc).await;
             // The process table, and a store read per pane: off the async workers.
             tokio::task::spawn_blocking(move || {
+                let page = |id: &str| browser_page(&mstore, id);
+                let workspace = |id: &str| window_workspace(&mstore, id);
                 Tower::global()
-                    .sample(req.host.unwrap_or(false), &hostname, || inputs(&tracker), |id| block_label(&mstore, id))
+                    .sample(
+                        req.host.unwrap_or(false),
+                        &hostname,
+                        || inputs(&tracker),
+                        |id| block_label(&mstore, id),
+                        |pid| renderer_serves(&renderers, pid, &page, &workspace),
+                    )
                     .map_err(|e| format!("tower.sample: {e}"))
             })
             .await
@@ -102,6 +114,47 @@ pub(crate) fn inputs(tracker: &AgentProcessRegistry) -> Inputs {
         roots: blockcontroller::pidregistry::get_all(),
         own_pid: std::process::id(),
     }
+}
+
+/// Which renderer serves which window or pane: only the window host knows
+/// (`crates/cef/src/renderer_map.rs`). Asked with a short timeout: a slow or
+/// absent host leaves renderers unnamed rather than holding up the sample.
+async fn renderer_map(
+    http_client: &reqwest::Client,
+    host_ipc: &tokio::sync::Mutex<Option<crate::server::HostIpc>>,
+) -> Vec<RendererEntry> {
+    let Some(host) = host_ipc.lock().await.clone() else {
+        return Vec::new();
+    };
+    let timeout = Some(std::time::Duration::from_millis(500));
+    match crate::server::ui_handlers::post_to_host(http_client, &host, "renderer_map", serde_json::json!({}), timeout).await {
+        Ok(answer) => parse_renderer_map(&answer),
+        Err(e) => {
+            tracing::debug!(error = %e, "[tower] couldn't ask the host which renderer serves what");
+            Vec::new()
+        }
+    }
+}
+
+/// A browser pane's page, for its renderer's row: its title, else its URL's
+/// host.
+fn browser_page(mstore: &Store, block_id: &str) -> Option<String> {
+    let block = mstore.get::<Block>(block_id).ok().flatten()?;
+    let meta = |key: &str| obj::meta_get_string(&block.meta, key, "");
+    let title = meta("frame:title");
+    if !title.is_empty() {
+        return Some(title);
+    }
+    let url = meta("url");
+    let host = url.split("://").nth(1).unwrap_or(&url).split(['/', '?', '#']).next().unwrap_or("");
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+/// A window's workspace name, for its renderer's row.
+fn window_workspace(mstore: &Store, window_id: &str) -> Option<String> {
+    let window = mstore.get::<obj::Window>(window_id).ok().flatten()?;
+    let workspace = mstore.get::<obj::Workspace>(&window.workspaceid).ok().flatten()?;
+    Some(workspace.name).filter(|n| !n.is_empty())
 }
 
 /// A pane's name in Tower: the agent's name, else what the terminal runs.

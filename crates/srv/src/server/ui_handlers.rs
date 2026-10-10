@@ -195,9 +195,20 @@ pub(crate) async fn proxy_to_host_timeout(
     body: serde_json::Value,
     timeout: Option<std::time::Duration>,
 ) -> Result<serde_json::Value, String> {
+    post_to_host(&state.http_client, host, route, body, timeout).await
+}
+
+/// [`proxy_to_host_timeout`] for a caller that holds the HTTP client rather
+/// than the whole `AppState` (Tower's sampler, `app_api/tower_pane.rs`).
+pub(crate) async fn post_to_host(
+    http_client: &reqwest::Client,
+    host: &HostIpc,
+    route: &str,
+    body: serde_json::Value,
+    timeout: Option<std::time::Duration>,
+) -> Result<serde_json::Value, String> {
     let url = format!("http://127.0.0.1:{}/agentmux/browser/{route}", host.port);
-    let mut request = state
-        .http_client
+    let mut request = http_client
         .post(&url)
         .header("Authorization", format!("Bearer {}", host.token))
         .json(&body);

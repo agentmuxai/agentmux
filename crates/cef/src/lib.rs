@@ -44,6 +44,7 @@ mod ssh_approval;
 #[cfg(target_os = "windows")]
 mod floating_pane;
 mod reducer;
+mod renderer_map;
 mod saga_dispatch;
 mod sidecar;
 mod state;
@@ -498,9 +499,14 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     }
 
     // Execute subprocess if applicable (exits here for non-browser processes).
+    // Subprocesses get a minimal app whose only job is the renderer's PID
+    // report for Tower (renderer_map.rs). Not the browser process's
+    // AgentMuxApp: its command-line rewriting must not run in every
+    // subprocess. The browser process passes none here, as before.
+    let mut subprocess_app = (!is_browser_process).then(renderer_map::SubprocessApp::new);
     let ret = execute_process(
         Some(args.as_main_args()),
-        None, // App can be None for subprocess
+        subprocess_app.as_mut(),
         windows_sandbox_info as *mut u8,
     );
 

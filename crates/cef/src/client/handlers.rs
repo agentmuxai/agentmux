@@ -99,6 +99,19 @@ wrap_client! {
             }
             Some(AgentMuxPermissionHandler::new())
         }
+
+        // A renderer reporting its PID for Tower (renderer_map.rs). Nothing
+        // else is sent as a process message today.
+        fn on_process_message_received(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> ::std::os::raw::c_int {
+            let state = self.inner.lock().state.clone();
+            crate::renderer_map::record(&state, browser, source_process, message) as ::std::os::raw::c_int
+        }
     }
 }
 
@@ -657,6 +670,9 @@ wrap_life_span_handler! {
                 crate::browser_api::cdp::on_browser_closed(b.identifier());
             }
             let mut inner = self.inner.lock();
+            if let Some(b) = browser.as_deref() {
+                crate::renderer_map::forget(&inner.state, b.identifier());
+            }
             inner.on_before_close(browser);
         }
 

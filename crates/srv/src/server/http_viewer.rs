@@ -284,6 +284,9 @@ async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<Proc
             &st.hostname,
             || crate::server::app_api::tower_pane::inputs(&st.process_tracker),
             |id| crate::server::app_api::tower_pane::block_label(&st.mstore, id),
+            // What each renderer serves names this computer's windows and
+            // pages; a paired viewer sees only that it is a renderer.
+            |_| None,
         )?;
         crate::backend::tower_sampler::share(&mut snap, crate::backend::tower_sampler::SHARED_TOP, &q.filter, &|id| {
             agent_hidden(&st, id)
