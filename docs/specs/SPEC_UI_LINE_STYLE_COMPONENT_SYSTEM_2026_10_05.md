@@ -186,6 +186,7 @@ That adds up to **four different "active" looks** (solid accent fill, accent und
   - `comfortable` is for full panes such as Settings, and for modals.
   - A density class on a container sets `--ui-*` custom properties, and components read only those. No component hard-codes its own size.
 - **L4. Tone by intent, not colour name.** The tones are `accent`, `neutral`, `danger` and `quiet`. They map to theme tokens, so every theme works.
+  - **One exception fills (2026-10-10):** `attention`, at the operator's request. It's used only for the main action of a call to action an agent waits on: a browser hand-off or approval, a question, a tool permission, an SSH consent, a widget install. Those must stand out from everything else on screen, and an outline doesn't. It fills with the theme's fluorescent `--attention-color`, with `--attention-text-color` on it, and glows gently, without the glow under reduced motion. A destructive answer keeps `danger`, so the loudest colour never pushes a risky yes. See `docs/reports/REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md` §1.
 - **L5. Every state, every time.**
   - Every control has rest, hover, `:focus-visible` (via `--shadow-focus-ring` and the existing `focus-ring` mixin) and disabled (0.4 opacity, `--cursor-disabled`).
   - A control that can be on or off also has a pressed or selected state, exposed with the correct ARIA attribute.

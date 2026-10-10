@@ -102,6 +102,13 @@
     // visually distinct from Agent Tool (accent/blue), Workflow (warning/
     // yellow), and Shell (success/green).
     --info-color: rgb(155, 108, 224);
+    // "An agent needs you": a fluorescent magenta no other UI uses, so it
+    // reads as exactly that. Filled buttons on it take --attention-text-color
+    // (dark here: 6.6:1); the light themes' deeper shade takes white (below).
+    // docs/reports/REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §1.
+    --attention-color: rgb(255, 43, 214);
+    --attention-text-color: rgb(26, 0, 22);
+    --attention-bg-color: color-mix(in srgb, var(--attention-color) 14%, var(--main-bg-color));
     --hover-bg-color: rgba(255, 255, 255, 0.1);
     --block-bg-color: rgba(0, 0, 0, 0.5);
     --block-bg-solid-color: rgb(0, 0, 0);
@@ -524,4 +531,8 @@
 // window-controls.win32.scss already uses for dark/light chrome decisions.
 [data-theme-polarity="light"] {
     color-scheme: light;
+    // The attention magenta, deep enough to read on a light page (5.5:1
+    // against white), with white text on it.
+    --attention-color: rgb(196, 0, 155);
+    --attention-text-color: rgb(255, 255, 255);
 }

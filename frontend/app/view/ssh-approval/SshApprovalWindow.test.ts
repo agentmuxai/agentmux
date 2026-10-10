@@ -25,7 +25,16 @@ describe("parseSshApprovalMeta", () => {
             checkbox: "Always allow korp on area54",
             okLabel: "Allow",
             cancelLabel: "Deny",
+            destructive: false,
         });
+    });
+
+    it("marks an answer that destroys something, only when srv says so", () => {
+        const meta = parseSshApprovalMeta(
+            JSON.stringify({ approval_id: "a4", kind: "consent", ok_label: "End Session", destructive: true }),
+        );
+        expect(meta?.destructive).toBe(true);
+        expect(parseSshApprovalMeta(JSON.stringify({ approval_id: "a5", destructive: "yes" }))?.destructive).toBe(false);
     });
 
     it("falls back to safe labels and no checkbox", () => {

@@ -17,6 +17,7 @@
 
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { getApi } from "@/app/store/app-api";
+import { Button as UiButton } from "@/app/element/ui";
 import { Button } from "@/element/button";
 
 import "./memory-adoption-approval-window.scss";
@@ -112,9 +113,9 @@ export const MemoryAdoptionApprovalWindow = (): JSX.Element => {
                     <Button onClick={() => decide(false)} disabled={busy()}>
                         Cancel
                     </Button>
-                    <Button onClick={() => decide(true)} className="green solid" disabled={busy()}>
+                    <UiButton onClick={() => decide(true)} tone="attention" disabled={busy()}>
                         {busy() ? "Releasing…" : "Release"}
-                    </Button>
+                    </UiButton>
                 </footer>
             </div>
         );
@@ -149,9 +150,9 @@ export const MemoryAdoptionApprovalWindow = (): JSX.Element => {
                 <Button onClick={() => decide(false)} disabled={busy()}>
                     Cancel
                 </Button>
-                <Button onClick={() => decide(true)} className="green solid" disabled={busy()}>
+                <UiButton onClick={() => decide(true)} tone="attention" disabled={busy()}>
                     {busy() ? "Adopting…" : "Adopt"}
-                </Button>
+                </UiButton>
             </footer>
         </div>
     );

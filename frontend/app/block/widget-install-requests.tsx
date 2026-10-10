@@ -46,6 +46,7 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
         <ConfirmModal
             open={true}
             title={`${r.agent} wants to install ${r.name}`}
+            attention
             confirmLabel="Install"
             cancelLabel="Don't install"
             onConfirm={() => decide(true)}

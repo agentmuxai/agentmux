@@ -24,6 +24,7 @@
 
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { getApi } from "@/app/store/app-api";
+import { Button as UiButton } from "@/app/element/ui";
 import { Button } from "@/element/button";
 
 import "./credential-approval-window.scss";
@@ -129,9 +130,9 @@ export const CredentialApprovalWindow = (): JSX.Element => {
                 <Button onClick={() => decide(false)} disabled={busy() || decided()}>
                     Deny
                 </Button>
-                <Button onClick={() => decide(true)} className="green solid" disabled={busy() || decided()}>
+                <UiButton onClick={() => decide(true)} tone="attention" disabled={busy() || decided()}>
                     Approve
-                </Button>
+                </UiButton>
             </footer>
         </div>
     );
