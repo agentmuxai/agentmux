@@ -278,7 +278,14 @@ pub(crate) async fn handle_host_widget_approval(
             let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
             // An agent waiting on this install hears the answer, once the
             // package list says so too: its next step is often OpenWidget.
-            let answer = if decision == "approve" { widget_requests::Answer::Approved } else { widget_requests::Answer::Declined };
+            // "Installed" only if the list, rescanned just now, still has that
+            // version approved: a reinstall in the meantime replaced it.
+            let approved_now = packages.iter().any(|p| p.id == id && p.hash == hash && p.state == widget_packages::WidgetState::Approved);
+            let answer = if decision == "approve" && approved_now {
+                widget_requests::Answer::Approved
+            } else {
+                widget_requests::Answer::Declined
+            };
             if widget_requests::requests().answer(&id, &hash, answer) {
                 super::widget_agent_handlers::publish_requests(&state);
             }

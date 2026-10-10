@@ -68,9 +68,15 @@ export function startWidgetInstallRequests(): void {
     if (started || typeof getApi()?.approvals?.decideWidget !== "function") return;
     started = true;
     const shown = new Set<string>();
+    // An event is newer than the first fetch: once one arrives, the fetch's
+    // answer is stale and is dropped.
+    let sawEvent = false;
     muxEventSubscribe({
         eventType: WpsEvent.WidgetRequests,
-        handler: (event: { data?: { requests?: WidgetInstallRequest[] } }) => setRequests(event?.data?.requests ?? []),
+        handler: (event: { data?: { requests?: WidgetInstallRequest[] } }) => {
+            sawEvent = true;
+            setRequests(event?.data?.requests ?? []);
+        },
     });
     createRoot(() =>
         createEffect(
@@ -86,6 +92,8 @@ export function startWidgetInstallRequests(): void {
         )
     );
     void RpcApi.WidgetsRequestsCommand(TabRpcClient)
-        .then((r) => setRequests(r.requests))
+        .then((r) => {
+            if (!sawEvent) setRequests(r.requests);
+        })
         .catch((e) => console.log("widget install requests: could not load them", e));
 }
