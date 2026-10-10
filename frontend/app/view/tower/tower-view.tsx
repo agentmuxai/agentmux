@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Tower: CPU and memory per task (each pane and everything it started, plus
-// AgentMux itself), and every process on the machine
-// (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md). Read-only.
+// Tower: what each agent runs and what it costs (the Agents view), and every
+// process on the machine (the Processes view)
+// (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md,
+// SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md). Read-only.
 
 import type { SelectOption } from "@/app/element/ui";
 import {
@@ -16,12 +17,14 @@ import {
     Tabs,
     TextInput,
 } from "@/app/element/ui";
-import type { TowerPeerInfo, TowerProcess, TowerTask } from "@/app/store/rpc-api";
+import type { TowerPeerInfo, TowerProcess } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
-import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
+import { AgentsView } from "./tower-agents";
+import { ProcessName } from "./tower-process-name";
 import type { TowerViewModel } from "./tower-model";
+import { SortHeader } from "./tower-sort-header";
 import {
     count,
     type CpuMode,
@@ -29,27 +32,17 @@ import {
     formatCpu,
     formatMem,
     groupProcesses,
-    nextSort,
     processDetail,
     type ProcessGroup,
     sortGroups,
-    type SortKey,
     sortProcesses,
-    sortTasks,
     type TowerView as TowerViewKind,
-    trackingLabel,
 } from "./tower-util";
 
 import "./tower-view.scss";
 
-/** The host list shows this many rows; the filter narrows the rest. */
+/** The process list shows this many rows; the filter narrows the rest. */
 export const HOST_ROW_LIMIT = 400;
-
-const KIND_LABELS: Record<TowerTask["kind"], string> = {
-    agent: "agent",
-    terminal: "terminal",
-    agentmux: "app",
-};
 
 /** The picker's choice that opens the pairing form rather than a machine. */
 export const PAIR_OPTION = "__pair__";
@@ -112,17 +105,24 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Tabs<TowerViewKind>
                     items={
                         !m.hasTasks()
-                            ? [{ id: "host", label: "Host", icon: "server", tooltip: "Every process on that machine" }]
+                            ? [
+                                  {
+                                      id: "processes",
+                                      label: "Processes",
+                                      icon: "server",
+                                      tooltip: "Every process on that machine",
+                                  },
+                              ]
                             : [
                                   {
-                                      id: "tasks",
-                                      label: "Tasks",
-                                      icon: "layer-group",
-                                      tooltip: "Each pane and what it started",
+                                      id: "agents",
+                                      label: "Agents",
+                                      icon: "robot",
+                                      tooltip: "Each agent and what it runs",
                                   },
                                   {
-                                      id: "host",
-                                      label: "Host",
+                                      id: "processes",
+                                      label: "Processes",
                                       icon: "server",
                                       tooltip: "Every process on this machine",
                                   },
@@ -174,10 +174,10 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
                     {(snap) => (
                         <Switch>
-                            <Match when={m.effectiveView() === "tasks"}>
-                                <TasksTable model={m} cpu={cpu} />
+                            <Match when={m.effectiveView() === "agents"}>
+                                <AgentsView model={m} cpu={cpu} />
                             </Match>
-                            <Match when={m.effectiveView() === "host"}>
+                            <Match when={m.effectiveView() === "processes"}>
                                 <Show when={snap().host} fallback={<div class="tower-empty">Measuring…</div>}>
                                     <HostTable model={m} cpu={cpu} />
                                 </Show>
@@ -246,134 +246,6 @@ function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
     );
 }
 
-function SortHeader(props: { model: TowerViewModel; key: SortKey; label: string; numeric?: boolean; title?: string }) {
-    const active = () => props.model.sort().key === props.key;
-    return (
-        <th
-            class={clsx(props.numeric && "tower-num")}
-            aria-sort={active() ? (props.model.sort().desc ? "descending" : "ascending") : "none"}
-        >
-            <Button
-                tone="quiet"
-                density="compact"
-                class="tower-sort"
-                title={props.title}
-                icon={active() ? (props.model.sort().desc ? "arrow-down" : "arrow-up") : undefined}
-                onClick={() => props.model.setSort(nextSort(props.model.sort(), props.key))}
-            >
-                {props.label}
-            </Button>
-        </th>
-    );
-}
-
-function TasksTable(props: { model: TowerViewModel; cpu: (f: number | undefined) => string }) {
-    const m = props.model;
-    const tasks = createMemo(() => sortTasks(m.snapshot()?.tasks ?? [], m.sort()));
-    const totals = createMemo(() => {
-        const ts = m.snapshot()?.tasks ?? [];
-        const rates = ts.map((t) => t.cpu).filter((c): c is number => c != null);
-        return {
-            processes: ts.reduce((n, t) => n + t.processes.length, 0),
-            cpu: rates.length ? rates.reduce((a, b) => a + b, 0) : undefined,
-            mem: ts.reduce((n, t) => n + t.mem, 0),
-        };
-    });
-    return (
-        <>
-            <div class="tower-summary">
-                {count(tasks().length, "task")} · {count(totals().processes, "process")} · CPU {props.cpu(totals().cpu)}{" "}
-                · Memory {formatMem(totals().mem)}
-                <span
-                    class="tower-muted"
-                    title={`Memory is each process's ${m.snapshot()?.memory_metric}: the part only it uses.`}
-                >
-                    {" "}
-                    ({m.snapshot()?.memory_metric})
-                </span>
-            </div>
-            <table class="tower-table" aria-label="Tasks">
-                <thead>
-                    <tr>
-                        <SortHeader model={m} key="name" label="Task" />
-                        <SortHeader model={m} key="cpu" label="CPU" numeric />
-                        <SortHeader model={m} key="mem" label="Memory" numeric />
-                        <SortHeader
-                            model={m}
-                            key="count"
-                            label="Processes"
-                            numeric
-                            title="Processes, or PID in a task's list"
-                        />
-                    </tr>
-                </thead>
-                <tbody>
-                    <For
-                        each={tasks()}
-                        fallback={
-                            <tr>
-                                <td colSpan={4} class="tower-empty">
-                                    No tasks running.
-                                </td>
-                            </tr>
-                        }
-                    >
-                        {(task) => <TaskRows model={m} task={task} cpu={props.cpu} />}
-                    </For>
-                </tbody>
-            </table>
-        </>
-    );
-}
-
-function TaskRows(props: { model: TowerViewModel; task: TowerTask; cpu: (f: number | undefined) => string }) {
-    const m = props.model;
-    const open = () => m.expanded().has(props.task.id);
-    const processes = createMemo(() => (open() ? sortProcesses(props.task.processes, m.sort()) : []));
-    return (
-        <>
-            <tr class="tower-task-row" data-testid={`tower-task-${props.task.id}`}>
-                <td class="tower-name">
-                    <div class="tower-name-line">
-                        <IconButton
-                            icon={open() ? "chevron-down" : "chevron-right"}
-                            label={open() ? "Hide processes" : "Show processes"}
-                            density="compact"
-                            tooltip={false}
-                            aria-expanded={open()}
-                            onClick={() => m.toggleExpanded(props.task.id)}
-                        />
-                        <span class="tower-label" title={trackingLabel(props.task.tracking)}>
-                            {props.task.label}
-                        </span>
-                        <span class={clsx("tower-badge", `tower-badge--${props.task.kind}`)}>
-                            {KIND_LABELS[props.task.kind]}
-                        </span>
-                        <Show when={props.task.kind !== "agentmux" && !m.snapshot()?.remote}>
-                            <IconButton
-                                icon="arrow-up-right-from-square"
-                                label="Show this pane"
-                                density="compact"
-                                class="tower-reveal"
-                                onClick={() => void revealBlock(props.task.id)}
-                            />
-                        </Show>
-                    </div>
-                </td>
-                <td
-                    class="tower-num"
-                    title={props.task.cpu_account ? "Includes processes that exited since the last refresh" : undefined}
-                >
-                    {props.cpu(props.task.cpu)}
-                </td>
-                <td class="tower-num">{formatMem(props.task.mem)}</td>
-                <td class="tower-num">{props.task.processes.length}</td>
-            </tr>
-            <For each={processes()}>{(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested />}</For>
-        </>
-    );
-}
-
 function ProcessRow(props: {
     model: TowerViewModel;
     process: TowerProcess;
@@ -396,7 +268,7 @@ function ProcessRow(props: {
         >
             <td class="tower-name">
                 <div class="tower-name-line">
-                    <span class="tower-label">{props.process.name || `PID ${props.process.pid}`}</span>
+                    <ProcessName process={props.process} />
                     <Show when={props.taskLabel}>
                         {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
                     </Show>

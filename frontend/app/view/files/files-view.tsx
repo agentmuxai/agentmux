@@ -48,7 +48,7 @@ import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
-import { paneCommandFor, shortcutFor } from "@/app/keybindings";
+import { paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
 import { Button, IconButton } from "@/app/element/ui";
 
@@ -424,7 +424,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     // ── Keyboard (§5.3.1) ──────────────────────────────────────────────────
 
-    /** Runs a `files:*` command from the shortcut table; false if unknown. */
+    /** Runs a `files:*` command, for its keys and RunCommand alike; false if unknown. */
     const runFilesCommand = (command: string): boolean => {
         const sel = model.selection();
         switch (command) {
@@ -499,6 +499,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         return false;
     };
+    onCleanup(registerPaneCommandRunner(model.blockId, runFilesCommand));
 
     // Files commands from anywhere in the pane (toolbar, sidebar), not only
     // the list: the global shortcuts that share these keys stand aside in

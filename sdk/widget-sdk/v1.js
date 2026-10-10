@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * @agentmux/widget-sdk v1: the client for a sandboxed AgentMux widget
+ * @agentmuxai/widget-sdk v1: the client for a sandboxed AgentMux widget
  * (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6, §7).
  *
  *   import { connect } from "/agentmux/widget-sdk/v1.js";

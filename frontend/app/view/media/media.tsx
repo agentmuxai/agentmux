@@ -14,6 +14,12 @@ import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { basenameOf, dirnameOf, extOf } from "@/app/element/local-media";
 import { MediaPane, MediaPaneModel, META_PATH } from "./media-pane";
 
+/** What a split of a media pane creates: an empty media pane. It has no
+ *  per-pane settings to carry, and its files stay with the source. */
+export function mediaSplitBlockDef(): BlockDef {
+    return { meta: { view: "media" } };
+}
+
 export { basenameOf, dirnameOf, extOf };
 export { createMediaDropHook, mediaDropVerdict, type MediaDropActions } from "./media-drop";
 
@@ -34,6 +40,9 @@ export const mediaPaneTab: PaneTabManifest = {
     label: "Media",
     icon: "photo-film",
     defaultHue: 120,
+    // A split opens an empty media pane, not a copy of this one's files
+    // (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
+    capabilities: { splitBlockDef: mediaSplitBlockDef },
     create: (ctx) => {
         const pane = new MediaPaneModel(ctx);
         return {

@@ -31,4 +31,10 @@ role?: TowerProcessRole,
 /**
  * In the host list: the task it belongs to (`TowerTask::id`), if any.
  */
-task?: string, };
+task?: string, 
+/**
+ * One of AgentMux's own processes: what it is ("GPU", "Renderer",
+ * "Network service", "Server", "Launcher", …). Absent for any other
+ * process, and for one of AgentMux's the backend can't place.
+ */
+detail?: string, };

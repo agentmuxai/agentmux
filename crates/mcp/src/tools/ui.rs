@@ -177,6 +177,69 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .unwrap_or_else(|| json!([]));
             Ok(serde_json::to_string_pretty(&matches).unwrap_or_else(|_| matches.to_string()))
         }
+        "ListShortcuts" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let data = post_shortcuts(cx, "list", &UiShortcutsListRequest { auth }).await?;
+            let list = data.get("shortcuts").cloned().unwrap_or_else(|| json!([]));
+            Ok(serde_json::to_string_pretty(&list).unwrap_or_else(|_| list.to_string()))
+        }
+        "RunCommand" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let command = arguments
+                .get("command")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: command"))?;
+            let req = UiRunCommandRequest { auth, command: command.to_string(), target: str_arg(arguments, "target") };
+            let data = post_shortcuts(cx, "run", &req).await?;
+            if data.get("ran").and_then(|v| v.as_bool()) == Some(true) {
+                Ok(format!("Ran {command}."))
+            } else {
+                let why = data.get("reason").and_then(|v| v.as_str()).unwrap_or("no reason given");
+                Ok(format!("Didn't run {command}: {why}"))
+            }
+        }
+        "PressKeys" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let keys = arguments
+                .get("keys")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: keys"))?;
+            let req = UiPressKeysRequest { auth, keys: keys.to_string(), target: str_arg(arguments, "target") };
+            let data = post_shortcuts(cx, "press", &req).await?;
+            Ok(serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string()))
+        }
         _ => Err(not_in_family()),
     }
+}
+
+fn str_arg(arguments: &Value, name: &str) -> Option<String> {
+    arguments
+        .get(name)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// POST to `/api/v1/ui/shortcuts/{route}` and return the response's `data`.
+async fn post_shortcuts<T: serde::Serialize>(cx: &ToolCtx<'_>, route: &str, body: &T) -> Result<Value> {
+    let url = format!("{}/api/v1/ui/shortcuts/{route}", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() || body.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = body.get("error").and_then(|v| v.as_str()).unwrap_or("no error message");
+        anyhow::bail!("shortcuts/{route} failed: HTTP {status} — {err}");
+    }
+    Ok(body.get("data").cloned().unwrap_or(Value::Null))
 }

@@ -72,6 +72,12 @@ pub struct TowerProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub task: Option<String>,
+    /// One of AgentMux's own processes: what it is ("GPU", "Renderer",
+    /// "Network service", "Server", "Launcher", …). Absent for any other
+    /// process, and for one of AgentMux's the backend can't place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
 }
 
 /// A pane and every process it started, or AgentMux itself.
@@ -122,6 +128,22 @@ pub struct TowerHost {
     pub matched: u32,
 }
 
+/// The whole machine's totals, without its process list: what lets the
+/// Agents view's rail add up to the machine ("Everything else" is the machine
+/// less every task). SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMachine {
+    /// All processes' CPU, fraction of one core; absent on a first sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cpu: Option<f64>,
+    /// All processes' private memory, bytes.
+    #[ts(type = "number")]
+    pub mem: u64,
+    pub processes: u32,
+}
+
 /// `tower.sample`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -141,6 +163,10 @@ pub struct TowerSnapshot {
     /// command lines.
     pub remote: bool,
     pub tasks: Vec<TowerTask>,
+    /// This computer's (or a paired one's) totals, on every sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub machine: Option<TowerMachine>,
     /// Present when the request asked for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

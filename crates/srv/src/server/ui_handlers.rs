@@ -836,7 +836,7 @@ async fn proxy_value(
     Ok(host_resp.get("data").cloned().unwrap_or(serde_json::Value::Null))
 }
 
-async fn proxy_data(
+pub(crate) async fn proxy_data(
     state: &AppState,
     route: &str,
     body: serde_json::Value,

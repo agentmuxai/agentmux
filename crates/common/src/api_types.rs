@@ -607,6 +607,43 @@ pub struct UiQueryRequest {
     pub limit: Option<u32>,
 }
 
+// ── Shortcuts (ListShortcuts/RunCommand/PressKeys) ────────────────────────
+// docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4. They act
+// in the window that holds the caller's own pane (owner decision §8.1), so
+// there is no `pane` field; `target` is a pane in that window's active tab.
+
+/// `POST /api/v1/ui/shortcuts/list`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiShortcutsListRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+}
+
+/// `POST /api/v1/ui/shortcuts/run`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiRunCommandRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// A command id from `ListShortcuts` (`split:right`, `files:refresh`).
+    pub command: String,
+    /// A pane in the active tab to focus first; absent = the focused pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+/// `POST /api/v1/ui/shortcuts/press`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPressKeysRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// A key from `ListShortcuts`' `raw` list, in the table's syntax
+    /// (`ctrl+shift+d`; a chord is two keys separated by a space).
+    pub keys: String,
+    /// A pane in the active tab to focus first; absent = the focused pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
 // ── Browser-pane deep control (Navigate/Back/Forward/Reload/Eval/
 //    DispatchKey/FocusElement/FocusInfo) ─────────────────────────────────
 //
