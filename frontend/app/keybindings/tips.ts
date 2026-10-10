@@ -79,7 +79,7 @@ export const TIPS: TipRow[] = [
         area: "Panes",
         gesture: "mod+shift+wheel",
         where: "over a pane",
-        label: "Zoom every pane in the window together",
+        label: "Zoom every pane in the window together (over a browser pane's page, only that page zooms)",
         source: { file: "frontend/app/app.tsx", anchor: "const AppAllPanesZoomHandler = () => {" },
     },
     {
