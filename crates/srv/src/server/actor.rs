@@ -127,6 +127,13 @@ pub(crate) fn classify(
     }
 }
 
+/// Identity M4d-4: whether `uid`'s own row has `name` as its slug, exactly
+/// (spec §6.5.10 rule ii: never its display or instance name), so a request
+/// carrying `uid`'s token under `name` is that agent by its token.
+pub(crate) fn uid_has_slug(store: &Store, uid: &str, name: &str) -> bool {
+    matches!(store.agent_names_by_id(uid), Ok(Some(row)) if !row.slug.is_empty() && row.slug == name)
+}
+
 /// Count `actor` against the caller's row at `site`. A no-op for an
 /// Unattributed caller. Never fails and is never awaited: the store reads
 /// run detached on the blocking pool (inline under test, so tests can read
