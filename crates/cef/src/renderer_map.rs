@@ -16,14 +16,24 @@
 //!
 //! The subprocess app implements nothing else, on purpose: the browser
 //! process's `AgentMuxApp` rewrites command lines, which must not happen in
-//! every subprocess.
+//! every subprocess. The browser process passes no app to `execute_process`,
+//! as before.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use cef::*;
+use parking_lot::Mutex;
 use serde::Serialize;
 
-use crate::state::AppState;
+use crate::state::{AppState, BrowserPaneLifecycle};
+
+/// Browser id → the PID of the renderer serving it. Process-wide: the host
+/// has one `AppState`, and this is only ever read for srv's Tower pane.
+fn pids() -> &'static Mutex<HashMap<i32, u32>> {
+    static PIDS: OnceLock<Mutex<HashMap<i32, u32>>> = OnceLock::new();
+    PIDS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// The process message a renderer sends with its PID.
 pub const PID_MESSAGE: &str = "agentmux.renderer_pid";
@@ -42,7 +52,9 @@ wrap_render_process_handler! {
     pub struct PidReporter;
 
     impl RenderProcessHandler {
-        // Runs in the renderer, once for each browser created in it.
+        // Runs in the renderer, once for each browser created in it. On Linux
+        // the sandbox's PID namespace makes this a namespace-local PID; srv
+        // translates (tower_agentmux::own_view_pid).
         fn on_browser_created(&self, browser: Option<&mut Browser>, _extra_info: Option<&mut DictionaryValue>) {
             let Some(frame) = browser.and_then(|b| b.main_frame()) else { return };
             let Some(mut message) = process_message_create(Some(&CefString::from(PID_MESSAGE))) else { return };
@@ -56,7 +68,6 @@ wrap_render_process_handler! {
 /// The browser process's half: take a renderer's report. Returns whether
 /// `message` was ours (handled, whatever its content).
 pub fn record(
-    state: &AppState,
     browser: Option<&mut Browser>,
     source: ProcessId,
     message: Option<&mut ProcessMessage>,
@@ -70,14 +81,14 @@ pub fn record(
     }
     let (Some(browser), Some(args)) = (browser, message.argument_list()) else { return true };
     if let Some(pid) = u32::try_from(args.int(0)).ok().filter(|&p| p > 0) {
-        state.renderer_pids.lock().insert(browser.identifier(), pid);
+        pids().lock().insert(browser.identifier(), pid);
     }
     true
 }
 
 /// A browser closed: its renderer no longer serves it.
-pub fn forget(state: &AppState, browser_id: i32) {
-    state.renderer_pids.lock().remove(&browser_id);
+pub fn forget(browser_id: i32) {
+    pids().lock().remove(&browser_id);
 }
 
 /// One browser and the renderer serving it.
@@ -103,7 +114,7 @@ pub struct RendererMapData {
 
 /// Every browser whose renderer has reported, and what that browser is.
 pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
-    let pids: HashMap<i32, u32> = state.renderer_pids.lock().clone();
+    let pids: HashMap<i32, u32> = pids().lock().clone();
     if pids.is_empty() {
         return Vec::new();
     }
@@ -113,7 +124,15 @@ pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
     // a promoted pool window is registered as a window.
     let mut pool = state.unpromoted_pool_labels_snapshot();
     pool.extend(state.pool_side_top_level_labels());
-    let panes = state.browser_pane_block_ids();
+    // Each live browser pane's block id, by its browser's label.
+    let panes: HashMap<String, String> = state
+        .host_state
+        .lock()
+        .browser_panes
+        .iter()
+        .filter(|(_, e)| e.lifecycle == BrowserPaneLifecycle::Live)
+        .map(|(block_id, e)| (e.label.clone(), block_id.clone()))
+        .collect();
     let mut out: Vec<RendererEntry> = state
         .list_browsers()
         .into_iter()

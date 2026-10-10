@@ -179,6 +179,38 @@ pub fn renderer_serves(
     (!names.is_empty()).then(|| names.join(", "))
 }
 
+/// The PID a process sees for itself, which is what a renderer reports.
+///
+/// On Linux, Chromium's namespace sandbox runs renderers in a PID namespace
+/// of their own, where `getpid()` is a small number (2, 3, …) unrelated to
+/// the host PID this backend lists. The kernel records every level in
+/// `/proc/<pid>/status` (`NSpid: <host> … <innermost>`), so a renderer row is
+/// looked up by the innermost one. AgentMux's renderers share one namespace
+/// per instance, and only this instance's processes are looked up, so the
+/// number is unique among them. Elsewhere there is no namespace: the PID.
+pub fn own_view_pid(pid: u32) -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(inner) = std::fs::read_to_string(format!("/proc/{pid}/status"))
+            .ok()
+            .and_then(|s| innermost_ns_pid(&s))
+        {
+            return inner;
+        }
+    }
+    pid
+}
+
+/// The last PID on a `/proc/<pid>/status` `NSpid:` line.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn innermost_ns_pid(status: &str) -> Option<u32> {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("NSpid:"))
+        .and_then(|rest| rest.split_whitespace().last())
+        .and_then(|p| p.parse().ok())
+}
+
 fn kind_of(p: &ProcInfo, cmdline: Option<&str>) -> Kind {
     let Some(cmd) = cmdline else {
         return mac_helper_type(&p.name).map_or(Kind::Unreadable(1), Kind::Cef);
@@ -424,6 +456,18 @@ mod tests {
             renderer_serves(&entries, 2, &page, &none).as_deref(),
             Some("browser pane b.test, browser pane a.test")
         );
+    }
+
+    #[test]
+    fn a_sandboxed_renderer_is_found_by_the_pid_it_sees_for_itself() {
+        // A renderer in Chromium's PID namespace, as the host sees it: host
+        // PID 48211, PID 3 inside the namespace, which is what it reported.
+        let status = "Name:\tagentmux-cef\nTgid:\t48211\nNSpid:\t48211\t3\nPPid:\t48190\n";
+        assert_eq!(innermost_ns_pid(status), Some(3));
+        // No namespace: one PID on the line.
+        assert_eq!(innermost_ns_pid("NSpid:\t912\n"), Some(912));
+        // An old kernel without the line.
+        assert_eq!(innermost_ns_pid("Name:\tx\nPid:\t912\n"), None);
     }
 
     #[test]

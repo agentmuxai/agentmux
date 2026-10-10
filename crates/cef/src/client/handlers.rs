@@ -109,8 +109,7 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> ::std::os::raw::c_int {
-            let state = self.inner.lock().state.clone();
-            crate::renderer_map::record(&state, browser, source_process, message) as ::std::os::raw::c_int
+            crate::renderer_map::record(browser, source_process, message) as ::std::os::raw::c_int
         }
     }
 }
@@ -671,7 +670,7 @@ wrap_life_span_handler! {
             }
             let mut inner = self.inner.lock();
             if let Some(b) = browser.as_deref() {
-                crate::renderer_map::forget(&inner.state, b.identifier());
+                crate::renderer_map::forget(b.identifier());
             }
             inner.on_before_close(browser);
         }

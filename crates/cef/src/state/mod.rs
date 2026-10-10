@@ -355,9 +355,6 @@ pub struct AppState {
     /// pane's popups open in-app. Who may drive a window is srv's decision
     /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
     pub owned_panes: Mutex<std::collections::HashSet<String>>,
-    /// Browser id → the PID of the renderer serving it, as each renderer
-    /// reports (renderer_map.rs). Read by srv's Tower pane.
-    pub renderer_pids: Mutex<HashMap<i32, u32>>,
     /// Agents' site limits on their panes (client/allowed_origins.rs).
     pub site_limits: crate::client::allowed_origins::SiteLimits,
 
@@ -777,7 +774,6 @@ impl Default for AppState {
             window_meta: Mutex::new(HashMap::new()),
             approval_windows: Mutex::new(std::collections::HashSet::new()),
             owned_panes: Mutex::new(std::collections::HashSet::new()),
-            renderer_pids: Mutex::new(HashMap::new()),
             site_limits: Default::default(),
             popup_openers: Mutex::new(std::collections::HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
@@ -969,17 +965,6 @@ impl AppState {
             }
         }
         None
-    }
-
-    /// Each live browser pane's block id, keyed by its browser's label.
-    pub fn browser_pane_block_ids(&self) -> HashMap<String, String> {
-        self.host_state
-            .lock()
-            .browser_panes
-            .iter()
-            .filter(|(_, e)| e.lifecycle == BrowserPaneLifecycle::Live)
-            .map(|(block_id, e)| (e.label.clone(), block_id.clone()))
-            .collect()
     }
 
     /// Are there any registered browsers?

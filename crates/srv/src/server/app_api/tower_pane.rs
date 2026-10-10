@@ -13,7 +13,7 @@
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
 use crate::backend::{tower_peers, tower_remote};
-use crate::backend::tower_agentmux::{parse_renderer_map, renderer_serves, RendererEntry};
+use crate::backend::tower_agentmux::{own_view_pid, parse_renderer_map, renderer_serves, RendererEntry};
 use crate::backend::tower_sampler::{BlockLabel, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -60,7 +60,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         &hostname,
                         || inputs(&tracker),
                         |id| block_label(&mstore, id),
-                        |pid| renderer_serves(&renderers, pid, &page, &workspace),
+                        // A renderer reported the PID it sees for itself (namespaced on Linux).
+                        |pid| renderer_serves(&renderers, own_view_pid(pid), &page, &workspace),
                     )
                     .map_err(|e| format!("tower.sample: {e}"))
             })
@@ -127,7 +128,7 @@ async fn renderer_map(
         return Vec::new();
     };
     let timeout = Some(std::time::Duration::from_millis(500));
-    match crate::server::ui_handlers::post_to_host(http_client, &host, "renderer_map", serde_json::json!({}), timeout).await {
+    match crate::server::host_http::post_to_host(http_client, &host, "renderer_map", serde_json::json!({}), timeout).await {
         Ok(answer) => parse_renderer_map(&answer),
         Err(e) => {
             tracing::debug!(error = %e, "[tower] couldn't ask the host which renderer serves what");
