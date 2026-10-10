@@ -1,6 +1,6 @@
 # SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles
 
-**Status:** active — P1 (Home, the Profile menu, Incognito tabs on Windows) shipped in PR #4574; P2 (named profiles, Windows) shipped in PR #4583; P4 (agents) in PR #4585; P3 (Linux/macOS) not started.
+**Status:** active — P1 (Home, the Profile menu, Incognito tabs on Windows) shipped in PR #4574; P2 (named profiles, Windows) shipped in PR #4583; P4 (agents) in PR #4585; P3 part 1 (named profiles on Linux and macOS) in PR #4589, Incognito there not started (§7.2).
 **Author:** AgentX@narko, 2026-10-09, at the operator's request
 **Builds on:** `SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md` (the model: one `browser:identity`
 key per browser tab, in-memory private contexts, disk-backed named profiles, and the two CEF
