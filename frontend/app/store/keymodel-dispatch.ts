@@ -16,6 +16,7 @@ import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContex
 import { commandRegistry } from "@/app/store/command-registry";
 import { atoms, getApi, getBlockComponentModel, refocusNode, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
+import { effectiveStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
 import { isEditableTarget } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
@@ -259,6 +260,37 @@ export function registerControlShiftTracking() {
 const NO_KEY: MuxKeyboardEvent = { type: "keydown", key: "", code: "", repeat: false };
 
 /**
+ * Focuses a pane for the App API, as a click would: layout focus and the
+ * caret. `blockId` may be the pane's own block or one of its pane tabs; a tab
+ * becomes the pane's visible one first, or the caret would stay with the tab
+ * on show. False if no pane in the active tab holds `blockId`.
+ */
+export function focusPaneForApi(blockId: string): boolean {
+    const layout = getLayoutModelForStaticTab();
+    const node = layout.getNodeByBlockId(blockId);
+    if (!node) return false;
+    if (node.data && effectiveStack(node.data).includes(blockId)) setActiveBlockInStack(layout, node.id, blockId);
+    refocusNode(blockId);
+    return true;
+}
+
+/** Whether the caret is in `blockId`'s pane: in any element of that block, since a pane tab's content sits in its own block. */
+export function caretInBlock(blockId: string): boolean {
+    const caret = document.activeElement;
+    if (!caret) return false;
+    return [...document.querySelectorAll("[data-blockid]")].some((el) => el.getAttribute("data-blockid") === blockId && el.contains(caret));
+}
+
+/** Resolves once the caret is in `blockId`, or false after `ms`: focus can land a few frames late (giveBlockFocus retries). */
+async function caretArrives(blockId: string, ms = 500): Promise<boolean> {
+    for (const until = Date.now() + ms; ; ) {
+        if (caretInBlock(blockId)) return true;
+        if (Date.now() >= until) return false;
+        await new Promise((r) => setTimeout(r, 16));
+    }
+}
+
+/**
  * Publishes the shortcut table to the host as `window.__agentmux_shortcuts`,
  * for the App API's ListShortcuts, RunCommand and PressKeys
  * (keybindings/app-api.ts). The host reaches it only in the window that
@@ -269,13 +301,7 @@ export function installShortcutApi() {
     const deps = () => ({
         platform: keyPlatform(),
         focusedBlockId,
-        // Layout focus and the caret both: a key goes to the DOM's focused
-        // element, so layout focus alone left keys with the old pane.
-        focusBlock: (blockId: string): boolean => {
-            if (!getLayoutModelForStaticTab().getNodeByBlockId(blockId)) return false;
-            refocusNode(blockId);
-            return true;
-        },
+        focusBlock: focusPaneForApi,
         runGlobal: (command: string): boolean => runKeyCommand(command, NO_KEY),
     });
     (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
@@ -283,18 +309,13 @@ export function installShortcutApi() {
         run: (command: string, target?: string): RunResult => runCommand(command, target || undefined, deps()),
         // PressKeys: what to send, after focusing `target`. The host then
         // sends the events and reads `last()`.
-        plan: (keys: string, target?: string): KeyPressPlan | { reason: string } => {
-            if (target && !deps().focusBlock(target)) return { reason: `pane ${target} is not in the active tab of this window` };
+        plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
+            if (target && !focusPaneForApi(target)) return { reason: `pane ${target} is not in the active tab of this window` };
             // A key goes where the caret is: refuse rather than press it into another pane.
-            // A pane tab's content sits in its own block inside the pane's, so check every element of the target.
-            const caret = document.activeElement;
-            const holders = target ? [...document.querySelectorAll(`[data-blockid="${CSS.escape(target)}"]`)] : [];
-            if (target && !(caret && holders.some((el) => el.contains(caret)))) {
-                return { reason: `pane ${target} didn't take keyboard focus` };
-            }
+            if (target && !(await caretArrives(target))) return { reason: `pane ${target} didn't take keyboard focus` };
             return planKeyPress(keys, keyPlatform());
         },
-        focus: (blockId: string): boolean => deps().focusBlock(blockId),
+        focus: (blockId: string): boolean => focusPaneForApi(blockId),
         focused: focusedBlockId,
         last: () => lastResolvedCommand(),
     };

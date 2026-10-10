@@ -84,7 +84,8 @@ async fn open_app_window(state: &Arc<AppState>, block_id: &str) -> Result<CdpSes
 /// an error.
 async fn eval(cdp: &mut CdpSession, expr: &str) -> Result<Value, String> {
     let v = cdp
-        .call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))
+        // `plan` returns a Promise (it waits for the caret to land).
+        .call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true, "awaitPromise": true }))
         .await
         .map_err(|e| format!("CDP eval: {e}"))?;
     if let Some(exc) = v.get("exceptionDetails") {
