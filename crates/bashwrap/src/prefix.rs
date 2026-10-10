@@ -164,15 +164,44 @@ fn sanitize(raw: &str) -> String {
 }
 
 /// Record a call for the prefix process to claim. Written to a temporary
-/// name and renamed, so a claim never reads half a record.
+/// name and renamed, so a claim never reads half a record. Then other
+/// sessions' leftovers are swept (`sweep_other_sessions`).
 pub fn register(session_id: &str, record: &CallRecord) -> std::io::Result<()> {
     let dir = session_dir(session_id)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?;
-    std::fs::create_dir_all(&dir)?;
     let name = format!("{}.json", sanitize(&record.tool_use_id));
     let tmp = dir.join(format!(".{name}.{}", std::process::id()));
-    std::fs::write(&tmp, serde_json::to_vec(record)?)?;
-    std::fs::rename(&tmp, dir.join(name))
+    let bytes = serde_json::to_vec(record)?;
+    let write = || -> std::io::Result<()> {
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(&tmp, &bytes)?;
+        std::fs::rename(&tmp, dir.join(&name))
+    };
+    // A claim or a sweep removes a directory it finds empty, which can land
+    // between creating it and writing into it: then once more.
+    write().or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { write() } else { Err(e) })?;
+    if let Some(root) = calls_root() {
+        sweep_other_sessions(&root, &dir);
+    }
+    Ok(())
+}
+
+/// Every other session's directory: its stale records deleted, and the
+/// directory itself removed once nothing is left in it. Sessions end
+/// without telling anyone, and a call the CLI never ran (denied) leaves its
+/// record; without this both would stay forever.
+fn sweep_other_sessions(root: &Path, keep: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == keep || !path.is_dir() {
+            continue;
+        }
+        if read_records(&path).is_empty() {
+            // Fails (and is left) if a record or a temporary file is in it.
+            let _ = std::fs::remove_dir(&path);
+        }
+    }
 }
 
 /// Claim the record of the call this script runs: the newest one for the
@@ -198,14 +227,19 @@ pub fn claim(session_id: &str, command: Option<&str>) -> Option<CallRecord> {
     } else {
         Vec::new()
     };
+    let mut claimed_record = None;
     for (path, record) in candidates {
         let claimed = path.with_extension(format!("claimed.{}", std::process::id()));
         if std::fs::rename(path, &claimed).is_ok() {
             let _ = std::fs::remove_file(&claimed);
-            return Some(record.clone());
+            claimed_record = Some(record.clone());
+            break;
         }
     }
-    None
+    // The session's last waiting call: its directory goes too (it is made
+    // again for the next one). Fails, and stays, while anything is in it.
+    let _ = std::fs::remove_dir(&dir);
+    claimed_record
 }
 
 /// The session's unclaimed records, deleting any past their age.
@@ -409,6 +443,41 @@ mod tests {
             register("s", &new_record("toolu_3", "c", false)).unwrap();
             assert_eq!(claim("s", Some("zzz")), None, "two candidates: ambiguous");
             assert_eq!(claim("other-session", Some("b")), None, "another session's records are never claimed");
+        });
+    }
+
+    #[test]
+    fn a_session_directory_goes_once_its_last_call_is_claimed() {
+        with_calls_dir(|| {
+            register("s", &new_record("toolu_1", "a", false)).unwrap();
+            register("s", &new_record("toolu_2", "b", false)).unwrap();
+            let dir = session_dir("s").unwrap();
+            claim("s", Some("a")).unwrap();
+            assert!(dir.is_dir(), "a call still waits in it");
+            claim("s", Some("b")).unwrap();
+            assert!(!dir.exists());
+            // The next call makes it again.
+            register("s", &new_record("toolu_3", "c", false)).unwrap();
+            assert_eq!(claim("s", Some("c")).unwrap().tool_use_id, "toolu_3");
+        });
+    }
+
+    #[test]
+    fn a_new_record_sweeps_other_sessions_left_behind() {
+        with_calls_dir(|| {
+            // A session whose only call was denied: its record is past its age.
+            let mut denied = new_record("toolu_old", "x", false);
+            denied.created_ms -= RECORD_MAX_AGE.as_millis() as u64 + 1;
+            register("ended", &denied).unwrap();
+            // A session that ended with nothing waiting: an empty directory.
+            std::fs::create_dir_all(session_dir("empty").unwrap()).unwrap();
+            // A live session with a call waiting.
+            register("live", &new_record("toolu_live", "y", false)).unwrap();
+            register("current", &new_record("toolu_now", "z", false)).unwrap();
+            assert!(!session_dir("ended").unwrap().exists());
+            assert!(!session_dir("empty").unwrap().exists());
+            assert_eq!(claim("live", Some("y")).unwrap().tool_use_id, "toolu_live");
+            assert_eq!(claim("current", Some("z")).unwrap().tool_use_id, "toolu_now");
         });
     }
 
