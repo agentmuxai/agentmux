@@ -78,9 +78,6 @@ pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), 
     let Some(v) = meta.get(IDENTITY_META_KEY) else { return Ok(()) };
     let identity = v.as_str().unwrap_or("");
     if let Some(id) = profile_id(identity) {
-        if !cfg!(windows) {
-            return Err("browser profiles are Windows only for now".to_string());
-        }
         let known = profile_ids().ok_or("couldn't read the browser profiles")?;
         return if known.contains(id) { Ok(()) } else { Err(format!("there is no browser profile {id:?}")) };
     }
@@ -296,7 +293,9 @@ mod tests {
         };
         assert!(check_new_tab(&state, &MetaMapType::new()).is_ok());
         assert!(check_new_tab(&state, &with(json!("incognito:short"))).is_err());
-        assert!(check_new_tab(&state, &with(json!("profile:p-none"))).is_err());
+        // Profiles work on every platform: an unknown one is refused as unknown.
+        let unknown = check_new_tab(&state, &with(json!("profile:p-none"))).unwrap_err();
+        assert!(unknown.contains("there is no browser profile"), "{unknown}");
         assert!(check_new_tab(&state, &with(json!("profile:Bad Id"))).is_err());
         assert!(check_new_tab(&state, &with(json!(5))).is_err());
         let ok = check_new_tab(&state, &with(json!("incognito:cccccccc-3333")));

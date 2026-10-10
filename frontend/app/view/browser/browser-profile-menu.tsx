@@ -135,17 +135,15 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
             list.push(row);
         }
         list.push({ label: "", divider: true });
-        if (canOpenIncognito(platform)) {
-            list.push({
-                label: "New profile…",
-                icon: "plus",
-                onClick: () =>
-                    openModal(NewProfileModal, {
-                        // A fresh profile is signed in nowhere: it opens at Home.
-                        onCreated: (created) => void openTabAs(model.blockId, props.home(), `profile:${created.id}`),
-                    }),
-            });
-        }
+        list.push({
+            label: "New profile…",
+            icon: "plus",
+            onClick: () =>
+                openModal(NewProfileModal, {
+                    // A fresh profile is signed in nowhere: it opens at Home.
+                    onCreated: (created) => void openTabAs(model.blockId, props.home(), `profile:${created.id}`),
+                }),
+        });
         list.push({ label: "Manage profiles…", icon: "gear", onClick: openProfileSettings });
         return list;
     });

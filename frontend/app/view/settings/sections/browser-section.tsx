@@ -8,7 +8,6 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { Button, Switch, TextInput } from "@/app/element/ui";
-import { getPlatform } from "@/util/platformutil";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import {
     browserProfiles,
@@ -118,7 +117,6 @@ export function BrowserSection(): JSX.Element {
     const [newName, setNewName] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
     onMount(() => void loadBrowserProfiles());
-    const windowsOnly = getPlatform() !== "win32";
 
     const add = async () => {
         const name = newName().trim();
@@ -137,9 +135,6 @@ export function BrowserSection(): JSX.Element {
             <SectionHeader label={BROWSER_SETTINGS.profiles.label} />
             <div id={`setting-${BROWSER_SETTINGS.profiles.id}`} class="setting-row">
                 <div class="setting-devices-description">{BROWSER_SETTINGS.profiles.description}</div>
-                <Show when={windowsOnly}>
-                    <div class="setting-devices-empty">Browser profiles are Windows only for now.</div>
-                </Show>
                 <div class="browser-profile-list">
                     <div class="browser-profile-row">
                         <span class="browser-profile-badge browser-profile-badge-personal" aria-hidden="true">
@@ -149,24 +144,22 @@ export function BrowserSection(): JSX.Element {
                     </div>
                     <For each={browserProfiles()}>{(p) => <ProfileRow profile={p} />}</For>
                 </div>
-                <Show when={!windowsOnly}>
-                    <div class="browser-profile-add">
-                        <TextInput
-                            detached
-                            aria-label="New profile name"
-                            placeholder="New profile name"
-                            value={newName()}
-                            maxLength={40}
-                            onInput={(e) => setNewName(e.currentTarget.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") void add();
-                            }}
-                        />
-                        <Button icon="plus" disabled={!newName().trim()} onClick={() => void add()}>
-                            Add profile
-                        </Button>
-                    </div>
-                </Show>
+                <div class="browser-profile-add">
+                    <TextInput
+                        detached
+                        aria-label="New profile name"
+                        placeholder="New profile name"
+                        value={newName()}
+                        maxLength={40}
+                        onInput={(e) => setNewName(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") void add();
+                        }}
+                    />
+                    <Button icon="plus" disabled={!newName().trim()} onClick={() => void add()}>
+                        Add profile
+                    </Button>
+                </div>
                 <Show when={error()}>
                     <div class="settings-config-error" role="alert">
                         {error()}
