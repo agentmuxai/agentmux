@@ -22,6 +22,23 @@ export function isPoolMode(): boolean {
     return new URLSearchParams(window.location.search).get("pool") === "1";
 }
 
+/**
+ * Marks a pre-warmed window while it waits to be claimed, so DevTools clients
+ * (scripts/verify-shortcuts.mjs, the agent-open benchmark) can tell it from a
+ * real window: its title, which the DevTools target list shows, and a
+ * `data-pool-window` attribute. Promotion clears both; the window's own title
+ * effect sets the real title once it initialises.
+ */
+export function markPoolWaiting(kind: "window" | "pane"): void {
+    document.title = kind === "window" ? "AgentMux (pre-warmed window)" : "AgentMux (pre-warmed pane window)";
+    document.documentElement.dataset.poolWindow = kind;
+}
+
+function clearPoolWaiting(): void {
+    delete document.documentElement.dataset.poolWindow;
+    if (document.title.startsWith("AgentMux (pre-warmed")) document.title = "AgentMux";
+}
+
 /** True when the current renderer was spawned as a pane pool window. */
 export function isPanePoolMode(): boolean {
     if (typeof window === "undefined") return false;
@@ -67,6 +84,7 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
             "pool:promote",
             (payload) => {
                 cleanup();
+                clearPoolWaiting();
                 markPoolPromoted();
                 // The torn-off tab's picture, until its content reveals.
                 if (payload.snapshot) {
@@ -85,6 +103,7 @@ export async function awaitPoolPromote(): Promise<{ initialView: string | null; 
             "pool:new-window",
             (payload) => {
                 cleanup();
+                clearPoolWaiting();
                 markPoolPromoted();
                 const url = new URL(window.location.href);
                 url.searchParams.delete("pool");
@@ -128,6 +147,7 @@ export async function awaitPanePoolPromote(): Promise<void> {
             "pool:pane-promote",
             (payload) => {
                 cleanup();
+                clearPoolWaiting();
                 markPoolPromoted(() => getApi().setWindowInitStatus("revealed"));
                 // The source's picture of the pane, until its content reveals.
                 if (payload.snapshot) {
