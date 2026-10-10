@@ -132,14 +132,26 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             if !dir.starts_with(&s.widgets_dir) {
                 return Err("that widget isn't in the widgets folder".to_string());
             }
-            // What it stored goes first (Settings asked the user): if that
+            // Its open panes stop first, so none can write its data back;
+            // then what it stored goes (Settings asked the user): if that
             // fails, nothing is removed, so a reinstall can't find it again.
-            st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))?;
-            tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| format!("can't remove it: {e}"))?;
-            s.forget(&req.id)?;
+            let sessions = crate::backend::widget_access::sessions();
+            sessions.begin_removal(&req.id);
+            let removed = async {
+                st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))?;
+                tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| format!("can't remove it: {e}"))?;
+                s.forget(&req.id)?;
+                // A write that passed its check just before the panes stopped
+                // can land after the first purge; the package is gone now, so
+                // nothing can write again.
+                st.mstore.widget_storage_purge(&req.id).map_err(|e| format!("can't delete its data: {e}"))
+            }
+            .await;
+            sessions.end_removal(&req.id);
+            removed?;
             tracing::info!(id = %req.id, "widget package uninstalled");
             Ok(WidgetPackagesResult { packages: widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await })
         }

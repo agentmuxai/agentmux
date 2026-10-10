@@ -147,12 +147,17 @@ fn needed(url: &Url) -> String {
     format!("net:{}", url.origin().ascii_serialization())
 }
 
-async fn resolve(url: &Url, grant: &Grant, pkg_name: &str) -> Result<(String, Vec<SocketAddr>), AccessError> {
+/// The host's addresses, looked up within `deadline` (the request's own
+/// timeout covers DNS too), each checked against `grant`.
+async fn resolve(url: &Url, grant: &Grant, pkg_name: &str, deadline: Instant) -> Result<(String, Vec<SocketAddr>), AccessError> {
     let host = url_host(url).ok_or_else(|| AccessError::invalid("the url has no host"))?;
     let port = url.port_or_known_default().unwrap_or(443);
     let addrs: Vec<SocketAddr> = match host.parse::<IpAddr>() {
         Ok(ip) => vec![SocketAddr::new(ip, port)],
-        Err(_) => tokio::time::timeout(DNS_TIMEOUT, tokio::net::lookup_host((host.as_str(), port)))
+        Err(_) => tokio::time::timeout(
+            DNS_TIMEOUT.min(deadline.saturating_duration_since(Instant::now())),
+            tokio::net::lookup_host((host.as_str(), port)),
+        )
             .await
             .map_err(|_| AccessError::network(format!("looking up {host} timed out")))?
             .map_err(|e| AccessError::network(format!("can't look up {host}: {e}")))?
@@ -224,7 +229,7 @@ pub async fn fetch(pkg_name: &str, granted: &[String], req: FetchRequest) -> Res
 
     for _hop in 0..=MAX_REDIRECTS {
         let grant = grant_for(granted, &url).ok_or_else(|| AccessError::denied(pkg_name, &needed(&url)))?;
-        let (host, addrs) = resolve(&url, &grant, pkg_name).await?;
+        let (host, addrs) = resolve(&url, &grant, pkg_name, deadline).await?;
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return Err(AccessError::network("the request timed out"));

@@ -88,6 +88,8 @@ pub struct Session {
 pub struct Sessions {
     open: Mutex<HashMap<String, Session>>,
     sends: Mutex<HashMap<String, VecDeque<Instant>>>,
+    /// Packages being uninstalled: no session opens or answers for them.
+    removing: Mutex<std::collections::HashSet<String>>,
 }
 
 pub fn sessions() -> &'static Sessions {
@@ -104,9 +106,25 @@ fn runnable<'a>(packages: &'a [WidgetPackageInfo], id: &str, hash: &str) -> Opti
 }
 
 impl Sessions {
+    /// Ends every session of `id` and refuses new ones until
+    /// [`Sessions::end_removal`]: an uninstall calls this before it deletes
+    /// the widget's data, so an open pane can't write it back meanwhile.
+    pub fn begin_removal(&self, id: &str) {
+        self.removing.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string());
+        self.open.lock().unwrap_or_else(|p| p.into_inner()).retain(|_, s| s.widget_id != id);
+    }
+
+    pub fn end_removal(&self, id: &str) {
+        self.removing.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
+    }
+
+    fn is_removing(&self, id: &str) -> bool {
+        self.removing.lock().unwrap_or_else(|p| p.into_inner()).contains(id)
+    }
+
     /// A token for one pane of an approved package at `hash`.
     pub fn open(&self, packages: &[WidgetPackageInfo], id: &str, hash: &str, block_id: &str) -> Result<String, AccessError> {
-        if runnable(packages, id, hash).is_none() {
+        if runnable(packages, id, hash).is_none() || self.is_removing(id) {
             return Err(AccessError::unavailable(format!("{id} isn't approved at this version")));
         }
         let token = hex::encode(uuid::Uuid::new_v4().as_bytes()) + &hex::encode(uuid::Uuid::new_v4().as_bytes());
@@ -139,6 +157,9 @@ impl Sessions {
             .get(token)
             .cloned()
             .ok_or_else(|| AccessError::unavailable("this widget's session ended; reload it"))?;
+        if self.is_removing(&session.widget_id) {
+            return Err(AccessError::unavailable(format!("{} is being uninstalled", session.widget_id)));
+        }
         let pkg = runnable(packages, &session.widget_id, &session.hash)
             .cloned()
             .ok_or_else(|| AccessError::unavailable(format!("{} changed or was turned off; reload it", session.widget_id)))?;
@@ -227,6 +248,19 @@ mod tests {
         s.close(&token);
         assert!(s.authorize(&approved, &token).is_err());
         assert!(s.authorize(&approved, "made-up").is_err());
+    }
+
+    #[test]
+    fn an_uninstall_ends_the_widgets_sessions_until_it_is_done() {
+        let s = Sessions::default();
+        let approved = vec![pkg(WidgetState::Approved, WidgetKind::Sandboxed, &["storage"])];
+        let token = s.open(&approved, "acme.notes", "h1", "b1").unwrap();
+        s.begin_removal("acme.notes");
+        assert_eq!(s.authorize(&approved, &token).unwrap_err().code, 1005, "an open pane can't write while it's removed");
+        assert!(s.open(&approved, "acme.notes", "h1", "b2").is_err(), "nor open a new session");
+        s.end_removal("acme.notes");
+        assert!(s.authorize(&approved, &token).is_err(), "the old session stays ended");
+        assert!(s.open(&approved, "acme.notes", "h1", "b2").is_ok(), "a reinstall's panes can start again");
     }
 
     #[test]
