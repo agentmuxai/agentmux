@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Types for @agentmux/widget-sdk v1, the client of the AgentMux widget bridge,
+ * Types for @agentmuxai/widget-sdk v1, the client of the AgentMux widget bridge,
  * protocol 1 (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6, §7).
  */
 
