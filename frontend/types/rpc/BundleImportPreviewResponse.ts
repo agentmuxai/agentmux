@@ -4,11 +4,16 @@ import type { BundleImportMcpServerPreview } from "./BundleImportMcpServerPrevie
 import type { BundleImportProjectInstructionPreview } from "./BundleImportProjectInstructionPreview";
 import type { BundleImportRequirementPreview } from "./BundleImportRequirementPreview";
 import type { BundleImportSkillPreview } from "./BundleImportSkillPreview";
+import type { BundleImportWidgetPreview } from "./BundleImportWidgetPreview";
 
 /**
  * Response for `bundle.import.preview`.
  */
-export type BundleImportPreviewResponse = { project_instructions: Array<BundleImportProjectInstructionPreview>, name: string, description: string, instructions_preview: string, instructions_truncated: boolean, instructions_total_chars: number, context_files: Array<BundleImportContextFilePreview>, skills: Array<BundleImportSkillPreview>, mcp_servers: Array<BundleImportMcpServerPreview>, requirements: Array<BundleImportRequirementPreview>, warnings: Array<string>, warnings_truncated: boolean, 
+export type BundleImportPreviewResponse = { 
+/**
+ * Widgets the bundle carries (SPEC_WIDGET_SHARING_2026_10_10.md §3.3).
+ */
+widgets: Array<BundleImportWidgetPreview>, project_instructions: Array<BundleImportProjectInstructionPreview>, name: string, description: string, instructions_preview: string, instructions_truncated: boolean, instructions_total_chars: number, context_files: Array<BundleImportContextFilePreview>, skills: Array<BundleImportSkillPreview>, mcp_servers: Array<BundleImportMcpServerPreview>, requirements: Array<BundleImportRequirementPreview>, warnings: Array<string>, warnings_truncated: boolean, 
 /**
  * Soft and informational: `bundle_upsert` has no name uniqueness
  * constraint, so this never blocks an import.

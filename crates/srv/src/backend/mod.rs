@@ -26,6 +26,7 @@ pub mod widget_signature;
 pub mod widget_requests;
 pub mod bundle_export;
 pub mod bundle_import;
+pub mod bundle_widgets;
 pub mod bundle_validate;
 pub mod background_task_feed;
 pub mod dock_snapshot;

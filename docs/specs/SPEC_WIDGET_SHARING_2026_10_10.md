@@ -1,6 +1,6 @@
 # Sharing widgets: signed packages, widgets in agent bundles, a catalog
 
-**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b and W6c not started.
+**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b (widgets in bundles, §3) in PR #4647; W6c not started.
 **Date:** 2026-10-10
 **Builds on:** `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (packages §5, the content hash §8.2, approval §8.3)
 
@@ -78,7 +78,7 @@ It names a key, not a person, and it says nothing about what the code does. The 
 
 A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`, `bundle_import.rs`): instructions, per-provider instructions, context files and skills, all text. Import is preview, then commit, bound by a content digest (`bundle.import.preview`, `bundle.import.commit`, the three import modals in `frontend/app/view/bundle/components/`). Nothing in a bundle runs code, and nothing is signed; non-UTF-8 entries are skipped.
 
-### 3.2 The format: ABF v0.4 adds `widgets/`
+### 3.2 The format: a `widgets` component
 
 ```
 <slug>/bundle.json                  "components": { …, "widgets": [{ "id", "version", "hash" }] }
@@ -87,22 +87,23 @@ A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`
 <slug>/widgets/<id>/…               its files, binary included
 ```
 
-- Entries under `widgets/` are read as bytes (an icon, a font, a wasm file), the one place in a bundle that isn't text. The widget limits apply (spec §5.1: 50 MB, 2,000 files, no links), inside the bundle's own zip limits, which rise for a bundle with widgets to the widget limit plus the rest.
-- `components.widgets[].hash` is the package's content hash (§8.2). Import refuses a widget whose files don't hash to it, so the preview the user saw is what is installed.
-- **Sandboxed widgets only.** A bundle with a trusted widget is refused at preview ("bundles can carry sandboxed widgets only"). A trusted widget is full access to AgentMux; it shouldn't arrive as a side effect of importing an agent's instructions. A user who wants one installs it from its folder, with that prompt.
-- An importer older than v0.4 ignores `widgets/` (it already skips what it doesn't know); the rest of the bundle imports as before.
+- The manifest keeps ABF v0.3's `$schema`: `widgets` is one more optional component, and an importer that doesn't know it imports the rest of the bundle as before (it skips the entries; the non-text ones with a warning).
+- Entries under `widgets/` are read as bytes (`backend/bundle_widgets.rs`), the one place in a bundle that isn't text, and never reach the text importer. Each widget is held to the widget limits (spec §5.1: 50 MB, 2,000 files, no links, no path outside its folder) within the bundle's own zip limits (10 MB per entry, 50 MB and 10,000 entries in all).
+- `components.widgets[].hash` is the package's content hash (§8.2). A widget whose files don't hash to it, or that `bundle.json` doesn't list, isn't offered, so what the preview shows is what installs.
+- **Sandboxed widgets only.** A trusted widget in a bundle is shown as "bundles can carry sandboxed widgets only" and not offered. A trusted widget is full access to AgentMux; it shouldn't arrive as a side effect of importing an agent's instructions. A user who wants one installs it from its folder, with that prompt.
+- Only a zip carries widgets: the `files[]` input of `bundle.import.preview` is text.
 
 ### 3.3 Import
 
-- The preview modal gains a **Widgets** section: each widget's name, version, signature line (§2.3) and permissions in the words of spec §6.4, with a checkbox, on by default. The preview says plainly: "Each widget asks for your approval before it runs."
-- Commit copies each chosen widget into `~/.agentmux/widgets/<id>/` (asking before it replaces an installed version, as **Install from folder** does), then opens the normal approval prompt for each. **A bundle never approves a widget**: they arrive `needs_approval` (or `changed`), exactly as if installed from a folder, and declining one leaves the rest of the bundle imported.
-- An installed, approved widget at the same hash stays approved; nothing asks again.
-- `bundle.import_for_agent` (agents importing a bundle through the App API) does the same: the widgets wait for the user's approval, which an agent can't give.
+- `bundle.import.preview` returns `widgets`: each widget's name, version, author, kind, permissions, hash, signature (§2.3), the version installed here if any, and why it can't be imported, if it can't.
+- The preview modal gains a **Widgets** section: each widget's name and version, its signature line and its permissions in the words of spec §6.4, with a checkbox, on by default. It says plainly: "Each widget asks for your approval before it runs." A widget already installed at the same files and key is shown as such and not offered; one that would replace an installed version says so.
+- `bundle.import.commit` takes `include_widgets: [id]`. After the bundle is written, srv reads the archive again, holds it to the digest the user previewed, copies each chosen widget into `~/.agentmux/widgets/<id>/` (replacing an installed version), and opens the normal approval prompt for each, as "The bundle "<name>" wants to install <widget>". **A bundle never approves a widget**: they arrive `needs_approval` (or `changed`), exactly as if installed from a folder, and declining one leaves the rest of the bundle imported. The commit answers each widget's outcome: `waiting`, `unchanged` or `failed` with why.
+- An agent importing a bundle through the App API gets the same: the widgets wait for the user's approval, which an agent can't give. (`bundle.import_for_agent` doesn't carry widgets yet.)
 
 ### 3.4 Export
 
-- The bundle editor (Memory → Bundles) gains **Widgets**: pick installed sandboxed widgets to include. Export writes their approved files (never a newer, unapproved copy on disk), with `widget.sig` if the package has one.
-- `bundle.export` takes `widgets: [id]`.
+- `bundle.export` takes `widgets: [id]` (with `format: "zip"`): installed, approved, sandboxed widgets to include. Export writes their **approved** files, each hashed again against the approval (never a newer, unapproved copy on disk), with `widget.sig` when it still names the approved signer, and lists them in `components.widgets`.
+- AgentMux's UI has no bundle export button today; agents export through the App API. A widget picker belongs with that button when it comes.
 
 ### 3.5 What the agent is told
 
@@ -158,7 +159,7 @@ srv fetches the index (from the catalog URL in settings, default the official on
 | Phase | Builds | Done when |
 |---|---|---|
 | **W6a: signed packages** | `widget.sig`, the hash rule, verification and the publisher pins in srv; `signature` in `widgets.list` and `WidgetInstall`; the prompt lines and the `key_changed` warning; pinned publishers in Settings; `keygen`/`sign`/`verify` in the npm package, with a shared hash fixture | a signed sample installs with its fingerprint shown; a package re-signed with another key warns; an edited signed package is invalid (tested) |
-| **W6b: widgets in bundles** | ABF v0.4 `widgets/`; binary entries for it; preview, commit, export; sandboxed only | a bundle exported with a widget imports on another instance and the widget asks for approval (tested) |
+| **W6b: widgets in bundles** | the `widgets` component and `widgets/<id>/` entries, read as bytes; preview, commit and export; sandboxed only | a bundle exported with a widget imports on another instance and the widget asks for approval (tested) |
 | **W6c: the catalog** | the catalog repo (or B/C), its CI, the signed index; Browse, Install and Update in Settings | the samples are in the catalog and install from Browse |
 
 ## 6. What this doesn't do

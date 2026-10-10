@@ -378,6 +378,8 @@ export interface BundleImportSelectionState {
     includeInstructions: boolean;
     includeContextFileIds: number[];
     skills: BundleImportSkillSelectionState[];
+    /** The bundle's widgets to install, by id; each asks for approval. */
+    includeWidgets?: string[];
 }
 
 /** Step 2 — preview & select. Renders the checklist described in §4 Step

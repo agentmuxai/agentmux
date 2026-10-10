@@ -170,7 +170,7 @@ async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
         &state.id_store,
         &state.mstore,
         &state.identity_store,
-        ExportReq { id: "bundle-1".to_string(), format: String::new() },
+        ExportReq { id: "bundle-1".to_string(), format: String::new(), widgets: vec![] },
     )
     .unwrap();
 
@@ -646,7 +646,7 @@ async fn agent_less_export_warns_when_a_bound_agent_has_memory() {
         &state.id_store,
         &state.mstore,
         &state.identity_store,
-        ExportReq { id: "bundle-1".to_string(), format: String::new() },
+        ExportReq { id: "bundle-1".to_string(), format: String::new(), widgets: vec![] },
     )
     .unwrap();
     let warnings = result["warnings"].as_array().unwrap();
@@ -689,7 +689,7 @@ async fn agent_less_export_is_silent_without_memory_or_without_a_binding() {
         &state.id_store,
         &state.mstore,
         &state.identity_store,
-        ExportReq { id: "bundle-2".to_string(), format: String::new() },
+        ExportReq { id: "bundle-2".to_string(), format: String::new(), widgets: vec![] },
     )
     .unwrap();
     let warnings = result["warnings"].as_array().unwrap();
@@ -829,7 +829,7 @@ async fn an_imported_bundle_exports_the_components_it_arrived_with() {
         &state.id_store,
         &state.mstore,
         &state.identity_store,
-        ExportReq { id: bundle_id, format: String::new() },
+        ExportReq { id: bundle_id, format: String::new(), widgets: vec![] },
     )
     .unwrap();
     let paths: Vec<String> = exported["files"]

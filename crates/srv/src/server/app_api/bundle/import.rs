@@ -389,6 +389,22 @@ pub(super) struct ResolvedImportInput {
     pub(crate) files: Vec<crate::backend::bundle_import::BundleImportFile>,
     pub(crate) intake_warnings: Vec<String>,
     pub(crate) content_digest: String,
+    /// The archive's widgets (`widgets/<id>/`, read as bytes), out of
+    /// `files` and its warnings (SPEC_WIDGET_SHARING_2026_10_10.md §3).
+    pub(crate) widgets: Vec<crate::backend::bundle_widgets::BundleWidget>,
+}
+
+/// Takes a zip's widget entries out of the text files and their warnings,
+/// and reads them as bytes instead.
+fn split_widgets(
+    raw: &[u8],
+    files: &mut Vec<crate::backend::bundle_import::BundleImportFile>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<crate::backend::bundle_widgets::BundleWidget>, String> {
+    use crate::backend::bundle_widgets as bw;
+    files.retain(|f| !bw::is_widget_path(&f.path));
+    warnings.retain(|w| !bw::is_widget_path(w));
+    bw::read_from_zip(raw)
 }
 
 pub(super) fn resolve_import_input(
@@ -410,8 +426,9 @@ pub(super) fn resolve_import_input(
     if let Some(path) = file_path {
         let raw = read_abf_file_path(&path)?;
         let content_digest = bi::content_digest_raw_bytes(bi::ImportInputMode::FilePath, &raw);
-        let (files, intake_warnings) = bi::unzip_bundle_import_with_budget(&raw, warning_budget)?;
-        return Ok(ResolvedImportInput { files, intake_warnings, content_digest });
+        let (mut files, mut intake_warnings) = bi::unzip_bundle_import_with_budget(&raw, warning_budget)?;
+        let widgets = split_widgets(&raw, &mut files, &mut intake_warnings)?;
+        return Ok(ResolvedImportInput { files, intake_warnings, content_digest, widgets });
     }
     if let Some(b64) = zip_base64 {
         use base64::Engine as _;
@@ -419,8 +436,9 @@ pub(super) fn resolve_import_input(
             .decode(&b64)
             .map_err(|e| format!("invalid zip_base64: {e}"))?;
         let content_digest = bi::content_digest_raw_bytes(bi::ImportInputMode::ZipBase64, &raw);
-        let (files, intake_warnings) = bi::unzip_bundle_import_with_budget(&raw, warning_budget)?;
-        return Ok(ResolvedImportInput { files, intake_warnings, content_digest });
+        let (mut files, mut intake_warnings) = bi::unzip_bundle_import_with_budget(&raw, warning_budget)?;
+        let widgets = split_widgets(&raw, &mut files, &mut intake_warnings)?;
+        return Ok(ResolvedImportInput { files, intake_warnings, content_digest, widgets });
     }
     let files = files.expect("exactly one input already validated present");
     let raw_files: Vec<bi::BundleImportFile> = files
@@ -429,7 +447,8 @@ pub(super) fn resolve_import_input(
         .collect();
     let (capped_files, intake_warnings) = bi::enforce_raw_files_caps_with_budget(raw_files, warning_budget)?;
     let content_digest = bi::content_digest_files(&capped_files);
-    Ok(ResolvedImportInput { files: capped_files, intake_warnings, content_digest })
+    // Text files can't carry a widget's bytes: widgets come only in a zip.
+    Ok(ResolvedImportInput { files: capped_files, intake_warnings, content_digest, widgets: vec![] })
 }
 
 /// `bundle.import.preview` — Phase 3 of
@@ -458,6 +477,7 @@ pub(super) async fn bundle_import_preview_impl(
     let parsed = bi::parse_bundle_import_with_budget(&resolved.files, preview_commit_warning_budget())
         .map_err(|e| format!("bundle.import.preview: {e}"))?;
 
+    let widgets = preview_widgets(&resolved);
     let mut all_warnings = resolved.intake_warnings;
     all_warnings.extend(parsed.warnings);
 
@@ -572,6 +592,7 @@ pub(super) async fn bundle_import_preview_impl(
     let (warnings, warnings_truncated) = bound_warnings_for_response(all_warnings);
 
     Ok(BundleImportPreviewResponse {
+        widgets,
         project_instructions: project_instructions_json,
         name: parsed.name,
         description: bounded_display(&parsed.description),
@@ -873,6 +894,7 @@ pub(super) async fn bundle_import_commit_impl(
                 let (bounded_warnings, warnings_truncated) = bound_warnings_for_response(warnings);
 
     Ok(BundleImportCommitResponse {
+        widgets: vec![],
         bundle_id: memory.id,
         imported_skill_ids,
         skipped_skills,
@@ -888,6 +910,7 @@ pub(super) fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &
     let identity_store = state.identity_store.clone();
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
+    let app = state.clone();
     engine.register_typed(
         COMMAND_BUNDLE_IMPORT_COMMIT,
         move |req: CommitReq, _ctx| {
@@ -895,9 +918,109 @@ pub(super) fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
+            let app = app.clone();
             async move {
-                bundle_import_commit_impl(&id_store, &identity_store, &mstore, &broker, req).await
+                let widgets_input = (!req.include_widgets.is_empty())
+                    .then(|| (req.file_path.clone(), req.zip_base64.clone(), req.expected_content_digest.clone(), req.include_widgets.clone()));
+                let mut resp = bundle_import_commit_impl(&id_store, &identity_store, &mstore, &broker, req).await?;
+                if let Some((file_path, zip_base64, digest, include)) = widgets_input {
+                    resp.widgets = install_bundle_widgets(&app, file_path, zip_base64, &digest, &include).await;
+                }
+                Ok(resp)
             }
         },
     );
+}
+
+/// The import preview's line for each widget the bundle carries.
+fn preview_widgets(resolved: &ResolvedImportInput) -> Vec<crate::backend::bundle_widgets::BundleImportWidgetPreview> {
+    use crate::backend::bundle_widgets as bw;
+    if resolved.widgets.is_empty() {
+        return vec![];
+    }
+    let manifest = resolved.files.iter().find(|f| f.path == crate::backend::bundle_import::MANIFEST_FILE).map(|f| f.content.as_str());
+    let declared = bw::declared(manifest);
+    let svc = crate::backend::widget_packages::service();
+    let installed = svc.map(|s| s.list()).unwrap_or_default();
+    resolved
+        .widgets
+        .iter()
+        .map(|w| {
+            bw::preview(w, &declared, &installed, |id, signer| match svc {
+                Some(s) => s.describe_signature(id, signer),
+                None => crate::backend::widget_signature::describe(id, signer, &Default::default()),
+            })
+        })
+        .collect()
+}
+
+/// After a commit: copy in the chosen widgets and ask the user to approve
+/// each, the way an agent's `WidgetInstall` does. The archive is read again
+/// and held to the digest the user previewed, so what installs is what they
+/// saw (SPEC_WIDGET_SHARING_2026_10_10.md §3.3). A bundle never approves a
+/// widget.
+async fn install_bundle_widgets(
+    app: &AppState,
+    file_path: Option<String>,
+    zip_base64: Option<String>,
+    digest: &str,
+    include: &[String],
+) -> Vec<crate::backend::rpc_types::BundleImportWidgetResult> {
+    use crate::backend::bundle_widgets as bw;
+    use crate::backend::rpc_types::BundleImportWidgetResult;
+    use crate::backend::widget_packages::{self as wp, WidgetState};
+    let failed = |id: &str, e: String| BundleImportWidgetResult { id: id.to_string(), status: "failed".into(), error: Some(e) };
+    let Some(svc) = wp::service() else {
+        return include.iter().map(|id| failed(id, "widget packages aren't available on this AgentMux".into())).collect();
+    };
+    let resolved = match tokio::task::spawn_blocking(move || resolve_import_input(file_path, zip_base64, None, preview_commit_warning_budget())).await {
+        Ok(Ok(r)) if r.content_digest == digest => r,
+        Ok(Ok(_)) => return include.iter().map(|id| failed(id, "the bundle changed since the preview".into())).collect(),
+        Ok(Err(e)) => return include.iter().map(|id| failed(id, e.clone())).collect(),
+        Err(e) => return include.iter().map(|id| failed(id, e.to_string())).collect(),
+    };
+    let previews = preview_widgets(&resolved);
+    let name = resolved
+        .files
+        .iter()
+        .find(|f| f.path == crate::backend::bundle_import::MANIFEST_FILE)
+        .and_then(|f| serde_json::from_str::<serde_json::Value>(&f.content).ok())
+        .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "a bundle".into());
+    let mut results = Vec::new();
+    let mut asking = Vec::new();
+    for id in include {
+        let (Some(w), Some(p)) = (resolved.widgets.iter().find(|w| &w.id == id), previews.iter().find(|p| &p.id == id)) else {
+            results.push(failed(id, "the bundle doesn't carry it".into()));
+            continue;
+        };
+        if let Some(e) = &p.error {
+            results.push(failed(id, e.clone()));
+            continue;
+        }
+        if p.same_as_installed {
+            results.push(BundleImportWidgetResult { id: id.clone(), status: "unchanged".into(), error: None });
+            continue;
+        }
+        let (dir, widget) = (svc.widgets_dir.clone(), w.clone());
+        match tokio::task::spawn_blocking(move || bw::install(&dir, &widget)).await {
+            Ok(Ok(_)) => {
+                asking.push(id.clone());
+                results.push(BundleImportWidgetResult { id: id.clone(), status: "waiting".into(), error: None });
+            }
+            Ok(Err(e)) => results.push(failed(id, e)),
+            Err(e) => results.push(failed(id, e.to_string())),
+        }
+    }
+    if !asking.is_empty() {
+        let packages = wp::refresh_off_thread(&app.config_watcher, &app.event_bus, &app.broker).await;
+        let asker = format!("The bundle \u{201c}{name}\u{201d}");
+        for pkg in packages.iter().filter(|p| asking.contains(&p.id) && p.state != WidgetState::Approved) {
+            // Nobody waits on the answer: the prompt is the user's, and the
+            // widget stays in Settings → Widgets until they answer.
+            drop(crate::backend::widget_requests::requests().ask(crate::backend::widget_requests::WidgetInstallRequest::of(pkg, &asker)));
+        }
+        crate::server::widget_agent_handlers::publish_requests(app);
+    }
+    results
 }

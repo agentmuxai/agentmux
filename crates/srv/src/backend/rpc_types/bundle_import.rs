@@ -113,6 +113,9 @@ pub struct BundleImportProjectInstructionPreview {
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportPreviewResponse {
+    /// Widgets the bundle carries (SPEC_WIDGET_SHARING_2026_10_10.md §3.3).
+    #[serde(default)]
+    pub widgets: Vec<crate::backend::bundle_widgets::BundleImportWidgetPreview>,
     pub project_instructions: Vec<BundleImportProjectInstructionPreview>,
     pub name: String,
     pub description: String,
@@ -150,6 +153,9 @@ pub struct BundleImportUnresolvedRequirement {
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportCommitResponse {
+    /// What became of each widget the commit was asked to install.
+    #[serde(default)]
+    pub widgets: Vec<BundleImportWidgetResult>,
     pub bundle_id: String,
     pub imported_skill_ids: Vec<String>,
     pub skipped_skills: Vec<String>,
@@ -237,6 +243,23 @@ pub struct CommandBundleImportCommitData {
     pub include_context_files: Vec<usize>,
     #[serde(default)]
     pub include_skills: Vec<BundleImportSkillSelection>,
+    /// The bundle's widgets to install, by id (SPEC_WIDGET_SHARING_2026_10_10.md
+    /// §3.3). Each asks for the user's approval; none is approved by this.
+    #[serde(default)]
+    pub include_widgets: Vec<String>,
+}
+
+/// One widget a bundle import was asked to install.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BundleImportWidgetResult {
+    pub id: String,
+    /// `waiting` (installed, waiting for the user's approval), `unchanged`
+    /// (already installed at these files), or `failed`.
+    pub status: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub error: Option<String>,
 }
 
 // Request-shape tests for the two `bundle.import.*` commands.
