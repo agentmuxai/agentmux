@@ -20,8 +20,9 @@
  * threshold, so bursts of quick calls never reach the screen; a shown line
  * stays at least DWELL once it is fully on screen before a same-or-lower rank
  * replaces it (0–2 preempt); a rank-4 line lingers HOLD after its activity
- * ends, and for as long as the next call is still too young to show, so the
- * row doesn't flash back to the goal between two calls.
+ * ends, and for as long as the next call is still too young to show (running,
+ * or the model writing its input), so the row doesn't flash back to the goal
+ * between two calls.
  *
  * Type-out: a line types out only when its rank changes (goal → now → needs
  * you). Within a rank it swaps in at once (§6.4 "Reveal"). DWELL counts from
@@ -228,19 +229,23 @@ function choose(input: StatusInput, memory: StatusMemory | null): { line: Status
         if (best.key !== prev.key && best.rank >= prev.rank && !settled) return remember(prev, true);
         return remember(best, true);
     }
-    // It is no longer a candidate (its call ended, or it folded into
-    // "2 tools running"): it still gets its dwell before a same-or-lower
-    // rank replaces it.
-    if (best.rank >= memory.line.rank && !settled) return remember(memory.line, false);
+    // A line about activity that is no longer a candidate (its call ended,
+    // or it folded into "2 tools running") still gets its dwell before a
+    // same-or-lower rank replaces it. A status line (needs you, held, an
+    // anomaly, a lead-in) goes the moment its cause does: it would be false
+    // ("Waiting for your answer" after you answered) or frozen if it stayed.
+    if (memory.line.rank >= RANK.now && best.rank >= memory.line.rank && !settled) return remember(memory.line, false);
     // Its activity ended: a rank-4 line lingers unless something at least as
     // specific is ready, so the row doesn't flash between two calls. It
     // lingers for HOLD, for its own dwell, and while the next call is
     // running but still too young to show.
     if (memory.line.rank === RANK.now && best.rank > RANK.now) {
-        // Bounded: a call is "warming" only until its promote threshold.
-        const nextCallWarming = (input.activity?.tools ?? []).some(
-            (t) => t.activity.family !== "plan" && now - t.startedAt < TIMING.toolPromoteMs,
-        );
+        // The next call is on its way: running but too young to show, or the
+        // model writing its input. Bounded by each one's promote threshold.
+        const a = input.activity;
+        const nextCallWarming =
+            (a?.tools ?? []).some((t) => t.activity.family !== "plan" && now - t.startedAt < TIMING.toolPromoteMs) ||
+            (a?.phase === "composing" && now - a.phaseSince < TIMING.composingPromoteMs);
         if (now - memory.liveAt < TIMING.holdMs || !settled || nextCallWarming) return remember(memory.line, false);
     }
     return remember(best, true);

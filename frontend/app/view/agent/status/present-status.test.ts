@@ -190,6 +190,17 @@ describe("presentStatus: when to change", () => {
         ]);
     });
 
+    it("after a call ends, the line also holds while the model writes the next call's input", () => {
+        const composing = act({ phase: "composing", phaseSince: T0 + 1_500 });
+        const frames = [
+            { nowMs: T0, activity: bashAt(T0 - 2_000) },
+            { nowMs: T0 + 100, activity: IDLE_ACTIVITY },
+            { nowMs: T0 + TIMING.holdMs + 100, activity: composing }, // HOLD over; composing 600 ms
+            { nowMs: T0 + 1_500 + TIMING.composingPromoteMs, activity: composing }, // now it shows
+        ];
+        expect(play(frames)).toEqual(["Running the tests", "Running the tests", "Running the tests", "Preparing the next step"]);
+    });
+
     it("a todo-list update is not a next call warming up, so the row falls back", () => {
         const todo = act({ tools: [tool("TodoWrite", { todos: [] }, T0 + 1_800)] });
         expect(todo.tools[0].activity.family).toBe("plan");
@@ -199,6 +210,22 @@ describe("presentStatus: when to change", () => {
             { nowMs: T0 + TIMING.holdMs + 100, activity: todo },
         ];
         expect(play(frames).at(-1)).toBe("Fix the login redirect loop");
+    });
+
+    it("a status line goes the moment its cause does, without waiting out a dwell", () => {
+        // Answered: the question line must not linger.
+        const asked = play([
+            { nowMs: T0, activity: bashAt(T0 - 2_000) },
+            { nowMs: T0 + 100, activity: bashAt(T0 - 2_000), needsYou: "Waiting for your answer" },
+            { nowMs: T0 + 200, activity: bashAt(T0 - 2_000) },
+        ]);
+        expect(asked).toEqual(["Running the tests", "Waiting for your answer", "Running the tests"]);
+        // The model answered: "Waiting on the model" must not stay, frozen.
+        const waiting = act({ phase: "requesting", phaseSince: T0 - TIMING.slowRequestMs - 1_000 });
+        const answered = act({ phase: "responding", phaseSince: T0 + 100 });
+        const lines = play([{ nowMs: T0, activity: waiting }, { nowMs: T0 + 100, activity: answered }]);
+        expect(lines[0]).toMatch(/^Waiting on the model/);
+        expect(lines[1]).not.toMatch(/^Waiting on the model/);
     });
 
     it("a counter moving keeps the line's key, so the row doesn't type it out again", () => {
