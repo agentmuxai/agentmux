@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
 import { getPaneTab, registerPaneTab } from "./pane-tab-registry";
 import {
+    createWidgetSync,
     rewriteWidgetImports,
     syncWidgetPackages,
     trustedPaneManifest,
@@ -183,14 +184,46 @@ describe("syncWidgetPackages", () => {
     it("doesn't load the same package twice when two passes overlap", async () => {
         const sample = (await import(SAMPLE)).default;
         const d = deps(() => sample);
-        const loaded = new Map<string, LoadedPackage>();
-        const inFlight = new Set<string>();
-        const [a, b] = await Promise.all([
-            syncWidgetPackages([pkg()], d, loaded, inFlight),
-            syncWidgetPackages([pkg()], d, loaded, inFlight),
-        ]);
-        expect([...a, ...b].filter((r) => r.ok)).toHaveLength(1);
+        const sync = createWidgetSync(d, new Map<string, LoadedPackage>());
+        await Promise.all([sync([pkg()]), sync([pkg()])]);
         expect(d.readModule).toHaveBeenCalledTimes(1);
+        expect(getPaneTab("ext:agentmux.hello/main")).toBeDefined();
+    });
+
+    it("reloads at once a package whose new version arrived while the old one was loading", async () => {
+        const sample = (await import(SAMPLE)).default;
+        let release!: () => void;
+        const gate = new Promise<void>((r) => (release = r));
+        const slowFirst = vi.fn(async () => {
+            if (slowFirst.mock.calls.length === 1) await gate;
+            return "export default {}";
+        });
+        // A new version arrives while the old one is loading.
+        const loaded = new Map<string, LoadedPackage>();
+        const sync = createWidgetSync(deps(() => sample, { readModule: slowFirst }), loaded);
+        const first = sync([pkg({ hash: "h1" })]);
+        const second = sync([pkg({ hash: "h2" })]);
+        release();
+        await Promise.all([first, second]);
+        expect(loaded.get("agentmux.hello")?.hash).toBe("h2");
+    });
+
+    it("unloads at once a package turned off while it was loading", async () => {
+        const sample = (await import(SAMPLE)).default;
+        const off = new Map<string, LoadedPackage>();
+        let release2!: () => void;
+        const gate2 = new Promise<void>((r) => (release2 = r));
+        const slow = vi.fn(async () => {
+            await gate2;
+            return "export default {}";
+        });
+        const sync2 = createWidgetSync(deps(() => sample, { readModule: slow }), off);
+        const a = sync2([pkg()]);
+        const b = sync2([]);
+        release2();
+        await Promise.all([a, b]);
+        expect(off.size).toBe(0);
+        expect(getPaneTab("ext:agentmux.hello/main")).toBeUndefined();
     });
 
     it("gives a sandboxed package's panes the sandbox host, never its code in the app", async () => {

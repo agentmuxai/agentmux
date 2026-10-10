@@ -849,7 +849,7 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
         unzip(source, &stage)?;
     } else {
         let folder = if source.file_name().is_some_and(|n| n == MANIFEST_FILE) { source.parent().unwrap_or(source) } else { source };
-        copy_tree(folder, &stage)?;
+        copy_tree(folder, &stage, &mut Budget::default())?;
     }
     // A zip may hold the package at its root or in one top-level folder.
     let root = if stage.join(MANIFEST_FILE).exists() {
@@ -875,11 +875,38 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
         }
         std::fs::remove_dir_all(&dest).map_err(|e| format!("can't replace the installed version: {e}"))?;
     }
-    copy_tree(&root, &dest)?;
+    copy_tree(&root, &dest, &mut Budget::default())?;
     Ok(manifest.id)
 }
 
-fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+/// What a package may still take while it is copied or unpacked: the limits
+/// apply to the bytes actually written, so neither a large folder nor a zip
+/// whose header understates its sizes can fill the disk before hash_files.
+#[derive(Default)]
+struct Budget {
+    bytes: u64,
+    files: usize,
+}
+
+impl Budget {
+    /// Copies `from` into `to`, counting what was written against the limits.
+    fn copy(&mut self, from: &mut impl std::io::Read, to: &Path) -> Result<(), String> {
+        self.files += 1;
+        if self.files > MAX_PACKAGE_FILES {
+            return Err(format!("the package has over {MAX_PACKAGE_FILES} files"));
+        }
+        let left = MAX_PACKAGE_BYTES - self.bytes;
+        let mut w = std::fs::File::create(to).map_err(|e| e.to_string())?;
+        let written = std::io::copy(&mut from.take(left + 1), &mut w).map_err(|e| e.to_string())?;
+        if written > left {
+            return Err(format!("the package is over {} MB", MAX_PACKAGE_BYTES / (1024 * 1024)));
+        }
+        self.bytes += written;
+        Ok(())
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path, budget: &mut Budget) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(from).map_err(|e| format!("can't read {}: {e}", from.display()))? {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -888,9 +915,10 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
         if ft.is_symlink() {
             return Err(format!("{} is a link; a package can't contain links", entry.path().display()));
         } else if ft.is_dir() {
-            copy_tree(&entry.path(), &target)?;
+            copy_tree(&entry.path(), &target, budget)?;
         } else {
-            std::fs::copy(entry.path(), &target).map_err(|e| e.to_string())?;
+            let mut f = std::fs::File::open(entry.path()).map_err(|e| e.to_string())?;
+            budget.copy(&mut f, &target)?;
         }
     }
     Ok(())
@@ -902,7 +930,7 @@ fn unzip(zip_path: &Path, to: &Path) -> Result<(), String> {
     if archive.len() > MAX_PACKAGE_FILES {
         return Err(format!("the package has over {MAX_PACKAGE_FILES} files"));
     }
-    let mut total: u64 = 0;
+    let mut budget = Budget::default();
     for i in 0..archive.len() {
         let mut f = archive.by_index(i).map_err(|e| e.to_string())?;
         // enclosed_name refuses `..` and absolute names.
@@ -915,15 +943,10 @@ fn unzip(zip_path: &Path, to: &Path) -> Result<(), String> {
             std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
             continue;
         }
-        total += f.size();
-        if total > MAX_PACKAGE_BYTES {
-            return Err(format!("the package is over {} MB", MAX_PACKAGE_BYTES / (1024 * 1024)));
-        }
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let mut w = std::fs::File::create(&out).map_err(|e| e.to_string())?;
-        std::io::copy(&mut (&mut f).take(MAX_PACKAGE_BYTES + 1), &mut w).map_err(|e| e.to_string())?;
+        budget.copy(&mut f, &out)?;
     }
     Ok(())
 }
@@ -1092,6 +1115,17 @@ mod tests {
         // A v1 widget keeps its own widget-bar entry; none is added.
         svc.approve("local.hello", &p.hash).unwrap();
         assert!(widget_entries(&svc.rescan(&v1)).is_empty());
+    }
+
+    #[test]
+    fn installing_counts_the_bytes_written_not_what_a_zip_declares() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("f");
+        let mut near_full = Budget { bytes: MAX_PACKAGE_BYTES - 4, files: 0 };
+        assert!(near_full.copy(&mut &b"1234"[..], &out).is_ok());
+        assert!(near_full.copy(&mut &b"5"[..], &out).unwrap_err().contains("over 50 MB"));
+        let mut many = Budget { bytes: 0, files: MAX_PACKAGE_FILES };
+        assert!(many.copy(&mut &b"x"[..], &out).unwrap_err().contains("files"));
     }
 
     #[test]

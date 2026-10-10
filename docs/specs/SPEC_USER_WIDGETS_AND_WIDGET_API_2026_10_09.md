@@ -71,12 +71,12 @@ A trusted package has `index.js` (or whatever `entry` names) instead of `index.h
 srv serves an approved, enabled package's files read-only at:
 
 ```
-GET /agentmux/widget-files/<id>/<content-hash>/<path>
+GET /agentmux/widget-files/<id>/<content-hash>/<key>/<path>
 ```
 
-- Only files inside the package folder; `..`, absolute paths and symlinks are refused. The `<content-hash>` segment must equal the approved hash (§8.2), so a URL always means one exact version of the code, and an edited package isn't served until it's approved again.
-- No auth key: the URL is what the iframe loads, and package files aren't secrets.
-- Every response carries `Content-Security-Policy` (§6.1), `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache` and a content type from the extension.
+- Only files inside the package folder; `..`, absolute paths and symlinks are refused. The `<content-hash>` segment must equal the approved hash (§8.2), so a URL always means one exact version of the code. Each file is hashed again on every read and compared with its hash at approval, so an edited file is never served (409), whether or not srv's folder watcher noticed the edit.
+- No auth key: the URL is what the iframe loads, and package files aren't secrets. `<key>` is an HMAC of the instance secret over the id and hash (srv hands the full URL to the UI in `widgets.list`), so a web page elsewhere on the machine can't name a package's files.
+- Every response carries `Content-Security-Policy` (§6.1), `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache`, `Referrer-Policy: no-referrer` and a content type from the extension.
 - The SDK is served the same way at `GET /agentmux/widget-sdk/v1.js` (§7).
 
 ### 5.3 The manifest, `widget.json`
@@ -305,7 +305,7 @@ srv scans `~/.agentmux/widgets/` at start and watches it. For each folder it par
 
 ### 8.2 The content hash
 
-SHA-256 over every file in the package, sorted by relative path: for each, the path, a NUL byte, the length, a NUL byte, the bytes. Any change to any file (an edit, an update, a file added) changes it.
+Each file's SHA-256 (hex), then SHA-256 over the files sorted by relative path: for each, the path, a NUL byte, the file's hash, a newline. Any change to any file (an edit, an update, a file added) changes it. The per-file hashes are kept with the approval, for the check on every read (§5.2).
 
 ### 8.3 Approval
 

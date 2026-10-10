@@ -94,13 +94,12 @@ export function trustedPaneManifest(exported: unknown, pkg: WidgetPackageInfo, p
  * Brings the registered pane tabs in line with `packages`: loads each
  * approved package not yet loaded at its current hash, and unloads any that
  * is gone, disabled, changed or no longer approved. `loaded` is the state
- * between passes; a package being loaded is in `inFlight`.
+ * between passes. Run passes through createWidgetSync, one at a time.
  */
 export async function syncWidgetPackages(
     packages: WidgetPackageInfo[],
     deps: PackageLoaderDeps,
-    loaded: Map<string, LoadedPackage>,
-    inFlight: Set<string> = new Set()
+    loaded: Map<string, LoadedPackage>
 ): Promise<PackageLoadResult[]> {
     const want = new Map(packages.filter((p) => p.state === "approved").map((p) => [p.id, p]));
     for (const [id, l] of [...loaded]) {
@@ -113,8 +112,7 @@ export async function syncWidgetPackages(
     const results: PackageLoadResult[] = [];
     const register = deps.register ?? registerPaneTab;
     for (const pkg of want.values()) {
-        if (loaded.has(pkg.id) || inFlight.has(pkg.id)) continue;
-        inFlight.add(pkg.id);
+        if (loaded.has(pkg.id)) continue;
         const unregister: (() => void)[] = [];
         try {
             const manifests: PaneTabManifest[] = [];
@@ -139,11 +137,41 @@ export async function syncWidgetPackages(
             const reason = e instanceof Error ? e.message : String(e);
             results.push({ id: pkg.id, ok: false, reason });
             console.warn(`[widget-loader] ${pkg.id} not loaded: ${reason}`);
-        } finally {
-            inFlight.delete(pkg.id);
         }
     }
     return results;
+}
+
+/**
+ * Runs passes one at a time, each with the newest list it was given. A list
+ * that arrives while a pass is loading starts another pass when it ends, so
+ * a load that finished against an older list (a new hash, or a package since
+ * turned off) is put right at once rather than at the next change.
+ */
+export function createWidgetSync(
+    deps: PackageLoaderDeps,
+    loaded: Map<string, LoadedPackage>,
+    onResults: (results: PackageLoadResult[]) => void = () => {}
+): (packages: WidgetPackageInfo[]) => Promise<void> {
+    let latest: WidgetPackageInfo[] = [];
+    let running: Promise<void> | null = null;
+    let again = false;
+    return (packages) => {
+        latest = packages;
+        if (running) {
+            again = true;
+            return running;
+        }
+        running = (async () => {
+            do {
+                again = false;
+                onResults(await syncWidgetPackages(latest, deps, loaded));
+            } while (again);
+        })().finally(() => {
+            running = null;
+        });
+        return running;
+    };
 }
 
 // ── Load errors, for Settings → Widgets ─────────────────────────────────────
@@ -213,8 +241,7 @@ export function startWidgetLoader(): Promise<void> {
             (await RpcApi.WidgetsReadFileCommand(TabRpcClient, { id: pkg.id, hash: pkg.hash, path })).content,
         importModule: (source) => importFromBlob(source),
     };
-    const loaded = new Map<string, LoadedPackage>();
-    const inFlight = new Set<string>();
+    const sync = createWidgetSync(deps, new Map<string, LoadedPackage>(), noteResults);
     firstPass = startWidgetPackages().then(
         () =>
             new Promise<void>((resolve) => {
@@ -222,7 +249,7 @@ export function startWidgetLoader(): Promise<void> {
                     const list = widgetPackages();
                     let first = true;
                     createEffect(() => {
-                        const pass = syncWidgetPackages(list(), deps, loaded, inFlight).then(noteResults);
+                        const pass = sync(list());
                         if (first) {
                             first = false;
                             void pass.finally(resolve);
