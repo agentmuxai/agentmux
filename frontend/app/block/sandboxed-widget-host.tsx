@@ -59,7 +59,9 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
     let iframe: HTMLIFrameElement | null = null;
     let loads = 0;
     let disposed = false;
-    const state: BridgeState = { ready: false, inFlight: 0 };
+    // One per session: a request still running when the widget restarts
+    // finishes against its own session's state and port, never the new one's.
+    let state: BridgeState = { ready: false, inFlight: 0 };
 
     const notify = (method: string, params: unknown) => port?.postMessage({ jsonrpc: "2.0", method, params });
 
@@ -103,8 +105,7 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
         port?.close();
         port = null;
         state.ready = false;
-        state.inFlight = 0;
-        state.lastMetaSent = undefined;
+        state = { ready: false, inFlight: 0 };
     };
 
     // Stopping removes the frame (it unmounts with the failure shown).
@@ -123,28 +124,30 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
     const connect = () => {
         const started = generation();
         const channel = new MessageChannel();
-        port = channel.port1;
-        port.onmessage = async (ev) => {
+        const own = channel.port1;
+        const session = state;
+        port = own;
+        own.onmessage = async (ev) => {
             const msg = ev.data;
             if (!msg || msg.jsonrpc !== "2.0" || msg.id == null || typeof msg.method !== "string") return;
-            if (state.inFlight >= MAX_IN_FLIGHT) {
-                port?.postMessage({ jsonrpc: "2.0", id: msg.id, error: { code: 1002, message: "too many requests in flight", data: { limit: "inFlight" } } });
+            if (session.inFlight >= MAX_IN_FLIGHT) {
+                own.postMessage({ jsonrpc: "2.0", id: msg.id, error: { code: 1002, message: "too many requests in flight", data: { limit: "inFlight" } } });
                 return;
             }
-            state.inFlight++;
+            session.inFlight++;
             try {
                 let reply;
                 try {
-                    reply = await handleBridgeRequest(host, state, msg.method, msg.params ?? {});
+                    reply = await handleBridgeRequest(host, session, msg.method, msg.params ?? {});
                 } catch (e) {
                     reply = { error: { code: 1099, message: e instanceof Error ? e.message : String(e) } };
                 }
-                port?.postMessage({ jsonrpc: "2.0", id: msg.id, ...reply });
+                if (port === own) own.postMessage({ jsonrpc: "2.0", id: msg.id, ...reply });
             } finally {
-                state.inFlight--;
+                session.inFlight--;
             }
         };
-        port.start();
+        own.start();
         iframe!.contentWindow?.postMessage({ type: "agentmux:connect", protocols: [PROTOCOL] }, "*", [channel.port2]);
         setTimeout(() => {
             if (!state.ready && port && !disposed && generation() === started) stop(`${pkg.name} didn't start (no hello within ${HELLO_TIMEOUT_MS / 1000} s).`);

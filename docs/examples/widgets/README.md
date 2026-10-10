@@ -1,5 +1,7 @@
 # AgentMux widget samples
 
+**Status:** living — the starter samples for the widget API (`docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`).
+
 A widget adds your own kind of pane to AgentMux. Each folder here is a complete widget package you can install as it is, then copy and change. The full reference is `docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`; the SDK is `sdk/widget-sdk/`.
 
 | Sample | Shows | Kind |
