@@ -11,6 +11,7 @@
 import { createMemo, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
+import { IconButton } from "@/app/element/ui";
 import { pushNotification } from "@/app/store/global";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import { getPlatform } from "@/util/platformutil";
@@ -139,13 +140,13 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
                 );
             }}
         >
-            <button
+            <IconButton
                 class={clsx("browser-nav-btn browser-profile-btn", { "browser-profile-btn-incognito": isIncognito() })}
-                title={`Browsing as ${name()}`}
-                aria-label={`Profile: browsing as ${name()}`}
-            >
-                <i class={clsx("fa fa-solid", isIncognito() ? `fa-${INCOGNITO_ICON}` : "fa-circle-user")} aria-hidden="true" />
-            </button>
+                icon={isIncognito() ? INCOGNITO_ICON : "circle-user"}
+                label={`Profile: browsing as ${name()}`}
+                // The menu opens on click; a tooltip over it would only get in the way.
+                tooltip={false}
+            />
         </FlyoutMenu>
     );
 }

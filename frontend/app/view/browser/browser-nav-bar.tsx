@@ -8,6 +8,7 @@ import { getApi } from "@/app/store/app-api";
 import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
+import { IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
@@ -400,8 +401,11 @@ export function BrowserNavBar(props: {
                     onClick={() => getApi().browserPanes.reload(model.blockId).catch(() => {})}
                     title="Reload"
                 >{"↻"}</button>
-                <button
+                <IconButton
                     class="browser-nav-btn"
+                    icon="house"
+                    label={`Home: ${home()}`}
+                    tooltipPlacement="bottom"
                     onClick={goHome}
                     onContextMenu={(e) => {
                         e.preventDefault();
@@ -416,11 +420,7 @@ export function BrowserNavBar(props: {
                             e
                         );
                     }}
-                    title={`Home: ${home()}`}
-                    aria-label="Home"
-                >
-                    <i class="fa fa-solid fa-house" aria-hidden="true" />
-                </button>
+                />
                 <FlyoutMenu
                     items={bookmarkMenuItems()}
                     placement="bottom-start"
