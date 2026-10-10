@@ -223,20 +223,17 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // tick() re-runs this memo every second so a phase's "up to Ys" countdown
     // (formatPhaseLabel) stays live — see useTick.ts's "always-on tick" pattern.
     const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
-    // The very first text after ENTERING the loading state renders in full
-    // instantly — the type-out reveal is a transition effect for text
-    // changes while already visibly working (summary → phrase). Playing
-    // it on entry meant "Working…" trailed the Enter keypress by
-    // ~TIMING.revealCharMs × 8 ≈ 250ms of a nearly-empty row, reading as "the
-    // indicator comes up late" even though the state flip is synchronous
-    // with the send (user report 2026-08-10). Plain (non-reactive) flag:
-    // only the loading edge below writes it, only the reveal effect reads it.
-    let revealInstantly = true;
+    // A turn's first line types out too (operator, 2026-10-10; it showed whole
+    // since 2026-08-10). Going live forgets the presenter's memory, so that line
+    // is new to it and its dwell counts from the end of its own type-out.
+    let wasLive = false;
     // The live status (status/present-status.ts): what to say, and when, from
     // what the agent is doing and what the row showed last.
     let statusMemory: StatusMemory | null = null;
     const status = createMemo(() => {
         const now = (tick(), Date.now());
+        if (live() && !wasLive) statusMemory = null;
+        wasLive = live();
         const l = props.turnLedger;
         const r = presentStatus(
             {
@@ -248,7 +245,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 turnStartedAt: l && turnOpen(l, now) ? l.startedAtMs : untrack(loadStartMs),
                 goal: props.activitySummary?.trim() || null,
                 phrase: phrase(),
-                instantReveal: untrack(reducedMotion) || revealInstantly,
+                instantReveal: untrack(reducedMotion),
             },
             statusMemory,
         );
@@ -263,19 +260,16 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // counter that grows inside the same line shows in full.
     const [revealed, setRevealed] = createSignal(Number.POSITIVE_INFINITY);
 
-    createEffect(() => {
-        if (!live()) revealInstantly = true;
-    });
 
-    // Every new line types out; a moved counter (same key) never re-types it.
-    // The presenter's dwell counts from the end of this type-out.
+    // Every new line types out, and so does the line on screen when the row
+    // goes live; a moved counter (same key) never re-types it. The presenter's
+    // dwell counts from the end of this type-out.
     createEffect(
         on(
-            statusKey,
+            [statusKey, live],
             () => {
                 const text = untrack(leftText);
-                if (untrack(reducedMotion) || !text || revealInstantly) {
-                    revealInstantly = false;
+                if (untrack(reducedMotion) || !text || !untrack(live)) {
                     setRevealed(Number.POSITIVE_INFINITY);
                     return;
                 }

@@ -25,6 +25,24 @@ import type { AgentViewModel } from "../agent-model";
 import { requestComposerFocus } from "../composer-focus";
 import { focusManager } from "@/app/store/focusManager";
 
+/** Run the clock just until the Working row's line has finished typing out
+ *  (it stops changing), so a test reads the whole line without letting the
+ *  row's other timing rules move on. Needs fake timers. A turn's first line
+ *  types out too (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.10). */
+function finishTyping(container: HTMLElement): void {
+    const text = () => container.querySelector(".agent-working-row-left")?.textContent;
+    let prev = text();
+    for (let i = 0; i < 400; i++) {
+        vi.advanceTimersByTime(28);
+        const now = text();
+        if (now === prev) return;
+        prev = now;
+    }
+}
+const FAKE_CLOCK: Parameters<typeof vi.useFakeTimers>[0] = {
+    toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"],
+};
+
 afterEach(() => {
     cleanup();
 });
@@ -679,17 +697,25 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
  * and has no shimmer overlay.
  */
 describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
+    beforeEach(() => {
+        vi.useFakeTimers(FAKE_CLOCK);
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
     it("shows the ambient summary in the left zone", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} activitySummary="  Fix the login redirect loop " />
         ));
-
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
     });
 
     it("falls back to the cycling phrase when there is no summary", () => {
         const { container } = render(() => <AgentWorkingRow loading={true} activitySummary={null} />);
-
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toMatch(/…$/);
     });
 
@@ -697,7 +723,7 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} stopping={true} activitySummary="Fix the login redirect loop" />
         ));
-
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 
@@ -781,7 +807,8 @@ describe("AgentWorkingRow type-out follows the clock", () => {
             <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" needsYou={needsYou()} />
         ));
         const primary = () => container.querySelector(".agent-working-row-primary")?.textContent;
-        expect(primary()).toBe("Fix the login redirect loop"); // a turn's first line: at once
+        finishTyping(container);
+        expect(primary()).toBe("Fix the login redirect loop"); // a turn's first line types out too
         setNeedsYou("Waiting for your approval: git push"); // a rank change: types out
         expect(primary()).toBe("");
         // The window was in the background: 2 s pass, and one callback runs.
@@ -833,6 +860,22 @@ describe("AgentWorkingRow type-out follows the clock", () => {
         expect(primary()).toBe("Building the frontend");
     });
 
+    // The operator's call (2026-10-10): a turn's first line types out too; it
+    // had shown whole since 2026-08-10.
+    it("when a turn starts, its first line types out", () => {
+        vi.useFakeTimers(FAKE_CLOCK);
+        const [loading, setLoading] = createSignal(false);
+        const { container } = render(() => <AgentWorkingRow loading={loading()} activitySummary="Fix the login redirect loop" />);
+        const primary = () => container.querySelector(".agent-working-row-primary")?.textContent;
+        vi.advanceTimersByTime(5_000); // idle a while: the presenter has seen this line
+        setLoading(true);
+        expect(primary()).toBe(""); // not whole at once
+        vi.advanceTimersByTime(3 * 28 + 5);
+        expect(primary()).toBe("Fix");
+        finishTyping(container);
+        expect(primary()).toBe("Fix the login redirect loop");
+    });
+
     it("shows an ASCII spinner, not the pulsing dot", () => {
         const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" />);
         expect(container.querySelector(".agent-working-row .agent-spinner-dot")).toBeNull();
@@ -845,6 +888,14 @@ describe("AgentWorkingRow type-out follows the clock", () => {
  * counts the turn the user sees, over its CLI passes, from srv's ledger.
  */
 describe("AgentWorkingRow across a turn's passes", () => {
+    beforeEach(() => {
+        vi.useFakeTimers(FAKE_CLOCK);
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
     const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
         turnId: 7,
         seq: 1,
@@ -902,7 +953,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
                 })}
             />
         ));
-
+        finishTyping(container);
         const row = container.querySelector(".agent-working-row--loading");
         expect(row?.classList.contains("is-settling")).toBe(true);
         expect(container.querySelector(".agent-working-row--worked")).toBeNull();
@@ -966,6 +1017,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
                 turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX", external: true } })}
             />
         ));
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("↳ jekt from AgentX");
         // Nothing after it: the goal is in the Swarm view.
         expect(container.querySelector(".agent-working-row-detail")).toBeNull();
@@ -977,6 +1029,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
                 turnLedger={ledger({ startedAtMs: Date.now() - 10_000, trigger: { kind: "agent", from: "AgentX", external: true } })}
             />
         ));
+        finishTyping(later.container);
         expect(later.container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
     });
 
@@ -984,6 +1037,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} activitySummary="Fix it" turnLedger={ledger({ startedAtMs: Date.now() - 500 })} />
         ));
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix it");
     });
 
@@ -1046,6 +1100,14 @@ describe("AgentWorkingRow across a turn's passes", () => {
  * presenter's line (status/present-status.ts, tested there in depth).
  */
 describe("AgentWorkingRow live status", () => {
+    beforeEach(() => {
+        vi.useFakeTimers(FAKE_CLOCK);
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
     const busy = (startedAt: number) => ({
         phase: null,
         phaseSince: 0,
@@ -1058,6 +1120,7 @@ describe("AgentWorkingRow live status", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 3_000)} />
         ));
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("Running the srv test suite");
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Running the srv test suite");
     });
@@ -1066,6 +1129,7 @@ describe("AgentWorkingRow live status", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 200)} />
         ));
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
     });
 
@@ -1078,11 +1142,13 @@ describe("AgentWorkingRow live status", () => {
                 needsYou="Waiting for your approval: Running git push"
             />
         ));
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Waiting for your approval: Running git push");
     });
 
     it("a status like Stopping still outranks what is running", () => {
         const { container } = render(() => <AgentWorkingRow loading={true} stopping={true} activity={busy(Date.now() - 3_000)} />);
+        finishTyping(container);
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 });
