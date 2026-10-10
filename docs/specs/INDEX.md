@@ -634,6 +634,7 @@ partial list.
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |
+| [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
