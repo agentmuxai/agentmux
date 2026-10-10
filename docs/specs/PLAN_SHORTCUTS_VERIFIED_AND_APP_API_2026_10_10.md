@@ -155,3 +155,12 @@ Method: real keys sent through System Events into a dev window. The window was r
 - ⌃PageUp/PageDown (`doctab:next/prev`) and ⇧⌘PageUp/PageDown (`tab:move*`) reach the app as Page key codes. A physical fn+Arrow, where macOS 15+ window tiling owns fn⌃Arrow, still needs a hand press.
 - ⌃⌥⌘← (`pane:resize:left`) never reaches the page: Magnet takes it, on that Mac only. ⌃⌥⌘↑ reaches the app. This is a Help-pane note, not a rebind.
 - **Found: the Files pane swallowed some global shortcuts.** With it focused, ⌘/, ⌃⇧↑/↓, ⇧⌘PageUp/PageDown and ⌃⌥⌘↑ reached the page and resolved nothing. Its list handler took any arrow, Page key or "/" as its own, whatever the modifiers, and stopped the dispatcher. It now leaves a key the table gives a global command to the dispatcher (`isGlobalKey`). This affected every platform.
+
+**L3 on Linux, real key presses (charlie, Maricon, 2026-10-10, main @ `3dc1bc120` plus the L3 branch, #4624, kinks plan L3).** GNOME 50.1 on Wayland.
+- Method: `scripts/verify-shortcuts-l3-linux.mjs` presses each distinct Linux key once through `ydotool`, with the dev window holding OS focus (checked through `document.hasFocus()` before each key). A passive keydown listener records whether the key arrived, and `last()` what it resolved to.
+- **92 of 92 keys pressed reached AgentMux**; the desktop took none.
+- Not pressed:
+  - the four `pane:swap:*` keys, which GNOME takes for "move window to workspace" (the gsettings result above). Wayland gives no way to read and restore the workspace, so they're never pressed;
+  - the manual rows;
+  - Shift+Delete, which is refused.
+- So on stock GNOME, `pane:swap:*` is the only Linux key the OS takes. Its rebind (owner decision §8.3) is with Maricon.
