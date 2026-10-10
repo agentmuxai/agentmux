@@ -170,7 +170,7 @@ async fn run_pkce_login_inner(
     let state = uuid::Uuid::new_v4().to_string();
 
     // 4. Register the flow with the cloud relay BEFORE opening the browser.
-    //    The hosted /desktop-callback page (agentmux-cloud, login-relay.ts)
+    //    The hosted /desktop-callback page (agentmux-cloud's login-relay page)
     //    posts {state, code} there; step 7 polls it back out. No loopback
     //    listener: the browser never touches 127.0.0.1, and concurrent
     //    instances can't collide — each flow polls its own state key.

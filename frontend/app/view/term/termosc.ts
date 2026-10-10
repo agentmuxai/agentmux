@@ -178,7 +178,6 @@ export function handleOscTitleCommand(data: string, blockId: string, loaded: boo
 }
 
 // OSC 16162 — Shell Integration Commands
-// See aiprompts/wave-osc-16162.md for full documentation
 type Osc16162Command =
     | { command: "A"; data: {} }
     | { command: "C"; data: { cmd64?: string } }

@@ -4,7 +4,7 @@
 // Top-level window tasks: deferred load_url, close, memory-pressure banner,
 // minimize / maximize / focus / move / position / rect, window-at-cursor
 // resolution, corrective move, window creation, DevTools, and main-focus
-// reclaim. Split out of `ui_tasks.rs` unchanged.
+// reclaim. Split out of the single-file `ui_tasks` module unchanged.
 
 use std::sync::Arc;
 use cef::*;

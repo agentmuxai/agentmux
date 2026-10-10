@@ -824,8 +824,8 @@ async fn run_cli_login_pty(
 
     // Reap the child in a blocking task. The PtyPair (master + slave)
     // moves into the closure so its destructor runs AFTER child.wait()
-    // — necessary for ConPTY on Windows (see retro
-    // 2026-05-11-live-log-streaming-wrapper-failures.md §4.2).
+    // — necessary for ConPTY on Windows (see
+    // docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md §4.2).
     //
     // Cancel handling: `cancel_cli_login` reads `cli_login_pty_pid`
     // and kills the subprocess by PID; once the child dies, this

@@ -3,7 +3,7 @@
 //
 // Window transparency / per-window opacity handlers for the CEF host.
 //
-// Fourth carve of the commands/window.rs modularization (Plan 1). Pure
+// Fourth carve of the `commands::window` modularization (Plan 1). Pure
 // move — no behavior change.
 //
 // `set_window_transparency`, `set_window_opacity`, `get_window_opacity`

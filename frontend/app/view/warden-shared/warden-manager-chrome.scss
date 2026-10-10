@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Shared visual primitives for every Warden manager — split out of the
-// original single-page warden.scss, where LAN's markup reused Host's
+// original single-page warden stylesheet, where LAN's markup reused Host's
 // `.warden-host-*` classes by name even though they're not Host-specific.
 // Named generically here. Every manager component that uses any class
 // below MUST explicitly `import` this file — no implicit/transitive

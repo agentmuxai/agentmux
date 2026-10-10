@@ -13,6 +13,7 @@ import {
     compareCodeEqual,
     deadRefFindings,
     gateFile,
+    isBareNonRef,
     isForeignRef,
     isScanPath,
     isSourcePath,
@@ -416,6 +417,43 @@ describe("file references", () => {
         expect(isForeignRef("agentmux-cloud/docs/PLAN_X.md")).toBe(true);
         expect(isForeignRef("persistent.rs")).toBe(false);
         expect(isForeignRef("crates/srv/src/app.rs")).toBe(false);
+    });
+
+    it("treats provider files, TypeScript libs, packages and registry crates as foreign", () => {
+        for (const ref of ["notes.md", "KIMI.md", "system_prompt.md", "CLAUDE_CONTAINER.md", "lib.dom.d.ts",
+            "lib.es2022.full.d.ts", "vite/client.d.ts", "shiki/langs/rust.mjs", "keyring-2.3.3/src/windows.rs"]) {
+            expect(isForeignRef(ref), ref).toBe(true);
+        }
+        expect(isForeignRef("libfoo.d.ts")).toBe(false);
+        expect(isForeignRef("vitest/src/x.ts")).toBe(false);
+    });
+
+    it("does not read a name glued to a glob or an escape", () => {
+        const refs = (src) => commentRefs(ts(src)).map((r) => r.ref);
+        expect(refs("// Payloads in frontend/types/rpc/Attachment*Event.ts;\n")).toEqual([]);
+        expect(refs("// a non-ASCII byte (\"docs/specs/Caf\\303\\251.md\")\n")).toEqual([]);
+        expect(refs("// see a.ts and *.md\n")).toEqual(["a.ts"]);
+    });
+
+    it("excuses bare names a test uses as fixtures, or the file's code spells the same way", () => {
+        const code = ts("// `item.ts + 1` and `last.ts`\nconst gap = item.ts - last.ts;\n");
+        expect(isBareNonRef("item.ts", code)).toBe(true);
+        expect(isBareNonRef("last.ts", code)).toBe(true);
+        // `xitem.ts` and `a.item.ts` are not what the code spells.
+        expect(isBareNonRef("xitem.ts", ts("// x\nconst t = item.ts;\n"))).toBe(false);
+        expect(isBareNonRef("gone.rs", rs("// see gone.rs\nfn main() {}\n"))).toBe(false);
+        // Anywhere in a test, in any language the scan reads.
+        for (const file of ["frontend/x.test.ts", "scripts/y.test.mjs", "crates/srv/src/tests/z.rs", "crates/a/tests.rs"]) {
+            expect(isBareNonRef("a.md", ts("// a.md\n"), file), file).toBe(true);
+        }
+        expect(isBareNonRef("a.md", ts("// a.md\n"), "frontend/x.ts")).toBe(false);
+    });
+
+    it("keeps failing a doc name or repo path in a test, and skips only the bare fixture", () => {
+        const info = ts("// fixtures: a.md, src/a.ts\n// see docs/specs/SPEC_GONE_2026_01_01.md and frontend/gone.ts\n");
+        const res = deadRefFindings(info, new Set([1, 2]), index, new Set(), "frontend/x.test.ts");
+        expect(res.warnings).toEqual([]);
+        expect(res.errors.map((e) => e.line)).toEqual([2, 2]);
     });
 
     it("errors on an added dead doc or repo path, warns on a bare name, skips the rest", () => {

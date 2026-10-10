@@ -3,7 +3,7 @@
 
 // Styles for MemoryHistory — the shared version history/diff/revert list,
 // mounted from the Stash memory tab and the Armory's Personal and Global
-// Memory full views. Was NativeMemoryHistoryPanel.scss; the class names keep
+// Memory full views. Was the NativeMemoryHistoryPanel stylesheet; the class names keep
 // their `native-memory-history-*` prefix so nothing that targets them moves.
 // The panel's "current content" rules went with it — content now renders in
 // MemoryContent (memory-editor.scss). SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.

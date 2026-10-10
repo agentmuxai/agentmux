@@ -11,7 +11,7 @@ const FILE_PATH_REGEXES: RegExp[] = [
     // Unix absolute: /home/user/file.ts, /usr/bin/node
     /\/[\w.\-]+(?:\/[\w.\-]+)+/g,
 
-    // Relative with extension: ./src/app.ts, ../config/settings.json, src/components/App.tsx
+    // Relative with extension: ./src/app.ts, ../config/settings.json, src/components/App.tsx (comment-hygiene: allow)
     /\.{0,2}\/[\w.\-]+(?:\/[\w.\-]+)*\.[\w]+/g,
 
     // Home dir: ~/Documents/file.txt, ~/.config/settings.json

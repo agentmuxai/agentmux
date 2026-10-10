@@ -3,7 +3,7 @@
 
 /**
  * Which part of a file a Read, Edit or Write covers: shown on the tool row
- * before the path (`Read 33:334 src/a.ts`), and again above the preview
+ * before the path (`Read 33:334 src/a.ts`), and again above the preview (comment-hygiene: allow)
  * (docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §3).
  *
  * Pure, like the rest of tool-meta: no JSX, no Solid.

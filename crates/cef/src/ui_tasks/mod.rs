@@ -13,7 +13,7 @@
 // Used on Linux (and macOS). On Windows, Win32 APIs are used directly since
 // they are safe to call from any thread.
 //
-// This module was split from a single `ui_tasks.rs` into category submodules
+// This module was split from a single `ui_tasks` file into category submodules
 // (pure reorganization — zero logic / public-API changes). Every task type and
 // `post_*` / `get_*` function is re-exported below so external call sites keep
 // using `crate::ui_tasks::…` unchanged.

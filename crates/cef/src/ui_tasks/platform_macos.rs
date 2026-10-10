@@ -3,7 +3,7 @@
 //
 // macOS-specific swizzle storage + swizzled ObjC implementations used by the
 // browser-pane overlay path, plus `clear_pane_swizzle_statics` (with a no-op
-// non-macOS variant). Split out of `ui_tasks.rs` unchanged.
+// non-macOS variant). Split out of the single-file `ui_tasks` module unchanged.
 
 // macOS: swizzle storage for NativeWidgetMacNSWindow::isMainWindow / isKeyWindow.
 // The swizzled implementations check objc_getAssociatedObject on `self` — only the

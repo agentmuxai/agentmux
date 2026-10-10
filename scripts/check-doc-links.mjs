@@ -12,11 +12,11 @@
 // this one catches a *Markdown link* whose target is wrong relative to where it
 // was written. The two miss opposite things:
 //
-//   docs/reports/X.md containing `](specs/archive/Y.md)`
+//   docs/reports/X.md containing `](specs/archive/Y.md)` (comment-hygiene: allow)
 //     -> check-spec-citations.sh: does not fire. The text does not contain the
 //        substring `docs/specs/`, so it is not recognised as a spec citation.
 //     -> this gate: fires. Resolved from docs/reports/ the target would be
-//        docs/reports/specs/archive/Y.md, which does not exist.
+//        docs/reports/specs/archive/Y.md, which does not exist. (comment-hygiene: allow)
 //
 // That exact shape is why this exists: the top-level `specs/` tree was folded
 // into `docs/specs/` (PR #2920), and links written as `specs/archive/...` kept

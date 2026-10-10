@@ -20,7 +20,7 @@
 //! side followed once the six agent-child tables' FK re-pointed to
 //! `db_agents` (Phase 3c, PR 3 of 4, #3088) removed the reason
 //! `agent_def_get` had to stay scoped to `db_agent_definitions`. Neither
-//! legacy table has a live writer left in this file; `dual_write.rs`, which
+//! legacy table has a live writer left in this file; the old `dual_write` module, which
 //! used to mirror definition writes into `db_agents`, is gone — there is no
 //! second table left to mirror into one from.
 //!

@@ -11,7 +11,7 @@
 // behind. See the module docs on `super::COMMAND_TX` for the full
 // rationale.
 //
-// Split out of `launcher_ipc.rs` (now `launcher_ipc/mod.rs`) — this
+// Split out of the single-file `launcher_ipc` module (now `launcher_ipc/mod.rs`) — this
 // file is the uniform, stateless "report a fact to the launcher"
 // family; connection setup, shadow projection, and the reader/drain
 // tasks stay in the parent module.

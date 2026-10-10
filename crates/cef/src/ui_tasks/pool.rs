@@ -3,7 +3,7 @@
 //
 // Pool-window promote tasks (drag-to-tear-off / new-window / pane promote) and
 // the mother-window resize tasks after a pane tear-off. Split out of
-// `ui_tasks.rs` unchanged.
+// the single-file `ui_tasks` module unchanged.
 
 use std::sync::Arc;
 use cef::*;

@@ -248,7 +248,7 @@ impl HostState {
     }
 }
 
-// ── Pane label generator (replaces pane/lifecycle.rs::BROWSER_PANE_LABEL_SEQ) ──────
+// ── Pane label generator ──────
 //
 // Monotonic counter appended to every pane label so a close-then-recreate of
 // the same block_id doesn't collide: if the old browser's `on_before_close`

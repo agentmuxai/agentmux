@@ -5,7 +5,7 @@
 // handlers (backend/rpc_types/, server/websocket.rs). The original Go
 // generator (cmd/generate/main-generatets.go) was removed with the Go backend.
 //
-// This module was split from a single ~1,454-line rpc-api.ts into domain
+// This module was split from a single ~1,454-line rpc-api file into domain
 // files. `RpcApi` is composed here from the per-domain partials; its public
 // shape, method names, signatures, and call syntax (`RpcApi.SomeMethod(...)`)
 // are identical to the original single-object export. None of the methods use

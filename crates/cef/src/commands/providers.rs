@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Provider management commands for the CEF host.
-// Ported from src-tauri/src/commands/providers.rs and cli_installer.rs.
+// Ported from src-tauri/src/commands/providers.rs and its cli_installer module.
 //
 // Uses JSON file storage instead of tauri-plugin-store.
 
