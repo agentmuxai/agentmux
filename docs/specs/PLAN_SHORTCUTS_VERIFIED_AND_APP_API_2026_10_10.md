@@ -1,7 +1,7 @@
 # Plan — every shortcut in the Help pane works on every platform, and agents can drive them
 
 **Date:** 2026-10-10
-**Status:** proposed — nothing built yet.
+**Status:** proposed — owner decisions recorded (§8); nothing built yet.
 **Author:** AgentA@Area54 (Windows), with Masty@starpower and Maricon@charlie for the other platforms
 **Builds on:**
 - [../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md](../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md) (the audit, by reading code; phases 3–6 shipped in #4323–#4328)
@@ -107,6 +107,14 @@ For each PR that changes behaviour:
 5. **Docs:** regenerate the docs site's shortcut page from the table (`keybindings/doc.ts`) and note platform exceptions.
 
 ## 8. Decisions for the owner
+
+**Decided 2026-10-10** (the owner: "proceed with best recommendations"):
+1. `RunCommand` and `PressKeys` act only in the window that holds the agent's own pane.
+2. Destructive commands keep the confirmation a user sees, and closing a pane the agent doesn't own keeps `ClosePane`'s 15-second undo. `files:deletePermanently` is not available through the App API at all (it can't be undone); `files:trash` is (it can).
+3. When the OS takes a key, AgentMux changes its default on that platform. First case: `pane:swap:*` on Linux, with a replacement that avoids GNOME's grabs (§9).
+4. The L3 setup (the Accessibility permission on starpower, `ydotool` with uinput access on charlie) is the owner's to do when a partner asks; L1 and L2 don't wait for it.
+
+The questions as asked:
 
 1. Agent scope for `RunCommand` and `PressKeys`: only the agent's own window (proposed), or any window of the instance.
 2. Whether destructive commands are callable at all through `RunCommand`, or only with a confirmation the user answers.
