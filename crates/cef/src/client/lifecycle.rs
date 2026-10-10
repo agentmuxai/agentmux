@@ -845,6 +845,10 @@ impl AgentMuxHandler {
                     .unwrap_or(false)
                     && crate::commands::platform::is_oauth_authorization_url(&url);
                 let opener = browser.as_deref().and_then(|b| self.opener_pane_of(b));
+                // Off an agent's site list: not opened (client/allowed_origins.rs).
+                if opener.as_deref().is_some_and(|o| self.stop_off_list_popup(o, &url)) {
+                    return true;
+                }
                 let opener_url = browser
                     .as_deref()
                     .map(crate::browser_pane::callbacks::main_frame_url)
@@ -972,21 +976,8 @@ impl AgentMuxHandler {
     /// the pane itself, or, when `browser` is a popup window, the pane that
     /// opened that popup (so a sign-in that opens a second window still counts
     /// against, and belongs with, the pane it started in).
-    fn opener_pane_of(&self, browser: &Browser) -> Option<String> {
-        if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
-            return Some(block);
-        }
-        let label = self
-            .state
-            .list_browsers()
-            .into_iter()
-            .find(|(_, b)| {
-                let b = b.clone();
-                let mut other: cef::Browser = browser.clone();
-                b.is_same(Some(&mut other)) != 0
-            })
-            .map(|(label, _)| label)?;
-        self.state.popup_openers.lock().get(&label).cloned()
+    pub(super) fn opener_pane_of(&self, browser: &Browser) -> Option<String> {
+        self.limited_pane_of(browser).map(|(pane, _)| pane)
     }
 
     /// AgentMux's own origins (its frontend, srv): never opened in-app from a
@@ -1169,6 +1160,11 @@ impl AgentMuxHandler {
         // could grow far past the intended bound (reagentx P1 on PR #2593).
         // See `browser_pane::callbacks::update_pane_load_watchdog_url`.
         let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
+        // Off an agent's site list: cancelled before anything below marks the
+        // pane as loading (client/allowed_origins.rs).
+        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_off_list_navigation(b, &url)) {
+            return 1;
+        }
         if is_main_frame {
             if let Some(b) = browser.as_deref() {
                 if let Some(block_id) =

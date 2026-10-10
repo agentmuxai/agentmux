@@ -59,6 +59,8 @@ pub fn delete_block(
     // So does anything it was waiting on the user for: an agent mid
     // hand-off or approval gets Cancelled now, not after the timeout.
     crate::server::browser_attention::cancel_for(block_id);
+    // And its share of a site limit (its chain's other panes keep theirs).
+    crate::server::browser_allowlist::drop_pane(block_id);
     Ok(())
 }
 

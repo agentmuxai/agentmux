@@ -509,6 +509,7 @@ async fn route_command(
                 .get("window_label")
                 .and_then(|v| v.as_str())
                 .unwrap_or("main");
+            crate::client::allowed_origins::limit_before_create(&state.site_limits, block_id, args.get("allowed_origins"));
             state.browser_panes.create(state, block_id, url, rect, window_label)?;
             Ok(serde_json::json!(true))
         }

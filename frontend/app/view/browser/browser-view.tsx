@@ -241,12 +241,35 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     <div class="browser-attention" role="alertdialog" aria-live="assertive">
                         <div class="browser-attention-head">
                             <i class="fa-solid fa-hand" aria-hidden="true" />
-                            <span>
-                                <b>{a().agent ?? "An agent"}</b>{" "}
-                                {a().kind === "handoff" ? "needs you: " : "wants to: "}
-                                {a().kind === "handoff" ? a().reason : a().what}
-                            </span>
+                            <Show
+                                when={a().kind === "navigation"}
+                                fallback={
+                                    <span>
+                                        <b>{a().agent || "An agent"}</b>{" "}
+                                        {a().kind === "handoff" ? "needs you: " : "wants to: "}
+                                        {a().kind === "handoff" ? a().reason : a().what}
+                                    </span>
+                                }
+                            >
+                                <span>
+                                    This pane is limited to the sites it was opened for. The page wants to{" "}
+                                    {a().popup ? "open a window at " : "go to "}
+                                    <b>{a().origin}</b>.
+                                </span>
+                            </Show>
                         </div>
+                        <Show when={a().kind === "navigation" && a().url}>
+                            <div class="browser-attention-target" title={a().url}>
+                                {a().url}
+                            </div>
+                        </Show>
+                        <Show when={a().kind === "navigation"}>
+                            <div class="browser-attention-target">
+                                {a().popup
+                                    ? "Allow adds this site to the pane's list; then click again to open the window."
+                                    : "Allow adds this site to the pane's list and goes there. A form's data isn't sent again."}
+                            </div>
+                        </Show>
                         <Show when={a().window}>
                             <div class="browser-attention-target">In its popup window: {a().window}</div>
                         </Show>
@@ -273,10 +296,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 density="compact"
                                 onClick={() => model.resolveAttention(a().kind === "handoff" ? "done" : "approve").catch(() => {})}
                             >
-                                {a().kind === "handoff" ? "Done" : "Approve"}
+                                {a().kind === "handoff" ? "Done" : a().kind === "navigation" ? "Allow" : "Approve"}
                             </Button>
                             <Button density="compact" onClick={() => model.resolveAttention("cancel").catch(() => {})}>
-                                Cancel
+                                {a().kind === "navigation" ? "Block" : "Cancel"}
                             </Button>
                         </div>
                     </div>
@@ -327,6 +350,15 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         <span>
                             Driven by <b>{agent()}</b>
                         </span>
+                        <Show when={model.allowedOriginsAtom().length > 0}>
+                            <span
+                                class="browser-limited-to"
+                                title={`Limited to: ${model.allowedOriginsAtom().join(", ")}`}
+                            >
+                                Limited to {model.allowedOriginsAtom().length}{" "}
+                                {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
+                            </span>
+                        </Show>
                         <Button
                             density="compact"
                             class="browser-take-over"

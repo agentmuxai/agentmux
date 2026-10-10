@@ -193,7 +193,15 @@ export function usePaneRectSync(params: {
         nativePaneOwners.set(model.blockId, token);
         try {
             diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
-            await getApi().browserPanes.create(model.blockId, url || "about:blank", windowLabel, paneRect());
+            await getApi().browserPanes.create(
+                model.blockId,
+                url || "about:blank",
+                windowLabel,
+                paneRect(),
+                // Only while an agent drives the pane: Take over ends the limit
+                // but leaves the meta key behind.
+                model.driverAgentAtom() ? model.allowedOriginsAtom() : undefined,
+            );
             if (disposed) {
                 if (releaseNativePane(model.blockId, token)) {
                     diag(`createPane finished after unmount — closing the orphan`);

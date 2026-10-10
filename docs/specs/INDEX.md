@@ -280,6 +280,7 @@ partial list.
 | [`SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25`](SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md) | SPEC: Block identity bindings from resolving to a provider's ambient home dir |
 | [`SPEC_BRIDGE_INIT_RECOVERY_2026_06_15`](SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md) | SPEC: Host-Bridge Init Failure — Self-Heal + Recovery UI |
 | [`SPEC_BROWSER_DOM_API`](SPEC_BROWSER_DOM_API.md) | SPEC: Browser-pane DOM API (`/agentmux/browser/*`) |
+| [`SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09`](SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md) | SPEC: An agent's browser pane can be limited to the sites it was opened for |
 | [`SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22`](SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md) | SPEC — Browser pane: bookmarks (design exploration) + Go-button icon (quick tweak) |
 | [`SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01`](SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md) | Browser pane — camera (getUserMedia video) access |
 | [`SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07`](SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md) | SPEC — Browser pane: clicking the body selects the pane (macOS) |
