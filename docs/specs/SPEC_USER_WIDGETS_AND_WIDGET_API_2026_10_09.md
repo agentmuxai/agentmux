@@ -1,6 +1,6 @@
 # User widgets and the widget API
 
-**Status:** active — W1 (packages and approval, §13) in PR #4575; W2 (the sandboxed runtime and the SDK) in PR #4581; W3 to W6 not started.
+**Status:** active — W1 (packages and approval, §13) in PR #4575; W2 (the sandboxed runtime and the SDK) in PR #4581; W3 (scoped access) in PR #4582; W4 to W6 not started.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
 **Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
@@ -183,16 +183,16 @@ Methods marked "—" in the permission column need none.
 | `files.pick` | `{ accept?: string[], multiple?: boolean }` | `{ files: { name, type, size, dataBase64 }[] }` | `files` |
 | `files.save` | `{ name: string, type?: string, dataBase64: string }` | `{ saved: boolean }` | `files` |
 | `clipboard.writeText` | `{ text: string }` | `{}` | `clipboard:write` |
-| `agents.list` | `{}` | `{ agents: { id, name, provider, state: "working"\|"idle"\|"stopped" }[] }` | `agents:read` |
+| `agents.list` | `{}` | `{ agents: { id, name, state: "working"\|"idle"\|"stopped" }[] }` (the agents running on this machine) | `agents:read` |
 | `agents.send` | `{ agent: string, text: string }` | `{ id: string }` | `agents:send` |
 
 Details:
 
 - **`meta`** is the pane's own meta, under the widget's namespace: the widget sees and writes `filter`, srv stores `widget:<id>:filter`. Other meta keys are invisible to it. At most 64 KB per pane. Meta survives restarts and moves with the pane, like any pane's.
 - **`storage`** is per package, not per pane: srv keeps it in its database, at most 5 MB per package, values up to 1 MB each. Uninstalling deletes it after the user confirms.
-- **`net.fetch`** is made by srv, not the iframe: no cookies, no credentials of the user's browser profile, no `Origin` header of AgentMux. The request URL's origin must match one of the package's `net:` permissions exactly (`net:https://api.github.com` allows that origin and nothing else; `net:https://*.example.com` allows its subdomains, never the bare wildcard). Redirects are followed only to allowed origins. Loopback (`127.0.0.1`, `localhost`, `::1`) and private addresses are refused unless the permission names that exact origin, port included (`net:http://127.0.0.1:8188`). Responses up to 10 MB; default timeout 30 s, at most 120 s.
-- **`files.pick`** opens the host's file dialog; the widget gets the chosen files' contents (up to 25 MB in all), never a path. A cancelled dialog is error `1006`. `files.save` opens a save dialog; `saved: false` if cancelled.
-- **`agents.send`** delivers `text` to one of the user's own agents on this machine, as a message marked as sent by the widget (`FROM=widget:<id>`, `TRUST=self-declared`), which the agent treats like any unverified message. At most 10 messages a minute per package, 8 KB each.
+- **`net.fetch`** is made by srv, not the iframe: no cookies, no credentials of the user's browser profile, no `Origin` header of AgentMux. The request URL's origin must match one of the package's `net:` permissions exactly (`net:https://api.github.com` allows that origin and nothing else; `net:https://*.example.com` allows its subdomains, never the bare wildcard). Redirects are followed only to allowed origins, at most 5, and `Authorization` and `Cookie` don't follow a redirect to another origin. srv resolves the host once and connects to the addresses it checked, so a name can't resolve one way for the check and another for the request. Loopback, private, link-local and other local addresses are refused unless the permission names that address itself, port included: an IP address (`net:http://127.0.0.1:8188`, or another machine on the user's network by its address), or `localhost` for loopback. A public name that resolves to a private address is refused, and so is any wildcard. A widget can't set the connection's own headers (`Host`, `Content-Length`, `Connection`, `Transfer-Encoding`, `Proxy-*` and the like). Request and response bodies up to 10 MB; default timeout 30 s, at most 120 s.
+- **`files.pick`** opens the host's file dialog; the widget gets the chosen files' contents (up to 25 MB in all), never a path. A cancelled dialog is error `1006`. A dialog opens only on a user's click (a click in the widget's frame, or on one of its header actions); called otherwise, it's error `1005`. `files.save` opens a save dialog (or, where the host has none, downloads the file), also only on a click; `saved: false` if cancelled. Both run in the app's own document, so they work in a browser as in the desktop app.
+- **`agents.send`** delivers `text` to one of the user's own agents running on this machine (error `1003` if none has that name), as a message marked as sent by the widget (`FROM=widget:<id>`, `DELIVERY=host`, `TRUST=self-declared`), which the agent treats like any unverified message; the usual keyword escalation applies. At most 10 messages a minute per package, 8 KB each.
 - **`ui.setHeaderActions` / `ui.setContextMenu`** are drawn by AgentMux, in its own style; a click comes back as the `action` event.
 
 `Theme` is `{ mode: "dark" | "light", vars: { [name: string]: string } }`: the app's colors as CSS custom properties (`--am-bg`, `--am-fg`, `--am-muted`, `--am-accent`, `--am-border`, `--am-error`, `--am-warning`, `--am-success`, `--am-font`, `--am-font-mono`, `--am-radius`, plus the pane's hue as `--am-pane-hue`). The SDK applies them to the document (§7).
@@ -220,6 +220,7 @@ A trusted package's prompt has one line instead: "**This widget runs as part of 
 | `theme` | `Theme` | The user changes theme or the pane's color |
 | `meta` | `{ meta: object }` | The pane's widget meta changed from outside the widget (another window, an agent, an undo) |
 | `action` | `{ id: string, source: "header" \| "menu" }` | The user clicked one of its header actions or menu items |
+| `storage` | `{ keys: string[] }` | The package's storage changed, from any of its panes in any window (this one included); only the keys, so a pane reads what it needs again. Sent only to a package granted `storage` |
 | `dispose` | `{}` | The pane is closing or the widget is being reloaded; the port closes 1 s later |
 
 A dormant widget keeps running (it's an iframe), but should pause timers and polling; the SDK makes that one line.
@@ -342,7 +343,8 @@ An agent can't approve its own install or raise a widget's permissions; every in
 
 ## 11. Security summary
 
-- A sandboxed widget holds no credential: no auth key, no host token, no session. Everything it does is a bridge call the host checks against its grants, and srv checks again for every call that reaches srv (storage, net, agents), using a token scoped to that widget and pane: srv issues it when the pane opens, its route allowlist accepts it only on the widget routes, and it names the package id, the approved hash and the granted permissions (the scoped container credential, `container_route_allowed` in `auth.rs`, is the model).
+- A sandboxed widget holds no credential: no auth key, no host token, no session. Everything it does is a bridge call the host checks against its grants, and srv checks again for every call that reaches srv (storage, net, agents). The pane host opens a session for its pane (`widgets.session`, with the package id and the approved hash) and makes those calls through it (`widgets.call`). A session token is no credential anywhere else; it only names the package and the version. On every call srv looks the package up again and refuses unless it is still approved at that hash, enabled, and granted the permission the call needs, so a frontend bug can't widen a widget's reach, and an edited, re-approved, turned-off or removed package ends the old version's sessions.
+- The session RPCs need the instance auth key, like every RPC. Whatever holds that key (the app, an agent) could already reach the network, the agents and srv's database directly, so it gains nothing by speaking for a widget; what the session adds is that a widget's pane host is held to that widget's grants.
 - Its code comes only from its approved files (CSP, and the hash in every file URL).
 - A trusted widget has full access by design, and the prompt says so in those words.
 - No code runs without the user's approval in AgentMux's own UI, and only the host can carry that approval to srv.

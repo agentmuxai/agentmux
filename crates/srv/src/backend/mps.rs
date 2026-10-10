@@ -28,6 +28,8 @@ pub const EVENT_REMOTES_CHANGE: &str = "remoteschange";
 /// The widget packages changed: installed, approved, edited, removed
 /// (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8). Payload `{ packages }`.
 pub const EVENT_WIDGET_PACKAGES: &str = "widgetpackages";
+/// A widget package's storage changed: `{ id, keys }`, never the values.
+pub const EVENT_WIDGET_STORAGE: &str = "widgetstorage";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.

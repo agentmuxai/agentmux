@@ -100,10 +100,10 @@ function mount(meta: Record<string, unknown> = {}, opts: { lagOpenClear?: boolea
 }
 
 describe("the Media pane's document tabs", () => {
-    it("a pane from before tabs shows its file, with no strip for one tab", async () => {
+    it("a pane from before tabs shows its file, with its tab on the strip", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" });
         await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
-        expect(v.container.querySelector(".doc-tab-strip")).toBeNull();
+        expect(v.pills()).toEqual(["a.png"]);
         expect(v.inst.liveTitle!().text).toBe("a.png");
     });
 
@@ -189,7 +189,7 @@ describe("the Media pane's document tabs", () => {
         const record = v.meta().doctabs;
         cleanup();
         const again = mount({ doctabs: record });
-        expect(again.pills()).toEqual([]);
+        expect(again.pills()).toEqual(["a.png"]);
         expect(again.inst.liveTitle!().text).toBe("a.png");
     });
 
@@ -197,7 +197,7 @@ describe("the Media pane's document tabs", () => {
         const v = mount();
         hub.hooks.get("m1")!.drop({ paths: ["C:/pics/a.png"], files: [] });
         await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
-        expect(v.pills()).toEqual([]);
+        expect(v.pills()).toEqual(["a.png"]);
         hub.hooks.get("m1")!.drop({ paths: ["C:/pics/b.png"], files: [] });
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "b.png"]));
     });
@@ -207,7 +207,7 @@ describe("the Media pane's document tabs", () => {
         fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media"]));
         fireEvent.keyDown(v.root(), { key: "w", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toEqual([]));
+        await waitFor(() => expect(v.pills()).toEqual(["a.png"]));
         fireEvent.keyDown(v.root(), { key: "w", ctrlKey: true });
         await waitFor(() => expect(v.inst.liveTitle!().text).toBe("Media"));
         expect(v.container.textContent).toContain("Click to load media");

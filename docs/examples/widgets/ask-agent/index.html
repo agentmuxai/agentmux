@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Copyright 2026, AgentMux Corp. SPDX-License-Identifier: Apache-2.0 -->
+<!--
+  Ask an agent: a sandboxed widget that lists your agents with `agents:read`
+  and sends one a message with `agents:send`
+  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3).
+
+  The agent sees the message as sent by this widget (FROM=widget:agentmux.ask-agent),
+  unverified, like any message whose sender it can't check. A widget may send
+  at most 10 messages a minute, 8 KB each.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/agentmux/widget-sdk/am-widget.css" />
+    <style>
+      form { display: grid; gap: 8px; }
+      textarea { min-height: 5em; }
+      .state-working { color: var(--am-accent); }
+    </style>
+  </head>
+  <body>
+    <form id="ask">
+      <select id="agent"></select>
+      <textarea id="text" placeholder="What should it do?"></textarea>
+      <button class="primary" type="submit">Send</button>
+    </form>
+    <p id="status" class="muted"></p>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

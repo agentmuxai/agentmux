@@ -61,7 +61,7 @@ A document is a file the pane shows. Folders (Hangar) and pages (Browser) are no
 
 ### 4.1 The strip
 - Drawn **under the pane header**, above the pane's content, by `DocTabStrip` (a thin wrapper around `PaneTabStrip`, as `EditorTabStrip` is today).
-- Shown when a pane has **two or more** document tabs. A type can ask to show it always (`alwaysShowStrip`): the Editor does, matching today.
+- Shown when a pane has **two or more** document tabs. A type can ask to show it always (`alwaysShowStrip`): the Editor does, matching today, and so does Media (§10 question 2).
 - Each tab: icon, title, close ×, and per-type marks: **dirty** (a dot that the × replaces on hover), **preview** (italic title), **pinned** (no ×, kept left).
 - "+" at the end: a new document tab (§4.3, `Ctrl+T`).
 - Reorder: `Ctrl+Shift+PageUp` / `PageDown` (§4.3). Pinned tabs stay before unpinned ones. **Drag to reorder is deferred to Phase 5** (as built in Phase 1): `PaneTabStrip`'s drag is the pane-tab drag (its own drag kind, with tear-off into a new window), so a document tab dragged with it would be taken for a pane tab. Document tabs get their own drag kind with §5.8's between-pane drag.
@@ -222,5 +222,5 @@ Any view whose instance shows one of several documents: a diff viewer (one tab p
 
 ## 10. Open questions for the repo owner
 1. **macOS keys.** Mac users expect `Cmd+W`, `Cmd+T` and `Cmd+Shift+T` for document tabs (Safari, VS Code), but in this app `Cmd:` chords are window-level (`Cmd:t` is a new window tab). Proposed: `Ctrl` on every platform (§4.3), revisited after use. The alternative is `Cmd` on macOS only for document tabs, which means moving the window-tab chords there.
-2. **Strip from one tab or from two?** Proposed: from two, except the Editor (always), so a Media pane with one document doesn't lose a row.
+2. ~~**Strip from one tab or from two?**~~ Settled 2026-10-10: from one, for the Editor and Media. Built from two for Media first, so a pane with one document kept its row; the repo owner, testing tab drag between panes, found Media had no tab bar.
 3. ~~**Browser live-view budget.**~~ Moot: Browser tabs are dropped (§6.4).

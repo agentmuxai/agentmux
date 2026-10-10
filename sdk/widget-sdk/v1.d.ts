@@ -95,7 +95,6 @@ export interface PickedFile {
 export interface AgentInfo {
     id: string;
     name: string;
-    provider: string;
     state: "working" | "idle" | "stopped";
 }
 
@@ -105,6 +104,8 @@ export interface EventMap {
     theme: Theme;
     meta: { meta: Record<string, unknown> };
     action: { id: string; source: "header" | "menu" };
+    /** The package's storage changed, from any of its panes in any window. */
+    storage: { keys: string[] };
     dispose: Record<string, never>;
 }
 
