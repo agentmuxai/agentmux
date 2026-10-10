@@ -299,12 +299,14 @@ function GroupRows(props: {
     model: TowerViewModel;
     group: ProcessGroup;
     cpu: (f: number | undefined) => string;
-    /** Inside an owner group: one level in, and opened on its own. */
+    /** Inside "Other processes": one level in, with its own open state, and
+     *  open while a search is typed, so a match isn't hidden in it. */
     inOwner?: boolean;
 }) {
     const m = props.model;
     const key = () => `app:${props.inOwner ? "other:" : ""}${props.group.key}`;
-    const open = () => m.expanded().has(key());
+    const searching = () => !!props.inOwner && m.filter().trim() !== "";
+    const open = () => searching() || m.expanded().has(key());
     const processes = createMemo(() => (open() ? sortProcesses(props.group.processes, m.sort()) : []));
     const label = (task: string | undefined) => (task ? m.taskLabel(task) : undefined);
     return (
@@ -333,6 +335,7 @@ function GroupRows(props: {
                             density="compact"
                             tooltip={false}
                             aria-expanded={open()}
+                            disabled={searching()}
                             onClick={() => m.toggleExpanded(key())}
                         />
                         <span class="tower-label">{props.group.name}</span>
@@ -369,7 +372,10 @@ function GroupRows(props: {
 function OwnerRows(props: { model: TowerViewModel; group: OwnerGroup; cpu: (f: number | undefined) => string }) {
     const m = props.model;
     const key = () => `owner:${props.group.key}`;
-    const open = () => m.filter().trim() !== "" || m.expanded().has(key());
+    // A search holds every group with a match open; its arrow can't close
+    // it then, so it is disabled rather than doing nothing.
+    const searching = () => m.filter().trim() !== "";
+    const open = () => searching() || m.expanded().has(key());
     const color = () =>
         props.group.kind === "agent"
             ? agentColor(props.group.key, props.group.label, m.snapshot()?.remote ?? false)
@@ -404,6 +410,7 @@ function OwnerRows(props: { model: TowerViewModel; group: OwnerGroup; cpu: (f: n
                             density="compact"
                             tooltip={false}
                             aria-expanded={open()}
+                            disabled={searching()}
                             onClick={() => m.toggleExpanded(key())}
                         />
                         <span class="tower-label">{props.group.label}</span>
@@ -445,12 +452,13 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
     const ownerByKey = createMemo(() => new Map(owners().map((g) => [g.key, g])));
     const grouped = () => m.grouping() !== "none";
     const shown = () => (m.grouping() === "app" ? groups().length : m.grouping() === "none" ? rows().length : 0);
-    // The first list grouped by agent opens its two busiest agents; after
-    // that, what is open is the user's to choose.
+    // The first list grouped by agent whose agents have a CPU rate (the very
+    // first sample has none) opens its two busiest; after that, what is open
+    // is the user's to choose.
     createEffect(() => {
         if (m.grouping() !== "agent" || m.ownersOpened) return;
         const agents = owners().filter((g) => g.kind === "agent");
-        if (!agents.length) return;
+        if (!agents.some((g) => g.cpu != null)) return;
         m.ownersOpened = true;
         const busiest = [...agents].sort((a, b) => (b.cpu ?? -1) - (a.cpu ?? -1)).slice(0, 2);
         m.open(busiest.map((g) => `owner:${g.key}`));

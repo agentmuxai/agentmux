@@ -615,6 +615,70 @@ describe("Tower", () => {
         expect(screen.getByText("System")).toBeInTheDocument();
     });
 
+    it("the busiest agents are chosen once their CPU is known, not from the first sample's names", async () => {
+        vi.useFakeTimers();
+        const withAgents = (rated: boolean) => {
+            const snap = snapshot(true);
+            snap.tasks.unshift(
+                {
+                    id: "a-quiet",
+                    kind: "agent",
+                    label: "Aquiet",
+                    tracking: "high",
+                    cpu: rated ? 0 : undefined,
+                    cpu_account: true,
+                    mem: 1,
+                    processes: [],
+                },
+                {
+                    id: "b-idle",
+                    kind: "agent",
+                    label: "Bidle",
+                    tracking: "high",
+                    cpu: rated ? 0 : undefined,
+                    cpu_account: true,
+                    mem: 1,
+                    processes: [],
+                }
+            );
+            snap.host!.processes.push(
+                { id: "90:1", pid: 90, name: "quiet.exe", cpu: rated ? 0 : undefined, mem: 1, task: "a-quiet" },
+                { id: "91:1", pid: 91, name: "idle.exe", cpu: rated ? 0.01 : undefined, mem: 1, task: "b-idle" },
+                { id: "92:1", pid: 92, name: "build.exe", cpu: rated ? 3 : undefined, mem: 1, task: "block-a" }
+            );
+            // The first sample: no process has a rate yet.
+            if (!rated) snap.host!.processes.forEach((p) => (p.cpu = undefined));
+            return snap;
+        };
+        sample.mockResolvedValueOnce(withAgents(false)).mockResolvedValue(withAgents(true));
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        // No rates yet: nothing opened by name.
+        expect(screen.queryByText("quiet.exe")).toBeNull();
+        await vi.advanceTimersByTimeAsync(2000);
+        // AgentX (3 cores) and Bidle are the busiest two; Aquiet stays shut.
+        expect(screen.getByText("build.exe")).toBeInTheDocument();
+        expect(screen.getByText("idle.exe")).toBeInTheDocument();
+        expect(screen.queryByText("quiet.exe")).toBeNull();
+    });
+
+    it("while searching, a group's arrow can't close it, and an app under Other opens", async () => {
+        const snap = snapshot(true);
+        snap.host!.processes.push(
+            { id: "20:1", pid: 20, name: "rustc.exe", cpu: 0.2, mem: GB },
+            { id: "21:1", pid: 21, name: "rustc.exe", cpu: 0.2, mem: GB }
+        );
+        sample.mockResolvedValue(snap);
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-other");
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "rustc" } });
+        await waitFor(() => expect(screen.getAllByText("rustc.exe")).toHaveLength(3));
+        expect(within(screen.getByTestId("tower-owner-other")).getByRole("button")).toBeDisabled();
+        expect(within(screen.getByTestId("tower-app-rustc.exe")).getByRole("button")).toBeDisabled();
+    });
+
     it("groups by agent, app or nothing; another machine has no agents to group by", async () => {
         setMeta({ "tower:view": "processes" });
         renderTower();
