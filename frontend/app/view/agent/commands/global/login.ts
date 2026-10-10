@@ -19,6 +19,7 @@
  */
 
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
+import { reserveLoginWindow } from "../../flows/login-window";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -92,6 +93,8 @@ export const loginCommand: SlashCommand = {
         if (!prov || !cliPath) {
             return { kind: "error", message: "/login: provider or CLI path not available" };
         }
+        // Still inside the Enter that sent /login: the URL comes later (login-window.ts).
+        if (!prov.headlessLoginUrlUnsupported) reserveLoginWindow();
         // reagent P1 on PR #2413 (round 3, third pass): mirrors the
         // `loginCancelled = false` every OTHER login-starting function
         // (relogin()/loginViaTerminal()) already does at

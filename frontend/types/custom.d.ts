@@ -255,6 +255,14 @@ declare global {
     /** Whether the host can manage an OS login entry, and whether one is registered. */
     type AutostartStatus = { available: boolean; enabled: boolean };
 
+    /** A window opened at a user's click, to be pointed at a URL later (`AppApi.reserveExternalWindow`). */
+    type ExternalWindow = {
+        /** Shows `url` (http or https) in the window, cut off from this page first. */
+        navigate(url: string): void;
+        /** Closes it, when the URL never came. */
+        close(): void;
+    };
+
     type AppApi = {
         /** Capabilities of the host this frontend is running in. */
         getHostCaps(): HostCaps;
@@ -270,6 +278,14 @@ declare global {
         approvals: ApprovalHostApi;
         /** Open a URL in the system browser; rejects if the host could not. */
         openExternalChecked(url: string): Promise<void>;
+        /**
+         * Open a window now, during a user's click, for a URL that arrives
+         * later (a provider login's): a browser opens windows only during a
+         * gesture. Null when the host opens URLs in the system browser anyway
+         * (the desktop), or the window was refused; the caller then opens the
+         * URL as usual. Called synchronously in the click handler.
+         */
+        reserveExternalWindow(): ExternalWindow | null;
         readClipboardText(): Promise<string>;
         /** The clipboard's text plus paths for its copied files or image data
          *  (image data written to a temp file by the host). For the agent

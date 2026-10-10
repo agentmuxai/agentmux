@@ -18,6 +18,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { reserveLoginWindow } from "@/app/view/agent/flows/login-window";
 import { loginBackend } from "@/app/view/agent/flows/login-backend";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -145,6 +146,8 @@ export function ClaudeLoginPanel(props: {
 
     const start = async () => {
         if (inFlight()) return;
+        // Still inside the click: the login's URL comes later (login-window.ts).
+        reserveLoginWindow();
         setInFlight(true);
         setError(null);
         setPhase("starting");

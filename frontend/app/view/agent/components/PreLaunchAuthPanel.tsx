@@ -21,6 +21,7 @@
  */
 
 import { Button } from "@/element/button";
+import { navigateLoginWindow, releaseLoginWindow, reserveLoginWindow } from "../flows/login-window";
 import { loginBackend } from "../flows/login-backend";
 import { translateError } from "@/app/errors/translate";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
@@ -146,11 +147,15 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         const s = controller.state();
         const url = s.authUrl;
         if (s.sessionId === PROVIDER_LOGIN_SESSION_ID) return;
+        // A connect that failed before its URL came: close the window reserved for it.
+        if (s.kind === "failed") releaseLoginWindow();
         if (url && url !== lastOpenedUrl) {
             lastOpenedUrl = url;
             console.log(`[auth-diag] opening auth URL in browser (host=${(() => { try { return new URL(url).host; } catch { return "?"; } })()})`);
             try {
-                getApi().openExternal(url);
+                // The window reserved at Connect's click, on a browser host;
+                // the system browser otherwise.
+                if (!navigateLoginWindow(url)) getApi().openExternal(url);
             } catch (e) {
                 console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
             }
@@ -205,6 +210,8 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
+        // Still inside the click: the login's URL comes later (login-window.ts).
+        if (!prov.headlessLoginUrlUnsupported) reserveLoginWindow();
         void startConnect(controller, prov, props.accountId(), inAppUi);
     };
 

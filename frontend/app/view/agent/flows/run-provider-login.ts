@@ -77,6 +77,7 @@
  */
 
 import { getApi } from "@/app/store/global";
+import { releaseLoginWindow } from "./login-window";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -424,6 +425,16 @@ async function pollForInAppLoginCompletion(
 }
 
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
+    try {
+        return await runProviderLoginTiers(p);
+    } finally {
+        // A window reserved at the click and never used (no URL: a failure, or
+        // the terminal tier) is closed, not left blank.
+        releaseLoginWindow();
+    }
+}
+
+async function runProviderLoginTiers(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
     // Mint the account dir ONCE, up front — before ANY tier runs — for
     // EVERY oauth-class provider, not just Claude. Account minting itself
     // (ensureAccountDir / persistSeededAccount) has always been
