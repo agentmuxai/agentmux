@@ -134,7 +134,7 @@ The questions as asked:
 | L2 Temp-tree guard, script timeouts | Maricon@charlie | done (#4612) |
 | L3 Injected L3 Linux | Maricon@charlie | in progress |
 | A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
-| A2 Other tabs | AgentA@Area54 | in review (#NNNN) |
+| A2 Other tabs | AgentA@Area54 | in review (#4634) |
 | A3 Paste guard, `pane:close` via ClosePane | AgentA@Area54 | in review (#4626) |
 | A4 Save-key reporting, dialog Escape | AgentA@Area54 | done (#4613); the Ctrl+F Help note moved to SPEC_HELP_HIDDEN_TIPS_2026_10_10 (#4616) |
 | A5 Pool window marker | AgentA@Area54 | done (#4618) |
