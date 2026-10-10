@@ -490,7 +490,11 @@ fn renderer_suffix(detail: &str, pid: u32, renderer: &dyn Fn(u32) -> Option<Stri
 /// peaks by index and the exited processes still within [`EXITED_LINGER`].
 fn track_peaks_and_exits(st: &mut State, procs: &[ProcInfo], now: Instant) -> (Vec<Option<u64>>, Vec<Exited>) {
     let live: HashSet<ProcKey> = procs.iter().map(|p| p.key()).collect();
-    if let Some(prev) = st.last.as_ref() {
+    // Only a recent measurement says what exited just now. The sampler runs
+    // while a Tower pane is visible; after a gap (a hidden pane) what is gone
+    // went at any time in it, so nothing is listed as just exited.
+    let recent = st.last.as_ref().filter(|prev| now.duration_since(prev.at) <= STALE_AFTER);
+    if let Some(prev) = recent {
         let gone_ms = agentmux_common::time::now_ms() as u64;
         for g in &prev.grouping.tasks {
             for &(i, role) in &g.members {
@@ -878,6 +882,21 @@ mod tests {
 
         let later = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(4) + EXITED_LINGER, false, "host", &label);
         assert!(task(&later).exited.is_none(), "gone after the linger");
+    }
+
+    /// After a gap (no Tower pane visible), what went missing in it isn't
+    /// listed as just exited.
+    #[test]
+    fn processes_gone_during_a_gap_are_not_listed_as_just_exited() {
+        let mut st = state();
+        let t0 = Instant::now();
+        let mut snap = machine();
+        let inputs = Inputs { blocks: vec![tracked("agent-a", &[200, 201, 202, 203], &[200])], roots: vec![], own_pid: 110 };
+        build(&mut st, &snap, &inputs, t0, false, "host", &label);
+        snap.retain(|x| x.pid != 203);
+        let after_gap = build(&mut st, &snap, &inputs, t0 + STALE_AFTER + Duration::from_secs(1), false, "host", &label);
+        let task = after_gap.tasks.iter().find(|t| t.id == "agent-a").unwrap();
+        assert!(task.exited.is_none(), "nothing just exited after a gap");
     }
 
     #[test]
