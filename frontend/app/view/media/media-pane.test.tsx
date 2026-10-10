@@ -128,7 +128,7 @@ describe("the Media pane's document tabs", () => {
         await new Promise((r) => setTimeout(r, 20));
         expect(v.inst.liveTitle!().text).toBe("a.png");
         fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media", "b.png"]));
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "New Tab", "b.png"]));
     });
 
     it("a second request for the same file is handled even while the first one's clearing is on its way (muxreview on #4235)", async () => {
@@ -147,10 +147,10 @@ describe("the Media pane's document tabs", () => {
     it("one file, one tab: sent into an empty tab, the tab already showing it comes to the front (muxreview on #4235)", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" });
         fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media"]));
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "New Tab"]));
         await v.setMeta({ "media:open": [req("C:/pics/a.png")] });
         await waitFor(() => expect(v.inst.liveTitle!().text).toBe("a.png"));
-        expect(v.pills()).toEqual(["a.png", "Media"]);
+        expect(v.pills()).toEqual(["a.png", "New Tab"]);
     });
 
     it("a newer render landing on a file another tab shows leaves one tab on it", () => {
@@ -205,14 +205,14 @@ describe("the Media pane's document tabs", () => {
     it("Ctrl+T adds an empty tab, Ctrl+W closes, and closing the last leaves an empty one", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" });
         fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media"]));
+        await waitFor(() => expect(v.pills()).toEqual(["a.png", "New Tab"]));
         fireEvent.keyDown(v.root(), { key: "w", ctrlKey: true });
         await waitFor(() => expect(v.pills()).toEqual(["a.png"]));
         fireEvent.keyDown(v.root(), { key: "w", ctrlKey: true });
         await waitFor(() => expect(v.inst.liveTitle!().text).toBe("Media"));
         expect(v.container.textContent).toContain("Click to load media");
         fireEvent.keyDown(v.root(), { key: "T", ctrlKey: true, shiftKey: true });
-        await waitFor(() => expect(v.pills()).toEqual(["Media", "a.png"]));
+        await waitFor(() => expect(v.pills()).toEqual(["New Tab", "a.png"]));
     });
 
     it("keeps its files in the block and restores them", async () => {
