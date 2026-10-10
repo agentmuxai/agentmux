@@ -149,6 +149,18 @@ wrap_task! {
                 // without risking the close_browser cascade into main.
                 // SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md +
                 // retro-browser-pane-renderer-leak-2026-07-07.md.
+                // The jar this tab browses in (its `browser:identity`). One
+                // that can't be made fails the pane rather than falling back
+                // to the shared jar, which would put an Incognito tab in your
+                // Personal session.
+                let mut request_context = match crate::browser_pane::identity::context_for_block(&self.block_id) {
+                    Ok(ctx) => ctx,
+                    Err(e) => {
+                        tracing::warn!(block_id = %self.block_id, error = %e, "[browser-identity] pane not created");
+                        dequeue();
+                        return;
+                    }
+                };
                 let wrapper_hwnd = match crate::browser_pane::wrapper::create_wrapper(
                     &self.label,
                     parent_hwnd_raw,
@@ -191,7 +203,7 @@ wrap_task! {
                     Some(&url_cef),
                     Some(&settings),
                     None, // extra_info
-                    None, // request_context
+                    request_context.as_mut(),
                 );
 
                 if result == 0 {
