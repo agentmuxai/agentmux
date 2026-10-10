@@ -49,6 +49,14 @@ struct Cached {
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
+/// When a fetch was last tried. With no usable copy (an srv without the
+/// endpoint, an unreachable one), every tool call would otherwise retry and
+/// wait out the request; this spaces the retries.
+static LAST_ATTEMPT: Mutex<Option<Instant>> = Mutex::new(None);
+const RETRY_AFTER: Duration = Duration::from_secs(60);
+/// Short, so a slow srv delays a tool call by this at most.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Fetch the keys if there is no copy yet, or it is older than 20 h. Errors
 /// leave the old copy (or none) in place: signing then falls back to the env
 /// keys, exactly as before M4d-3.
@@ -57,8 +65,15 @@ pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, 
     if fresh || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
         return;
     }
+    {
+        let mut last = LAST_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|t| t.elapsed() < RETRY_AFTER) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
     let url = format!("{}/agentmux/agents/self/keys", local_url.trim_end_matches('/'));
-    let Ok(resp) = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await else { return };
+    let Ok(resp) = client.get(&url).header(AUTH_KEY_HEADER, auth_key).timeout(FETCH_TIMEOUT).send().await else { return };
     if !resp.status().is_success() {
         return;
     }
