@@ -378,6 +378,8 @@ pub fn verify_channel_jekt(
 // ── Cross-channel v2: bound to the sender's UID (identity M4d-6) ──
 mod channel_v2;
 pub use channel_v2::{sign_channel_jekt_v2, verify_channel_jekt_v2};
+mod lan_v2;
+pub use lan_v2::{sign_lan_jekt_v2, verify_lan_jekt_v2};
 
 // ── General agent-to-agent WAN signing ──
 //
