@@ -247,8 +247,9 @@ fn embedded_v4(high: u16, low: u16) -> Ipv4Addr {
 
 /// Addresses that are not a public host: loopback, private, link-local (cloud
 /// metadata), carrier-grade NAT, unspecified, multicast, reserved and
-/// documentation ranges, and IPv6 forms that carry an IPv4 address.
-fn ip_is_blocked(ip: IpAddr) -> bool {
+/// documentation ranges, and IPv6 forms that carry an IPv4 address. Also
+/// the widget fetch's test (`widget_net.rs`).
+pub(crate) fn ip_is_blocked(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => ipv4_is_blocked(v4),
         IpAddr::V6(v6) => ipv6_is_blocked(v6),

@@ -192,6 +192,13 @@ impl FsWatchPool {
         self.subscribe_target(canonical.clone(), canonical, RecursiveMode::NonRecursive)
     }
 
+    /// Watch `path` and everything under it (widget packages: an edit deep in
+    /// a package folder reloads it).
+    pub fn subscribe_dir_recursive(self: &Arc<Self>, path: &Path) -> Subscription {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.subscribe_target(canonical.clone(), canonical, RecursiveMode::Recursive)
+    }
+
     fn subscribe_target(self: &Arc<Self>, requested_path: PathBuf, target: PathBuf, mode: RecursiveMode) -> Subscription {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let is_new = {

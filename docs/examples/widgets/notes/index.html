@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Copyright 2026, AgentMux Corp. SPDX-License-Identifier: Apache-2.0 -->
+<!--
+  Notes: a sandboxed widget that keeps its data with `storage`, exports and
+  imports it with `files`, and copies a note with `clipboard:write`
+  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3).
+
+  Its notes are the package's, not one pane's: every Notes pane shows the
+  same list.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/agentmux/widget-sdk/am-widget.css" />
+    <style>
+      form { display: flex; gap: 8px; margin-bottom: 12px; }
+      form textarea { flex: 1; min-height: 3em; }
+      li { display: flex; gap: 8px; align-items: flex-start; }
+      li .text { flex: 1; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <form id="add">
+      <textarea id="text" placeholder="A new note"></textarea>
+      <button class="primary" type="submit">Add</button>
+    </form>
+    <ul id="notes" class="list"></ul>
+    <p id="empty" class="muted">No notes yet.</p>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

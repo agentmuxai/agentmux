@@ -5,7 +5,7 @@
 // handlers (backend/rpc_types/, server/websocket.rs). The original Go
 // generator (cmd/generate/main-generatets.go) was removed with the Go backend.
 //
-// This module was split from a single ~1,454-line rpc-api.ts into domain
+// This module was split from a single ~1,454-line rpc-api file into domain
 // files. `RpcApi` is composed here from the per-domain partials; its public
 // shape, method names, signatures, and call syntax (`RpcApi.SomeMethod(...)`)
 // are identical to the original single-object export. None of the methods use
@@ -15,11 +15,13 @@ import { AgentApi } from "./agent";
 import { AttachmentsApi } from "./attachments";
 import { BlockApi } from "./block";
 import { BookmarksApi } from "./bookmarks";
+import { BrowserProfilesApi } from "./browser-profiles";
 import { BrowserStartPageApi } from "./browser-start-page";
 import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
 import { RemotesApi } from "./remotes";
+import { WidgetsApi } from "./widgets";
 import { FsApi } from "./fs";
 import { IdentityApi } from "./identity";
 import { LayoutApi } from "./layout";
@@ -352,8 +354,10 @@ export const RpcApi = {
     ...BundleImportApi,
     ...FleetApi,
     ...RemotesApi,
+    ...WidgetsApi,
     ...ReactiveApi,
     ...BookmarksApi,
+    ...BrowserProfilesApi,
     ...LayoutApi,
     ...BrowserStartPageApi,
     ...VoiceApi,

@@ -1,30 +1,24 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// A sample third-party pane tab — Pane Tab contract v1, Phase 6
-// (docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3, §4).
+// A sample trusted widget (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md
+// §9): a Solid ES module whose default export is a pane tab manifest
+// (docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3).
 //
-// Install: copy this directory to ~/.agentmux/widgets/hello/ and add to
-// widgets.json:
+// Install: Settings → Widgets → Install…, and pick this folder's widget.json.
+// AgentMux copies it to ~/.agentmux/widgets/agentmux.hello/ and asks you to
+// approve it; a trusted widget runs as part of AgentMux, so read it first.
 //
-//   "ext@hello": {
-//       "label": "Hello",
-//       "icon": "hand",
-//       "module": "hello/index.js",
-//       "blockdef": { "meta": { "view": "ext:hello" } }
-//   }
-//
-// A widget is a plain ES module whose default export is a PaneTabManifest.
 // Import Solid from "solid-js" (and "solid-js/web", "solid-js/store") as
 // usual: the loader points those imports at the app's own Solid, so the
 // widget shares its reactive runtime. It reaches its block only through the
-// host context `ctx` — no app internals.
+// host context `ctx` — no app internals. Its view name comes from its
+// package (`ext:agentmux.hello/main`), so it doesn't declare one.
 
 import { createEffect, createSignal } from "solid-js";
 
 export default {
     apiVersion: 1,
-    view: "ext:hello",
     label: "Hello",
     icon: "hand",
     create(ctx) {

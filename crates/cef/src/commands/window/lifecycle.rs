@@ -3,7 +3,7 @@
 //
 // Window lifecycle commands + HWND resolution helpers for the CEF host.
 //
-// First carve of the `commands/window.rs` modularization
+// First carve of the `commands::window` modularization
 // (docs/analysis/ANALYSIS_LARGE_FILE_MODULARIZATION_CANDIDATES_2026_05_28.md,
 // Plan 1). Holds the close path, the per-label top-level-HWND resolver,
 // the EnumWindows fallbacks, and the per-label HWND cache capture —

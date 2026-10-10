@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Split out of bootstrap.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.3).
+//! Split out of the single-file bootstrap module unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.3).
 
 use super::*;
 
@@ -104,6 +104,7 @@ pub fn spawn_background_subsystems(
         fs_watch_pool.clone(),
         config_watcher.clone(),
         event_bus.clone(),
+        broker.clone(),
     );
 
     // Browser pane start page — same load-then-watch shape as settings.json

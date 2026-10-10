@@ -25,6 +25,7 @@ mod messagebus;
 pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
+pub(crate) mod agent_self_keys;
 pub(crate) mod jekt_held;
 pub(crate) mod actor;
 pub(crate) mod service;
@@ -47,10 +48,14 @@ mod notify_handlers;
 pub(crate) mod browser_allowlist;
 pub(crate) mod browser_attention;
 pub(crate) mod browser_host_sync;
+pub(crate) mod browser_identity;
 pub(crate) mod browser_owner;
 pub(crate) mod browser_popup;
 pub(crate) mod browser_uploads;
 pub(crate) mod ui_handlers;
+pub(crate) mod widget_access_handlers;
+pub(crate) mod widget_agent_handlers;
+pub(crate) mod widget_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;

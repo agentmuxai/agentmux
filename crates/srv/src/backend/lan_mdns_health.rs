@@ -6,7 +6,7 @@
 //! `mdns-sd` builds one socket per interface when its daemon is created. For
 //! IPv4 that is a bind to `0.0.0.0:5353`, a multicast-group join and a test
 //! packet; if any step fails the crate logs at `debug!` and **skips that
-//! interface** (`service_daemon.rs`, "bind a socket to {}: {}. Skipped."). The
+//! interface** (mdns-sd's service daemon, "bind a socket to {}: {}. Skipped."). The
 //! daemon still starts and `LAN discovery started (mDNS)` is still logged, so a
 //! host can hear its peers (over IPv6) and never be heard. That is exactly what
 //! happened on Area54 on 2026-10-01 (SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 8.1).

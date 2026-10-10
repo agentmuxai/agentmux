@@ -4,7 +4,7 @@
 /**
  * `sleep` was exported here but had zero real call sites anywhere in the
  * frontend (reagent P2 on PR #2388: a first draft duplicated it as a new
- * frontend/util/async.ts instead of noticing it already existed and was
+ * frontend/util/async.ts instead of noticing it already existed and was (comment-hygiene: allow)
  * just never consumed) — no test coverage existed either. Scoped to just
  * `sleep` rather than a full util.ts test file; the rest of this large
  * grab-bag module is out of scope for this PR.

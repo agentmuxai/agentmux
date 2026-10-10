@@ -186,7 +186,7 @@ The backend's `ConfigWatcher` (wconfig.rs) monitors the config directory. When `
 ### Widget Bar Architecture
 
 - **File:** `frontend/app/tab/widgetbar.tsx`
-- **Custom widgets:** Loaded from `fullConfigAtom` (sourced from `~/.agentmux/config/widgets.json`)
+- **Custom widgets:** Loaded from `fullConfigAtom` (sourced from `~/.agentmux/config/widgets.json`). *2026-10-09: that file was later removed from the UI (`widget-visibility-rearchitecture.md`) and came back as the user's own `widgets.json` next to `settings.json` (Pane Tab contract Phase 6), now joined by widget packages (`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`).*
 - **Built-in widgets:** `help`, `devtools` (and now `settings`) are hardcoded after custom widgets
 - **Click handler:** `handleWidgetSelect()` -- special-cases `devtools` and `settings`, everything else calls `createBlock(blockDef)`
 

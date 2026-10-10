@@ -324,7 +324,8 @@ pub(crate) const OPEN_BROWSER_TOOL: &str = r#"{
       "url": { "type": "string", "description": "http:// or https:// URL to open" },
       "split": { "type": "string", "enum": ["right", "left", "up", "down"], "description": "Where to place the pane relative to your own (default: right)" },
       "title": { "type": "string", "description": "Optional pane title" },
-      "allowed_origins": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "description": "Optional: keep the pane on these sites. Each is example.com (https://example.com), *.example.com (it and its subdomains, https) or a full origin like http://localhost:3000. url must be on the list. A navigation elsewhere (a link, a redirect, a popup) doesn't happen: the user is asked in the pane, and Allow adds that site. Include every site a sign-in on the way needs." }
+      "allowed_origins": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "description": "Optional: keep the pane on these sites. Each is example.com (https://example.com), *.example.com (it and its subdomains, https) or a full origin like http://localhost:3000. url must be on the list. A navigation elsewhere (a link, a redirect, a popup) doesn't happen: the user is asked in the pane, and Allow adds that site. Include every site a sign-in on the way needs." },
+      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes (Windows only for now). Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use it\"); any other profile is refused." }
     },
     "required": ["url"]
   }
@@ -743,6 +744,40 @@ pub(crate) const OPEN_MEDIA_TOOL: &str = r#"{
       "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
     },
     "required": ["file"]
+  }
+}"#;
+
+pub(crate) const WIDGET_LIST_TOOL: &str = r#"{
+  "name": "WidgetList",
+  "description": "List the AgentMux widgets installed on this machine: id, name, version, kind (sandboxed or trusted), state (approved, needs_approval, changed, invalid with its error, disabled), permissions, folder and the views it adds. Use it to see whether a widget you built installed, and what view to pass to OpenWidget.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const WIDGET_INSTALL_TOOL: &str = r#"{
+  "name": "WidgetInstall",
+  "description": "Install a widget package you built (a folder with a widget.json, that widget.json, or a .zip) and ask the user to approve it. AgentMux validates and copies it, then shows the user a prompt naming you, the widget and every permission it asks for; you can't approve it yourself. Returns once the user answers or the wait ends: status installed (with its views), declined, pending (still waiting; the user can answer later in Settings → Widgets), or the validation error to fix. Installing again with changes replaces the old version and asks again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":      { "type": "string",  "description": "The package folder, its widget.json, or a .zip; relative paths are in your workspace" },
+      "replace":   { "type": "boolean", "description": "Replace an installed package with the same id (default true)" },
+      "wait_secs": { "type": "integer", "description": "How long to wait for the user's answer, in seconds (default 300, at most 600)" }
+    },
+    "required": ["path"]
+  }
+}"#;
+
+pub(crate) const OPEN_WIDGET_TOOL: &str = r#"{
+  "name": "OpenWidget",
+  "description": "Open a pane of an installed, approved widget next to this conversation. view is one of the widget's views from WidgetList (ext:<id>/<pane>). meta sets keys of the pane's own widget state (what the widget reads with meta.get), e.g. {\"repo\": \"owner/name\"}. Fails, saying why, if the widget isn't approved or is turned off. If the widget then shows an error, read it, fix the package, and WidgetInstall again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "view":  { "type": "string", "description": "The view to open, e.g. ext:acme.todo/main" },
+      "meta":  { "type": "object", "description": "The pane's initial widget state, as the widget's own keys" },
+      "split": { "type": "string", "enum": ["right", "down"], "description": "Where to place the pane relative to this agent pane (default: right)" }
+    },
+    "required": ["view"]
   }
 }"#;
 

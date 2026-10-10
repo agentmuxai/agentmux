@@ -11,21 +11,25 @@ import { literalFirstSearch } from "@/app/util/fuzzysearch";
 import type { SettingsIndexEntry } from "./settings-model";
 import { APPEARANCE_SETTINGS } from "./sections/appearance-section";
 import { WINDOW_SETTINGS } from "./sections/window-panes-section";
+import { BROWSER_SETTINGS } from "./sections/browser-section";
 import { TERMINAL_SETTINGS } from "./sections/terminal-section";
 import { SOUNDS_SETTINGS } from "./sections/sounds-section";
 import { NOTIFICATIONS_SETTINGS } from "./sections/notifications-section";
 import { RECORDING_SETTINGS } from "./sections/recording-section";
 import { DEVICES_SETTINGS } from "./sections/devices-section";
+import { WIDGETS_SETTINGS } from "./sections/widgets-section";
 import { ADVANCED_SETTINGS } from "./sections/advanced-section";
 
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(APPEARANCE_SETTINGS),
     ...Object.values(WINDOW_SETTINGS),
+    ...Object.values(BROWSER_SETTINGS),
     ...Object.values(TERMINAL_SETTINGS),
     ...Object.values(SOUNDS_SETTINGS),
     ...Object.values(NOTIFICATIONS_SETTINGS),
     ...Object.values(RECORDING_SETTINGS),
     ...Object.values(DEVICES_SETTINGS),
+    ...Object.values(WIDGETS_SETTINGS),
     ...Object.values(ADVANCED_SETTINGS),
 ];
 

@@ -94,12 +94,11 @@ describe("lastPromptToStore", () => {
 });
 
 describe("resolveSwarmLine", () => {
-    it("prefers the generated title over everything", () => {
+    it("prefers the generated title over every other title and status", () => {
         const meta = {
             "term:ambient_summary": "Fix the login race",
             [META_RESTORED]: "Old goal",
             [META_LAST_PROMPT]: "Please review something else entirely",
-            [META_AWAITING_USER]: true,
         };
         expect(line({ meta, status: "running", currentTool: "Bash" })).toEqual({
             text: "Fix the login race",
@@ -123,12 +122,15 @@ describe("resolveSwarmLine", () => {
         expect(line({ meta })).toEqual({ text: STATUS_NO_ACTIVITY, source: "status" });
     });
 
-    it("says it is waiting for you ahead of an old goal, but not ahead of a generated title", () => {
+    it("says it is waiting for you ahead of every title, as the pane's working row does", () => {
         const waiting = { [META_AWAITING_USER]: true, [META_RESTORED]: "Old goal", [META_LAST_PROMPT]: "Fix the login race" };
         expect(line({ meta: waiting, status: "running" })).toEqual({ text: STATUS_WAITING, source: "status" });
-        expect(line({ meta: { ...waiting, "term:ambient_summary": "Fix the login race" } }).source).toBe("generated");
+        expect(line({ meta: { ...waiting, "term:ambient_summary": "Fix the login race" }, status: "running" })).toEqual({
+            text: STATUS_WAITING,
+            source: "status",
+        });
         // And it is only the true flag: a cleared one falls through the ladder.
-        expect(line({ meta: { ...waiting, [META_AWAITING_USER]: false } }).source).toBe("restored");
+        expect(line({ meta: { ...waiting, [META_AWAITING_USER]: false }, status: "running" }).source).toBe("restored");
     });
 
     it("ignores a waiting flag once the agent has no turn in flight", () => {
@@ -138,6 +140,7 @@ describe("resolveSwarmLine", () => {
         const stale = { [META_AWAITING_USER]: true, [META_RESTORED]: "Set up CI for the docs site" };
         expect(line({ meta: stale, status: "idle" })).toEqual({ text: "Set up CI for the docs site", source: "restored" });
         expect(line({ meta: { [META_AWAITING_USER]: true }, status: "idle" }).text).toBe(STATUS_NO_ACTIVITY);
+        expect(line({ meta: { ...stale, "term:ambient_summary": "Fix the login race" }, status: "idle" }).source).toBe("generated");
     });
 
     // The status chip's "question" state uses the same check, so it gets the

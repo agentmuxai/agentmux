@@ -21,6 +21,7 @@
  */
 
 import { Button } from "@/element/button";
+import { createConnectWindow, navigateLoginWindow } from "../flows/login-window";
 import { loginBackend } from "../flows/login-backend";
 import { translateError } from "@/app/errors/translate";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
@@ -150,7 +151,9 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
             lastOpenedUrl = url;
             console.log(`[auth-diag] opening auth URL in browser (host=${(() => { try { return new URL(url).host; } catch { return "?"; } })()})`);
             try {
-                getApi().openExternal(url);
+                // The window reserved at Connect's click, on a browser host;
+                // the system browser otherwise.
+                if (!navigateLoginWindow(url)) getApi().openExternal(url);
             } catch (e) {
                 console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
             }
@@ -193,6 +196,10 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         untrack(() => controller.selected(prov.id, id, outcomeFor(id, suppliesProvider)));
     });
 
+    // The window each Connect opens inside its click, closed once that
+    // connect is over without a URL (login-window.ts).
+    const connectWindow = createConnectWindow(() => controller.state().kind);
+
     // Connect / Retry click handler. Issue #1624 PR-C Part B: OAuth no
     // longer requires a pre-selected account — the backend mints one
     // directly (`direct_account: true` in auth-flow-controller.ts's
@@ -205,7 +212,9 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        void startConnect(controller, prov, props.accountId(), inAppUi);
+        // Inside the click: the login's window opens now (login-window.ts).
+        const settled = connectWindow.begin(prov);
+        void startConnect(controller, prov, props.accountId(), inAppUi).finally(settled);
     };
 
     // "Use my existing login" REMOVED 2026-08-31 — it copied the operator's

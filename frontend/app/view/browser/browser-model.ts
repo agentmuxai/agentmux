@@ -77,7 +77,7 @@ function installEventSinkOnce(): void {
  * no backlink). Callers that want a blank pane can pass `"about:blank"`
  * explicitly. See docs/specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
  */
-const DEFAULT_BROWSER_URL = "https://agentmux.ai";
+export const DEFAULT_BROWSER_URL = "https://agentmux.ai";
 
 /** The browser's state behind its native pane tab (`browserPaneTab`, browser.tsx). */
 export class BrowserViewModel {
@@ -169,6 +169,9 @@ export class BrowserViewModel {
     /** The sites the driving agent limited this pane to (`browser:allowed_origins`,
      *  written by srv; SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §5). */
     allowedOriginsAtom: Accessor<string[]>;
+    /** The jar this tab browses as (`browser:identity`), fixed when it was
+     *  opened; undefined for Personal (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5). */
+    identityAtom: Accessor<string | undefined>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -382,6 +385,10 @@ export class BrowserViewModel {
             this.driverAgentAtom = createMemo(() => {
                 const v = this.meta()?.["browser:owner_agent"];
                 return typeof v === "string" && v.trim() ? v.trim() : undefined;
+            });
+            this.identityAtom = createMemo(() => {
+                const v = this.meta()?.["browser:identity"];
+                return typeof v === "string" && v ? v : undefined;
             });
             this.allowedOriginsAtom = createMemo(() => {
                 const v = this.meta()?.["browser:allowed_origins"];

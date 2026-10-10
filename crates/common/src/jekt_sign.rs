@@ -375,6 +375,12 @@ pub fn verify_channel_jekt(
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
+// ── Cross-channel v2: bound to the sender's UID (identity M4d-6) ──
+mod channel_v2;
+pub use channel_v2::{sign_channel_jekt_v2, verify_channel_jekt_v2};
+mod lan_v2;
+pub use lan_v2::{sign_lan_jekt_v2, verify_lan_jekt_v2};
+
 // ── General agent-to-agent WAN signing ──
 //
 // Issue #2586's second half. Asymmetric for the same reason LAN and

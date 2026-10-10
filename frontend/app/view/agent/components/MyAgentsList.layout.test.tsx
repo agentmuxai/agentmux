@@ -11,8 +11,8 @@
  * `_recent-sessions.scss`, loads both in headless Chromium (Chrome or Edge,
  * whichever is installed) and measures the result.
  *
- * It skips, rather than fails, on a machine with no Chromium-based browser.
- * Set `AGENTMUX_TEST_BROWSER` to a browser executable to force one.
+ * It skips, rather than fails, on a machine with no usable browser
+ * (layout-browser.ts findBrowser: on macOS, Chrome's headless shell only).
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
@@ -20,7 +20,7 @@ import { join } from "node:path";
 import * as sass from "sass";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { findBrowser, measureInBrowser } from "./layout-browser";
+import { findBrowser, measureInBrowser, NO_BROWSER_HINT } from "./layout-browser";
 import { MyAgentsList } from "./MyAgentsList";
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ListRecentSessionsCommand: vi.fn() } }));
@@ -34,6 +34,7 @@ vi.mock("@/element/DualProviderLogo", () => ({
 }));
 
 const BROWSER = findBrowser();
+if (!BROWSER) console.info(NO_BROWSER_HINT);
 
 /** The app's design tokens that the tile CSS reads, with their real values. */
 const TOKENS = `:root{

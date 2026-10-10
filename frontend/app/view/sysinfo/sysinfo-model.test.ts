@@ -61,7 +61,7 @@ describe("sampleReducer — APPEND, ordinary forward time", () => {
 // Regression: wall-clock `ts` can step BACKWARDS (NTP correction, manual set,
 // VM resume). Before the fix the reducer had two forward-only assumptions:
 //
-//  1. `cutoffTs = item.ts - intervalMs * (numPoints + 1)` with
+//  1. `cutoffTs = item.ts - intervalMs * (numPoints + 1)` with (comment-hygiene: allow)
 //     `state.filter(d => d.ts >= cutoffTs)` — a pre-step point's ts is LARGER
 //     than any post-step cutoff, so it passed the filter forever and never
 //     aged out.
@@ -113,10 +113,10 @@ describe("sampleReducer — APPEND across a backwards clock step", () => {
 
     // reagentx P1 (PR #2832): the first version of this fix used ONE threshold
     // for two different jobs — deciding a step happened, and deciding which
-    // points may remain. A point sitting between `item.ts` and
-    // `item.ts + gapThreshold` survived the filter but is still AHEAD of the
+    // points may remain. A point sitting between `item.ts` and (comment-hygiene: allow)
+    // `item.ts + gapThreshold` survived the filter but is still AHEAD of the (comment-hygiene: allow)
     // new sample, so the `clockStepped` branch appended
-    // `[...trimmed, blank(last.ts + 1), item]` with `last.ts + 1 > item.ts` —
+    // `[...trimmed, blank(last.ts + 1), item]` with `last.ts + 1 > item.ts` — (comment-hygiene: allow)
     // reintroducing exactly the non-monotonic series this PR exists to fix.
     // Only reachable for a PARTIAL step: bigger than the threshold, but not
     // big enough to clear every buffered point — i.e. an ordinary few-second
@@ -186,8 +186,8 @@ describe("sampleReducer — RESET", () => {
     });
 
     // codex P2 (PR #2832): a sub-threshold backwards correction in history left
-    // BOTH samples in place, and bracketing the seam with `prev.ts + 1` /
-    // `cur.ts - 1` blanks inherits the same inversion rather than repairing it
+    // BOTH samples in place, and bracketing the seam with `prev.ts + 1` / (comment-hygiene: allow)
+    // `cur.ts - 1` blanks inherits the same inversion rather than repairing it (comment-hygiene: allow)
     // — history [10000, 8000] emitted 10000, 10001, 7999, 8000.
     it("drops the superseded segment on a sub-threshold backwards correction", () => {
         const out = reset([sample(10000), sample(8000)]);
@@ -212,7 +212,7 @@ describe("sampleReducer — RESET", () => {
 
 describe("sampleReducer — no duplicate x", () => {
     it("omits the seam sentinel when it would collide with the new sample", () => {
-        // `last.ts + 1 === item.ts`: the sentinel has nowhere to go.
+        // `last.ts + 1 === item.ts`: the sentinel has nowhere to go. (comment-hygiene: allow)
         const out = append([sample(4999), sample(20000)], sample(5000));
         expect(out.map((d) => d.ts)).toEqual([4999, 5000]);
         expect(new Set(out.map((d) => d.ts)).size).toBe(out.length);

@@ -510,6 +510,8 @@ async fn route_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("main");
             crate::client::allowed_origins::limit_before_create(&state.site_limits, block_id, args.get("allowed_origins"));
+            crate::browser_pane::identity::set_for_block(block_id, args.get("identity").and_then(|v| v.as_str()));
+            crate::browser_pane::identity::check_capacity(block_id)?;
             state.browser_panes.create(state, block_id, url, rect, window_label)?;
             Ok(serde_json::json!(true))
         }
@@ -667,6 +669,27 @@ async fn route_command(
             })
             .await
             .map_err(|e| format!("browser_attention_resolve: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
+        "widget_approval_decide" => {
+            // The user's Install/Cancel on a widget's install prompt, relayed
+            // to srv as the host: no agent can approve a widget itself
+            // (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3).
+            let body = serde_json::json!({
+                "id": args.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "hash": args.get("hash").and_then(|v| v.as_str()).unwrap_or(""),
+                "decision": args.get("decision").and_then(|v| v.as_str()).unwrap_or(""),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] widget_approval_decide id={} decision={}", body["id"], body["decision"]);
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_widget_approval(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("widget_approval_decide: {e}"))?;
             relayed?;
             Ok(serde_json::json!(true))
         }

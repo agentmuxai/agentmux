@@ -315,6 +315,8 @@ fn forward_app_shortcut(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mu
 /// Windows virtual-key codes for browser-pane-only shortcuts (issue #1190).
 const VK_L: i32 = 0x4C; // Ctrl+L — focus address bar
 const VK_R: i32 = 0x52; // Ctrl+R — reload
+const VK_N: i32 = 0x4E; // Ctrl+Shift+N — new Incognito tab
+const VK_HOME: i32 = 0x24; // Alt+Home — Home
 const VK_LEFT: i32 = 0x25; // Alt+Left — back
 const VK_RIGHT: i32 = 0x27; // Alt+Right — forward
 
@@ -329,6 +331,10 @@ enum BrowserPaneShortcut {
     Reload,
     GoBack,
     GoForward,
+    /// Alt+Home, and Ctrl+Shift+N: the toolbar handles these
+    /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §2).
+    Home,
+    NewIncognito,
 }
 
 /// Ctrl+T/Ctrl+W (new tab / close tab) are intentionally not matched here —
@@ -342,8 +348,10 @@ enum BrowserPaneShortcut {
 /// Requiring shift-up leaves those shifted chords alone (falls through to
 /// CEF's normal handling) instead of guessing what they should do.
 fn browser_pane_shortcut_for(ctrl: bool, alt: bool, shift: bool, vk: i32) -> Option<BrowserPaneShortcut> {
+    // The one shifted chord taken: Ctrl+Shift+N, a new Incognito tab, as in a
+    // browser. Every other shifted chord falls through to CEF, as below.
     if shift {
-        return None;
+        return (ctrl && !alt && vk == VK_N).then_some(BrowserPaneShortcut::NewIncognito);
     }
     if ctrl && !alt {
         match vk {
@@ -355,6 +363,7 @@ fn browser_pane_shortcut_for(ctrl: bool, alt: bool, shift: bool, vk: i32) -> Opt
         match vk {
             VK_LEFT => Some(BrowserPaneShortcut::GoBack),
             VK_RIGHT => Some(BrowserPaneShortcut::GoForward),
+            VK_HOME => Some(BrowserPaneShortcut::Home),
             _ => None,
         }
     } else {
@@ -386,8 +395,14 @@ fn run_browser_pane_shortcut(
     let state = handler.state.clone();
     drop(handler);
 
+    let action = match shortcut {
+        BrowserPaneShortcut::FocusAddress => Some("focus-address"),
+        BrowserPaneShortcut::Home => Some("home"),
+        BrowserPaneShortcut::NewIncognito => Some("new-incognito"),
+        _ => None,
+    };
     match shortcut {
-        BrowserPaneShortcut::FocusAddress => {
+        BrowserPaneShortcut::FocusAddress | BrowserPaneShortcut::Home | BrowserPaneShortcut::NewIncognito => {
             // codex P2 on #2548: emit_event_from_state always targets "main" —
             // wrong when the pane was torn off into a floating window, since
             // that window's own BrowserNavBar (not main's) owns the matching
@@ -398,7 +413,7 @@ fn run_browser_pane_shortcut(
                         &state,
                         &label,
                         "browser-pane-shortcut",
-                        &serde_json::json!({ "block_id": block_id, "action": "focus-address" }),
+                        &serde_json::json!({ "block_id": block_id, "action": action }),
                     );
                 }
                 None => {

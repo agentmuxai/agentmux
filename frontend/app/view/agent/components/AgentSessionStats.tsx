@@ -26,6 +26,7 @@ import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js"
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
+import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
 import {
     archiveSession,
@@ -59,23 +60,9 @@ interface AgentSessionStatsProps {
     label: string;
 }
 
-/** `93s` / `4m 12s` / `2h 14m` — duration, not a clock time. */
-function formatDuration(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    // No trailing "0s" on a round minute (ReAgent P2 on #3436).
-    if (m < 60) return s % 60 === 0 ? `${m}m` : `${m}m ${s % 60}s`;
-    const h = Math.floor(m / 60);
-    return `${h}h ${m % 60}m`;
-}
-
 /** `3m ago` / `2h ago` / `—` when never. */
 function formatAgo(ts: number): string {
-    if (!ts) return "—";
-    const delta = Date.now() - ts;
-    if (delta < 60_000) return "just now";
-    return `${formatDuration(delta).split(" ")[0]} ago`;
+    return ts ? formatTimeAgo(ts) : "—";
 }
 
 /**
@@ -246,7 +233,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                                 </Show>
                                 <Show when={totals()?.duration_ms}>
                                     {" · "}
-                                    {formatDuration(totals()!.duration_ms!)}
+                                    {formatDurationShort(totals()!.duration_ms!)}
                                 </Show>
                             </>
                         )}

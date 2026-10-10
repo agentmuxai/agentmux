@@ -1,0 +1,36 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Image zoom in the Media view (media-zoom.ts): the cursor says what a click
+// or drag will do, and a zoomed image shows its zoom with a way back to fit.
+
+.media-view-content:focus {
+    outline: none;
+}
+
+.media-view-media {
+    cursor: zoom-in;
+
+    // No will-change: it would raster the image once and scale that bitmap,
+    // blurring a zoomed-in image.
+    &.media-view-zoomed {
+        cursor: grab;
+    }
+
+    &.media-view-dragging {
+        cursor: grabbing;
+    }
+
+    // Each image pixel drawn larger than 2 CSS pixels: squares, not blur.
+    &.media-view-pixels {
+        image-rendering: pixelated;
+    }
+}
+
+.media-view-zoom-badge {
+    position: absolute;
+    right: var(--space-2);
+    bottom: var(--space-2);
+    z-index: 1;
+    opacity: 0.85;
+}

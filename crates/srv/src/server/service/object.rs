@@ -47,6 +47,9 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Err(e) => return WebReturnType::error(e),
             };
             crate::server::browser_owner::strip_srv_only_keys(&mut block_def.meta);
+            if let Err(e) = crate::server::browser_identity::check_new_tab(state, &block_def.meta) {
+                return WebReturnType::error(e);
+            }
             // Optional explicit tab_id at args[2] (args[1] is rtOpts).
             // When present, overrides uicontext.active_tab_id — lets
             // callers like applyTabPreset (frontend) target a specific

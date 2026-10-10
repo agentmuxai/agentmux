@@ -45,6 +45,7 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
+import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
@@ -70,6 +71,11 @@ export function resolveEffectiveViewType(blockView: string): string {
 
 // Each ViewModel's own reactive root, disposed with it (`disposeViewModel`).
 const viewModelRoots = new WeakMap<ViewModel, () => void>();
+/** The manifest each live ViewModel was built from (`null`: none was
+ *  registered). A pane whose view's manifest is replaced (a widget reloaded
+ *  after an edit, or one that registered after the pane mounted) rebuilds.
+ *  SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.5. */
+const viewModelManifests = new WeakMap<ViewModel, PaneTabManifest | null>();
 
 /**
  * Builds a ViewModel in its OWN reactive root. It is called from inside
@@ -95,6 +101,7 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
         return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
     });
     viewModelRoots.set(vm, disposeRoot);
+    viewModelManifests.set(vm, manifest ?? null);
     return vm;
 }
 
@@ -181,6 +188,8 @@ function getViewElem(
         return <CenteredDiv>No View</CenteredDiv>;
     }
     if (viewModel.viewComponent == null) {
+        // A widget's pane whose widget isn't running: say why.
+        if (blockView.startsWith("ext:")) return <MissingWidget blockId={blockId} view={blockView} />;
         return <CenteredDiv>No View Component</CenteredDiv>;
     }
     const VC = viewModel.viewComponent;
@@ -443,11 +452,21 @@ function Block(props: BlockProps): JSX.Element {
         }
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
         let vm = bcm?.viewModel;
-        if (vm == null || vm.viewType !== view) {
+        // Reactive on the registry: a replaced manifest rebuilds the pane.
+        const manifestNow = getPaneTab(resolveEffectiveViewType(view)) ?? null;
+        const stale = vm != null && viewModelManifests.has(vm) && viewModelManifests.get(vm) !== manifestNow;
+        if (vm == null || vm.viewType !== view || stale) {
+            const replaced = stale && createdViewModels.includes(vm) ? vm : null;
             vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
             createdViewModels.push(vm);
             registeredBcm = { viewModel: vm };
             registerBlockComponentModel(props.nodeModel.blockId, registeredBcm);
+            // The old instance's dispose runs now (a widget's iframe closes,
+            // its bridge says goodbye), not at unmount.
+            if (replaced) {
+                disposeViewModel(replaced);
+                createdViewModels.splice(createdViewModels.indexOf(replaced), 1);
+            }
         }
         setViewModel(vm);
         // See NodeModel.activeViewModel/setActiveViewModel's own doc
@@ -691,10 +710,18 @@ function Block(props: BlockProps): JSX.Element {
                     viewType={viewTypeStr()}
                     onClose={props.nodeModel.onClose}
                 >
-                    {props.preview
-                        ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-                        : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} covered={() => coverPhase() !== "live"} />
-                    }
+                    {/* Keyed on the ViewModel: BlockFull and BlockPreview take it
+                        once, so a rebuilt one (a widget reloaded or unloaded,
+                        SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.5) has
+                        to mount a new frame, or the old instance keeps
+                        rendering. The same ViewModel never remounts. */}
+                    <Show when={viewModel()} keyed>
+                        {(vm) =>
+                            props.preview
+                                ? <BlockPreview nodeModel={props.nodeModel} viewModel={vm} preview={props.preview} />
+                                : <BlockFull nodeModel={props.nodeModel} viewModel={vm} preview={props.preview} covered={() => coverPhase() !== "live"} />
+                        }
+                    </Show>
                 </BlockErrorBoundary>
             </Show>
             {/* The same cover component agent-view.tsx and AgentPicker.tsx

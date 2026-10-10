@@ -1,6 +1,6 @@
 # App API Extension Spec
 
-**Status:** Proposed
+**Status:** implemented — App API Tier 1 in PR #332, grown since into `crates/srv/src/server/app_api/`, the `/api/v1` routes and the MCP tools in `crates/mcp`. Kept for its history.
 **Date:** 2026-04-10
 **Motivation:** CEF webview content is inaccessible to external automation tools
 (Windows MCP, AppleScript, etc.). The only reliable way to programmatically

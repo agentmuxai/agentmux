@@ -41,7 +41,7 @@
 //! `agentmux-srv`'s process lifecycle. `messaging:whatsapp:tunnel_domain` is
 //! kept as a config field purely so the startup log can print the full
 //! callback URL as a convenience reminder; nothing reads it to manage a
-//! subprocess. `messaging/tunnel.rs` (the spec's shared `TunnelManager`) is
+//! subprocess. `messaging::tunnel` (the spec's shared `TunnelManager`) is
 //! not created. This scoping decision means `BridgeHealth` reflects only
 //! "the bridge is initialized and the outbound sender is running", not
 //! "Meta can currently reach us" — the latter depends on infrastructure this
