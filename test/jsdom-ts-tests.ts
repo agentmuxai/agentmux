@@ -9,7 +9,8 @@
 //
 // A new `.ts` test that touches `document`, `window`, `localStorage` or DOM
 // events fails under node with "ReferenceError: document is not defined".
-// Add it here, or put `// @vitest-environment jsdom` on its first line.
+// Add it here, or give it a first-line comment setting the vitest
+// environment to jsdom (`@vitest-environment` followed by jsdom).
 export const JSDOM_TS_TESTS = [
     "frontend/app/block/block-registry.test.ts",
     "frontend/app/block/context-menu-region.test.ts",

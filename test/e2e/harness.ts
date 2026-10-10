@@ -14,7 +14,7 @@
  * work in the browser"), and the repo's shared vitest.config.ts merges in
  * the frontend's own vite.config (browser-oriented resolution needed for
  * the rest of the test suite) — that resolution applies even under
- * `@vitest-environment node` and even via `createRequire` (vite-node
+ * the node test environment and even via `createRequire` (vite-node
  * intercepts Node's own `require` too, not just ESM imports). Node's own
  * native `WebSocket` (global since Node 22, undici-backed) sidesteps this
  * entirely — it's a process global, not something resolved through Vite's
