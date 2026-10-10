@@ -56,8 +56,6 @@ impl Store {
         }
     }
 
-    /// Load this agent's signing key together with its mint/last-rotation
-    /// time, if one has already been minted.
     /// When this agent's jekt key expires (unix seconds): its creation plus
     /// [`JEKT_KEY_TTL_SECS`]. Until then no `ensure` rotates it, so a holder
     /// of the key needs nothing newer before this time (identity M4d-3).
@@ -65,6 +63,8 @@ impl Store {
         Ok(self.agent_jekt_key_load_with_created_at(&agent_id.to_lowercase())?.map(|(_, created)| created + JEKT_KEY_TTL_SECS))
     }
 
+    /// Load this agent's signing key together with its mint/last-rotation
+    /// time, if one has already been minted.
     fn agent_jekt_key_load_with_created_at(&self, agent_id: &str) -> Result<Option<(Vec<u8>, i64)>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt =
