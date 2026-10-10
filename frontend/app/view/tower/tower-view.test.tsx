@@ -223,7 +223,7 @@ describe("Tower", () => {
         renderTower();
         expect(await screen.findByText(/37 processes AgentMux didn't start/)).toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "Show in Processes" }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "tower:view": "processes" });
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:view": "processes", "tower:only": "other" });
     });
 
     it("terminals are one entry, each terminal heading its processes", async () => {
@@ -696,6 +696,32 @@ describe("Tower", () => {
         renderTower();
         await screen.findByText("System");
         expect(screen.queryByRole("radio", { name: "Agent" })).toBeNull();
+    });
+
+    it("going from an agent to Processes shows only that agent's processes, until Show all", async () => {
+        renderTower();
+        await screen.findByTestId("tower-rail-block-a");
+        fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
+        // The agent the Agents view showed (the first, none chosen) goes along.
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:view": "processes", "tower:only": "block-a" });
+        expect(await screen.findByTestId("tower-only")).toHaveTextContent("Only AgentX");
+        await waitFor(() => expect(screen.getByText("claude.exe")).toBeInTheDocument());
+        expect(screen.queryByTestId("tower-owner-other")).toBeNull();
+        expect(screen.queryByText("System")).toBeNull();
+
+        fireEvent.click(within(screen.getByTestId("tower-only")).getByRole("button", { name: "Show all" }));
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:only": null });
+        expect(await screen.findByTestId("tower-owner-other")).toBeInTheDocument();
+        expect(screen.queryByTestId("tower-only")).toBeNull();
+    });
+
+    it("a pane opened on Processes isn't filtered, and switching within it carries nothing", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-other");
+        expect(screen.queryByTestId("tower-only")).toBeNull();
+        fireEvent.click(screen.getByRole("tab", { name: "Processes" }));
+        expect(setMetaMock).not.toHaveBeenCalledWith(expect.objectContaining({ "tower:only": expect.anything() }));
     });
 
     it("polls only while visible", async () => {

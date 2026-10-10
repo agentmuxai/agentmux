@@ -133,22 +133,28 @@ export interface OwnerGroup {
     mem?: number;
 }
 
-/** Every process under its owner: one group per agent, then every
- *  terminal's processes together, AgentMux's, and the rest (a process with
- *  no task, or one whose task isn't listed). Groups without processes are
- *  left out. */
+/** Who started a process, as the Agents rail and the Processes groups name
+ *  it: its agent's task id, `terminals`, `agentmux`, or `other` (no task, or
+ *  a task that isn't listed). */
+export function ownerOf(p: TowerProcess, tasksById: ReadonlyMap<string, TowerTask>): [string, RailKind, string] {
+    const t = p.task ? tasksById.get(p.task) : undefined;
+    return !t
+        ? [OTHER_ID, "other", "Other processes"]
+        : t.kind === "agent"
+          ? [t.id, "agent", t.label]
+          : t.kind === "terminal"
+            ? [TERMINALS_ID, "terminals", "Terminals"]
+            : [AGENTMUX_ID, "agentmux", "AgentMux"];
+}
+
+/** Every process under its owner (`ownerOf`): one group per agent, then
+ *  every terminal's processes together, AgentMux's, and the rest. Groups
+ *  without processes are left out. */
 export function ownerGroups(processes: TowerProcess[], tasks: TowerTask[]): OwnerGroup[] {
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const groups = new Map<string, OwnerGroup>();
     for (const p of processes) {
-        const t = p.task ? byId.get(p.task) : undefined;
-        const [key, kind, label]: [string, RailKind, string] = !t
-            ? [OTHER_ID, "other", "Other processes"]
-            : t.kind === "agent"
-              ? [t.id, "agent", t.label]
-              : t.kind === "terminal"
-                ? [TERMINALS_ID, "terminals", "Terminals"]
-                : [AGENTMUX_ID, "agentmux", "AgentMux"];
+        const [key, kind, label] = ownerOf(p, byId);
         let g = groups.get(key);
         if (!g) {
             g = { key, kind, label, processes: [] };

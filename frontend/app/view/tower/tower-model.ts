@@ -16,6 +16,7 @@ import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, t
 import { createStore, reconcile } from "solid-js/store";
 import {
     type CpuMode,
+    orderRail,
     type ProcessGrouping,
     railEntries,
     type RailSort,
@@ -54,6 +55,11 @@ export class TowerViewModel {
     effectiveView: Accessor<TowerView>;
     /** The Agents view's selected rail entry (`RailEntry::id`), as chosen. */
     selected: Accessor<string>;
+    /** The rail entry the Agents view shows: the chosen one, else the first. */
+    shownEntry: Accessor<string>;
+    /** The Processes view shows only this owner's processes (`RailEntry::id`,
+     *  `ownerOf`), carried over from the Agents view; `""` for all. */
+    only: Accessor<string>;
     railSort: Accessor<RailSort>;
     /** Each rail entry's recent CPU, oldest first (fraction of one core). */
     history: Accessor<ReadonlyMap<string, readonly number[]>>;
@@ -121,6 +127,10 @@ export class TowerViewModel {
             const v = ctx.meta()?.["tower:agent"];
             return typeof v === "string" ? v : "";
         });
+        this.only = createMemo(() => {
+            const v = ctx.meta()?.["tower:only"];
+            return typeof v === "string" && this.hasTasks() ? v : "";
+        });
         this.railSort = createMemo<RailSort>(() => {
             const v = ctx.meta()?.["tower:railsort"];
             return RAIL_SORTS.includes(v as RailSort) ? (v as RailSort) : "pane";
@@ -156,6 +166,12 @@ export class TowerViewModel {
             this.recordHistory(snap);
             setState("snap", reconcile(snap, { key: "id", merge: true }));
         };
+        this.shownEntry = createMemo(() => {
+            const snap = this.snapshot();
+            if (!snap) return this.selected();
+            const ids = orderRail(railEntries(snap), this.railSort(), this.smoothedCpu).map((e) => e.id);
+            return ids.includes(this.selected()) ? this.selected() : (ids[0] ?? "");
+        });
         [this.error, this.setError] = createSignal<string | null>(null);
         [this.stalled, this.setStalled] = createSignal(false);
         [this.sort, this.setSort] = createSignal<Sort>({ key: "cpu", desc: true });
@@ -194,8 +210,21 @@ export class TowerViewModel {
         onCleanup(() => this.stop());
     }
 
-    setView(view: TowerView): void {
-        this.setMeta({ "tower:view": view === "processes" ? "processes" : null });
+    /** Switch views. Going from the Agents view to Processes keeps the agent
+     *  shown there as a filter (`only`), as Lens keeps a namespace; `only`
+     *  names another owner instead. */
+    setView(view: TowerView, only?: string): void {
+        const carried =
+            view === "processes" && this.effectiveView() === "agents" ? (only ?? this.shownEntry()) : undefined;
+        this.setMeta({
+            "tower:view": view === "processes" ? "processes" : null,
+            ...(carried !== undefined ? { "tower:only": carried || null } : {}),
+        });
+    }
+
+    /** The Processes view shows every process again. */
+    showAll(): void {
+        this.setMeta({ "tower:only": null });
     }
 
     /** Select a rail entry in the Agents view. */
