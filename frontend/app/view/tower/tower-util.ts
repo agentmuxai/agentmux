@@ -44,7 +44,7 @@ export function formatMem(bytes: number | undefined): string {
     return bytes == null ? "—" : formatBytes(bytes);
 }
 
-/** CPU time used, from nanoseconds: "0.4 s", "12.3 s", "4 min 5 s",
+/** CPU time used, from nanoseconds: "0.4 s", "12 s", "4 min 5 s",
  *  "1 h 2 min". */
 export function formatCpuTime(ns: number | undefined): string {
     if (ns == null || !Number.isFinite(ns)) return "—";
