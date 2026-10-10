@@ -1,6 +1,6 @@
 # User widgets and the widget API
 
-**Status:** active — W1 (packages and approval, §13) in PR #4575; W2 (the sandboxed runtime and the SDK) in PR #4581; W3 (scoped access) in the PR after it; W4 to W6 not started.
+**Status:** active — W1 (packages and approval, §13) in PR #4575; W2 (the sandboxed runtime and the SDK) in PR #4581; W3 (scoped access) in PR #4582; W4 to W6 not started.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
 **Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
