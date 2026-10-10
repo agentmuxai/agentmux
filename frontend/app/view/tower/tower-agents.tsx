@@ -19,6 +19,8 @@ import { SortHeader } from "./tower-sort-header";
 import {
     buildProcessTree,
     count,
+    formatAgo,
+    formatCpuTime,
     formatMem,
     orderRail,
     processDetail,
@@ -212,7 +214,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
             if (n.children.length) keys.push(foldKey(n.process));
             n.children.forEach(walk);
         };
-        for (const t of props.entry.tasks) buildProcessTree(t.processes).forEach(walk);
+        for (const t of props.entry.tasks) buildProcessTree(withExited(t)).forEach(walk);
         return keys;
     });
     return (
@@ -255,6 +257,17 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                     <Button density="compact" tone="quiet" icon="angles-up" onClick={() => m.fold(parents())}>
                         Collapse all
                     </Button>
+                    <span class="tower-toolbar-spacer" />
+                    <Button
+                        density="compact"
+                        tone="quiet"
+                        icon="table-columns"
+                        pressed={m.moreColumns()}
+                        title="CPU time used (with everything a process started, exited ones included) and peak memory"
+                        onClick={() => m.setMoreColumns(!m.moreColumns())}
+                    >
+                        More columns
+                    </Button>
                 </div>
                 <table class="tower-table" aria-label={`${props.entry.label}'s processes`}>
                     <thead>
@@ -262,6 +275,14 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                             <SortHeader model={m} key="name" label="Process" />
                             <SortHeader model={m} key="cpu" label="CPU" numeric />
                             <SortHeader model={m} key="mem" label="Memory" numeric />
+                            <Show when={m.moreColumns()}>
+                                <th class="tower-num" title="CPU time used, with everything it started">
+                                    CPU time
+                                </th>
+                                <th class="tower-num" title="The most private memory seen">
+                                    Peak
+                                </th>
+                            </Show>
                             <SortHeader model={m} key="count" label="PID" numeric />
                         </tr>
                     </thead>
@@ -287,9 +308,15 @@ function foldKey(p: TowerProcess): string {
     return `fold:${p.id}`;
 }
 
+/** A task's processes and the ones that exited in the last minute, which
+ *  stay in its tree, dimmed (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.4). */
+function withExited(task: TowerTask): TowerProcess[] {
+    return task.exited?.length ? [...task.processes, ...task.exited] : task.processes;
+}
+
 /** One task's processes as a tree; under Terminals, headed by the terminal. */
 function TaskTree(props: { model: TowerViewModel; task: TowerTask; cpu: Cpu; heading: boolean }) {
-    const roots = createMemo(() => buildProcessTree(props.task.processes));
+    const roots = createMemo(() => buildProcessTree(withExited(props.task)));
     return (
         <>
             <Show when={props.heading}>
@@ -301,6 +328,10 @@ function TaskTree(props: { model: TowerViewModel; task: TowerTask; cpu: Cpu; hea
                     </td>
                     <td class="tower-num">{props.cpu(props.task.cpu)}</td>
                     <td class="tower-num">{formatMem(props.task.mem)}</td>
+                    <Show when={props.model.moreColumns()}>
+                        <td />
+                        <td />
+                    </Show>
                     <td class="tower-num tower-muted">{props.task.processes.length}</td>
                 </tr>
             </Show>
@@ -370,7 +401,10 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
     const open = () => m.expanded().has(openKey());
     return (
         <>
-            <tr class="tower-process-row tower-many-row" data-testid={`tower-many-${props.line.name}`}>
+            <tr
+                class={clsx("tower-process-row tower-many-row", props.line.exited && "tower-process-row--exited")}
+                data-testid={`tower-many-${props.line.name}${props.line.exited ? "-exited" : ""}`}
+            >
                 <td class="tower-name">
                     <div class="tower-name-line" style={indentStyle(props.depth)}>
                         <IconButton
@@ -387,10 +421,17 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
                         />
                         <span class="tower-label">{props.line.name}</span>
                         <span class="tower-muted">×{props.line.nodes.length}</span>
+                        <Show when={props.line.exited}>
+                            <span class="tower-muted">exited</span>
+                        </Show>
                     </div>
                 </td>
                 <td class="tower-num">{props.cpu(props.line.cpu)}</td>
                 <td class="tower-num">{formatMem(props.line.mem)}</td>
+                <Show when={m.moreColumns()}>
+                    <td class="tower-num">{formatCpuTime(props.line.cpuTime)}</td>
+                    <td class="tower-num">{formatMem(props.line.peak)}</td>
+                </Show>
                 <td class="tower-num tower-muted">{props.line.nodes.length}</td>
             </tr>
             <Show when={open()}>
@@ -414,10 +455,15 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
     const hasChildren = () => props.node.children.length > 0;
     const folded = () => m.expanded().has(foldKey(props.node.process));
     const subtree = () => (hasChildren() ? "With everything it started" : undefined);
+    const exitedMs = () => props.node.process.exited_ms;
     return (
         <>
             <tr
-                class={clsx("tower-process-row", props.node.process.role && `tower-role--${props.node.process.role}`)}
+                class={clsx(
+                    "tower-process-row",
+                    props.node.process.role && `tower-role--${props.node.process.role}`,
+                    exitedMs() != null && "tower-process-row--exited"
+                )}
                 title={processDetail(props.node.process, m.snapshot()?.memory_metric ?? "")}
             >
                 <td class="tower-name">
@@ -433,6 +479,11 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                             />
                         </Show>
                         <ProcessName process={props.node.process} />
+                        <Show when={exitedMs()}>
+                            {(ms) => (
+                                <span class="tower-muted">exited {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}</span>
+                            )}
+                        </Show>
                     </div>
                 </td>
                 <td class="tower-num" title={subtree()}>
@@ -441,6 +492,12 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                 <td class="tower-num" title={subtree()}>
                     {formatMem(props.node.mem)}
                 </td>
+                <Show when={m.moreColumns()}>
+                    <td class="tower-num" title={subtree()}>
+                        {formatCpuTime(props.node.cpuTime)}
+                    </td>
+                    <td class="tower-num">{formatMem(props.node.process.peak_mem)}</td>
+                </Show>
                 <td class="tower-num tower-muted">{props.node.process.pid}</td>
             </tr>
             <Show when={hasChildren() && !folded()}>

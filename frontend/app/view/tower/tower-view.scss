@@ -425,3 +425,8 @@ tr:hover .tower-reveal,
     border-left: 2px solid var(--accent-color);
     white-space: nowrap;
 }
+
+// A process that exited in the last minute: still in its tree, dimmed.
+.tower-process-row--exited {
+    opacity: 0.55;
+}

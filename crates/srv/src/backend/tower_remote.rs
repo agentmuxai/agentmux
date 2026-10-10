@@ -104,6 +104,7 @@ pub fn to_snapshot(conn: &str, os: &str, f: ProcFrame) -> TowerSnapshot {
             role: None,
             task: None,
             detail: None,
+            ..Default::default()
         })
         .collect();
     TowerSnapshot {
