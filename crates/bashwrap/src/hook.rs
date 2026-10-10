@@ -107,13 +107,24 @@ pub fn build_response(stdin_payload: &str) -> Value {
         if declared_background { " --declared-background" } else { "" }
     );
 
+    // `updatedInput` replaces the tool's whole input; the CLI doesn't merge
+    // it. So every other field the model set (`description`, `timeout`,
+    // `run_in_background`, ...) is copied through, and only `command`
+    // changes. Rebuilt from `command` alone, the CLI ran every background
+    // call in the foreground, cut every command at its 120 s default, and
+    // labelled tasks with the wrapper
+    // (docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md).
+    let mut updated = match input.tool_input {
+        Value::Object(fields) => fields,
+        _ => serde_json::Map::new(),
+    };
+    updated.insert("command".to_string(), Value::String(wrapped));
+
     json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
-            "updatedInput": {
-                "command": wrapped
-            }
+            "updatedInput": updated
         }
     })
 }
@@ -691,6 +702,50 @@ line' && cat $HOME/.env"#;
                 "expected no --declared-background flag, got: {cmd}"
             );
         }
+    }
+
+    /// `updatedInput` replaces the whole input, so every field but `command`
+    /// must come back as the model set it: the CLI reads `run_in_background`
+    /// and `timeout` from it, and labels the call and its task with
+    /// `description`.
+    #[test]
+    fn keeps_every_other_field_of_the_tool_input() {
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_keep",
+            "tool_input": {
+                "command": "task dev",
+                "description": "Start the dev build",
+                "timeout": 7_200_000,
+                "run_in_background": true,
+                "dangerouslyDisableSandbox": false,
+                "some_future_field": { "nested": [1, 2] }
+            }
+        })
+        .to_string();
+        let resp = build_response(&payload);
+        let updated = &resp["hookSpecificOutput"]["updatedInput"];
+        assert!(updated["command"].as_str().unwrap().starts_with("agentmux-bashwrap exec"));
+        assert_eq!(updated["description"], json!("Start the dev build"));
+        assert_eq!(updated["timeout"], json!(7_200_000));
+        assert_eq!(updated["run_in_background"], json!(true));
+        assert_eq!(updated["dangerouslyDisableSandbox"], json!(false));
+        assert_eq!(updated["some_future_field"], json!({ "nested": [1, 2] }));
+        assert_eq!(updated.as_object().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn a_tool_input_that_is_not_an_object_still_gets_the_command() {
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_odd",
+            "tool_input": "echo hi"
+        })
+        .to_string();
+        let resp = build_response(&payload);
+        let updated = resp["hookSpecificOutput"]["updatedInput"].as_object().unwrap();
+        assert_eq!(updated.len(), 1);
+        assert!(updated["command"].as_str().unwrap().starts_with("agentmux-bashwrap exec"));
     }
 
     #[test]

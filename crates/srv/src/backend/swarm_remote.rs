@@ -300,6 +300,8 @@ mod tests {
             channel: channel.to_string(),
             registration_nonce: 0,
             jekt_public_key: String::new(),
+            uid: String::new(),
+            uid_public_key: String::new(),
         }
     }
 

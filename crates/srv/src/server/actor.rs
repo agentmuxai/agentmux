@@ -127,6 +127,33 @@ pub(crate) fn classify(
     }
 }
 
+/// Identity M4d-4: whether `uid`'s own row has `name` as its slug, exactly
+/// (spec §6.5.10 rule ii: never its display or instance name), so a request
+/// carrying `uid`'s token under `name` is that agent by its token.
+pub(crate) fn uid_has_slug(store: &Store, uid: &str, name: &str) -> bool {
+    matches!(store.agent_names_by_id(uid), Ok(Some(row)) if !row.slug.is_empty() && row.slug == name)
+}
+
+/// Identity M4d-4: whether a host-tier jekt is from the agent it claims by
+/// its token (`audit_source_uid` is the request's Caller). Far-side receivers
+/// have no Caller and keep checking the signature, which is still sent.
+pub(crate) fn jekt_sender_by_token(store: &Store, req: &crate::backend::reactive::InjectionRequest, claimed: &str) -> bool {
+    req.delivery_tier.as_deref() == Some("host")
+        && !req.audit_source_uid.is_empty()
+        && uid_has_slug(store, &req.audit_source_uid, claimed)
+}
+
+/// Identity M4d-4: the pane of a caller whose token names it under its own
+/// slug, from its UID's registration, with no key to check. `None` (today's
+/// name path) for anyone else, or before the UID registers.
+pub(crate) fn own_pane_by_token(store: &Store, caller: Option<&Caller>, name: &str) -> Option<String> {
+    let uid = caller.and_then(Caller::uid)?;
+    if !uid_has_slug(store, uid, name) {
+        return None;
+    }
+    crate::backend::reactive::handler::get_global_handler().block_for_uid(uid)
+}
+
 /// Count `actor` against the caller's row at `site`. A no-op for an
 /// Unattributed caller. Never fails and is never awaited: the store reads
 /// run detached on the blocking pool (inline under test, so tests can read
