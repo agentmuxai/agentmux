@@ -105,10 +105,16 @@ fn kind_of(p: &ProcInfo, cmdline: Option<&str>) -> Kind {
     let Some(cmd) = cmdline else {
         return mac_helper_type(&p.name).map_or(Kind::Unreadable, Kind::Cef);
     };
-    if let Some(ty) = switch(cmd, "type") {
-        return Kind::Cef(cef_label(ty, switch(cmd, "utility-sub-type")));
+    let name = p.name.to_ascii_lowercase();
+    // The AgentMux group holds every unclaimed descendant of the launcher, not
+    // only AgentMux's binaries, so a `--type=` switch counts only on one of
+    // ours (the host exe, "agentmux-cef", or a macOS "AgentMux Helper").
+    if name.starts_with("agentmux") {
+        if let Some(ty) = switch(cmd, "type") {
+            return Kind::Cef(cef_label(ty, switch(cmd, "utility-sub-type")));
+        }
     }
-    if p.name.to_ascii_lowercase().starts_with("agentmux-srv") {
+    if name.starts_with("agentmux-srv") {
         return Kind::Srv(if has_arg(cmd, "__extract") {
             "Document parser"
         } else if has_arg(cmd, "--crash-monitor") {
@@ -143,7 +149,8 @@ fn cef_label(ty: &str, utility_sub_type: Option<&str>) -> String {
         "crashpad-handler" => "Crash reporter".to_string(),
         "zygote" => "Zygote".to_string(),
         "ppapi" | "ppapi-broker" => "Plugin".to_string(),
-        other => other.to_string(),
+        // A fixed label: never text taken from a command line.
+        _ => "Subprocess".to_string(),
     }
 }
 
@@ -158,7 +165,8 @@ fn utility_label(sub_type: Option<&str>) -> String {
         "audio" => "Audio service".to_string(),
         "video_capture" => "Video capture service".to_string(),
         "data_decoder" => "Data decoder".to_string(),
-        other => format!("Utility: {}", other.replace('_', " ")),
+        // A fixed label: never text taken from a command line.
+        _ => "Utility".to_string(),
     }
 }
 
@@ -305,7 +313,7 @@ mod tests {
     fn utility_sub_types() {
         assert_eq!(utility_label(Some("storage.mojom.StorageService")), "Storage service");
         assert_eq!(utility_label(Some("audio.mojom.AudioService")), "Audio service");
-        assert_eq!(utility_label(Some("proxy_resolver.mojom.ProxyResolverFactory")), "Utility: proxy resolver");
+        assert_eq!(utility_label(Some("proxy_resolver.mojom.ProxyResolverFactory")), "Utility");
         assert_eq!(utility_label(None), "Utility");
     }
 
@@ -313,6 +321,22 @@ mod tests {
     fn other_cef_types() {
         assert_eq!(cef_label("crashpad-handler", None), "Crash reporter");
         assert_eq!(cef_label("zygote", None), "Zygote");
-        assert_eq!(cef_label("broker", None), "broker");
+        assert_eq!(cef_label("broker", None), "Subprocess");
+    }
+
+    #[test]
+    fn a_type_switch_on_a_process_that_is_not_ours_means_nothing() {
+        // Some tool the user ran from an AgentMux terminal that wasn't claimed
+        // by a task, with a Chromium-style switch of its own.
+        let snap = vec![
+            p(10, 1, "agentmux.exe"),
+            p(30, 10, "agentmux-srv.exe"),
+            p(40, 30, "electron.exe"),
+        ];
+        let cmd = HashMap::from([(10, "agentmux.exe"), (40, "electron.exe --type=renderer")]);
+        let got = labels(&snap, &cmd, 30);
+        assert_eq!(got.get(&40), None);
+        // And it doesn't make its parent look like the window host.
+        assert_eq!(got.get(&30).map(String::as_str), Some("Server"));
     }
 }
