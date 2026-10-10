@@ -59,8 +59,8 @@ describe("runCommand", () => {
         expect(runSync("nope:nothing", undefined, deps()).reason).toMatch(/unknown command/);
     });
 
-    it("refuses a target that isn't in the active tab", () => {
-        expect(runSync("term:multiInput", "elsewhere", deps()).reason).toMatch(/not in the active tab/);
+    it("refuses a target that isn't in this window", () => {
+        expect(runSync("term:multiInput", "elsewhere", deps()).reason).toMatch(/not in this window/);
     });
 
     it("sends a pane command to that pane's runner, not the dispatcher", () => {
@@ -151,6 +151,18 @@ describe("planKeyPress", () => {
                 }
             }
         }
+    });
+});
+
+describe("a target in another tab", () => {
+    it("waits for the window to switch tabs, then runs there", async () => {
+        const seen: string[] = [];
+        const off = registerPaneCommandRunner("far-pane", (c) => (seen.push(c), true));
+        const d = deps({ focusBlock: async (id) => id === "far-pane" });
+        expect(await runCommand("files:refresh", "far-pane", d)).toEqual({ ran: true });
+        expect(seen).toEqual(["files:refresh"]);
+        expect(await runCommand("files:refresh", "elsewhere", d)).toMatchObject({ ran: false, reason: expect.stringMatching(/not in this window/) });
+        off();
     });
 });
 

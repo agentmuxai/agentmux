@@ -134,8 +134,8 @@ export interface RunDeps {
     platform: KeyPlatform;
     /** The pane a key press would reach now (the focused pane), if any. */
     focusedBlockId: () => string | null;
-    /** Focuses `blockId` in the active tab; false if it isn't there. */
-    focusBlock: (blockId: string) => boolean;
+    /** Focuses `blockId` in this window, switching tabs if needed; false if it isn't in this window. */
+    focusBlock: (blockId: string) => boolean | Promise<boolean>;
     /** The dispatcher's own handler: true when the command applied. */
     runGlobal: (command: string) => boolean;
 }
@@ -143,7 +143,7 @@ export interface RunDeps {
 /**
  * Runs a table command as its key would: a global command through the
  * dispatcher's handler, a pane command through the target pane's own runner.
- * `target` is a pane in the active tab (default: the focused pane).
+ * `target` is a pane in this window, in any tab (default: the focused pane).
  */
 export function runCommand(command: string, target: string | undefined, deps: RunDeps): RunResult | Promise<RunResult> {
     const refused = refusalFor(command, deps.platform);
@@ -152,9 +152,16 @@ export function runCommand(command: string, target: string | undefined, deps: Ru
     if (!info) {
         return { ran: false, reason: `unknown command ${command}: ListShortcuts lists the commands` };
     }
-    if (target && !deps.focusBlock(target)) {
-        return { ran: false, reason: `pane ${target} is not in the active tab of this window` };
+    if (target) {
+        const notHere: RunResult = { ran: false, reason: `pane ${target} is not in this window` };
+        const focused = deps.focusBlock(target);
+        if (typeof focused !== "boolean") return focused.then((ok) => (ok ? runFocused(command, target, info, deps) : notHere));
+        if (!focused) return notHere;
     }
+    return runFocused(command, target, info, deps);
+}
+
+function runFocused(command: string, target: string | undefined, info: ShortcutInfo, deps: RunDeps): RunResult | Promise<RunResult> {
     if (info.pane || TERMINAL_OWN.has(command)) {
         const blockId = target ?? deps.focusedBlockId();
         if (!blockId) return { ran: false, reason: `${command} needs a pane: none is focused` };
