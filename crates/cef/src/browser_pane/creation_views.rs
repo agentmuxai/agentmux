@@ -68,7 +68,8 @@ use cef::{
 
 use crate::state::AppState;
 
-/// Create a Views-based browser pane on the CEF UI thread.
+/// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
+/// profile's) or, when `None`, in its window's.
 ///
 /// Caller is `CreateBrowserPaneTask::execute` (`browser_pane/creation.rs`),
 /// which is itself posted via `post_task(ThreadId::UI, ...)` from
@@ -80,6 +81,7 @@ pub fn create_browser_pane_view(
     url: String,
     rect: Rect,
     window_label: String,
+    jar: Option<cef::RequestContext>,
 ) {
     tracing::info!(
         block_id = %block_id,
@@ -150,11 +152,13 @@ pub fn create_browser_pane_view(
     //    host. Reusing the parent window's RequestContext means the
     //    pane's Profile matches the window's main browser's Profile, so
     //    the map check fires and AddObserver is skipped.
-    // A pane with an Incognito identity can't have a jar of its own on this
-    // path yet (the profiles spec §7.2): it is not created, rather than
-    // browsing in the window's shared jar. `check_capacity` already refused it
-    // to the frontend; this is the backstop.
-    if crate::browser_pane::identity::has_identity(&block_id) {
+    // An Incognito pane can't be created on this path yet (the profiles spec
+    // §7.2): an off-the-record profile shares its original's ThemeService, so
+    // `CefWidgetImpl::AddAssociatedProfile` adds the widget as its observer a
+    // second time ("Observers can only be added once!"). `check_capacity` and
+    // `creation.rs` refuse it first; this is the backstop. A named profile
+    // has a ThemeService of its own and is fine.
+    if crate::browser_pane::identity::is_incognito_block(&block_id) {
         tracing::warn!(block_id = %block_id, "[browser-identity] Incognito pane not created: Windows only for now");
         return;
     }
@@ -166,9 +170,10 @@ pub fn create_browser_pane_view(
         block_id = %block_id, label = %label,
         window_label = %window_label,
         has_parent_context = parent_request_context.is_some(),
+        own_jar = jar.is_some(),
         "[browser-pane] views: resolved parent window's RequestContext"
     );
-    let mut request_context = parent_request_context;
+    let mut request_context = jar.or(parent_request_context);
 
     // 6. Create the BrowserView. Underlying Browser is constructed lazily on
     //    AddedToWidget below.
