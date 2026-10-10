@@ -18,7 +18,7 @@ The Help pane's shortcut list is generated from the table (`keybindings/help.ts`
 
 | Kind of failure | Known or suspected cases |
 |---|---|
-| The OS or window manager takes the key first | Not measured. Likely candidates: Ctrl+Arrow, Ctrl+Shift+Arrow and ⌃↑ on macOS (Mission Control, Spaces); Ctrl+Alt+Arrow and Alt+Shift+Arrow on Linux desktops; Ctrl+Shift+0 (keyboard-layout switch on some Windows setups) |
+| The OS or window manager takes the key first | Not measured by pressing yet. macOS: Ctrl+Arrow, Ctrl+Shift+Arrow and ⌃↑ (Mission Control, Spaces). **GNOME 50 (read from gsettings on charlie):** Ctrl+Alt+Arrows (switch workspace) and **Ctrl+Shift+Alt+Arrows (move window to workspace), which is our `pane:swap:*` on every platform**; also Super+Alt/Shift+Arrows, Ctrl+Alt+Tab/Esc/D, Ctrl+Shift+Alt+R, Alt+Tab, Alt+\`, Alt+Esc, Alt+Space, Alt+F2/F4/F6/F7/F8/F10, Ctrl+Alt+F1–F12, Super+1–9 and Super+Ctrl+1–9, Super+Space and Super+A/V/M/S/N/H/D/P/Tab. GNOME does *not* bind Alt+Shift+Arrow (our Linux pane resize), Ctrl+Arrow or Ctrl+Shift+Arrow by default; KDE and others may. Windows: Ctrl+Shift+0 (keyboard-layout switch on some setups) |
 | The host takes the key first | On macOS, AgentMux's own app menu: ⌘H, ⌘M, ⌘Q and ⌘W are menu items, and the standard edit items keep ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V/⌘A, which overlap the Files pane's undo, cut, copy, paste and select-all. In a browser pane, Ctrl/⌘+Shift+N is consumed as `window:new` before the pane's "new incognito" can run |
 | The key reaches the page but its row's context rule doesn't match | Not measured |
 | Help shows something the table doesn't drive | The Help pane's own zoom keys are hardcoded (`helpview.tsx`) and ignore remaps; "Shift + drag" is hand-written; a meta key on Linux is labelled "Win" |
@@ -34,7 +34,7 @@ A shortcut works only if all three hold, and each needs a different tool:
 |---|---|---|
 | **L1 Command** | Does the command do what the label says? | App API `RunCommand` (new, §4), then observe the result |
 | **L2 Page key** | Does the key, once in the page, resolve to that command in that context? | App API `PressKeys` (new, §4): real key events with modifiers, injected through the DevTools protocol into the window |
-| **L3 OS key** | Does the key reach AgentMux at all on this platform? | OS-level key synthesis on each partner's host: `SendInput` (Windows), `xdotool` (Linux, X11; `ydotool` on Wayland), `osascript`/System Events (macOS). Injected keys bypass some OS shortcuts, so a short manual pass by a human or partner confirms the suspected list in §2 |
+| **L3 OS key** | Does the key reach AgentMux at all on this platform? | OS-level key synthesis on each host: `SendInput` (Windows); `osascript`/System Events (macOS); on Linux, `xdotool` on an X11 session only and `ydotool` on Wayland (kernel uinput, so the compositor's grabs apply; one-time root setup for uinput access). XWayland plus `xdotool` doesn't count: AgentMux is a native Wayland client there, and XTEST events skip the compositor's grabs. A short manual pass confirms the suspected list in §2 |
 
 L1 and L2 run unattended from a script against a dev instance (§5). L3 is the per-platform part the partners own.
 
@@ -83,9 +83,9 @@ Rules for the script, since it runs on hosts where other agents and the owner ar
 |---|---|---|
 | Area54 | Windows 10 | AgentA |
 | starpower | macOS 26.5.2, Apple Silicon | Masty@starpower |
-| charlie | Linux expected; to be confirmed by Maricon | Maricon@charlie |
+| charlie | Ubuntu 26.04.1, GNOME 50.1, Wayland (AgentMux as a native Wayland client); a VMware guest on a Windows host | Maricon@charlie |
 
-starpower has no Linux, so charlie must cover it; if it doesn't, the owner picks a third host.
+On charlie, a manual press of a Ctrl+Alt or Super combination passes through VMware (Ctrl+Alt releases input) and the Windows host before GNOME, so those rows are flagged; `ydotool` runs inside the guest and isn't affected. Until `ydotool` is set up, charlie's L3 column is "taken by GNOME" from its gsettings.
 
 For each PR that changes behaviour:
 1. AgentA opens the PR with the Windows L1/L2/L3 results.
@@ -99,7 +99,7 @@ For each PR that changes behaviour:
 3. **Verification script** and a first full run on all three platforms. The results go into §9 of this plan.
 4. **Fixes, from the results:**
    - rebind keys the OS takes, per platform;
-   - the Help pane's zoom keys from the table; "Super" instead of "Win" on Linux;
+   - the Help pane's zoom keys from the table; "Super" instead of "Win" on Linux (agreed by Maricon);
    - pane commands runnable outside their key (`term:*`);
    - the browser pane's Ctrl/⌘+Shift+N conflict;
    - the macOS menu overlap with the Files pane.
@@ -110,7 +110,8 @@ For each PR that changes behaviour:
 
 1. Agent scope for `RunCommand` and `PressKeys`: only the agent's own window (proposed), or any window of the instance.
 2. Whether destructive commands are callable at all through `RunCommand`, or only with a confirmation the user answers.
-3. When the OS takes a key: change our default on that platform (proposed), or keep it and mark it "taken by the OS" in the Help pane.
+3. When the OS takes a key: change our default on that platform (proposed), or keep it and mark it "taken by the OS" in the Help pane. The first known case: `pane:swap:*` (Ctrl+Alt+Shift+Arrow) is GNOME's "move window to workspace".
+4. L3 setup that only the owner can do: the Accessibility permission for the sending process on starpower, and root setup of `ydotool` with uinput access on charlie. Both also need an idle machine, since injected keys act on the desktop.
 
 ## 9. Results
 
