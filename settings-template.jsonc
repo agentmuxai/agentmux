@@ -147,6 +147,13 @@
     // this off is invisible even if you have it on.
     // "network:lan_discovery":     false,
 
+    // -- Cloud --
+    // Publish this computer to my devices: while signed in to MuxBus Cloud,
+    // your signed-in devices can list this computer from anywhere. Turning
+    // it off also tells them it went offline. Dev builds, headless installs
+    // and isolated homes never publish.
+    // "cloud:publishpresence":     true,
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,

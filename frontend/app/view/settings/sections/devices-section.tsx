@@ -31,6 +31,14 @@ export const DEVICES_SETTINGS = {
     },
     muxbus: MUXBUS_SIGN_IN_SETTING,
     cloudPresence: CLOUD_PRESENCE_SETTING,
+    publishPresence: {
+        id: "devices.publish_presence",
+        label: "Publish this computer to my devices",
+        description:
+            "While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.",
+        section: "devices",
+        keywords: ["cloud", "presence", "publish", "offline", "mobile", "devices", "cloud:publishpresence"],
+    },
     statusbarMuxbusCloud: {
         id: "devices.statusbar_muxbus_cloud",
         label: "Show MuxBus Cloud in the status bar",
@@ -143,6 +151,17 @@ export function DevicesSection(): JSX.Element {
             <MuxBusSignIn />
             <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />
             <CloudPresence />
+            <SettingRow
+                id={DEVICES_SETTINGS.publishPresence.id}
+                label={DEVICES_SETTINGS.publishPresence.label}
+                description={DEVICES_SETTINGS.publishPresence.description}
+                control={
+                    <ToggleControl
+                        checked={settingsAtom()?.["cloud:publishpresence"] !== false}
+                        onChange={(v) => set("cloud:publishpresence", v)}
+                    />
+                }
+            />
             <SettingRow
                 id={DEVICES_SETTINGS.statusbarMuxbusCloud.id}
                 label={DEVICES_SETTINGS.statusbarMuxbusCloud.label}

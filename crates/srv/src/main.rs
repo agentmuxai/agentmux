@@ -254,6 +254,7 @@ async fn main() {
         state.local_web_url.clone(),
     );
     let presence_id_store = Arc::clone(&state.id_store);
+    let presence_config = Arc::clone(&state.config_watcher);
     let viewer = Arc::clone(&state.viewer);
     let viewer_router = server::build_viewer_router(state.clone());
     // Keeps the host's copy of which panes agents own current (for its popup
@@ -303,7 +304,8 @@ async fn main() {
     // The cloud presence record, published from the fleet feed's snapshot
     // while signed in (`muxbus::wan_presence`). Here rather than beside
     // `wan_publish::spawn` because the feed exists only once AppState does.
-    muxbus::wan_presence::spawn(fleet_feed, presence_id_store, stdin_token.clone());
+    // A headless srv doesn't publish unless forced (`wan_presence::policy`).
+    muxbus::wan_presence::spawn(fleet_feed, presence_id_store, presence_config, headless, stdin_token.clone());
 
     // Run both servers until shutdown
     tokio::select! {
@@ -330,7 +332,12 @@ async fn main() {
     // so each gets to end its turn and exit and nothing it started (`task dev`
     // → task.exe/node, `Shell()` sessions) orphans on srv exit. Capped at
     // `agent_teardown::APP_EXIT_CAP`; the launcher's backstop takes whatever
-    // is left.
-    let closed = sagas::agent_teardown::app_exit(&state_for_exit).await;
+    // is left. Beside it, the cloud presence goodbye (at most 2 s, so it
+    // never outlasts the teardown's own cap): devices show this computer as
+    // offline at once instead of minutes later.
+    let (closed, ()) = tokio::join!(
+        sagas::agent_teardown::app_exit(&state_for_exit),
+        muxbus::wan_presence::goodbye_on_shutdown(),
+    );
     tracing::info!(agents = closed, "shutdown: agents closed");
 }

@@ -8,6 +8,7 @@ import { RpcClient } from "../rpc-client";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
 import type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
 
+export type { PresenceOffReason } from "@/types/rpc/PresenceOffReason";
 export type { PresenceState } from "@/types/rpc/PresenceState";
 export type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
 

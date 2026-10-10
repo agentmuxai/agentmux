@@ -49,6 +49,7 @@ mod tests {
             offset_ms: None,
             record_version: 2,
             note: None,
+            off_reason: None,
         };
         assert_eq!(
             serde_json::to_value(&status).unwrap(),
@@ -82,8 +83,27 @@ mod tests {
             (PresenceState::Publishing, "publishing"),
             (PresenceState::Unsupported, "unsupported"),
             (PresenceState::Rejected, "rejected"),
+            (PresenceState::Off, "off"),
+            (PresenceState::SignedOff, "signed_off"),
         ] {
             assert_eq!(serde_json::to_value(state).unwrap(), json!(wire));
+        }
+        let off = PresenceStatusResult {
+            state: PresenceState::Off,
+            off_reason: Some(PresenceOffReason::DevBuild),
+            ..status
+        };
+        assert_eq!(
+            serde_json::to_value(&off).unwrap(),
+            json!({ "state": "off", "since_ms": 5, "record_version": 2, "off_reason": "dev_build" })
+        );
+        for (reason, wire) in [
+            (PresenceOffReason::Setting, "setting"),
+            (PresenceOffReason::Headless, "headless"),
+            (PresenceOffReason::IsolatedHome, "isolated_home"),
+            (PresenceOffReason::TestHarness, "test_harness"),
+        ] {
+            assert_eq!(serde_json::to_value(reason).unwrap(), json!(wire));
         }
     }
 

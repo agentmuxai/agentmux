@@ -303,6 +303,9 @@ pub fn set_connection_values(
 /// `browser_start_page.rs`'s watcher needs the identical broadcast a third
 /// time. One shared function instead of a third copy.
 pub fn broadcast_full_config(config_watcher: &Arc<ConfigState>, event_bus: &Arc<EventBus>) {
+    // Every settings change passes here: the presence publisher reads
+    // "Publish this computer to my devices" again.
+    crate::muxbus::wan_presence::settings_changed();
     let config = config_watcher.get_full_config();
     let client_count = event_bus.connection_count();
     if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {

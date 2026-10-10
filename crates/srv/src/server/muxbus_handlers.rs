@@ -398,15 +398,20 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |_req: MuxBusDisconnectReq, _ctx| {
             let mstore = mstore_disconnect.clone();
             async move {
+                // The presence goodbye goes first: it needs the sign-in
+                // being cleared. At most 2 s; nothing is published after it
+                // until `signed_out`, which runs whether or not the clear
+                // below works.
+                let said_goodbye = crate::muxbus::wan_presence::goodbye_before_sign_out().await;
                 // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
                 // synchronous OS-keychain delete, same concern as every
                 // other muxbus call site in this module.
-                tokio::task::spawn_blocking(move || mstore.muxbus_clear())
-                    .await
+                let cleared = tokio::task::spawn_blocking(move || mstore.muxbus_clear()).await;
+                crate::muxbus::wan_presence::signed_out(said_goodbye);
+                cleared
                     .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
                 clear_wan_peer_cache();
-                crate::muxbus::wan_presence::sign_in_changed();
                 // A deliberate sign-out, not a lost sign-in: no notification,
                 // no agent notes. And close the relay connection, which would
                 // otherwise keep delivering on the old token until it ends.

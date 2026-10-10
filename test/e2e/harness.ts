@@ -101,12 +101,15 @@ export async function evalInMainWindow(port: number, expression: string): Promis
  *  `AGENTMUX_DEBUG_CLOSE` is the one deliberate pass-through: it's a
  *  pure diagnostic (close-path trace to %TEMP%\agentmux-close-debug.txt),
  *  not instance state, and being able to set it on an E2E run is exactly
- *  how close-path failures in these suites get diagnosed. */
+ *  how close-path failures in these suites get diagnosed.
+ *  `AGENTMUX_TEST_HARNESS` is added: an instance under test doesn't publish
+ *  its cloud presence (crates/srv/src/muxbus/wan_presence/policy.rs). */
 export function scrubbedEnv(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) {
         if (!k.startsWith("AGENTMUX_") || k === "AGENTMUX_DEBUG_CLOSE") env[k] = v;
     }
+    env.AGENTMUX_TEST_HARNESS = "1";
     return env;
 }
 

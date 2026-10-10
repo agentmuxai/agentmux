@@ -40,7 +40,7 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type { ViewerDeviceInfo, ViewerPairStartResult } from "./viewer";
-export type { PresenceState, PresenceStatusResult } from "./presence";
+export type { PresenceOffReason, PresenceState, PresenceStatusResult } from "./presence";
 export type { TowerPeerInfo, TowerProcess, TowerSnapshot, TowerTask } from "./tower";
 export type {
     CheckCliAuthResult,

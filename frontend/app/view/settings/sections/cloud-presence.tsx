@@ -4,12 +4,13 @@
 // Cloud presence: whether this computer's presence record reaches the cloud,
 // which is how your signed-in devices list it when they aren't on this
 // network, in one line, and "Publish now". The publisher and its states are
-// crates/srv/src/muxbus/wan_presence.rs.
+// crates/srv/src/muxbus/wan_presence.rs. The "Publish this computer to my
+// devices" switch below it is devices-section.tsx's.
 
 import { Button } from "@/app/element/ui";
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
-import { RpcApi, type PresenceStatusResult } from "@/app/store/rpc-api";
+import { RpcApi, type PresenceOffReason, type PresenceStatusResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
 
@@ -37,12 +38,28 @@ function when(atMs: number | undefined, nowMs: number): string {
     return atMs == null || atMs - nowMs < 1000 ? "now" : `in ${span(atMs - nowMs)}`;
 }
 
+/** Why an install doesn't publish, after "Off". */
+const OFF_REASONS: Record<PresenceOffReason, string> = {
+    setting: "Off (setting)",
+    dev_build: "Off for dev builds",
+    headless: "Off for headless installs",
+    isolated_home: "Off for isolated homes",
+    test_harness: "Off under test",
+};
+
+/** States in which "Publish now" has nothing to do. */
+const NOTHING_TO_PUBLISH: ReadonlySet<PresenceStatusResult["state"]> = new Set(["signed_out", "signed_off", "off"]);
+
 /** The status in one line of plain words. */
 export function presenceLine(status: PresenceStatusResult, nowMs: number): string {
     const why = status.last_error ? ` (${status.last_error})` : "";
     switch (status.state) {
         case "signed_out":
             return "Sign in to publish";
+        case "signed_off":
+            return "Signed off: your devices show this computer as offline";
+        case "off":
+            return status.off_reason ? OFF_REASONS[status.off_reason] : "Off";
         case "publishing":
             return status.last_ok_ms == null ? "Published" : `Published ${span(nowMs - status.last_ok_ms)} ago`;
         case "retrying":
@@ -86,6 +103,11 @@ export function CloudPresence(): JSX.Element {
         }
     };
 
+    const canPublish = () => {
+        const s = status();
+        return s != null && !NOTHING_TO_PUBLISH.has(s.state);
+    };
+
     const line = () => {
         const s = status();
         return s ? presenceLine(s, now()) : (error() ?? "Loading…");
@@ -100,7 +122,7 @@ export function CloudPresence(): JSX.Element {
                 </span>
                 <Button
                     busy={publishing()}
-                    disabled={status() == null || status()?.state === "signed_out"}
+                    disabled={!canPublish()}
                     onClick={() => void publishNow()}
                 >
                     Publish now
