@@ -39,13 +39,20 @@
     @include line.tone(attention);
     box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
 
-    &:not(:focus-visible) {
+    &:not(:focus-visible, :disabled, [aria-disabled="true"]) {
         animation: ui-attention-glow 1.8s ease-in-out infinite;
     }
 
     &:focus-visible {
         outline: 2px solid var(--main-text-color);
         outline-offset: 2px;
+    }
+
+    // Not ready yet (Submit before every question is answered): no glow, so
+    // it doesn't read as the thing to press.
+    &:disabled,
+    &[aria-disabled="true"] {
+        box-shadow: none;
     }
 
     @media (prefers-reduced-motion: reduce) {
