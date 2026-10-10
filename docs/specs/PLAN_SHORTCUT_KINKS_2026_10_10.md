@@ -132,7 +132,7 @@ The questions as asked:
 | M2 L3 macOS | Masty@starpower | done: results in the shortcuts plan §9; found the Files pane swallowing global keys, fixed in #4636 |
 | L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS (#4603 reruns) |
 | L2 Temp-tree guard, script timeouts | Maricon@charlie | done (#4612) |
-| L3 Injected L3 Linux | Maricon@charlie | in progress |
+| L3 Injected L3 Linux | Maricon@charlie | done (#4624): on GNOME 50 Wayland all 92 keys pressed reached the app; the 4 `pane:swap:*` keys are taken by GNOME (move-to-workspace) and weren't pressed |
 | A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
 | A2 Other tabs | AgentA@Area54 | done (#4634) |
 | A3 Paste guard, `pane:close` via ClosePane | AgentA@Area54 | done (#4626) |
