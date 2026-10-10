@@ -4,9 +4,9 @@
         "@emnapi/core",
         "@emnapi/runtime",
         "@emnapi/wasi-threads",
-        "react",
-        "vitest-environment-node`",
-        "vitest-environment-jsdom`"
+        "react"
     ],
-    "ignoreBinaries": ["task"]
+    "ignoreBinaries": [
+        "task"
+    ]
 }
