@@ -9,7 +9,7 @@
 
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { findBrowser, type BrowserLookup } from "./layout-browser";
+import { findBrowser, NO_BROWSER_HINT, type BrowserLookup } from "./layout-browser";
 
 const CHROME_APP = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const HOME = "/home/u";
@@ -20,6 +20,7 @@ function lookup(over: Partial<BrowserLookup> & { files?: string[]; dirs?: Record
     return {
         env: over.env ?? {},
         platform: over.platform ?? "darwin",
+        arch: over.arch ?? "arm64",
         home: HOME,
         exists: (p) => files.has(p),
         list: (d) => over.dirs?.[d] ?? [],
@@ -55,6 +56,26 @@ describe("findBrowser", () => {
             },
         });
         expect(findBrowser(l)).toBe(fresh.path);
+    });
+
+    it("takes only a shell built for this OS and architecture", () => {
+        const linux = shellIn("150.0.0.1", "linux");
+        const mac = shellIn("131.0.6778.204", "mac_arm");
+        const l = lookup({
+            files: [linux.path, mac.path],
+            dirs: {
+                [CACHE]: [linux.dir, mac.dir],
+                [join(CACHE, linux.dir)]: ["chrome-headless-shell-linux"],
+                [join(CACHE, mac.dir)]: ["chrome-headless-shell-mac_arm"],
+            },
+        });
+        expect(findBrowser(l)).toBe(mac.path);
+        expect(findBrowser({ ...l, platform: "linux", arch: "x64" })).toBe(linux.path);
+        expect(findBrowser({ ...l, platform: "darwin", arch: "x64" })).toBeNull();
+    });
+
+    it("the install hint puts the shell where the lookup searches", () => {
+        expect(NO_BROWSER_HINT).toContain("--path ~/.cache/puppeteer");
     });
 
     it("never launches the Chrome app on macOS: no shell means skip", () => {

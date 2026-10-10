@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 export interface BrowserLookup {
     env: Record<string, string | undefined>;
     platform: NodeJS.Platform;
+    arch: string;
     home: string;
     exists: (path: string) => boolean;
     /** Entries of a directory, or [] when it doesn't exist. */
@@ -30,6 +31,7 @@ export interface BrowserLookup {
 const realLookup = (): BrowserLookup => ({
     env: process.env,
     platform: process.platform,
+    arch: process.arch,
     home: homedir(),
     exists: existsSync,
     list: (dir) => {
@@ -52,7 +54,17 @@ const newestFirst = (a: string, b: string): number => {
     return 0;
 };
 
-/** Chrome's headless shell, on PATH or in the Puppeteer cache (newest first). */
+/** Puppeteer's name for this host's platform, as in its cache's
+ *  `<platform>-<version>` folders, or null for one it has no builds for. */
+function puppeteerPlatform(l: BrowserLookup): string | null {
+    if (l.platform === "darwin") return l.arch === "arm64" ? "mac_arm" : "mac";
+    if (l.platform === "linux") return l.arch === "arm64" ? "linux_arm" : "linux";
+    if (l.platform === "win32") return l.arch === "ia32" ? "win32" : "win64";
+    return null;
+}
+
+/** Chrome's headless shell, on PATH or in the Puppeteer cache (newest build
+ *  for this OS and architecture first: a cache can hold others'). */
 function findHeadlessShell(l: BrowserLookup): string | null {
     const exe = l.platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell";
     const sep = l.platform === "win32" ? ";" : ":";
@@ -60,9 +72,11 @@ function findHeadlessShell(l: BrowserLookup): string | null {
         if (l.exists(join(dir, exe))) return join(dir, exe);
     }
     const cache = join(l.env.PUPPETEER_CACHE_DIR ?? join(l.home, ".cache", "puppeteer"), "chrome-headless-shell");
+    const host = puppeteerPlatform(l);
     const builds = l
         .list(cache)
-        .map((name) => ({ name, version: name.slice(name.indexOf("-") + 1) }))
+        .filter((name) => host !== null && name.startsWith(`${host}-`))
+        .map((name) => ({ name, version: name.slice(host!.length + 1) }))
         .sort((a, b) => newestFirst(a.version, b.version));
     for (const { name } of builds) {
         for (const inner of l.list(join(cache, name))) {
@@ -102,7 +116,7 @@ export function findBrowser(lookup: BrowserLookup = realLookup()): string | null
 /** Why layout tests skip on a machine with no usable browser. */
 export const NO_BROWSER_HINT =
     "layout tests skipped: no headless browser. Install Chrome's headless shell with " +
-    "`npx @puppeteer/browsers install chrome-headless-shell@stable`, or set AGENTMUX_TEST_BROWSER.";
+    "`npx @puppeteer/browsers install chrome-headless-shell@stable --path ~/.cache/puppeteer`, or set AGENTMUX_TEST_BROWSER.";
 
 const RESULT_RE = /<pre id="result">([\s\S]*?)<\/pre>/;
 
