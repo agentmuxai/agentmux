@@ -458,6 +458,7 @@ pub(crate) async fn replay_tabs(
     // shared one still do.
     let mut fresh_jars = std::collections::HashMap::new();
     let jars_available = crate::server::browser_identity::jars_available(state);
+    let profiles = crate::server::browser_identity::profile_ids();
     for tab in tabs {
         let tab_events = dispatch_to_reducer(
             state,
@@ -493,7 +494,7 @@ pub(crate) async fn replay_tabs(
                     obj.remove(key);
                 }
             }
-            if !crate::server::browser_identity::refresh_for_replay(&mut meta, &mut fresh_jars, jars_available) {
+            if !crate::server::browser_identity::refresh_for_replay(&mut meta, &mut fresh_jars, jars_available, profiles.as_ref()) {
                 continue;
             }
             let blk_events = dispatch_to_reducer(

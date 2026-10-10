@@ -15,6 +15,7 @@ import { AgentApi } from "./agent";
 import { AttachmentsApi } from "./attachments";
 import { BlockApi } from "./block";
 import { BookmarksApi } from "./bookmarks";
+import { BrowserProfilesApi } from "./browser-profiles";
 import { BrowserStartPageApi } from "./browser-start-page";
 import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
@@ -356,6 +357,7 @@ export const RpcApi = {
     ...WidgetsApi,
     ...ReactiveApi,
     ...BookmarksApi,
+    ...BrowserProfilesApi,
     ...LayoutApi,
     ...BrowserStartPageApi,
     ...VoiceApi,

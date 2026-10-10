@@ -1,6 +1,6 @@
 # SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles
 
-**Status:** active — P1 (Home, the Profile menu, Incognito tabs on Windows) in PR #4574; P2 (named profiles), P3 (Linux/macOS) and P4 (agents) not started.
+**Status:** active — P1 (Home, the Profile menu, Incognito tabs on Windows) shipped in PR #4574; P2 (named profiles, Windows) shipped in PR #4583; P4 (agents) in PR #4585; P3 (Linux/macOS) not started.
 **Author:** AgentX@narko, 2026-10-09, at the operator's request
 **Builds on:** `SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md` (the model: one `browser:identity`
 key per browser tab, in-memory private contexts, disk-backed named profiles, and the two CEF
@@ -67,13 +67,15 @@ panes):
 - **Both open at the current page's address**, so "this site as my other account" is one click.
   From a blank or error page they open Home instead.
 - **The new tab takes focus**, and the old one stays in the strip, as a browser opens a new tab.
-- **New profile…** asks for a name in a small inline form in the menu, with a colour picked for
-  it that you can change. Enter creates the profile and opens a new tab in it, at Home, since a
-  fresh profile is signed in nowhere.
+- **New profile…** opens a small dialog: a name, and a colour picked for it that you can change.
+  Enter or Create makes the profile and opens a new tab in it, at Home, since a fresh profile is
+  signed in nowhere. (A dialog, not a field inside the menu: a menu's keys are its own, and a
+  text field in one fights them.)
 - **Manage profiles…** opens **Settings → Browser → Profiles**: rename, recolour, delete (with a
   confirm that names what will be signed out), and the order of the list.
 - **The first profile is "Personal".** It's today's shared jar, so every existing tab, and
-  everything you're already signed in to, is in it from day one. It can be renamed, not deleted.
+  everything you're already signed in to, is in it from day one. It can't be deleted, or renamed
+  (for now).
 
 ## 4. Showing which identity a tab is in
 
@@ -85,10 +87,11 @@ panes):
 The Profile button sits just before the address field, so it is the address bar's mark too: a
 second glyph beside it would only repeat it.
 
-- **With only one profile, its face stays quiet:** a neutral person glyph, and no mark in the
-  tab, so nothing changes for anyone who never uses this.
-- **With two or more profiles,** every tab shows its circle, so two tabs of one site side by side
-  are told apart at a glance.
+- **Personal tabs keep their site's icon,** however many profiles there are: marking every tab
+  would replace all their favicons. Only Incognito and named-profile tabs are marked, so the
+  special ones stand out, and two tabs of one site side by side are told apart at a glance.
+- **A named profile's tab** shows a person glyph in its colour in the tab strip; its Profile
+  button wears the colour, and the menu shows its initial on its colour.
 - **Hovering a tab pill** adds "Browsing as Work" (or "Incognito") to its tooltip.
 
 ## 5. Behaviour
@@ -104,7 +107,10 @@ second glyph beside it would only repeat it.
   tab with a fresh jar: signed out, its address kept like any tab's. A layout reopened from
   Layouts gives its Incognito tabs fresh jars too, so they never share one with a tab still open.
   Tabs that shared a jar still share one.
-- **Profile tabs are restored, still signed in,** since a profile's jar is on disk (§6).
+- **Profile tabs are restored, still signed in,** since a profile's jar is on disk (§6). The jar
+  lives in the version's CEF cache, like Personal's; the list of profiles is shared across
+  versions, so after an update a profile is still there, with the same sign-in state Personal
+  has after one.
 - **One jar per profile:** every tab of a profile shares it. Each Incognito tab has its own.
 - **Bookmarks and Home are global,** the same in every profile, for now (§9).
 - **Deleting a profile** first closes its open tabs (after the confirm), then removes its data.
@@ -112,10 +118,16 @@ second glyph beside it would only repeat it.
   for as long as the tab exists (identities spec §4.1).
 - **Agents:** `OpenBrowser` gets an optional `profile` (`"incognito"` or a profile name).
   - **Default:** unchanged in this spec.
-  - **Named profiles:** an agent may use one only after you switch on "Agents may use this
-    profile" for it in Manage profiles.
+  - **Named profiles:** an agent may use one only after you switch on "Agents may use it" for
+    it in Settings → Browser (Manage profiles).
   - **Incognito:** always allowed, since it gives the agent less, not more (identities spec §7).
-  - **Agents never create, rename or delete profiles.**
+  - **Agents never create, rename or delete profiles.** `browser_profiles.create`, `update`
+    and `delete` refuse a connection registered as an agent; `list` doesn't.
+  - **Where it's checked (P4):** `OpenBrowser`'s `profile` goes through
+    `browser_identity::identity_for_agent`. A `browser:identity` an agent passes to `pane.open`
+    (a connection registered as an agent) or to the HTTP pane open (`/api/v1/pane/open`, which
+    agents and `muxsh` call) goes through `check_agent_may_use`. The window's own calls aren't
+    checked, the same trust as every other key the window sets.
 
 ## 6. How it works
 
@@ -141,6 +153,9 @@ second glyph beside it would only repeat it.
     - **A profile:** a disk-backed context at `<cef-cache>/profile-<id>`, one per profile,
       shared by its tabs.
   - **Popup contexts:** a popup gets its opener's context.
+  - **Writing sign-ins (P2):** the host exits without shutting CEF down, so cookies newer than
+    Chromium's last periodic write (about every 30 seconds) were lost on quit. A profile's cookie
+    store is written when one of its tabs finishes loading a page, which is how a sign-in ends.
 - **Frontend:**
   - **Toolbar and menu:** the Home and Profile buttons in `browser-nav-bar.tsx`, the menu as a
     `FlyoutMenu`, and the inline New-profile form.
@@ -176,7 +191,7 @@ second glyph beside it would only repeat it.
 | **P1** | Home button, button order, "Home page" naming; the Profile button and menu with Personal and **Open new Incognito tab** (Windows); badges; Incognito tabs back signed out | The toolbar and Incognito, with nothing blocked |
 | **P2** | The spike on disk-backed profiles (§7.1), then **New profile…**, the profile list, Manage profiles, restore signed in | Named profiles, once the spike works |
 | **P3** | Linux/macOS: floating-pane fallback, then the CEF patch | The same menu on every platform |
-| **P4** | `OpenBrowser({profile})` and "Agents may use this profile" | Agents in their own jars |
+| **P4** | `OpenBrowser({profile})` and "Agents may use it" | Agents in their own jars |
 
 Until P2, the menu shows Personal, Open new Incognito tab, and a disabled **New profile…** with
 "Coming soon", so the menu's shape doesn't change when profiles arrive.
@@ -192,6 +207,7 @@ Until P2, the menu shows Personal, Open new Incognito tab, and a disabled **New 
 | Bookmarks and Home | Global, shared by every profile. Per-profile bookmarks can come later if wanted. |
 | Incognito after restart | Back signed out, with a fresh jar: its pane is in srv's store, its jar was only in memory. |
 | The cap | 8 Incognito tabs; P1 measures the memory and sets it. |
+| Agents and profiles | Off for each profile until the user switches on "Agents may use it" in Settings → Browser. Incognito is always allowed. Agents can list profiles but never change them. |
 
 ## 10. Tests
 

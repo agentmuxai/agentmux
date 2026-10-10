@@ -153,14 +153,51 @@ wrap_task! {
                 // that can't be made fails the pane rather than falling back
                 // to the shared jar, which would put an Incognito tab in your
                 // Personal session.
-                let mut request_context = match crate::browser_pane::identity::context_for_block(&self.block_id) {
-                    Ok(ctx) => ctx,
+                let cache_root = self.state.cef_cache_dir.lock().clone();
+                use crate::browser_pane::identity::{self, PaneJar};
+                // A retry, after waiting for its profile: the tab may have
+                // closed or been re-created meanwhile, and a browser made now
+                // would be one nothing tracks.
+                let still_wanted = || {
+                    self.state.host_state.lock().browser_panes.get(&self.block_id).is_some_and(|e| {
+                        e.label == self.label && e.lifecycle == crate::state::BrowserPaneLifecycle::Live
+                    })
+                };
+                if identity::is_waiting(&self.label) && !still_wanted() {
+                    tracing::info!(block_id = %self.block_id, "[browser-identity] pane closed while its profile opened; not creating it");
+                    identity::done_waiting(&self.label);
+                    dequeue();
+                    return;
+                }
+                let mut request_context = match identity::context_for_block(&self.block_id, cache_root.as_deref()) {
+                    Ok(PaneJar::Shared) => None,
+                    Ok(PaneJar::Ready(ctx)) => Some(ctx),
+                    Ok(PaneJar::Pending) => {
+                        // Its profile is still being opened: a browser created
+                        // in it now would never finish. Try again shortly.
+                        dequeue();
+                        if identity::wait_once_more(&self.label) {
+                            let mut again = CreateBrowserPaneTask::new(
+                                self.state.clone(),
+                                self.block_id.clone(),
+                                self.label.clone(),
+                                self.url.clone(),
+                                self.rect.clone(),
+                                self.window_label.clone(),
+                            );
+                            post_delayed_task(ThreadId::UI, Some(&mut again), 100);
+                        } else {
+                            tracing::warn!(block_id = %self.block_id, "[browser-identity] pane not created: its profile never became ready");
+                        }
+                        return;
+                    }
                     Err(e) => {
                         tracing::warn!(block_id = %self.block_id, error = %e, "[browser-identity] pane not created");
                         dequeue();
                         return;
                     }
                 };
+                identity::done_waiting(&self.label);
                 let wrapper_hwnd = match crate::browser_pane::wrapper::create_wrapper(
                     &self.label,
                     parent_hwnd_raw,

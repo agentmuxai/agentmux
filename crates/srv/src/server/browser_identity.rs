@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
+use crate::backend::browser_profiles_store::BrowserProfile;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::server::AppState;
 
@@ -25,6 +26,24 @@ pub(crate) fn is_incognito(identity: &str) -> bool {
     identity
         .strip_prefix("incognito:")
         .is_some_and(|jar| (8..=64).contains(&jar.len()) && jar.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
+}
+
+/// The profile id of a `profile:<id>` identity.
+pub(crate) fn profile_id(identity: &str) -> Option<&str> {
+    identity
+        .strip_prefix("profile:")
+        .filter(|id| crate::backend::browser_profiles_store::is_profile_id(id))
+}
+
+/// The ids of the named profiles there are, or `None` when they can't be read.
+pub(crate) fn profile_ids() -> Option<HashSet<String>> {
+    match crate::server::app_api::browser_profiles_list() {
+        Ok(ps) => Some(ps.into_iter().map(|p| p.id).collect()),
+        Err(e) => {
+            tracing::warn!(error = %e, "[browser-identity] couldn't read the browser profiles");
+            None
+        }
+    }
 }
 
 fn identity_of(meta: &MetaMapType) -> Option<&str> {
@@ -57,13 +76,17 @@ pub(crate) fn live_jars(state: &AppState) -> Option<Vec<String>> {
 /// fails the open rather than quietly browsing in the shared jar.
 pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), String> {
     let Some(v) = meta.get(IDENTITY_META_KEY) else { return Ok(()) };
-    let identity = v.as_str().filter(|i| is_incognito(i)).ok_or_else(|| {
-        if v.as_str().is_some_and(|i| i.starts_with("profile:")) {
-            "named browser profiles aren't available yet".to_string()
-        } else {
-            format!("{IDENTITY_META_KEY} must be incognito:<id>")
+    let identity = v.as_str().unwrap_or("");
+    if let Some(id) = profile_id(identity) {
+        if !cfg!(windows) {
+            return Err("browser profiles are Windows only for now".to_string());
         }
-    })?;
+        let known = profile_ids().ok_or("couldn't read the browser profiles")?;
+        return if known.contains(id) { Ok(()) } else { Err(format!("there is no browser profile {id:?}")) };
+    }
+    if !is_incognito(identity) {
+        return Err(format!("{IDENTITY_META_KEY} must be incognito:<id> or profile:<id>"));
+    }
     if !cfg!(windows) {
         return Err("Incognito tabs are Windows only for now".to_string());
     }
@@ -79,7 +102,7 @@ pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), 
 /// A popup pane browses as the tab that opened it: same jar, so a sign-in in
 /// it signs in the tab.
 pub(crate) fn inherit(meta: &mut MetaMapType, opener: &Block) {
-    if let Some(identity) = identity_of(&opener.meta).filter(|i| is_incognito(i)) {
+    if let Some(identity) = identity_of(&opener.meta).filter(|i| is_incognito(i) || profile_id(i).is_some()) {
         meta.insert(IDENTITY_META_KEY.to_string(), json!(identity));
     }
 }
@@ -99,8 +122,18 @@ pub(crate) fn jars_available(state: &AppState) -> usize {
 /// `available` fresh jars are made. Returns false for a tab that would need
 /// one more: it is left out of the replay, not opened as a blank pane or in
 /// the shared jar.
-pub(crate) fn refresh_for_replay(meta: &mut Value, fresh: &mut HashMap<String, String>, available: usize) -> bool {
+pub(crate) fn refresh_for_replay(
+    meta: &mut Value,
+    fresh: &mut HashMap<String, String>,
+    available: usize,
+    profiles: Option<&HashSet<String>>,
+) -> bool {
     let Some(obj) = meta.as_object_mut() else { return true };
+    // A tab of a profile that no longer exists is left out, not reopened in
+    // a jar the host would make anew under the old id.
+    if let Some(id) = obj.get(IDENTITY_META_KEY).and_then(Value::as_str).and_then(profile_id) {
+        return profiles.is_some_and(|known| known.contains(id));
+    }
     let Some(old) = obj.get(IDENTITY_META_KEY).and_then(Value::as_str).filter(|i| is_incognito(i)).map(str::to_string) else {
         return true;
     };
@@ -113,9 +146,91 @@ pub(crate) fn refresh_for_replay(meta: &mut Value, fresh: &mut HashMap<String, S
     true
 }
 
+/// The identity an agent's `OpenBrowser` asked for by `profile` browses as:
+/// none (Personal) for "personal" or nothing; a fresh Incognito jar for
+/// "incognito", always allowed since it gives the agent less, not more; and a
+/// named profile (by name, any case, or id) only when the user switched on
+/// "Agents may use it" for it in Settings → Browser (profiles spec §5).
+pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -> Result<Option<String>, String> {
+    let requested = requested.trim();
+    if requested.is_empty() || requested.eq_ignore_ascii_case("personal") {
+        return Ok(None);
+    }
+    if requested.eq_ignore_ascii_case("incognito") {
+        return Ok(Some(format!("incognito:{}", uuid::Uuid::new_v4())));
+    }
+    let allowed = || {
+        let names: Vec<&str> = profiles.iter().filter(|p| p.agents_allowed).map(|p| p.name.as_str()).collect();
+        if names.is_empty() {
+            "none".to_string()
+        } else {
+            names.join(", ")
+        }
+    };
+    let Some(p) = profiles.iter().find(|p| p.name.eq_ignore_ascii_case(requested) || p.id == requested) else {
+        return Err(format!(
+            "there is no browser profile called {requested:?}. Use \"incognito\", or a profile the user lets agents use: {}",
+            allowed()
+        ));
+    };
+    if !p.agents_allowed {
+        return Err(format!(
+            "the user hasn't let agents use the browser profile {:?}: they can switch on \"Agents may use it\" for it in Settings → Browser. Use \"incognito\", or a profile agents may use: {}",
+            p.name,
+            allowed()
+        ));
+    }
+    Ok(Some(format!("profile:{}", p.id)))
+}
+
+/// `OpenBrowser`'s `profile`: give the agent's new tab the identity it asked
+/// for, checked like any new tab (the platform, the Incognito cap).
+pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, requested: Option<&str>) -> Result<(), String> {
+    let Some(requested) = requested else { return Ok(()) };
+    let profiles = crate::server::app_api::browser_profiles_list()?;
+    if let Some(identity) = identity_for_agent(requested, &profiles)? {
+        meta.insert(IDENTITY_META_KEY.to_string(), json!(identity));
+        check_new_tab(state, meta)?;
+    }
+    Ok(())
+}
+
+/// An agent opening a browser tab some other way (`pane.open`, the HTTP pane
+/// open) with a `browser:identity`: a named profile only if agents may use it.
+pub(crate) fn check_agent_may_use(meta: &MetaMapType) -> Result<(), String> {
+    let Some(id) = identity_of(meta).and_then(profile_id) else { return Ok(()) };
+    let profiles = crate::server::app_api::browser_profiles_list()?;
+    match profiles.iter().find(|p| p.id == id) {
+        Some(p) if p.agents_allowed => Ok(()),
+        Some(p) => Err(format!("the user hasn't let agents use the browser profile {:?}", p.name)),
+        None => Err(format!("there is no browser profile {id:?}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn profile(id: &str, name: &str, agents_allowed: bool) -> BrowserProfile {
+        BrowserProfile { id: id.into(), name: name.into(), color: "#3b82f6".into(), created_at: 0, agents_allowed }
+    }
+
+    #[test]
+    fn an_agent_gets_personal_incognito_or_a_profile_it_is_allowed() {
+        let ps = [profile("p-work", "Work", true), profile("p-bank", "Bank", false)];
+        assert_eq!(identity_for_agent("", &ps), Ok(None));
+        assert_eq!(identity_for_agent("Personal", &ps), Ok(None));
+        let a = identity_for_agent("incognito", &ps).unwrap().unwrap();
+        let b = identity_for_agent("Incognito", &ps).unwrap().unwrap();
+        assert!(is_incognito(&a) && is_incognito(&b) && a != b, "a fresh jar each time");
+        assert_eq!(identity_for_agent("work", &ps), Ok(Some("profile:p-work".into())));
+        assert_eq!(identity_for_agent("p-work", &ps), Ok(Some("profile:p-work".into())));
+        let refused = identity_for_agent("Bank", &ps).unwrap_err();
+        assert!(refused.contains("hasn't let agents use") && refused.contains("Work"), "{refused}");
+        assert!(refused.contains("\"Agents may use it\" for it in Settings → Browser") && !refused.contains("  "), "{refused}");
+        let unknown = identity_for_agent("Nope", &ps).unwrap_err();
+        assert!(unknown.contains("no browser profile") && !unknown.contains("Bank"), "{unknown}");
+    }
 
     #[test]
     fn only_well_formed_incognito_identities_pass() {
@@ -131,9 +246,9 @@ mod tests {
         let mut a = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:aaaaaaaa-1111" });
         let mut b = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:aaaaaaaa-1111" });
         let mut c = json!({ "view": "browser" });
-        assert!(refresh_for_replay(&mut a, &mut fresh, 8));
-        assert!(refresh_for_replay(&mut b, &mut fresh, 8));
-        assert!(refresh_for_replay(&mut c, &mut fresh, 8));
+        assert!(refresh_for_replay(&mut a, &mut fresh, 8, None));
+        assert!(refresh_for_replay(&mut b, &mut fresh, 8, None));
+        assert!(refresh_for_replay(&mut c, &mut fresh, 8, None));
         let ia = a[IDENTITY_META_KEY].as_str().unwrap();
         assert_ne!(ia, "incognito:aaaaaaaa-1111");
         assert!(is_incognito(ia));
@@ -142,9 +257,16 @@ mod tests {
         // Past the jars there are to spare, a tab needing a new one is left out;
         // one sharing a jar already made still comes.
         let mut d = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:dddddddd-4444" });
-        assert!(!refresh_for_replay(&mut d, &mut fresh, 1));
+        assert!(!refresh_for_replay(&mut d, &mut fresh, 1, None));
         let mut e = json!({ "view": "browser", IDENTITY_META_KEY: "incognito:aaaaaaaa-1111" });
-        assert!(refresh_for_replay(&mut e, &mut fresh, 1));
+        assert!(refresh_for_replay(&mut e, &mut fresh, 1, None));
+        // A profile tab comes only while its profile exists, and keeps its id.
+        let known: HashSet<String> = ["p-work".to_string()].into();
+        let mut f = json!({ "view": "browser", IDENTITY_META_KEY: "profile:p-work" });
+        assert!(refresh_for_replay(&mut f, &mut fresh, 0, Some(&known)));
+        assert_eq!(f[IDENTITY_META_KEY], json!("profile:p-work"));
+        let mut g = json!({ "view": "browser", IDENTITY_META_KEY: "profile:p-gone" });
+        assert!(!refresh_for_replay(&mut g, &mut fresh, 0, Some(&known)));
     }
 
     #[test]
@@ -157,6 +279,11 @@ mod tests {
         let mut meta = MetaMapType::new();
         inherit(&mut meta, &Block::default());
         assert!(meta.get(IDENTITY_META_KEY).is_none());
+        let mut work = Block::default();
+        work.meta.insert(IDENTITY_META_KEY.into(), json!("profile:p-work"));
+        let mut meta = MetaMapType::new();
+        inherit(&mut meta, &work);
+        assert_eq!(meta[IDENTITY_META_KEY], json!("profile:p-work"));
     }
 
     #[tokio::test]
@@ -169,7 +296,8 @@ mod tests {
         };
         assert!(check_new_tab(&state, &MetaMapType::new()).is_ok());
         assert!(check_new_tab(&state, &with(json!("incognito:short"))).is_err());
-        assert!(check_new_tab(&state, &with(json!("profile:work"))).unwrap_err().contains("aren't available"));
+        assert!(check_new_tab(&state, &with(json!("profile:p-none"))).is_err());
+        assert!(check_new_tab(&state, &with(json!("profile:Bad Id"))).is_err());
         assert!(check_new_tab(&state, &with(json!(5))).is_err());
         let ok = check_new_tab(&state, &with(json!("incognito:cccccccc-3333")));
         assert_eq!(ok.is_ok(), cfg!(windows), "{ok:?}");
