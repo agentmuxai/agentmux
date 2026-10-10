@@ -20,7 +20,7 @@ use super::AppState;
 // Each acts in the window that holds the caller's own pane (owner decision §8.1): the
 // host resolves that window from the verified block and calls the page's
 // `window.__agentmux_shortcuts` (frontend keybindings/app-api.ts), which
-// checks `target` is a pane in that window's active tab.
+// reveals `target` (a pane in that window, in any tab) before acting on it.
 
 /// Commands no agent may run: agents are first-class owners, so only what
 /// has no protection. A permanent delete can't be undone. The frontend

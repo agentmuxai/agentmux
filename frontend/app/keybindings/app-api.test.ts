@@ -59,7 +59,7 @@ describe("runCommand", () => {
         expect(runSync("nope:nothing", undefined, deps()).reason).toMatch(/unknown command/);
     });
 
-    it("refuses a target that isn't in the active tab", () => {
+    it("refuses a target that isn't in this window", () => {
         expect(runSync("term:multiInput", "elsewhere", deps()).reason).toMatch(/not in this window/);
     });
 
