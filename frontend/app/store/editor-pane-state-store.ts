@@ -37,6 +37,7 @@ import {
     emptyDocTabs,
     MAX_CLOSED,
     moveDoc,
+    moveDocTo,
     newDocTabId,
     openDoc,
     promoteDoc,
@@ -183,6 +184,8 @@ export type EditorPaneCommand =
     | { type: "SwitchTab"; tabId: string; source?: EditorCommandSource }
     | { type: "CycleTab"; delta: number; source?: EditorCommandSource }
     | { type: "ReorderTab"; tabId: string; toIndex: number; source?: EditorCommandSource }
+    /** A tab dragged to just before or after another (`moveDocTo`). */
+    | { type: "MoveTabTo"; tabId: string; targetId: string; position: "before" | "after"; source?: EditorCommandSource }
     | { type: "MarkDirty"; tabId: string; source?: EditorCommandSource }
     | { type: "ClearDirty"; tabId: string; source?: EditorCommandSource }
     | {
@@ -475,6 +478,11 @@ export function update(state: EditorPaneState, command: EditorPaneCommand): Redu
             if (idx < 0) return same(state);
             const to = Math.max(0, Math.min(doc.tabs.length - 1, command.toIndex));
             return next(state, moveDoc(doc, command.tabId, to - idx));
+        }
+
+        case "MoveTabTo": {
+            const moved = moveDocTo(doc, command.tabId, command.targetId, command.position);
+            return moved === doc ? same(state) : next(state, moved);
         }
 
         case "MarkDirty": {

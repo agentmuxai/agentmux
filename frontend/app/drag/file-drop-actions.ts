@@ -56,6 +56,8 @@ export const notifyDrop = {
             failures.length > 0 ? 8 : 5
         );
     },
+    /** A document tab dropped on another pane that couldn't take it. */
+    cantMove: (title: string, reason: string) => notice("warning", `Couldn't move ${title}`, reason),
     /** A media or editor pane was handed a file it can't open. */
     cantOpen: (name: string, paneKind: string) =>
         notice("warning", "Couldn't open the file", `${name} can't be opened in this ${paneKind}.`),

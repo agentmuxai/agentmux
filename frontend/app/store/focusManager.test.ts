@@ -468,4 +468,52 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(1);
         });
     });
+
+    // A press on a tab of an unselected pane selects the pane; focusing its
+    // input mid-press would stop the browser from starting the tab's drag.
+    describe("a press on a draggable tab", () => {
+        const press = (target: Element, type = "pointerdown", init: PointerEventInit = {}) =>
+            target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, ...init }));
+        let tab: HTMLElement;
+        beforeEach(() => {
+            document.body.innerHTML = `<div draggable="true" class="pane-tab"><span>a.png</span></div><div id="plain">text</div>`;
+            tab = document.querySelector<HTMLElement>(".pane-tab span")!;
+        });
+
+        it("focuses the pane when the press ends, not during it", () => {
+            press(tab);
+            focusManager.requestNodeFocus();
+            expect(giveFocus).not.toHaveBeenCalled();
+            press(tab, "pointerup");
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("after a drag: at dragend, or at the next move when the dragged tab went away", () => {
+            press(tab);
+            focusManager.requestNodeFocus();
+            document.dispatchEvent(new Event("dragstart"));
+            press(tab, "pointercancel");
+            expect(giveFocus).not.toHaveBeenCalled();
+            document.dispatchEvent(new Event("dragend"));
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+
+            press(tab);
+            focusManager.requestNodeFocus();
+            press(document.body, "pointermove", { buttons: 0 });
+            expect(giveFocus).toHaveBeenCalledTimes(2);
+        });
+
+        it("not if another pane was selected by then; a press elsewhere focuses at once", () => {
+            press(tab);
+            focusManager.requestNodeFocus();
+            focusedNode = { id: "node-2", data: { blockId: "block-2" } };
+            press(tab, "pointerup");
+            expect(giveFocus).not.toHaveBeenCalled();
+
+            focusedNode = { id: "node-1", data: { blockId: "block-1" } };
+            press(document.querySelector("#plain")!);
+            focusManager.requestNodeFocus();
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+    });
 });

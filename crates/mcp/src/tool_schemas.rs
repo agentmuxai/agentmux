@@ -316,12 +316,12 @@ pub(crate) const LIST_SHORTCUTS_TOOL: &str = r#"{
 
 pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
   "name": "RunCommand",
-  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane in that window's active tab first; without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the confirmations a user sees: tab:close asks before closing. pane:close is refused (use ClosePane, which gives the user 15 seconds to undo, or QuitSelf for your own pane), and so is files:deletePermanently (it can't be undone), and files:trash on macOS, where restoring from the Trash isn't supported yet. Returns whether it ran, and why not if it didn't.",
+  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane anywhere in that window first (it switches to the pane's tab); without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the protections a user has: tab:close asks before closing, files:trash can be undone. pane:close needs target, and closes that pane the way ClosePane does: a pane you're in closes at once, another agent's pane waits 15 seconds for its user to keep it (the answer says it's pending). term:paste is refused when the clipboard has a line break and the shell hasn't turned on bracketed paste, since pasting would run that line. files:deletePermanently is refused (it can't be undone). Returns whether it ran, and why not if it didn't.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "command": { "type": "string", "description": "Command id from ListShortcuts" },
-      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first, or of one of its pane tabs (that tab becomes the one the pane shows)" }
+      "target": { "type": "string", "description": "Optional: id of a pane in your window, in any tab, or of one of a pane's tabs, to focus first: the window switches to that tab and the pane shows it" }
     },
     "required": ["command"]
   }
@@ -329,12 +329,12 @@ pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
 
 pub(crate) const PRESS_KEYS_TOOL: &str = r#"{
   "name": "PressKeys",
-  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to a command RunCommand refuses is refused, wherever it is bound. Pass target to focus a pane in that window's active tab first. Returns the modifiers sent (on macOS `meta` is ⌘); the commands the table binds the key to; `resolved`, the command that actually ran and who ran it (the app or a pane), or null; and `closed_dialog`, true when the key closed a dialog that handles it itself (Escape in the palette or a confirmation), which the app's dispatcher never sees. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
+  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to files:deletePermanently or pane:close anywhere is refused (pane:close's key closes at once; use RunCommand pane:close for the undo), and so is the paste key when the clipboard has a line break and the shell hasn't turned on bracketed paste. Pass target to focus a pane anywhere in that window first (it switches to the pane's tab). Returns the modifiers sent (on macOS `meta` is ⌘); the commands the table binds the key to; `resolved`, the command that actually ran and who ran it (the app or a pane), or null; and `closed_dialog`, true when the key closed a dialog that handles it itself (Escape in the palette or a confirmation), which the app's dispatcher never sees. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "keys": { "type": "string", "description": "A raw key from ListShortcuts, in the table's syntax" },
-      "target": { "type": "string", "description": "Optional: id of a pane in the active tab of your window to focus first, or of one of its pane tabs (that tab becomes the one the pane shows)" }
+      "target": { "type": "string", "description": "Optional: id of a pane in your window, in any tab, or of one of a pane's tabs, to focus first: the window switches to that tab and the pane shows it" }
     },
     "required": ["keys"]
   }

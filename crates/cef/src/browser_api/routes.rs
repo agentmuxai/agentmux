@@ -902,6 +902,22 @@ pub struct OwnedPanesReq {
     pub profiles: Option<Vec<String>>,
 }
 
+/// `POST /agentmux/browser/renderer_map` — which renderer process serves
+/// which window or pane (`crate::renderer_map`), for srv's Tower pane.
+pub async fn renderer_map(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<crate::renderer_map::RendererMapData>>) {
+    if !authorized(&headers, &state.ipc_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
+        );
+    }
+    let renderers = crate::renderer_map::snapshot(&state);
+    ok_body(ApiResponse::ok(crate::renderer_map::RendererMapData { renderers }))
+}
+
 /// `POST /agentmux/browser/owned_panes` — srv's whole set of agent-owned
 /// browser panes, replacing the host's copy. `on_before_popup` reads it to
 /// decide which of a pane's popups open in-app

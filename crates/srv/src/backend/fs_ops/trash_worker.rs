@@ -77,6 +77,10 @@ fn context() -> trash::TrashContext {
 /// Move `path` to the Trash. Must be called on the trash thread (via [`run`]).
 /// The crate trashes a link itself, not its target.
 pub fn trash_path(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(result) = macos::trash(path) {
+        return result;
+    }
     context().delete(path).map_err(|e| {
         tracing::warn!(path = %path.display(), error = ?e, "fs.trash: trash crate error");
         format!("Couldn't move it to the Trash: {}", describe(&e))
@@ -141,25 +145,149 @@ pub fn restore_paths(targets: &[std::path::PathBuf]) -> Vec<Result<(), String>> 
         .collect()
 }
 
-/// macOS: the `trash` crate cannot list or restore the Trash there.
-/// `NSFileManager.trashItemAtURL` does return the item's new URL, so undo can
-/// become a move back later (spec §7.3); until then restore says so.
+/// macOS: the `trash` crate can't list or restore the Trash there, so
+/// [`macos::trash`] remembers where `NSFileManager` put each item and this
+/// moves it back. Only items trashed since srv started can be put back.
+#[cfg(target_os = "macos")]
+pub fn restore_paths(targets: &[std::path::PathBuf]) -> Vec<Result<(), String>> {
+    targets.iter().map(|target| macos::restore(target)).collect()
+}
+
+/// Other platforms the `trash` crate can't restore on.
 #[cfg(not(any(
     target_os = "windows",
-    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
+    target_os = "macos",
+    all(unix, not(target_os = "ios"), not(target_os = "android"))
 )))]
 pub fn restore_paths(targets: &[std::path::PathBuf]) -> Vec<Result<(), String>> {
     targets
         .iter()
-        .map(|_| Err("Restoring from the Trash isn't supported on macOS yet.".to_string()))
+        .map(|_| Err("Restoring from the Trash isn't supported on this system.".to_string()))
         .collect()
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use std::collections::HashMap;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+
+    use super::super::platform;
+    use super::path_key;
+
+    /// An item in the Trash: where it is, and its device and inode then, so
+    /// a different item that later takes that name isn't mistaken for it.
+    struct Trashed {
+        path: PathBuf,
+        dev: u64,
+        ino: u64,
+    }
+
+    impl Trashed {
+        fn still_there(&self) -> bool {
+            std::fs::symlink_metadata(&self.path).is_ok_and(|m| m.dev() == self.dev && m.ino() == self.ino)
+        }
+    }
+
+    /// Where each item trashed since srv started went, by its original
+    /// path's [`path_key`], oldest first.
+    fn trashed() -> &'static Mutex<HashMap<String, Vec<Trashed>>> {
+        static TRASHED: OnceLock<Mutex<HashMap<String, Vec<Trashed>>>> = OnceLock::new();
+        TRASHED.get_or_init(Default::default)
+    }
+
+    /// Trash `path` through `NSFileManager` and remember where it went.
+    /// `None` for a path that isn't UTF-8, which the crate handles instead.
+    pub(super) fn trash(path: &Path) -> Option<Result<(), String>> {
+        let utf8 = path.to_str()?;
+        let url = NSURL::fileURLWithPath(&NSString::from_str(utf8));
+        let mut resulting = None;
+        let file_mgr = NSFileManager::defaultManager();
+        if let Err(e) = file_mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut resulting)) {
+            let description = e.localizedDescription().to_string();
+            tracing::warn!(path = %path.display(), error = %description, "fs.trash: trashItemAtURL failed");
+            return Some(Err(format!("Couldn't move it to the Trash: {description}")));
+        }
+        let dest = resulting.and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string()));
+        match dest.and_then(|dest| std::fs::symlink_metadata(&dest).ok().map(|m| (dest, m))) {
+            Some((dest, meta)) => {
+                let mut map = trashed().lock().unwrap_or_else(|e| e.into_inner());
+                map.entry(path_key(path)).or_default().push(Trashed { path: dest, dev: meta.dev(), ino: meta.ino() });
+            }
+            None => tracing::warn!(path = %path.display(), "fs.trash: trashed, but macOS didn't say where to"),
+        }
+        Some(Ok(()))
+    }
+
+    /// Put back the most recently trashed item that came from `target` and is
+    /// still in the Trash, refusing if something is in its place now.
+    pub(super) fn restore(target: &Path) -> Result<(), String> {
+        let key = path_key(target);
+        let mut map = trashed().lock().unwrap_or_else(|e| e.into_inner());
+        let Some(stack) = map.get_mut(&key) else {
+            return Err(
+                "AgentMux hasn't moved it to the Trash since it started, so it can't put it back. \
+                 Put Back in the Finder can."
+                    .to_string(),
+            );
+        };
+        // Drop what's no longer in the Trash: emptied, moved out of it, or
+        // replaced by another item of the same name.
+        while stack.last().is_some_and(|t| !t.still_there()) {
+            stack.pop();
+        }
+        let Some(from) = stack.last().map(|t| t.path.clone()) else {
+            map.remove(&key);
+            return Err("It isn't in the Trash anymore.".to_string());
+        };
+        if !target.parent().is_some_and(Path::is_dir) {
+            return Err("The folder it was in isn't there anymore, so it can't be put back.".to_string());
+        }
+        platform::rename_no_replace(&from, target).map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                "Something with the same name is already there, so it can't be put back.".to_string()
+            }
+            _ => {
+                tracing::warn!(path = %target.display(), error = %e, "fs.restore: move back failed");
+                format!("Couldn't put it back: {e}")
+            }
+        })?;
+        stack.pop();
+        if stack.is_empty() {
+            map.remove(&key);
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn another_item_with_the_same_name_is_not_the_trashed_one() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("item.txt");
+            std::fs::write(&path, "trashed").unwrap();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            let t = Trashed { path: path.clone(), dev: meta.dev(), ino: meta.ino() };
+            assert!(t.still_there());
+
+            // The first file stays (moved), so the new one can't reuse its inode.
+            std::fs::rename(&path, dir.path().join("moved.txt")).unwrap();
+            std::fs::write(&path, "another").unwrap();
+            assert!(!t.still_there());
+        }
+    }
 }
 
 /// A path's identity for matching a trashed item's original location: the
 /// display form, case-folded on Windows, whose filesystems are
 /// case-insensitive and whose Recycle Bin reports plain (non-verbatim) paths.
 #[cfg_attr(
-    not(any(target_os = "windows", all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))),
+    not(any(target_os = "windows", target_os = "macos", all(unix, not(target_os = "ios"), not(target_os = "android")))),
     allow(dead_code)
 )]
 fn path_key(path: &Path) -> String {
@@ -192,7 +320,7 @@ mod tests {
 
     /// Touches the real Recycle Bin / Trash, so it is opt-in:
     /// `cargo test -p agentmux-srv trash_and_restore_round_trip -- --ignored`.
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[tokio::test]
     #[ignore]
     async fn trash_and_restore_round_trip() {
@@ -209,5 +337,39 @@ mod tests {
         assert_eq!(results.len(), 1);
         results[0].clone().unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "x", "restored in place");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_restore_refuses_what_it_did_not_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().canonicalize().unwrap().join("never-trashed.txt");
+        let results = run(move || restore_paths(&[file])).await.unwrap();
+        assert!(results[0].as_ref().unwrap_err().contains("hasn't moved it to the Trash"));
+    }
+
+    /// Touches the real Trash, so it is opt-in, like the round trip.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn macos_restore_leaves_a_new_item_in_its_place_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().canonicalize().unwrap().join(format!("agentmux-trash-test-{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&file, "old").unwrap();
+        let f = file.clone();
+        run(move || trash_path(&f)).await.unwrap().unwrap();
+        std::fs::write(&file, "new").unwrap();
+
+        let f = file.clone();
+        let results = run(move || restore_paths(&[f])).await.unwrap();
+        assert!(results[0].as_ref().unwrap_err().contains("already there"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new", "the new file is untouched");
+
+        // Once it's out of the way, the trashed one comes back.
+        std::fs::remove_file(&file).unwrap();
+        let f = file.clone();
+        let results = run(move || restore_paths(&[f])).await.unwrap();
+        results[0].clone().unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "old");
     }
 }

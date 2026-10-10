@@ -31,6 +31,7 @@ mod file_ops;
 mod indexing;
 mod lifecycle;
 mod pty;
+mod spawn_cwd;
 pub(crate) mod stamps;
 mod translation;
 

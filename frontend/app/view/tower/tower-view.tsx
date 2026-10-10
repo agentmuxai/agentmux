@@ -34,6 +34,7 @@ import {
     groupProcesses,
     type OwnerGroup,
     ownerGroups,
+    ownerOf,
     processDetail,
     type ProcessGroup,
     type ProcessGrouping,
@@ -440,8 +441,17 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
     const host = () => m.snapshot()?.host;
     /** Another machine sends only its busiest and largest processes. */
     const partial = () => (host()?.processes.length ?? 0) < (host()?.matched ?? 0);
+    const tasksById = createMemo(() => new Map((m.snapshot()?.tasks ?? []).map((t) => [t.id, t])));
+    // Carried over from the Agents view: only that owner's processes.
+    const onlyLabel = createMemo(() => {
+        const only = m.only();
+        if (!only) return undefined;
+        const p = (host()?.processes ?? []).find((x) => ownerOf(x, tasksById())[0] === only);
+        return p ? ownerOf(p, tasksById())[2] : (tasksById().get(only)?.label ?? "that owner");
+    });
     const rows = createMemo(() => {
-        const all = host()?.processes ?? [];
+        const only = m.only();
+        const all = (host()?.processes ?? []).filter((p) => !only || ownerOf(p, tasksById())[0] === only);
         return sortProcesses(filterProcesses(all, m.filter(), m.taskLabel), m.sort());
     });
     // Grouped by app or by owner: rows keyed by the app's name or the owner,
@@ -482,6 +492,16 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                 </Show>
             </div>
             <div class="tower-host-bar">
+                <Show when={onlyLabel()}>
+                    {(label) => (
+                        <span class="tower-only" data-testid="tower-only">
+                            Only {label()}
+                            <Button density="compact" tone="quiet" onClick={() => m.showAll()}>
+                                Show all
+                            </Button>
+                        </span>
+                    )}
+                </Show>
                 <FilterInput
                     value={m.filter()}
                     onInput={(q) => m.setFilter(q)}

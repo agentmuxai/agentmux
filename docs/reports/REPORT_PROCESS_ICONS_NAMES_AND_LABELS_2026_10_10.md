@@ -1,6 +1,6 @@
 # AgentMux's processes in the OS task manager: icons, names and pane labels on Windows, macOS and Linux
 
-**Status:** active — §9 items 1 and 2 (Windows icons and names, the build in the host name, macOS helper icons) ship with this report; items 3 to 6 follow in their own PRs.
+**Status:** implemented — §9 items 1 to 4 are built: Windows icons and names, the build in the host name and macOS helper icons (#4595), the Linux srv name (#4596), and Tower's labelled AgentMux rows (#4598, and renderers named by the window or pane they serve in the PR that sets this status). Item 5 is not built: Tower shows the same. Item 6 is not built (§9). §8.2's per-type CEF names on Linux were dropped (§8.2).
 **Date:** 2026-10-10 | **Version:** main at 0.59.18 (`f2da6d823`); Windows measured on 0.59.16 and 0.59.17 portables and four `task dev` builds running side by side. macOS and Linux findings are from the packaging scripts, not from a running machine (§10).
 **Requested by:** repo owner: "in the background processes … AgentMux Server, and all the agentmux-bashwrap, mcp, etc, we want to use our icons, currently they are using generic ones"; then "there are many entries with just 'AgentMux' … are we able to get more information in the name?", "do they relate to actual panes in the agentmux instances? can they be labeled?" and "can we ensure the icons are supported on 3 platforms?"
 **Author:** Loap.
@@ -157,17 +157,20 @@ ELF binaries have no resource section, so there's nothing to embed. Desktop syst
 Names, though, are per process on Linux, unlike Windows:
 
 - The kernel's process name (`comm`, what `top`, `ps -o comm` and most monitors show) is the first **15** characters of the file name. srv's file is `agentmux-srv-<ver>-linux.x64`, so it shows as `agentmux-srv-0.` and changes with every version. `agentmux-bashwrap` shows as `agentmux-bashwr`.
-- A process can set its own `comm` with `prctl(PR_SET_NAME)`. srv, mcp and bashwrap should set stable names at startup (`agentmux-srv`, `agentmux-mcp`, `am-bashwrap`), and the host can name each CEF subprocess by its `--type` (`agentmux-gpu`, `agentmux-render`, `agentmux-util`) — the per-type split Windows can't have.
+- A process can set its own `comm` with `prctl(PR_SET_NAME)`. srv now sets `agentmux-srv`, and its document-parsing child `agentmux-srvdoc` (#4596). `agentmux-mcp` already fits in 15 bytes; `agentmux-bashwr` is left as the kernel cuts it.
+- **Dropped:** naming each CEF subprocess by its `--type`. Chromium forks renderers and most utility processes from its zygote, so our entry point never runs in them: they would inherit the zygote's name, which is wrong rather than merely unhelpful. Tower labels them instead (§7).
 - Icons: once names are stable, the `.deb`/`.rpm` can install hicolor icons under those names (`agentmux-srv` …) so monitors that look icons up by process name find them; an AppImage can only do that through its desktop-integration step. Which monitors honour it (GNOME System Monitor, KDE System Monitor, others) needs checking on real desktops before promising it.
 
 ## 9. Proposed order of work
 
 1. **Windows icons** (§5): srv, mcp, bashwrap via `winres`; one CompanyName. Small, self-contained.
 2. **Windows host name with the build** (§6.1) and the **macOS helper icons** (§8.1, first row). Small packaging changes.
-3. **Linux process names** via `prctl` (§8.2). Small; makes srv's name stable and splits CEF subprocesses by type.
+3. **Linux process names** via `prctl` (§8.2). Small; makes srv's name stable. (The CEF per-type split was dropped, §8.2.)
 4. **Tower: labelled CEF rows** (§7). A feature in the existing Tower pane; answers "which pane is this process".
 5. **Command-line marker for the Details tab** (§6.2). Optional once Tower shows the same.
 6. **macOS nested helper apps** for srv/mcp/bashwrap, and Linux theme icons by process name (§8). Larger (bundle layout, signing; per-desktop verification).
+
+**Not built, and why.** Item 5: Tower now names every AgentMux process, the window or pane included, so a marker on the Details tab's command line would repeat it less usefully. Item 6: moving srv, mcp and bashwrap into nested `.app` bundles changes the signed bundle layout and how srv and the agents' PATH find those binaries, and it can only be verified on a Mac (Activity Monitor's attribution through a symlink in particular); theme icons by process name need checking per Linux desktop before they can be promised. Both are worth doing as their own change, verified on those platforms.
 
 ## 10. How to verify
 

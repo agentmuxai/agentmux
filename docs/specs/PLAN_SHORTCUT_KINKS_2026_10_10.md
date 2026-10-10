@@ -107,6 +107,17 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 
 ## 5. Decisions for the owner
 
+**Decided 2026-10-10.** The owner: "we want to give agents powerful tools, they are first class owners in agentmux, so they have widespread perms, but with protections". So the rule is protections, not refusals; refuse only what has no protection.
+- **D1: yes.** RunCommand/PressKeys may switch tabs within the agent's own window to reach a pane. The window stays the boundary.
+- **D2: allow, with protections.** All three commands run for agents:
+  - `term:paste` is refused only when the clipboard has a line break and the shell hasn't turned on bracketed paste, because then the line would run. PressKeys' paste key gets the same guard.
+  - `files:openInNewTab` and `files:mention` are allowed, and their tool descriptions say what they do.
+  - Going beyond the question: RunCommand's `pane:close` no longer refuses. It needs `target` and closes that pane the way ClosePane does: at once if the agent is in it; otherwise after the 15 seconds its user has to keep it.
+  - `files:deletePermanently` stays refused. It can't be undone, and an agent could click its own confirmation.
+- **D3: yes.** A new tab keeps its layout but doesn't give the agent picker keyboard focus.
+
+The questions as asked:
+
 - **D1 (K2).** May RunCommand/PressKeys switch tabs within the agent's own window to reach a pane? Proposed: yes. It stays inside the window, as decided before (shortcuts plan §8.1).
 - **D2 (K3).** For `files:openInNewTab`, `term:paste` and `files:mention`: refuse them to agents, or allow them and say what they do in the tool description?
   - Proposed: refuse `term:paste`. Its effect depends on whatever is on the clipboard.
@@ -117,15 +128,15 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 
 | Package | Owner | Status |
 |---|---|---|
-| M1 Trash restore (macOS) | Masty@starpower | in progress |
+| M1 Trash restore (macOS) | Masty@starpower | done (#4610) |
 | M2 L3 macOS | Masty@starpower | waiting for Accessibility |
 | L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS (#4603 reruns) |
-| L2 Temp-tree guard, script timeouts | Maricon@charlie | in progress |
-| L3 Injected L3 Linux | Maricon@charlie | open |
-| A1 Pane-tab targets, caret wait | AgentA@Area54 | in review (#4609) |
-| A2 Other tabs | AgentA@Area54 | waiting for D1 |
-| A3 Beyond-the-pane commands | AgentA@Area54 | waiting for D2 |
-| A4 Help notes, dialog Escape | AgentA@Area54 | open |
-| A5 Pool window marker | AgentA@Area54 | open |
-| A6 Dev environment | AgentA@Area54 | open |
-| A7 New-tab focus | AgentA@Area54 | waiting for D3 |
+| L2 Temp-tree guard, script timeouts | Maricon@charlie | done (#4612) |
+| L3 Injected L3 Linux | Maricon@charlie | in progress |
+| A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
+| A2 Other tabs | AgentA@Area54 | in review (#4634) |
+| A3 Paste guard, `pane:close` via ClosePane | AgentA@Area54 | in review (#4626) |
+| A4 Save-key reporting, dialog Escape | AgentA@Area54 | done (#4613); the Ctrl+F Help note moved to SPEC_HELP_HIDDEN_TIPS_2026_10_10 (#4616) |
+| A5 Pool window marker | AgentA@Area54 | done (#4618) |
+| A6 Dev environment | AgentA@Area54 | terminals start at home (#4621), full-reload reason logged (#4623); `npm ci` and launching a dev instance from an agent still open |
+| A7 New-tab focus | AgentA@Area54 | open (D3: yes) |

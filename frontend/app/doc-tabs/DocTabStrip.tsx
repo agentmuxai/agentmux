@@ -6,16 +6,19 @@
  * `PaneTabStrip` (as the Editor's file tabs are), under the pane header.
  * docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §4.1.
  *
- * Drag-reorder is not wired here: `PaneTabStrip`'s drag is a pane-tab drag
- * (it can tear the "tab" off into a window), which a document is not.
- * Reorder is by keys (Ctrl+Shift+PageUp/PageDown) until documents get a drag
- * type of their own (§5.8).
+ * Tabs drag as document tabs (`PaneTabStrip`'s `docDrag`): their own drag
+ * kind, which never tears off into a window. Dropped on another tab of the
+ * strip, a tab moves there; reorder by keys still works
+ * (Ctrl+Shift+PageUp/PageDown). A tab of another pane of the same type
+ * dropped on one of these moves into this pane, beside it (doc-tab-hosts.ts).
+ * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md.
  */
 
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { Show, type JSX } from "solid-js";
 import type { DocTab } from "./doc-tabs";
 import type { DocTabsController } from "./doc-tabs-controller";
+import { dropDocTab } from "./doc-tab-hosts";
 import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
 
@@ -24,6 +27,12 @@ export function DocTabStrip<P>(props: {
     /** Tooltip per tab (a full path); the title when omitted. */
     tooltipOf?: (tab: DocTab<P>) => string;
     addTitle?: string;
+    /** The pane type ("media"): tabs move only between panes of one type. */
+    docType: string;
+    /** The block whose tabs these are. */
+    blockId: string;
+    /** Whether a tab can be dragged (an empty one has nothing to move). */
+    canDrag?: (tab: DocTab<P>) => boolean;
 }): JSX.Element {
     const ctl = props.ctl;
     return (
@@ -49,6 +58,16 @@ export function DocTabStrip<P>(props: {
                     }}
                     onAdd={ctl.spec.newDocument ? () => void ctl.newDocument() : undefined}
                     addTitle={props.addTitle ?? `New tab (${keyLabel("ctrl+t")})`}
+                    docDrag={{
+                        docType: props.docType,
+                        blockId: props.blockId,
+                        canDrag: (id) => {
+                            const tab = ctl.tabs().find((t) => t.id === id);
+                            return !!tab && (props.canDrag?.(tab) ?? true);
+                        },
+                        onReorder: (id, targetId, position) => ctl.moveTo(id, targetId, position),
+                        onReceive: (sourceBlockId, tabId, at) => dropDocTab(sourceBlockId, tabId, props.blockId, at),
+                    }}
                 />
             </div>
         </Show>

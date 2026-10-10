@@ -12,20 +12,24 @@ import { createSignal, type Accessor } from "solid-js";
 import {
     activateDoc,
     activeTab,
+    attachDoc,
     closeDoc,
     closeOthers,
     closeToRight,
     cycleDoc,
+    detachDoc,
     DOC_TABS_META,
     emptyDocTabs,
     hydrateDocTabs,
     moveDoc,
+    moveDocTo,
     openDoc,
     persistDocTabs,
     promoteDoc,
     reopenClosed,
     setPinned,
     updateDoc,
+    type DocDropAt,
     type DocTab,
     type DocTabsState,
     type OpenArgs,
@@ -102,7 +106,8 @@ export class DocTabsController<P> {
         };
     }
 
-    private apply(next: DocTabsState<P>): void {
+    /** `movedOut`: a tab that left for another pane, which is not closed. */
+    private apply(next: DocTabsState<P>, movedOut?: string): void {
         if (next === this.state()) return;
         const before = this.state();
         this.setState(next);
@@ -110,7 +115,7 @@ export class DocTabsController<P> {
         // (a closed preview, a tab past the reopen cap).
         if (this.onClosed) {
             const still = new Set([...next.tabs, ...next.closed].map((t) => t.id));
-            for (const t of [...before.tabs, ...before.closed]) if (!still.has(t.id)) this.onClosed(t);
+            for (const t of [...before.tabs, ...before.closed]) if (!still.has(t.id) && t.id !== movedOut) this.onClosed(t);
         }
         this.scheduleSave();
     }
@@ -185,6 +190,28 @@ export class DocTabsController<P> {
 
     move(id: string, delta: number): void {
         this.apply(moveDoc(this.state(), id, delta));
+    }
+
+    /** A tab dragged to just before or after another. False when nothing
+     *  moved. */
+    moveTo(id: string, targetId: string, position: "before" | "after"): boolean {
+        const before = this.state();
+        this.apply(moveDocTo(before, id, targetId, position));
+        return this.state() !== before;
+    }
+
+    /** Take tab `id` out, to move it to another pane. Null if there is no
+     *  such tab. */
+    detach(id: string): DocTab<P> | null {
+        const out = detachDoc(this.state(), id);
+        if (!out) return null;
+        this.apply(out.state, id);
+        return out.tab;
+    }
+
+    /** Put in a tab moved from another pane (`attachDoc`). */
+    attach(tab: DocTab<P>, at?: DocDropAt): void {
+        this.apply(attachDoc(this.state(), tab, at));
     }
 
     pin(id: string, pinned: boolean): void {
