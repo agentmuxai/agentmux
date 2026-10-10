@@ -1357,9 +1357,9 @@ pub(crate) async fn handle_host_browser_popup(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    meta.insert(popup::POPUP_OF_META_KEY.to_string(), json!(opener));
-    meta.insert(popup::POPUP_FROM_META_KEY.to_string(), json!(popup::origin_of(&opener_url)));
+    popup::mark_popup_meta(&mut meta, &opener, &opener_url);
     crate::server::browser_identity::inherit(&mut meta, &block);
+    // On the new pane from the start, so the host has it before the first load.
     crate::server::browser_allowlist::mirror(&mut meta, crate::server::browser_allowlist::list_for(&opener).as_deref());
     if let Some(agent) = &owner {
         meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(agent));

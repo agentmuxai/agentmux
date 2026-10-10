@@ -8,7 +8,7 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
@@ -68,7 +68,8 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
     // which block's `connection` this same mounted instance should reflect
     // without remounting at all.
     const [connModalOpen, setConnModalOpen] = createSignal(props.changeConnModalAtom());
-    const isLocal = createMemo(() => util.isBlank(props.connection));
+    // "local" is this computer too, as everywhere else (remoteDisplay, srv's default).
+    const isLocal = createMemo(() => util.isBlank(props.connection) || props.connection === "local");
     const connStatus = createMemo(() => getConnStatusAtom(props.connection)());
     const connColorNum = createMemo(() => computeConnColorNum(connStatus()));
     const color = createMemo(() => `var(--conn-icon-color-${connColorNum()})`);
@@ -135,22 +136,20 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
         if (holder) holder.current = el;
     });
 
-    // Shown on a local pane too, as "Local": the header is where a pane is
-    // switched to a remote, and the picker opens beside this chip.
+    // A remote pane only. A local pane has no chip; Change connection (⌘⇧G)
+    // still opens the picker there, placed by the pane (typeaheadmodal.tsx).
     return (
-        <div
-            ref={(el) => setBtnEl(el)}
-            class={clsx("connection-button", { "connection-button--local": isLocal() })}
-            onClick={clickHandler}
-            title={isLocal() ? "On this computer. Click to run it on a remote." : getTitleText()}
-        >
-            <Show
-                when={!isLocal()}
-                fallback={
-                    <span class="connection-icon-box">
-                        <i class={util.makeIconClass("laptop", false)} />
-                    </span>
-                }
+        <Show when={!isLocal()}>
+            <div
+                ref={(el) => {
+                    setBtnEl(el);
+                    // Gone when the pane turns local: a stale anchor would keep
+                    // the picker from falling back to the pane.
+                    onCleanup(() => setBtnEl(null));
+                }}
+                class="connection-button"
+                onClick={clickHandler}
+                title={getTitleText()}
             >
                 <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
                     {getConnIcon()}
@@ -164,12 +163,12 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
                         }}
                     />
                 </span>
-            </Show>
-            <Show when={display()?.color}>
-                <span class="connection-swatch" style={{ background: display()!.color }} />
-            </Show>
-            <div class="connection-name ellipsis">{isLocal() ? "Local" : (display()?.name ?? props.connection)}</div>
-        </div>
+                <Show when={display()?.color}>
+                    <span class="connection-swatch" style={{ background: display()!.color }} />
+                </Show>
+                <div class="connection-name ellipsis">{display()?.name ?? props.connection}</div>
+            </div>
+        </Show>
     );
 }
 
