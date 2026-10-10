@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 const platform = vi.hoisted(() => ({ mac: false }));
-vi.mock("@/util/platformutil", () => ({ isMacOS: () => platform.mac }));
+vi.mock("@/util/platformutil", () => ({ isMacOS: () => platform.mac, isLinux: () => false }));
 
 import { CopyErrorButton } from "./CopyErrorButton";
 

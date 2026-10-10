@@ -173,6 +173,24 @@ describe("appHandleKeyDown", () => {
             list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", code: "ArrowUp", shiftKey: true, bubbles: true, cancelable: true }));
             expect(paneKey).toHaveBeenCalledTimes(1);
         });
+
+        it("finishes the chord in a focused terminal without sending the key to the shell", () => {
+            setKeyUtilPlatform("linux");
+            setPlatform("linux");
+            registerChordCapture();
+            focusTerminal();
+            // xterm reads keys from its own listener on this textarea and
+            // writes them to the shell.
+            const toShell = vi.fn();
+            field!.addEventListener("keydown", toShell);
+            const key = (init: KeyboardEventInit) => field!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+            expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
+            key({ key: "Shift", code: "ShiftLeft", shiftKey: true });
+            key({ key: "ArrowUp", code: "ArrowUp", shiftKey: true });
+            expect(swapUp).toHaveBeenCalledTimes(1);
+            // The bare Shift reaches the terminal (it writes nothing); the arrow doesn't.
+            expect(toShell.mock.calls.map(([e]) => (e as KeyboardEvent).key)).toEqual(["Shift"]);
+        });
     });
 
     it("runs a shortcut the host forwards out of a browser pane, after taking focus back", async () => {
