@@ -72,6 +72,9 @@ export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     deserialize: (st) => (typeof st === "string" && st ? { path: st } : null),
     // Ctrl+T, "+": a tab to pick a file into.
     newDocument: () => ({ path: "", blank: ++blanks }),
+    // The strip is there with one file too, as the Editor's is: its "+" and
+    // a tab to drag to another Media pane are where people look for them.
+    alwaysShowStrip: true,
 };
 
 export class MediaPaneModel {

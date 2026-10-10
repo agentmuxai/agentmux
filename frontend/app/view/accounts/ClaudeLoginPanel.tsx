@@ -18,6 +18,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { withLoginWindow } from "@/app/view/agent/flows/login-window";
 import { loginBackend } from "@/app/view/agent/flows/login-backend";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -143,7 +144,10 @@ export function ClaudeLoginPanel(props: {
             },
         });
 
-    const start = async () => {
+    // The login's window opens inside the click (its URL comes later), and is
+    // closed on every way out of the flow if no URL used it (login-window.ts).
+    const start = () => (inFlight() ? Promise.resolve() : withLoginWindow(CLAUDE_PROVIDER, startFlow));
+    const startFlow = async () => {
         if (inFlight()) return;
         setInFlight(true);
         setError(null);

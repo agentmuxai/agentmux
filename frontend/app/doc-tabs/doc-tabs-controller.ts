@@ -46,7 +46,7 @@ export interface DocTabsSpec<P> {
     newDocument?(active: P | undefined): P | null;
     /** The pane always shows a document: its last tab can't be closed. */
     keepOne?: boolean;
-    /** Show the strip with one tab too (the Editor). */
+    /** Show the strip with one tab too (Media, as the Editor does). */
     alwaysShowStrip?: boolean;
 }
 
