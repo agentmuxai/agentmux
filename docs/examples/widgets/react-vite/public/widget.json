@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "agentmux.react-vite",
+  "name": "Hello (React)",
+  "version": "1.0.0",
+  "description": "The sandboxed hello widget, built with React and Vite.",
+  "author": "AgentMux",
+  "icon": "atom",
+  "kind": "sandboxed",
+  "entry": "index.html",
+  "permissions": [],
+  "contributes": {
+    "panes": [{ "name": "main", "label": "Hello (React)" }]
+  }
+}

@@ -16,7 +16,7 @@
  * bytes), its `solid-js` imports are pointed at the app's own Solid (one
  * reactive runtime), and it is imported from a blob URL. Its default export
  * is a pane tab manifest for its one pane, or `{ panes: { <name>: manifest } }`.
- * A sandboxed package's panes are iframe hosts (`sandboxed-widget-host.ts`).
+ * A sandboxed package's panes are iframe hosts (`sandboxed-widget-host.tsx`).
  *
  * When a package's approved version changes (an update, an edit approved
  * again), its pane types are unregistered and registered again; open panes

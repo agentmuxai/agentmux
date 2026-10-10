@@ -571,10 +571,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // An approved widget's files (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md
     // §5.2). No auth key: a widget's iframe loads them, and the URL's key
     // segment is what keeps other pages out. Full router only, never the LAN.
-    let widget_files = Router::new().route(
-        "/agentmux/widget-files/:id/:hash/:key/*path",
-        get(super::widget_handlers::handle_widget_file),
-    );
+    let widget_files = Router::new()
+        .route("/agentmux/widget-files/:id/:hash/:key/*path", get(super::widget_handlers::handle_widget_file))
+        .route("/agentmux/widget-sdk/:file", get(super::widget_handlers::handle_widget_sdk));
 
     let full = Router::new()
         .merge(full_health)
