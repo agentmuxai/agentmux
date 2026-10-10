@@ -214,32 +214,77 @@ describe("RemotesView", () => {
         expect(setMeta).toHaveBeenCalledWith({ "remotes:expand": null });
     });
 
-    it("adds a remote through srv, which shows the user the block first", async () => {
+    it("adds just a destination to AgentMux's settings, named user@host:port, with nothing in ssh config", async () => {
+        const { model } = await renderWith([]);
+        fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
+        const field = screen.getByLabelText("Connect to") as HTMLInputElement;
+        expect(field.placeholder).toBe("user@host:port");
+        fireEvent.input(field, { target: { value: "me@db1.example.com:2222" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(rpc.RemoteAddCommand).not.toHaveBeenCalled();
+        expect(rpc.RemoteSetConfigCommand).toHaveBeenCalledWith(expect.anything(), {
+            connection: "me@db1.example.com:2222",
+            values: { "display:name": "me@db1.example.com:2222" },
+        });
+        expect(model.expanded()).toBe("me@db1.example.com:2222");
+    });
+
+    it("takes port 22 when none is typed", async () => {
+        await renderWith([]);
+        fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
+        fireEvent.input(screen.getByLabelText("Connect to"), { target: { value: "asafe@127.0.0.1" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(rpc.RemoteSetConfigCommand).toHaveBeenCalledWith(expect.anything(), {
+            connection: "asafe@127.0.0.1:22",
+            values: { "display:name": "asafe@127.0.0.1:22" },
+        });
+    });
+
+    it("writes ssh config, under a plain alias, only for an identity file or jump host from Advanced", async () => {
         const { model } = await renderWith([]);
         fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
         const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
-        fireEvent.input(field("Alias"), { target: { value: "db1" } });
-        fireEvent.input(field("Host name or address"), { target: { value: "db1.example.com" } });
-        fireEvent.input(field("Port"), { target: { value: "2222" } });
+        fireEvent.input(field("Connect to"), { target: { value: "10.0.0.5" } });
+        fireEvent.input(field("Name"), { target: { value: "lab" } });
+        fireEvent.input(field("Identity file"), { target: { value: "~/.ssh/lab" } });
+        fireEvent.input(field("Jump host"), { target: { value: "bastion" } });
         fireEvent.click(screen.getByRole("button", { name: "Add" }));
         await new Promise((r) => setTimeout(r, 0));
         expect(rpc.RemoteAddCommand).toHaveBeenCalledWith(
             expect.anything(),
-            { alias: "db1", hostname: "db1.example.com", user: "", port: "2222", identityfile: "", proxyjump: "", blockid: "blk-1" },
+            { alias: "10-0-0-5", hostname: "10.0.0.5", user: "", port: "", identityfile: "~/.ssh/lab", proxyjump: "bastion", blockid: "blk-1" },
             expect.anything()
         );
-        expect(model.expanded()).toBe("db1");
-        expect(screen.queryByLabelText("Alias")).toBeNull();
+        expect(rpc.RemoteSetConfigCommand).toHaveBeenCalledWith(expect.anything(), {
+            connection: "10-0-0-5",
+            values: { "display:name": "lab" },
+        });
+        expect(model.expanded()).toBe("10-0-0-5");
+    });
+
+    it("says how to write the destination when it can't be read", async () => {
+        await renderWith([]);
+        fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
+        fireEvent.input(screen.getByLabelText("Connect to"), { target: { value: "me@host:port" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(rpc.RemoteAddCommand).not.toHaveBeenCalled();
+        expect(rpc.RemoteSetConfigCommand).not.toHaveBeenCalled();
+        expect(document.querySelector(".remotes-add .remotes-detail-error")?.textContent).toContain("user@host:port");
     });
 
     it("keeps the form open, without an error, when the user cancels in the window", async () => {
         await renderWith([]);
         rpc.RemoteAddCommand.mockRejectedValueOnce(new Error("kept: the user chose not to add it"));
         fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
-        fireEvent.input(screen.getByLabelText("Alias"), { target: { value: "db1" } });
+        fireEvent.input(screen.getByLabelText("Connect to"), { target: { value: "db1" } });
+        fireEvent.input(screen.getByLabelText("Identity file"), { target: { value: "~/.ssh/db1" } });
         fireEvent.click(screen.getByRole("button", { name: "Add" }));
         await new Promise((r) => setTimeout(r, 0));
-        expect(screen.getByLabelText("Alias")).toBeTruthy();
+        expect(screen.getByLabelText("Connect to")).toBeTruthy();
+        expect(rpc.RemoteSetConfigCommand).not.toHaveBeenCalled();
         expect(document.querySelector(".remotes-add .remotes-detail-error")).toBeNull();
     });
 
