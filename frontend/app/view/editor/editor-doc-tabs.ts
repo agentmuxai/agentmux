@@ -18,7 +18,7 @@
 
 import { historyField } from "@codemirror/commands";
 import type { EditorState } from "@codemirror/state";
-import type { DocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
+import { ALREADY_OPEN_THERE, type DocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 import type { DocTab } from "@/app/doc-tabs/doc-tabs";
 import { canonicalizePath, dispatch, snapshot, type EditorBuffer } from "@/app/store/editor-pane-state-store";
 import type { EditorMode, EditorViewModel } from "./editor-model";
@@ -118,14 +118,7 @@ export function editorDocTabHost(model: EditorViewModel): DocTabHost {
         scope: () => model.connection(),
         peek: (tabId) => tabOf(tabId) ?? null,
         refuseGive: (tab) => (saving.get(model)?.has(tab.id) ? "It is still being saved. Try again in a moment." : null),
-        refuseTake: (moving) => {
-            const tab = moving as DocTab<EditorBuffer>;
-            const here = snapshot(blockId)?.doc.tabs.find((t) => t.key === tab.key);
-            // The same file open here: the moved tab gives way to this one, so
-            // its unsaved edits would be lost.
-            if (here && tab.dirty) return "That file is already open there. Save these changes first, or close the other copy.";
-            return null;
-        },
+        refuseTake: (tab) => (snapshot(blockId)?.doc.tabs.some((t) => t.key === tab.key) ? ALREADY_OPEN_THERE : null),
         give: (tabId) => {
             const tab = tabOf(tabId);
             if (!tab) return null;
@@ -143,25 +136,23 @@ export function editorDocTabHost(model: EditorViewModel): DocTabHost {
             if (tab.payload.contentLoaded && live.content === undefined) {
                 tab = { ...tab, payload: { ...tab.payload, contentLoaded: false, contentHash: "" } };
             }
-            const openHere = snapshot(blockId)?.doc.tabs.some((t) => t.key === tab.key);
-            if (!openHere) {
-                // In place before the tab arrives, so its first render has them.
-                if (live.content !== undefined) model._contentByTab.set(tab.id, live.content);
-                if (live.encoding) model._encodingByTab.set(tab.id, live.encoding);
-                if (live.mode) {
-                    model._tabModes.set(tab.id, live.mode);
-                    model._tabModesVersion[1]((v) => v + 1);
-                }
-                if (live.editorState !== undefined) {
-                    let moved = movedStates.get(model);
-                    if (!moved) movedStates.set(model, (moved = new Map()));
-                    moved.set(tab.id, live.editorState);
-                }
+            // In place before the tab arrives, so its first render has them.
+            // (Its file isn't open here: refuseTake saw to that.)
+            if (live.content !== undefined) model._contentByTab.set(tab.id, live.content);
+            if (live.encoding) model._encodingByTab.set(tab.id, live.encoding);
+            if (live.mode) {
+                model._tabModes.set(tab.id, live.mode);
+                model._tabModesVersion[1]((v) => v + 1);
+            }
+            if (live.editorState !== undefined) {
+                let moved = movedStates.get(model);
+                if (!moved) movedStates.set(model, (moved = new Map()));
+                moved.set(tab.id, live.editorState);
             }
             dispatch(blockId, { type: "AttachTab", tab, at, source: "user" });
             // A read tab watches its file from here now (DetachTab stopped the
             // source's watch); one not read yet is watched when it is.
-            if (!openHere && tab.payload.contentLoaded && live.content !== undefined) {
+            if (tab.payload.contentLoaded && live.content !== undefined) {
                 model._syncWatch(tab.id, canonicalizePath(tab.payload.filePath));
             }
         },

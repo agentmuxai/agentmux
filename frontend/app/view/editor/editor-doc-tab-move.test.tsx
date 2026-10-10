@@ -4,8 +4,8 @@
 /**
  * Moving an Editor tab to another Editor pane (editor-doc-tabs.ts): its text,
  * unsaved edits included, its encoding, its file watch and its undo history
- * go with it; a tab never moves between this computer and a host, and a tab
- * with unsaved edits never gives way to the same file open in the target.
+ * go with it; a tab never moves between this computer and a host, nor to a
+ * pane that has its file open already.
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md §3.4.
  */
 
@@ -53,8 +53,8 @@ vi.mock("@/app/drag/file-drop", () => ({ registerFileDropTarget: () => () => {} 
 vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantOpen: () => {}, cantMove: () => {} } }));
 vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: async () => {} }));
 
-import { moveDocTab, registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
-import { dispatch, snapshot } from "@/app/store/editor-pane-state-store";
+import { ALREADY_OPEN_THERE, moveDocTab, registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
+import { snapshot } from "@/app/store/editor-pane-state-store";
 import { editorDocTabHost, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
 import { EditorViewModel } from "./editor-model";
 
@@ -169,30 +169,22 @@ describe("moving an Editor tab to another Editor", () => {
         expect(takeMovedEditorState(c, id)).toBe(json);
     });
 
-    it("the same file open in the target: a clean tab gives way to it, a dirty one is refused", async () => {
+    it("the same file open in the target: the tab stays put, clean or dirty", async () => {
         const a = mount();
         const b = mount();
         await openLoaded(a, "c:/repo/a.ts");
         await openLoaded(b, "c:/repo/a.ts");
         await openLoaded(b, "c:/repo/b.ts");
-        const bCopy = tabsOf(b).find((t) => t.filePath === "c:/repo/a.ts")!.id;
 
         const id = a.activeIdAtom()!;
+        expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: false, reason: ALREADY_OPEN_THERE });
         a.onContentChange("unsaved\n");
-        const dirty = moveDocTab(a.blockId, id, b.blockId);
-        expect(dirty.moved).toBe(false);
-        expect(dirty).toMatchObject({ reason: expect.stringContaining("already open there") });
+        expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: false, reason: ALREADY_OPEN_THERE });
         expect(tabsOf(a)).toHaveLength(1);
         // The model's text map, not contentAtom: typing doesn't re-fire that
         // (CodeMirror holds the live text).
         expect(a._contentByTab.get(id)).toBe("unsaved\n");
-
-        // Saved, so clean again: it gives way to the copy already there.
-        dispatch(a.blockId, { type: "ClearDirty", tabId: id });
-        expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: true });
-        expect(tabsOf(a)).toEqual([]);
         expect(tabsOf(b)).toHaveLength(2);
-        expect(b.activeIdAtom()).toBe(bCopy);
     });
 
     it("a clean tab is read fresh in the target, so a change on disk is not lost", async () => {
