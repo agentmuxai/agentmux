@@ -19,6 +19,11 @@ export function isMacOS(): boolean {
     return PLATFORM === PlatformMacOS;
 }
 
+/** The platform's command modifier: ⌘ on macOS, Ctrl elsewhere (the shortcut table's `mod`). */
+export function isModKey(e: { metaKey: boolean; ctrlKey: boolean }): boolean {
+    return isMacOS() ? e.metaKey : e.ctrlKey;
+}
+
 export function isLinux(): boolean {
     return PLATFORM === PlatformLinux;
 }
