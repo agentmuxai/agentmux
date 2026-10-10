@@ -18,8 +18,8 @@ The Help pane's shortcut list is generated from the table (`keybindings/help.ts`
 
 | Kind of failure | Known or suspected cases |
 |---|---|
-| The OS or window manager takes the key first | Not measured. Likely candidates: ⌘M (minimize) and ⌘H (hide) on macOS; Ctrl+Arrow and Ctrl+Shift+Arrow (Mission Control, desktop switching); Ctrl+Alt+Arrow and Alt+Shift+Arrow on Linux desktops; Ctrl+Shift+0 (keyboard-layout switch on some Windows setups) |
-| The host takes the key first | macOS standard menu items keep ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V/⌘A, which overlap the Files pane's undo, cut, copy, paste and select-all. In a browser pane, Ctrl/⌘+Shift+N is consumed as `window:new` before the pane's "new incognito" can run |
+| The OS or window manager takes the key first | Not measured. Likely candidates: Ctrl+Arrow, Ctrl+Shift+Arrow and ⌃↑ on macOS (Mission Control, Spaces); Ctrl+Alt+Arrow and Alt+Shift+Arrow on Linux desktops; Ctrl+Shift+0 (keyboard-layout switch on some Windows setups) |
+| The host takes the key first | On macOS, AgentMux's own app menu: ⌘H, ⌘M, ⌘Q and ⌘W are menu items, and the standard edit items keep ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V/⌘A, which overlap the Files pane's undo, cut, copy, paste and select-all. In a browser pane, Ctrl/⌘+Shift+N is consumed as `window:new` before the pane's "new incognito" can run |
 | The key reaches the page but its row's context rule doesn't match | Not measured |
 | Help shows something the table doesn't drive | The Help pane's own zoom keys are hardcoded (`helpview.tsx`) and ignore remaps; "Shift + drag" is hand-written; a meta key on Linux is labelled "Win" |
 | A command that only works from its key | `term:copy`/`paste`/`clear` are no-ops in the global map (the terminal runs them itself); the command palette's registry diverges from the key handlers (`tab:close` skips the confirm dialog, `split:*` ignores `app:defaultnewblock`, most table ids aren't registered) |
@@ -38,13 +38,20 @@ A shortcut works only if all three hold, and each needs a different tool:
 
 L1 and L2 run unattended from a script against a dev instance (§5). L3 is the per-platform part the partners own.
 
+**L2 skips the host's menu.** A key injected through the DevTools protocol bypasses the macOS menu bar's key equivalents (and the host's own pre-key handling may differ), so a key the menu takes passes L2 and fails L3. The matrix records that as "taken by the host", not as a pass. On macOS, an editing key in a text field (copy, paste, select all) injected this way also needs CDP's `commands` field to act; the dispatcher's own key handlers don't.
+
+**L3 safety, macOS (Masty, 2026-10-10), and the same rules on every host:**
+- Keys go to whichever app is in front, and a host may run several AgentMux instances. The script brings the dev instance forward by process id (System Events: the process whose unix id is the dev PID; `wmctrl`/`xdotool --pid` on Linux; `SetForegroundWindow` on the dev PID's window on Windows), never by app name, and checks it is still in front before every key.
+- Synthetic keys do trigger system shortcuts: a synthesized Ctrl+Arrow really switches Spaces. L3 needs the owner's go-ahead and an idle machine, and on macOS the Accessibility permission for the sending process, which only the owner can grant.
+- The automated pass never sends ⌘Q, ⌘W, or any key that closes a tab, pane or window, or deletes files; those are checked by hand.
+
 ## 4. App API additions
 
 Three tools on the agent App API (`crates/mcp`), served by srv and carried out by the frontend, following the path `UIClick` already uses (srv `ui_handlers.rs` → CEF host → page):
 
 - **`ListShortcuts`** returns the effective table for this platform: command id, label, category, keys as the Help pane shows them, context rule, and whether the row is pane-local. Agents read what the user sees.
 - **`RunCommand(command, target?)`** runs a table command by id in the agent's window: global commands through the dispatcher's own `runKeyCommand` (not the separate command-palette registry), pane commands (`doctab:*`, `editor:*`, `files:*`, `term:*`) through the target pane's handler. `target` picks the pane (default: the focused pane) or tab. It returns whether the command ran and a short reason when it didn't ("no terminal focused", "fewer than two terminals").
-- **`PressKeys(keys, target?)`** presses a key combination given in the table's syntax (`ctrl+shift+d`, chords as two keys) as real key events in the agent's window, after focusing `target`. It returns which command, if any, the dispatcher resolved, so a verification script can tell "key resolved to the wrong command" from "command misbehaved".
+- **`PressKeys(keys, target?)`** presses a key combination given in the table's syntax (`ctrl+shift+d`, chords as two keys) as real key events in the agent's window, after focusing `target`. It returns which command, if any, the dispatcher resolved, so a verification script can tell "key resolved to the wrong command" from "command misbehaved". It also returns the physical modifiers it sent (on macOS the table's `meta` is ⌘, CDP's meta bit), so a Ctrl-for-⌘ mapping bug can't pass as a pass.
 
 **Scope and safety** (owner decisions, §8):
 - Act only in the window that holds the agent's own pane.
@@ -65,15 +72,20 @@ The command registry (palette) and the key handlers should run the same code for
 
 Each row's expected effect lives next to the script as a small check function. Rows whose effect can't be observed from the App API are listed as "manual" rather than passed.
 
+Rules for the script, since it runs on hosts where other agents and the owner are working:
+- It talks to the dev instance whose DevTools port is in `AGENTMUX_CDP_PORT`; it never assumes the default port, which another agent's dev instance may hold.
+- A dev build shows the owner's real agents, so it never launches or messages an agent. Terminal, editor, files, settings and help panes are fine.
+- It skips the rows that close tabs, panes or windows or delete files, and lists them as "manual".
+
 ## 6. Cross-platform protocol
 
 | Host | Platform | Owner |
 |---|---|---|
 | Area54 | Windows 10 | AgentA |
-| starpower | to be confirmed by Masty | Masty@starpower |
-| charlie | to be confirmed by Maricon | Maricon@charlie |
+| starpower | macOS 26.5.2, Apple Silicon | Masty@starpower |
+| charlie | Linux expected; to be confirmed by Maricon | Maricon@charlie |
 
-We need macOS and Linux covered; if both partner hosts run the same OS, the owner picks a third.
+starpower has no Linux, so charlie must cover it; if it doesn't, the owner picks a third host.
 
 For each PR that changes behaviour:
 1. AgentA opens the PR with the Windows L1/L2/L3 results.
