@@ -250,6 +250,11 @@ patch lands, or a secondary-window browser pane on Views keeps today's
 behavior and the pane shows the private indicator so it is at least
 honest. Phase 1 (Windows) does not have this problem.
 
+**Resolved 2026-10-10:** the CEF-fork patch landed (§4.4 route 1,
+`agentmuxai/cef#11`), so a shared pane on Views gets the global context in
+every window. Implemented under
+`SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md` §7.2.
+
 ### 4.3 Cost
 
 Each distinct context is a distinct profile, and Chromium will not share
@@ -261,6 +266,13 @@ clear error in the menu when exceeded, rather than letting a user open
 thirty and wonder why the host is being evicted.
 
 ### 4.4 Views platforms (Linux / macOS)
+
+**Resolved 2026-10-10: route 1.** The spike on CEF 154 showed constraint B
+applies only to off-the-record contexts: a disk-backed named profile has a
+`ThemeService` of its own, while an off-the-record one shares its original's.
+`agentmuxai/cef#11` makes the widget observe each `ThemeService` once, and ships
+in the 154 `-r2` runtimes. See `SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md`
+§7.2.
 
 Two candidate routes, decided by a spike, in this order of preference:
 

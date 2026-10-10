@@ -40,10 +40,3 @@ export function newIncognitoIdentity(): string {
 export function newTabUrl(currentUrl: string | undefined, home: string): string {
     return currentUrl && /^https?:\/\//i.test(currentUrl) ? currentUrl : home;
 }
-
-/** Whether this platform can open Incognito tabs yet. Windows only: on
- *  Linux and macOS an off-the-record jar crashes CEF's Views path (spec §7.2).
- *  Named profiles work on every platform. */
-export function canOpenIncognito(platform: string): boolean {
-    return platform === "win32";
-}

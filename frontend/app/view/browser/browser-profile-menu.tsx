@@ -18,9 +18,7 @@ import { pushNotification } from "@/app/store/global";
 import { openModal } from "@/app/store/modalmodel";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
-import { getPlatform } from "@/util/platformutil";
 import {
-    canOpenIncognito,
     IDENTITY_META_KEY,
     INCOGNITO_ICON,
     newIncognitoIdentity,
@@ -71,11 +69,10 @@ export function ProfileBadge(props: { name: string; color: string }): JSX.Elemen
     );
 }
 
-type Row = { kind: "header"; sub: string } | { kind: "dim" } | { kind: "identity"; current: boolean };
+type Row = { kind: "header"; sub: string } | { kind: "identity"; current: boolean };
 
 export function BrowserProfileButton(props: { model: BrowserViewModel; home: () => string }): JSX.Element {
     const model = props.model;
-    const platform = getPlatform();
     ensureBrowserProfiles();
     const identity = createMemo(() => parseIdentity(model.meta()?.[IDENTITY_META_KEY]));
     const profile = () => {
@@ -103,18 +100,12 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
             sub: id.kind === "incognito" ? "Nothing is saved, and it's gone when the tab closes" : "Your saved sign-ins",
         });
         const list: MenuItem[] = [header, { label: "", divider: true }];
-        if (canOpenIncognito(platform)) {
-            list.push({
-                label: "Open new Incognito tab",
-                icon: INCOGNITO_ICON,
-                shortcut: keyLabel("mod+shift+n"),
-                onClick: () => openIncognitoTab(model, props.home()),
-            });
-        } else {
-            const row: MenuItem = { label: "Incognito tabs: Windows only for now", icon: INCOGNITO_ICON };
-            rows.set(row, { kind: "dim" });
-            list.push(row);
-        }
+        list.push({
+            label: "Open new Incognito tab",
+            icon: INCOGNITO_ICON,
+            shortcut: keyLabel("mod+shift+n"),
+            onClick: () => openIncognitoTab(model, props.home()),
+        });
         list.push({ label: "", divider: true });
         // Personal and the profiles: choosing one opens a new tab in it, the
         // current one included ("another tab as me").
@@ -163,7 +154,6 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
                         {...menuItemProps}
                         class={clsx(menuItemProps.class, {
                             "browser-profile-header": row?.kind === "header",
-                            "browser-profile-dim": row?.kind === "dim",
                         })}
                     >
                         <Show
