@@ -208,7 +208,8 @@ pub(crate) async fn handle_host_browser_navigation(
     let answered = |asked: bool, reason: &str| {
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "asked": asked, "reason": reason } }))).into_response()
     };
-    let Some(list) = browser_allowlist::list_for(&pane) else {
+    let list = browser_allowlist::list_for(&pane).or_else(|| opener_list(&state, &pane));
+    let Some(list) = list else {
         // Taken over or closed since: the host's copy was behind. Send it
         // the current one, and let the navigation it stopped go on.
         crate::server::browser_host_sync::push(&state).await;
@@ -271,6 +272,16 @@ pub(crate) async fn handle_host_browser_navigation(
         crate::server::browser_host_sync::push(&st).await;
     });
     answered(true, "")
+}
+
+/// The site list of the pane `pane` was opened from as a popup, from srv's
+/// own records (`browser:popup_of`, which only srv writes). Covers the moment
+/// between a popup pane opening and joining its chain: a navigation the host
+/// stopped then is still asked about, not replayed.
+fn opener_list(state: &AppState, pane: &str) -> Option<Vec<String>> {
+    let block = state.mstore.get::<crate::backend::obj::Block>(pane).ok().flatten()?;
+    let opener = block.meta.get(crate::server::browser_popup::POPUP_OF_META_KEY)?.as_str()?;
+    list_for(opener)
 }
 
 /// Load `url` in `target` (a pane or popup window), as the navigation the

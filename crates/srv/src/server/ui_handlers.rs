@@ -1369,6 +1369,7 @@ pub(crate) async fn handle_host_browser_popup(
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
+    crate::server::browser_allowlist::join_popup_pane(&state, &result.block_id, &opener).await;
     // The opener's owner owns its popup: written here, from srv's own record,
     // never from anything the page or a client said. Checked again now the
     // pane is open: the person may have taken the opener over meanwhile, and
@@ -1394,7 +1395,6 @@ pub(crate) async fn handle_host_browser_popup(
         }
     }
     reservation.commit(&result.block_id);
-    crate::server::browser_allowlist::join_popup_pane(&state, &result.block_id, &opener).await;
     tracing::info!(
         opener = %opener, pane = %result.block_id, url = %url, owner = ?owner,
         "[browser-popup] popup opened as a pane"

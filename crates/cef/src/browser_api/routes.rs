@@ -913,7 +913,7 @@ pub async fn owned_panes(
         owned.clear();
         owned.extend(req.panes);
     }
-    *state.site_limits.lists.lock() = req.allowed;
+    crate::client::allowed_origins::replace_lists(&state.site_limits, req.allowed);
     // A pane whose question is over reports its attempts again.
     state.site_limits.reports.lock().retain(|p| req.asking.contains(p));
     ok_body(ApiResponse::ok(AckData::new()))
