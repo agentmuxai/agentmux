@@ -2115,6 +2115,7 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         evicted_block: None,
         evicted_agent: None,
         audit_source_uid: String::new(),
+        lan_claimed_uid: String::new(),
         wan: None,
     };
     let json = serde_json::to_value(&with_outcome).unwrap();

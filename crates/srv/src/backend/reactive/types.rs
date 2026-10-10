@@ -103,6 +103,12 @@ pub struct InjectionRequest {
     /// to set and sign (M4d). Empty = Unattributed.
     #[serde(skip)]
     pub audit_source_uid: String,
+    /// Identity M4d-6: the UID a LAN v2 signature proved under the answering
+    /// peer's pinned key (`server/reactive/lan_v2.rs`). Claimed by that LAN
+    /// path only, never verified attribution; `#[serde(skip)]` like
+    /// `audit_source_uid`. Empty = none.
+    #[serde(skip)]
+    pub lan_claimed_uid: String,
     /// When a held message was originally accepted (ms), set only by the
     /// held-jekt replay (`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.4):
     /// the delivered header shows this as `TS` plus `HELD_FOR`, so a late
@@ -256,6 +262,13 @@ pub struct InjectionRequest {
     /// `channel_sig` is still sent beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_sig_v2: Option<String>,
+    /// Identity M4d-6: base64 Ed25519 signature, made only with the sender's
+    /// UID-keyed LAN key, over the LAN material plus `source_uid`
+    /// (`agentmux_common::jekt_sign::sign_lan_jekt_v2`). A receiver checks it
+    /// only after the v1 `lan_sig` verified, and records the UID as claimed by
+    /// that LAN path, never as verified attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_sig_v2: Option<String>,
     /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
     /// produced by the claimed `source_agent`'s own **WAN** keypair
     /// (`db_agent_wan_keys` — a different key from the LAN one) over a
@@ -597,6 +610,10 @@ pub struct AuditLogEntry {
     /// delivery.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub audit_source_uid: String,
+    /// Identity M4d-6: the UID a LAN v2 signature claimed
+    /// (`InjectionRequest::lan_claimed_uid`). Not verified attribution.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub lan_claimed_uid: String,
     /// W3-S: the WAN verdict for a cloud-delivered jekt, when there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wan: Option<WanAudit>,

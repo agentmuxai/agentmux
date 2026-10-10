@@ -523,9 +523,11 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
             sig,
         );
     req.lan_verified = Some(verified);
+    lan_v2::claim_uid(state, req, &claimed);
 }
 
 mod channel_v2;
+mod lan_v2;
 
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
