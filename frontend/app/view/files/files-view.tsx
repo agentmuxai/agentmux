@@ -790,6 +790,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             // CSS zoom from the shared `term:zoom`: everything scales together, and
             // the @container on this element measures in zoomed pixels.
             style={{ zoom: readZoom(props.ctx.meta()) }}
+            // The folder shown, for tooling (verify-shortcuts.mjs's temp-tree guard).
+            data-path={model.path()}
+            data-connection={model.connection()}
             onContextMenu={(e) => e.preventDefault()}
             onKeyDown={onPaneKeyDown}
         >
