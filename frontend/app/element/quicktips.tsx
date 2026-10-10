@@ -6,6 +6,9 @@ import { cn } from "@/util/util";
 import { createMemo, For, JSX, Show } from "solid-js";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { keyLabelWords } from "@/app/keybindings/help";
+import { keyPlatform } from "@/app/keybindings";
+import { gestureLabels, tipsFor, type TipArea, type TipRow } from "@/app/keybindings/tips";
+import { getPlatform } from "@/util/platformutil";
 
 const KeyCap = (props: { children?: JSX.Element }): JSX.Element => {
     return (
@@ -61,10 +64,8 @@ const HEADER_ICONS: { icon: string; label: string; command?: string }[] = [
     { icon: "fa-xmark-large", label: "Close pane", command: "pane:close" },
 ];
 
-const MOUSE_ENTRIES: { label: string; keys: string[] }[] = [{ label: "Resize a single border", keys: ["Shift + drag"] }];
 
 const MORE_TIPS: { icon: string; lead: string; text: string }[] = [
-    { icon: "fa-computer-mouse", lead: "Tabs", text: "Right click any tab to change backgrounds or rename." },
     { icon: "fa-cog", lead: "Web View", text: "Click the gear in the web view to set your homepage" },
     { icon: "fa-cog", lead: "Terminal", text: "Click the gear in the terminal to set your terminal theme and font size" },
 ];
@@ -92,7 +93,7 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
         HEADER_ICONS.filter((it) => matches("Header Icons", it.label, keyLabelWords(it.command ? shortcutFor(it.command) : "")))
     );
     const shortcutSections = createMemo(() =>
-        [...shortcutHelp(), { category: "Mouse", entries: MOUSE_ENTRIES }]
+        shortcutHelp()
             .map((section) => ({
                 category: section.category,
                 entries: section.entries.filter((e) => matches(section.category, e.label, ...e.keys.map(keyLabelWords))),
@@ -100,9 +101,24 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
             .filter((section) => section.entries.length > 0)
     );
     const tips = createMemo(() => MORE_TIPS.filter((t) => matches("More Tips", t.lead, t.text)));
+    // The hidden tips (keybindings/tips.ts), grouped by area in table order.
+    const gestureSections = createMemo(() => {
+        const platform = keyPlatform();
+        const byArea = new Map<TipArea, { tip: TipRow; keys: string[][] }[]>();
+        for (const tip of tipsFor(getPlatform())) {
+            const keys = gestureLabels(tip, platform);
+            if (!matches("Mouse and gestures", tip.area, tip.label, tip.where ?? "", ...keys.flat().map(keyLabelWords))) continue;
+            byArea.set(tip.area, [...(byArea.get(tip.area) ?? []), { tip, keys }]);
+        }
+        return [...byArea.entries()].map(([area, entries]) => ({ area, entries }));
+    });
     const links = createMemo(() => HELP_LINKS.filter((l) => matches("Need More Help", l.label)));
     const nothing = () =>
-        headerIcons().length === 0 && shortcutSections().length === 0 && tips().length === 0 && links().length === 0;
+        headerIcons().length === 0 &&
+        shortcutSections().length === 0 &&
+        gestureSections().length === 0 &&
+        tips().length === 0 &&
+        links().length === 0;
 
     return (
         <div class="flex flex-col w-full gap-6 @container">
@@ -155,6 +171,45 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
                                                 <span class="text-[15px]">{entry.label}</span>
                                                 <div class="flex flex-row flex-wrap items-center gap-1">
                                                     <For each={entry.keys}>{(k) => <KeyCap>{k}</KeyCap>}</For>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </For>
+                                </div>
+                            )}
+                        </For>
+                    </div>
+                </div>
+            </Show>
+
+            <Show when={gestureSections().length > 0}>
+                <div class={CARD}>
+                    <CardTitle>Mouse and gestures</CardTitle>
+                    {/* From keybindings/tips.ts, whose rows are anchored to the code
+                        they describe (tips.test.ts). Same columns as the keyboard list. */}
+                    <div class="columns-[17rem] gap-x-5">
+                        <For each={gestureSections()}>
+                            {(section) => (
+                                <div class="quicktips-gestures flex flex-col gap-1.5 mb-6 break-inside-avoid">
+                                    <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">{section.area}</div>
+                                    <For each={section.entries}>
+                                        {(entry) => (
+                                            <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+                                                <span class="text-[15px]">{entry.tip.label}</span>
+                                                <div class="flex flex-row flex-wrap items-center gap-1">
+                                                    <For each={entry.keys}>
+                                                        {(alt, i) => (
+                                                            <>
+                                                                <Show when={i() > 0}>
+                                                                    <span class="text-secondary">or</span>
+                                                                </Show>
+                                                                <For each={alt}>{(k) => <KeyCap>{k}</KeyCap>}</For>
+                                                            </>
+                                                        )}
+                                                    </For>
+                                                    <Show when={entry.tip.where}>
+                                                        <span class="text-secondary text-[13px]">{entry.tip.where}</span>
+                                                    </Show>
                                                 </div>
                                             </div>
                                         )}

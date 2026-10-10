@@ -1,6 +1,6 @@
 # Hidden tips in the Help pane: the gestures nobody would guess
 
-**Status:** proposed.
+**Status:** active: P1 in #NNNN; owner decisions in §9.
 **Date:** 2026-10-10.
 **Requested by:** repo owner: "lets add more hidden tips to the help. there are a lot of unobvious key shortcut helpers, like using ctrl when border resize, or anything else u find, write that to a separate spec".
 **Author:** AgentA@Area54, with Masty@starpower (macOS) and Maricon@charlie (Linux) to verify per platform.
@@ -132,10 +132,18 @@ Left out of the first set, to add once checked in the app: the xterm defaults (A
 
 ## 9. Decisions for the owner
 
+**Decided 2026-10-10** (the owner: "choose best recommendations"): D1, D2 and D3 are all yes as proposed.
+
+The questions as asked:
+
 - **D1.** Help shows the curated first set (§6, about 35 tips), not all 45 found. Proposed: yes, and niche views get their own pane's tips later.
 - **D2.** Unify pane zoom and agent search on ⌘ for macOS (§5) before documenting them, rather than documenting "Ctrl, even on macOS". Proposed: yes.
 - **D3.** Library defaults (xterm, CodeMirror) appear only after a per-platform check. Proposed: yes.
 
 ## 10. Results
 
-Filled in by §7.
+**P1 (#NNNN).**
+- `keybindings/tips.ts` holds 34 tips: the first set, minus the zoom tips and the agent pane's Ctrl+F, which wait for §5's ⌘ fixes (P2).
+- They render as a "Mouse and gestures" card in Help. It replaces the hand-written "Shift + drag" line and the out-of-date tab tip; the two gear tips stay under "More Tips".
+- Every tip's anchor is checked by `tips.test.ts`.
+- The hand check per platform (§7) is still owed, for Windows as well; it's recorded here as it's done.
