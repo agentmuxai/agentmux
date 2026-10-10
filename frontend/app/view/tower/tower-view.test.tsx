@@ -98,7 +98,15 @@ function snapshot(host = false): TowerSnapshot {
                 cpu_account: false,
                 mem: 2 * GB,
                 processes: [
-                    { id: "5:1", pid: 5, name: "agentmux-srv.exe", cpu: 0.1, mem: 2 * GB, role: "main", detail: "Server" },
+                    {
+                        id: "5:1",
+                        pid: 5,
+                        name: "agentmux-srv.exe",
+                        cpu: 0.1,
+                        mem: 2 * GB,
+                        role: "main",
+                        detail: "Server",
+                    },
                 ],
             },
         ],
@@ -337,8 +345,9 @@ describe("Tower", () => {
     });
 
     it("the Processes view lists every process, filters, and says what it can't measure", async () => {
-        // "host" is what the view was saved as before it was renamed.
-        setMeta({ "tower:view": "host" });
+        // "host" and "off" are how the view and a flat list were saved before
+        // they were renamed.
+        setMeta({ "tower:view": "host", "tower:group": "off" });
         renderTower();
         expect(await screen.findByText("WindowServer")).toBeInTheDocument();
         expect(sample).toHaveBeenCalledWith(expect.anything(), { host: true });
@@ -552,7 +561,7 @@ describe("Tower", () => {
             { id: "4:1", pid: 4, name: "System", cpu: 0.01, mem: 1024 },
         ];
         sample.mockResolvedValue(many);
-        setMeta({ "tower:view": "processes" });
+        setMeta({ "tower:view": "processes", "tower:group": "app" });
         renderTower();
         const chrome = await screen.findByTestId("tower-app-chrome.exe");
         expect(within(chrome).getByText("(2)")).toBeInTheDocument();
@@ -566,10 +575,63 @@ describe("Tower", () => {
         expect(screen.queryByTestId("tower-app-system")).toBeNull();
         expect(screen.getByText("System")).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole("button", { name: "Group by app" }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "off" });
+        fireEvent.click(screen.getByRole("radio", { name: "None" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "none" });
         await waitFor(() => expect(screen.queryByTestId("tower-app-chrome.exe")).toBeNull());
         expect(screen.getAllByText("chrome.exe")).toHaveLength(2);
+    });
+
+    it("the Processes view groups every process under its agent, the busiest open", async () => {
+        const snap = snapshot(true);
+        snap.host!.processes.push({ id: "20:1", pid: 20, name: "chrome.exe", cpu: 0.2, mem: GB });
+        sample.mockResolvedValue(snap);
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        const agent = await screen.findByTestId("tower-owner-block-a");
+        expect(within(agent).getByText("AgentX")).toBeInTheDocument();
+        expect(within(agent).getByText("(1)")).toBeInTheDocument();
+        const owners = screen.getAllByTestId(/^tower-owner-/).map((r) => r.dataset.testid);
+        expect(owners).toEqual(["tower-owner-block-a", "tower-owner-other"]);
+        // The busiest agent starts open; the other processes don't.
+        await waitFor(() => expect(screen.getByText("claude.exe")).toBeInTheDocument());
+        expect(screen.queryByText("chrome.exe")).toBeNull();
+        expect(agent.getAttribute("style")).toContain("--tower-owner-color");
+        // Other processes open to their apps.
+        fireEvent.click(
+            within(screen.getByTestId("tower-owner-other")).getByRole("button", { name: /Show Other processes/ })
+        );
+        expect(screen.getByText("chrome.exe")).toBeInTheDocument();
+        expect(screen.getByText("WindowServer")).toBeInTheDocument();
+    });
+
+    it("a search shows each match under its owner, and only owners with a match", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-block-a");
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "system" } });
+        await waitFor(() => expect(screen.queryByTestId("tower-owner-block-a")).toBeNull());
+        // The match's group opens by itself while the search is on.
+        expect(screen.getByTestId("tower-owner-other")).toBeInTheDocument();
+        expect(screen.getByText("System")).toBeInTheDocument();
+    });
+
+    it("groups by agent, app or nothing; another machine has no agents to group by", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByTestId("tower-owner-block-a");
+        const radios = screen.getAllByRole("radio").map((r) => r.textContent);
+        expect(radios).toEqual(expect.arrayContaining(["Agent", "App", "None"]));
+        fireEvent.click(screen.getByRole("radio", { name: "App" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "app" });
+        fireEvent.click(screen.getByRole("radio", { name: "Agent" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": null });
+        cleanup();
+
+        sample.mockImplementation(() => Promise.resolve({ ...snapshot(true), remote: true, tasks: [] }));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await screen.findByText("System");
+        expect(screen.queryByRole("radio", { name: "Agent" })).toBeNull();
     });
 
     it("polls only while visible", async () => {

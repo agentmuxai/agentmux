@@ -14,7 +14,14 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, type Setter } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { type CpuMode, railEntries, type RailSort, type Sort, type TowerView } from "./tower-util";
+import {
+    type CpuMode,
+    type ProcessGrouping,
+    railEntries,
+    type RailSort,
+    type Sort,
+    type TowerView,
+} from "./tower-util";
 
 /** A sample with no CPU rates yet (the first one) is followed up this soon,
  *  instead of a whole interval of dashes. */
@@ -62,8 +69,12 @@ export class TowerViewModel {
     sort: Accessor<Sort>;
     setSort: Setter<Sort>;
     expanded: Accessor<ReadonlySet<string>>;
-    /** The Processes view groups processes by app, as Task Manager does. */
-    groupByApp: Accessor<boolean>;
+    /** How the Processes view groups its list: by agent where the machine
+     *  has agents, else by app as Task Manager does, or not at all. */
+    grouping: Accessor<ProcessGrouping>;
+    /** The Processes view has opened its busiest agents once, on its first
+     *  list; after that what is open is the user's. */
+    ownersOpened = false;
     filter: Accessor<string>;
     setFilter: Setter<string>;
     viewName: Accessor<string>;
@@ -120,7 +131,13 @@ export class TowerViewModel {
         void this.refreshPeers();
         this.sharing = () => settingsAtom()?.["tower:sharewithpaired"] === true;
         this.cpuMode = createMemo<CpuMode>(() => (ctx.meta()?.["tower:cpu"] === "core" ? "core" : "machine"));
-        this.groupByApp = createMemo(() => ctx.meta()?.["tower:group"] !== "off");
+        // Saved as "off" until 2026-10-10, when grouping was by app or nothing.
+        this.grouping = createMemo<ProcessGrouping>(() => {
+            const g = ctx.meta()?.["tower:group"];
+            if (g === "off" || g === "none") return "none";
+            if (g === "app") return "app";
+            return this.hasTasks() ? "agent" : "app";
+        });
         this.viewName = createMemo(() => {
             if (!this.remote()) return this.view() === "processes" ? "Tower · Processes" : "Tower";
             const peer = this.peers().find((p) => p.connection === this.connection());
@@ -249,8 +266,15 @@ export class TowerViewModel {
         } as unknown as SettingsType);
     }
 
-    setGroupByApp(on: boolean): void {
-        this.setMeta({ "tower:group": on ? null : "off" });
+    setGrouping(grouping: ProcessGrouping): void {
+        this.setMeta({ "tower:group": grouping === "agent" ? null : grouping });
+    }
+
+    /** Open these Processes groups (`owner:<key>` keys). */
+    open(keys: string[]): void {
+        const next = new Set(this.expanded());
+        for (const k of keys) next.add(k);
+        this.setExpanded(next);
     }
 
     setCpuMode(mode: CpuMode): void {

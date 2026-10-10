@@ -41,14 +41,18 @@ const FIXED_ICONS: Record<Exclude<RailEntry["kind"], "agent">, string> = {
 /** An agent's color: its pane's (the user's pick, else the agent's color),
  *  as the pane's own tab shows it; another computer's agents, whose panes
  *  aren't here, get the color their name picks. */
-export function entryColor(entry: RailEntry, remote: boolean): string | undefined {
-    if (entry.kind !== "agent") return undefined;
+export function agentColor(taskId: string, label: string, remote: boolean): string {
     if (!remote) {
-        const block = MOS.getObjectValue<Block>(MOS.makeORef("block", entry.id));
+        const block = MOS.getObjectValue<Block>(MOS.makeORef("block", taskId));
         const color = blockRoleColor(block?.meta, isLightThemeActive(), "pill", { widget: false });
         if (color) return color;
     }
-    return pickAgentColor(entry.label);
+    return pickAgentColor(label);
+}
+
+/** A rail entry's color: its agent's; the fixed entries have none. */
+export function entryColor(entry: RailEntry, remote: boolean): string | undefined {
+    return entry.kind === "agent" ? agentColor(entry.id, entry.label, remote) : undefined;
 }
 
 export function AgentsView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Element {
