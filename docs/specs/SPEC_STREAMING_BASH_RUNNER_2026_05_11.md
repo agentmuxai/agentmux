@@ -326,6 +326,9 @@ fn wrapper_invocation(tool_id: &str, b64: &str) -> String {
 
 `shell_quote` wraps in single quotes (Unix) or `"` (Win32 cmd) to survive whatever shell Claude's Bash tool uses internally (`bash -c "..."` on Unix; `cmd.exe /c "..."` on Windows ConPTY).
 
+> [!IMPORTANT]
+> **Amended 2026-10-10.** `updatedInput` *replaces* the tool's whole input; Claude Code does not merge it. The sketch above, which returns `command` alone, made the CLI drop the call's `description`, `timeout` and `run_in_background`: background calls ran in the foreground, every command was cut at 120 s, and tasks were labelled with the wrapper. The hook (`crates/bashwrap/src/hook.rs`) now copies `tool_input` and replaces only `command`. See `docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`.
+
 ### 5.3 Merging with user-provided hooks
 
 `agent_config.rs:112-119` already merges user hooks from `content_map["hooks"]`. Our redirect entry is *appended* to any existing `PreToolUse` array. Hook execution order in Claude Code runs matchers sequentially; if a user has their own `Bash` matcher that emits a deny, ours never runs (the deny wins). If their matcher emits allow, ours fires next and rewrites — which is the desired layering (user policy first, transparent streaming second).

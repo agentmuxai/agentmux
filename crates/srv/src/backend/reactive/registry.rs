@@ -86,6 +86,17 @@ pub struct AgentEntry {
     /// mixed-version machine gets escalated (spec §6).
     #[serde(default)]
     pub jekt_public_key: String,
+    /// Identity M4d-5 (`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md`
+    /// §6.5.10): the registered block's agent UID, and that UID's own public
+    /// key (M4d-2), published beside the name-keyed `jekt_public_key`, which
+    /// is unchanged so v1 verification is the same for every peer. M4d-6
+    /// verifies v2 signatures (`source_uid`) against it, by UID. Empty for an
+    /// entry written before this shipped or for a block with no agent row;
+    /// like `jekt_public_key`, empty means "cannot check".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub uid: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub uid_public_key: String,
 }
 
 /// Serializes this process's own read-compare-remove sequences
@@ -130,6 +141,26 @@ fn local_auth_key() -> &'static str {
 /// be a lookup rather than a constant.
 type PubkeyResolver = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
 static JEKT_PUBLIC_KEY_RESOLVER: OnceLock<PubkeyResolver> = OnceLock::new();
+
+/// Resolves a registered block's agent UID and that UID's public key, for
+/// [`AgentEntry::uid`] / [`AgentEntry::uid_public_key`] (identity M4d-5). By
+/// block, because the block is what every registration path has. A load,
+/// never a mint, like [`jekt_public_key_for`]: M4d-2 mints the key at spawn.
+type UidKeyResolver = Box<dyn Fn(&str) -> Option<(String, String)> + Send + Sync>;
+static UID_KEY_RESOLVER: OnceLock<UidKeyResolver> = OnceLock::new();
+
+/// Install the process's block → (UID, UID public key) resolver. First call
+/// wins. Until it is called, entries are written without a UID.
+pub fn init_uid_key_resolver<F>(resolver: F)
+where
+    F: Fn(&str) -> Option<(String, String)> + Send + Sync + 'static,
+{
+    let _ = UID_KEY_RESOLVER.set(Box::new(resolver));
+}
+
+fn uid_key_for_block(block_id: &str) -> (String, String) {
+    UID_KEY_RESOLVER.get().and_then(|resolve| resolve(block_id)).unwrap_or_default()
+}
 
 /// Install the process's agent-public-key resolver. Idempotent — first call
 /// wins, same contract as [`init_local_auth_key`].
@@ -218,6 +249,8 @@ pub fn write_with_nonce(
         // `REGISTRY_OP_LOCK`, on every local agent registration and
         // re-registration, for a value nothing reads (reagent P2 on PR #2959).
         jekt_public_key: String::new(),
+        uid: String::new(),
+        uid_public_key: String::new(),
     };
     let path = agent_path(data_dir, agent_id);
     let Ok(json) = serde_json::to_string(&entry) else { return };
@@ -447,6 +480,8 @@ pub fn write_shared_with_nonce(
     // would be no worse than the entry being rewritten a moment later, which
     // re-registration does anyway.
     let jekt_public_key = jekt_public_key_for(agent_id);
+    // Same hoisting, same reason: a store read, kept out of the guard.
+    let (uid, uid_public_key) = uid_key_for_block(block_id);
 
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let dir = shared_agent_dir(shared_dir, agent_id);
@@ -462,6 +497,8 @@ pub fn write_shared_with_nonce(
         channel: channel.to_string(),
         registration_nonce,
         jekt_public_key,
+        uid,
+        uid_public_key,
     };
     write_entry_file(&path, &entry);
 }
@@ -585,6 +622,18 @@ pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
         let channel = local_channel_id();
         remove_shared_if_nonce(&shared_dir, agent_id, &channel, expected_nonce);
     }
+}
+
+/// Every channel's shared entry that published a key for `uid` (identity
+/// M4d-6). Scans the whole registry: entries are filed by name, and one UID
+/// live in several channels has an entry, and a key, in each.
+pub fn lookup_shared_by_uid(shared_dir: &Path, uid: &str) -> Vec<AgentEntry> {
+    let Ok(dirs) = std::fs::read_dir(shared_dir) else { return Vec::new() };
+    dirs.flatten()
+        .filter(|d| d.path().is_dir())
+        .flat_map(|d| read_entry_files_in_dir(&d.path()))
+        .filter(|e| e.uid == uid && !e.uid_public_key.is_empty())
+        .collect()
 }
 
 /// Return every live candidate for `agent_id` across all channels,
@@ -773,6 +822,36 @@ mod shared_tests {
         let found = lookup_all_shared(dir.path(), "agentx");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].local_url, "http://127.0.0.1:9099");
+    }
+
+    // ---- identity M4d-5: the UID and its key published beside the name's ----
+
+    #[test]
+    fn a_shared_entry_publishes_the_block_s_uid_and_its_public_key() {
+        // The resolver is a process-wide OnceLock: this one test owns it. The
+        // key is a real M4d-2 key from a real store row; only the block→UID
+        // step is a fixed map here (bootstrap reads the block's active
+        // instance).
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-x", "agentx", "claude", "agent", 1, "");
+        def.slug = "agentx".into();
+        store.agent_def_insert(&mut def).unwrap();
+        let (keys, _) = store.agent_uid_keys_ensure("uid-x").unwrap().unwrap();
+        let public = keys.lan.public_key.clone();
+        init_uid_key_resolver(move |block_id| {
+            (block_id == "block-uid").then(|| ("uid-x".to_string(), store.agent_uid_lan_public_key_load("uid-x").ok().flatten())).and_then(|(u, k)| Some((u, k?)))
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block-uid", "dev-a");
+        write_shared(dir.path(), "agenty", "http://127.0.0.1:9001", "block-none", "dev-a");
+        let x = &lookup_all_shared(dir.path(), "agentx")[0];
+        assert_eq!((x.uid.as_str(), x.uid_public_key.as_str()), ("uid-x", public.as_str()));
+        assert_ne!(x.uid_public_key, keys.lan.private_key, "never the private half");
+        let y = &lookup_all_shared(dir.path(), "agenty")[0];
+        assert_eq!((y.uid.as_str(), y.uid_public_key.as_str()), ("", ""), "no row: nothing to check against");
+        let raw = std::fs::read_to_string(shared_channel_path(dir.path(), "agenty", "dev-a")).unwrap();
+        assert!(!raw.contains("uid"), "empty fields stay off the wire for older readers");
     }
 
     // ---- jekt_public_key publication (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D1) ----
@@ -1059,6 +1138,8 @@ mod shared_tests {
             channel: "dev-a".to_string(),
             registration_nonce: 0,
             jekt_public_key: String::new(),
+            uid: String::new(),
+            uid_public_key: String::new(),
         }
     }
 
