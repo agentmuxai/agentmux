@@ -16,7 +16,7 @@ import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { ActivityState, CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
-import { presentStatus, type StatusMemory } from "../status/present-status";
+import { presentStatus, TIMING, type StatusMemory } from "../status/present-status";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
@@ -248,7 +248,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // How much of the line is typed out; Infinity once it is all there, so a
     // counter that grows inside the same line shows in full.
     const [revealed, setRevealed] = createSignal(Number.POSITIVE_INFINITY);
-    const REVEAL_CHAR_MS = 28;
+    const REVEAL_CHAR_MS = TIMING.revealCharMs;
 
     // The very first text after ENTERING the loading state renders in full
     // instantly — the type-out reveal is a transition effect for text
@@ -263,14 +263,16 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (!live()) revealInstantly = true;
     });
 
-    // A new line types out; the same line with its counters moved (its key
-    // unchanged) just updates, so a running clock never re-types it.
+    // A new line types out when its rank changes; a new line of the same rank
+    // swaps in at once (the presenter's `reveal`), and the same line with its
+    // counters moved (its key unchanged) just updates, so a running clock
+    // never re-types it.
     createEffect(
         on(
             () => status().key,
             () => {
                 const text = untrack(leftText);
-                if (untrack(reducedMotion) || !text || revealInstantly) {
+                if (untrack(reducedMotion) || !text || revealInstantly || untrack(status).reveal === false) {
                     revealInstantly = false;
                     setRevealed(Number.POSITIVE_INFINITY);
                     return;

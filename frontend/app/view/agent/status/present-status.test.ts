@@ -126,6 +126,81 @@ describe("presentStatus: when to change", () => {
         expect(play(frames)).toEqual(["Running the tests", "Question for you"]);
     });
 
+    // The row changed too often: a line was replaced the moment it finished
+    // typing out, because the dwell ran from when it was chosen, not from
+    // when it was readable.
+    it("the dwell runs from the end of the type-out, not from when the line was chosen", () => {
+        const long = act({ tools: [tool("Bash", { description: "Run the full srv integration test suite now" }, T0)] });
+        const both = act({
+            tools: [
+                tool("Bash", { description: "Run the full srv integration test suite now" }, T0),
+                tool("Read", { file_path: "a.ts" }, T0 + 100, "r"),
+            ],
+        });
+        // 47 characters at revealCharMs: fully on screen ~1.3 s after it is chosen.
+        const shownAt = T0 + TIMING.toolPromoteMs;
+        const readyAt = shownAt + "Running the full srv integration test suite now".length * TIMING.revealCharMs;
+        const frames = [
+            { nowMs: T0, activity: long },
+            { nowMs: shownAt, activity: long },
+            // Past the old dwell (from shownAt), still inside the new one (from readyAt).
+            { nowMs: shownAt + TIMING.dwellMs + 100, activity: both },
+            { nowMs: readyAt + TIMING.dwellMs, activity: both },
+        ];
+        expect(play(frames)).toEqual([
+            "Fix the login redirect loop",
+            "Running the full srv integration test suite now",
+            "Running the full srv integration test suite now",
+            "2 tools running",
+        ]);
+    });
+
+    it("types out only when the rank changes; within a rank the line swaps in at once", () => {
+        let memory: StatusMemory | null = null;
+        const step = (f: Partial<StatusInput>) => {
+            const r = presentStatus(input(f), memory);
+            memory = r.memory;
+            return r.line;
+        };
+        const read = (file: string, id: string, at: number) => tool("Read", { file_path: file }, at, id);
+        expect(step({ nowMs: T0 }).reveal).toBe(true); // the goal
+        const a = step({ nowMs: T0 + 2_000, activity: act({ tools: [read("a.ts", "a", T0)] }) });
+        expect([a.text, a.reveal]).toEqual(["Reading a.ts", true]); // goal → now
+        const ab = step({ nowMs: T0 + 6_000, activity: act({ tools: [read("a.ts", "a", T0), read("b.ts", "b", T0 + 100)] }) });
+        expect([ab.text, ab.reveal]).toEqual(["Reading 2 files", false]); // now → now
+        const q = step({ nowMs: T0 + 6_100, activity: act({ tools: [read("a.ts", "a", T0)] }), needsYou: "Waiting for your answer" });
+        expect(q.reveal).toBe(true); // now → needs you
+    });
+
+    it("after a call ends, the line holds while the next call is still too young to show", () => {
+        const next = act({ tools: [tool("Read", { file_path: "a.ts" }, T0 + 1_800)] });
+        const frames = [
+            { nowMs: T0, activity: bashAt(T0 - 2_000) },
+            { nowMs: T0 + 100, activity: IDLE_ACTIVITY }, // the call ended
+            { nowMs: T0 + 1_900, activity: next }, // the next began at +1.8 s
+            { nowMs: T0 + TIMING.holdMs + 100, activity: next }, // HOLD is over, the next is 300 ms old
+            { nowMs: T0 + 3_400, activity: next }, // old enough now
+        ];
+        expect(play(frames)).toEqual([
+            "Running the tests",
+            "Running the tests",
+            "Running the tests",
+            "Running the tests", // not a flash of the goal
+            "Reading a.ts",
+        ]);
+    });
+
+    it("a todo-list update is not a next call warming up, so the row falls back", () => {
+        const todo = act({ tools: [tool("TodoWrite", { todos: [] }, T0 + 1_800)] });
+        expect(todo.tools[0].activity.family).toBe("plan");
+        const frames = [
+            { nowMs: T0, activity: bashAt(T0 - 2_000) },
+            { nowMs: T0 + 100, activity: IDLE_ACTIVITY },
+            { nowMs: T0 + TIMING.holdMs + 100, activity: todo },
+        ];
+        expect(play(frames).at(-1)).toBe("Fix the login redirect loop");
+    });
+
     it("a counter moving keeps the line's key, so the row doesn't type it out again", () => {
         let memory: StatusMemory | null = null;
         const a = presentStatus(input({ nowMs: T0, activity: bashAt(T0 - 11_000) }), memory);

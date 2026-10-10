@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503 and phase 3 (the live status, §6.8 and §6.9) in PR #4510; phase 2b (attention, §5.5) follows them. See §4.7 for how the build differs from the design below. Phase 4 (tuning `TIMING` from real log data) is proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503, phase 2b (attention, §5.5) in PR #4511 and phase 3 (the live status, §6.8 and §6.9) in PR #4510. The live status's change timing was corrected in PR #4557 (§6.10). Still open: §7's replay tests and live checks, and phase 4 (tuning `TIMING` from real log data). See §4.7 for how the build differs from the design below.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -520,6 +520,14 @@ The muted goal, quiet-command detection, the thinking headline, subagent step de
 - **What slow means in this pane.** The reducer keeps the pane's last 20 waits for the model, from request sent to its answer beginning (`activity.waits`). "Waiting on the model" fires at 20 s, or at twice the pane's median wait once it has 5 or more, whichever is later (`slowRequestMs`). A model that is always slow doesn't cry wolf on every request.
 
 Still open: tuning `TIMING` from real `[turn]` and `[wave-turn]` log data.
+
+### 6.10 As built: the row changed too often (PR #4557)
+
+Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right after the line prints". Three causes, all in the presenter, none in the values of `TIMING`:
+
+- **Every new line typed out.** §6.4 says the type-out runs only when the class changes, and a change within rank 4 swaps instantly. The row typed out on any new key, so "Reading a.ts" → "Reading 2 files" → "Running the tests", and "Thinking" → "Thinking: …", each re-typed. The presenter now marks a line `reveal` only when its rank differs from the line it replaces, and the row swaps a same-rank line in at once.
+- **The dwell started before the line was readable.** It counted from when a line was chosen, while the type-out runs at 28 ms a character, so any line over about 43 characters was replaced as soon as it had printed. The memory now keeps `readyAt` (chosen, plus the type-out when there is one), and the dwell counts from there. The pace moved into `TIMING.revealCharMs` so the presenter and the row agree on it.
+- **A line that stopped being a candidate got no dwell.** When its call ended, or it folded into "2 tools running", it could be replaced at once. It now keeps its dwell like any other line. And the hold after a call ends also lasts while the next call is running but still under its promote threshold, so the row no longer flashes back to the goal between two calls. That is bounded by `toolPromoteMs`, and a todo-list update doesn't count.
 
 ---
 
