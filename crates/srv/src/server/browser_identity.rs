@@ -71,8 +71,8 @@ pub(crate) fn live_jars(state: &AppState) -> Option<Vec<String>> {
 }
 
 /// Check the identity a client gives a new browser tab (`pane.open`): an
-/// Incognito one that is well formed, on a host that can give it a jar of its
-/// own, within the cap unless it shares a jar already open. Anything else
+/// Incognito one that is well formed, within the cap unless it shares a jar
+/// already open. Anything else
 /// fails the open rather than quietly browsing in the shared jar.
 pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), String> {
     let Some(v) = meta.get(IDENTITY_META_KEY) else { return Ok(()) };
@@ -102,7 +102,7 @@ pub(crate) fn inherit(meta: &mut MetaMapType, opener: &Block) {
 }
 
 /// How many more Incognito jars a layout replay may open: the cap less those
-/// open now (none when they can't be counted, or off Windows).
+/// open now (none when they can't be counted).
 pub(crate) fn jars_available(state: &AppState) -> usize {
     live_jars(state).map_or(0, |open| MAX_INCOGNITO_JARS.saturating_sub(open.len()))
 }
