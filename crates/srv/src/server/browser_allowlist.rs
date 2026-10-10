@@ -165,14 +165,20 @@ pub(crate) fn refuse_popup(opener: &str, url: &str) -> Option<&'static str> {
         .then_some("it isn't on the sites the pane that opened it is limited to")
 }
 
-/// `pane`, a popup pane `opener` just opened, shares the site limit of the
-/// chain it opened from, if that has one: in its header, and on the host
-/// before its next navigation.
-pub(crate) async fn join_popup_pane(state: &AppState, pane: &str, opener: &str) {
-    if let Some(list) = join(pane, opener) {
+/// `pane`, a popup pane that `join`ed its opener's chain (`list`) as soon as
+/// it opened, once its ownership is settled: with an owner it shares the
+/// chain's limit, in its header and on the host; with none (the opener was
+/// taken over meanwhile) it leaves the chain. The host push waits until here,
+/// so nothing yields between opening the pane and settling who owns it.
+pub(crate) async fn settle_popup_pane(state: &AppState, pane: &str, list: Option<Vec<String>>, owned: bool) {
+    let Some(list) = list else { return };
+    if owned {
         publish(state, &[pane.to_string()], Some(&list));
-        crate::server::browser_host_sync::push(state).await;
+    } else {
+        drop_pane(pane);
+        publish(state, &[pane.to_string()], None);
     }
+    crate::server::browser_host_sync::push(state).await;
 }
 
 /// Why an agent's own `BrowserNavigate` of `pane` to `url` is refused, if it
@@ -208,7 +214,8 @@ pub(crate) async fn handle_host_browser_navigation(
     let answered = |asked: bool, reason: &str| {
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "asked": asked, "reason": reason } }))).into_response()
     };
-    let Some(list) = browser_allowlist::list_for(&pane) else {
+    let list = browser_allowlist::list_for(&pane).or_else(|| opener_list(&state, &pane));
+    let Some(list) = list else {
         // Taken over or closed since: the host's copy was behind. Send it
         // the current one, and let the navigation it stopped go on.
         crate::server::browser_host_sync::push(&state).await;
@@ -271,6 +278,16 @@ pub(crate) async fn handle_host_browser_navigation(
         crate::server::browser_host_sync::push(&st).await;
     });
     answered(true, "")
+}
+
+/// The site list of the pane `pane` was opened from as a popup, from srv's
+/// own records (`browser:popup_of`, which only srv writes). Covers the moment
+/// between a popup pane opening and joining its chain: a navigation the host
+/// stopped then is still asked about, not replayed.
+fn opener_list(state: &AppState, pane: &str) -> Option<Vec<String>> {
+    let block = state.mstore.get::<crate::backend::obj::Block>(pane).ok().flatten()?;
+    let opener = block.meta.get(crate::server::browser_popup::POPUP_OF_META_KEY)?.as_str()?;
+    list_for(opener)
 }
 
 /// Load `url` in `target` (a pane or popup window), as the navigation the
