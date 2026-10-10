@@ -548,10 +548,10 @@ const CHANNEL_SIG_MAX_AGE_SECS: i64 = JEKT_SIG_MAX_AGE_SECS;
 /// `handle_reactive_inject`'s Tier 2a/2b). Off that tier the field stays
 /// `None`, same scoping as `lan_verified`.
 ///
-/// Ordering guarantee (§D2 step 2): a claimed sender THIS instance holds an
-/// HMAC key for is a same-instance agent, and `verify_jekt_signature` owns
-/// it entirely — this function returns without touching `channel_verified`,
-/// so the two verifiers can never disagree about one message.
+/// Ordering (§D2 step 2): a sender this instance holds an HMAC key for, whose
+/// message names this channel (or none), is left to `verify_jekt_signature`.
+/// Naming another channel, it is checked here, and a verified signature clears
+/// the HMAC verdict, which came from a stale key (a key outlives a move).
 ///
 /// Outcomes, all three-state like its siblings:
 /// - `None` — no shared-registry entry for the claimed sender anywhere (a
