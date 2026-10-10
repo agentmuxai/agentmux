@@ -104,6 +104,7 @@ pub fn spawn_background_subsystems(
         fs_watch_pool.clone(),
         config_watcher.clone(),
         event_bus.clone(),
+        broker.clone(),
     );
 
     // Browser pane start page — same load-then-watch shape as settings.json
