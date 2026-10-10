@@ -53,8 +53,6 @@ const SKIP_FILES: &[&str] = &["crates/srv/src/backend/pane_env.rs"];
 /// `(file, program, count, classification)`. `program` is the literal text between `new(` and
 /// the first `,` or `)`, which is stable across edits in a way line numbers are not.
 const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
-    ("crates/bashwrap/src/bash_wrap.rs", "\"taskkill\"", 1,
-     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/bash_wrap.rs", "bash.as_os_str(", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/bash_wrap.rs", "bash", 1,
@@ -127,6 +125,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/common/src/process.rs", "\"taskkill\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/common/src/process.rs", "\"sleep\"", 1,
+     "test: the unix-only force_kill_tree test's child"),
     ("crates/common/src/runtime_mode.rs", "\"git\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/common/src/toolchain_path.rs", "shell", 1,

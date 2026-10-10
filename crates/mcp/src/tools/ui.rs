@@ -14,7 +14,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ui/screenshot", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiScreenshotRequest { auth, pane: pane_arg(arguments) })
                 .send()
                 .await
@@ -124,7 +124,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ui/click", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiClickRequest {
                     auth,
                     pane: pane_arg(arguments),
@@ -151,7 +151,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ui/query", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiQueryRequest {
                     auth,
                     pane: pane_arg(arguments),

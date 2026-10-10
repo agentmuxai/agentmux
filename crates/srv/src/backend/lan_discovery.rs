@@ -286,7 +286,7 @@ fn query_peers_concurrently<'a>(
             let result = http
                 .get(format!("{peer_url}/agentmux/reactive/agent"))
                 .query(&[("id", agent_id)])
-                .header("X-AuthKey", &auth_key)
+                .header(agentmux_common::AUTH_KEY_HEADER, &auth_key)
                 .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
                 .send()
                 .await;
@@ -759,7 +759,7 @@ impl LanDiscovery {
         lan_key: &str,
     ) -> Option<Vec<String>> {
         let url = format!("{base_url}/agentmux/reactive/agent-names");
-        let resp = match http.get(&url).header("X-AuthKey", lan_key).send().await {
+        let resp = match http.get(&url).header(agentmux_common::AUTH_KEY_HEADER, lan_key).send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: unreachable");

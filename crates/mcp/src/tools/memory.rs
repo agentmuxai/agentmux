@@ -14,7 +14,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/memory/list", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .query(&[("agent_id", agent_id.as_str())])
                 .send()
                 .await
@@ -41,7 +41,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/memory/read", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .query(&[("agent_id", agent_id.as_str()), ("filename", filename)])
                 .send()
                 .await
@@ -90,7 +90,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&body)
                 .send()
                 .await
@@ -113,7 +113,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/memory/history", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .query(&[("agent_id", agent_id.as_str()), ("filename", filename)])
                 .send()
                 .await
@@ -145,7 +145,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/memory/diff", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .query(&[("agent_id", agent_id.as_str()), ("from_version_id", from_version_id), ("to_version_id", to_version_id)])
                 .send()
                 .await
@@ -188,7 +188,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             });
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&body)
                 .send()
                 .await

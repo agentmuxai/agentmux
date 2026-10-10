@@ -18,6 +18,7 @@
 
 pub mod approval;
 
+use agentmux_common::AUTH_KEY_HEADER;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -483,7 +484,7 @@ pub(crate) async fn call_host_only_service(
 
     let resp = http_client()
         .post(&url)
-        .header("X-AuthKey", auth_key)
+        .header(AUTH_KEY_HEADER, auth_key)
         .json(&body)
         .timeout(timeout)
         .send()

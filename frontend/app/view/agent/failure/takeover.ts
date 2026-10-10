@@ -12,6 +12,7 @@
 
 import { getApi } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
+import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 
 export interface TakeoverResult {
     /** False when no other instance was running the agent any more. */
@@ -35,7 +36,7 @@ export async function requestAgentTakeover(
     const authKey = deps.authKey ?? getApi()?.getAuthKey?.();
     const resp = await fetchImpl(`${endpoint}/api/v1/agent/takeover`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(authKey ? { "X-AuthKey": authKey } : {}) },
+        headers: { "Content-Type": "application/json", ...(authKey ? { [AUTH_KEY_HEADER]: authKey } : {}) },
         body: JSON.stringify({ block_id: blockId }),
     });
     let data: any = {};

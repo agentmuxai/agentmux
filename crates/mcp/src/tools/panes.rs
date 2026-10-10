@@ -76,7 +76,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&req)
                 .send()
                 .await
@@ -150,7 +150,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&req)
                 .send()
                 .await
@@ -230,7 +230,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&req)
                 .send()
                 .await
@@ -273,7 +273,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             });
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&body)
                 .send()
                 .await
@@ -309,7 +309,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/self", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .query(&[("block_id", block_id)])
                 .send()
                 .await
@@ -395,7 +395,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&body)
                 .send()
                 .await
@@ -438,7 +438,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 ),
             };
             let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
-            let mut reqb = client.get(&url).header("X-AuthKey", auth_key);
+            let mut reqb = client.get(&url).header(AUTH_KEY_HEADER, auth_key);
             // The "tabs" query scopes to the caller's own workspace when we know it.
             if query == "tabs" && !block_id.is_empty() {
                 reqb = reqb.query(&[("block_id", block_id)]);
@@ -469,7 +469,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/tab/activate", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&TabActivateRequest { tab_id: tab_id.to_string() })
                 .send()
                 .await
@@ -487,7 +487,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/tab/new", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&TabNewRequest {
                     block_id: Some(block_id.to_string()),
                     workspace_id: None,
@@ -513,7 +513,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/window/focus", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&WindowFocusRequest {
                     block_id: Some(block_id.to_string()),
                     window_id: if window_id.is_empty() { None } else { Some(window_id.to_string()) },
@@ -536,7 +536,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/pane/close", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&ClosePaneRequest { auth, block_id: target_block_id.clone(), reason })
                 .send()
                 .await
@@ -589,7 +589,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/self/quit", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&QuitSelfRequest { auth, reason, user_instruction })
                 .send()
                 .await
@@ -632,7 +632,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             );
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&RegisterDevServerRequest { auth, project, port })
                 .send()
                 .await

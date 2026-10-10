@@ -14,7 +14,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/agent/identity/accounts", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .query(&[("agent_id", agent_id.as_str())])
                 .send()
                 .await
@@ -45,7 +45,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             });
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&body)
                 .send()
                 .await
