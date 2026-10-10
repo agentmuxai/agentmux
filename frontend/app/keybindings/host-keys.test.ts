@@ -13,7 +13,7 @@ const FILE = join(__dirname, "host-keys.json");
 
 describe("host-keys.json", () => {
     it("matches the shortcut table", () => {
-        const generated = JSON.stringify({ mac: hostKeys("mac"), other: hostKeys("other") }, null, 2) + "\n";
+        const generated = JSON.stringify({ mac: hostKeys("mac"), other: hostKeys("other"), linux: hostKeys("linux") }, null, 2) + "\n";
         if (process.env.UPDATE_HOST_KEYS) writeFileSync(FILE, generated);
         expect(readFileSync(FILE, "utf8").replace(/\r\n/g, "\n")).toBe(generated);
     });

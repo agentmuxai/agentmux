@@ -4,7 +4,9 @@
 // One key syntax for every binding, its matcher and its label
 // (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6.2, §11.4).
 
-export type KeyPlatform = "mac" | "other";
+/** "linux" is "other" (Windows and Linux share a row's keys) except where a
+ *  row gives Linux its own keys, because the desktop takes the shared ones. */
+export type KeyPlatform = "mac" | "linux" | "other";
 
 export interface KeySpec {
     ctrl: boolean;

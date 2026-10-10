@@ -26,7 +26,7 @@ vi.mock("@/layout/index", () => ({
 }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
-import { appHandleKeyDown, disableGlobalKeybindings, enableGlobalKeybindings, isTypingFocus, keyCommands, registerHostShortcuts } from "./keymodel-dispatch";
+import { appHandleKeyDown, disableGlobalKeybindings, enableGlobalKeybindings, isTypingFocus, keyCommands, registerChordCapture, registerHostShortcuts } from "./keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
 import { setUserKeybindings } from "@/app/keybindings/registry";
@@ -121,6 +121,58 @@ describe("appHandleKeyDown", () => {
         expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
         expect(press({ key: "ArrowUp", code: "ArrowUp" })).toBe(true);
         expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a chord waiting while a modifier is pressed on its own", () => {
+        expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
+        // A bare Shift, Control or Alt isn't the chord's second key.
+        expect(press({ key: "Shift", code: "ShiftLeft", shiftKey: true })).toBe(false);
+        expect(press({ key: "Control", code: "ControlLeft", ctrlKey: true })).toBe(false);
+        expect(press({ key: "ArrowUp", code: "ArrowUp" })).toBe(true);
+        expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+    });
+
+    describe("pane:swap (GNOME takes Ctrl+Alt+Shift+Arrow, plan §8.3)", () => {
+        const CTRL_ALT_SHIFT_UP = { key: "ArrowUp", code: "ArrowUp", ctrlKey: true, altKey: true, shiftKey: true };
+        const swapUp = vi.fn(() => true);
+        beforeEach(() => {
+            swapUp.mockClear();
+            keyCommands.set("pane:swap:up", swapUp);
+        });
+
+        it("is Ctrl+Alt+Shift+Arrow on Windows", () => {
+            expect(press(CTRL_ALT_SHIFT_UP)).toBe(true);
+            expect(swapUp).toHaveBeenCalledTimes(1);
+        });
+
+        it("is Ctrl+Shift+S, then Shift+Arrow on Linux, and Ctrl+Alt+Shift+Arrow isn't", () => {
+            setKeyUtilPlatform("linux");
+            setPlatform("linux");
+            expect(press(CTRL_ALT_SHIFT_UP)).toBe(false);
+            expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
+            expect(press({ key: "Shift", code: "ShiftLeft", shiftKey: true })).toBe(false);
+            expect(press({ key: "ArrowUp", code: "ArrowUp", shiftKey: true })).toBe(true);
+            expect(swapUp).toHaveBeenCalledTimes(1);
+            expect(handlers["split:up"]).not.toHaveBeenCalled();
+        });
+
+        it("takes the chord's second key before a pane that uses it (the Files list's Shift+↑)", () => {
+            setKeyUtilPlatform("linux");
+            setPlatform("linux");
+            registerChordCapture();
+            const list = document.createElement("div");
+            list.tabIndex = 0;
+            const paneKey = vi.fn((e: KeyboardEvent) => e.preventDefault());
+            list.addEventListener("keydown", paneKey);
+            focus(list);
+            expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
+            list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", code: "ArrowUp", shiftKey: true, bubbles: true, cancelable: true }));
+            expect(swapUp).toHaveBeenCalledTimes(1);
+            expect(paneKey).not.toHaveBeenCalled();
+            // With no chord waiting, the pane keeps its key.
+            list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", code: "ArrowUp", shiftKey: true, bubbles: true, cancelable: true }));
+            expect(paneKey).toHaveBeenCalledTimes(1);
+        });
     });
 
     it("runs a shortcut the host forwards out of a browser pane, after taking focus back", async () => {

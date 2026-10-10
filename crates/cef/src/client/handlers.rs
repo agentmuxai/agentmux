@@ -270,7 +270,11 @@ struct HostKey {
 #[derive(Debug, serde::Deserialize)]
 struct HostKeys {
     mac: Vec<HostKey>,
+    /// Windows.
     other: Vec<HostKey>,
+    /// Linux: `other`, except where the table gives Linux its own keys
+    /// because the desktop takes the shared ones.
+    linux: Vec<HostKey>,
 }
 
 static HOST_KEYS: std::sync::LazyLock<HostKeys> = std::sync::LazyLock::new(|| {
@@ -288,7 +292,13 @@ fn app_shortcut_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac
 }
 
 fn host_key_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<&'static HostKey> {
-    let keys = if mac { &HOST_KEYS.mac } else { &HOST_KEYS.other };
+    let keys = if mac {
+        &HOST_KEYS.mac
+    } else if cfg!(target_os = "linux") {
+        &HOST_KEYS.linux
+    } else {
+        &HOST_KEYS.other
+    };
     keys.iter()
         .find(|k| k.ctrl == ctrl && k.shift == shift && k.alt == alt && k.meta == meta && k.vk == vk)
 }
@@ -1158,6 +1168,13 @@ mod browser_pane_shortcut_tests {
         assert_eq!(app_shortcut_for(true, true, false, false, 0x54, false), Some("tab:new"));
         assert_eq!(app_shortcut_for(false, false, false, true, 0x54, true), Some("tab:new"));
         assert_eq!(app_shortcut_for(true, false, false, false, 0x54, false), None);
+    }
+
+    /// Linux has its own list (the table can give Linux its own keys where
+    /// the desktop takes the shared ones); it resolves the shared keys too.
+    #[test]
+    fn linux_list_parses_and_has_the_shared_keys() {
+        assert!(HOST_KEYS.linux.iter().any(|k| k.command == "tab:new" && k.ctrl && k.shift && k.vk == 0x54));
     }
 
     /// Every browser-pane shortcut reaches the pane: either no app shortcut is

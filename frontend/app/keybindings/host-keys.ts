@@ -6,7 +6,7 @@
 // A browser pane is a native CEF child window, so its keys never reach the
 // app's DOM listeners; crates/cef reads host-keys.json, which this generates.
 
-import { DEFAULT_KEYBINDINGS, type KeyBindingRow } from "./defaults";
+import { DEFAULT_KEYBINDINGS, rowKeys, type KeyBindingRow } from "./defaults";
 import { parseKey, type KeyPlatform, type KeySpec } from "./keys";
 
 export interface HostKey {
@@ -80,7 +80,7 @@ export function hostKeys(platform: KeyPlatform): HostKey[] {
     const out: HostKey[] = [];
     for (const row of DEFAULT_KEYBINDINGS) {
         if (!forwards(row)) continue;
-        for (const source of (platform === "mac" ? row.mac : row.other) ?? []) {
+        for (const source of rowKeys(row, platform)) {
             if (source.includes(" ")) continue; // chords
             const k = parseKey(source, platform);
             const vk = vkOf(k);

@@ -9,6 +9,7 @@ import { helpSections } from "./help";
 export function keybindingsDoc(): string {
     const mac = helpSections("mac");
     const other = helpSections("other");
+    const linux = helpSections("linux");
     const out: string[] = [
         "# Keyboard shortcuts",
         "",
@@ -23,11 +24,14 @@ export function keybindingsDoc(): string {
     for (const category of categories) {
         const m = mac.find((s) => s.category === category)?.entries ?? [];
         const o = other.find((s) => s.category === category)?.entries ?? [];
+        const l = linux.find((s) => s.category === category)?.entries ?? [];
         const labels = [...new Set([...m, ...o].map((e) => e.label))];
         out.push(`## ${category}`, "", "| Action | macOS | Windows / Linux |", "|---|---|---|");
         for (const label of labels) {
             const keys = (list: typeof m) => list.find((e) => e.label === label)?.keys.join(", ") || "—";
-            out.push(`| ${label} | ${keys(m)} | ${keys(o)} |`);
+            // Linux's own keys, where its desktop takes the shared ones.
+            const both = keys(o) === keys(l) ? keys(o) : `Windows: ${keys(o)}; Linux: ${keys(l)}`;
+            out.push(`| ${label} | ${keys(m)} | ${both} |`);
         }
         out.push("");
     }

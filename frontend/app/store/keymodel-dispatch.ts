@@ -32,6 +32,9 @@ const [simpleControlShift, setSimpleControlShift] = createSignal(false);
 export const keyCommands = new Map<string, KeyHandler>();
 let globalKeybindingsDisabled = false;
 
+/** `KeyboardEvent.key` of a key that only modifies others. */
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "OS", "Super", "Hyper"]);
+
 // track current chord state and timeout (for resetting)
 let activeChord: string | null = null;
 let chordTimeout: NodeJS.Timeout = null;
@@ -184,6 +187,9 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
     const platform = keyPlatform();
     const ev = keyEventLike(muxEvent);
     if (activeChord) {
+        // Pressing a modifier on its own (Shift, to type a second step like
+        // Shift+↑) isn't the second key: leave the chord waiting.
+        if (MODIFIER_KEYS.has(ev.key)) return false;
         // The second key of a chord: run its binding, or consume the key.
         const leader = activeChord;
         resetChord();
@@ -257,6 +263,23 @@ export function registerControlShiftTracking() {
     document.addEventListener("keydown", update, true);
     document.addEventListener("keyup", update, true);
     window.addEventListener("blur", () => unsetControlShift());
+}
+
+/** A chord's second key goes to the chord, not to whatever has focus: while a
+ *  chord waits, the next key is resolved in the capture phase, before a pane
+ *  (the Files list's Shift+↑, an editor's arrows) can take it. */
+export function registerChordCapture() {
+    document.addEventListener(
+        "keydown",
+        (e: KeyboardEvent) => {
+            if (!activeChord || MODIFIER_KEYS.has(e.key)) return;
+            if (appHandleKeyDown(keyutil.adaptFromReactOrNativeKeyEvent(e))) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        },
+        true
+    );
 }
 
 /** A key event for running a command without a key press (RunCommand). */
