@@ -21,12 +21,13 @@ import { requestSubagentName } from "./subagent-naming";
 import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
-import { formatElapsedClock } from "@/util/format-time";
+import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { revealBlock } from "@/app/util/reveal-block";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
+import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
 import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSections, seenAgo } from "./swarm-remote";
@@ -312,11 +313,8 @@ function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): Ag
  * grouping (activeCount/retired) keeps reading the real backend status.
  */
 export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "running" | "idle"): AgentDisplayStatus {
-    if (sub.status === "abandoned") return "interrupted";
-    if (sub.status === "active") {
-        return parentAgentStatus === "idle" ? "interrupted" : "working";
-    }
-    return "idle"; // completed
+    const status = subagentStatus(sub.status, parentAgentStatus === "running");
+    return status.kind === "working" || status.kind === "interrupted" ? status.kind : "idle";
 }
 
 /**
@@ -850,7 +848,7 @@ function LongRunningRow({ row }: { row: LongRunningToolRow }): JSX.Element {
     const remaining = createMemo(() => {
         if (row.sleepMs == null) return "";
         tick();
-        return `~${Math.ceil(Math.max(0, row.startedAt + row.sleepMs - Date.now()) / 1000)}s left`;
+        return formatTimeLeft(row.startedAt + row.sleepMs - Date.now());
     });
     return (
         <div
@@ -1320,9 +1318,13 @@ export type ChipStatus = "working" | "question" | "idle";
 /** `awaitingUser` is `isAwaitingUser(meta, agentStatus)` from swarm-line.ts,
  *  the same check as the row's "Waiting for you" line. */
 export function chipStatus(status: AgentDisplayStatus, awaitingUser = false): ChipStatus {
-    const working = status === "working" || status === "tools" || status === "stopping";
-    if (!working) return "idle";
-    return awaitingUser ? "question" : "working";
+    const ranked = rankAgentStatus({
+        live: status === "working" || status === "tools" || status === "stopping",
+        needsYou: awaitingUser,
+        held: { stopping: status === "stopping" },
+    });
+    if (ranked.kind === "needs-you") return "question";
+    return isActiveStatus(ranked) ? "working" : "idle";
 }
 
 // Reads `props.status`, not a destructured `status`: in Solid a destructured

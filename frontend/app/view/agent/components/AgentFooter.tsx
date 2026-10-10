@@ -30,7 +30,8 @@ import {
     type TurnLedger,
 } from "@/app/store/agent-pane-state/turn-ledger";
 import type { SessionStats, TurnTokens } from "../types";
-import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
+import type { LaunchPhase } from "../flows/launch-phase";
+import { rowStatusWords } from "../status/row-status";
 import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "../turn-trigger-text";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
@@ -172,20 +173,6 @@ const CANCELLABLE_LAUNCH_PHASES = new Set([
     "waiting-for-login-completion",
 ]);
 
-/** The row's own statuses, which outrank anything else it would say except
- *  a question or approval for the user (the presenter's rank 1). */
-function heldStatus(props: AgentWorkingRowProps, nowMs: number): string | null {
-    if (props.reconnecting) return "Reconnecting…";
-    if (props.compacting) return "Compacting…";
-    if (props.stopping) return "Stopping…";
-    if (props.waitingReason === "rate_limited") {
-        return props.retryAfterMs != null
-            ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
-            : "Rate limited — retrying…";
-    }
-    return formatPhaseLabel(props.launchPhase, nowMs) ?? null;
-}
-
 /** A turn something other than the user started opens by saying so. */
 function leadInText(props: AgentWorkingRowProps, nowMs: number): string | null {
     const l = props.turnLedger;
@@ -228,11 +215,23 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const status = createMemo(() => {
         const now = (tick(), Date.now());
         const l = props.turnLedger;
+        const words = rowStatusWords(
+            {
+                live: live() || !!props.compacting || !!props.reconnecting,
+                needsYou: props.needsYou ?? null,
+                reconnecting: !!props.reconnecting,
+                compacting: !!props.compacting,
+                stopping: !!props.stopping,
+                waitingReason: props.waitingReason,
+                retryAfterMs: props.retryAfterMs,
+                launchPhase: props.launchPhase,
+            },
+            now,
+        );
         const r = presentStatus(
             {
                 nowMs: now,
-                needsYou: props.needsYou ?? null,
-                held: heldStatus(props, now),
+                ...words,
                 leadIn: leadInText(props, now),
                 activity: props.activity ?? null,
                 turnStartedAt: l && turnOpen(l, now) ? l.startedAtMs : untrack(loadStartMs),

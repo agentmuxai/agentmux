@@ -11,6 +11,8 @@
  * installs arrive later as more hosts with their own `tier`.
  */
 
+import { formatAgoPrecise } from "@/util/format-time";
+
 export interface RemoteAgent {
     name: string;
     block_id: string;
@@ -100,9 +102,5 @@ export function remoteSections(data: SwarmOtherInstances | null | undefined): Re
 
 /** "seen 2m ago" for a stale section, from Unix ms. */
 export function seenAgo(seenAtMs: number, nowMs: number): string {
-    const s = Math.max(0, Math.round((nowMs - seenAtMs) / 1000));
-    if (s < 60) return `seen ${s}s ago`;
-    const m = Math.round(s / 60);
-    if (m < 60) return `seen ${m}m ago`;
-    return `seen ${Math.round(m / 60)}h ago`;
+    return `seen ${formatAgoPrecise(seenAtMs, nowMs)}`;
 }
