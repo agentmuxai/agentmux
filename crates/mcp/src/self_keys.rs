@@ -8,7 +8,10 @@
 //! The env copy goes stale: srv rotates the host jekt key after 24 h, and an
 //! agent running longer keeps signing with the key it was launched with, so
 //! every jekt it sends fails srv's check. Fetched at startup and again once
-//! the copy is 20 h old, ahead of the rotation.
+//! the fetched key reaches the expiry srv served with it: srv rotates a key
+//! only after that, so until then nothing newer exists, and the fetch that
+//! follows it is what rotates it. Checked before every tool call, so a UI
+//! automation proof is signed with a live key too.
 //!
 //! The fetched name-keyed keys are used only when the slug srv served them
 //! for is exactly this process's `AGENTMUX_AGENT_ID`: an agent signing under
@@ -23,13 +26,16 @@ use std::time::{Duration, Instant};
 use agentmux_common::AUTH_KEY_HEADER;
 use serde::Deserialize;
 
-/// Re-fetch once the copy is this old, ahead of srv's 24 h jekt-key rotation.
+/// Re-fetch a copy this old even with no expiry to go by (an older srv).
 const REFRESH_AFTER: Duration = Duration::from_secs(20 * 60 * 60);
 
 #[derive(Deserialize, Default, Clone)]
 struct Wire {
     slug: String,
     jekt_key: Option<String>,
+    /// Unix seconds; absent from an srv that predates it.
+    #[serde(default)]
+    jekt_key_expires_at: Option<i64>,
     lan_key: Option<String>,
     wan_key: Option<String>,
     #[allow(dead_code)] // M4d-6 signs v2 with it.
@@ -47,7 +53,7 @@ static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 /// leave the old copy (or none) in place: signing then falls back to the env
 /// keys, exactly as before M4d-3.
 pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, auth_key: &str) {
-    let fresh = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|c| c.fetched_at.elapsed() < REFRESH_AFTER);
+    let fresh = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|c| still_good(c, agentmux_common::time::now_secs()));
     if fresh || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
         return;
     }
@@ -59,6 +65,11 @@ pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, 
     if let Ok(keys) = resp.json::<Wire>().await {
         *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Cached { keys, fetched_at: Instant::now() });
     }
+}
+
+/// Whether a cached copy needs no re-fetch at `now` (unix seconds).
+fn still_good(c: &Cached, now: i64) -> bool {
+    c.fetched_at.elapsed() < REFRESH_AFTER && c.keys.jekt_key_expires_at.is_none_or(|expires| now < expires)
 }
 
 /// A fetched name-keyed key, decoded, when srv served it for exactly the name
@@ -156,5 +167,16 @@ mod tests {
         let env = [1u8; 32];
         assert_eq!(with_env("aria", Some(ENV_B64), jekt_key).as_deref(), Some(&env[..]));
         assert_eq!(with_env("aria", None, jekt_key), None);
+    }
+
+    #[test]
+    fn a_copy_is_good_until_its_key_expires_then_refetched() {
+        let cached = |expires: Option<i64>| Cached {
+            keys: Wire { slug: "aria".into(), jekt_key_expires_at: expires, ..Default::default() },
+            fetched_at: Instant::now(),
+        };
+        assert!(still_good(&cached(Some(1_000)), 999));
+        assert!(!still_good(&cached(Some(1_000)), 1_000), "expired: srv may rotate it now");
+        assert!(still_good(&cached(None), 1_000_000), "no expiry served: the 20 h clock");
     }
 }
