@@ -69,15 +69,18 @@ export function normTable(keys) {
     return [...mods, key].join("+");
 }
 
+/** A schema's settings, or null when gsettings can't read it. */
 function gsettingsList(schema) {
     try {
         return execFileSync("gsettings", ["list-recursively", schema], { encoding: "utf8" });
     } catch {
-        return "";
+        return null;
     }
 }
 
-/** The accelerators GNOME grabs on this host: normal form -> the settings that bind it. */
+/** The accelerators GNOME grabs on this host: normal form -> the settings that bind it.
+ *  `readable` is false when the window manager's own keybindings couldn't be read
+ *  (no gsettings, no session bus, not GNOME): an empty map then means "unknown". */
 export function readGnomeGrabs() {
     const grabs = new Map();
     const addGrab = (accel, owner) => {
@@ -86,8 +89,11 @@ export function readGnomeGrabs() {
         if (!grabs.has(n)) grabs.set(n, []);
         grabs.get(n).push(owner);
     };
+    let wmRead = false;
     for (const schema of SCHEMAS) {
-        for (const line of gsettingsList(schema).split("\n")) {
+        const listed = gsettingsList(schema);
+        if (schema === "org.gnome.desktop.wm.keybindings") wmRead = Boolean(listed?.trim());
+        for (const line of (listed ?? "").split("\n")) {
             const m = line.match(/^(\S+) (\S+) (.*)$/);
             if (!m) continue;
             const accels = [...m[3].matchAll(/'([^']*<[^']*|[^']*)'/g)].map((x) => x[1]).filter((a) => a.includes("<") || /^(F\d+|Print)$/.test(a));
@@ -95,13 +101,14 @@ export function readGnomeGrabs() {
         }
     }
     // Custom shortcuts (Settings > Keyboard > Custom).
-    const customs = gsettingsList("org.gnome.settings-daemon.plugins.media-keys").match(/custom-keybindings \[(.*)\]/)?.[1] ?? "";
+    const customs = (gsettingsList("org.gnome.settings-daemon.plugins.media-keys") ?? "").match(/custom-keybindings \[(.*)\]/)?.[1] ?? "";
     for (const p of [...customs.matchAll(/'([^']+)'/g)].map((x) => x[1])) {
         const schema = `org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${p}`;
         const binding = execFileSync("gsettings", ["get", schema, "binding"], { encoding: "utf8" }).trim().replace(/^'|'$/g, "");
         const name = execFileSync("gsettings", ["get", schema, "name"], { encoding: "utf8" }).trim();
         addGrab(binding, `custom ${name}`);
     }
+    grabs.readable = wmRead;
     return grabs;
 }
 

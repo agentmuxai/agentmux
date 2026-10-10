@@ -11,7 +11,7 @@
 //
 // Usage:
 //   node scripts/verify-shortcuts-l3-linux.mjs [--port N] [--only REGEX]
-//       [--include-taken] [--wait-focus SECONDS] [--json]
+//       [--wait-focus SECONDS] [--json]
 //
 // The keys go to whatever window has keyboard focus on the real desktop, so:
 // - Run it against a dev build or a throwaway instance (AGENTMUX_CDP_PORT,
@@ -19,9 +19,11 @@
 // - It refuses to start, and stops, unless that instance's window has focus.
 //   Wayland lets no program give a window focus: click the window. With
 //   --wait-focus it waits that long for the click instead of refusing.
-// - Keys GNOME binds (scripts/gnome-grabs.mjs) are skipped unless
-//   --include-taken is given, and then only those whose effect it can undo:
-//   a workspace switch or move, undone with the opposite one.
+// - Keys GNOME binds (scripts/gnome-grabs.mjs) are never pressed: what GNOME
+//   does with one (switch or move workspaces) can't be confirmed or reliably
+//   undone from here on Wayland. They're reported as taken; a person confirms.
+//   It runs only in a GNOME session whose keybindings it can read, so a missing
+//   gsettings can't make every key look free.
 // - Keys a "manual" row of the shortcut table uses globally (closing a tab or
 //   pane, opening an agent, the microphone) are never pressed.
 // Each key is pressed with the Help pane focused, so the pane-local keys act
@@ -37,17 +39,16 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { normGnome, normTable, readGnomeGrabs } from "./gnome-grabs.mjs";
+import { normTable, readGnomeGrabs } from "./gnome-grabs.mjs";
 import { appWindows, close, closeNewWindows, connect, js, MANUAL, S, settle, sleep } from "./verify-shortcuts-cdp.mjs";
 
 function parseArgs() {
-    const a = { port: Number(process.env.AGENTMUX_CDP_PORT) || 9223, only: null, includeTaken: false, waitFocus: 0, json: false };
+    const a = { port: Number(process.env.AGENTMUX_CDP_PORT) || 9223, only: null, waitFocus: 0, json: false };
     const argv = process.argv.slice(2);
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i];
         if (k === "--port") a.port = Number(argv[++i]);
         else if (k === "--only") a.only = new RegExp(argv[++i]);
-        else if (k === "--include-taken") a.includeTaken = true;
         else if (k === "--wait-focus") a.waitFocus = Number(argv[++i]);
         else if (k === "--json") a.json = true;
         else {
@@ -79,16 +80,6 @@ const MODIFIERS = [
     [4, 125], // Meta: KEY_LEFTMETA
 ];
 
-/** gnome-grabs' normal form ("alt+ctrl+arrowup") -> a planned key event, for undoing a workspace move. */
-export function eventFromNorm(norm) {
-    const parts = norm.split("+");
-    const name = parts.pop();
-    const bits = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
-    const modifiers = parts.reduce((m, p) => m | (bits[p] ?? 0), 0);
-    const code = { arrowup: "ArrowUp", arrowdown: "ArrowDown", arrowleft: "ArrowLeft", arrowright: "ArrowRight", pageup: "PageUp", pagedown: "PageDown", home: "Home", end: "End" }[name];
-    return code ? { code, modifiers } : null;
-}
-
 /** ydotool's `key` arguments for one planned key: modifiers down, the key, modifiers up. */
 export function keySequence(ev) {
     const code = EVDEV[ev.code];
@@ -100,21 +91,6 @@ export function keySequence(ev) {
 /** Presses one key with its modifiers through ydotool. */
 function press(ev) {
     execFileSync("ydotool", ["key", ...keySequence(ev)], { timeout: 5000, stdio: "ignore" });
-}
-
-/** A workspace switch or move GNOME made, and the binding that undoes it. */
-export function undoFor(owners, grabs) {
-    const opposite = { up: "down", down: "up", left: "right", right: "left" };
-    for (const owner of owners) {
-        const m = owner.match(/^(desktop\.wm\.keybindings (?:switch|move)-to-workspace-)(up|down|left|right)$/);
-        if (!m) continue;
-        const back = `${m[1]}${opposite[m[2]]}`;
-        for (const [norm, os] of grabs) {
-            const ev = os.includes(back) && eventFromNorm(norm);
-            if (ev) return { owner, back, ev };
-        }
-    }
-    return null;
 }
 
 const ARRIVALS = `(() => {
@@ -164,6 +140,12 @@ async function main() {
         console.error("this is the Linux L3 pass; macOS has verify-shortcuts-l3-macos.mjs");
         process.exit(2);
     }
+    // Fail closed: with no grab list, every key would look free.
+    const grabs = /GNOME/i.test(process.env.XDG_CURRENT_DESKTOP ?? "") ? readGnomeGrabs() : null;
+    if (!grabs?.readable) {
+        console.error(grabs ? "couldn't read GNOME's keybindings (gsettings): not pressing keys it might take" : "not a GNOME session (XDG_CURRENT_DESKTOP): this pass only knows which keys GNOME takes");
+        process.exit(2);
+    }
     const notReady = ydotoolReady();
     if (notReady) {
         console.error(notReady);
@@ -190,7 +172,6 @@ async function main() {
     // Give the person who clicked a moment to let go of the mouse and keys.
     if (args.waitFocus > 0) await sleep(3000);
     await cdp.evaluate(ARRIVALS);
-    const grabs = readGnomeGrabs();
     const list = await cdp.evaluate(`${S}.list()`);
 
     // One entry per distinct key, with every row that uses it.
@@ -216,13 +197,9 @@ async function main() {
             r.result = `skipped: also ${k.manual.join(", ")} (manual)`;
             continue;
         }
-        let undo = null;
         if (owners.length) {
-            undo = undoFor(owners, grabs);
-            if (!args.includeTaken || !undo) {
-                r.result = `skipped: taken by GNOME (${owners.join(", ")})${args.includeTaken ? ", and this can't undo it" : ""}`;
-                continue;
-            }
+            r.result = `skipped: taken by GNOME (${owners.join(", ")})`;
+            continue;
         }
         helpId = await focusHelp(cdp, helpId);
         if (!helpId) {
@@ -253,12 +230,7 @@ async function main() {
         }
         const last = await cdp.evaluate(`${S}.last()`);
         r.resolved = last && last.at >= before ? last.command : null;
-        r.result = reached ? "reached" : owners.length ? `taken by GNOME (${owners.join(", ")})` : "didn't reach the app";
-        if (undo) {
-            press(undo.ev);
-            await sleep(300);
-            r.result += `; undone with ${undo.back.split(" ").pop()}`;
-        }
+        r.result = reached ? "reached" : "didn't reach the app";
         await settle(cdp).catch(() => {});
         await closeNewWindows(args.port, windowsBefore).catch(() => {});
         // A window a key opened took focus; closing it hands focus back.
