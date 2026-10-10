@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) in #3602. M4c-2c (identity, preset and history owners are the Caller) in #3605. M4c-2d (the sender's UID audited and carried) in #3608. M4c-3 (cron fires in process) in #3609; M4c complete, released in v0.57.0 (#3612). M4d designed in §6.5.10 (#3616; gated except M4d-1). M4d-1 (purge by every name) implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) in #3602. M4c-2c (identity, preset and history owners are the Caller) in #3605. M4c-2d (the sender's UID audited and carried) in #3608. M4c-3 (cron fires in process) in #3609; M4c complete, released in v0.57.0 (#3612). M4d designed in §6.5.10 (#3616; gated except M4d-1). M4d-1 (purge by every name) implemented. M4d gate read clean 2026-10-10; M4d-2 (UID-keyed LAN and WAN keys) in #4567. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -1331,6 +1331,14 @@ step ships until M4b's agent-path `spawn.no_token.*` counters and the
 sustained over a release cycle (`GET /agentmux/identity/fallbacks`, first
 shipped in v0.56.14; the cycle starts with v0.57.0). Design may land
 before the gate; code does not, except M4d-1 (see "Gating per step").
+
+**Gate read 2026-10-10:** `GET /agentmux/identity/fallbacks` on every running
+channel's srv (0.59.15, 0.59.16 and 0.59.17), each read by an agent of that
+instance with its own key: no `spawn.no_token.*` counter and
+`live.tokenless_or_unknown` 0 on all three, well past the release cycle that
+started with v0.57.0. M4d-2 onward proceeds. What prompted it: a jekt from an
+agent that had moved instances arrived `TRUST=unverified`, the false
+`sensitive` M4d-4 records below, which M4d-6 resolves by UID.
 
 **Rules carried from §6.5.3–§6.5.4, and one added.** Names on the wire and in
 display are never replaced; name-keyed key rows stay until M5, so reverting
