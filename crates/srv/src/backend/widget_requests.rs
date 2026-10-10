@@ -74,13 +74,25 @@ const MAX_PENDING: usize = 32;
 
 impl Requests {
     /// Asks the user; the receiver gets their answer. Asking again for the
-    /// same version joins the request already waiting, and replaces any
-    /// request for an older version of the same widget.
+    /// same version (the same files and the same signing key) joins the
+    /// request already waiting; any other request for the widget is
+    /// replaced, its waiters declined. The key counts because `widget.sig`
+    /// isn't in the hash: a re-signed package must be shown with its new
+    /// signer (SPEC_WIDGET_SHARING_2026_10_10.md §2.3).
     pub fn ask(&self, req: WidgetInstallRequest) -> oneshot::Receiver<Answer> {
         let (tx, rx) = oneshot::channel();
         let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
-        pending.retain(|(r, _)| r.id != req.id || r.hash == req.hash);
-        if let Some((_, waiters)) = pending.iter_mut().find(|(r, _)| r.id == req.id && r.hash == req.hash) {
+        let same = |r: &WidgetInstallRequest| r.id == req.id && r.hash == req.hash && r.signature.fingerprint == req.signature.fingerprint;
+        pending.retain_mut(|(r, waiters)| {
+            if r.id != req.id || same(r) {
+                return true;
+            }
+            for tx in waiters.drain(..) {
+                let _ = tx.send(Answer::Declined);
+            }
+            false
+        });
+        if let Some((_, waiters)) = pending.iter_mut().find(|(r, _)| same(r)) {
             waiters.push(tx);
         } else {
             if pending.len() >= MAX_PENDING {
@@ -154,6 +166,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_re_signed_package_replaces_the_waiting_request() {
+        let r = Requests::default();
+        let first = r.ask(req("acme.x", "h1", "a"));
+        let mut resigned = req("acme.x", "h1", "a");
+        resigned.signature.fingerprint = Some("AAAA-BBBB-CCCC-DDDD".into());
+        let second = r.ask(resigned);
+        assert_eq!(first.await.unwrap(), Answer::Declined, "the old signer's prompt is gone");
+        let list = r.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].signature.fingerprint.as_deref(), Some("AAAA-BBBB-CCCC-DDDD"));
+        assert!(r.answer("acme.x", "h1", Answer::Approved));
+        assert_eq!(second.await.unwrap(), Answer::Approved);
+    }
+
+    #[tokio::test]
     async fn the_users_answer_reaches_every_agent_that_asked_for_that_version() {
         let r = Requests::default();
         let a = r.ask(req("acme.x", "h1", "Lark"));
@@ -183,7 +210,7 @@ mod tests {
         let r = Requests::default();
         let old = r.ask(req("acme.x", "h1", "Lark"));
         let new = r.ask(req("acme.x", "h2", "Lark"));
-        assert!(old.await.is_err(), "the old request is dropped");
+        assert_eq!(old.await.unwrap(), Answer::Declined, "the old request is declined");
         assert_eq!(r.list().iter().map(|q| q.hash.as_str()).collect::<Vec<_>>(), ["h2"]);
         let other = r.ask(req("acme.y", "h9", "Lark"));
         r.answer("acme.x", "h2", Answer::Declined);

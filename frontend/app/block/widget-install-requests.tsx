@@ -25,7 +25,8 @@ import { installLabel, WidgetApprovalDetails } from "@/app/view/settings/section
 
 const [requests, setRequests] = createSignal<WidgetInstallRequest[]>([]);
 
-const keyOf = (r: Pick<WidgetInstallRequest, "id" | "hash">) => `${r.id}@${r.hash}`;
+// The signer is part of a version: a re-signed package is a new prompt.
+const keyOf = (r: Pick<WidgetInstallRequest, "id" | "hash" | "signature">) => `${r.id}@${r.hash}@${r.signature?.fingerprint ?? ""}`;
 
 function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCloseProps): JSX.Element {
     const r = props.request;
