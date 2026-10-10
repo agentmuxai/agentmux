@@ -58,10 +58,10 @@ for p in "${PACKAGERS[@]}"; do
     for t in "${TOOLS[@]}"; do
         # A cp of target/release/<tool>[.exe] whose destination is a tools/bin
         # dir, or (macOS, where each tool runs from its own helper app) a cp of
-        # it anywhere plus a symlink at tools/bin/<tool>.
+        # it anywhere plus one `ln -s <…/tool> <…tools/bin/tool>` line.
         if ! grep -qE "^[[:space:]]*cp .*target/release/${t}(\\.exe)?[\" ].*tools/bin" "$p" &&
            ! { grep -qE "^[[:space:]]*cp .*target/release/${t}(\\.exe)?[\" ]" "$p" &&
-               grep -qE "tools/bin/${t}\"?[[:space:]]*$" "$p" && grep -qE "^[[:space:]]*ln -s .*${t}" "$p"; }; then
+               grep -qE "^[[:space:]]*ln -s .*/${t}\"? .*tools/bin/${t}\"?[[:space:]]*$" "$p"; }; then
             echo "check-bundled-tools: $p does not copy $t into tools/bin." >&2
             fail=1
         fi

@@ -283,8 +283,7 @@ ln -s "../../../Helpers/AgentMux MCP.app/Contents/MacOS/agentmux-mcp" "$APP/Cont
 # always shipped it (package-portable.sh); scripts/check-bundled-tools.sh fails
 # CI if a packager drops either tool again.
 cp target/release/agentmux-bashwrap "$BASHWRAP_APP_BIN/agentmux-bashwrap"
-ln -s "../../../Helpers/AgentMux Shell Wrapper.app/Contents/MacOS/agentmux-bashwrap" \
-      "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
+ln -s "../../../Helpers/AgentMux Shell Wrapper.app/Contents/MacOS/agentmux-bashwrap" "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
 
 # Remote helpers — agentmux-remote for every SSH host platform, since any
 # AgentMux may connect to any host; srv uploads the matching one to a host for
@@ -547,7 +546,9 @@ done
 #    login keychain on first launch (retro-keychain-prompt-recurs-per-build-
 #    identity-2026-08-21.md). Same identifier on every channel and version.
 #    srv now lives in its own helper app, whose CFBundleIdentifier is that same
-#    ai.agentmux.srv, so the bundle signature below carries it too.
+#    ai.agentmux.srv. Signing the bundle below re-signs its main executable
+#    with the bundle's identifier, so that plist entry is what keeps the
+#    identifier; the explicit --identifier here only matches it.
 #    agentmux-mcp and agentmux-bashwrap (on Claude's PATH through the
 #    MacOS/tools/bin symlinks) are signed the same way, inside-out, before the
 #    seal, or `codesign --verify --deep --strict` fails and notarization
