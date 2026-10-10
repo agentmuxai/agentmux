@@ -629,7 +629,7 @@ async fn connect_and_run(
     // request before a single byte reached the network, logged as "Missing,
     // duplicated or incorrect header sec-websocket-key". This has been
     // broken since the file's first commit; reproduced in isolation
-    // (`examples/ws_probe.rs`, removed after confirming the fix) and
+    // (a `ws_probe` example, removed after confirming the fix) and
     // confirmed fixed by switching to `ClientRequestBuilder` — tungstenite's
     // own purpose-built API for "URI + extra headers": it builds the request
     // from the `Uri` (generating the required headers, including a fresh

@@ -25,6 +25,11 @@ pub fn capture_home_dir() {
     );
 }
 
+/// The account-wide AgentMux root captured at startup (`capture_home_dir`).
+pub fn agentmux_home() -> Option<std::path::PathBuf> {
+    HOME_DIR.get().cloned().flatten().map(std::path::PathBuf::from)
+}
+
 /// The `data` of the `srvinfo` event.
 pub fn srv_info(version: &str, host_name: &str) -> serde_json::Value {
     serde_json::json!({

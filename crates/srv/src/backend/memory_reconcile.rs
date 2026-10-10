@@ -928,7 +928,7 @@ pub(crate) fn record_agentmux_write_in(
 pub(crate) fn conflict_file_name(name: &str, version: &str) -> String {
     let stem = name.strip_suffix(".md").unwrap_or(name);
     // A conflict on a conflict copy is named after the original, not
-    // stacked (`x__conflict_a__conflict_b.md`).
+    // stacked (`x__conflict_a__conflict_b.md`). (comment-hygiene: allow)
     let stem = stem.split(CONFLICT_MARK).next().unwrap_or(stem);
     let short: String = version.trim_start_matches("v_").chars().take(8).collect();
     let suffix = format!("{CONFLICT_MARK}{short}");

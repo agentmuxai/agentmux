@@ -184,6 +184,13 @@ describe("document tabs: the controller", () => {
         expect(ctl.moveTo(c, a, "before")).toBe(false);
     });
 
+    it("names a restored tab as this build does, not as it was saved", () => {
+        const h = host();
+        h.raw.doctabs = { v: 1, active: 0, tabs: [{ key: "/x/a", title: "old name", icon: "film", state: "/x/a" }] };
+        const ctl = new DocTabsController(spec, h);
+        expect(ctl.tabs().map((t) => [t.title, t.icon])).toEqual([["a", undefined]]);
+    });
+
     it("refuses to close a keepOne pane's last tab, and says so to the key handler", () => {
         const ctl = new DocTabsController(spec, host(), [{ path: "/a" }]);
         const refused = vi.fn();

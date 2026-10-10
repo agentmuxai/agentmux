@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Block lifecycle, controller I/O, blockfile access. Split from the original
-// hand-maintained rpc-api.ts. Keep in sync with agentmux-srv RPC handlers.
+// hand-maintained rpc-api file. Keep in sync with agentmux-srv RPC handlers.
 
 import { RpcClient } from "../rpc-client";
 

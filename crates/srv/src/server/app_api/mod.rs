@@ -76,6 +76,8 @@ pub(crate) use global_memory::{global_memory_write_impl, global_memory_list_impl
 mod skill;
 mod mcp;
 mod bookmarks;
+mod browser_profiles;
+pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
 mod browser_start_page;
 mod voice;
@@ -100,6 +102,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     skill::register(engine, state);
     mcp::register(engine, state);
     bookmarks::register(engine, state);
+    browser_profiles::register(engine, state);
     layout::register(engine, state);
     browser_start_page::register(engine, state);
     voice::register(engine, state);

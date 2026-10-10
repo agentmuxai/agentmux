@@ -4,8 +4,8 @@
 // Zoom module — per-pane zoom (the focused block's `term:zoom` metadata)
 // and chrome zoom (title bar + status bar, via the `--zoomfactor` CSS var).
 //
-// This used to be three files — `zoom.win32.ts`, `zoom.linux.ts`,
-// `zoom.darwin.ts` — selected by the `.platform` import resolver. Measured
+// This used to be three files — `zoom.win32`, `zoom.linux`,
+// `zoom.darwin` — selected by the `.platform` import resolver. Measured
 // on 2026-09-06 they differed by **nine lines, every one a comment**: the
 // JavaScript was identical on all three platforms
 // (docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md §2.3). The

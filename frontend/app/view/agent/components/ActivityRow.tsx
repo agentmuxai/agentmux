@@ -12,7 +12,7 @@
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
-import { formatElapsedClock } from "@/util/format-time";
+import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { ChunkPreview } from "./ChunkPreview";
 import {
     createDispatchDetail,
@@ -92,8 +92,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         const a = props.activity();
         if (!a || a.sleepMs == null || a.status !== "running") return "";
         tick();
-        const leftMs = Math.max(0, a.startedAt + a.sleepMs - Date.now());
-        return `~${Math.ceil(leftMs / 1000)}s left`;
+        return formatTimeLeft(a.startedAt + a.sleepMs - Date.now());
     });
 
     const elapsed = createMemo(() => {

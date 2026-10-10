@@ -18,17 +18,18 @@
  * 4. `status`: a plain phrase from what the agent is doing.
  *
  * One deviation from the spec's order, on purpose: an agent that is waiting on
- * the user says so ahead of `restored` and `heuristic`. That is the one state
- * someone has to act on, and an old goal would bury it. The flag is honoured
- * only while the agent has a turn in flight (`status === "running"`): a pending
- * question means a live turn, so a flag left behind by a crash, or by a question
- * that was answered while the pane was not mounted to clear it, cannot outrank
- * the other lines once the agent is idle.
+ * the user says so ahead of every title, as the agent pane's working row does.
+ * That is the one state someone has to act on, and any title would bury it.
+ * Which status wins comes from the shared ranking (agent-status.ts), which
+ * honours the flag only while the agent has a turn in flight: a flag left
+ * behind by a crash, or by a question answered while the pane was not mounted
+ * to clear it, cannot outrank the other lines once the agent is idle.
  *
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.4.
  */
 
 import { readSwarmSummary } from "./activitySummary";
+import { rankAgentStatus, type AgentStatus } from "./agent-status";
 import { isUsableTitle } from "./ambient-title";
 
 export type SwarmLineSource = "generated" | "restored" | "heuristic" | "status";
@@ -146,27 +147,30 @@ export interface SwarmLineInput {
     contextTokens: number | null;
 }
 
+/** The ranked status of a Swarm agent, from what its row knows: whether a
+ *  turn is in flight, and the pending-question flag (`term:awaiting_user`). */
+function swarmAgentStatus(meta: Record<string, unknown> | undefined, status: "running" | "idle"): AgentStatus {
+    return rankAgentStatus({ live: status === "running", needsYou: meta?.[META_AWAITING_USER] === true });
+}
+
 /**
- * Whether the agent is waiting on the user: a question is pending
- * (`term:awaiting_user`) and a turn is in flight. The row's "Waiting for you"
- * line and the status chip's "question" state both use this. The running-only
- * guard is what stops a flag left by a crash, or by a question answered while
- * the pane was not mounted, from marking an idle agent (#4234).
+ * Whether the agent is waiting on the user: a question is pending and a turn
+ * is in flight. The row's "Waiting for you" line and the status chip's
+ * "question" state both use this.
  */
 export function isAwaitingUser(meta: Record<string, unknown> | undefined, status: "running" | "idle"): boolean {
-    return status === "running" && meta?.[META_AWAITING_USER] === true;
+    return swarmAgentStatus(meta, status).kind === "needs-you";
 }
 
 /** The line for one agent row. Always returns something. */
 export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
-    const { meta, status, currentTool, contextTokens } = input;
+    const { meta, currentTool, contextTokens } = input;
+    const status = swarmAgentStatus(meta, input.status);
+
+    if (status.kind === "needs-you") return { text: STATUS_WAITING, source: "status" };
 
     const generated = readSwarmSummary(meta);
     if (generated) return { text: generated, source: "generated" };
-
-    if (isAwaitingUser(meta, status)) {
-        return { text: STATUS_WAITING, source: "status" };
-    }
 
     const restored = meta?.[META_RESTORED];
     if (typeof restored === "string" && isUsableTitle(restored)) {
@@ -177,7 +181,9 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
     const heuristic = typeof lastPrompt === "string" ? heuristicTitle(lastPrompt) : null;
     if (heuristic) return { text: heuristic, source: "heuristic" };
 
-    if (status === "running") {
+    // The Swarm knows no held reason, so a live agent is working; with no
+    // tool in flight it is the model's own turn.
+    if (status.kind === "working") {
         return { text: currentTool ? STATUS_WORKING : STATUS_THINKING, source: "status" };
     }
     return {

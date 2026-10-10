@@ -11,11 +11,13 @@ import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry, type SettingsSection,
 import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
+import { BrowserSection } from "./sections/browser-section";
 import { TerminalSection } from "./sections/terminal-section";
 import { SoundsSection } from "./sections/sounds-section";
 import { NotificationsSection } from "./sections/notifications-section";
 import { RecordingSection } from "./sections/recording-section";
 import { DevicesSection } from "./sections/devices-section";
+import { WidgetsSection } from "./sections/widgets-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 import { focusWhenRendered } from "@/util/focusutil";
@@ -52,11 +54,13 @@ function ConfigErrorsBanner(): JSX.Element {
 const RAIL: TabItem<SettingsSection>[] = [
     { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
     { id: "window",     label: SETTINGS_SECTION_LABELS.window,     icon: "table-cells" },
+    { id: "browser",    label: SETTINGS_SECTION_LABELS.browser,    icon: "globe" },
     { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "square-terminal" },
     { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
     { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
     { id: "recording",  label: SETTINGS_SECTION_LABELS.recording,  icon: "microphone" },
     { id: "devices",    label: SETTINGS_SECTION_LABELS.devices,    icon: "mobile-screen" },
+    { id: "widgets",    label: SETTINGS_SECTION_LABELS.widgets,    icon: "puzzle-piece" },
     { id: "advanced",   label: SETTINGS_SECTION_LABELS.advanced,   icon: "sliders" },
 ];
 
@@ -123,6 +127,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         <Match when={section() === "window"}>
                             <WindowPanesSection />
                         </Match>
+                        <Match when={section() === "browser"}>
+                            <BrowserSection />
+                        </Match>
                         <Match when={section() === "terminal"}>
                             <TerminalSection />
                         </Match>
@@ -137,6 +144,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         </Match>
                         <Match when={section() === "devices"}>
                             <DevicesSection />
+                        </Match>
+                        <Match when={section() === "widgets"}>
+                            <WidgetsSection />
                         </Match>
                         <Match when={section() === "advanced"}>
                             <AdvancedSection />

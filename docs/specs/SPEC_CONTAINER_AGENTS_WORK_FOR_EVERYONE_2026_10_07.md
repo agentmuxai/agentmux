@@ -106,7 +106,7 @@ For a stored legacy image the check also tries the base image, mirroring the run
 
 - `IMAGE_NAME` becomes `agentmuxai/agent-base`; the `claude_version` input and the `build-args` go away.
 - A manual dispatch can now publish `:latest` (new boolean input, default off). Tags still publish `:latest` as before. Without this the first publish after merging could only be a release tag.
-- After the push, a step checks an anonymous pull in the style of `mirror-reviewer-image.yml`, but inverted: that workflow fails when an anonymous pull works, this one fails when it does not. It runs `scripts/check-anonymous-pull.sh`, which fails with a message naming the exact UI step (section 7).
+- After the push, a step tries an anonymous pull and fails if it does not work. It runs `scripts/check-anonymous-pull.sh`, which fails with a message naming the exact UI step (section 7).
 
 ## 4. Phases
 

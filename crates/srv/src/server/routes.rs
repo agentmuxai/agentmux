@@ -240,6 +240,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // shares the exact pane.open logic with the WebSocket RPC handler
         // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
         .route("/api/v1/pane/open", post(handle_pane_open))
+        // Widgets for agents (WidgetList, WidgetInstall): an install waits
+        // for the user's answer, which only the host can carry.
+        .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
+        .route("/api/v1/widgets/install", post(super::widget_agent_handlers::handle_widgets_install))
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS
@@ -410,6 +414,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
+        .route("/api/v1/host/widget_approval", post(super::widget_handlers::handle_host_widget_approval))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
@@ -489,6 +494,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "/agentmux/identity/fallbacks",
             get(caller::handle_identity_fallbacks),
         )
+        .route(
+            "/agentmux/agents/self/keys",
+            get(agent_self_keys::handle_agent_self_keys),
+        )
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
@@ -563,8 +572,16 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .layer(cors.clone())
         .with_state(state.clone());
 
+    // An approved widget's files (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md
+    // §5.2). No auth key: a widget's iframe loads them, and the URL's key
+    // segment is what keeps other pages out. Full router only, never the LAN.
+    let widget_files = Router::new()
+        .route("/agentmux/widget-files/:id/:hash/:key/*path", get(super::widget_handlers::handle_widget_file))
+        .route("/agentmux/widget-sdk/:file", get(super::widget_handlers::handle_widget_sdk));
+
     let full = Router::new()
         .merge(full_health)
+        .merge(widget_files)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
         .merge(authed_routes);

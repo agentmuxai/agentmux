@@ -3,7 +3,7 @@
 
 // Native (per-agent) memory files — `agent:memory:*` RPCs backed by
 // db_agent_native_memory. This is the agent-written Memory concept, NOT the
-// Armory Bundle (see ./bundle.ts). Split from ./memory.ts in Phase 1 of
+// Armory Bundle (see ./bundle.ts). Split from the old `memory` module in Phase 1 of
 // docs/specs/SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md.
 
 import { RpcClient } from "../rpc-client";

@@ -342,6 +342,15 @@ pub(crate) fn persisted_agent_identity(
             None
         }
     };
+    // Identity M4d-2: the UID's own signing keys, copied from its name's on
+    // ownership evidence or minted. Only token-carrying spawns get them (the
+    // ones that will sign v2, M4d-6); nothing reads them yet. Like the token,
+    // a store error is logged, never a spawn failure.
+    if token.is_some() {
+        if let Err(e) = mstore.agent_uid_keys_ensure(&instance.id) {
+            tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: UID key ensure failed");
+        }
+    }
     Some(PersistedAgentIdentity {
         uid: instance.id,
         slug,

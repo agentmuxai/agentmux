@@ -146,6 +146,10 @@ declare global {
          *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
          *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
         decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "cancel"): Promise<void>;
+        /** Answer a widget's install prompt: approve exactly the package version
+         *  (`hash`) the user was shown, or cancel. Relayed by the host, which srv
+         *  trusts and agents can't impersonate. SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3. */
+        decideWidget(id: string, hash: string, approve: boolean): Promise<void>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */
@@ -161,9 +165,17 @@ declare global {
      * Events (`browser-pane-*`, `pane-media-*`) arrive through `AppApi.listen`.
      */
     type BrowserPaneHostApi = {
-        /** `allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
-         *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6). */
-        create(blockId: string, url: string, windowLabel: string, rect: HostRect, allowedOrigins?: string[]): Promise<void>;
+        /** `opts.allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
+         *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6).
+         *  `opts.identity`: the jar it browses as (`browser:identity`,
+         *  SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6). */
+        create(
+            blockId: string,
+            url: string,
+            windowLabel: string,
+            rect: HostRect,
+            opts?: { allowedOrigins?: string[]; identity?: string }
+        ): Promise<void>;
         resize(blockId: string, rect: HostRect): Promise<void>;
         /** Move several of this window's panes in one step; resolves once they have moved. */
         setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
@@ -255,6 +267,14 @@ declare global {
     /** Whether the host can manage an OS login entry, and whether one is registered. */
     type AutostartStatus = { available: boolean; enabled: boolean };
 
+    /** A window opened at a user's click, to be pointed at a URL later (`AppApi.reserveExternalWindow`). */
+    type ExternalWindow = {
+        /** Shows `url` (http or https) in the window, cut off from this page first. */
+        navigate(url: string): void;
+        /** Closes it, when the URL never came. */
+        close(): void;
+    };
+
     type AppApi = {
         /** Capabilities of the host this frontend is running in. */
         getHostCaps(): HostCaps;
@@ -270,6 +290,14 @@ declare global {
         approvals: ApprovalHostApi;
         /** Open a URL in the system browser; rejects if the host could not. */
         openExternalChecked(url: string): Promise<void>;
+        /**
+         * Open a window now, during a user's click, for a URL that arrives
+         * later (a provider login's): a browser opens windows only during a
+         * gesture. Null when the host opens URLs in the system browser anyway
+         * (the desktop), or the window was refused; the caller then opens the
+         * URL as usual. Called synchronously in the click handler.
+         */
+        reserveExternalWindow(): ExternalWindow | null;
         readClipboardText(): Promise<string>;
         /** The clipboard's text plus paths for its copied files or image data
          *  (image data written to a temp file by the host). For the agent

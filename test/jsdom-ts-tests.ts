@@ -77,6 +77,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/agent/failure/useAccountBinding.test.ts",
     "frontend/app/view/agent/flows/force-login.test.ts",
     "frontend/app/view/agent/flows/login-backend.test.ts",
+    "frontend/app/view/agent/flows/login-window.test.ts",
     "frontend/app/view/agent/flows/open-oauth-pane.test.ts",
     "frontend/app/view/agent/flows/run-provider-login.test.ts",
     "frontend/app/view/agent/hooks/useAgentCommands.test.ts",

@@ -324,6 +324,7 @@ jobs:
       # everything it does cover, the same gate that would have caught #1876
       # (missing fields); #1823 was a Windows `cfg` break in agentmux-cef
       # itself, which nightly (ci-nightly-build.yml) now owns catching.
+      # The `rust-macos` job checks the same crate list; keep them identical.
       - name: cargo check --tests (CEF-free crates)
         run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
@@ -395,6 +396,28 @@ jobs:
       - name: RPC codegen hygiene
         if: matrix.os == 'ubuntu-latest'
         run: node scripts/check-rpc-codegen-hygiene.mjs
+
+  # macOS compile check, non-blocking for now (PLAN_MACOS_COMPILE_GATE_2026_10_09.md
+  # phase 1): `cargo check --tests` on the same CEF-free crates as the `rust`
+  # job, so a macOS-only compile break shows on the PR instead of in the next
+  # nightly. `continue-on-error`, and deliberately not in `CI required`'s
+  # `needs`, until phase 2's measurements say it is fast and reliable enough to
+  # gate merges; then `macos-latest` moves into the `rust` matrix instead.
+  rust-macos:
+    name: cargo check --tests (macos-latest)
+    needs: changes
+    # Same condition as `rust`, for the same reasons (see its comment).
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Keep this crate list identical to the `rust` job's.
+      - name: cargo check --tests (CEF-free crates)
+        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
   docs:
     name: doc status + grep gates

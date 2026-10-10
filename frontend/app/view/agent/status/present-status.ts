@@ -18,9 +18,16 @@
  *
  * Timing (the "right time"): an activity is promoted to rank 4 only after a
  * threshold, so bursts of quick calls never reach the screen; a shown line
- * stays at least DWELL before a same-or-lower rank replaces it (0–2 preempt);
- * a rank-4 line lingers HOLD after its activity ends, so the row doesn't
- * flash back to the goal between two calls.
+ * stays at least DWELL once it is fully on screen before a same-or-lower rank
+ * replaces it (0–2 preempt); a rank-4 line lingers HOLD after its activity
+ * ends, and for as long as the next call is still too young to show (running,
+ * or the model writing its input), so the row doesn't flash back to the goal
+ * between two calls.
+ *
+ * Type-out: every new line types out (the operator's call, over §6.4's "swap
+ * within a rank"); the same line with a counter moving keeps its key and is
+ * not typed again. DWELL counts from the end of the type-out, so a line is
+ * never replaced the moment it has finished printing.
  *
  * docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.
  */
@@ -40,8 +47,11 @@ export const TIMING = {
     /** The model writing its reply. */
     writingPromoteMs: 3_000,
     thinkingPromoteMs: 4_000,
-    /** A line stays at least this long before a same-or-lower rank replaces it. */
+    /** A line stays at least this long, once fully typed out, before a
+     *  same-or-lower rank replaces it. */
     dwellMs: 1_200,
+    /** The type-out's pace, per character; the row reads it from here. */
+    revealCharMs: 28,
     /** A rank-4 line lingers this long after its activity ended. */
     holdMs: 2_000,
     /** A request that has waited this long for the model is worth saying. */
@@ -67,13 +77,13 @@ export interface StatusInput {
     goal: string | null;
     /** The cycling phrase, without its ellipsis. */
     phrase: string;
+    /** The row will show the next new line at once rather than type it out
+     *  (reduced motion, or the first line of a turn), so its dwell starts now. */
+    instantReveal?: boolean;
 }
 
 export interface StatusLine {
     text: string;
-    /** Shown after the text, muted, and truncated first: the session's goal,
-     *  beside a line about what is happening right now (ranks 2–5). */
-    detail?: string;
     rank: number;
     /** Same key: the same line, its counters moved. A new key types out. */
     key: string;
@@ -83,6 +93,9 @@ export interface StatusMemory {
     line: StatusLine;
     /** When this key was first shown. */
     since: number;
+    /** When it is fully on screen: `since`, plus its type-out if it has one.
+     *  The dwell counts from here. */
+    readyAt: number;
     /** When its candidate was last eligible (for HOLD). */
     liveAt: number;
 }
@@ -93,7 +106,7 @@ function line(rank: number, text: string, key = text): StatusLine {
 
 /** Rank 4: what is running, once it has lasted long enough. A subagent's
  *  own calls show under its Agent call ("Explore agent: map it · Reading
- *  a.ts"); one call shows its test progress, else its time once long. */
+ *  a.ts"); one call shows its test progress, else its time once long. (comment-hygiene: allow) */
 function nowLine(a: ActivityState, nowMs: number): StatusLine | null {
     const running = a.tools.filter((t) => t.activity.family !== "plan");
     const ids = new Set(running.map((t) => t.id).filter((id): id is string => id != null));
@@ -177,42 +190,58 @@ export function statusCandidates(input: StatusInput): StatusLine[] {
     return out;
 }
 
-/** The goal beside a line about the moment (ranks 2–5), never beside itself
- *  or a status that owns the row. */
-function withDetail(l: StatusLine, goal: string | null): StatusLine {
-    return goal && l.rank >= RANK.anomaly && l.rank <= RANK.plan ? { ...l, detail: goal } : l;
-}
-
-/** The line to show now, and the memory to pass next time. */
+/** The line to show now, and the memory to pass next time. The goal is a
+ *  line of its own (rank 6), never a muted tail on another: the Swarm view
+ *  already shows each agent's goal (§6.10). */
 export function presentStatus(input: StatusInput, memory: StatusMemory | null): { line: StatusLine; memory: StatusMemory } {
-    const r = choose(input, memory);
-    return { line: withDetail(r.line, input.goal), memory: r.memory };
-}
-
-function choose(input: StatusInput, memory: StatusMemory | null): { line: StatusLine; memory: StatusMemory } {
     const now = input.nowMs;
     const candidates = statusCandidates(input);
     const best = candidates[0];
     const remember = (chosen: StatusLine, eligible: boolean) => {
-        const same = memory?.line.key === chosen.key;
-        return {
-            line: chosen,
-            memory: { line: chosen, since: same && memory ? memory.since : now, liveAt: eligible ? now : (memory?.liveAt ?? now) },
-        };
+        if (memory && memory.line.key === chosen.key) {
+            const line = chosen;
+            // Text that grows while it is still typing out (a subagent step,
+            // test progress) is typed to its new end, so it is ready later.
+            const typing = now < memory.readyAt;
+            const readyAt = typing ? Math.max(memory.readyAt, memory.since + chosen.text.length * TIMING.revealCharMs) : memory.readyAt;
+            return { line, memory: { ...memory, line, readyAt, liveAt: eligible ? now : memory.liveAt } };
+        }
+        const readyAt = input.instantReveal ? now : now + chosen.text.length * TIMING.revealCharMs;
+        return { line: chosen, memory: { line: chosen, since: now, readyAt, liveAt: now } };
     };
     if (!memory || best.rank <= RANK.anomaly) return remember(best, true);
+    const settled = now - memory.readyAt >= TIMING.dwellMs;
 
     // The line on screen, as it reads now if it is still eligible.
     const prev = candidates.find((c) => c.key === memory.line.key);
     if (prev) {
         // A same-or-lower rank waits out the dwell; a higher one comes now.
-        if (best.key !== prev.key && best.rank >= prev.rank && now - memory.since < TIMING.dwellMs) return remember(prev, true);
+        if (best.key !== prev.key && best.rank >= prev.rank && !settled) return remember(prev, true);
         return remember(best, true);
     }
-    // Its activity ended: a rank-4 line lingers briefly unless something at
-    // least as specific is ready, so the row doesn't flash between two calls.
-    if (memory.line.rank === RANK.now && best.rank > RANK.now && now - memory.liveAt < TIMING.holdMs) {
-        return remember(memory.line, false);
+    // A line about activity that is no longer a candidate (its call ended,
+    // or it folded into "2 tools running") still gets its dwell before a
+    // same-or-lower rank replaces it. A status line (needs you, held, an
+    // anomaly, a lead-in) goes the moment its cause does: it would be false
+    // ("Waiting for your answer" after you answered) or frozen if it stayed.
+    if (memory.line.rank >= RANK.now && best.rank >= memory.line.rank && !settled) return remember(memory.line, false);
+    // Its activity ended: a rank-4 line lingers unless something at least as
+    // specific is ready, so the row doesn't flash between two calls. It
+    // lingers for HOLD, for its own dwell, and while the next call is
+    // running but still too young to show.
+    if (memory.line.rank === RANK.now && best.rank > RANK.now) {
+        // The next call is on its way: running but too young to show, or the
+        // model writing its input. Bounded twice: by each one's promote
+        // threshold, and overall, so a burst of quick calls (each gone before
+        // it could show) can't keep an ended line up for the whole burst. The
+        // cap still covers any next call that began within HOLD.
+        const a = input.activity;
+        const cap = memory.liveAt + TIMING.holdMs + Math.max(TIMING.toolPromoteMs, TIMING.composingPromoteMs);
+        const nextCallWarming =
+            now < cap &&
+            ((a?.tools ?? []).some((t) => t.activity.family !== "plan" && now - t.startedAt < TIMING.toolPromoteMs) ||
+                (a?.phase === "composing" && now - a.phaseSince < TIMING.composingPromoteMs));
+        if (now - memory.liveAt < TIMING.holdMs || !settled || nextCallWarming) return remember(memory.line, false);
     }
     return remember(best, true);
 }

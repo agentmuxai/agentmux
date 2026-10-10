@@ -159,6 +159,9 @@ pub struct Handler {
     /// its audit entries. Same set-and-restore discipline as
     /// `delivery_source_uid`.
     delivery_wan: Option<super::types::WanAudit>,
+    /// The LAN-claimed UID of the delivery in flight (identity M4d-6), same
+    /// set-and-restore discipline.
+    delivery_lan_claimed_uid: String,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
     /// Warden Supervisor consecutive-nudge ceiling state, keyed on the
@@ -264,6 +267,7 @@ impl Handler {
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
             delivery_wan: None,
+            delivery_lan_claimed_uid: String::new(),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
             nudge_counters: HashMap::new(),
@@ -909,11 +913,13 @@ impl Handler {
         let uid = std::mem::take(&mut req.audit_source_uid);
         let outer = std::mem::replace(&mut self.delivery_source_uid, uid);
         let outer_wan = std::mem::replace(&mut self.delivery_wan, super::types::WanAudit::from_request(&req));
+        let outer_lan = std::mem::replace(&mut self.delivery_lan_claimed_uid, std::mem::take(&mut req.lan_claimed_uid));
         let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure, reason);
         // Restore, not clear: a Supervisor nudge runs this inside its own
         // decision, whose UID stays set for the rest of it.
         self.delivery_source_uid = outer;
         self.delivery_wan = outer_wan;
+        self.delivery_lan_claimed_uid = outer_lan;
         resp
     }
 
@@ -1870,6 +1876,7 @@ impl Handler {
             evicted_block: None,
             evicted_agent: None,
             audit_source_uid: self.delivery_source_uid.clone(),
+            lan_claimed_uid: self.delivery_lan_claimed_uid.clone(),
             wan: self.delivery_wan.clone(),
         };
 
@@ -1909,6 +1916,7 @@ impl Handler {
             evicted_block: evicted_block.map(|s| s.to_string()),
             evicted_agent: evicted_agent.map(|s| s.to_string()),
             audit_source_uid: String::new(),
+            lan_claimed_uid: String::new(),
             wan: None,
         };
 

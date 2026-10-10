@@ -12,7 +12,7 @@
 //   2. The "hamburger Identity & Memory manager" (`BundleManagerModal`)
 //      referenced in that pane's comment was never actually built —
 //      the Armory pane's now-removed "Identities" tab
-//      (`AgentIdentitiesPanel`, `agent-identities-panel.tsx`) shipped
+//      (`AgentIdentitiesPanel`) shipped
 //      instead, not this file.
 //
 // `statusBadge()` is the one export that survives: Armory Phase 5

@@ -345,6 +345,27 @@ pub struct InjectRequest {
     /// yet" conditions as `lan_sig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_sig: Option<String>,
+    /// Identity M4d-6 (`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md`
+    /// §6.5.10): the sending agent's UID, as its MCP fetched it with its
+    /// UID-keyed key (M4d-3). Bound into `channel_sig_v2`; a forwarding srv
+    /// never sets or changes it. Absent when the sender has no UID key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_uid: Option<String>,
+    /// Base64 Ed25519 signature, made only with the sender's UID-keyed LAN
+    /// key, over the cross-channel material plus `source_uid`
+    /// (`agentmux_common::jekt_sign::sign_channel_jekt_v2`). Verified by UID
+    /// against the `uid_public_key` an instance published for it (M4d-5), so
+    /// it proves *which* agent sent the jekt, not just which name. The v1
+    /// `channel_sig` is still sent beside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_sig_v2: Option<String>,
+    /// Identity M4d-6: base64 Ed25519 signature, made only with the sender's
+    /// UID-keyed LAN key, over the LAN material plus `source_uid`
+    /// (`agentmux_common::jekt_sign::sign_lan_jekt_v2`). A receiver checks it
+    /// only after the v1 `lan_sig` verified, and records the UID as claimed by
+    /// that LAN path, never as verified attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_sig_v2: Option<String>,
     /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
     /// produced with the sender's own `AGENTMUX_WAN_KEY` — a *different* key
     /// from `AGENTMUX_LAN_KEY` — over a domain-separated payload
@@ -803,6 +824,11 @@ pub struct UiBrowserOpenRequest {
     /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_origins: Option<Vec<String>>,
+    /// Browse as `"incognito"` (a fresh jar of its own) or a named browser
+    /// profile the user lets agents use; absent: Personal
+    /// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 /// Response for `POST /api/v1/ui/browser/open`: the new pane's block id,

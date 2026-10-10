@@ -9,13 +9,14 @@ import { invokeBrowserApi, invokeCommand } from "@/app/platform/ipc";
 
 /** `AppApi.browserPanes` on CEF: one host command per method. */
 export const cefBrowserPanes: BrowserPaneHostApi = {
-    create: async (blockId, url, windowLabel, rect, allowedOrigins) => {
+    create: async (blockId, url, windowLabel, rect, opts) => {
         await invokeCommand("browser_pane_create", {
             block_id: blockId,
             url,
             window_label: windowLabel,
             ...rect,
-            ...(allowedOrigins?.length ? { allowed_origins: allowedOrigins } : {}),
+            ...(opts?.allowedOrigins?.length ? { allowed_origins: opts.allowedOrigins } : {}),
+            ...(opts?.identity ? { identity: opts.identity } : {}),
         });
     },
     resize: async (blockId, rect) => {
@@ -164,6 +165,9 @@ export const cefApprovals: ApprovalHostApi = {
     decideBrowserAttention: async (blockId, id, decision) => {
         await invokeCommand("browser_attention_resolve", { block_id: blockId, id, decision });
     },
+    decideWidget: async (id, hash, approve) => {
+        await invokeCommand("widget_approval_decide", { id, hash, decision: approve ? "approve" : "cancel" });
+    },
     requestMemoryAdoption: async (args) => {
         await invokeCommand("memory_adoption_request", args);
     },
@@ -177,6 +181,8 @@ export const cefHostMisc = {
     openExternalChecked: async (url: string) => {
         await invokeCommand("open_external", { url });
     },
+    // The system browser opens whenever asked: nothing to reserve.
+    reserveExternalWindow: (): ExternalWindow | null => null,
     readClipboardText: () => invokeCommand<string>("read_clipboard", {}),
     readClipboardAttachments: () =>
         invokeCommand<{ text: string; paths: string[] }>("read_clipboard_attachments", {}),

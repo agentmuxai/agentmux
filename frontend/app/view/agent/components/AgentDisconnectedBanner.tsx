@@ -22,6 +22,7 @@
 
 import { Show, type Accessor, type JSX } from "solid-js";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import { formatAgoPrecise } from "@/util/format-time";
 
 interface AgentDisconnectedBannerProps {
     /** Live phase accessor — banner only renders when kind=Disconnected. */
@@ -34,17 +35,6 @@ interface AgentDisconnectedBannerProps {
      * click — the second subscribe still lands in Idle.
      */
     onReconnect: () => void;
-}
-
-function formatLastConnectedAge(lastConnectedAt: number): string {
-    const ageMs = Date.now() - lastConnectedAt;
-    if (ageMs < 1_000) return "just now";
-    const seconds = Math.floor(ageMs / 1_000);
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h ago`;
 }
 
 export const AgentDisconnectedBanner = (
@@ -74,7 +64,7 @@ export const AgentDisconnectedBanner = (
                             <span class="agent-disconnected-banner-detail">
                                 {" · "}was {p.lastKind.toLowerCase()}
                                 {", "}
-                                {formatLastConnectedAge(p.lastConnectedAt)}
+                                {formatAgoPrecise(p.lastConnectedAt)}
                             </span>
                         </span>
                         <button

@@ -117,6 +117,19 @@ async fn main() {
         &stores.identity_store,
     );
 
+    // Widget packages: scan ~/.agentmux/widgets, apply this instance's
+    // approvals, merge their widget-bar entries, watch the folder
+    // (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.1). After the user's
+    // widgets.json loaded above, whose v1 module entries it lists too.
+    backend::widget_packages::start(
+        &config.data_home,
+        config.auth_key.clone(),
+        bg.fs_watch_pool.clone(),
+        bg.config_watcher.clone(),
+        bg.event_bus.clone(),
+        bg.broker.clone(),
+    );
+
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = boot_timing::time_async(
         "bind_listeners_and_network",

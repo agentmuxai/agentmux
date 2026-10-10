@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // File and remote-file operations, plus the editor file-tree commands. Split
-// from the original hand-maintained rpc-api.ts.
+// from the original hand-maintained rpc-api file.
 
 import { RpcClient } from "../rpc-client";
 

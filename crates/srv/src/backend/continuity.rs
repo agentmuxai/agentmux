@@ -215,7 +215,7 @@ fn identifier(token: &str) -> Option<String> {
         return has_host.then(|| t.to_string());
     }
     // `#3671` or `owner/repo#3671`. Anything else with a `#` falls through,
-    // so `docs/spec.md#section` is still seen as a path.
+    // so `docs/spec.md#section` is still seen as a path. (comment-hygiene: allow)
     if let Some((repo, num)) = t.rsplit_once('#') {
         let repo_ok = repo.is_empty()
             || (repo.split('/').count() == 2 && repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)));

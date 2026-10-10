@@ -67,6 +67,12 @@ pub(super) fn purge_agent_dependents(
             params![id],
         )?;
     }
+    // Identity M4d-2: the UID-keyed signing keys, keyed by `uid`.
+    for table in ["db_agent_lan_keys_by_uid", "db_agent_wan_keys_by_uid"] {
+        if present.contains(table) {
+            removed += conn.execute(&format!("DELETE FROM {table} WHERE uid=?1"), params![id])?;
+        }
+    }
     // The two that key on the agent differently.
     if present.contains("db_conversation_trust_grants") {
         removed += conn.execute(

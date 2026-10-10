@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Connections, config/meta/vars, events, routes, workspace/WSL, and toolchain
-// commands. Split from the original rpc-api.ts.
+// commands. Split from the original rpc-api file.
 
 import { RpcClient } from "../rpc-client";
 

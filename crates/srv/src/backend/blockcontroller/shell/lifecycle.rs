@@ -208,7 +208,7 @@ async fn run_pty_output_flusher(
         // boundary — but `block_in_place` gets its own replacement worker
         // via THE SAME shared `spawn_blocking` pool internally (verified
         // directly against the vendored tokio 1.52.3 source,
-        // `runtime/scheduler/multi_thread/worker.rs`'s `block_in_place`:
+        // `runtime/scheduler/multi_thread/worker.rs`'s `block_in_place`: (comment-hygiene: allow)
         // `runtime::spawn_blocking(move || run(worker))`), so per flush it
         // draws on that shared pool TWICE — once for the replacement
         // worker, once implicitly for the original thread's own blocking

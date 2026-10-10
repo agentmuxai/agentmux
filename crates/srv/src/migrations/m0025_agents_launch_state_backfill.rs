@@ -22,9 +22,9 @@
 //! has written since v29 shipped. Channel-scoped: each channel's
 //! `objects.db` has its own rows.
 //!
-//! Frozen copy of `dual_write.rs::agents_projection_key_for_inst`'s rule
+//! Frozen copy of `dual_write::agents_projection_key_for_inst`'s rule
 //! (as of v29) — deliberately not a call into it, per this module's "freeze
-//! copies of live logic" doc: `dual_write.rs` is deleted when the legacy
+//! copies of live logic" doc: `dual_write` is deleted when the legacy
 //! table is dropped, and this migration must keep producing the same rows
 //! on every machine it ever runs on.
 //!

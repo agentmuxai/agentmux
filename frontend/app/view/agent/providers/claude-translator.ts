@@ -232,8 +232,14 @@ export class ClaudeTranslator implements OutputTranslator {
             return this.handleUserMessage(rawEvent.message, rawEvent.tool_use_result);
         }
 
-        // Case 5: rate_limit_event — CLI is waiting on a 429, will retry
+        // Case 5: rate_limit_event — CLI is waiting on a 429, will retry.
+        // Claude Code also sends it as a usage report on ordinary requests,
+        // with `rate_limit_info.status` "allowed" or "allowed_warning" (seen on
+        // 2.1.288: every one of a session's 46 was "allowed"). Only "rejected"
+        // means it is held back; the rest showed a false "Rate limited".
         if (rawEvent.type === "rate_limit_event") {
+            const status = rawEvent.rate_limit_info?.status;
+            if (status != null && status !== "rejected") return [];
             return [{
                 type: "provider_waiting",
                 reason: "rate_limited" as const,

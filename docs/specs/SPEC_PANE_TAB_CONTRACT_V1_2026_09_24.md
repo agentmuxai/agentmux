@@ -10,8 +10,10 @@ activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
 Phases 5a–5b (capabilities replace view-name checks) in #3765; 5c dropped
 (§4); Phase 6 (third-party widgets from the user's widgets.json) in #3767;
 Phase 2c part 1 (sysinfo, swarm, drone, warden, armory, media → native
-`create`) in #3768; part 2a (editor, browser) in the PR after it; term and
-agent not started — they need the contract hooks listed under 2c first.
+`create`) in #3768; part 2a (editor, browser) in the PR after it; parts 2b-1
+to 2b-3 (the hooks, then terminal and agent on `create`, §4). User widgets
+continue in `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (packages,
+approval, a sandboxed kind).
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad

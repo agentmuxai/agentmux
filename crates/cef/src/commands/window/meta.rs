@@ -5,7 +5,7 @@
 // label / is-main queries, double-click time, instance + window listing,
 // focus, backend-window registration, and DevTools toggles.
 //
-// Fifth carve of the commands/window.rs modularization (Plan 1). All
+// Fifth carve of the `commands::window` modularization (Plan 1). All
 // handlers are `pub` and dispatched by ipc.rs (re-exported
 // `pub use meta::*`). Pure move — no behavior change. Self-contained:
 // every cross-module reference is a fully-qualified `crate::…` path
