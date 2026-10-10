@@ -276,6 +276,7 @@ partial list.
 | [`SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20`](SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) | Spec: Intelligent Long-Running-Task Dashboard (Phase C) |
 | [`SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20`](SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md) | Spec: Background Task PID Capture (Phase A) |
 | [`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20`](SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md) | Spec: Background Task Teardown Survival (Phase B) |
+| [`SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10`](SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md) | SPEC: stream Bash output through Claude Code's shell prefix instead of rewriting the command |
 | [`SPEC_BENCHMARK_PORTABLE_DISCOVERY_2026_05_20`](SPEC_BENCHMARK_PORTABLE_DISCOVERY_2026_05_20.md) | SPEC: Benchmark Auth-File Discovery — Dev and Portable Instances |
 | [`SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25`](SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md) | SPEC: Block identity bindings from resolving to a provider's ambient home dir |
 | [`SPEC_BRIDGE_INIT_RECOVERY_2026_06_15`](SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md) | SPEC: Host-Bridge Init Failure — Self-Heal + Recovery UI |
