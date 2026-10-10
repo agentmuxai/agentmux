@@ -31,11 +31,11 @@ export function moveEditorTabTo(blockId: string, tabId: string, targetId: string
     return snapshot(blockId)?.doc !== before;
 }
 
-/** Tabs being saved, per pane. A tab can't move mid-save: the save's end
- *  (its unsaved mark cleared, a scratch buffer moved to its new path) would
- *  land on the pane it left. */
-/** Counted per tab: a second save can start before the first ends (Save As
- *  submitted twice), and the tab stays put until the last one has. */
+/** Saves in flight, counted per tab, per pane. A tab can't move mid-save:
+ *  the save's end (its unsaved mark cleared, a scratch buffer moved to its new
+ *  path) would land on the pane it left. A second save can start before the
+ *  first ends (Save As submitted twice), so the tab stays put until the last
+ *  one has. */
 const saving = new WeakMap<EditorViewModel, Map<string, number>>();
 
 /** Run `save` for tab `tabId` of `model`, marking the tab as being saved. */
