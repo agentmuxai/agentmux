@@ -191,6 +191,23 @@ describe("appHandleKeyDown", () => {
             // The bare Shift reaches the terminal (it writes nothing); the arrow doesn't.
             expect(toShell.mock.calls.map(([e]) => (e as KeyboardEvent).key)).toEqual(["Shift"]);
         });
+
+        // The capture listener runs on every platform: split's chord, finished
+        // in a terminal, keeps its arrow from the shell on Windows and macOS too.
+        for (const os of ["win32", "darwin"] as const) {
+            it(`finishes split's chord in a focused terminal without sending the arrow to the shell (${os})`, () => {
+                setKeyUtilPlatform(os);
+                setPlatform(os);
+                registerChordCapture();
+                focusTerminal();
+                const toShell = vi.fn();
+                field!.addEventListener("keydown", toShell);
+                expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
+                field!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", code: "ArrowUp", bubbles: true, cancelable: true }));
+                expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+                expect(toShell).not.toHaveBeenCalled();
+            });
+        }
     });
 
     it("runs a shortcut the host forwards out of a browser pane, after taking focus back", async () => {
