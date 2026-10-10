@@ -439,12 +439,14 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                 <td class="tower-num tower-muted">{props.node.process.pid}</td>
             </tr>
             <Show when={hasChildren() && !folded()}>
+                {/* The parent joins the scope: an "×n" line under one parent
+                    opens on its own, not with a same-named one elsewhere. */}
                 <TreeRows
                     model={m}
                     nodes={props.node.children}
                     depth={props.depth + 1}
                     cpu={props.cpu}
-                    scope={props.scope}
+                    scope={`${props.scope}>${props.node.process.id}`}
                 />
             </Show>
         </>

@@ -275,6 +275,31 @@ describe("Tower", () => {
         expect(screen.getAllByText("rustc.exe")).toHaveLength(4);
     });
 
+    it("an ×n line opens on its own, not with a same-named one under another parent", async () => {
+        const snap = snapshot();
+        const procs = snap.tasks[0].processes;
+        procs.push(
+            { id: "50:1", pid: 50, ppid: 11, name: "cargo.exe", cpu: 0, mem: GB, started_at_ms: 300 },
+            { id: "60:1", pid: 60, ppid: 11, name: "cargo.exe", cpu: 0, mem: GB, started_at_ms: 300 }
+        );
+        for (const [pid, ppid] of [
+            [51, 50],
+            [52, 50],
+            [61, 60],
+            [62, 60],
+        ]) {
+            procs.push({ id: `${pid}:1`, pid, ppid, name: "rustc.exe", cpu: 1, mem: GB, started_at_ms: 400 });
+        }
+        sample.mockResolvedValue(snap);
+        renderTower();
+        await waitFor(() => expect(screen.getAllByTestId("tower-many-rustc.exe")).toHaveLength(2));
+        const [first] = screen.getAllByTestId("tower-many-rustc.exe");
+        fireEvent.click(within(first).getByRole("button", { name: "Show the rustc.exe processes" }));
+        // Two from the opened line, and the other line still closed.
+        expect(screen.getAllByText("rustc.exe")).toHaveLength(4);
+        expect(screen.getAllByRole("button", { name: "Show the rustc.exe processes" })).toHaveLength(1);
+    });
+
     it("keeps each row, and updates it, across a refresh", async () => {
         vi.useFakeTimers();
         renderTower();
