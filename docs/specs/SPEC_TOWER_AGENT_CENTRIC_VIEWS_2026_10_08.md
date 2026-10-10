@@ -1,6 +1,6 @@
 # SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent
 
-**Status:** active — Phase 1 (the Agents view) shipped in PR #4597; Phase 2 (Processes grouped by agent) in PR #4611, except carrying the rail's selection into Processes as a filter; Phases 3-4 ("started by" labels and exited processes, history) not started. Verified 2026-10-10.
+**Status:** implemented — Phase 1 in PR #4597; phase 2 in PRs #4611 and #4614; phase 3 in PRs #4617 (exited processes, CPU time and peak columns) and #4620 ("started by" labels); phase 4 in PR #4622. Verified 2026-10-10.
 **Date:** 2026-10-08
 **Builds on:** `SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md` (Tower as shipped in
 #4498, #4499, #4500).
