@@ -68,10 +68,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: path"))?;
             let wait = arguments.get("wait_secs").and_then(Value::as_u64).unwrap_or(INSTALL_WAIT_SECS).min(INSTALL_WAIT_MAX_SECS);
+            // The prompt names this agent only from its signed identity; an
+            // agent with no signing key yet is shown as unverified.
             let body = json!({
                 "path": resolve_path(path),
                 "replace": arguments.get("replace").and_then(Value::as_bool).unwrap_or(true),
-                "agent": std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default(),
+                "auth": crate::identity::sign_ui_automation_auth().ok(),
                 "wait_secs": wait,
             });
             let url = format!("{}/api/v1/widgets/install", cx.local_url.trim_end_matches('/'));

@@ -56,6 +56,22 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(json!({ "error": message.into() }))).into_response()
 }
 
+/// Who the prompt says is asking: the agent whose signature verified, or,
+/// without one, a plain "not a verified agent" (never a name the caller chose).
+fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> String {
+    const UNVERIFIED: &str = "Something on this computer (not a verified agent)";
+    match auth {
+        Some(a) => match super::ui_handlers::verified_block_id(state, None, a) {
+            Ok(_) => a.agent_id.chars().take(64).collect(),
+            Err(e) => {
+                tracing::warn!(claimed = %a.agent_id, error = %e, "a widget install's signed identity didn't verify");
+                UNVERIFIED.to_string()
+            }
+        },
+        None => UNVERIFIED.to_string(),
+    }
+}
+
 /// `GET /api/v1/widgets`: every package and its state.
 pub(super) async fn handle_widgets_list() -> Response {
     match widget_packages::service() {
@@ -69,9 +85,11 @@ pub(super) struct InstallBody {
     path: String,
     #[serde(default)]
     replace: bool,
-    /// The agent asking, shown in the prompt.
+    /// The asking agent's signed identity, which names it in the prompt.
+    /// Anything holding the auth key can call this route, so a name in the
+    /// body proves nothing; a signature only that agent can make does.
     #[serde(default)]
-    agent: String,
+    auth: Option<agentmux_common::api_types::UiAutomationAuth>,
     /// How long to wait for the user's answer.
     #[serde(default)]
     wait_secs: Option<u64>,
@@ -105,7 +123,7 @@ pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(b
         }
         _ => {}
     }
-    let agent = if body.agent.is_empty() { "An agent".to_string() } else { body.agent.clone() };
+    let agent = asking_agent(&state, body.auth.as_ref());
     let answer = widget_requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent));
     publish_requests(&state);
     tracing::info!(id = %id, agent = %agent, "an agent asked to install a widget; waiting for the user");
@@ -174,7 +192,8 @@ mod tests {
             let app = app.clone();
             let path = src.to_string_lossy().into_owned();
             tokio::spawn(async move {
-                send(&app, post("/api/v1/widgets/install", &[], json!({ "path": path, "agent": "Lark", "wait_secs": 20 }))).await
+                // A name in the body is ignored: only a signed identity names the agent.
+                send(&app, post("/api/v1/widgets/install", &[], json!({ "path": path, "agent": "AgentMux", "wait_secs": 20 }))).await
             })
         };
         // The request shows up for the user.
@@ -187,7 +206,8 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         let req = req.expect("the install asks the user");
-        assert_eq!((req.agent.as_str(), req.permissions.as_slice()), ("Lark", ["storage".to_string()].as_slice()));
+        assert_eq!(req.agent, "Something on this computer (not a verified agent)");
+        assert_eq!(req.permissions, ["storage".to_string()]);
         // Only the host can answer for the user.
         let decision = json!({ "id": "acme.agentmade", "hash": req.hash, "decision": "approve" });
         let (s, _) = send(&app, post("/api/v1/host/widget_approval", &[], decision.clone())).await;

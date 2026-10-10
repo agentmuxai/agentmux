@@ -343,7 +343,7 @@ An agent can't approve its own install or raise a widget's permissions; every in
 
 How it works:
 - srv's `POST /api/v1/widgets/install` installs the package, and if it isn't approved at that version, holds a request (`backend/widget_requests.rs`) and waits.
-- Every UI hears of the requests waiting (the `widgetrequests` event, and `widgets.requests` for a UI that starts later). Each one opens a prompt naming the agent, with exactly what Settings → Widgets shows for the package: version, kind, each permission in plain words, or the trusted-widget warning.
+- Every UI hears of the requests waiting (the `widgetrequests` event, and `widgets.requests` for a UI that starts later). Each one opens a prompt naming the agent (from its signed identity, the one UI automation and SSH consent use; a request without one that verifies says "not a verified agent", never a name the caller chose), with exactly what Settings → Widgets shows for the package: version, kind, each permission in plain words, or the trusted-widget warning.
 - The answer goes to srv the only way an approval can, through the host (§8.3). The host's approval route answers every request for that version, so approving in Settings answers the agent too; an answer for one version ends requests for the widget's other versions.
 - A newer version replaces an older request for the same widget; a version asked for twice is one prompt.
 
