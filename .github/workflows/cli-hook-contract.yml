@@ -1,0 +1,67 @@
+# The contract between AgentMux's Bash hook (`agentmux-bashwrap hook`) and the
+# real Claude Code CLI: scripts/cli-contract/bashwrap-hook-contract.mjs runs
+# the CLI with only the hook configured, against a fake Messages API (no model,
+# no credential, no secret), and checks that a Bash call's run_in_background,
+# timeout and description still reach the CLI after the hook rewrites it.
+#
+# Why: the hook's unit tests check what it sends; a CLI upgrade changed what
+# the CLI does with it and broke every background call for six weeks without a
+# test failing. docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md.
+#
+# When: on PRs that touch the hook, the CLI pin or this test (the pin bump is
+# where a CLI change gets in), and weekly against the CLI's `latest`, to hear
+# about a break before the pin moves. Not a required check: it is skipped on
+# every other PR.
+name: CLI hook contract
+
+on:
+    pull_request:
+        paths:
+            - "crates/bashwrap/**"
+            - "crates/srv/src/backend/providers.rs"
+            - "frontend/app/view/agent/providers/catalog.ts"
+            - "scripts/cli-contract/**"
+            - ".github/workflows/cli-hook-contract.yml"
+    schedule:
+        - cron: "0 9 * * 1" # Mondays 09:00 UTC
+    workflow_dispatch: {}
+
+permissions:
+    contents: read
+
+concurrency:
+    group: cli-hook-contract-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    contract:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "24"
+            - uses: dtolnay/rust-toolchain@stable
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  shared-key: cli-hook-contract
+
+            - name: Build agentmux-bashwrap
+              run: cargo build -p agentmux-bashwrap
+
+            - name: Install the Claude Code CLI (the pinned version; latest on the weekly run)
+              run: |
+                  pinned=$(awk '/npm_package: "@anthropic-ai\/claude-code"/ { f = 1 } f && /pinned_version:/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); exit }' crates/srv/src/backend/providers.rs)
+                  if [ -z "$pinned" ]; then echo "::error::no Claude Code pin found in providers.rs"; exit 1; fi
+                  version=$pinned
+                  if [ "${{ github.event_name }}" = "schedule" ]; then version=latest; fi
+                  echo "Claude Code pin: $pinned; testing: $version"
+                  npm install --no-fund --no-audit --prefix "$RUNNER_TEMP/claude" "@anthropic-ai/claude-code@$version"
+                  "$RUNNER_TEMP/claude/node_modules/.bin/claude" --version
+
+            - name: Run the contract
+              run: |
+                  node scripts/cli-contract/bashwrap-hook-contract.mjs \
+                    --claude "$RUNNER_TEMP/claude/node_modules/.bin/claude" \
+                    --bashwrap "$GITHUB_WORKSPACE/target/debug/agentmux-bashwrap"

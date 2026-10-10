@@ -40,6 +40,7 @@
 
 import { subagentDisplayLabel, type ActiveSubagent } from "../../swarm/swarm-model";
 import type { ActivityStatus, PinnedActivity } from "./types";
+import { bestStatus, subagentStatus, type AgentStatus } from "@/app/store/agent-status";
 
 /** One dock row summarizing every member of a shared `dispatch_id` — the
  *  dock-local counterpart of the Swarm pane's `WorkflowDispatch`, but
@@ -95,15 +96,13 @@ function groupSubagentsForDock(
     return [...loose, ...dispatchGroups];
 }
 
-function subagentStatusToActivity(s: ActiveSubagent["status"]): ActivityStatus {
-    switch (s) {
-        case "active": return "running";
-        case "completed": return "done";
-        // Terminated without a Result line (parent turn ended early) — same
-        // bucket as a shell's manual "stopped", not "error" (no failure
-        // signal, just cut off). See SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION.
-        case "abandoned": return "stopped";
-    }
+/** The dock's words for the shared status. Cut off (terminated without a
+ *  Result line) is a shell's manual "stopped", not "error": there is no
+ *  failure signal. The dock doesn't pass the parent's turn, so an active
+ *  subagent stays running here until the watcher says otherwise. */
+function activityStatus(status: AgentStatus): ActivityStatus {
+    if (status.kind === "working") return "running";
+    return status.kind === "interrupted" ? "stopped" : "done";
 }
 
 export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
@@ -113,7 +112,7 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
         // The Swarm row's label, so the two never disagree; same-slug siblings
         // get a short id to tell them apart (see subagentDisplayLabel).
         title: subagentDisplayLabel(s),
-        status: subagentStatusToActivity(s.status),
+        status: activityStatus(subagentStatus(s.status)),
         startedAt: s.spawned_at,
         // last_event_at at the moment a subagent completes (or is reconciled
         // to abandoned) is the closest thing to an "ended at" ActiveSubagent
@@ -133,8 +132,7 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
  *  `subagentToActivity`'s own "no member still running" rule. */
 function subagentGroupToActivity(group: DispatchGroup): PinnedActivity {
     const members = group.subagents;
-    const anyAbandoned = members.some((m) => m.status === "abandoned");
-    const status: ActivityStatus = group.activeCount > 0 ? "running" : anyAbandoned ? "stopped" : "done";
+    const status = activityStatus(bestStatus(members.map((m) => subagentStatus(m.status))));
     return {
         id: group.dispatchId,
         kind: "subagent",

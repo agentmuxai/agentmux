@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "agentmux.notes",
+  "name": "Notes",
+  "version": "1.0.0",
+  "description": "Quick notes kept on this computer, with copy, export and import.",
+  "author": "AgentMux",
+  "icon": "note-sticky",
+  "kind": "sandboxed",
+  "entry": "index.html",
+  "permissions": ["storage", "files", "clipboard:write"],
+  "contributes": {
+    "panes": [{ "name": "main", "label": "Notes" }]
+  }
+}

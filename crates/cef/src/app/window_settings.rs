@@ -5,7 +5,7 @@
 // that sets the Wayland app_id / X11 WM_CLASS, the selected-ozone-platform
 // publication point, and the `window:transparent` settings.json reader used
 // to gate transparent-compositing command-line flags before CefInitialize.
-// Split out of `app.rs` (now `app/mod.rs`).
+// Split out of the single-file `app` module (now `app/mod.rs`).
 
 /// Override the `get_linux_window_properties` function pointer on a
 /// `WindowDelegate` to write the AgentMux app_id directly to the C struct,

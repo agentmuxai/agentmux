@@ -31,6 +31,12 @@ pub(crate) const POPUP_FROM_META_KEY: &str = "browser:popup_from";
 /// strip with Show and Close. Written only by srv.
 pub(crate) const POPUP_WINDOWS_META_KEY: &str = "browser:popup_windows";
 
+/// Marks a new popup pane's meta with its opener and the opener's origin.
+pub(crate) fn mark_popup_meta(meta: &mut crate::backend::obj::MetaMapType, opener: &str, opener_url: &str) {
+    meta.insert(POPUP_OF_META_KEY.to_string(), serde_json::json!(opener));
+    meta.insert(POPUP_FROM_META_KEY.to_string(), serde_json::json!(origin_of(opener_url)));
+}
+
 /// A popup window's id is the host's label for it.
 pub(crate) fn is_window_id(id: &str) -> bool {
     id.starts_with("popup-")

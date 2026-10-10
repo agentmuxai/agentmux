@@ -570,6 +570,12 @@ pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
 pub const COMMAND_BOOKMARKS_LIST: &str = "bookmarks.list";
 pub const COMMAND_BOOKMARKS_SET: &str = "bookmarks.set";
 
+// Named browser profiles (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6).
+pub const COMMAND_BROWSER_PROFILES_LIST: &str = "browser_profiles.list";
+pub const COMMAND_BROWSER_PROFILES_CREATE: &str = "browser_profiles.create";
+pub const COMMAND_BROWSER_PROFILES_UPDATE: &str = "browser_profiles.update";
+pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
+
 // Layout files — save a window as `*.agentmux-layout.json`.
 // See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.
 pub const COMMAND_LAYOUT_SAVE: &str = "layout.save";

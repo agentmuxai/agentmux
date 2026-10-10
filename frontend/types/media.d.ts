@@ -38,7 +38,7 @@ declare module "*.module.sss" {
 }
 
 // Built-in asset types
-// see `src/node/constants.ts`
+// see vite's `src/node/constants`
 
 // images
 declare module "*.apng" {

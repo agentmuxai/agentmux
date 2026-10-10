@@ -3,7 +3,7 @@
 //
 // Deferred pane-overlay bounds + show task (non-Windows / CEF Views panes),
 // including the macOS ObjC frame-commit + swizzle-install path. Split out of
-// `ui_tasks.rs` unchanged.
+// the single-file `ui_tasks` module unchanged.
 
 // The task in this file is entirely `#[cfg(not(target_os = "windows"))]`, so
 // these imports are only needed off Windows.

@@ -5,7 +5,7 @@
 // renders this class (phase 3 of
 // docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md).
 //
-// Previously these lived in `agent-view/styles/_loading-overlay.scss`, nested
+// Previously these lived in the agent view's `_loading-overlay` partial, nested
 // inside a `.agent-view { ... }` block and reachable only via
 // `agent-view.scss`'s `@use`. That was the spec's §3.2 problem in miniature:
 // the cover's appearance depended on which ancestor happened to be in the

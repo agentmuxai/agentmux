@@ -39,7 +39,7 @@
  *
  * History (relevant when reading older PRs / specs): this file is the
  * descendant of two prior implementations — `modal.tsx` (v1, single
- * Portal into `document.body`) and `modal-v2.tsx` (added the chrome
+ * Portal into `document.body`) and the old `modal-v2` component (added the chrome
  * slot system + paint gate). Both are gone; the surviving file is the
  * canonical one. Older specs reference "modal-v2"; treat that as a
  * pointer to this file. Design rationale for the scope axis lives in

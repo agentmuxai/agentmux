@@ -144,7 +144,7 @@ function deriveContract(root: string): Contract {
     // binding from the contract (a guard that passes while drift slips
     // through). The per-method window also tolerates braces in return
     // types. Both rpcCall and rpcStream count as a binding.
-    // rpc-api was split from a single rpc-api.ts into a domain-module
+    // rpc-api was split from a single rpc-api file into a domain-module
     // directory (rpc-api/{agent,block,file,...}.ts) composed by index.ts.
     // Concatenate every domain file so the binding extractor still sees the
     // full method surface.

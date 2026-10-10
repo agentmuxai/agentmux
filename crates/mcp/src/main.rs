@@ -65,6 +65,7 @@ struct LoopEntry {
 /// when the agent pane closes.
 type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
+mod self_keys;
 mod tool_schemas;
 use tool_schemas::*;
 mod window_capture;
@@ -113,6 +114,13 @@ async fn main() {
         .default_headers(default_headers)
         .build()
         .expect("http client");
+
+    // Identity M4d-3: fetch this agent's signing keys from srv now, so the
+    // first signed send doesn't wait on it (self_keys.rs).
+    {
+        let (client, local_url, auth_key) = (client.clone(), local_url.clone(), auth_key.clone());
+        tokio::spawn(async move { self_keys::refresh_if_stale(&client, &local_url, &auth_key).await });
+    }
 
     // Running loops, keyed by loop_id. Lives for this MCP process's lifetime
     // (== the agent session), so loops are reaped when the agent pane closes.
@@ -182,6 +190,9 @@ async fn main() {
                 let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
                 let open_media: Value = serde_json::from_str(OPEN_MEDIA_TOOL).expect("static json");
                 let open_files: Value = serde_json::from_str(OPEN_FILES_TOOL).expect("static json");
+                let widget_list: Value = serde_json::from_str(WIDGET_LIST_TOOL).expect("static json");
+                let widget_install: Value = serde_json::from_str(WIDGET_INSTALL_TOOL).expect("static json");
+                let open_widget: Value = serde_json::from_str(OPEN_WIDGET_TOOL).expect("static json");
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
                 let discover_agents: Value =
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
@@ -292,7 +303,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, conn_list, open_editor, open_media, open_files, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, open_browser, browser_snapshot, browser_click, browser_fill, browser_select, browser_check, browser_set_files, browser_wait_for, browser_handoff, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, conn_list, open_editor, open_media, open_files, widget_list, widget_install, open_widget, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, open_browser, browser_snapshot, browser_click, browser_fill, browser_select, browser_check, browser_set_files, browser_wait_for, browser_handoff, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -349,6 +360,9 @@ async fn call_tool(
         .cloned()
         .unwrap_or(json!({}));
 
+    // Identity M4d-3: every tool may sign (a jekt, a UI-automation proof), so
+    // the fetched keys are checked here, once, before any of them runs.
+    self_keys::refresh_if_stale(client, local_url, auth_key).await;
     tools::call(
         name,
         &arguments,

@@ -1688,8 +1688,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // LSP handlers (lspstart, lspsend, lspstop)
     super::lsp_handlers::register_lsp_handlers(engine, &state);
 
-    // CLI handlers (resolvecli, checkcliauth, runclilogin)
+    // CLI handlers (resolvecli, checkcliauth, runclilogin), then widget packages (widgets.*)
     super::cli_handlers::register_cli_handlers(engine, &state);
+    super::widget_handlers::register_widget_handlers(engine, &state);
 
     // Tool store handlers (gettoolstatus, installtool)
     super::tool_handlers::register_tool_handlers(engine, &state);

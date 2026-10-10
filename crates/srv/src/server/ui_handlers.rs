@@ -80,6 +80,10 @@ pub(crate) fn verified_block_id(
         crate::server::actor::ActorSite::UiAuth,
         Some(&auth.agent_id),
     );
+    if let Some(block) = crate::server::actor::own_pane_by_token(&state.mstore, caller, &auth.agent_id) {
+        return Ok(block); // identity M4d-4
+    }
+    crate::backend::agent_resolve::record_uid_fallback("m4d.ui_auth_by_name");
     if auth.ts_secs <= 0 || (now_unix_secs() - auth.ts_secs).abs() > UI_AUTOMATION_SIG_MAX_AGE_SECS
     {
         return Err("signature timestamp missing or outside the freshness window".to_string());
@@ -786,11 +790,11 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    meta.insert(
-        crate::server::browser_owner::OWNER_META_KEY.to_string(),
-        json!(req.auth.agent_id),
-    );
+    meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(req.auth.agent_id));
     crate::server::browser_allowlist::mirror(&mut meta, allowed.as_deref());
+    if let Err(e) = crate::server::browser_identity::for_agent_open(&state, &mut meta, req.profile.as_deref()) {
+        return err_response(StatusCode::BAD_REQUEST, e);
+    }
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
@@ -1312,9 +1316,7 @@ pub(crate) async fn handle_host_browser_popup(
     // the person took over belongs to nobody.
     let owner = owning_agent(&block, &opener)
         .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
-    if let Some(why) = crate::server::browser_allowlist::refuse_popup(&opener, &url) {
-        return refused(why);
-    }
+    if let Some(why) = crate::server::browser_allowlist::refuse_popup(&opener, &url) { return refused(why); }
     // The count and the slot are taken together: two popups reported at once
     // can't both fit under the cap. The slot is given back if the pane
     // doesn't open.
@@ -1359,8 +1361,10 @@ pub(crate) async fn handle_host_browser_popup(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    meta.insert(popup::POPUP_OF_META_KEY.to_string(), json!(opener));
-    meta.insert(popup::POPUP_FROM_META_KEY.to_string(), json!(popup::origin_of(&opener_url)));
+    popup::mark_popup_meta(&mut meta, &opener, &opener_url);
+    crate::server::browser_identity::inherit(&mut meta, &block);
+    // On the new pane from the start, so the host has it before the first load.
+    crate::server::browser_allowlist::mirror(&mut meta, crate::server::browser_allowlist::list_for(&opener).as_deref());
     if let Some(agent) = &owner {
         meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(agent));
     }
@@ -1369,10 +1373,10 @@ pub(crate) async fn handle_host_browser_popup(
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
-    // The opener's owner owns its popup: written here, from srv's own record,
-    // never from anything the page or a client said. Checked again now the
-    // pane is open: the person may have taken the opener over meanwhile, and
-    // then the agent gets neither.
+    let joined = crate::server::browser_allowlist::join(&result.block_id, &opener);
+    // The opener's owner owns its popup, from srv's own record, never from the
+    // page or a client. Checked again now the pane is open: the person may have
+    // taken the opener over meanwhile, and then the agent gets neither.
     let mut owner = owner;
     if let Some(agent) = owner.clone() {
         let still = state
@@ -1394,7 +1398,7 @@ pub(crate) async fn handle_host_browser_popup(
         }
     }
     reservation.commit(&result.block_id);
-    crate::server::browser_allowlist::join_popup_pane(&state, &result.block_id, &opener).await;
+    crate::server::browser_allowlist::settle_popup_pane(&state, &result.block_id, joined, owner.is_some()).await;
     tracing::info!(
         opener = %opener, pane = %result.block_id, url = %url, owner = ?owner,
         "[browser-popup] popup opened as a pane"

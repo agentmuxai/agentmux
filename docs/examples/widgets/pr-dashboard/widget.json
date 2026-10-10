@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "agentmux.pr-dashboard",
+  "name": "PR dashboard",
+  "version": "1.0.0",
+  "description": "A public GitHub repository's open pull requests, refreshed every two minutes.",
+  "author": "AgentMux",
+  "icon": "code-pull-request",
+  "kind": "sandboxed",
+  "entry": "index.html",
+  "permissions": ["net:https://api.github.com"],
+  "contributes": {
+    "panes": [{ "name": "main", "label": "Pull requests" }]
+  }
+}

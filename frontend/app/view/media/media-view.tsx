@@ -32,6 +32,21 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } fr
 import { registerFileDropTarget } from "@/app/drag/file-drop";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { ALL_MEDIA_EXTENSIONS, createMediaDropHook } from "./media-drop";
+import { Button } from "@/app/element/ui";
+import "./media-view.scss";
+import {
+    actualSizeScale,
+    FIT,
+    panBy,
+    showsPixels,
+    toggleZoom,
+    wheelFactor,
+    zoomAt,
+    zoomPercent,
+    clampPan,
+    type ZoomBox,
+    type ZoomState,
+} from "./media-zoom";
 
 /**
  * One Media document: a file, shown, with its folder watched for newer
@@ -66,6 +81,104 @@ export function MediaView(props: {
     const [mediaReady, setMediaReady] = createSignal(false);
     // A dropped file with no host path, shown from its bytes (no live updates).
     const [localName, setLocalName] = createSignal("");
+
+    // Image zoom and pan (media-zoom.ts): the wheel zooms about the cursor,
+    // a drag pans, double-click toggles fit and actual size.
+    const [zoom, setZoom] = createSignal<ZoomState>(FIT);
+    const [dragging, setDragging] = createSignal(false);
+    let contentRef: HTMLDivElement | undefined;
+    let imgRef: HTMLImageElement | undefined;
+    // The last image's own size: a newer render of the same size keeps the
+    // zoom and pan (comparing renders), another size goes back to fit.
+    let lastNatural = "";
+
+    const zoomBox = (): ZoomBox | null => {
+        if (!contentRef || !imgRef || !imgRef.naturalWidth) return null;
+        return {
+            fitWidth: imgRef.offsetWidth,
+            fitHeight: imgRef.offsetHeight,
+            viewWidth: contentRef.offsetWidth,
+            viewHeight: contentRef.offsetHeight,
+            naturalWidth: imgRef.naturalWidth,
+            naturalHeight: imgRef.naturalHeight,
+        };
+    };
+    // A point on screen, in the view's own CSS pixels from its centre (the
+    // pane may be zoomed, which scales screen pixels against CSS pixels).
+    const fromCentre = (clientX: number, clientY: number): { x: number; y: number } => {
+        const rect = contentRef!.getBoundingClientRect();
+        const k = contentRef!.offsetWidth ? rect.width / contentRef!.offsetWidth : 1;
+        return {
+            x: (clientX - rect.left) / k - contentRef!.offsetWidth / 2,
+            y: (clientY - rect.top) / k - contentRef!.offsetHeight / 2,
+        };
+    };
+    const screenScale = (): number => {
+        const rect = contentRef?.getBoundingClientRect();
+        return rect && contentRef!.offsetWidth ? rect.width / contentRef!.offsetWidth : 1;
+    };
+    const centre = { x: 0, y: 0 };
+    const showsImage = (): boolean => !errorMsg() && kind() === "image" && !!objectUrl() && mediaReady();
+
+    const onWheel = (e: WheelEvent) => {
+        // Ctrl/Cmd+wheel zooms the pane itself (app.tsx), as everywhere.
+        if (e.ctrlKey || e.metaKey || !showsImage()) return;
+        const box = zoomBox();
+        if (!box) return;
+        e.preventDefault();
+        setZoom(zoomAt(zoom(), wheelFactor(e.deltaY, e.deltaMode), fromCentre(e.clientX, e.clientY), box));
+    };
+
+    let dragFrom: { x: number; y: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => {
+        if (e.button !== 0 || zoom().scale <= 1) return;
+        e.preventDefault();
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        dragFrom = { x: e.clientX, y: e.clientY };
+        setDragging(true);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+        const box = zoomBox();
+        if (!dragFrom || !box) return;
+        const k = screenScale();
+        setZoom(panBy(zoom(), (e.clientX - dragFrom.x) / k, (e.clientY - dragFrom.y) / k, box));
+        dragFrom = { x: e.clientX, y: e.clientY };
+    };
+    const endDrag = () => {
+        dragFrom = null;
+        setDragging(false);
+    };
+    const onDoubleClick = (e: MouseEvent) => {
+        const box = zoomBox();
+        if (box) setZoom(toggleZoom(zoom(), fromCentre(e.clientX, e.clientY), box));
+    };
+    // + / - zoom about the centre, 0 fits, 1 shows actual size; zoomed in,
+    // the arrow keys pan a tenth of the view.
+    const onKeyDown = (e: KeyboardEvent) => {
+        if (e.ctrlKey || e.metaKey || e.altKey || !showsImage()) return;
+        const box = zoomBox();
+        if (!box) return;
+        let next: ZoomState | null = null;
+        if (e.key === "+" || e.key === "=") next = zoomAt(zoom(), 1.25, centre, box);
+        else if (e.key === "-" || e.key === "_") next = zoomAt(zoom(), 1 / 1.25, centre, box);
+        else if (e.key === "0") next = FIT;
+        else if (e.key === "1") next = zoomAt(zoom(), actualSizeScale(box) / zoom().scale, centre, box);
+        else if (zoom().scale > 1 && e.key.startsWith("Arrow")) {
+            const step = { x: box.viewWidth / 10, y: box.viewHeight / 10 };
+            const d = { ArrowLeft: [step.x, 0], ArrowRight: [-step.x, 0], ArrowUp: [0, step.y], ArrowDown: [0, -step.y] }[e.key];
+            if (d) next = panBy(zoom(), d[0], d[1], box);
+        }
+        if (!next) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom(next);
+    };
+    const onImageLoad = () => {
+        const natural = imgRef ? `${imgRef.naturalWidth}x${imgRef.naturalHeight}` : "";
+        if (natural !== lastNatural) setZoom(FIT);
+        lastNatural = natural;
+        setMediaReady(true);
+    };
 
     let watchedDir: string | null = null;
     let unsubFileChanged: () => void = () => {};
@@ -158,6 +271,18 @@ export function MediaView(props: {
     };
 
     onMount(() => {
+        // A real listener, not passive, so it can keep the wheel from scrolling.
+        contentRef?.addEventListener("wheel", onWheel, { passive: false });
+        onCleanup(() => contentRef?.removeEventListener("wheel", onWheel));
+        // A resized pane keeps the image in reach.
+        if (typeof ResizeObserver !== "undefined" && contentRef) {
+            const resize = new ResizeObserver(() => {
+                const box = zoomBox();
+                if (box && zoom().scale > 1) setZoom(clampPan(zoom(), box));
+            });
+            resize.observe(contentRef);
+            onCleanup(() => resize.disconnect());
+        }
         const dispose = registerFileDropTarget(
             blockId,
             createMediaDropHook({
@@ -280,7 +405,13 @@ export function MediaView(props: {
 
     return (
         <div class="media-view flex flex-col w-full h-full">
-            <div class="media-view-content flex-1" style={{ position: "relative", overflow: "hidden" }}>
+            <div
+                ref={contentRef}
+                class="media-view-content flex-1"
+                style={{ position: "relative", overflow: "hidden" }}
+                tabIndex={-1}
+                onKeyDown={onKeyDown}
+            >
                 <Show when={errorMsg()}>
                     <div style={emptyStateStyle} onClick={() => void pickFile()}>
                         <div>{errorMsg()}</div>
@@ -296,12 +427,46 @@ export function MediaView(props: {
                 </Show>
                 <Show when={!errorMsg() && kind() === "image" && objectUrl()}>
                     <img
+                        ref={imgRef}
                         class="media-view-media max-w-full max-h-full"
-                        style={{ "object-fit": "contain", opacity: mediaReady() ? 1 : 0, transition: "opacity 120ms ease", position: "absolute", inset: "0", margin: "auto" }}
+                        classList={{
+                            "media-view-zoomed": zoom().scale > 1,
+                            "media-view-dragging": dragging(),
+                            "media-view-pixels": (() => {
+                                const box = zoomBox();
+                                return !!box && showsPixels(zoom(), box);
+                            })(),
+                        }}
+                        style={{
+                            "object-fit": "contain",
+                            opacity: mediaReady() ? 1 : 0,
+                            transition: "opacity 120ms ease",
+                            position: "absolute",
+                            inset: "0",
+                            margin: "auto",
+                            transform: `translate(${zoom().x}px, ${zoom().y}px) scale(${zoom().scale})`,
+                        }}
                         src={objectUrl()}
-                        onLoad={() => setMediaReady(true)}
+                        draggable={zoom().scale <= 1}
+                        onLoad={onImageLoad}
+                        onDblClick={onDoubleClick}
+                        onPointerDown={onPointerDown}
+                        onPointerMove={onPointerMove}
+                        onPointerUp={endDrag}
+                        onPointerCancel={endDrag}
                         onError={() => setErrorMsg("Failed to display media (unsupported format or corrupt file).")}
                     />
+                </Show>
+                <Show when={showsImage() && zoom().scale > 1}>
+                    <div class="media-view-zoom-badge">
+                        <Button density="compact" title="Fit to the pane (0)" onClick={() => setZoom(FIT)}>
+                            {(() => {
+                                const box = zoomBox();
+                                return box ? `${zoomPercent(zoom(), box)}%` : "";
+                            })()}{" "}
+                            · Fit
+                        </Button>
+                    </div>
                 </Show>
                 <Show when={!errorMsg() && kind() === "video" && objectUrl()}>
                     <video

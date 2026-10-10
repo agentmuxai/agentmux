@@ -46,7 +46,7 @@ const FILE_EXT_TLDS = new Set(["md", "rs", "py", "sh", "pl", "ml"]);
 
 // Generic filename stem words. Combined with FILE_EXT_TLDS, these let us
 // reject `main.rs` / `README.md` / `setup.py` while keeping real single-label
-// domains like `docs.rs`, `pkg.sh`, `rustup.rs`.
+// domains like `docs.rs`, `pkg.sh`, `rustup.rs`. (comment-hygiene: allow)
 const FILENAME_STEMS = new Set([
     "main", "build", "setup", "index", "mod", "lib", "test", "spec", "app",
     "utils", "types", "constants", "config", "package", "requirements",
@@ -66,7 +66,7 @@ export function isLikelyFilename(schema: string, url: string): boolean {
     const ext = host.slice(dotIdx + 1).toLowerCase();
     // Only FILE_EXT_TLDS trigger this check — .com/.io/.dev etc. are fine
     if (!FILE_EXT_TLDS.has(ext)) return false;
-    // Only single-label hosts (one dot): "docs.rs" yes, "api.docs.rs" no
+    // Only single-label hosts (one dot): "docs.rs" yes, "api.docs.rs" no (comment-hygiene: allow)
     const dotsInHost = (host.match(/\./g) ?? []).length;
     if (dotsInHost !== 1) return false;
     const label = host.slice(0, dotIdx);

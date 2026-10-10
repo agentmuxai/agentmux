@@ -253,7 +253,7 @@ export interface ToolNode {
     log?: ToolStreamingLog;
     collapsed: boolean;
     /**
-     * Plain-text one-liner, e.g. "📖 Read auth.ts". No status glyph and no
+     * Plain-text one-liner, e.g. "📖 Read auth.ts". No status glyph and no (comment-hygiene: allow)
      * duration: those change after parse time (the reducer sets `canceled`
      * without re-parsing), so ToolBlock renders them from `status`/`duration`.
      * ToolBlock composes its header from the node's fields (`tool-header.ts`)

@@ -3,7 +3,7 @@
 //
 // Linux-only GPU capability probing — drives ANGLE backend selection
 // in `on_before_command_line_processing` (see the parent `app` module's
-// `wrap_app!` block). Split out of `app.rs` (now `app/mod.rs`).
+// `wrap_app!` block). Split out of the single-file `app` module (now `app/mod.rs`).
 
 /// GPU capability tier, measured once at startup to drive ANGLE backend
 /// selection. Precedence: hardware Vulkan → hardware GL → software (SwiftShader).

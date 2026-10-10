@@ -49,11 +49,17 @@ vi.mock("./sections/devices-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     DevicesSection: () => <div data-testid="devices-section" />,
 }));
+vi.mock("./sections/widgets-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    WidgetsSection: () => <div data-testid="widgets-section" />,
+}));
 vi.mock("./sections/advanced-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     AdvancedSection: () => <div data-testid="advanced-section" />,
 }));
 
+import { createRoot } from "solid-js";
+import { settingsPaneTab } from "./settings";
 import { SettingsView } from "./settings-view";
 import { SettingsViewModel } from "./settings-model";
 
@@ -68,11 +74,11 @@ describe("SettingsView section tabs", () => {
         return { ...result, model };
     }
 
-    it("orders the tabs as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Advanced", () => {
+    it("orders the tabs as Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Advanced", () => {
         renderSettings();
         const tabs = screen.getByRole("tablist", { name: "Settings section" });
         const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Window & Panes", "Browser", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {
@@ -216,5 +222,34 @@ describe("SettingsView search bar", () => {
         const input = screen.getByTestId("settings-search-input");
         fireEvent.input(input, { target: { value: "xyzzy_nonexistent_setting" } });
         expect(screen.getByTestId("settings-search-empty")).toBeInTheDocument();
+    });
+});
+
+describe("Settings pane: the section to open at", () => {
+    // The host passes meta as an accessor; reading it as an object silently
+    // opened every Settings pane at Appearance (a browser pane's Manage
+    // profiles… asks for Browser).
+    function openWith(meta: Record<string, unknown>): string {
+        return createRoot((dispose) => {
+            const inst = settingsPaneTab.create({
+                blockId: "b1",
+                meta: () => meta as MetaType,
+                setMeta: async () => {},
+                isFocused: () => true,
+                visibility: () => "active",
+            });
+            const title = inst.liveTitle!().text;
+            dispose();
+            return title;
+        });
+    }
+
+    it("opens at the section its block asks for", () => {
+        expect(openWith({ view: "settings", "settings:section": "browser" })).toBe("Browser");
+    });
+
+    it("opens at Appearance when none, or an unknown one, is asked for", () => {
+        expect(openWith({ view: "settings" })).toBe("Appearance");
+        expect(openWith({ view: "settings", "settings:section": "nope" })).toBe("Appearance");
     });
 });
