@@ -28,8 +28,9 @@ use std::time::{Duration, Instant};
 use agentmux_procstats::{ProcInfo, ProcKey, RateMeter};
 
 use crate::backend::process_tracker::registry::BlockMembers;
+use crate::backend::tower_agentmux::Describer;
 use crate::backend::process_tracker::{agent_started, TrackedProcess, TrackingConfidence};
-use crate::backend::rpc_types::{TowerHost, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
+use crate::backend::rpc_types::{TowerHost, TowerMachine, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
 
 /// `TowerTask::id` of AgentMux's own processes.
 pub const AGENTMUX_TASK_ID: &str = "agentmux";
@@ -275,7 +276,8 @@ pub fn share(snap: &mut TowerSnapshot, top: usize, filter: &str, hidden: &dyn Fn
     let words: Vec<String> = filter.to_lowercase().split_whitespace().map(str::to_string).collect();
     host.processes.retain(|p| {
         let task = p.task.as_deref().and_then(|t| labels.get(t)).map_or("", String::as_str);
-        let hay = format!("{} {} {task}", p.name.to_lowercase(), p.pid);
+        let detail = p.detail.as_deref().unwrap_or("").to_lowercase();
+        let hay = format!("{} {} {task} {detail}", p.name.to_lowercase(), p.pid);
         words.iter().all(|w| hay.contains(w.as_str()))
     });
     host.matched = host.processes.len() as u32;
@@ -309,6 +311,8 @@ struct State {
     procs: RateMeter<ProcKey>,
     tasks: RateMeter<String>,
     sticky: HashMap<ProcKey, String>,
+    /// What each of AgentMux's own processes is (`tower_agentmux`).
+    describer: Describer,
     /// The last measurement: what a request within [`REUSE_WITHIN`] renders
     /// from, so it neither costs a second read nor shrinks the CPU window to
     /// milliseconds (one coarse clock tick over that would read as a spike).
@@ -324,6 +328,8 @@ struct Sampled {
     rates: Vec<Option<f64>>,
     grouping: Grouping,
     account_rates: HashMap<String, Option<f64>>,
+    /// AgentMux's own processes: index → what it is (`TowerProcess::detail`).
+    details: HashMap<usize, String>,
 }
 
 /// The process-wide sampler. Its state is the previous sample (for CPU
@@ -345,6 +351,7 @@ impl Tower {
                 procs: RateMeter::new(),
                 tasks: RateMeter::new(),
                 sticky: HashMap::new(),
+                describer: Describer::default(),
                 last: None,
             }),
         }
@@ -385,7 +392,7 @@ impl Tower {
                 st.procs = RateMeter::new();
                 st.tasks = RateMeter::new();
             }
-            let sampled = advance(&mut st, procs, &inputs(), now);
+            let sampled = advance(&mut st, procs, &inputs(), now, &agentmux_procstats::command_line_of);
             st.last = Some(sampled);
         }
         let last = st.last.as_ref().expect("measured above");
@@ -395,8 +402,17 @@ impl Tower {
 
 /// Measure: group the table, take every process's and task account's rate
 /// since the previous measurement, and remember sticky membership.
-fn advance(st: &mut State, procs: Vec<ProcInfo>, inputs: &Inputs, now: Instant) -> Sampled {
+/// `cmdline` reads a process's command line, for labelling AgentMux's own
+/// processes only (`tower_agentmux`).
+fn advance(
+    st: &mut State,
+    procs: Vec<ProcInfo>,
+    inputs: &Inputs,
+    now: Instant,
+    cmdline: &dyn Fn(ProcKey) -> Option<String>,
+) -> Sampled {
     let grouping = group(&procs, inputs, &st.sticky);
+    let details = st.describer.describe(&procs, &grouping.agentmux, inputs.own_pid, cmdline);
     // Every process's rate, every round, so the Host view has rates the
     // moment it is opened.
     let rates: Vec<Option<f64>> = procs
@@ -423,6 +439,7 @@ fn advance(st: &mut State, procs: Vec<ProcInfo>, inputs: &Inputs, now: Instant) 
         rates,
         grouping,
         account_rates,
+        details,
     }
 }
 
@@ -449,6 +466,7 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
             mem_commit: p.mem_commit,
             role,
             task,
+            detail: s.details.get(&i).cloned(),
         }
     };
 
@@ -522,6 +540,13 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
         interval_ms: INTERVAL.as_millis() as u32,
         remote: false,
         tasks,
+        // Already measured for every process each round (`advance`), so the
+        // totals cost nothing even when the full list isn't asked for.
+        machine: Some(TowerMachine {
+            cpu: sum_known(rates.iter().copied()),
+            mem: procs.iter().filter_map(|p| p.mem_private).sum(),
+            processes: procs.len() as u32,
+        }),
         host,
     }
 }
@@ -539,12 +564,18 @@ mod tests {
         hostname: &str,
         labels: &dyn Fn(&str) -> Option<BlockLabel>,
     ) -> TowerSnapshot {
-        let sampled = advance(st, procs.to_vec(), inputs, now);
+        let sampled = advance(st, procs.to_vec(), inputs, now, &|_| None);
         render(&sampled, want_host, hostname, labels)
     }
 
     fn state() -> State {
-        State { procs: RateMeter::new(), tasks: RateMeter::new(), sticky: HashMap::new(), last: None }
+        State {
+            procs: RateMeter::new(),
+            tasks: RateMeter::new(),
+            sticky: HashMap::new(),
+            describer: Describer::default(),
+            last: None,
+        }
     }
 
     fn p(pid: u32, ppid: u32, name: &str) -> ProcInfo {
@@ -724,6 +755,20 @@ mod tests {
         assert_eq!(node.task.as_deref(), Some("agent-a"));
         assert!(host.processes.iter().find(|x| x.pid == 900).unwrap().task.is_none());
         assert_eq!(node.id, "203:2030");
+
+        // The machine's totals come with every sample, the full list or not,
+        // and are the host list's own.
+        let machine = second.machine.clone().unwrap();
+        assert_eq!(machine.cpu, host.cpu);
+        assert_eq!(machine.mem, host.mem);
+        assert_eq!(machine.processes as usize, snap.len());
+        // (`build` measures again: a sample at the same instant has no CPU
+        // interval, so only what doesn't depend on one is compared.)
+        let without_list = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(2), false, "host", &label);
+        assert!(without_list.host.is_none());
+        let again = without_list.machine.unwrap();
+        assert_eq!((again.mem, again.processes), (machine.mem, machine.processes));
+        assert_eq!(first.machine.unwrap().cpu, None, "no made-up 0% on the first sample");
     }
 
     /// A build that started and finished between two samples: the tree has
