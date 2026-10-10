@@ -185,6 +185,31 @@ pub(crate) async fn handle_widget_file(UrlPath((id, hash, key, path)): UrlPath<(
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    // A sandboxed widget's document has an opaque origin, so its module
+    // scripts load with `Origin: null` in CORS mode. The files aren't
+    // secret and no credentials ride along: any origin may read them.
+    h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    resp
+}
+
+/// The widget SDK and its stylesheet (spec §7), served next to the widgets.
+const SDK_V1_JS: &str = include_str!("../../../../sdk/widget-sdk/v1.js");
+const SDK_V1_CSS: &str = include_str!("../../../../sdk/widget-sdk/am-widget.css");
+
+/// `GET /agentmux/widget-sdk/<file>`: `v1.js` and `am-widget.css`. No auth:
+/// a widget's iframe imports them, like its own files.
+pub(crate) async fn handle_widget_sdk(UrlPath(file): UrlPath<String>) -> Response {
+    let (body, ty) = match file.as_str() {
+        "v1.js" => (SDK_V1_JS, "text/javascript; charset=utf-8"),
+        "am-widget.css" => (SDK_V1_CSS, "text/css; charset=utf-8"),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mut resp = body.into_response();
+    let h = resp.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(ty));
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
     resp
 }
 
@@ -296,6 +321,14 @@ mod tests {
         assert_eq!(body, b"<p>approved</p>");
         assert!(headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap().contains("connect-src 'none'"));
         assert_eq!(headers[header::CONTENT_TYPE], "text/html; charset=utf-8");
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*", "an opaque-origin iframe loads it");
+
+        let (s, headers, body) = send(&app, get("/agentmux/widget-sdk/v1.js")).await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(String::from_utf8_lossy(&body).contains("export async function connect"));
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        let (s, _, _) = send(&app, get("/agentmux/widget-sdk/../widget-approvals.json")).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
 
         let (s, _, _) = send(&app, get(&format!("/agentmux/widget-files/acme.test/{hash}/wrongkey/index.html"))).await;
         assert_eq!(s, StatusCode::NOT_FOUND, "the key segment is required");
