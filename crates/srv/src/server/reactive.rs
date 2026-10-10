@@ -351,14 +351,8 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    // Identity M4d-4: a host-tier request carrying its sender's token, under
-    // that agent's own slug, is verified by the token. Far-side receivers have
-    // no Caller and keep checking the signature, which is still sent.
-    if req.delivery_tier.as_deref() == Some("host")
-        && !req.audit_source_uid.is_empty()
-        && super::actor::uid_has_slug(&state.mstore, &req.audit_source_uid, &claimed)
-    {
-        req.sig_verified = Some(true);
+    if super::actor::jekt_sender_by_token(&state.mstore, req, &claimed) {
+        req.sig_verified = Some(true); // identity M4d-4
         return;
     }
     let Ok(Some(key)) = state.mstore.agent_jekt_key_load(&claimed) else {

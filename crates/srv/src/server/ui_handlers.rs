@@ -80,15 +80,8 @@ pub(crate) fn verified_block_id(
         crate::server::actor::ActorSite::UiAuth,
         Some(&auth.agent_id),
     );
-    // Identity M4d-4: a caller whose token names it, under its own slug, acts
-    // on its UID's pane with no key to check. Without a UID registration yet,
-    // the name path below.
-    if let Some(uid) = caller.and_then(crate::server::caller::Caller::uid) {
-        if crate::server::actor::uid_has_slug(&state.mstore, uid, &auth.agent_id) {
-            if let Some(block) = crate::backend::reactive::handler::get_global_handler().block_for_uid(uid) {
-                return Ok(block);
-            }
-        }
+    if let Some(block) = crate::server::actor::own_pane_by_token(&state.mstore, caller, &auth.agent_id) {
+        return Ok(block); // identity M4d-4
     }
     crate::backend::agent_resolve::record_uid_fallback("m4d.ui_auth_by_name");
     if auth.ts_secs <= 0 || (now_unix_secs() - auth.ts_secs).abs() > UI_AUTOMATION_SIG_MAX_AGE_SECS
