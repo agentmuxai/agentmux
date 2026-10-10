@@ -22,7 +22,9 @@
 
 import { createEffect, createRoot } from "solid-js";
 import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
-import { MOS } from "@/app/store/global";
+import { getSettingsKeyAtom, MOS } from "@/app/store/global";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { windowId } from "@/app/store/window-identity";
@@ -63,7 +65,9 @@ export function startWaitingForYou(blockId: string, source: string, text?: strin
 
 function watch(blockId: string, source: string, stillWaiting: () => boolean): void {
     const key = `${blockId}\0${source}`;
-    if (watches.has(key)) return;
+    // A pane that mounts again brings its own check: the old one may read a
+    // disposed mount's state.
+    watches.get(key)?.();
     const dispose = createRoot((d) => {
         createEffect(() => {
             const gone = !MOS.getMuxObjectAtom<Block>(`block:${blockId}`)();
@@ -91,6 +95,13 @@ export function isWaitingForYou(blockId: string): boolean {
     return (waiting.get(blockId)?.size ?? 0) > 0;
 }
 
+/** Whether the agent itself waits in this pane (a question or a tool
+ *  permission), which the pane's `term:awaiting_user` meta reports. */
+export function isAgentWaitingForYou(blockId: string): boolean {
+    const s = waiting.get(blockId);
+    return !!s && (s.has("question") || s.has("permission"));
+}
+
 /** srv's announcement of a call to action it holds open (`userattention`,
  *  crates/srv/src/backend/user_attention.rs). */
 export interface UserAttention {
@@ -108,6 +119,9 @@ export function applyUserAttention(a: UserAttention, thisWindow: string): void {
     if (!a?.key) return;
     if (a.window_ids?.length && !a.window_ids.includes(thisWindow)) return;
     const blockId = a.block_id || `${APP_KEY_PREFIX}${a.key}`;
+    // Browser hand-offs and approvals can be left out (Settings → Sounds);
+    // an end is always applied.
+    if (a.active && a.kind === "browser" && getSettingsKeyAtom("notify:waiting:browser")() === false) return;
     if (a.active) startWaitingForYou(blockId, `srv:${a.key}`, a.text);
     else endWaitingForYou(blockId, `srv:${a.key}`, "submitted");
 }
@@ -124,6 +138,14 @@ export function installWaitingForYou(): void {
             if (event?.data) applyUserAttention(event.data, windowId());
         },
     });
+    // What was already open when this window started.
+    void RpcApi.NotifyAttentionCommand(TabRpcClient)
+        .then((r) => {
+            for (const a of r.attention ?? []) applyUserAttention(a as UserAttention, windowId());
+        })
+        .catch(() => {
+            /* older srv without notify.attention */
+        });
 }
 
 /** Test helper. */

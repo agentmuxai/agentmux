@@ -280,6 +280,19 @@ describe("the Files pane: navigation", () => {
         await waitFor(() => expect(v.model.selection().focus).toBe("src"));
     });
 
+    it("leaves a key the table gives a global command to the dispatcher (Masty's macOS L3)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("a10.md"));
+        const before = v.model.selection().focus;
+        // Ctrl+Shift+↑ is pane:focus:up: not swallowed as a list move.
+        expect(fireEvent.keyDown(v.list(), { key: "ArrowUp", ctrlKey: true, shiftKey: true })).toBe(true);
+        expect(v.model.selection().focus).toBe(before);
+        // A plain ↑ is still the list's.
+        expect(fireEvent.keyDown(v.list(), { key: "ArrowUp" })).toBe(false);
+        expect(v.model.selection().focus).not.toBe(before);
+    });
+
     it("goes back, forward and up through the App API's RunCommand too", async () => {
         const errors: unknown[] = [];
         const onError = (e: ErrorEvent) => errors.push(e.error);
@@ -730,6 +743,18 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         fireEvent.keyDown(input, { key: "Escape" });
         await waitFor(() => expect(v.names()).toHaveLength(4));
         expect(v.container.querySelector(".files-filter-input")).toBeNull();
+    });
+
+    it("Escape on the list clears the filter too, though Escape is also a global row (muxreview on #4636)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "f", ctrlKey: true });
+        const input = await waitFor(() => v.container.querySelector(".files-filter-input") as HTMLInputElement);
+        fireEvent.input(input, { target: { value: "A" } });
+        await waitFor(() => expect(v.names()).toEqual(["a2.md", "a10.md"]));
+        // Focus back on the list, filter still applied.
+        fireEvent.keyDown(v.list(), { key: "Escape" });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
     });
 
     it("a new folder clears the filter", async () => {

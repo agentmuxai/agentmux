@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { keyPlatform } from "@/app/keybindings";
+import { keyPlatform, setKeyContextProvider } from "@/app/keybindings";
 import {
     lastResolvedCommand,
     listShortcuts,
@@ -124,6 +124,8 @@ function focusedViewType(): string {
     const blockId = getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId;
     return (blockId && getBlockComponentModel(blockId)?.viewModel?.viewType) || "";
 }
+
+setKeyContextProvider(() => currentKeyContext());
 
 /** Where focus is, for the shortcut table's `when` clauses. */
 export function currentKeyContext(): KeyContext {

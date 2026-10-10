@@ -139,4 +139,4 @@ The questions as asked:
 | A4 Save-key reporting, dialog Escape | AgentA@Area54 | done (#4613); the Ctrl+F Help note moved to SPEC_HELP_HIDDEN_TIPS_2026_10_10 (#4616) |
 | A5 Pool window marker | AgentA@Area54 | done (#4618) |
 | A6 Dev environment | AgentA@Area54 | terminals start at home (#4621), full-reload reason logged (#4623); `npm ci` and launching a dev instance from an agent still open |
-| A7 New-tab focus | AgentA@Area54 | open (D3: yes) |
+| A7 New-tab focus | AgentA@Area54 | in review (#4635) |
