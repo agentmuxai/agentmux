@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { createTaskWakeDetector } from "./task-wake";
+import { createTaskWakeDetector, unwrapTaskSummary } from "./task-wake";
 
 const notification = (task_id: string, summary?: string) => ({ type: "system", subtype: "task_notification", task_id, tool_use_id: "toolu_1", status: "completed", summary });
 const init = { type: "system", subtype: "init", session_id: "s" };
@@ -39,6 +39,39 @@ describe("createTaskWakeDetector", () => {
 
     it("one notification makes one line", () => {
         expect(run([notification("t1", "done"), init, result, init]).map((n) => n.text)).toEqual(["Woke up: done"]);
+    });
+
+    describe("a summary that quotes AgentMux's Bash wrapper", () => {
+        // base64url("cd app && npm run build") with the CLI's own wrapping.
+        const wrapped = 'Background command "agentmux-bashwrap exec --tool-id=toolu_bg --b64-cmd=Y2QgYXBwICYmIG5wbSBydW4gYnVpbGQ --declared-background" completed (exit code 0)';
+        const bashCall = (description?: string) => ({
+            type: "assistant",
+            message: { content: [{ type: "tool_use", id: "toolu_bg", name: "Bash", input: { command: "cd app && npm run build", description, run_in_background: true } }] },
+        });
+        const done = { ...notification("t9", wrapped), tool_use_id: "toolu_bg" };
+
+        it("shows the call's description instead", () => {
+            expect(run([bashCall("Build the app"), done, init])[0].text).toBe('Woke up: Background command "Build the app" completed (exit code 0)');
+        });
+
+        it("shows the decoded command when the call had no description", () => {
+            expect(run([bashCall(), done, init])[0].text).toBe('Woke up: Background command "cd app && npm run build" completed (exit code 0)');
+        });
+
+        it("the CLI's summary with no wrapper in it is left alone", () => {
+            const plain = 'Background command "Build the app" completed (exit code 0)';
+            expect(unwrapTaskSummary(plain, "something else")).toBe(plain);
+        });
+
+        it("a long or multi-line command shows its first line, shortened", () => {
+            const b64 = btoa(`${"x".repeat(120)}\nsecond line`).replace(/=+$/, "");
+            const text = unwrapTaskSummary(`agentmux-bashwrap exec --tool-id=t --b64-cmd=${b64}`);
+            expect(text).toBe(`${"x".repeat(79)}…`);
+        });
+
+        it("a command that doesn't decode reads as \"a command\"", () => {
+            expect(unwrapTaskSummary('Background command "agentmux-bashwrap exec --b64-cmd=_-_" completed')).toBe('Background command "a command" completed');
+        });
     });
 
     it("live and replay produce the same node (same id) for the same lines", () => {
