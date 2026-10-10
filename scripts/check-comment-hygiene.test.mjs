@@ -426,6 +426,11 @@ describe("file references", () => {
         }
         expect(isForeignRef("libfoo.d.ts")).toBe(false);
         expect(isForeignRef("vitest/src/x.ts")).toBe(false);
+        // Generic names are foreign only on their own: in a path they name a repo file.
+        for (const ref of ["docs/notes.md", "frontend/app/notes.md", "crates/x/system_prompt.md", "frontend/types/lib.dom.d.ts"]) {
+            expect(isForeignRef(ref), ref).toBe(false);
+        }
+        expect(isForeignRef("agents/KIMI.md")).toBe(true);
     });
 
     it("does not read a name glued to a glob or an escape", () => {
@@ -433,6 +438,9 @@ describe("file references", () => {
         expect(refs("// Payloads in frontend/types/rpc/Attachment*Event.ts;\n")).toEqual([]);
         expect(refs("// a non-ASCII byte (\"docs/specs/Caf\\303\\251.md\")\n")).toEqual([]);
         expect(refs("// see a.ts and *.md\n")).toEqual(["a.ts"]);
+        // A Windows path still yields its file name, so a rename can flag it.
+        expect(refs("// e.g. C:\\repo\\gone.ts or frontend\\app\\gone.ts\n")).toEqual(["gone.ts", "gone.ts"]);
+        expect(refs("// a stray \\x.md and \\12.md stay names\n")).toEqual(["x.md", "12.md"]);
     });
 
     it("excuses bare names a test uses as fixtures, or the file's code spells the same way", () => {

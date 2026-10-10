@@ -5,7 +5,7 @@ import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 
 // Patterns ordered by specificity — earlier matches take priority
 const FILE_PATH_REGEXES: RegExp[] = [
-    // Windows absolute: C:\Users\foo\bar.ts, C:/Users/foo/bar.ts
+    // Windows absolute: C:\Users\foo\bar.ts, C:/Users/foo/bar.ts (comment-hygiene: allow)
     /[A-Za-z]:[\\\/][\w.\-\\\/]+[\w.\-]/g,
 
     // Unix absolute: /home/user/file.ts, /usr/bin/node

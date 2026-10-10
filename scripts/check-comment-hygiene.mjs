@@ -391,18 +391,23 @@ export function narrationRule(text) {
 // this repo.
 const REF_EXT = "rs|tsx?|jsx?|mjs|cjs|sh|ps1|scss|css|md";
 const REF_FILE = new RegExp(`\\.(?:${REF_EXT})$`);
-// A name glued to `*` (a glob, `Attachment*Event.ts`) or `\` (an escape,
-// `Caf\303\251.md`) is not a file name on its own.
-const REF_RE = new RegExp(`(?<![\\w./@*\\\\-])((?:\\.{1,2}/)*(?:[\\w@.-]+/)*[\\w@-][\\w@.-]*\\.(?:${REF_EXT}))(?![\\w/-])`, "g");
+// A name glued to `*` (a glob, `Attachment*Event.ts`) is not a file name on its
+// own; neither is the tail of an octal escape (`Caf\303\251.md`), which
+// commentRefs drops. A Windows path (`frontend\app\x.ts`) still yields `x.ts`. (comment-hygiene: allow)
+const REF_RE = new RegExp(`(?<![\\w./@*-])((?:\\.{1,2}/)*(?:[\\w@.-]+/)*[\\w@-][\\w@.-]*\\.(?:${REF_EXT}))(?![\\w/-])`, "g");
+const OCTAL_ESCAPE_TAIL = /^[0-7]{3}\./;
 // Names that are real but not files in this repo: what AgentMux writes into an
 // agent's workdir or reads from a provider CLI's config, sibling repos, and the
 // pre-CEF `src-tauri/` tree that "ported from" comments cite. Measured against a
 // full triage of the tree's dead references (REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md §6).
-// Also: a bundle's `notes.md`, the TypeScript compiler's own `lib.*.d.ts`
-// declarations, package paths (`vite/…`, `shiki/…`), the xterm.js repository,
-// and a crate's versioned source folder in the cargo registry (`keyring-2.3.3/…`).
+// Also: package paths (`vite/…`, `shiki/…`), the xterm.js repository, and a
+// crate's versioned source folder in the cargo registry (`keyring-2.3.3/…`).
 const FOREIGN_REF =
-    /^(?:(?:CLAUDE|CLAUDE\.local|CLAUDE_CONTAINER|AGENTS|GEMINI|QWEN|KIMI|MEMORY|AGENTMUX_MEMORY|SKILL|SYSTEM|APPEND_SYSTEM|system_prompt|notes|copilot-instructions)\.md|lib(?:\.[\w-]+)+\.d\.ts)$/;
+    /^(?:CLAUDE|CLAUDE\.local|CLAUDE_CONTAINER|AGENTS|GEMINI|QWEN|KIMI|MEMORY|AGENTMUX_MEMORY|SKILL|SYSTEM|APPEND_SYSTEM|copilot-instructions)\.md$/;
+// Generic names that are foreign only on their own (a bundle's `notes.md`, a
+// provider's `system_prompt.md`, the TypeScript compiler's `lib.*.d.ts`): with a
+// folder in front (`docs/notes.md`) they name a repo file and are checked. (comment-hygiene: allow)
+const FOREIGN_BARE = /^(?:(?:system_prompt|notes)\.md|lib(?:\.[\w-]+)+\.d\.ts)$/;
 const FOREIGN_PREFIX =
     /^(?:\.claude|\.codex|\.gemini|\.qwen|\.pi|\.copilot|\.agentmux|\.github\/instructions|~|HOME|agentmux-cloud|agentmux-ai|muxbus|reagent|src-tauri|node_modules|vite|shiki|xtermjs|[\w-]+-\d+\.\d+\.\d+)\//;
 const DOC_NAME = /^(?:SPEC|REPORT|PLAN|RUNBOOK|RETRO|ADR|PRD|AUDIT)_[A-Za-z0-9_.-]+\.md$/;
@@ -426,6 +431,7 @@ export function commentRefs(info) {
         const body = normalizeComment(l.text);
         for (const m of body.matchAll(REF_RE)) {
             let ref = m[1];
+            if (body[m.index - 1] === "\\" && OCTAL_ESCAPE_TAIL.test(ref)) continue;
             const prev = idx > 0 ? normalizeComment(info.lines[idx - 1].text) : "";
             if (m.index === 0 && prev) {
                 const tail = /[\w@./-]+$/.exec(prev);
@@ -469,7 +475,8 @@ export function isForeignRef(ref) {
     // TypeScript/Rust tree; a `.js` path is still checked, and so is a bare
     // name when its file is removed (staleAfterMove does not use this).
     const bareJs = !r.includes("/") && /\.jsx?$/.test(r);
-    return bareJs || FOREIGN_REF.test(baseName(r)) || FOREIGN_PREFIX.test(r) || r.includes("...") || r.includes("*");
+    const bareGeneric = !r.includes("/") && FOREIGN_BARE.test(r);
+    return bareJs || bareGeneric || FOREIGN_REF.test(baseName(r)) || FOREIGN_PREFIX.test(r) || r.includes("...") || r.includes("*");
 }
 
 /** True when some tracked file is what `ref` names (by full path, path suffix, or basename). */
