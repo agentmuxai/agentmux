@@ -6,15 +6,21 @@
 //!
 //! git never runs on a request: a background loop probes each agent's folder
 //! and the request reads the cache. An entry is re-probed once it is
-//! [`REFRESH_AFTER_MS`] old or the agent's folder changed, so what a request
-//! sees is at most ~30 s old. Every git run goes through
+//! [`REFRESH_AFTER_MS`] old or the agent's folder changed. Distinct folders
+//! are probed concurrently ([`MAX_CONCURRENT_PROBES`] at a time) and a probe
+//! is abandoned after [`PROBE_TIMEOUT`], so with a handful of folders an
+//! entry is under ~30 s old; many slow repositories can make it older, which
+//! is why every answer carries `git_checked_ms`. Every git run goes through
 //! `fs_ops::git`'s safe runner (the repository's own fsmonitor and filters
 //! are off, nothing prompts, the index isn't written, a slow run is killed
 //! after a few seconds).
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+
+use futures_util::StreamExt;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,9 +33,15 @@ use super::paths::{normalize_path, normalize_repo};
 /// How often the loop looks for entries to refresh.
 const TICK: Duration = Duration::from_secs(5);
 
-/// An entry this old is probed again on the next tick, so none is older
-/// than this plus [`TICK`] (30 s).
-pub const REFRESH_AFTER_MS: u64 = 25_000;
+/// An entry this old is probed again on the next tick.
+pub const REFRESH_AFTER_MS: u64 = 20_000;
+
+/// Most probes running at once: each is a few git processes.
+const MAX_CONCURRENT_PROBES: usize = 4;
+
+/// A probe (several git runs, each with its own 4 s limit) is abandoned
+/// after this and the folder reads as having no git facts until the next.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Most uncommitted paths kept per agent; [`GitFacts::dirty_count`] is the
 /// real total.
@@ -129,6 +141,40 @@ pub fn cached(block: &str, dir: &str) -> Option<GitFacts> {
     cache().read().get(block, dir)
 }
 
+/// One refresh pass: probe each due `(block, folder)` in `folders`, every
+/// distinct folder once and at most [`MAX_CONCURRENT_PROBES`] at a time,
+/// each abandoned after `timeout`, and store the results stamped `now_ms`.
+pub async fn refresh_once<F, Fut>(
+    cache: &parking_lot::RwLock<GitCache>,
+    folders: Vec<(String, String)>,
+    now_ms: u64,
+    timeout: Duration,
+    probe: F,
+) where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Option<GitFacts>>,
+{
+    let due: Vec<(String, String)> = {
+        let c = cache.read();
+        folders.into_iter().filter(|(b, d)| c.needs_probe(b, d, now_ms)).collect()
+    };
+    let mut dirs: Vec<String> = due.iter().map(|(_, d)| d.clone()).collect();
+    dirs.sort();
+    dirs.dedup();
+    let results: HashMap<String, Option<GitFacts>> = futures_util::stream::iter(dirs)
+        .map(|dir| {
+            let fut = probe(dir.clone());
+            async move { (dir, tokio::time::timeout(timeout, fut).await.ok().flatten()) }
+        })
+        .buffer_unordered(MAX_CONCURRENT_PROBES)
+        .collect()
+        .await;
+    let mut c = cache.write();
+    for (block, dir) in due {
+        c.put(&block, &dir, results.get(&dir).cloned().flatten(), now_ms);
+    }
+}
+
 /// Keep every registered agent's git facts fresh. Never returns.
 pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
     let mut ticker = tokio::time::interval(TICK);
@@ -153,23 +199,8 @@ pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
             continue;
         };
 
-        // Agents sharing a folder share one probe per tick.
-        let mut this_tick: HashMap<String, Option<GitFacts>> = HashMap::new();
-        for (block, dir) in folders {
-            let now = agentmux_common::time::now_ms_u64();
-            if !cache().read().needs_probe(&block, &dir, now) {
-                continue;
-            }
-            let facts = match this_tick.get(&dir) {
-                Some(f) => f.clone(),
-                None => {
-                    let f = probe(&dir, now).await;
-                    this_tick.insert(dir.clone(), f.clone());
-                    f
-                }
-            };
-            cache().write().put(&block, &dir, facts, now);
-        }
+        let now = agentmux_common::time::now_ms_u64();
+        refresh_once(cache(), folders, now, PROBE_TIMEOUT, |dir| async move { probe(&dir, now).await }).await;
     }
 }
 
@@ -251,8 +282,50 @@ mod tests {
         assert_eq!(c.get("b1", "/r"), None, "a gone agent's entry is dropped");
     }
 
-    #[test]
-    fn refresh_plus_tick_stays_within_thirty_seconds() {
-        assert!(REFRESH_AFTER_MS + TICK.as_millis() as u64 <= 30_000);
+    fn facts_for(dir: &str) -> GitFacts {
+        GitFacts { root: dir.to_string(), ..Default::default() }
+    }
+
+    /// The loop's real pass: distinct folders are probed concurrently (at
+    /// most MAX_CONCURRENT_PROBES), a shared folder once, a fresh entry not
+    /// at all, and a hung probe is abandoned rather than holding up the rest.
+    #[tokio::test(start_paused = true)]
+    async fn a_pass_probes_due_folders_concurrently_and_abandons_a_hung_one() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = parking_lot::RwLock::new(GitCache::default());
+        cache.write().put("fresh", "/fresh", Some(facts_for("/fresh")), 1_000);
+
+        let mut folders: Vec<(String, String)> = (0..8).map(|i| (format!("b{i}"), format!("/r{i}"))).collect();
+        folders.push(("shares-r0".into(), "/r0".into()));
+        folders.push(("fresh".into(), "/fresh".into()));
+        folders.push(("hung".into(), "/hung".into()));
+
+        let (running, peak, calls) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
+        let start = tokio::time::Instant::now();
+        refresh_once(&cache, folders, 2_000, Duration::from_secs(8), |dir| {
+            let (running, peak, calls) = (&running, &peak, &calls);
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                let wait = if dir == "/hung" { 600 } else { 2 };
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                running.fetch_sub(1, Ordering::SeqCst);
+                Some(facts_for(&dir))
+            }
+        })
+        .await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 9, "8 folders + the hung one; shared and fresh ones skipped");
+        assert_eq!(peak.load(Ordering::SeqCst), MAX_CONCURRENT_PROBES);
+        // Eight 2 s probes four at a time beside one 8 s timeout finish in
+        // about 8 s; one at a time would take 24 s.
+        assert!(start.elapsed() <= Duration::from_secs(9), "took {:?}", start.elapsed());
+        let c = cache.read();
+        assert_eq!(c.get("b3", "/r3"), Some(facts_for("/r3")));
+        assert_eq!(c.get("shares-r0", "/r0"), Some(facts_for("/r0")));
+        assert_eq!(c.get("hung", "/hung"), None, "abandoned");
+        assert!(!c.needs_probe("hung", "/hung", 2_001), "and not retried until it is due again");
+        assert_eq!(c.get("fresh", "/fresh"), Some(facts_for("/fresh")));
     }
 }

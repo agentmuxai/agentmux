@@ -107,9 +107,23 @@ pub struct RecentFile {
     /// The path exactly as the tool input wrote it (usually absolute).
     pub path: String,
     pub tool: String,
-    /// When this watcher read the call: not the call's own time, so a block
-    /// first seen mid-session stamps its whole backlog with that moment.
+    /// When the call was made: the transcript line's own `timestamp`, else
+    /// the moment this watcher read it live. A line without a timestamp read
+    /// as backlog (see [`apply_lines`]) is not recorded at all, so a block
+    /// first seen mid-session never reads as "edited just now".
     pub ts_ms: u64,
+}
+
+/// A transcript line's own time, when it carries one (`timestamp`, RFC 3339
+/// or Unix ms, as Claude's session lines do).
+fn line_timestamp(v: &serde_json::Value) -> Option<u64> {
+    let ts = v.get("timestamp")?;
+    if let Some(n) = ts.as_u64() {
+        return Some(n);
+    }
+    chrono::DateTime::parse_from_rfc3339(ts.as_str()?)
+        .ok()
+        .and_then(|dt| u64::try_from(dt.timestamp_millis()).ok())
 }
 
 /// What the watcher currently knows about one block, for readers outside
@@ -194,6 +208,8 @@ struct BlockState {
     partial: bool,
     /// Files named by edit tools, newest first (see [`note_recent_file`]).
     recent_files: Vec<RecentFile>,
+    /// This block's output has been looked at before.
+    seen: bool,
 }
 
 impl BlockState {
@@ -219,8 +235,14 @@ impl BlockState {
 ///
 /// Pure w.r.t. I/O so it can be unit-tested against real transcript shapes
 /// without a FileStore. Called once per tick with only the lines appended since
-/// the previous call — never the whole file. `now_ms` stamps recent files.
-fn apply_lines(state: &mut BlockState, lines: &[&str], now_ms: u64) {
+/// the previous call — never the whole file.
+///
+/// A recent file takes its line's own timestamp. Without one it takes
+/// `live_now_ms`: the read time when these lines were just written, `None`
+/// when they are backlog read on first sight of the block (srv restarted, or
+/// the block predates the watcher), whose read time says nothing about when
+/// the edit happened. Such an edit is not recorded.
+fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>) {
     for line in lines {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -250,7 +272,9 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], now_ms: u64) {
                 if let Some(path) = frame_input(frame)
                     .and_then(|i| first_string(i, &["file_path", "notebook_path"]))
                 {
-                    note_recent_file(&mut state.recent_files, &path, name, now_ms);
+                    if let Some(ts) = line_timestamp(&v).or(live_now_ms) {
+                        note_recent_file(&mut state.recent_files, &path, name, ts);
+                    }
                 }
                 continue;
             }
@@ -448,15 +472,24 @@ fn first_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
 /// of the work for this block.
 fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockState) -> bool {
     let size = match filestore.stat(block_id, "output") {
-        Ok(Some(wf)) if wf.size > 0 => wf.size,
-        _ => return false,
+        Ok(Some(wf)) => wf.size,
+        Ok(None) => 0,
+        Err(_) => return false,
     };
+    // Whatever is already there the first time this block is looked at is
+    // backlog; only what appears after that was written live (see
+    // `apply_lines` on stamping recent files).
+    let first_sight = !state.seen;
+    state.seen = true;
+    if size <= 0 {
+        return false;
+    }
 
     // The file shrank — a new session reusing the block, or a truncation. Our
     // accumulated state describes a transcript that no longer exists, so start
     // over rather than mixing two conversations' checklists.
     if size < state.next_offset {
-        *state = BlockState::default();
+        *state = BlockState { seen: true, ..BlockState::default() };
     }
 
     if state.next_offset == 0 && size > MAX_READ_BYTES {
@@ -496,7 +529,8 @@ fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockSt
     if lines.is_empty() {
         return false;
     }
-    apply_lines(state, &lines, agentmux_common::time::now_ms_u64());
+    let live_now_ms = (!first_sight).then(agentmux_common::time::now_ms_u64);
+    apply_lines(state, &lines, live_now_ms);
     true
 }
 
@@ -670,7 +704,53 @@ mod tests {
 
     fn feed_at(state: &mut BlockState, lines: &[String], now_ms: u64) {
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-        apply_lines(state, &refs, now_ms);
+        apply_lines(state, &refs, Some(now_ms));
+    }
+
+    fn output_store(block: &str, text: &str) -> FileStore {
+        use crate::backend::storage::filestore::{FileMeta, FileOpts};
+        let fs = FileStore::open_in_memory().unwrap();
+        fs.make_file(block, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_data(block, "output", text.as_bytes()).unwrap();
+        fs
+    }
+
+    /// An srv restart (or any first sight of a block) reads the backlog: an
+    /// edit there without its own timestamp must not read as "edited now",
+    /// one with a timestamp keeps it, and what is written afterwards is live.
+    #[test]
+    fn a_first_sight_backlog_does_not_read_as_just_edited() {
+        let block = "b-backlog";
+        let stamped = r#"{"type":"assistant","timestamp":"2026-10-01T10:00:00Z","message":{"content":[{"type":"tool_use","id":"s1","name":"Edit","input":{"file_path":"/r/stamped.rs"}}]}}"#;
+        let backlog = format!("{}
+{}
+", edit_call("e1", "Edit", "file_path", "/r/old.rs"), stamped);
+        let fs = output_store(block, &backlog);
+        let mut st = BlockState::default();
+        assert!(consume_new_output(&fs, block, &mut st));
+        let got: Vec<(&str, u64)> = st.recent_files.iter().map(|f| (f.path.as_str(), f.ts_ms)).collect();
+        assert_eq!(got, vec![("/r/stamped.rs", 1_790_848_800_000)], "the untimed backlog edit is not recorded");
+
+        let before = agentmux_common::time::now_ms_u64();
+        fs.append_data(block, "output", format!("{}
+", edit_call("e2", "Write", "file_path", "/r/new.rs")).as_bytes())
+            .unwrap();
+        assert!(consume_new_output(&fs, block, &mut st));
+        assert_eq!(st.recent_files[0].path, "/r/new.rs");
+        assert!(st.recent_files[0].ts_ms >= before, "a live edit takes the read time");
+    }
+
+    /// A block first seen while still empty: everything after is live.
+    #[test]
+    fn a_block_first_seen_empty_records_its_first_edits() {
+        let block = "b-empty";
+        let fs = FileStore::open_in_memory().unwrap();
+        let mut st = BlockState::default();
+        assert!(!consume_new_output(&fs, block, &mut st));
+        let fs = output_store(block, &format!("{}
+", edit_call("e1", "Edit", "file_path", "/r/a.rs")));
+        assert!(consume_new_output(&fs, block, &mut st));
+        assert_eq!(st.recent_files.len(), 1);
     }
 
     fn edit_call(id: &str, tool: &str, key: &str, path: &str) -> String {

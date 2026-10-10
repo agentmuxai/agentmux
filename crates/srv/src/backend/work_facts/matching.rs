@@ -69,6 +69,9 @@ pub struct WhoResult {
     pub goal: Option<String>,
     pub repo: Option<String>,
     pub branch: Option<String>,
+    /// When this agent's git facts were taken (Unix ms), so a reader can
+    /// tell how fresh `dirty` and `branch` matches are.
+    pub git_checked_ms: Option<u64>,
     pub matches: Vec<WhoMatch>,
 }
 
@@ -258,6 +261,7 @@ pub fn who_is_working_on(t: &Target, others: &[WorkFacts]) -> Vec<WhoResult> {
                 goal: f.goal.clone(),
                 repo: f.repo.clone(),
                 branch: f.branch.clone(),
+                git_checked_ms: f.git_checked_ms,
                 matches,
             })
         })

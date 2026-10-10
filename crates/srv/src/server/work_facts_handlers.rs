@@ -181,8 +181,8 @@ pub(crate) async fn handle_who_is_working_on(
     let regs = state.reactive_handler.list_agents();
     let uid = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string));
     let me_block = caller_block(&regs, uid.as_deref(), p.block.as_deref(), p.agent.as_deref());
-    let (me, mut others) = split_caller(local_facts(&state).await, me_block.as_deref());
-    let (cross, unreachable) = cross_channel_facts(&state).await;
+    let (local, (cross, unreachable)) = tokio::join!(local_facts(&state), cross_channel_facts(&state));
+    let (me, mut others) = split_caller(local, me_block.as_deref());
     others.extend(cross);
 
     let q = matching::WhoQuery { path: p.path, repo: p.repo, branch: p.branch, query: p.query };
@@ -202,11 +202,27 @@ pub(crate) async fn handle_who_is_working_on(
     .into_response()
 }
 
+/// Start gathering every agent's facts for `ListConversations`, this srv's
+/// and the other channels' at once, so the handler can run its own preview
+/// fan-out meanwhile rather than paying a second round after it.
+pub(super) fn start_conversation_facts(state: &AppState) -> tokio::task::JoinHandle<Vec<WorkFacts>> {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let (mut local, (cross, _)) = tokio::join!(local_facts(&state), cross_channel_facts(&state));
+        local.extend(cross);
+        local
+    })
+}
+
 /// Add a `work` field (see `work_facts::conversation_summary`) to every
-/// host and cross-channel `ListConversations` entry that names its block.
-pub(super) async fn annotate_conversations(state: &AppState, entries: &mut [serde_json::Value]) {
-    let mut facts = local_facts(state).await;
-    facts.extend(cross_channel_facts(state).await.0);
+/// host and cross-channel `ListConversations` entry that names its block,
+/// from the facts [`start_conversation_facts`] gathered. If gathering failed
+/// the entries are left as they were.
+pub(super) async fn annotate_conversations(
+    facts: tokio::task::JoinHandle<Vec<WorkFacts>>,
+    entries: &mut [serde_json::Value],
+) {
+    let facts = facts.await.unwrap_or_default();
     let by_block: HashMap<&str, &WorkFacts> = facts.iter().map(|f| (f.block_id.as_str(), f)).collect();
     for e in entries.iter_mut() {
         let Some(f) = e.get("block_id").and_then(|b| b.as_str()).and_then(|b| by_block.get(b)) else {
@@ -307,7 +323,7 @@ mod tests {
             json!({ "name": agent, "tier": "host", "block_id": block }),
             json!({ "name": "remote", "tier": "lan" }),
         ];
-        annotate_conversations(&state, &mut entries).await;
+        annotate_conversations(start_conversation_facts(&state), &mut entries).await;
         assert!(entries[0]["work"].is_object(), "{}", entries[0]);
         assert_eq!(entries[0]["work"]["dirty_count"], 0);
         assert!(entries[1].get("work").is_none(), "LAN entries carry no facts");
