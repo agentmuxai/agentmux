@@ -11,6 +11,7 @@ import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
 import type { NotifyAckParams } from "@/types/rpc/NotifyAckParams";
 import type { NotifyAckResult } from "@/types/rpc/NotifyAckResult";
+import type { NotifyAttentionResult } from "@/types/rpc/NotifyAttentionResult";
 import type { NotifyEmitParams } from "@/types/rpc/NotifyEmitParams";
 import type { NotifyFocusParams } from "@/types/rpc/NotifyFocusParams";
 import type { NotifyOk } from "@/types/rpc/NotifyOk";
@@ -19,7 +20,7 @@ import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivatio
 
 export const NotifyApi = {
     /** The calls to action srv holds open now (the waiting-for-you registry). */
-    NotifyAttentionCommand(client: RpcClient, opts?: RpcOpts): Promise<{ attention: unknown[] }> {
+    NotifyAttentionCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyAttentionResult> {
         return client.rpcCall("notify.attention", {}, opts);
     },
 
