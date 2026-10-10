@@ -27,7 +27,7 @@ import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
-import { EDITOR_STATE_FIELDS, provideEditorStates, takeMovedEditorState } from "./editor-doc-tabs";
+import { EDITOR_STATE_FIELDS, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
@@ -226,7 +226,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     if (model.activeTabAtom()?.isScratch) {
                         triggerSaveAs();
                     } else {
-                        void model.saveFile();
+                        void trackSave(model, model.activeIdAtom(), model.saveFile());
                     }
                     return true;
                 },
@@ -466,7 +466,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         // superseded build leaves it for the next one.
         const moved = tabId ? takeMovedEditorState(model, tabId) : undefined;
         let state: EditorState | undefined;
-        if (moved !== undefined) {
+        // Only when it is the text shown: a clean tab is read fresh on
+        // arrival, and its file may have changed meanwhile.
+        if (moved !== undefined && (moved as { doc?: unknown }).doc === content) {
             try {
                 state = EditorState.fromJSON(moved, { extensions }, EDITOR_STATE_FIELDS);
             } catch {
@@ -744,8 +746,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     };
 
     const handleSaveAsConfirm = async (path: string) => {
+        const tabId = saveAsTabId();
         setSaveAsTabId(null);
-        if (path) await model.saveFileAs(path);
+        if (path) await trackSave(model, tabId, model.saveFileAs(path));
     };
 
     // ── File-tree context menu ────────────────────────────────────────

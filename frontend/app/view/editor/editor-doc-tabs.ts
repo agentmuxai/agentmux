@@ -31,9 +31,25 @@ export function moveEditorTabTo(blockId: string, tabId: string, targetId: string
     return snapshot(blockId)?.doc !== before;
 }
 
+/** Tabs being saved, per pane. A tab can't move mid-save: the save's end
+ *  (its unsaved mark cleared, a scratch buffer moved to its new path) would
+ *  land on the pane it left. */
+const saving = new WeakMap<EditorViewModel, Set<string>>();
+
+/** Run `save` for tab `tabId` of `model`, marking the tab as being saved. */
+export function trackSave(model: EditorViewModel, tabId: string | null | undefined, save: Promise<void>): Promise<void> {
+    if (!tabId) return save;
+    let tabs = saving.get(model);
+    if (!tabs) saving.set(model, (tabs = new Set()));
+    tabs.add(tabId);
+    return save.finally(() => tabs!.delete(tabId));
+}
+
 /** What travels with an Editor tab, beside the tab itself. */
 interface EditorLiveState {
-    /** Absent for a tab whose file hasn't been read yet: the target reads it. */
+    /** A tab's unsaved text. Absent for a clean tab: its text is its file,
+     *  which the target reads fresh, so a change on disk the source was still
+     *  reading (or never saw) isn't lost. */
     content?: string;
     encoding?: { encoding: string; bom: string; lineEnding: string; hadDecodeErrors: boolean };
     mode?: EditorMode;
@@ -72,7 +88,7 @@ function liveStateOf(model: EditorViewModel, tab: DocTab<EditorBuffer>): EditorL
         encoding: model._encodingByTab.get(tab.id),
         mode: model._tabModes.get(tab.id),
     };
-    if (tab.payload.contentLoaded && model._contentByTab.has(tab.id)) live.content = model._contentByTab.get(tab.id);
+    if (tab.dirty && model._contentByTab.has(tab.id)) live.content = model._contentByTab.get(tab.id);
     // A tab that moved in and moves on before this pane's view has built it
     // still has its state waiting here: pass that on (and don't leave it
     // behind). A built tab's own state is the newer.
@@ -95,7 +111,7 @@ export function editorDocTabHost(model: EditorViewModel): DocTabHost {
         docType: "editor",
         scope: () => model.connection(),
         peek: (tabId) => tabOf(tabId) ?? null,
-        refuseGive: () => null,
+        refuseGive: (tab) => (saving.get(model)?.has(tab.id) ? "It is still being saved. Try again in a moment." : null),
         refuseTake: (moving) => {
             const tab = moving as DocTab<EditorBuffer>;
             const here = snapshot(blockId)?.doc.tabs.find((t) => t.key === tab.key);
@@ -116,8 +132,8 @@ export function editorDocTabHost(model: EditorViewModel): DocTabHost {
         take: (transfer, at) => {
             const live = (transfer.live ?? {}) as EditorLiveState;
             let tab = transfer.tab as DocTab<EditorBuffer>;
-            // Read in the source but arriving without its text: read it here
-            // rather than show an empty buffer.
+            // Arriving without its text (a clean tab, or one not read yet):
+            // read here, fresh, rather than show an empty or stale buffer.
             if (tab.payload.contentLoaded && live.content === undefined) {
                 tab = { ...tab, payload: { ...tab.payload, contentLoaded: false, contentHash: "" } };
             }

@@ -48,7 +48,7 @@ vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: async () => {
 
 import { moveDocTab, registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 import { dispatch, snapshot } from "@/app/store/editor-pane-state-store";
-import { editorDocTabHost, provideEditorStates, takeMovedEditorState } from "./editor-doc-tabs";
+import { editorDocTabHost, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
 import { EditorViewModel } from "./editor-model";
 
 let blocks = 0;
@@ -182,6 +182,28 @@ describe("moving an Editor tab to another Editor", () => {
         expect(tabsOf(a)).toEqual([]);
         expect(tabsOf(b)).toHaveLength(2);
         expect(b.activeIdAtom()).toBe(bCopy);
+    });
+
+    it("a clean tab is read fresh in the target, so a change on disk is not lost", async () => {
+        const a = mount();
+        const b = mount();
+        await openLoaded(a, "c:/repo/a.ts");
+        h.files.set("c:/repo/a.ts", "const a = 2; // changed on disk\n");
+        moveDocTab(a.blockId, a.activeIdAtom()!, b.blockId);
+        await until(() => b.contentAtom() === "const a = 2; // changed on disk\n");
+    });
+
+    it("a tab being saved can't move until the save is done", async () => {
+        const a = mount();
+        const b = mount();
+        await openLoaded(a, "c:/repo/a.ts");
+        const id = a.activeIdAtom()!;
+        let finish!: () => void;
+        const saved = trackSave(a, id, new Promise<void>((r) => (finish = r)));
+        expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: false, reason: "It is still being saved. Try again in a moment." });
+        finish();
+        await saved;
+        expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: true });
     });
 
     it("never between this computer and a host", async () => {
