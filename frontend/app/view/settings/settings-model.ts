@@ -6,6 +6,7 @@ import { createSignal } from "solid-js";
 export type SettingsSection =
     | "appearance"
     | "window"
+    | "browser"
     | "terminal"
     | "sounds"
     | "notifications"
@@ -34,6 +35,7 @@ export interface SettingsIndexEntry {
 export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     appearance: "Appearance",
     window: "Window & Panes",
+    browser: "Browser",
     terminal: "Terminal",
     sounds: "Sounds",
     notifications: "Notifications & Tray",
@@ -56,8 +58,10 @@ export class SettingsViewModel {
     query: () => string;
     setQuery: (q: string) => void;
 
-    constructor() {
-        const [section, setSection] = createSignal<SettingsSection>("appearance");
+    /** `initial`: the section to open at, e.g. Browser from a browser
+     *  pane's Manage profiles… (the block's `settings:section`). */
+    constructor(initial?: SettingsSection) {
+        const [section, setSection] = createSignal<SettingsSection>(initial ?? "appearance");
         this.activeSection = section;
         this.setSection = setSection;
         // No blockAtom/meta-persistence here (unlike Armory/Warden's

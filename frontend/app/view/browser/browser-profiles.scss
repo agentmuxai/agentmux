@@ -1,0 +1,99 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Named browser profiles: the badge, the New-profile dialog and the Settings
+// rows (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4).
+
+// A profile's initial on its colour.
+.browser-profile-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.browser-profile-badge-personal {
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    font-size: 9px;
+}
+
+// The ✓ on the menu row of the tab's own identity.
+.browser-profile-current {
+    margin-left: auto;
+    padding-left: var(--space-2);
+    color: var(--secondary-text-color);
+}
+
+// Colour choices: a ring of each colour, the chosen one filled.
+.browser-profile-swatches {
+    display: flex;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+}
+
+.browser-profile-swatch.ui-button {
+    width: 18px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid var(--swatch);
+    background: transparent;
+
+    &.selected {
+        box-shadow: inset 0 0 0 3px var(--swatch);
+    }
+}
+
+.browser-new-profile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 320px;
+}
+
+.browser-new-profile-error {
+    color: var(--error-color);
+    font-size: 12px;
+}
+
+// Settings → Browser.
+.browser-profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: var(--space-2) 0;
+}
+
+.browser-profile-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+
+    .ui-input {
+        max-width: 220px;
+    }
+}
+
+.browser-profile-fixed {
+    color: var(--secondary-text-color);
+}
+
+.browser-profile-add {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+
+    .ui-input {
+        max-width: 220px;
+    }
+}

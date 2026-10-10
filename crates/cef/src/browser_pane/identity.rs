@@ -13,9 +13,20 @@
 //! closing and recreating the native pane (tear-off, redock, a remount) keeps
 //! the tab signed in; when no block uses it any more it is dropped, and with
 //! it everything the tab saved.
+//!
+//! `profile:<id>` is a named profile: a disk-backed jar at
+//! `<cef-cache>/profile-<id>` (a direct child of the cache root, the one
+//! layout Chrome accepts), one per profile, shared by its tabs and kept across
+//! restarts. A disk-backed profile is created asynchronously, and a browser
+//! created in it before it is ready never finishes
+//! (SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md §1.5 A), so its jar is made
+//! first and its tabs' panes wait until CEF says it is initialized.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use cef::*;
 
 #[derive(Default)]
 struct Registry {
@@ -26,7 +37,39 @@ struct Registry {
     live: Option<HashSet<String>>,
     /// Identity → its jar. Only `incognito:` identities have one here.
     jars: HashMap<String, Jar>,
+    /// Profile id → its disk-backed jar.
+    profiles: HashMap<String, ProfileJar>,
+    /// Pane label → how many times its creation has waited for its profile.
+    waits: HashMap<String, u32>,
 }
+
+struct ProfileJar {
+    ctx: cef::RequestContext,
+    ready: Arc<AtomicBool>,
+}
+
+wrap_request_context_handler! {
+    struct ProfileReady {
+        ready: Arc<AtomicBool>,
+    }
+
+    impl RequestContextHandler {
+        fn on_request_context_initialized(&self, _request_context: Option<&mut RequestContext>) {
+            self.ready.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// How the pane for a block is created: in the shared jar, in this one, or
+/// not yet (its profile is still being made ready; try again shortly).
+pub enum PaneJar {
+    Shared,
+    Ready(cef::RequestContext),
+    Pending,
+}
+
+/// A pane waits for its profile at most this many times, 100 ms apart.
+const MAX_PROFILE_WAITS: u32 = 100;
 
 struct Jar {
     ctx: cef::RequestContext,
@@ -59,12 +102,19 @@ pub fn is_incognito(identity: &str) -> bool {
         .is_some_and(|jar| (8..=64).contains(&jar.len()) && jar.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
 }
 
+/// The profile id of a `profile:<id>` identity.
+pub fn profile_id(identity: &str) -> Option<&str> {
+    identity
+        .strip_prefix("profile:")
+        .filter(|id| (1..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'))
+}
+
 /// Remember the identity `browser_pane_create` gave for `block` (absent or
 /// unknown: Personal). Called before the pane is created, so every creation
 /// path for the block (a fresh pane, one replayed after a close) finds it.
 pub fn set_for_block(block: &str, identity: Option<&str>) {
     let mut r = registry();
-    match identity.filter(|i| is_incognito(i)) {
+    match identity.filter(|i| is_incognito(i) || profile_id(i).is_some()) {
         Some(i) => {
             r.by_block.insert(block.to_string(), i.to_string());
         }
@@ -100,7 +150,10 @@ pub fn check_capacity(block: &str) -> Result<(), String> {
     let mut r = registry();
     let Some(identity) = r.by_block.get(block).cloned() else { return Ok(()) };
     if !cfg!(windows) {
-        return Err("Incognito tabs are Windows only for now".to_string());
+        return Err("Incognito tabs and browser profiles are Windows only for now".to_string());
+    }
+    if profile_id(&identity).is_some() {
+        return Ok(());
     }
     prune(&mut r);
     if r.jars.contains_key(&identity) || r.jars.len() < MAX_INCOGNITO_JARS {
@@ -115,16 +168,36 @@ pub fn has_identity(block: &str) -> bool {
     registry().by_block.contains_key(block)
 }
 
-/// The jar `block`'s pane is created in: `None` for the global jar. Creates
-/// an Incognito jar the first time its identity is used (CEF UI thread).
-/// `Err` when the identity needs a jar of its own and none can be made: the
-/// pane must not be created in the shared jar instead, which would put an
-/// Incognito tab in your Personal session.
-pub fn context_for_block(block: &str) -> Result<Option<cef::RequestContext>, String> {
+/// The jar `block`'s pane is created in (CEF UI thread). Creates an
+/// Incognito jar, or a profile's, the first time it is used; a profile's is
+/// `Pending` until CEF has made it ready. `Err` when the identity needs a jar
+/// of its own and none can be made: the pane must not be created in the
+/// shared jar instead, which would put the tab in your Personal session.
+pub fn context_for_block(block: &str, cache_root: Option<&str>) -> Result<PaneJar, String> {
     let mut r = registry();
-    let Some(identity) = r.by_block.get(block).cloned() else { return Ok(None) };
+    let Some(identity) = r.by_block.get(block).cloned() else { return Ok(PaneJar::Shared) };
+    if let Some(id) = profile_id(&identity) {
+        if let Some(p) = r.profiles.get(id) {
+            return Ok(if p.ready.load(Ordering::SeqCst) { PaneJar::Ready(p.ctx.clone()) } else { PaneJar::Pending });
+        }
+        let root = cache_root.filter(|r| !r.is_empty()).ok_or("no profile folder: the cache root isn't known")?;
+        let path = std::path::Path::new(root).join(format!("profile-{id}"));
+        let settings = cef::RequestContextSettings {
+            cache_path: cef::CefString::from(path.to_string_lossy().as_ref()),
+            persist_session_cookies: 1,
+            ..Default::default()
+        };
+        let ready = Arc::new(AtomicBool::new(false));
+        let mut handler = ProfileReady::new(ready.clone());
+        let ctx = cef::request_context_create_context(Some(&settings), Some(&mut handler))
+            .ok_or_else(|| format!("CEF couldn't open browser profile {id:?}"))?;
+        tracing::info!(block, profile = id, path = %path.display(), "[browser-identity] opening a browser profile");
+        let now_ready = ready.load(Ordering::SeqCst);
+        r.profiles.insert(id.to_string(), ProfileJar { ctx: ctx.clone(), ready });
+        return Ok(if now_ready { PaneJar::Ready(ctx) } else { PaneJar::Pending });
+    }
     if let Some(jar) = r.jars.get(&identity) {
-        return Ok(Some(jar.ctx.clone()));
+        return Ok(PaneJar::Ready(jar.ctx.clone()));
     }
     prune(&mut r);
     if r.jars.len() >= MAX_INCOGNITO_JARS {
@@ -142,7 +215,76 @@ pub fn context_for_block(block: &str) -> Result<Option<cef::RequestContext>, Str
         .ok_or_else(|| "CEF couldn't create an Incognito jar".to_string())?;
     tracing::info!(block, identity = %identity, "[browser-identity] created an Incognito jar");
     r.jars.insert(identity, Jar { ctx: ctx.clone(), created: std::time::Instant::now() });
-    Ok(Some(ctx))
+    Ok(PaneJar::Ready(ctx))
+}
+
+/// Another wait for pane `label`'s profile, if it has waits left; false once
+/// it has waited `MAX_PROFILE_WAITS` times (the count then starts over).
+pub fn wait_once_more(label: &str) -> bool {
+    let mut r = registry();
+    let n = r.waits.entry(label.to_string()).or_insert(0);
+    *n += 1;
+    if *n > MAX_PROFILE_WAITS {
+        r.waits.remove(label);
+        return false;
+    }
+    true
+}
+
+/// Pane `label` was created: forget its waits.
+pub fn done_waiting(label: &str) {
+    registry().waits.remove(label);
+}
+
+// Sign a deleted profile out at once: its cookies go now. CEF keeps an
+// opened profile's files in use for the life of the process, so its folder
+// itself goes at the next start (`retain_profiles`).
+wrap_task! {
+    struct ForgetProfileTask {
+        ctx: cef::RequestContext,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(cookies) = self.ctx.cookie_manager(None) {
+                cookies.delete_cookies(None, None, None);
+                cookies.flush_store(None);
+            }
+            self.ctx.clear_http_auth_credentials(None);
+        }
+    }
+}
+
+/// srv's list of the named profiles there are: the jar of one not in it is
+/// dropped, its sign-ins cleared at once, and its folder under `cache_root`
+/// deleted, along with any folder left by a profile deleted before: CEF keeps
+/// an opened profile's files in use until the process ends, so a folder that
+/// can't be deleted now goes on the next start, before any profile is open.
+pub fn retain_profiles(ids: &HashSet<String>, cache_root: Option<&str>) {
+    let mut r = registry();
+    let gone: Vec<String> = r.profiles.keys().filter(|id| !ids.contains(*id)).cloned().collect();
+    for id in &gone {
+        if let Some(p) = r.profiles.remove(id) {
+            let mut task = ForgetProfileTask::new(p.ctx);
+            post_task(ThreadId::UI, Some(&mut task));
+        }
+        tracing::info!(profile = %id, "[browser-identity] closed a deleted browser profile and cleared its sign-ins");
+    }
+    let open: HashSet<String> = r.profiles.keys().cloned().collect();
+    drop(r);
+    let Some(root) = cache_root.filter(|r| !r.is_empty()) else { return };
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(id) = name.strip_prefix("profile-") else { continue };
+        if ids.contains(id) || open.contains(id) || profile_id(&format!("profile:{id}")).is_none() {
+            continue;
+        }
+        match std::fs::remove_dir_all(e.path()) {
+            Ok(()) => tracing::info!(profile = %id, "[browser-identity] deleted a deleted profile's folder"),
+            Err(err) => tracing::debug!(profile = %id, error = %err, "[browser-identity] profile folder not deleted yet"),
+        }
+    }
 }
 
 /// srv's list of the identities blocks still use: every jar not in it (past
@@ -171,11 +313,48 @@ mod tests {
     }
 
     #[test]
-    fn a_block_without_an_incognito_identity_uses_the_global_jar() {
+    fn a_block_without_an_identity_uses_the_global_jar() {
         set_for_block("idt-a", None);
-        assert!(context_for_block("idt-a").unwrap().is_none());
-        set_for_block("idt-b", Some("profile:work"));
-        assert!(context_for_block("idt-b").unwrap().is_none());
+        assert!(matches!(context_for_block("idt-a", None).unwrap(), PaneJar::Shared));
+        set_for_block("idt-b", Some("profile:Not Valid"));
+        assert!(matches!(context_for_block("idt-b", None).unwrap(), PaneJar::Shared));
+    }
+
+    #[test]
+    fn profile_identities_are_recognised() {
+        assert_eq!(profile_id("profile:p-work1"), Some("p-work1"));
+        assert_eq!(profile_id("profile:Work"), None);
+        assert_eq!(profile_id("profile:"), None);
+        assert_eq!(profile_id("incognito:0f0e2d1c-aaaa"), None);
+        set_for_block("idt-p", Some("profile:p-work1"));
+        assert!(has_identity("idt-p"));
+        assert_eq!(check_capacity("idt-p").is_ok(), cfg!(windows));
+        // No cache root: no folder to put the profile in, so no pane.
+        assert!(context_for_block("idt-p", None).is_err());
+        set_for_block("idt-p", None);
+    }
+
+    #[test]
+    fn a_pane_waits_for_its_profile_a_bounded_number_of_times() {
+        for _ in 0..MAX_PROFILE_WAITS {
+            assert!(wait_once_more("idt-wait"));
+        }
+        assert!(!wait_once_more("idt-wait"));
+        assert!(wait_once_more("idt-wait"), "the count starts over");
+        done_waiting("idt-wait");
+    }
+
+    #[test]
+    fn a_deleted_profiles_folder_is_removed_and_others_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["profile-p-keep", "profile-p-gone", "Default", "profile-Bad Name"] {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        retain_profiles(&["p-keep".to_string()].into(), Some(dir.path().to_str().unwrap()));
+        assert!(dir.path().join("profile-p-keep").exists());
+        assert!(!dir.path().join("profile-p-gone").exists());
+        assert!(dir.path().join("Default").exists());
+        assert!(dir.path().join("profile-Bad Name").exists());
     }
 
     #[test]

@@ -357,6 +357,53 @@ pub struct CommandBookmarksSetData {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBookmarksListData {}
 
+/// Every `browser_profiles.*` command answers with the whole list; `created`
+/// is the new profile, from `browser_profiles.create`
+/// (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BrowserProfilesResult {
+    pub profiles: Vec<crate::backend::browser_profiles_store::BrowserProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub created: Option<crate::backend::browser_profiles_store::BrowserProfile>,
+}
+
+/// `browser_profiles.list`: no arguments (a struct, so `{}` deserializes).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserProfilesListData {}
+
+/// `browser_profiles.create`: a name, and a colour or the palette's next.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserProfileCreateData {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+}
+
+/// `browser_profiles.update`: rename and/or recolour.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserProfileUpdateData {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+}
+
+/// `browser_profiles.delete`: the profile, its open tabs and its saved data.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserProfileDeleteData {
+    pub id: String,
+}
+
 /// Request for `gettoolstatus`. The handler ignores its payload, but this must
 /// be a struct rather than `()`: the stub calls it with no argument, which the
 /// RPC client sends as `{}`, and serde deserializes `()` only from JSON `null`.

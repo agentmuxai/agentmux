@@ -28,10 +28,10 @@ describe("SETTINGS_INDEX", () => {
         }
     });
 
-    it("covers all eight sections", () => {
+    it("covers all nine sections", () => {
         const sections = new Set(SETTINGS_INDEX.map((e) => e.section));
         expect(sections).toEqual(
-            new Set(["appearance", "window", "terminal", "sounds", "notifications", "recording", "devices", "advanced"]),
+            new Set(["appearance", "window", "browser", "terminal", "sounds", "notifications", "recording", "devices", "advanced"]),
         );
     });
 

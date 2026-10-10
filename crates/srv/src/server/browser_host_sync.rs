@@ -45,6 +45,11 @@ pub(crate) async fn push(state: &AppState) {
     if let Some(jars) = crate::server::browser_identity::live_jars(state) {
         body["jars"] = serde_json::json!(jars);
     }
+    // The named profiles there are: the host drops the jar and folder of one
+    // deleted. Left out when they can't be read, so it keeps them all.
+    if let Some(ids) = crate::server::browser_identity::profile_ids() {
+        body["profiles"] = serde_json::json!(ids);
+    }
     if let Err(e) = crate::server::ui_handlers::proxy_to_host_timeout(state, &host, "owned_panes", body, Some(std::time::Duration::from_secs(5))).await {
         tracing::debug!(error = %e, "[browser-popup] couldn't send the owned panes to the host");
     }
