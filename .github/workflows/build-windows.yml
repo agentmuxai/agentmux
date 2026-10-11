@@ -114,7 +114,9 @@ jobs:
       # image now, not after the whole build.
       - name: Check 7-Zip (portable archive)
         shell: bash
-        run: 7z i > /dev/null && echo "7-Zip: $(command -v 7z)"
+        run: |
+          7z i > /dev/null
+          echo "7-Zip found at $(command -v 7z)"
 
       - uses: Swatinem/rust-cache@v2
 
