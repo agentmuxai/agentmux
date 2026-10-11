@@ -250,7 +250,13 @@ declare global {
     /** `mcp.catalog.list`'s response shape: an McpServer plus how many
      *  agents currently bind it — the Armory catalog's "used by N agents"
      *  count (#1960 gap #2). */
-    type McpServerCatalogItem = McpServer & { bound_count: number };
+    type McpServerCatalogItem = McpServer & {
+        bound_count: number;
+        /** Reaches every agent, not only the bound ones (`mcp.catalog.set_reach`). */
+        all_agents: boolean;
+        /** Container agents get it too. */
+        in_containers: boolean;
+    };
 
     /** `skill.catalog.list`'s response shape — see McpServerCatalogItem. */
     type SkillCatalogItem = Skill & { bound_count: number };

@@ -27,6 +27,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_catalog_upsert(engine, state);
     register_mcp_catalog_delete(engine, state);
     register_mcp_catalog_probe(engine, state);
+    register_mcp_catalog_set_reach(engine, state);
     register_mcp_catalog_bind(engine, state);
     register_mcp_catalog_list_for_agent(engine, state);
     register_mcp_catalog_unbind(engine, state);
@@ -513,6 +514,41 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                 }
                 Ok(McpDeleteResult { deleted })
+            }
+        },
+    );
+}
+
+/// Who a global catalog server reaches beyond its binds (every agent,
+/// container agents too). Global rows only, like the rest of `mcp.catalog.*`.
+/// The switches live in the identity store beside the catalog, so they
+/// survive an upgrade (SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §2.1).
+fn register_mcp_catalog_set_reach(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let identity_store = state.identity_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_MCP_CATALOG_SET_REACH,
+        move |req: CommandMcpCatalogSetReachData, _ctx| {
+            let identity_store = identity_store.clone();
+            let broker = broker.clone();
+            async move {
+                match identity_store.mcp_server_get(&req.id).map_err(|e| format!("mcp.catalog.set_reach: {e}"))? {
+                    Some(s) if s.is_global => {}
+                    Some(_) => return Err("FORBIDDEN: a private MCP server has no catalog reach".to_string()),
+                    None => return Err(format!("mcp.catalog.set_reach: no MCP server {}", req.id)),
+                }
+                let reach = crate::backend::storage::McpServerReach {
+                    all_agents: req.all_agents,
+                    in_containers: req.in_containers,
+                };
+                identity_store
+                    .mcp_server_set_reach(&req.id, reach, now_ms())
+                    .map_err(|e| format!("mcp.catalog.set_reach: {e}"))?;
+                broker.publish(crate::backend::mps::MuxEvent {
+                    event: "mcp:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                Ok(reach)
             }
         },
     );

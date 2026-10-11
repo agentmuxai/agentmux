@@ -659,6 +659,9 @@ pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
 pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
 pub const COMMAND_MCP_CATALOG_DELETE: &str = "mcp.catalog.delete";
 pub const COMMAND_MCP_CATALOG_PROBE: &str = "mcp.catalog.probe";
+// Who a catalog server reaches beyond its binds: every agent, and container
+// agents too (SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §2.3).
+pub const COMMAND_MCP_CATALOG_SET_REACH: &str = "mcp.catalog.set_reach";
 // mcp.bind is check_s1-gated (agent binds a server to itself over its own
 // authenticated connection) — the Armory dashboard's WebSocket never
 // authenticates as an agent, so it can never satisfy that gate. This is the

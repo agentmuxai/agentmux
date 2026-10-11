@@ -150,6 +150,7 @@ use crate::backend::fs_ops::remote as remote_fs;
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let mstore = state.mstore.clone();
+    let identity_store = state.identity_store.clone();
     let editor_file_watcher = state.editor_file_watcher.clone();
     let media_file_watcher = state.media_file_watcher.clone();
 
@@ -239,6 +240,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |mut cmd: CommandWriteAgentConfigData, _ctx| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
             async move {
                 tracing::info!(
                     working_dir = %cmd.working_dir,
@@ -261,6 +263,10 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         )
                     })
                     .unwrap_or_default();
+
+                // The agent's catalog servers, as `agent.open` gives them.
+                let container = agent_mode == "container";
+                crate::backend::mcp_launch::add_to_files(&mut cmd.files, &mstore, &identity_store, cmd.agent_id.as_deref(), container);
 
                 // Host-tier + LAN-tier jekt sender signing keys — see
                 // `agent_config::inject_jekt_signing_keys_into_mcp_json`'s doc
