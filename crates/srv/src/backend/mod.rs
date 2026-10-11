@@ -92,6 +92,7 @@ pub mod service;
 pub mod session_archive;
 pub mod session_backfill;
 pub mod claude_layout;
+pub mod continued_note;
 pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;
