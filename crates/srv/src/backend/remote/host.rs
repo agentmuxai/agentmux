@@ -61,7 +61,7 @@ impl HostSsh {
         Ok(Self {
             dest,
             ssh_path,
-            control_dir: super::ssh::control_dir(&crate::backend::base::get_mux_config_dir()),
+            control_dir: super::ssh::shared_control_dir(),
             env: Vec::new(),
         })
     }
@@ -94,25 +94,63 @@ impl HostSsh {
     /// (frames or a script's output, not a session, go over it). The caller
     /// sets its stdio.
     pub fn command(&self, remote: &str) -> tokio::process::Command {
-        let mut args = super::ssh::launch(&self.dest, remote, &[], "", self.control_dir.as_deref());
-        args[0] = "-T".to_string();
+        let mut args = super::ssh::launch_exec(&self.dest, remote, "", self.control_dir.as_deref());
         // With nowhere to ask (no askpass route), never prompt: on the
         // terminal srv was started from, if any, nobody would answer. ssh
         // fails with its reason instead.
         if self.env.is_empty() {
             args.insert(1, "-oBatchMode=yes".to_string());
         }
+        self.ssh(&args)
+    }
+
+    /// `ssh` with `args`, sanitized like every process srv starts, and
+    /// askpass's variables after the sanitizing (it needs srv's address and
+    /// key). Killed if dropped.
+    fn ssh(&self, args: &[String]) -> tokio::process::Command {
         let mut cmd = tokio::process::Command::new(&self.ssh_path);
-        cmd.args(&args).kill_on_drop(true);
+        cmd.args(args).kill_on_drop(true);
         #[cfg(windows)]
         {
             use agentmux_common::win32::NoWindow;
             cmd.no_window();
         }
         crate::backend::pane_env::sanitize_process_command(&mut cmd);
-        // After the sanitizing: askpass needs srv's address and key.
         cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
         cmd
+    }
+
+    /// Whether this host's shared connection is up, which it is only once the
+    /// user has logged in (`ssh -O check`). `None` where ssh doesn't share
+    /// connections (Windows), or ssh couldn't be asked: nothing is known.
+    pub async fn shared_connection_up(&self) -> Option<bool> {
+        let dir = self.control_dir.as_deref()?;
+        let args = super::ssh::control(&self.dest, dir, super::ssh::Control::Check);
+        let out = self.run_control(&args).await?;
+        Some(out.status.success())
+    }
+
+    /// Close this host's shared connection (`ssh -O exit`): every session on
+    /// it ends. Nothing to do where there is none, or ssh doesn't share
+    /// connections.
+    pub async fn close_shared_connection(&self) {
+        if let Some(dir) = self.control_dir.as_deref() {
+            let args = super::ssh::control(&self.dest, dir, super::ssh::Control::Exit);
+            let _ = self.run_control(&args).await;
+        }
+    }
+
+    /// An `ssh -O` request: a local socket, answered at once, so a few seconds
+    /// is plenty; `None` if ssh couldn't run or didn't answer.
+    async fn run_control(&self, args: &[String]) -> Option<std::process::Output> {
+        let mut cmd = self.ssh(args);
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        tokio::time::timeout(Duration::from_secs(5), cmd.output())
+            .await
+            .ok()?
+            .ok()
     }
 
     /// Run `remote` with `input` on its stdin, for at most `limit`, so a

@@ -9,6 +9,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { connBarShows } from "@/app/store/conn-status-rules";
 import {
     atoms,
     getBlockComponentModel,
@@ -927,17 +928,6 @@ function ConnStatusOverlay({
         prtn.catch((e) => console.log("error reconnecting", connName(), e));
     };
 
-    const statusText = createMemo(() => {
-        const cs = connStatus();
-        if (cs?.status == "connecting") return `Connecting to "${connName()}"...`;
-        return `Disconnected from "${connName()}"`;
-    });
-
-    const showReconnect = createMemo(() => {
-        const cs = connStatus();
-        return cs?.status !== "connecting" && cs?.status !== "connected";
-    });
-
     const reconClassName = createMemo(() => {
         const w = width();
         let base = "outlined grey";
@@ -946,8 +936,6 @@ function ConnStatusOverlay({
         }
         return clsx(base, "text-[11px] py-[3px] px-[7px]");
     });
-
-    const showIcon = createMemo(() => connStatus()?.status != "connecting");
 
     const handleCopy = async (e: MouseEvent) => {
         const errTexts = [];
@@ -960,15 +948,13 @@ function ConnStatusOverlay({
     };
 
     return (
-        <Show when={!isLayoutMode && connStatus()?.status !== "connected" && !connModalOpen}>
+        <Show when={!isLayoutMode && connBarShows(connStatus()) && !connModalOpen}>
             <div class="connstatus-overlay" ref={(el) => { overlayRef = el; }}>
                 <div class="connstatus-content">
                     <div class={clsx("connstatus-status-icon-wrapper", { "has-error": showError() })}>
-                        <Show when={showIcon()}>
-                            <i class="fa-solid fa-triangle-exclamation"></i>
-                        </Show>
+                        <i class="fa-solid fa-triangle-exclamation"></i>
                         <div class="connstatus-status ellipsis">
-                            <div class="connstatus-status-text">{statusText()}</div>
+                            <div class="connstatus-status-text">Disconnected from "{connName()}"</div>
                             <Show when={showError()}>
                                 <div class="connstatus-error" style={{ "overflow-y": "auto" }}>
                                     <CopyButton className="copy-button" onClick={handleCopy} title="Copy" />
@@ -977,18 +963,16 @@ function ConnStatusOverlay({
                             </Show>
                         </div>
                     </div>
-                    <Show when={showReconnect()}>
-                        <div class="connstatus-actions">
-                            <Button className={reconClassName()} onClick={handleTryReconnect}>
-                                <Show
-                                    when={width() && width() < 350}
-                                    fallback="Reconnect"
-                                >
-                                    <i class="fa-solid fa-rotate-right"></i>
-                                </Show>
-                            </Button>
-                        </div>
-                    </Show>
+                    <div class="connstatus-actions">
+                        <Button className={reconClassName()} onClick={handleTryReconnect}>
+                            <Show
+                                when={width() && width() < 350}
+                                fallback="Reconnect"
+                            >
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </Show>
+                        </Button>
+                    </div>
                 </div>
             </div>
         </Show>

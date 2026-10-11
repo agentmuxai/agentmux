@@ -232,7 +232,7 @@ function Row(props: {
 function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.Element {
     const model = props.model;
     const r = () => props.record;
-    const connected = () => r().status.state === "connected" || r().status.state === "connecting";
+    const connection = () => connectionAction(r());
     const durable = () => r().settings?.["term:durable"];
     const run = (what: string, action: () => Promise<void>) => () => void model.run(what, action);
 
@@ -248,11 +248,10 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 <div class="remotes-detail-error">{r().status.error}</div>
             </Show>
             <div class="remotes-detail-actions">
-                <Show
-                    when={connected()}
-                    fallback={<button onClick={run("Connect", () => model.connect(r().name))}>Connect</button>}
-                >
-                    <button onClick={run("Disconnect", () => model.disconnect(r().name))}>Disconnect</button>
+                <Show when={connection()}>
+                    {(action) => (
+                        <button onClick={run(action(), () => runConnectionAction(model, r(), action()))}>{action()}</button>
+                    )}
                 </Show>
                 <Show when={r().kind === "ssh"}>
                     <button onClick={run("Sessions", () => model.showSessions(r().name))}>Sessions…</button>
@@ -485,6 +484,25 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
     );
 }
 
+/** A row's connection action: Connect when it is down, Disconnect when it is
+ *  up, and neither while a login is under way (an ssh at a password prompt):
+ *  nothing is up to close yet, and Connect would start a second login. */
+function connectionAction(r: RemoteRecord): "Connect" | "Disconnect" | null {
+    switch (r.status.state) {
+        case "connected":
+            return "Disconnect";
+        case "connecting":
+            return null;
+        default:
+            return "Connect";
+    }
+}
+
+/** Run a row's {@link connectionAction}. */
+function runConnectionAction(model: RemotesViewModel, r: RemoteRecord, action: "Connect" | "Disconnect"): Promise<void> {
+    return action === "Connect" ? model.connect(r.name) : model.disconnect(r.name);
+}
+
 /** The right-click menu: the row's actions (§4.2). */
 export function rowMenu(model: RemotesViewModel, r: RemoteRecord): ContextMenuItem[] {
     const act = (label: string, action: () => Promise<void>, extra: Partial<ContextMenuItem> = {}): ContextMenuItem => ({
@@ -493,16 +511,15 @@ export function rowMenu(model: RemotesViewModel, r: RemoteRecord): ContextMenuIt
         onSelect: () => void model.run(label, action),
         ...extra,
     });
-    const connected = r.status.state === "connected" || r.status.state === "connecting";
     const items: ContextMenuItem[] = [
         act("New terminal", () => model.newTerminal(r.name)),
         act("Browse files", () => model.browseFiles(r.name)),
     ];
     if (r.kind === "ssh") items.push(act("Sessions…", () => model.showSessions(r.name)));
-    items.push({ type: "separator" });
-    items.push(
-        connected ? act("Disconnect", () => model.disconnect(r.name)) : act("Connect", () => model.connect(r.name))
-    );
+    const connection = connectionAction(r);
+    if (connection) {
+        items.push({ type: "separator" }, act(connection, () => runConnectionAction(model, r, connection)));
+    }
     items.push({ type: "separator" });
     items.push(
         isPinned(r) ? act("Unpin", () => model.setPinned(r.name, false)) : act("Pin", () => model.setPinned(r.name, true)),
