@@ -7,6 +7,8 @@
 //! the full server object JSON (command/args/env for stdio; url/headers for
 //! SSE) that gets merged into `.mcp.json` at agent launch.
 
+use std::collections::HashMap;
+
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +122,20 @@ pub struct McpServerCatalogItem {
     #[serde(flatten)]
     pub server: McpServer,
     pub bound_count: i64,
+    /// Reaches every agent, not only the bound ones (`McpServerReach`).
+    pub all_agents: bool,
+    /// Container agents get it too.
+    pub in_containers: bool,
+}
+
+/// Who a catalog (global) server reaches beyond its binds, from
+/// `db_mcp_server_reach`. The default, no row, is "only the agents it is
+/// bound to, and no container agent".
+/// `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerReach {
+    pub all_agents: bool,
+    pub in_containers: bool,
 }
 
 impl Store {
@@ -133,17 +149,64 @@ impl Store {
             .collect())
     }
 
-    /// Every MCP server an agent launches with: the ones bound to it in
-    /// Connectors, plus the global ones (`mcp_server_list`). Not its bundles':
-    /// a bundle carries no MCP servers
-    /// (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). Single
-    /// source of truth for `write_agent_config_files`.
-    pub fn effective_mcp_servers(&self, catalog: &Store, agent_id: &str) -> Vec<McpServer> {
+    /// Every MCP server an agent launches with, on both launch paths
+    /// (`agent.open` and the picker's `writeagentconfig`): its own private
+    /// servers, plus the catalog servers bound to it or switched on for all
+    /// agents. A container agent gets only the catalog servers switched on
+    /// for containers: a catalog server is usually a host command. Its own
+    /// servers are delivered as configured. Not its bundles': a bundle
+    /// carries no MCP servers
+    /// (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1).
+    /// `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
+    pub fn effective_mcp_servers(&self, catalog: &Store, agent_id: &str, container: bool) -> Vec<McpServer> {
+        let reach = catalog.mcp_server_reach_all().unwrap_or_default();
         self.mcp_server_list(catalog, agent_id)
             .unwrap_or_default()
             .into_iter()
+            .filter(|item| {
+                if !item.server.is_global {
+                    return true;
+                }
+                let r = reach.get(&item.server.id).copied().unwrap_or_default();
+                (item.bound_to_agent || r.all_agents) && (!container || r.in_containers)
+            })
             .map(|item| item.server)
             .collect()
+    }
+
+    /// Every catalog server's reach switches, by server id. Call on the
+    /// catalog store (the identity store), where `db_mcp_server_reach` sits
+    /// beside `db_mcp_servers`.
+    pub fn mcp_server_reach_all(&self) -> Result<HashMap<String, McpServerReach>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT mcp_id, all_agents, in_containers FROM db_mcp_server_reach")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                McpServerReach { all_agents: row.get::<_, i64>(1)? != 0, in_containers: row.get::<_, i64>(2)? != 0 },
+            ))
+        })?;
+        let mut out = HashMap::new();
+        for r in rows {
+            let (id, reach) = r?;
+            out.insert(id, reach);
+        }
+        Ok(out)
+    }
+
+    /// Set a catalog server's reach switches. Call on the catalog store; the
+    /// caller checks the server is a global row.
+    pub fn mcp_server_set_reach(&self, mcp_id: &str, reach: McpServerReach, now_ms: i64) -> Result<(), StoreError> {
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO db_mcp_server_reach (mcp_id, all_agents, in_containers, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(mcp_id) DO UPDATE SET
+                all_agents = excluded.all_agents,
+                in_containers = excluded.in_containers,
+                updated_at = excluded.updated_at",
+            params![mcp_id, reach.all_agents as i64, reach.in_containers as i64, now_ms],
+        )?;
+        Ok(())
     }
 
     /// List every GLOBAL MCP server — the Armory catalog view. Unlike
@@ -154,10 +217,14 @@ impl Store {
     /// `db_agent_mcp_ref` to it — per SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md
     /// §8 ("used by N agents"), tracked as gap #2 of #1960.
     pub fn mcp_server_list_global(&self, catalog: &Store) -> Result<Vec<McpServerCatalogItem>, StoreError> {
+        let reach = catalog.mcp_server_reach_all()?;
         Ok(self
             .managed_list_global::<McpServer>(catalog)?
             .into_iter()
-            .map(|(server, bound_count)| McpServerCatalogItem { server, bound_count })
+            .map(|(server, bound_count)| {
+                let r = reach.get(&server.id).copied().unwrap_or_default();
+                McpServerCatalogItem { server, bound_count, all_agents: r.all_agents, in_containers: r.in_containers }
+            })
             .collect())
     }
 
@@ -191,7 +258,14 @@ impl Store {
     /// bundle-level — FK cascades may be off on some builds, same reasoning
     /// as `skill_delete`). Returns true if deleted.
     pub fn mcp_server_delete(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
-        self.managed_delete::<McpServer>(catalog, id)
+        let deleted = self.managed_delete::<McpServer>(catalog, id)?;
+        // Its reach switches go with it.
+        catalog
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM db_mcp_server_reach WHERE mcp_id = ?1", params![id])?;
+        Ok(deleted)
     }
 
     /// Bind an MCP server to an agent (insert ref row). Idempotent —
@@ -483,10 +557,61 @@ mod effective_tests {
             bundle_ref(&store, bundle_id, id);
         }
 
+        store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
+        assert_eq!(effective(&store, "agent-1", false), vec!["Agent's", "Global"]);
+    }
+
+    fn effective(store: &Store, agent_id: &str, container: bool) -> Vec<String> {
         let mut names: Vec<String> =
-            store.effective_mcp_servers(&store, "agent-1").into_iter().map(|s| s.name).collect();
+            store.effective_mcp_servers(store, agent_id, container).into_iter().map(|s| s.name).collect();
         names.sort();
-        assert_eq!(names, vec!["Agent's".to_string(), "Global".to_string()]);
+        names
+    }
+
+    /// A catalog server reaches the agents it is bound to, and every agent
+    /// once switched on for all; being in the catalog alone reaches no one.
+    #[test]
+    fn a_catalog_server_reaches_its_bound_agents_or_all_when_switched_on() {
+        let store = Store::open_in_memory().unwrap();
+        bundle(&store, "own");
+        agent(&store, "agent-1", "own");
+        agent(&store, "agent-2", "own");
+        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true)).unwrap();
+        assert!(effective(&store, "agent-1", false).is_empty(), "in the catalog, bound to no one");
+
+        store.mcp_server_bind(&store, "agent-1", "g").unwrap();
+        assert_eq!(effective(&store, "agent-1", false), vec!["Catalog"]);
+        assert!(effective(&store, "agent-2", false).is_empty());
+
+        store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
+        assert_eq!(effective(&store, "agent-2", false), vec!["Catalog"]);
+        let item = store.mcp_server_list_global(&store).unwrap().pop().unwrap();
+        assert_eq!((item.bound_count, item.all_agents, item.in_containers), (1, true, false));
+    }
+
+    /// A container agent gets a catalog server only when it is switched on
+    /// for containers; its own servers always.
+    #[test]
+    fn a_container_agent_gets_catalog_servers_only_when_switched_on_for_containers() {
+        let store = Store::open_in_memory().unwrap();
+        bundle(&store, "own");
+        agent(&store, "agent-1", "own");
+        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true)).unwrap();
+        store.mcp_server_upsert_unique(&store, "agent-1", &server("a", "Own", false), true).unwrap();
+        store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
+        assert_eq!(effective(&store, "agent-1", true), vec!["Own"]);
+        store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: true }, 2).unwrap();
+        assert_eq!(effective(&store, "agent-1", true), vec!["Catalog", "Own"]);
+    }
+
+    /// Deleting a server drops its reach switches.
+    #[test]
+    fn deleting_a_server_drops_its_reach() {
+        let store = Store::open_in_memory().unwrap();
+        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true)).unwrap();
+        store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: true }, 1).unwrap();
+        assert!(store.mcp_server_delete(&store, "g").unwrap());
+        assert!(store.mcp_server_reach_all().unwrap().is_empty());
     }
 
     /// A bundle write never stores MCP configs, whatever the caller sends, and

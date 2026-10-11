@@ -462,7 +462,13 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        from the viewer routes. agentmux-mobile's
 ///        SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2, §4.3. See
 ///        `storage/viewer_devices.rs`.
-pub const OBJECT_SCHEMA_VERSION: i64 = 43;
+///   v44 — db_mcp_server_reach: per catalog MCP server, whether it reaches
+///        every agent (`all_agents`) and whether container agents get it
+///        too (`in_containers`). A table of its own beside `db_mcp_servers`,
+///        so nothing that copies catalog rows changes. Both default 0: a
+///        catalog server reaches only the agents it is bound to.
+///        `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
+pub const OBJECT_SCHEMA_VERSION: i64 = 44;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -818,6 +824,14 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             updated_at  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_is_global ON db_mcp_servers(is_global);
+        -- v44: who a catalog server reaches beyond its
+        -- binds — see OBJECT_SCHEMA_VERSION's v44 doc comment.
+        CREATE TABLE IF NOT EXISTS db_mcp_server_reach (
+            mcp_id        TEXT PRIMARY KEY,
+            all_agents    INTEGER NOT NULL DEFAULT 0,
+            in_containers INTEGER NOT NULL DEFAULT 0,
+            updated_at    INTEGER NOT NULL DEFAULT 0
+        );
 
         -- v34: skill_id's FK to this store's LOCAL db_skills is gone — see
         -- OBJECT_SCHEMA_VERSION's v34 doc comment above. agent_id's FK to
@@ -1875,7 +1889,12 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        Unattributed request; never guessed. Dual-written, not yet read.
 ///        Identity M4c-1 of
 ///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 11;
+///   v12 — db_mcp_server_reach (parity with OBJECT_SCHEMA_VERSION v44):
+///        the catalog's reach switches live with the catalog, here, so they
+///        survive an upgrade where an agent bind (`db_agent_mcp_ref`, in
+///        `objects.db`) does not. A new table, so the counter bumps (same
+///        reasoning as v5).
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 12;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -2179,7 +2198,15 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_ids_mcp_servers_is_global ON db_mcp_servers(is_global);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_mcp_servers_global_name
-            ON db_mcp_servers(name) WHERE is_global = 1;",
+            ON db_mcp_servers(name) WHERE is_global = 1;
+        -- v12: who a catalog server reaches beyond its binds — see
+        -- IDENTITY_STORE_SCHEMA_VERSION's v12 doc comment.
+        CREATE TABLE IF NOT EXISTS db_mcp_server_reach (
+            mcp_id        TEXT PRIMARY KEY,
+            all_agents    INTEGER NOT NULL DEFAULT 0,
+            in_containers INTEGER NOT NULL DEFAULT 0,
+            updated_at    INTEGER NOT NULL DEFAULT 0
+        );",
     )?;
 
     // Seed the blank Bundle singleton — same fixed id as objects.db/store.db

@@ -58,6 +58,6 @@ pub use error::StoreError;
 #[allow(unused_imports)]
 pub use history::AgentHistory;
 pub use identities::{AgentIdentityLink, IdentityAccount, SecretRef};
-pub use mcp_servers::McpServer;
+pub use mcp_servers::{McpServer, McpServerReach};
 pub use bundles::{format_global_bundle_block, global_bundle_sections, Bundle, BundleReseedOutcome, GlobalMemorySection};
 pub use skills::{AgentSkill, Skill};

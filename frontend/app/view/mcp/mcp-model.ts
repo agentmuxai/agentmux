@@ -35,6 +35,13 @@ function draftFromServer(s: McpServer): McpDraft {
     return { id: s.id, name: s.name, transport: s.transport, config: s.config };
 }
 
+/** Who a catalog server reaches, in a few words: everyone, or how many
+ *  agents it is bound to. */
+export function reachLabel(server: McpServerCatalogItem): string {
+    if (server.all_agents) return "All agents";
+    return `${server.bound_count} ${server.bound_count === 1 ? "agent" : "agents"}`;
+}
+
 export class McpCatalogModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bind/unbind/add/edit made elsewhere refreshes this standalone Armory
@@ -124,6 +131,18 @@ export class McpCatalogModel {
             await this.refresh();
         } catch (e) {
             this.setError(`Bind failed: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    /** Who a catalog server reaches beyond its binds: every agent, and
+     *  container agents too (SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §2.3). */
+    async setReach(serverId: string, reach: { all_agents: boolean; in_containers: boolean }): Promise<void> {
+        this.setError(null);
+        try {
+            await RpcApi.McpCatalogSetReachCommand(TabRpcClient, { id: serverId, ...reach });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Saving who gets it failed: ${(e as Error).message ?? e}`);
         }
     }
 

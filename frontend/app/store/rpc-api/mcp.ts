@@ -38,6 +38,7 @@ import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
 import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
 import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
+import type { CommandMcpCatalogSetReachData } from "@/types/rpc/CommandMcpCatalogSetReachData";
 import type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
 import type { McpBindResult } from "@/types/rpc/McpBindResult";
 import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
@@ -127,6 +128,16 @@ export const McpApi = {
         opts?: RpcOpts,
     ): Promise<McpServer> {
         return client.rpcCall("mcp.catalog.upsert", data, opts);
+    },
+
+    /** Who a catalog server reaches beyond its binds: every agent, and
+     *  container agents too. Upsert leaves both as they are. */
+    McpCatalogSetReachCommand(
+        client: RpcClient,
+        data: CommandMcpCatalogSetReachData,
+        opts?: RpcOpts,
+    ): Promise<{ all_agents: boolean; in_containers: boolean }> {
+        return client.rpcCall("mcp.catalog.set_reach", data, opts);
     },
 
     McpCatalogDeleteCommand(
