@@ -8,8 +8,9 @@
 // `<id>-<size>.png` for a shot taken at several sizes) or clip
 // (`<id>.gif`), so a file found under the docs' src/assets/ by that name is
 // replaced. Nothing is added: an image the docs don't use yet is listed, to be
-// placed by hand. Images whose shot says they show this machine's data
-// (`containsWorkspaceData: true`) are never copied.
+// placed by hand. A screenshot is copied only when its shot marks it
+// publishable (`containsWorkspaceData` false, or "review": a person checks it);
+// one marked true, or not marked at all, never is.
 //
 //   node scripts/ui-screenshots/publish.mjs --docs <agentmux-docs clone> --from <run dir> [--from ...] [--dry-run]
 //
@@ -28,7 +29,10 @@ export function runImages(manifest, dir) {
             source: join(dir, s.file),
             name: `${s.size ? `${s.id}-${s.size}` : s.id}${extname(s.file)}`,
             id: s.id,
-            machineData: s.containsWorkspaceData === true,
+            // Publishable only when the shot says so: false (shows no machine
+            // data) or "review" (a person checks it). A shot that doesn't say
+            // (the first run's manual suite) isn't copied (Codex on #4673).
+            machineData: !(s.containsWorkspaceData === false || s.containsWorkspaceData === "review"),
         });
     }
     for (const r of manifest.recordings ?? []) {
@@ -61,7 +65,7 @@ export function plan(images, docsByName) {
     for (const img of images) runsWith.set(img.name, (runsWith.get(img.name) ?? 0) + 1);
     return images.map((img) => {
         if (runsWith.get(img.name) > 1) return { ...img, action: "ambiguous", targets: [], why: "more than one run has an image of this name" };
-        if (img.machineData) return { ...img, action: "skipped", why: "shows this machine's data" };
+        if (img.machineData) return { ...img, action: "skipped", why: "shows this machine's data, or isn't marked publishable" };
         if (!existsSync(img.source)) return { ...img, action: "skipped", why: "not in the run" };
         const targets = docsByName.get(img.name) ?? [];
         if (targets.length === 0) return { ...img, action: "unused" };

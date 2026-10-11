@@ -17,9 +17,10 @@ describe("runImages", () => {
         const imgs = runImages(
             {
                 shots: [
-                    { id: "chrome-window", file: "01-chrome-window.png" },
-                    { id: "widget-agent", size: "small", file: "widget-agent-small.png" },
+                    { id: "chrome-window", file: "01-chrome-window.png", containsWorkspaceData: "review" },
+                    { id: "widget-agent", size: "small", file: "widget-agent-small.png", containsWorkspaceData: false },
                     { id: "widget-toolchain", size: "small", file: "widget-toolchain-small.png", containsWorkspaceData: true },
+                    { id: "agent-picker", file: "04-agent-picker.png" },
                 ],
                 recordings: [{ id: "stash-tour", files: ["stash-tour.gif", "stash-tour.mp4"] }],
             },
@@ -29,6 +30,8 @@ describe("runImages", () => {
             ["chrome-window.png", false],
             ["widget-agent-small.png", false],
             ["widget-toolchain-small.png", true],
+            // Not marked either way (the first run's manual suite): not publishable.
+            ["agent-picker.png", true],
             ["stash-tour.gif", false],
             ["stash-tour.mp4", false],
         ]);
@@ -56,9 +59,9 @@ describe("publish", () => {
             join(run, "manifest.json"),
             JSON.stringify({
                 shots: [
-                    { id: "chrome-window", file: "01-chrome-window.png" },
-                    { id: "chrome-top-bar", file: "02-chrome-top-bar.png" },
-                    { id: "chrome-new", file: "03-chrome-new.png" },
+                    { id: "chrome-window", file: "01-chrome-window.png", containsWorkspaceData: "review" },
+                    { id: "chrome-top-bar", file: "02-chrome-top-bar.png", containsWorkspaceData: "review" },
+                    { id: "chrome-new", file: "03-chrome-new.png", containsWorkspaceData: "review" },
                     { id: "widget-toolchain", size: "small", file: "widget-toolchain-small.png", containsWorkspaceData: true },
                 ],
             })

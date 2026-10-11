@@ -20,6 +20,7 @@
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setup as agentSetup } from "./agent-shots.mjs";
 import { closeTab, openNewTab } from "./widget-shots.mjs";
 
 const VIEWPORT = { width: 1100, height: 760, scale: 1 };
@@ -89,6 +90,10 @@ async function waitFor(session, expression, what, timeoutMs = 15000) {
 
 /** Adds the demo data that isn't there yet. */
 export async function setup(session) {
+    // Personal memory is written for an agent the agent suite creates, so its
+    // setup runs first: the memory suite then works on its own too (Codex on
+    // #4673). It's idempotent.
+    await agentSetup(session);
     const done = await session.evaluate(`(async () => {
         const out = [];
         const entries = ${JSON.stringify(GLOBAL_ENTRIES)};
