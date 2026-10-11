@@ -83,6 +83,26 @@ describe("helpers", () => {
         expect(toolDetail("mcp__github__search_issues", { query: "bug" })).toBe("");
         expect(toolDetail("Grep", { pattern: "x" })).toBe("x");
     });
+
+    it("a Grep row shows where and how it searched, not just the pattern", () => {
+        const call = {
+            pattern: "fn deliver\\(",
+            path: "C:\\work\\agentmux\\crates\\srv",
+            glob: "*.rs",
+            output_mode: "content",
+            "-n": true,
+            "-C": 1,
+            "-i": true,
+            head_limit: 5,
+        };
+        expect(toolDetail("Grep", call)).toBe("fn deliver\\( · in .../crates/srv · *.rs · -i -C1 · content · limit 5");
+        expect(toolDetail("Grep", { pattern: "x", type: "ts", multiline: true, output_mode: "count", offset: 10 })).toBe(
+            "x · type:ts · -U · count · offset 10",
+        );
+        // The defaults add nothing: file-list mode, no limit, no context.
+        expect(toolDetail("Grep", { pattern: "x", output_mode: "files_with_matches", head_limit: 0, "-C": 0 })).toBe("x");
+        expect(toolDetail("Grep", { path: "/a" })).toBe("");
+    });
 });
 
 // Codex P2 on #3901: normalizeToolName() maps a noncanonical casing ("READ",
