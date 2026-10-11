@@ -16,6 +16,7 @@ mod global_memory;
 mod history;
 mod loops;
 mod memory;
+mod open_prs;
 mod overlap;
 mod panes;
 mod presets;

@@ -36,18 +36,21 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+            let pr = match arguments.get("pr").filter(|v| !v.is_null()) {
+                Some(v) => Some(pr_number(v).ok_or_else(|| anyhow::anyhow!("pr must be a PR number (12, \"#12\" or its URL)"))?),
+                None => None,
+            };
             let query = who_query(arguments, &agent, block_id);
-            let asked_pr = arguments.get("pr").is_some_and(|v| !v.is_null());
-            if asked_pr && !query.iter().any(|(k, _)| matches!(*k, "path" | "repo" | "branch" | "query")) {
-                anyhow::bail!("pr is not supported yet: pass path, repo, branch or query");
-            }
             let url = format!("{}/api/v1/work-facts/who", local_url.trim_end_matches('/'));
             let mut body = srv_get_json(client, &url, auth_key, &query, "WhoIsWorkingOn").await?;
-            if asked_pr {
-                if let Some(obj) = body.as_object_mut() {
-                    obj.insert("pr_note".into(), json!("pr is not supported yet and was ignored"));
-                }
-            }
+            add_open_prs(&mut body, arguments, pr, &agent, |path| {
+                let mut q = query.clone();
+                q.retain(|(k, _)| *k != "path");
+                q.push(("path", path));
+                let url = url.clone();
+                async move { srv_get_json(client, &url, auth_key, &q, "WhoIsWorkingOn").await.ok() }
+            })
+            .await;
             Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
         }
         "ClaimWork" | "ReleaseWork" => {
@@ -68,6 +71,97 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
         }
         _ => Err(not_in_family()),
+    }
+}
+
+/// `12`, `"12"`, `"#12"` or a PR's URL (`…/pull/12`).
+fn pr_number(v: &Value) -> Option<u64> {
+    if let Some(n) = v.as_u64() {
+        return Some(n).filter(|n| *n > 0);
+    }
+    let s = v.as_str()?.trim().trim_end_matches('/');
+    let tail = s.rsplit(['/', '#']).next()?;
+    tail.parse().ok().filter(|n| *n > 0)
+}
+
+/// Files of the asked PR whose local facts are fetched, at most.
+const PR_FILES_CHECKED: usize = 10;
+
+/// Add the open PRs that touch the question (`open_prs.rs`) to srv's answer,
+/// for the repository srv resolved. With `pr`, the agents on this computer
+/// are the ones with that PR's files changed or edited (`ask_path`, srv's
+/// answer for one file), not everyone in the repository. A failure is
+/// reported in the answer (`pr_error`) and never fails the call.
+async fn add_open_prs<F, Fut>(body: &mut Value, arguments: &Value, pr: Option<u64>, me: &str, ask_path: F)
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Option<Value>>,
+{
+    let repo = body.pointer("/asked/repo").and_then(Value::as_str).map(str::to_string);
+    let Some(repo) = repo.filter(|r| r.contains('/') && !r.starts_with("local:")) else {
+        if pr.is_some() {
+            body["pr_error"] = json!("pr needs a repository on GitHub (owner/repo)");
+        }
+        return;
+    };
+    let prs = match open_prs::open_prs(&repo).await {
+        Ok(prs) => prs,
+        Err(e) => {
+            body["pr_error"] = json!(e);
+            return;
+        }
+    };
+    let host = open_prs::this_host();
+    let path = body.pointer("/asked/path").and_then(Value::as_str).map(str::to_string);
+    let asked = open_prs::Asked {
+        path: path.as_deref(),
+        branch: arg(arguments, "branch"),
+        query: arg(arguments, "query"),
+        pr,
+    };
+    let matches = match open_prs::pr_matches(&prs, &asked, me, &host) {
+        Ok(m) => m,
+        Err(e) => {
+            body["pr_error"] = json!(e);
+            return;
+        }
+    };
+    if let Some(files) = pr.and_then(|n| prs.iter().find(|p| p.number == n)).map(|p| p.files.clone()) {
+        let mut agents: Vec<Value> = Vec::new();
+        for file in files.iter().take(PR_FILES_CHECKED) {
+            if let Some(answer) = ask_path(file.clone()).await {
+                merge_agents(&mut agents, answer.get("agents").and_then(Value::as_array).cloned().unwrap_or_default());
+            }
+        }
+        body["agents"] = Value::Array(agents);
+        if files.len() > PR_FILES_CHECKED {
+            body["pr_note"] = json!(format!(
+                "the PR changes {} files; agents on this computer were checked against the first {PR_FILES_CHECKED}",
+                files.len()
+            ));
+        }
+    }
+    open_prs::merge_into(body, matches, &host, &repo);
+}
+
+/// Merge srv answers for several files: one entry per agent and channel,
+/// with every distinct match.
+fn merge_agents(into: &mut Vec<Value>, from: Vec<Value>) {
+    for agent in from {
+        let key = |a: &Value| (a.get("agent").cloned(), a.get("channel").cloned());
+        match into.iter_mut().find(|a| key(a) == key(&agent)) {
+            Some(existing) => {
+                let new = agent.get("matches").and_then(Value::as_array).cloned().unwrap_or_default();
+                if let Some(list) = existing.get_mut("matches").and_then(Value::as_array_mut) {
+                    for m in new {
+                        if !list.contains(&m) {
+                            list.push(m);
+                        }
+                    }
+                }
+            }
+            None => into.push(agent),
+        }
     }
 }
 
@@ -101,6 +195,28 @@ fn release_body(arguments: &Value, agent: &str, block_id: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pr_is_a_number_a_hash_number_or_a_url() {
+        assert_eq!(pr_number(&json!(12)), Some(12));
+        assert_eq!(pr_number(&json!("12")), Some(12));
+        assert_eq!(pr_number(&json!("#12")), Some(12));
+        assert_eq!(pr_number(&json!("https://github.com/o/r/pull/4683/")), Some(4683));
+        assert_eq!(pr_number(&json!("main")), None);
+        assert_eq!(pr_number(&json!(0)), None);
+    }
+
+    #[test]
+    fn answers_for_several_files_merge_by_agent() {
+        let mut agents = Vec::new();
+        merge_agents(&mut agents, vec![json!({ "agent": "A", "channel": "c", "matches": [{ "kind": "dirty", "detail": "x" }] })]);
+        merge_agents(&mut agents, vec![
+            json!({ "agent": "A", "channel": "c", "matches": [{ "kind": "dirty", "detail": "x" }, { "kind": "edited", "detail": "y" }] }),
+            json!({ "agent": "B", "channel": "c", "matches": [] }),
+        ]);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0]["matches"].as_array().unwrap().len(), 2);
+    }
 
     #[test]
     fn only_given_arguments_and_the_callers_identity_are_sent() {

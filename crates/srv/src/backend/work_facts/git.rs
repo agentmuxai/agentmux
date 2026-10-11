@@ -204,6 +204,27 @@ pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
     }
 }
 
+/// The files the branch checked out in `root` changes since it left the
+/// default branch (`origin/HEAD`, else `origin/main` or `origin/master`):
+/// what a PR from it changes. Empty on the default branch itself, or when
+/// git can't say in [`PROBE_TIMEOUT`]. A diff of two commits: no working-tree
+/// filter runs.
+pub async fn branch_files(root: &str) -> Vec<String> {
+    let files = async {
+        let mut base = None;
+        for candidate in ["origin/HEAD", "origin/main", "origin/master"] {
+            if safe_git_line(root, &["rev-parse", "--verify", "--quiet", candidate]).await.is_some() {
+                base = Some(candidate);
+                break;
+            }
+        }
+        let range = format!("{}...HEAD", base?);
+        let out = safe_git_line(root, &["diff", "--name-only", &range]).await?;
+        Some(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect::<Vec<_>>())
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, files).await.ok().flatten().unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +348,28 @@ mod tests {
         assert_eq!(c.get("hung", "/hung"), None, "abandoned");
         assert!(!c.needs_probe("hung", "/hung", 2_001), "and not retried until it is due again");
         assert_eq!(c.get("fresh", "/fresh"), Some(facts_for("/fresh")));
+    }
+
+    #[tokio::test]
+    async fn a_branch_lists_the_files_it_changes_since_the_default_branch() {
+        let tmp = std::env::temp_dir().join(format!("wf-branch-files-{}-{}", std::process::id(), agentmux_common::time::now_ms()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        git(&tmp, &["init", "-q", "-b", "main"]);
+        git(&tmp, &["config", "user.email", "t@t"]);
+        git(&tmp, &["config", "user.name", "t"]);
+        std::fs::write(tmp.join("base.rs"), "a").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "base"]);
+        git(&tmp, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let root = tmp.to_string_lossy().to_string();
+        assert!(branch_files(&root).await.is_empty(), "on the default branch: nothing");
+        git(&tmp, &["checkout", "-q", "-b", "agent/x"]);
+        std::fs::create_dir_all(tmp.join("src")).unwrap();
+        std::fs::write(tmp.join("src/new.rs"), "b").unwrap();
+        std::fs::write(tmp.join("base.rs"), "changed").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "work"]);
+        assert_eq!(branch_files(&root).await, vec!["base.rs".to_string(), "src/new.rs".to_string()]);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
