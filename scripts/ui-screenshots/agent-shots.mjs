@@ -27,7 +27,7 @@ import { homeProblem, installFakeClaude } from "./install-fake-claude.mjs";
 import { closeTab, openNewTab, visibleCenter } from "./widget-shots.mjs";
 
 /** The agent pane at a size that reads well in a docs column. */
-const VIEWPORT = { width: 960, height: 760, scale: 1 };
+export const VIEWPORT = { width: 960, height: 760, scale: 1 };
 
 export const DEMO_ACCOUNT = { id: "6f1d2c3b-0a9e-4c7d-8b5a-acme00000001", email: "dev@acme.example" };
 /** Agents kept for the picker's My Agents, each with one short session. */
@@ -36,7 +36,7 @@ export const PICKER_AGENTS = ["api-tests", "docs-writer", "checkout-service"];
 export const SHOT_AGENT = "web-frontend";
 
 /** The conversation's messages, matched by fake-claude/conversation.json. */
-const MESSAGES = {
+export const MESSAGES = {
     fix: 'The cart badge says "1 items" when there is one item. Can you fix it and add a test?',
     total: "Can you show the cart total in the header too?",
     where: "Where should it go?",
@@ -57,7 +57,7 @@ function captureHome() {
 
 const credentialsFile = () => join(captureHome(), "demo-accounts", "claude", ".credentials.json");
 
-async function waitFor(session, expression, what, timeoutMs = 20000) {
+export async function waitFor(session, expression, what, timeoutMs = 20000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (await session.evaluate(expression)) return;
@@ -90,7 +90,7 @@ async function deleteOrphanBundles(session, name) {
 }
 
 /** Deletes the user-owned agent named `name`, if there is one, and its bundle. */
-async function deleteAgent(session, name) {
+export async function deleteAgent(session, name) {
     for (const d of await session.evaluate(agentsNamed([name]))) {
         await session.evaluate(`RpcApi.DeleteAgentDefinitionCommand(TabRpcClient, { id: ${JSON.stringify(d.id)} })`);
     }
@@ -120,7 +120,7 @@ const visibleText = (text) => `[...document.querySelectorAll(".pane-stack")].som
 
 const paneText = (pane, text) => `!!document.querySelector(${JSON.stringify(pane)})?.innerText.includes(${JSON.stringify(text)})`;
 
-async function maximize(session, pane) {
+export async function maximize(session, pane) {
     const fills = `(() => { const r = document.querySelector(${JSON.stringify(pane)})?.getBoundingClientRect(); return !!r && r.width > window.innerWidth * 0.95; })()`;
     for (let attempt = 0; attempt < 2; attempt++) {
         if (await session.evaluate(fills)) return;
@@ -190,7 +190,7 @@ async function openCreateForm(session) {
 /** Creates agent `name` from the Claude Code template, on this computer, and
  *  waits for it to launch; returns its pane, maximized. `settled` false skips
  *  waiting for a signed-in, idle agent (for an agent that can't start). */
-async function createAgent(session, name, { settled = true } = {}) {
+export async function createAgent(session, name, { settled = true } = {}) {
     const pane = await openCreateForm(session);
     await session.clickSelector(`${pane} .agent-new-bundle-modal-input`);
     await session.typeText(name);
@@ -253,7 +253,7 @@ async function createAgent(session, name, { settled = true } = {}) {
     return agentPane;
 }
 
-async function send(session, pane, text) {
+export async function send(session, pane, text) {
     await session.clickSelector(`${pane} ${COMPOSER}`);
     await session.typeText(text);
     await session.wait(200);
@@ -262,7 +262,7 @@ async function send(session, pane, text) {
 
 /** Waits for the turn just sent to start, then to finish. (The launch turn's
  *  "Worked" summary is already shown, so finishing alone isn't enough.) */
-async function turnDone(session, pane) {
+export async function turnDone(session, pane) {
     await waitFor(session, working(pane), "the turn to start", 15000);
     await waitFor(session, `!!document.querySelector(${JSON.stringify(`${pane} .agent-working-row--worked`)}) && !(${working(pane)})`, "the turn to finish", 45000);
 }
@@ -276,13 +276,14 @@ export async function setup(session) {
     const accountDir = join(home, "demo-accounts", "claude");
     mkdirSync(accountDir, { recursive: true });
     // srv checks for a credential file before it asks the CLI; this one only
-    // ever reaches the stand-in.
+    // ever reaches the stand-in. The account is saved as signed in ("valid"):
+    // a new agent's pane offers to bind only a signed-in account.
     writeFileSync(
         credentialsFile(),
         JSON.stringify({ claudeAiOauth: { accessToken: "demo-placeholder", refreshToken: "demo-placeholder", expiresAt: 4102444800000, scopes: ["user:inference"] } }) + "\n"
     );
     await session.evaluate(`RpcApi.UpsertIdentityAccountCommand(TabRpcClient, { id: ${JSON.stringify(DEMO_ACCOUNT.id)}, name: ${JSON.stringify(DEMO_ACCOUNT.email)},
-        provider: "claude", kind: "oauth", display_name: ${JSON.stringify(DEMO_ACCOUNT.email)},
+        provider: "claude", kind: "oauth", display_name: ${JSON.stringify(DEMO_ACCOUNT.email)}, status: "valid",
         secret_ref: { backend: "oauth_config_dir", dir: ${JSON.stringify(accountDir.replace(/\\/g, "/"))} } })`);
     await session.evaluate("location.reload()");
     await session.wait(1500);

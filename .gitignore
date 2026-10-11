@@ -66,6 +66,7 @@ nul
 # manual's own asset directory under a stable name, rather than every
 # capture run's raw output living in git history.
 docs/manual/screenshots/
+docs/manual/recordings/
 
 # AppImage build artifacts (assembled in build/AgentMux.AppDir/ before being bundled by appimagetool)
 /build/AgentMux.AppDir/
