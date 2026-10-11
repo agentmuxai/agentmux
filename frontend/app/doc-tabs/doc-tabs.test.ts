@@ -21,7 +21,7 @@ import {
     setPinned,
     type DocTabsState,
 } from "./doc-tabs";
-import { DocTabsController, docTabKeyAction, handleDocTabKey, type DocTabsSpec } from "./doc-tabs-controller";
+import { DOC_TABS_SAVE_DELAY_MS, DocTabsController, DocTabsSaver, docTabKeyAction, handleDocTabKey, type DocTabsSpec } from "./doc-tabs-controller";
 
 type P = { path: string };
 const open = (s: DocTabsState<P>, path: string, extra: { preview?: boolean; activate?: boolean } = {}, id = path) =>
@@ -286,5 +286,48 @@ describe("document tabs: the controller", () => {
         expect(docTabKeyAction({ key: "w", ctrlKey: true, shiftKey: false, altKey: true, metaKey: false })).toBeNull();
         expect(docTabKeyAction({ key: "w", ctrlKey: false, shiftKey: false, altKey: false, metaKey: true })).toBeNull();
         expect(docTabKeyAction({ key: "f", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false })).toBeNull();
+    });
+});
+
+describe("document tabs: the saver", () => {
+    afterEach(() => vi.useRealTimers());
+
+    const tabs = (paths: string[]) => paths.reduce((s, path) => openDoc(s, { key: path, title: path, payload: { path } }), emptyDocTabs<P>());
+
+    it("writes after a pause, never the same record twice, and null once no tab is left", () => {
+        vi.useFakeTimers();
+        let state = tabs(["/a"]);
+        const write = vi.fn();
+        const saver = new DocTabsSaver(() => state, (p: P) => p.path, write);
+        saver.schedule();
+        saver.schedule();
+        expect(write).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(DOC_TABS_SAVE_DELAY_MS);
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(write.mock.calls[0][0].tabs.map((t: { key: string }) => t.key)).toEqual(["/a"]);
+        saver.schedule();
+        vi.advanceTimersByTime(DOC_TABS_SAVE_DELAY_MS);
+        expect(write).toHaveBeenCalledTimes(1);
+        state = emptyDocTabs<P>();
+        saver.schedule();
+        vi.advanceTimersByTime(DOC_TABS_SAVE_DELAY_MS);
+        expect(write).toHaveBeenLastCalledWith(null);
+    });
+
+    it("does not rewrite what the block holds, and flushes a pending save at once", () => {
+        vi.useFakeTimers();
+        let state = tabs(["/a"]);
+        const write = vi.fn();
+        const saver = new DocTabsSaver(() => state, (p: P) => p.path, write);
+        saver.holds(JSON.parse(JSON.stringify(persistDocTabs(state, (p) => p.path))));
+        saver.schedule();
+        vi.advanceTimersByTime(DOC_TABS_SAVE_DELAY_MS);
+        expect(write).not.toHaveBeenCalled();
+        saver.flush();
+        expect(write).not.toHaveBeenCalled();
+        state = tabs(["/a", "/b"]);
+        saver.schedule();
+        saver.flush();
+        expect(write).toHaveBeenCalledTimes(1);
     });
 });

@@ -3,8 +3,10 @@
 
 /**
  * The document-tab strip: a pane's documents, drawn with the shared
- * `PaneTabStrip` (as the Editor's file tabs are), under the pane header.
- * docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §4.1.
+ * `PaneTabStrip`, under the pane header. The Editor and Media both draw
+ * theirs with it, each from its `DocTabsModel`.
+ * docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §4.1,
+ * docs/specs/PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10.md.
  *
  * Tabs drag as document tabs (`PaneTabStrip`'s `docDrag`): their own drag
  * kind, which never tears off into a window. Dropped on another tab of the
@@ -17,13 +19,13 @@
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { Show, type JSX } from "solid-js";
 import type { DocTab } from "./doc-tabs";
-import type { DocTabsController } from "./doc-tabs-controller";
+import type { DocTabsModel } from "./doc-tabs-controller";
 import { dropDocTab } from "./doc-tab-hosts";
 import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
 
 export function DocTabStrip<P>(props: {
-    ctl: DocTabsController<P>;
+    ctl: DocTabsModel<P>;
     /** Tooltip per tab (a full path); the title when omitted. */
     tooltipOf?: (tab: DocTab<P>) => string;
     addTitle?: string;
@@ -31,44 +33,66 @@ export function DocTabStrip<P>(props: {
     docType: string;
     /** The block whose tabs these are. */
     blockId: string;
-    /** Whether a tab can be dragged (an empty one has nothing to move). */
+    /** Whether a tab can be dragged. */
     canDrag?: (tab: DocTab<P>) => boolean;
+    /** Before the tabs, in the strip's row (the Editor's file tree toggle). */
+    leading?: JSX.Element;
+    /** Whether the row shows; `ctl.showStrip()` when omitted. */
+    show?: () => boolean;
+    /** A tab's label in place of its title (the Editor's Save As box), or
+     *  undefined for the title. */
+    renderLabel?: (tab: DocTab<P>) => JSX.Element | undefined;
+    /** Classes a pane adds to a tab. */
+    tabClass?: (tab: DocTab<P>) => Record<string, boolean>;
 }): JSX.Element {
     const ctl = props.ctl;
     return (
-        <Show when={ctl.showStrip()}>
+        <Show when={props.show?.() ?? ctl.showStrip()}>
             <div class="doc-tab-strip" role="presentation">
-                <PaneTabStrip<DocTab<P>>
-                    tabs={ctl.tabs()}
-                    activeId={ctl.activeId()}
-                    animateWidth
-                    getId={(t) => t.id}
-                    getLabel={(t) => t.title}
-                    getIcon={(t) => (t.icon ? <i class={`fa fa-${t.icon}`} aria-hidden="true" /> : <></>)}
-                    getTooltip={(t) => {
-                        const base = props.tooltipOf?.(t) ?? t.title;
-                        return t.preview ? `${base} (preview, double-click to keep)` : base;
-                    }}
-                    getAttention={(t) => !!t.dirty}
-                    getTabClass={(t) => ({ "doc-tab--preview": t.preview, "doc-tab--pinned": t.pinned, "doc-tab--no-icon": !t.icon })}
-                    onActivate={(id) => ctl.activate(id)}
-                    onClose={(id) => void ctl.close(id)}
-                    onTabDoubleClick={(t) => {
-                        if (t.preview) ctl.promote(t.id);
-                    }}
-                    onAdd={ctl.spec.newDocument ? () => void ctl.newDocument() : undefined}
-                    addTitle={props.addTitle ?? `New tab (${keyLabel("ctrl+t")})`}
-                    docDrag={{
-                        docType: props.docType,
-                        blockId: props.blockId,
-                        canDrag: (id) => {
-                            const tab = ctl.tabs().find((t) => t.id === id);
-                            return !!tab && (props.canDrag?.(tab) ?? true);
-                        },
-                        onReorder: (id, targetId, position) => ctl.moveTo(id, targetId, position),
-                        onReceive: (sourceBlockId, tabId, at) => dropDocTab(sourceBlockId, tabId, props.blockId, at),
-                    }}
-                />
+                {props.leading}
+                <Show when={ctl.tabs().length > 0}>
+                    <PaneTabStrip<DocTab<P>>
+                        tabs={ctl.tabs()}
+                        activeId={ctl.activeId()}
+                        animateWidth
+                        getId={(t) => t.id}
+                        getLabel={(t) => t.title}
+                        getIcon={(t) => (t.icon ? <i class={`fa fa-${t.icon}`} aria-hidden="true" /> : <></>)}
+                        getTooltip={(t) => {
+                            const base = props.tooltipOf?.(t) ?? t.title;
+                            return t.preview ? `${base} (preview, double-click to keep)` : base;
+                        }}
+                        getAttention={(t) => !!t.dirty}
+                        getTabClass={(t) => ({
+                            "doc-tab--preview": t.preview,
+                            "doc-tab--pinned": t.pinned,
+                            "doc-tab--no-icon": !t.icon,
+                            ...(props.tabClass?.(t) ?? {}),
+                        })}
+                        onActivate={(id) => ctl.activate(id)}
+                        onClose={(id) => void ctl.close(id)}
+                        onTabDoubleClick={(t) => {
+                            if (t.preview) ctl.promote(t.id);
+                        }}
+                        renderLabel={
+                            props.renderLabel
+                                ? (t) => props.renderLabel!(t) ?? <span class="pane-tab-label">{t.title}</span>
+                                : undefined
+                        }
+                        onAdd={ctl.canAddNew() ? () => void ctl.newDocument() : undefined}
+                        addTitle={props.addTitle ?? `New tab (${keyLabel("ctrl+t")})`}
+                        docDrag={{
+                            docType: props.docType,
+                            blockId: props.blockId,
+                            canDrag: (id) => {
+                                const tab = ctl.tabs().find((t) => t.id === id);
+                                return !!tab && (props.canDrag?.(tab) ?? true);
+                            },
+                            onReorder: (id, targetId, position) => ctl.moveTo(id, targetId, position),
+                            onReceive: (sourceBlockId, tabId, at) => dropDocTab(sourceBlockId, tabId, props.blockId, at),
+                        }}
+                    />
+                </Show>
             </div>
         </Show>
     );

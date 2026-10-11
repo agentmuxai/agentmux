@@ -9,7 +9,8 @@
 import { createEffect, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
-import { docTabAction, docTabKeyAction, type DocTabKeyAction } from "@/app/doc-tabs/doc-tabs-controller";
+import { docTabAction, docTabKeyAction, runDocTabAction } from "@/app/doc-tabs/doc-tabs-controller";
+import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -26,8 +27,8 @@ import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, SegmentedControl } from "@/app/element/ui";
-import { EditorTabStrip } from "./editor-tab-strip";
-import { EDITOR_STATE_FIELDS, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
+import { SaveAsInput } from "./editor-save-as-input";
+import { EDITOR_STATE_FIELDS, editorDocTabs, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
@@ -118,33 +119,15 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const [liveDoc, setLiveDoc] = createSignal("");
     const isMarkdown = (): boolean => model.languageAtom() === "markdown";
 
-    const runTabAction = (action: DocTabKeyAction): void => {
-        const active = model.activeIdAtom();
-        switch (action.kind) {
-            case "new":
-                void model.openScratch(false);
-                break;
-            case "close":
-                if (active) model.closeTab(active);
-                break;
-            case "cycle":
-                model.cycleTab(action.delta);
-                break;
-            case "reopen":
-                model.reopenLastClosed();
-                break;
-            case "move":
-                model.moveActiveTab(action.delta);
-                break;
-        }
-    };
+    // The pane's tabs on the shared strip and keys (PLAN_EDITOR_ON_SHARED_DOC_TABS).
+    const docTabs = editorDocTabs(model);
 
     // The editor's own commands, run by its keys and by the App API's
     // RunCommand alike. False when the command doesn't apply right now.
     const runEditorCommand = (command: string): boolean => {
         const tabAction = docTabAction(command);
         if (tabAction) {
-            runTabAction(tabAction);
+            runDocTabAction(tabAction, docTabs);
             return true;
         }
         switch (command) {
@@ -214,7 +197,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             if (tabKey && !(ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement)) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                runTabAction(tabKey);
+                runDocTabAction(tabKey, docTabs);
                 return;
             }
             // The editor's keys are the `editor:*` rows of the shortcut table.
@@ -1001,11 +984,15 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             </Show>
 
             <div class="editor-main-column">
-                <Show when={showTreeButton() || model.tabsAtom().length > 0}>
-                    <div class="editor-tab-strip-row">
-                        {/* While the tree is hidden, the button that shows it
-                            leads the document bar (the tree's own toolbar hides
-                            it). An editor on a remote host has no tree. */}
+                <DocTabStrip
+                    ctl={docTabs}
+                    docType="editor"
+                    blockId={model.blockId}
+                    show={() => showTreeButton() || docTabs.tabs().length > 0}
+                    leading={
+                        // While the tree is hidden, the button that shows it
+                        // leads the document bar (the tree's own toolbar hides
+                        // it). An editor on a remote host has no tree.
                         <Show when={showTreeButton()}>
                             <button
                                 type="button"
@@ -1017,16 +1004,19 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                 <i class="fa fa-folder-tree" />
                             </button>
                         </Show>
-                        <Show when={model.tabsAtom().length > 0}>
-                            <EditorTabStrip
-                                model={model}
-                                saveAsTabId={saveAsTabId()}
-                                onSaveAsConfirm={(path) => void handleSaveAsConfirm(path)}
-                                onSaveAsCancel={() => setSaveAsTabId(null)}
-                            />
-                        </Show>
-                    </div>
-                </Show>
+                    }
+                    tooltipOf={(t) => t.payload.filePath}
+                    addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
+                    // Not while its Save As box is open: the drag would take
+                    // the box's text selection.
+                    canDrag={(t) => saveAsTabId() !== t.id}
+                    tabClass={(t) => ({ "editor-tab--saveas": saveAsTabId() === t.id })}
+                    renderLabel={(t) =>
+                        saveAsTabId() === t.id ? (
+                            <SaveAsInput onConfirm={(path) => void handleSaveAsConfirm(path)} onCancel={() => setSaveAsTabId(null)} />
+                        ) : undefined
+                    }
+                />
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
                     <div class="editor-mode-toolbar">

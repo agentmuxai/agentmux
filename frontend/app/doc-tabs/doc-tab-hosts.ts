@@ -9,8 +9,9 @@
  * about a tab, and how it gives one up or takes one in. A drop of a document
  * tab on another pane goes through `dropDocTab`, the one path for every type:
  * both sides are asked first, and only then does the tab leave one pane and
- * enter the other. `controllerHost` is the host for any pane on a
- * `DocTabsController` (Media); the Editor has its own (editor-doc-tabs.ts).
+ * enter the other. `docTabsHost` makes the host from a pane's
+ * `DocTabsModel`: Media's controller, or the Editor's store with its hooks
+ * for the state it carries besides the tab (editor-doc-tabs.ts).
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md §3.3.
  */
 
@@ -18,7 +19,7 @@ import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element
 import { asDocTabDragData } from "@/app/drag/drag-types";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import type { DocDropAt, DocTab } from "./doc-tabs";
-import type { DocTabsController } from "./doc-tabs-controller";
+import type { DocTabsModel } from "./doc-tabs-controller";
 import "./doc-tabs.scss";
 
 /** A tab on its way between two panes: the tab itself, and whatever state
@@ -99,35 +100,54 @@ export function dropDocTab(sourceBlockId: string, tabId: string, targetBlockId: 
     return result.moved;
 }
 
+/** What a pane type adds to `docTabsHost`. */
+export interface DocTabsHostHooks<P> {
+    /** See `DocTabHost.scope`. */
+    scope?(): string;
+    /** Why `tab` can't leave this pane now, or null. */
+    refuseGive?(tab: DocTab<P>): string | null;
+    /** A tab that shows nothing yet (Media's "Click to load media"): when one
+     *  is in front, an arriving tab with a document takes its place rather
+     *  than joining it; another placeholder joins it. */
+    isPlaceholder?(tab: DocTab<P>): boolean;
+    /** The state of its type that a tab takes along besides itself, read
+     *  before it leaves (the Editor's unsaved text, its undo history). */
+    liveOf?(tab: DocTab<P>): unknown;
+    /** Before an arriving tab is put in: put its live state in place, and
+     *  return the tab as it should arrive. */
+    arriving?(tab: DocTab<P>, live: unknown): DocTab<P>;
+    /** After it is in. */
+    arrived?(tab: DocTab<P>, live: unknown): void;
+}
+
 /**
- * The host of a pane whose tabs are a `DocTabsController`'s. Everything a tab
- * is travels in the tab, so there is no live state. A pane with the tab's
- * document open already refuses it. `refuseGive` adds the type's own rule.
- * `isPlaceholder` names a tab that shows nothing yet (Media's "Click to load
- * media"): when one is in front, an arriving tab with a document takes its
- * place rather than joining it; another placeholder joins it.
+ * The host of a pane whose tabs are `tabs`. A pane with the tab's document
+ * open already refuses it. The hooks add what a type needs.
  */
-export function controllerHost<P>(
-    ctl: DocTabsController<P>,
-    docType: string,
-    opts: { refuseGive?: (tab: DocTab<P>) => string | null; isPlaceholder?: (tab: DocTab<P>) => boolean } = {}
-): DocTabHost {
+export function docTabsHost<P>(tabs: DocTabsModel<P>, docType: string, hooks: DocTabsHostHooks<P> = {}): DocTabHost {
+    const find = (id: string) => tabs.tabs().find((t) => t.id === id);
     return {
         docType,
-        peek: (tabId) => ctl.tabs().find((t) => t.id === tabId) ?? null,
-        refuseGive: (tab) => opts.refuseGive?.(tab as DocTab<P>) ?? null,
-        refuseTake: (tab) => (ctl.tabs().some((t) => t.key === tab.key) ? ALREADY_OPEN_THERE : null),
+        scope: hooks.scope,
+        peek: (tabId) => find(tabId) ?? null,
+        refuseGive: (tab) => hooks.refuseGive?.(tab as DocTab<P>) ?? null,
+        refuseTake: (tab) => (tabs.tabs().some((t) => t.key === tab.key) ? ALREADY_OPEN_THERE : null),
         give: (tabId) => {
-            const tab = ctl.detach(tabId);
-            return tab ? { docType, tab } : null;
+            const before = find(tabId);
+            if (!before) return null;
+            const live = hooks.liveOf?.(before);
+            const tab = tabs.detach(tabId);
+            return tab ? { docType, tab, live } : null;
         },
         take: (transfer, at) => {
-            const tab = transfer.tab as DocTab<P>;
-            const front = ctl.active();
-            const placeholder = front && opts.isPlaceholder?.(front) && !opts.isPlaceholder(tab) ? front : undefined;
-            ctl.attach(tab, at ?? (placeholder ? { targetId: placeholder.id, position: "after" } : undefined));
+            const tab = hooks.arriving?.(transfer.tab as DocTab<P>, transfer.live) ?? (transfer.tab as DocTab<P>);
+            const activeId = tabs.activeId();
+            const front = activeId ? find(activeId) : undefined;
+            const placeholder = front && hooks.isPlaceholder?.(front) && !hooks.isPlaceholder(tab) ? front : undefined;
+            tabs.attach(tab, at ?? (placeholder ? { targetId: placeholder.id, position: "after" } : undefined));
             // Gone, not closed: nothing to reopen. Only once the tab is in.
-            if (placeholder && ctl.tabs().some((t) => t.id === tab.id)) ctl.detach(placeholder.id);
+            if (placeholder && find(tab.id)) tabs.detach(placeholder.id);
+            hooks.arrived?.(tab, transfer.live);
         },
     };
 }

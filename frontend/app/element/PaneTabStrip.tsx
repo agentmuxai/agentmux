@@ -3,10 +3,10 @@
 
 /**
  * PaneTabStrip — the shared, pane-type-agnostic tab strip. Extracted from
- * the editor's tab strip (`frontend/app/view/editor/editor-tab-strip.tsx`,
- * `.editor-tab-strip`/`.editor-tab`) so agent-pane forks and terminal-pane
- * shell tabs can reuse the exact same chrome and interaction model instead
- * of each pane type growing its own copy.
+ * the editor's first tab strip (`.editor-tab-strip`/`.editor-tab`) so
+ * agent-pane forks and terminal-pane shell tabs can reuse the exact same
+ * chrome and interaction model instead of each pane type growing its own
+ * copy. Document tabs (Editor, Media) draw it through DocTabStrip.tsx.
  *
  * Deliberately accessor-based rather than requiring tabs to conform to a
  * fixed shape (`{id, label, ...}`) — callers pass closures that read

@@ -6,6 +6,11 @@
  * to the block's meta as it changes, restored from it, and the keys every
  * document-tab pane shares. docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §4.3,
  * §5.2, §5.3, §5.6.
+ *
+ * `DocTabsModel` is what the shared strip, keys and moves need of a pane's
+ * tabs. `DocTabsController` is one; the Editor's store is another, through
+ * `editorDocTabs` (editor-doc-tabs.ts), which keeps the Editor's own commands
+ * and events. docs/specs/PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10.md.
  */
 
 import { createSignal, type Accessor } from "solid-js";
@@ -33,6 +38,7 @@ import {
     type DocTab,
     type DocTabsState,
     type OpenArgs,
+    type PersistedDocTabs,
 } from "./doc-tabs";
 import { keyPlatform } from "@/app/keybindings";
 import { noteResolved } from "@/app/keybindings/app-api";
@@ -61,13 +67,86 @@ export interface DocTabsHost {
     setMeta(patch: Record<string, unknown>): Promise<void> | void;
 }
 
-/** Writes to block meta are batched this long. */
-const SAVE_DELAY_MS = 300;
+/** A pane's document tabs, as the shared strip (DocTabStrip), keys
+ *  (`runDocTabAction`) and moves (`docTabsHost`) use them. */
+export interface DocTabsModel<P> {
+    tabs(): DocTab<P>[];
+    activeId(): string | null;
+    showStrip(): boolean;
+    activate(id: string): void;
+    /** False when refused (the last tab of a keepOne pane). A tab with
+     *  unsaved changes may ask first. */
+    close(id: string): boolean;
+    /** A preview tab kept (double-click). */
+    promote(id: string): void;
+    cycle(delta: number): void;
+    move(id: string, delta: number): void;
+    /** A tab dragged to just before or after another. False when nothing moved. */
+    moveTo(id: string, targetId: string, position: "before" | "after"): boolean;
+    /** False when there was nothing to reopen. */
+    reopen(): boolean;
+    /** Whether "+" and Ctrl+T open a new document here. */
+    canAddNew(): boolean;
+    newDocument(): boolean;
+    /** Take tab `id` out, to move it to another pane. Null if there is none. */
+    detach(id: string): DocTab<P> | null;
+    /** Put in a tab moved from another pane (`attachDoc`). */
+    attach(tab: DocTab<P>, at?: DocDropAt): void;
+}
 
-export class DocTabsController<P> {
+/** Writes to block meta are batched this long. */
+export const DOC_TABS_SAVE_DELAY_MS = 300;
+
+/**
+ * Writes a pane's tabs to its block once changes settle: after a pause, never
+ * the same record twice, and at once on `flush` (a pane closing). With no
+ * tabs it writes null.
+ */
+export class DocTabsSaver<P> {
+    private timer: ReturnType<typeof setTimeout> | null = null;
+    private written: string;
+
+    constructor(
+        private readonly read: () => DocTabsState<P> | null | undefined,
+        private readonly serialize: (payload: P) => unknown,
+        private readonly write: (record: PersistedDocTabs | null) => void
+    ) {
+        this.written = JSON.stringify(null);
+    }
+
+    /** The record the block holds now (what the pane was restored from):
+     *  not written again until the tabs change. */
+    holds(record: unknown): void {
+        this.written = JSON.stringify(record ?? null);
+    }
+
+    schedule(): void {
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = setTimeout(() => this.save(), DOC_TABS_SAVE_DELAY_MS);
+    }
+
+    /** Write now if a save is pending. */
+    flush(): void {
+        if (this.timer) this.save();
+    }
+
+    private save(): void {
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = null;
+        const state = this.read();
+        if (!state) return;
+        const record = state.tabs.length > 0 ? persistDocTabs(state, this.serialize) : null;
+        const text = JSON.stringify(record);
+        if (text === this.written) return;
+        this.written = text;
+        this.write(record);
+    }
+}
+
+export class DocTabsController<P> implements DocTabsModel<P> {
     readonly state: Accessor<DocTabsState<P>>;
     private readonly setState: (s: DocTabsState<P>) => void;
-    private saveTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly saver: DocTabsSaver<P>;
     /** Told when a tab is closed (and not reopenable as itself), so the pane
      *  can release what it held for it. */
     onClosed: ((tab: DocTab<P>) => void) | null = null;
@@ -78,7 +157,8 @@ export class DocTabsController<P> {
         /** Used when the block has no saved tabs (a pane opened on a path). */
         initial?: P[]
     ) {
-        const saved = hydrateDocTabs<P>(host.meta()?.[DOC_TABS_META], (st) => spec.deserialize(st));
+        const raw = host.meta()?.[DOC_TABS_META];
+        const saved = hydrateDocTabs<P>(raw, (st) => spec.deserialize(st));
         // A restored tab's title and icon come from its document, as this
         // build names it, not from the save: a change (Media's tabs lost their
         // icons) reaches tabs saved before it.
@@ -89,12 +169,15 @@ export class DocTabsController<P> {
             for (const p of initial) start = openDoc(start, this.argsFor(p));
         }
         [this.state, this.setState] = createSignal(start);
+        this.saver = new DocTabsSaver(this.state, (p) => spec.serialize(p), (record) => void host.setMeta({ [DOC_TABS_META]: record }));
+        this.saver.holds(raw);
     }
 
     readonly tabs = (): DocTab<P>[] => this.state().tabs;
     readonly activeId = (): string | null => this.state().activeId;
     readonly active = (): DocTab<P> | undefined => activeTab(this.state());
     readonly showStrip = (): boolean => this.state().tabs.length >= 2 || (!!this.spec.alwaysShowStrip && this.state().tabs.length >= 1);
+    readonly canAddNew = (): boolean => !!this.spec.newDocument;
 
     private argsFor(payload: P, extra: Partial<OpenArgs<P>> = {}): OpenArgs<P> {
         return {
@@ -117,23 +200,12 @@ export class DocTabsController<P> {
             const still = new Set([...next.tabs, ...next.closed].map((t) => t.id));
             for (const t of [...before.tabs, ...before.closed]) if (!still.has(t.id) && t.id !== movedOut) this.onClosed(t);
         }
-        this.scheduleSave();
-    }
-
-    private scheduleSave(): void {
-        if (this.saveTimer) clearTimeout(this.saveTimer);
-        this.saveTimer = setTimeout(() => {
-            this.saveTimer = null;
-            void this.host.setMeta({ [DOC_TABS_META]: persistDocTabs(this.state(), (p) => this.spec.serialize(p)) });
-        }, SAVE_DELAY_MS);
+        this.saver.schedule();
     }
 
     /** Write now (a pane closing, tests). */
     flush(): void {
-        if (!this.saveTimer) return;
-        clearTimeout(this.saveTimer);
-        this.saveTimer = null;
-        void this.host.setMeta({ [DOC_TABS_META]: persistDocTabs(this.state(), (p) => this.spec.serialize(p)) });
+        this.saver.flush();
     }
 
     open(payload: P, opts: { preview?: boolean; activate?: boolean; at?: "afterActive" | "end" } = {}): string {
@@ -278,7 +350,7 @@ export function docTabAction(command: string): DocTabKeyAction | null {
  * stops it). `onRefused` is told when a close was refused (a keepOne pane's
  * last tab), so the pane can say why.
  */
-export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsController<P>, onRefused?: () => void): boolean {
+export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsModel<P>, onRefused?: () => void): boolean {
     const action = docTabKeyAction(e);
     if (!action) return false;
     runDocTabAction(action, ctl, onRefused);
@@ -288,11 +360,11 @@ export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsController<P>, 
 }
 
 /** Carry out a document-tab action on `ctl`: a key's, or the App API's RunCommand. */
-export function runDocTabAction<P>(action: DocTabKeyAction, ctl: DocTabsController<P>, onRefused?: () => void): void {
+export function runDocTabAction<P>(action: DocTabKeyAction, ctl: DocTabsModel<P>, onRefused?: () => void): void {
     const id = ctl.activeId();
     switch (action.kind) {
         case "new":
-            ctl.newDocument();
+            if (ctl.canAddNew()) ctl.newDocument();
             break;
         case "close":
             if (id && !ctl.close(id)) onRefused?.();
