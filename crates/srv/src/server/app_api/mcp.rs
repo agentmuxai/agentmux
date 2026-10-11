@@ -596,10 +596,13 @@ fn observed_agents(
     mstore: &crate::backend::storage::store::Store,
     catalog: &std::collections::HashSet<String>,
 ) -> Vec<McpObservedAgent> {
+    // Panes whose block is gone: their reports and exit markers go.
+    crate::backend::mcp_observed::prune(|block_id| {
+        mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten().is_some()
+    });
     let mut agents = Vec::new();
     for (block_id, observation) in crate::backend::mcp_observed::all() {
         let Some(label) = crate::server::app_api::tower_pane::block_label(mstore, &block_id) else {
-            crate::backend::mcp_observed::forget(&block_id);
             continue;
         };
         let servers = observation

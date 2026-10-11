@@ -65,6 +65,11 @@ struct State {
     ended: HashMap<String, u64>,
 }
 
+/// At most this many panes' exit markers (`State::ended`) are kept, the
+/// oldest spawns going first: a marker matters only while its reader may
+/// still be finishing, seconds after the exit.
+const MAX_ENDED: usize = 4096;
+
 static OBSERVED: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
 
 fn observed() -> std::sync::MutexGuard<'static, State> {
@@ -143,6 +148,13 @@ pub fn forget_owned(block_id: &str, owner: u64) -> bool {
     let mut state = observed();
     let ended = state.ended.entry(block_id.to_string()).or_insert(0);
     *ended = (*ended).max(owner);
+    if state.ended.len() > MAX_ENDED {
+        // Nonces only grow, so the smallest are the oldest exits.
+        let mut owners: Vec<u64> = state.ended.values().copied().collect();
+        owners.sort_unstable();
+        let cutoff = owners[state.ended.len() - MAX_ENDED];
+        state.ended.retain(|_, &mut o| o >= cutoff);
+    }
     if state.reports.get(block_id).is_some_and(|o| o.owner == owner) {
         state.reports.remove(block_id);
         return true;
@@ -167,9 +179,18 @@ pub fn all() -> HashMap<String, Observation> {
     observed().reports.clone()
 }
 
-/// Drop a pane's report whoever sent it: its block is gone. True when there
-/// was one.
-pub fn forget(block_id: &str) -> bool {
+/// Drop everything kept for panes whose block is gone (`exists` says which
+/// still are): their reports, and their exit markers.
+pub fn prune(exists: impl Fn(&str) -> bool) {
+    let mut state = observed();
+    state.reports.retain(|block, _| exists(block));
+    state.ended.retain(|block, _| exists(block));
+}
+
+/// Drop a pane's report and exit marker, whoever sent it. True when there
+/// was a report. Tests only: srv drops gone panes with `prune`.
+#[cfg(test)]
+fn forget(block_id: &str) -> bool {
     let mut state = observed();
     state.ended.remove(block_id);
     state.reports.remove(block_id).is_some()
@@ -254,6 +275,18 @@ mod tests {
         assert!(all().contains_key(block));
         assert!(forget_owned(block, 10));
         forget(block);
+    }
+
+    #[test]
+    fn a_deleted_panes_report_and_exit_marker_both_go() {
+        let (gone, kept) = ("mcp-observed-test-gone", "mcp-observed-test-kept");
+        record_init(gone, 30, &init_frame());
+        forget_owned(gone, 30);
+        record_init(kept, 31, &init_frame());
+        prune(|block| block != gone);
+        assert!(!observed().ended.contains_key(gone));
+        assert!(all().contains_key(kept));
+        forget(kept);
     }
 
     /// A reader still running after its process's exit was handled (an
