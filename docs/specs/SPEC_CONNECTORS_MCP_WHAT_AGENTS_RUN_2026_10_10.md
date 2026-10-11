@@ -167,9 +167,13 @@ to apply." under its catalog row and in its detail.
 - **Why it happens.** `.mcp.json` is written when the agent launches, so a
   server bound, or switched on, later reaches it only on its next start.
 - **How.** `mcp.observed.list` gives each agent a `missing` list:
-  `mcp_launch::missing_for_agent`, the servers AgentMux would launch it with
-  now (`effective_mcp_servers`, the container rule included) that it doesn't
-  report. A server the CLI reports as failed is reported, so not missing; one
+  `mcp_launch::missing_for_pane`, the catalog servers AgentMux would launch it
+  with now (`effective_mcp_servers`, the container rule included) that it
+  doesn't report. Its own private servers are left out, since the pane matches
+  by name against catalog rows and a private server can share a catalog
+  server's name. A pane that runs no agent definition (quick launch writes no
+  `.mcp.json`) has none, and the pane's own `agentMode` decides the container
+  rule, as it did at launch. A server the CLI reports as failed is reported, so not missing; one
   AgentMux never writes (the reserved `agentmux` name, a config that isn't
   JSON) is never missing. A test ties that to `insert_server_rows`.
 - **Only agents that report.** Panes that haven't sent the CLI's startup

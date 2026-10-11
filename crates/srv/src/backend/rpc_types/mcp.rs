@@ -134,10 +134,10 @@ pub struct McpObservedAgent {
     #[ts(type = "number")]
     pub at_ms: u64,
     pub servers: Vec<McpObservedServer>,
-    /// Servers AgentMux would launch this agent with now that it doesn't
-    /// report: bound or switched on after it started, so it needs a restart
-    /// to get them (`mcp_launch::missing_servers`). Empty when the pane
-    /// names no agent.
+    /// Catalog servers AgentMux would launch this agent with now that it
+    /// doesn't report: bound or switched on after it started, so it needs a
+    /// restart to get them (`mcp_launch::missing_servers`). Empty when the
+    /// pane runs no agent definition.
     pub missing: Vec<String>,
 }
 

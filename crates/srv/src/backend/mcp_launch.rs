@@ -15,18 +15,20 @@ pub(crate) fn is_launched(server: &crate::backend::storage::McpServer) -> bool {
     server.name != "agentmux" && serde_json::from_str::<Value>(&server.config).is_ok()
 }
 
-/// The servers AgentMux launches an agent with that its CLI doesn't report
-/// (`reported`, from `backend::mcp_observed`), by name. That is a server
-/// added or bound after the agent started: `.mcp.json` is written at launch,
-/// so the agent needs a restart to get it. A server the CLI reports as
-/// failed is reported, so not missing.
+/// The catalog (global) servers AgentMux launches an agent with that its CLI
+/// doesn't report (`reported`, from `backend::mcp_observed`), by name. That
+/// is a server bound or switched on after the agent started: `.mcp.json` is
+/// written at launch, so the agent needs a restart to get it. A server the
+/// CLI reports as failed is reported, so not missing. The agent's own private
+/// servers are left out: the pane matches by name against catalog rows, and a
+/// private server can share a name with a catalog one.
 pub fn missing_servers(
     expected: &[crate::backend::storage::McpServer],
     reported: &[crate::backend::mcp_observed::ObservedServer],
 ) -> Vec<String> {
     let mut missing: Vec<String> = expected
         .iter()
-        .filter(|s| is_launched(s) && !reported.iter().any(|r| r.name == s.name))
+        .filter(|s| s.is_global && is_launched(s) && !reported.iter().any(|r| r.name == s.name))
         .map(|s| s.name.clone())
         .collect();
     missing.sort();
@@ -233,6 +235,18 @@ mod tests {
 
     /// What `insert_server_rows` skips is never launched, so never missing:
     /// the two stay in step.
+    /// An agent's private server isn't a catalog row, even when a catalog
+    /// server of the same name exists: it is never listed, so the pane can't
+    /// show it under that row.
+    #[test]
+    fn a_private_server_is_never_missing_from_the_catalog_view() {
+        let mut private = row("git", "{}");
+        private.is_global = false;
+        let catalog_only = row("fetch", "{}");
+        assert_eq!(missing_servers(&[private.clone(), catalog_only], &[]), vec!["fetch"]);
+        assert!(missing_servers(&[private], &[]).is_empty());
+    }
+
     #[test]
     fn a_server_that_is_never_launched_is_never_missing() {
         let rows = [row("git", "{}"), row("agentmux", "{}"), row("broken", "{not json")];
