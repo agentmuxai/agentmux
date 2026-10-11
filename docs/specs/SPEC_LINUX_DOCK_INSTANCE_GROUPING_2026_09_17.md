@@ -1,7 +1,7 @@
 # SPEC: Linux Dock/Taskbar Instance Grouping Fix
 
 **Date:** 2026-09-17
-**Status:** Implemented — #3323
+**Status:** Implemented — #3323; `task dev` app_id corrected 2026-10-11 (§3.3)
 **Area:** `agentmux-cef/src/app/window_settings.rs` · `scripts/install-linux-desktop.sh` ·
 `scripts/linux-apprun.sh` · `scripts/stage-linux-runtime.sh` · `scripts/build-appimage-linux.sh` ·
 `scripts/build-deb-linux.sh` · `scripts/build-rpm-linux.sh` · `assets/linux/agentmux.desktop`
@@ -124,6 +124,21 @@ describing `linux_app_id()` as consulting `RuntimeMode`) — the first
 version of this PR only wired up the packaging-script paths (3.1/3.2) and left
 `task dev` mismatched, which would have broken icon-matching for the single most
 common development workflow.
+
+> [!IMPORTANT]
+> **Corrected 2026-10-11.** The export above never reached the host. `task dev`
+> runs the host through the launcher, and the launcher's `DataPaths::to_env_vars()`
+> overwrites `AGENTMUX_CHANNEL` with its own `dev-<branch>-<clone id>` channel. So
+> a dev window advertised `agentmux-dev-<branch>-<clone id>-<version>` while the
+> installed file was `agentmux-dev-<branch>--<version>.desktop` (the slug also
+> turned git's trailing newline into a dash), and GNOME showed its generic cog.
+> `task dev` now computes the app_id once, names the `.desktop` file with it and
+> exports it as `AGENTMUX_DEV_APP_ID`, which `linux_app_id()` uses as-is in a dev
+> build (judged by the binary's location, so a value inherited by a pane's shell
+> can't rename a packaged build's windows). Separately, when `task` is a snap,
+> GNOME credits every dev window to that snap (its AppArmor label is inherited),
+> whatever the app_id; `task dev` now warns about that. Retro:
+> `docs/retro/retro-linux-dev-taskbar-icon-2026-10-11.md`.
 
 ### 3.4 Non-goals
 
