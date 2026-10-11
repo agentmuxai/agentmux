@@ -7,11 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
     listeners: {} as Record<string, (payload: any) => void>,
     label: "win-target",
-    moveBlockToTab: vi.fn(() => Promise.resolve()),
+    redockFloatingPane: vi.fn(() => Promise.resolve()),
     moveTabToWorkspace: vi.fn(() => Promise.resolve()),
     deleteLayoutModelForTab: vi.fn(),
 }));
-const { listeners, moveBlockToTab, moveTabToWorkspace, deleteLayoutModelForTab } = h;
+const { listeners, redockFloatingPane, moveTabToWorkspace, deleteLayoutModelForTab } = h;
 
 vi.mock("@/store/global", () => ({
     atoms: { workspace: () => ({ oid: "ws-target" }), activeTabId: () => "tab-target" },
@@ -25,7 +25,7 @@ vi.mock("@/store/global", () => ({
     }),
 }));
 vi.mock("@/app/store/services", () => ({
-    WorkspaceService: { MoveBlockToTab: h.moveBlockToTab, MoveTabToWorkspace: h.moveTabToWorkspace },
+    WorkspaceService: { RedockFloatingPane: h.redockFloatingPane, MoveTabToWorkspace: h.moveTabToWorkspace },
 }));
 vi.mock("@/layout/index", () => ({ deleteLayoutModelForTab: h.deleteLayoutModelForTab }));
 vi.mock("@/util/logger", () => ({ Logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -58,10 +58,12 @@ afterEach(() => {
 });
 
 describe("CrossWindowDropOverlay", () => {
-    it("moves a pane dropped onto this window into its active tab", async () => {
+    // Through the redock, which queues the layout leaf here and the delete in
+    // the source; each side with its own workspace.
+    it("moves a pane dropped onto this window into its active tab's layout", async () => {
         await mounted("win-target");
         listeners["cross-drag-end"](end({ dragType: "pane", payload: { blockId: "blk-1" } }));
-        expect(moveBlockToTab).toHaveBeenCalledWith("ws-target", "blk-1", "tab-source", "tab-target", true);
+        expect(redockFloatingPane).toHaveBeenCalledWith("blk-1", "tab-source", "ws-source", "tab-target", "ws-target");
     });
 
     // As in Chrome, a window tab merges only onto a tab strip, through the

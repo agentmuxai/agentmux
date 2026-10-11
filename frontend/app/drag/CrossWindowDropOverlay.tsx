@@ -89,14 +89,24 @@ function CrossWindowDropOverlay(): JSX.Element {
                     return;
                 }
 
-                if (data.dragType === "pane" && data.payload.blockId) {
+                if (data.dragType === "pane" && data.payload.blockId && data.sourceTabId !== myActiveTabId) {
                     Logger.info("dnd:overlay", "cross-window drop: moving pane into this window", {
                         blockId: data.payload.blockId,
                         sourceTabId: data.sourceTabId,
                         destTabId: myActiveTabId,
                     });
-                    WorkspaceService.MoveBlockToTab(myWsId, data.payload.blockId, data.sourceTabId, myActiveTabId, true).catch((e) => {
-                        Logger.error("dnd:overlay", "MoveBlockToTab failed", { error: String(e) });
+                    // RedockFloatingPane, not MoveBlockToTab: the layouts live
+                    // in the windows, and only the redock queues the leaf for
+                    // this tab and the source tab's delete. A bare block move
+                    // left the pane drawn in neither window.
+                    WorkspaceService.RedockFloatingPane(
+                        data.payload.blockId,
+                        data.sourceTabId,
+                        data.sourceWorkspaceId,
+                        myActiveTabId,
+                        myWsId,
+                    ).catch((e) => {
+                        Logger.error("dnd:overlay", "RedockFloatingPane failed", { error: String(e) });
                     });
                 }
                 // A window tab is never moved here: it merges only onto this
