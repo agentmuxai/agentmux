@@ -191,6 +191,14 @@ function templateText(repoRoot, id, holders) {
  * the standard texts. Returns { text, used, problem }.
  */
 export function packageNoticeText(repoRoot, pkg) {
+  // A crate with its own licence file (Cargo's license-file) names no SPDX id.
+  if (pkg.licenseFile && fs.existsSync(pkg.licenseFile)) {
+    const own = path.resolve(pkg.licenseFile);
+    const notices = listLicenceFiles(pkg.dir).filter(
+      (f) => NOTICE_FILE.test(path.basename(f)) && path.resolve(f) !== own
+    );
+    return { text: [own, ...notices].map(readText).join("\n"), used: [], problem: null };
+  }
   let used;
   try {
     used = pkg.license ? chooseLicences(pkg.license) : null;
@@ -313,12 +321,7 @@ const THIN = "-".repeat(78);
 function renderSection(repoRoot, title, packages, problems) {
   const groups = new Map();
   for (const pkg of packages) {
-    let notice;
-    if (pkg.licenseFile && fs.existsSync(pkg.licenseFile)) {
-      notice = { text: readText(pkg.licenseFile), used: [pkg.license], problem: null };
-    } else {
-      notice = packageNoticeText(repoRoot, pkg);
-    }
+    const notice = packageNoticeText(repoRoot, pkg);
     if (notice.problem) problems.push(`${pkg.name} ${pkg.version}: ${notice.problem}`);
     const key = notice.text;
     if (!groups.has(key)) groups.set(key, []);

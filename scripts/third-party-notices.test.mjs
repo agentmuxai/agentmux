@@ -117,6 +117,22 @@ describe("packages on disk", () => {
     expect(text).toContain("Permission is hereby granted");
   });
 
+  it("uses a crate's own licence file, with its NOTICE, and names no licence choice", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "LICENSE.custom"), "Custom terms\n");
+    fs.writeFileSync(path.join(dir, "NOTICE"), "Notice text\n");
+    const { text, used, problem } = packageNoticeText(REPO, {
+      name: "x",
+      license: null,
+      authors: [],
+      dir,
+      licenseFile: path.join(dir, "LICENSE.custom"),
+    });
+    expect(problem).toBeNull();
+    expect(used).toEqual([]);
+    expect(text).toBe("Custom terms\n\nNotice text\n");
+  });
+
   it("reports a package it can't cover", () => {
     const { problem } = packageNoticeText(REPO, { name: "x", license: "SSPL-1.0", authors: [], dir: tmp() });
     expect(problem).toMatch(/SSPL-1.0/);
