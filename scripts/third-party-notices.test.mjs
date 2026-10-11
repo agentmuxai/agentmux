@@ -12,11 +12,15 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   chooseLicences,
+  chromiumCredits,
   jsPackagesFromModules,
   packageNoticeText,
+  parseNoticeSections,
   parseSpdx,
   repoUrl,
   selectLicenceFiles,
+  shikiAssetsFromModules,
+  shikiNotices,
 } from "./third-party-notices.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -138,6 +142,57 @@ describe("packages on disk", () => {
     expect(text).toContain("Marshall A. Greenblatt");
     expect(text).toContain("The Chromium Authors");
     expect(text.match(/Redistributions in binary form must reproduce/g)).toHaveLength(2);
+  });
+
+  it("has Chromium's credits for the CEF version Cargo.lock pins", () => {
+    const lock = fs.readFileSync(path.join(REPO, "Cargo.lock"), "utf8");
+    const version = lock.match(/name = "cef-dll-sys"\r?\nversion = "([^"]+)"/)[1];
+    const { html, problems } = chromiumCredits(REPO, [{ name: "cef-dll-sys", version }]);
+    expect(problems).toEqual([]);
+    expect(html.toString("utf8")).toContain("<title>Credits");
+  });
+
+  it("names the missing credits file for another CEF version", () => {
+    const { html, problems } = chromiumCredits(REPO, [{ name: "cef-dll-sys", version: "1.0.0+999.0.1" }]);
+    expect(html).toBeNull();
+    expect(problems[0]).toContain("credits-cef-999.0.1.html.gz");
+  });
+
+  it("has Shiki notices for the installed Shiki version", () => {
+    const pj = JSON.parse(
+      fs.readFileSync(path.join(REPO, "node_modules", "@shikijs", "langs", "package.json"), "utf8")
+    );
+    const notices = fs.readFileSync(path.join(REPO, "licenses", "shiki", "notices.txt"), "utf8");
+    expect(notices.split("\n")[0]).toMatch(new RegExp(`^Shiki ${pj.version.replace(/\./g, "\\.")}:`));
+  });
+
+  it("finds bundled Shiki grammars and themes, and reports one with no section", () => {
+    const ids = [
+      "/x/node_modules/@shikijs/langs/dist/rust.mjs",
+      "C:\\x\\node_modules\\@shikijs\\langs\\dist\\index.mjs",
+      "/x/node_modules/@shikijs/themes/dist/github-dark.mjs",
+    ];
+    const assets = shikiAssetsFromModules(ids);
+    expect(assets).toEqual({ grammars: ["rust"], themes: ["github-dark"] });
+
+    const root = tmp();
+    fs.mkdirSync(path.join(root, "licenses", "shiki"), { recursive: true });
+    const sep = "=".repeat(40);
+    fs.writeFileSync(
+      path.join(root, "licenses", "shiki", "notices.txt"),
+      `Shiki 1.0.0: test\n${sep}\nFiles:   rust.json, toml.json\nSPDX:    MIT\n----\nRust grammar licence\n`
+    );
+    const { text, problems } = shikiNotices(root, assets);
+    expect(text).toContain("Rust grammar licence");
+    expect(problems).toEqual([
+      'Shiki grammar or theme "github-dark" has no section in ' + path.join("licenses", "shiki", "notices.txt"),
+    ]);
+  });
+
+  it("parses NOTICE sections by the files they cover", () => {
+    const sep = "=".repeat(30);
+    const sections = parseNoticeSections(`head\n${sep}\nFiles:   a.json, b.json\nx\n${sep}\nFiles:   c.json\ny\n`);
+    expect(sections.map((s) => [...s.names])).toEqual([["a", "b"], ["c"]]);
   });
 
   it("reports a package it can't cover", () => {

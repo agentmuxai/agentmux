@@ -1,7 +1,10 @@
 Chromium Embedded Framework (CEF) and Chromium: the runtime that draws
 AgentMux's windows (libcef and its resources). AgentMux's build of them comes
 from https://github.com/agentmuxai/cef (CEF 154, Chromium 154.0.8037.58).
-Chromium also includes third-party components under their own licences.
+Chromium also includes third-party components under their own licences; they
+are listed, with their licence texts, in CHROMIUM_CREDITS.html in this folder
+(Chromium's credits for the standard CEF 154.0.28 distribution, the same
+Chromium version).
 
 ---- CEF ----
 

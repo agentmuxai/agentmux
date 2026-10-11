@@ -30,6 +30,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import process from "node:process";
+import * as zlib from "node:zlib";
 
 const PREFERENCE = [
   "MIT",
@@ -317,6 +318,69 @@ export function rustCrates(repoRoot) {
 const RULE = "=".repeat(78);
 const THIN = "-".repeat(78);
 
+// Shiki's language grammars and colour themes come from many upstream
+// projects, each under its own licence. @shikijs/langs and @shikijs/themes are
+// generated from tm-grammars and tm-themes, whose NOTICE files carry those
+// licences. licenses/shiki/notices.txt holds the sections for the grammars and
+// themes the app bundles (plus a few the NOTICE files miss), for the Shiki
+// version on its first line.
+const SHIKI_NOTICES = path.join("licenses", "shiki", "notices.txt");
+
+/** Sections of a tm-grammars-style NOTICE file: the files each one covers, and its text. */
+export function parseNoticeSections(text) {
+  const sections = [];
+  for (const chunk of text.replace(/\r\n/g, "\n").split(/^={20,}$/m)) {
+    const m = chunk.match(/^Files:\s+(.+)$/m);
+    if (!m) continue;
+    const names = m[1].split(",").map((s) => s.trim().replace(/\.json$/, ""));
+    sections.push({ names: new Set(names), text: chunk.trim() + "\n" });
+  }
+  return sections;
+}
+
+/** Grammar and theme names behind a list of bundled module ids. */
+export function shikiAssetsFromModules(moduleIds) {
+  const grammars = new Set();
+  const themes = new Set();
+  for (const raw of moduleIds) {
+    const id = raw.replace(/\\/g, "/");
+    let m = id.match(/\/@shikijs\/langs\/dist\/([^/]+)\.mjs$/);
+    if (m && m[1] !== "index") grammars.add(m[1]);
+    m = id.match(/\/@shikijs\/themes\/dist\/([^/]+)\.mjs$/);
+    if (m && m[1] !== "index") themes.add(m[1]);
+  }
+  return { grammars: [...grammars].sort(), themes: [...themes].sort() };
+}
+
+/** The notices for the bundled Shiki grammars and themes. Returns { text, problems }. */
+export function shikiNotices(repoRoot, { grammars, themes }) {
+  if (grammars.length + themes.length === 0) return { text: "", problems: [] };
+  const problems = [];
+  const source = fs.readFileSync(path.join(repoRoot, SHIKI_NOTICES), "utf8");
+  const pinned = source.match(/^Shiki (\d[\w.-]*?)(?=[:\s])/m)?.[1];
+  let installed = null;
+  try {
+    const pj = path.join(repoRoot, "node_modules", "@shikijs", "langs", "package.json");
+    installed = JSON.parse(fs.readFileSync(pj, "utf8")).version;
+  } catch {
+    // Not installed: nothing to compare.
+  }
+  if (installed && pinned !== installed) {
+    problems.push(`${SHIKI_NOTICES} is for Shiki ${pinned}, but ${installed} is installed; regenerate it`);
+  }
+  const sections = parseNoticeSections(source);
+  const used = new Set();
+  for (const name of [...grammars, ...themes]) {
+    const hit = sections.filter((s) => s.names.has(name));
+    if (hit.length === 0) problems.push(`Shiki grammar or theme "${name}" has no section in ${SHIKI_NOTICES}`);
+    for (const s of hit) used.add(s);
+  }
+  const lines = [RULE, "Shiki language grammars and colour themes", RULE, ""];
+  lines.push(`Grammars: ${grammars.join(", ")}`, `Themes: ${themes.join(", ")}`, "");
+  for (const s of sections) if (used.has(s)) lines.push(THIN, s.text);
+  return { text: lines.join("\n") + "\n", problems };
+}
+
 /** Group packages by identical notice text, so a shared licence prints once. */
 function renderSection(repoRoot, title, packages, problems) {
   const groups = new Map();
@@ -353,9 +417,9 @@ function bundledSection(repoRoot) {
 }
 
 /** The full THIRD_PARTY_NOTICES.txt. Returns { text, problems }. */
-export function buildNotices({ repoRoot, jsPackages, rustPackages, rustError }) {
+export function buildNotices({ repoRoot, jsPackages, rustPackages, rustError, shiki = { text: "", problems: [] } }) {
   const version = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
-  const problems = [];
+  const problems = [...shiki.problems];
   const header = [
     `AgentMux ${version}: third-party software notices`,
     "",
@@ -367,6 +431,7 @@ export function buildNotices({ repoRoot, jsPackages, rustPackages, rustError }) 
     `  1. Bundled fonts, tools and data`,
     `  2. JavaScript packages in the user interface (${jsPackages.length})`,
     `  3. Rust crates in the AgentMux programs (${rustPackages ? rustPackages.length : "not generated"})`,
+    `  4. Shiki language grammars and colour themes`,
     "",
     "",
   ].join("\n");
@@ -380,8 +445,30 @@ export function buildNotices({ repoRoot, jsPackages, rustPackages, rustError }) 
     bundledSection(repoRoot),
     renderSection(repoRoot, "JavaScript packages in the user interface", jsPackages, problems),
     rust,
+    shiki.text,
   ].join("\n");
   return { text, problems };
+}
+
+// Chromium's own credits page (every Chromium component and its licence), from
+// the standard CEF distribution of the CEF version cef-dll-sys pins. Our CEF
+// runtime builds don't produce one, so it's checked in, gzipped, per version.
+const CHROMIUM_CREDITS_DIR = path.join("licenses", "chromium");
+
+/** Chromium's credits HTML for the pinned CEF version. Returns { html, problems }. */
+export function chromiumCredits(repoRoot, rustPackages) {
+  if (!rustPackages) return { html: null, problems: [] };
+  const cef = rustPackages.find((p) => p.name === "cef-dll-sys")?.version.split("+")[1];
+  if (!cef) return { html: null, problems: ["cef-dll-sys not found, so Chromium's credits can't be chosen"] };
+  const file = path.join(CHROMIUM_CREDITS_DIR, `credits-cef-${cef}.html.gz`);
+  const full = path.join(repoRoot, file);
+  if (!fs.existsSync(full)) {
+    return {
+      html: null,
+      problems: [`no Chromium credits for CEF ${cef}: add ${file} (CREDITS.html from that CEF distribution, gzipped)`],
+    };
+  }
+  return { html: zlib.gunzipSync(fs.readFileSync(full)), problems: [] };
 }
 
 /**
@@ -405,8 +492,11 @@ export function thirdPartyNotices({ repoRoot, strict = Boolean(process.env.RELEA
       } catch (e) {
         rustError = String(e?.stderr ?? e?.message ?? e).split("\n")[0];
       }
-      const { text, problems } = buildNotices({ repoRoot, jsPackages, rustPackages, rustError });
+      const shiki = shikiNotices(repoRoot, shikiAssetsFromModules(moduleIds));
+      const { text, problems } = buildNotices({ repoRoot, jsPackages, rustPackages, rustError, shiki });
       if (rustError) problems.push(`Rust crates not listed: ${rustError}`);
+      const credits = chromiumCredits(repoRoot, rustPackages);
+      problems.push(...credits.problems);
       if (problems.length > 0) {
         const msg = `third-party notices:\n  ${problems.join("\n  ")}`;
         if (strict) this.error(msg);
@@ -416,6 +506,7 @@ export function thirdPartyNotices({ repoRoot, strict = Boolean(process.env.RELEA
       emit("licenses/THIRD_PARTY_NOTICES.txt", text);
       emit("licenses/LICENSE.txt", fs.readFileSync(path.join(repoRoot, "LICENSE")));
       emit("licenses/NOTICE.txt", fs.readFileSync(path.join(repoRoot, "NOTICE")));
+      if (credits.html) emit("licenses/CHROMIUM_CREDITS.html", credits.html);
     },
   };
 }
