@@ -104,15 +104,30 @@ pub fn observe_init(block_id: &str, frame: &Value, broker: Option<&crate::backen
     let Some(servers) = parse_init(frame) else { return };
     if record(block_id, servers, agentmux_common::time::now_ms_u64()) {
         if let Some(broker) = broker {
-            broker.publish(crate::backend::mps::MuxEvent {
-                event: "mcp:observed".to_string(),
-                scopes: vec![],
-                sender: String::new(),
-                persist: 0,
-                data: Some(serde_json::json!({ "block_id": block_id })),
-            });
+            publish(broker, block_id);
         }
     }
+}
+
+/// A pane's CLI exited: its servers are gone. Publishes `mcp:observed` when
+/// there was a report to drop.
+pub fn process_ended(block_id: &str, broker: Option<&crate::backend::mps::Broker>) {
+    if observed().remove(block_id).is_none() {
+        return;
+    }
+    if let Some(broker) = broker {
+        publish(broker, block_id);
+    }
+}
+
+fn publish(broker: &crate::backend::mps::Broker, block_id: &str) {
+    broker.publish(crate::backend::mps::MuxEvent {
+        event: "mcp:observed".to_string(),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: Some(serde_json::json!({ "block_id": block_id })),
+    });
 }
 
 /// Every pane's last report, by block id.
@@ -120,7 +135,7 @@ pub fn all() -> HashMap<String, Observation> {
     observed().clone()
 }
 
-/// Drop a pane's report (its block is gone).
+/// Drop a pane's report (its block is gone), quietly.
 pub fn forget(block_id: &str) {
     observed().remove(block_id);
 }
@@ -180,5 +195,14 @@ mod tests {
         assert_eq!(all().get(block).map(|o| o.at_ms), Some(3));
         forget(block);
         assert!(!all().contains_key(block));
+    }
+
+    #[test]
+    fn a_process_that_ended_has_no_servers() {
+        let block = "mcp-observed-test-ended";
+        record(block, parse_init(&init_frame()).unwrap(), 1);
+        process_ended(block, None);
+        assert!(!all().contains_key(block));
+        process_ended(block, None);
     }
 }

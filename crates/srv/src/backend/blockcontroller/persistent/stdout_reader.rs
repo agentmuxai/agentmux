@@ -190,7 +190,10 @@ impl PersistentSubprocessController {
                         ctrl.observe_mcp_frame(&parsed, my_generation_read);
                     }
                     // Every server it reports, for Connectors (`backend::mcp_observed`).
-                    crate::backend::mcp_observed::observe_init(&block_id_read, &parsed, broker_read.as_deref());
+                    // Not from a replaced process: it would overwrite the new one's.
+                    if inner_read.lock().unwrap().spawn_generation == my_generation_read {
+                        crate::backend::mcp_observed::observe_init(&block_id_read, &parsed, broker_read.as_deref());
+                    }
                 }
                 // The CLI version this agent now runs, from Claude's own
                 // `system/init` frame: every spawn path passes here, and
@@ -716,5 +719,10 @@ impl PersistentSubprocessController {
         }
 
         tracing::info!(block_id = %block_id_read, "persistent stdout reader finished");
+        // The CLI is gone, so its MCP servers are too, unless a new process
+        // already replaced it (and reports its own).
+        if inner_read.lock().unwrap().spawn_generation == my_generation_read {
+            crate::backend::mcp_observed::process_ended(&block_id_read, broker_read.as_deref());
+        }
     }
 }
