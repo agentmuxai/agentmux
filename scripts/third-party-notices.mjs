@@ -347,13 +347,6 @@ function bundledSection(repoRoot) {
   parts.push(
     "Font Awesome Free (fontawesome/ in this folder's parent): icons CC BY 4.0,",
     "fonts SIL OFL 1.1, code MIT. Full text: fontawesome/LICENSE.txt.",
-    THIN,
-    "",
-    "Chromium Embedded Framework (BSD-3-Clause, Copyright Marshall A. Greenblatt,",
-    "portions Copyright Google Inc.) and Chromium (BSD-3-Clause, Copyright The",
-    "Chromium Authors) draw AgentMux's windows. Chromium includes third-party",
-    "components under their own licences. AgentMux's build of them comes from",
-    "https://github.com/agentmuxai/cef.",
     ""
   );
   return parts.join("\n");

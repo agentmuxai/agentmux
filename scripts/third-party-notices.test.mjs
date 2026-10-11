@@ -133,6 +133,13 @@ describe("packages on disk", () => {
     expect(text).toBe("Custom terms\n\nNotice text\n");
   });
 
+  it("carries the full CEF and Chromium licence texts, not just their names", () => {
+    const text = fs.readFileSync(path.join(REPO, "licenses", "bundled", "cef-chromium.txt"), "utf8");
+    expect(text).toContain("Marshall A. Greenblatt");
+    expect(text).toContain("The Chromium Authors");
+    expect(text.match(/Redistributions in binary form must reproduce/g)).toHaveLength(2);
+  });
+
   it("reports a package it can't cover", () => {
     const { problem } = packageNoticeText(REPO, { name: "x", license: "SSPL-1.0", authors: [], dir: tmp() });
     expect(problem).toMatch(/SSPL-1.0/);
