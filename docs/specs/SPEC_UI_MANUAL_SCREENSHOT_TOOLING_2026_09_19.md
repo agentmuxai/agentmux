@@ -393,6 +393,11 @@ shot sets `keepPointer: true` so the pointer stays where `prep` put it. The
 first chrome run captured both without it, and `verify` still passed, since
 they closed between the check and the capture.
 
+What really is outside the page: a Browser pane's web content, OS file
+dialogs, OS notifications, the tray, the macOS menu bar, the pre-splash
+window, and the separate approval windows (SSH, credentials, memory adoption).
+The report's Appendix B lists them and how each might be captured.
+
 ### 9.4 The chrome suite
 
 `--suite chrome` (`chrome-shots.mjs`) holds Part 2's shots: the window and
@@ -411,7 +416,69 @@ instance's data folder and for its channel name (a local build's channel names
 its branch). The first published set (2026-10-10) was taken this way at
 1280×800; every image was reviewed before it went into agentmux-docs.
 
-What really is outside the page: a Browser pane's web content, OS file
-dialogs, OS notifications, the tray, the macOS menu bar, the pre-splash
-window, and the separate approval windows (SSH, credentials, memory adoption).
-The report's Appendix B lists them and how each might be captured.
+## 10. The agent pane, with a scripted Claude Code (2026-10-11)
+
+Part 3 of the screenshot plan: the agent pane mid-conversation. The report
+(§5.2) weighed three ways to fill a pane; this takes its third, the most
+faithful: a stand-in for the Claude Code CLI that srv starts like the real
+one, so the pane, srv's turn state, the session stats, the status bar's token
+counts and Swarm all come from a real session. Only the model's replies are
+scripted. No account, model or network is involved.
+
+### 10.1 The stand-in
+
+`fake-claude/cli.mjs` answers `--version` with Claude's pinned version and
+`auth status --json` with a signed-in demo account (`dev@acme.example`). Run
+the way srv runs Claude Code (`--input-format stream-json --output-format
+stream-json ...`), it reads user messages on stdin and plays turns from
+`fake-claude/conversation.json`: streamed thinking and text, tool calls with
+their results (a Read's line range and an Edit's patch go in
+`tool_use_result`, as Claude Code writes them), an AskUserQuestion that waits
+for its answer, and a `wait` that holds a turn open for a mid-turn shot. A
+message plays the first unplayed turn whose `match` it contains. AgentMux's own
+context message at launch gets an empty turn, and the pane's Stop ends the turn
+being played. The stand-in never reads or writes a file: its tool calls only
+describe changes to the `acme-web` demo project (§8.3).
+
+### 10.2 Installing it
+
+srv looks for a provider's CLI in `<home>/shared/cli/<provider>/<pinned
+version>/` and uses it only when that folder holds the completion marker
+(`crates/srv/src/backend/cli_install.rs`). `install-fake-claude.mjs --home
+<dir>` writes an npm-style `.cmd` shim there, in the shape
+`crates/common/src/cli.rs` resolves to `node <script>`, with the script and
+the marker. It refuses the machine's own `~/.agentmux`: the stand-in must never
+replace a real Claude Code. The version is read from `providers.rs`.
+
+Two more things gate a launch, and the suite's setup meets both with demo
+data. The agent needs a linked Claude account: setup adds one with
+`upsertidentityaccount`, its config folder inside the capture home. And on
+Windows and Linux srv checks for a `.credentials.json` in that folder before
+it asks the CLI anything (`cli_handlers.rs`): setup writes one holding a
+placeholder token, which only the stand-in ever sees.
+
+### 10.3 The agent suite
+
+`--suite agent` (`agent-shots.mjs`) needs `AGENTMUX_HOME_OVERRIDE` set to the
+capture instance's data folder, for setup. Setup installs the stand-in, adds the
+demo account, and reloads the page so the picker sees Claude Code as installed.
+It also makes sure the picker's My Agents has agents in it. My Agents lists
+agents that have had a session started from the pane, so setup creates each
+picker agent with the Create new agent form and says hello to it once.
+
+A conversation shot creates its agent the same way, in a window tab of its
+own, so the agent starts with no history; it is deleted when the shot's tab
+closes. (Relaunching a used agent would show its old conversation: the
+stand-in can't `--resume`, so AgentMux shows the reconstructed context
+instead.) The form doesn't bind an account, so the pane offers "Bind:
+dev@acme.example", which the shot clicks, as a user would. It then sends
+`/clear`, which empties the view without touching the session, so the
+sign-in notice from before the bind isn't in the shot. The agent runs on the
+host: with Docker on the capturing machine the form defaults to a container,
+and a container agent would pull an image and never reach the stand-in.
+
+The sign-in shot stops before the bind, so it shows what a new agent with no
+account shows: Log in, Login via terminal, and Bind for an existing account.
+
+Run it as §8.4, with `--suite agent`, the same `--redact` pairs as §9.4, and
+`AGENTMUX_HOME_OVERRIDE` in the environment.
