@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { interceptFrame, type FrameInterceptState, type FrameSink } from "./frame-intercepts";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import { createTaskWakeDetector } from "./task-wake";
 
 /** A sink that records what each hook was called with, in order. */
 function recording() {
@@ -22,7 +21,7 @@ function recording() {
 
 function state(): FrameInterceptState & { flushes: number; cleared: number } {
     const parser = new ClaudeCodeStreamParser({ isReplay: true });
-    const st = { parser, compactionSummaries: new CompactionSummaryTracker(), detectTaskWake: createTaskWakeDetector(), flushes: 0, cleared: 0 };
+    const st = { parser, compactionSummaries: new CompactionSummaryTracker(), flushes: 0, cleared: 0 };
     const flush = parser.flushPending.bind(parser);
     parser.flushPending = () => {
         st.flushes++;
@@ -88,11 +87,14 @@ describe("interceptFrame", () => {
         expect(interceptFrame({ type: "system", subtype: "init" }, st, sink, 1_000)).toBe(false);
     });
 
-    it("notes a task wake and still lets the frame through", () => {
+    // A task's notification then a pass's init used to add a "Woke up: …"
+    // line, which also landed on the user's own next turn
+    // (docs/retro/RETRO_AGENT_PANE_SEND_FLASH_AND_WOKE_UP_LINE_2026_10_11.md).
+    it("adds no line for a task notification followed by an init", () => {
         const st = state();
         const { calls, sink } = recording();
-        interceptFrame({ type: "system", subtype: "task_notification", task_id: "t1", summary: "done" }, st, sink, 1_000);
+        expect(interceptFrame({ type: "system", subtype: "task_notification", task_id: "t1", summary: "done" }, st, sink, 1_000)).toBe(false);
         expect(interceptFrame({ type: "system", subtype: "init" }, st, sink, 2_000)).toBe(false);
-        expect(calls).toEqual(["node:ambient_narration"]);
+        expect(calls).toEqual([]);
     });
 });

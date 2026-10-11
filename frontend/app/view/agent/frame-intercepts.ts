@@ -23,14 +23,12 @@ import type { CompactionSummaryTracker } from "./context-delivery";
 import { isMemoryInjectedFrame } from "./memory-injected";
 import { parseSessionOutcomeFrame, type SessionOutcomeData } from "@/app/store/agent-document/session-outcome";
 import type { ClaudeCodeStreamParser } from "./stream-parser";
-import type { TaskWakeDetector } from "./task-wake";
 import type { DocumentNode } from "./types";
 
 /** The per-stream state the intercepts read and advance. */
 export interface FrameInterceptState {
     parser: ClaudeCodeStreamParser;
     compactionSummaries: CompactionSummaryTracker;
-    detectTaskWake: TaskWakeDetector;
 }
 
 /** What a path does with what the intercepts found. */
@@ -63,10 +61,6 @@ export function interceptFrame(raw: Record<string, unknown>, st: FrameInterceptS
         st.parser.flushPending();
         sink.placeReleased();
     };
-
-    // Observe only: the frame keeps flowing.
-    const wake = st.detectTaskWake(raw, at);
-    if (wake) sink.node(wake, false);
 
     if (raw.type === "system" && raw.subtype === "compact_boundary") {
         // Closed even when the metadata doesn't parse: it is still a real
