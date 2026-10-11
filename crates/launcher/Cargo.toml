@@ -2,7 +2,7 @@
 name = "agentmux-launcher"
 version.workspace = true
 description = "AgentMux Launcher — Job Object + IPC + saga coordinator + srv lifecycle"
-authors = ["AgentMux Corp"]
+authors = ["AgentMux Corp."]
 edition = "2021"
 
 [[bin]]

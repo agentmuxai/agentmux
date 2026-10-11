@@ -3,7 +3,7 @@ name = "agentmux-bashwrap"
 version.workspace = true
 edition = "2021"
 description = "AgentMux streaming bash wrapper + PreToolUse hook helper"
-authors = ["AgentMux Corp"]
+authors = ["AgentMux Corp."]
 license = "Apache-2.0"
 
 [[bin]]

@@ -101,7 +101,7 @@ fn main() {
         let mut res = winres::WindowsResource::new();
         res.set("FileDescription", &format!("AgentMux v{}", version));
         res.set("ProductName", "AgentMux");
-        res.set("CompanyName", "AgentMux Corp");
+        res.set("CompanyName", "AgentMux Corp.");
         res.set("InternalName", "agentmux");
         let icon_path = std::path::Path::new("resources/win/agentmux.ico");
         if icon_path.exists() {

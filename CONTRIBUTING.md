@@ -13,11 +13,9 @@ Please be mindful and respect our [code of conduct](./CODE_OF_CONDUCT.md).
 
 We accept patches as GitHub pull requests. If you're new to GitHub PRs, see the [GitHub pull request guide](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests).
 
-### Contributor License Agreement
+### Licensing of contributions
 
-Contributions must be accompanied by a Contributor License Agreement (CLA). You (or your employer) retain the copyright to your contribution — this simply gives us permission to use and redistribute it as part of the project.
-
-> On submission of your first pull request you will be prompted to sign the CLA.
+AgentMux is licensed under the [Apache License 2.0](./LICENSE). Unless you say otherwise, anything you submit for inclusion in the project is licensed under those same terms (Apache License 2.0, § 5). You, or your employer, keep the copyright to your contribution. There is no separate contributor agreement to sign.
 
 ### Style Guide
 

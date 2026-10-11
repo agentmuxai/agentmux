@@ -2,7 +2,7 @@
 name = "agentmux-cef"
 version.workspace = true
 description = "AgentMux Host — Desktop app with bundled Chromium"
-authors = ["AgentMux Corp"]
+authors = ["AgentMux Corp."]
 edition = "2021"
 rust-version = "1.77"
 
