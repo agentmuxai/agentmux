@@ -744,24 +744,9 @@ impl Controller for ShellController {
             c
         } else if let Some((ssh_path, dest)) = &ssh_plan {
             let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-            let control = crate::backend::remote::ssh::shared_control_dir();
-            let args = crate::backend::remote::ssh::launch(dest, &cmd_str, &cmd_args, &cwd, control.as_deref());
-            tracing::info!(block_id = %self.block_id, dest = %dest.destination, args = ?args, "ssh spawn path");
-            let mut c = CommandBuilder::new(ssh_path);
-            c.args(args.iter().map(String::as_str));
-            c.env("TERM", "xterm-256color");
-            c.env("COLORTERM", "truecolor");
-            // An agent's SSH shell: every ssh prompt goes to the user through
-            // the askpass bridge, never into this terminal, which the agent reads.
-            if let Some(secret) = &askpass_secret {
-                if let Some(program) = crate::backend::remote::askpass::program() {
-                    let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
-                    for (k, v) in crate::backend::remote::askpass::ssh_env(secret, &program, &local_url, &self.auth_key) {
-                        c.env(k, v);
-                    }
-                }
-            }
-            c
+            tracing::info!(block_id = %self.block_id, "ssh spawn");
+            let what = (cmd_str.as_str(), cmd_args.as_slice(), cwd.as_str());
+            super::ssh_pane::command(ssh_path, dest, what, askpass_secret.as_deref(), &self.auth_key)
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
@@ -1361,13 +1346,11 @@ impl Controller for ShellController {
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
         // An SSH pane holds its connection open from here to the wait task's
-        // pane_ended (remote::link). Counted only now, after every step that
-        // can still fail and return, so each start has exactly one end. Its
-        // ssh may be at a password prompt: connecting, until the login shows.
+        // pane_ended (ssh_pane). Counted only now, after every step that can
+        // still fail and return, so each start has exactly one end.
         if ssh_plan.is_some() {
             crate::backend::remote::link::pane_started(&conn_name, false);
         }
-        // For the line saying the connection is gone, written after ssh's own.
         let filestore_note = self.filestore.clone();
         let ssh_wait = ssh_plan
             .as_ref()
@@ -1434,27 +1417,11 @@ impl Controller for ShellController {
             .await
             .expect("PTY child wait task panicked");
             drop(askpass_guard_wait);
-            // An SSH pane whose ssh had no connection, or lost it, is not a
-            // shell the user ended: it stays, saying so under ssh's own
-            // reason, instead of closing with the reason (spec §5.2; #4513).
-            // Enter starts ssh again (a finished pane's restart).
-            let mut lost_note = None;
-            if let Some((conn, dest)) = &ssh_wait {
-                use crate::backend::remote::ssh;
-                // stop() and stop_for_replace() set the status before they
-                // signal the process: still running means it ended on its own.
+            // An SSH pane that lost its connection stays, saying so (ssh_pane).
+            let lost_note = ssh_wait.as_ref().and_then(|(conn, dest)| {
                 let stopped_by_srv = inner_wait.lock().unwrap().proc_status != STATUS_RUNNING;
-                let error = ssh::pane_lost_connection(raw_exit_code, stopped_by_srv)
-                    .then(|| ssh::lost_message(dest));
-                if error.is_some() {
-                    lost_note = Some(if crate::backend::remote::link::held(conn) {
-                        crate::backend::remote::link::disconnected_note(conn)
-                    } else {
-                        crate::backend::remote::ssh::lost_note(conn)
-                    });
-                }
-                crate::backend::remote::link::pane_ended(conn, error.as_deref());
-            }
+                super::ssh_pane::ended(conn, dest, raw_exit_code, stopped_by_srv)
+            });
             let close_on_exit = close_on_exit && lost_note.is_none();
 
             tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
@@ -1542,19 +1509,7 @@ impl Controller for ShellController {
 
             // After the drain above, so it comes after ssh's own last words.
             if let (Some(text), Some(broker)) = (lost_note, broker_wait.clone()) {
-                let block_id = block_id_wait.clone();
-                let filestore = filestore_note;
-                let _ = tokio::task::spawn_blocking(move || {
-                    handle_append_block_file(
-                        &broker,
-                        &block_id,
-                        "term",
-                        &super::super::pane_note(&text),
-                        filestore.as_ref(),
-                        None,
-                    )
-                })
-                .await;
+                super::ssh_pane::write_note(broker, filestore_note, block_id_wait.clone(), text).await;
             }
 
             // Cloned before the inner `spawn_blocking` below moves
