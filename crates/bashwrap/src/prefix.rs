@@ -368,10 +368,14 @@ fn run_program(program: &str) -> Result<i32> {
 }
 
 /// Run the program and wait for it. The block's Job Object ends it with the
-/// agent, and it sees stdin close when the CLI closes its end.
+/// agent, and it sees stdin close when the CLI closes its end. Found through
+/// `PATHEXT` the way the CLI would find it without a prefix, so a `.cmd`
+/// shim (what a global npm install puts on `PATH`) starts too: std looks
+/// only for `.exe`, but runs a `.cmd` given its full path.
 #[cfg(windows)]
 fn run_program(program: &str) -> Result<i32> {
-    let mut cmd = std::process::Command::new(program);
+    let resolved = which::which(program).unwrap_or_else(|_| PathBuf::from(program));
+    let mut cmd = std::process::Command::new(resolved);
     // A console program, like bash.exe in `run_plain`.
     cmd.no_window();
     match cmd.status() {
@@ -462,6 +466,25 @@ mod tests {
             assert_eq!(code, 127, "a program that can't be started exits like a shell's");
             assert_eq!(claim("s", "cargo build").unwrap().tool_use_id, "toolu_1", "the call is still waiting");
         });
+    }
+
+    /// A global npm install puts a `.cmd` shim on `PATH`; named alone, as an
+    /// MCP server's command, it must start.
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_shim_on_path_starts_as_a_lone_word() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bashwrap-shim-test-{}-{}", std::process::id(), now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bw-shim-test.cmd"), "@exit /b 9\r\n").unwrap();
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![dir.clone()];
+        paths.extend(std::env::split_paths(&old_path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        let code = run_program("bw-shim-test");
+        std::env::set_var("PATH", &old_path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(code.unwrap(), 9);
     }
 
     #[test]
