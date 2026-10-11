@@ -57,7 +57,7 @@ pub fn install_id() -> Option<String> {
 /// with its `HIDE_AFTER_MS`), clamped to 1..=[`MAX_CHANNELS_RUNNING`]. A
 /// channel with no agent registered has no entry and is not counted.
 pub fn count_channels_running(entries: &[AgentEntry], own_channel: &str, own_url: &str, now_ms: u64) -> u32 {
-    let others = crate::backend::swarm_remote::other_channels(entries, own_channel, own_url, now_ms).len();
+    let others = crate::backend::swarm_remote::other_channels(entries, &Default::default(), own_channel, own_url, now_ms).len();
     u32::try_from(others)
         .unwrap_or(u32::MAX)
         .saturating_add(1)

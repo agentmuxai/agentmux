@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { platformLabel, remoteSections, seenAgo, type RemoteHost, type SwarmOtherInstances } from "./swarm-remote";
+import { platformLabel, remoteChip, remoteSections, seenAgo, type RemoteHost, type SwarmOtherInstances } from "./swarm-remote";
 
 const agent = (name: string) => ({ name, block_id: `blk-${name}` });
 const channel = (name: string, agents: string[], stale = false) => ({
@@ -118,5 +118,28 @@ describe("remoteSections: platform", () => {
     it("carries how the section was found", () => {
         const s = remoteSections(data([{ host_id: "cloud:x", display_name: "home", tier: "cloud", channels: [withOs("linux")] }]));
         expect([s[0].tier, s[0].badge]).toEqual(["cloud", "cloud"]);
+    });
+});
+
+describe("remoteChip", () => {
+    it("maps each reported state onto the local chip's terms", () => {
+        const of = (s: string) => {
+            const c = remoteChip(s, false);
+            return c && [c.status, c.awaitingUser, c.label];
+        };
+        expect(of("working")).toEqual(["working", false, "Working"]);
+        expect(of("waiting")).toEqual(["working", true, "Waiting for an answer"]);
+        expect(of("idle")).toEqual(["idle", false, "Idle"]);
+        expect(of("stopped")).toEqual(["idle", false, "Stopped"]);
+        expect(of("error")).toEqual(["error", false, "Exited with an error"]);
+    });
+
+    it("shows nothing for no state, an unknown state, or a stale section", () => {
+        expect(remoteChip(undefined, false)).toBeNull();
+        expect(remoteChip("", false)).toBeNull();
+        // Self-reported by another instance: never trusted to be one we know.
+        expect(remoteChip("dreaming", false)).toBeNull();
+        expect(remoteChip("toString", false)).toBeNull();
+        expect(remoteChip("working", true)).toBeNull();
     });
 });

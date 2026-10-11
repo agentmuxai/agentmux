@@ -14,14 +14,21 @@
 //! registry carries no status, provider or summary. LAN hosts and cloud installs
 //! are later phases and arrive as more `RemoteHost`s with their own `tier`.
 //!
+//! Phase 4 adds each agent's state (working, waiting, idle, ...) where its
+//! instance reports one: a LAN peer's from the `agent-names` poll the discovery
+//! loop already makes, another channel's from the same route asked over
+//! loopback ([`channel_statuses`]). State only, never what an agent says or
+//! does: the route's scope by the owner's decision of 2026-10-07.
+//!
 //! Nothing here carries a credential to the frontend: the registry's `auth_key`
 //! and `local_url` are dropped.
 
 use serde::Serialize;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 
+use crate::backend::agent_state::AgentState;
 use crate::backend::lan_discovery::LanInstance;
 use crate::backend::reactive::registry::AgentEntry;
 
@@ -41,7 +48,14 @@ pub struct RemoteAgent {
     /// The agent's block in its own instance. Not usable from this one; kept so a
     /// later phase can address it (the cross-channel fleet forwarder does).
     pub block_id: String,
+    /// What its instance last said it is doing; absent when that instance
+    /// gave no state (a build from before it did, or a terminal pane).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<AgentState>,
 }
+
+/// Agents' states per channel of this machine, lower-cased name to state.
+pub type ChannelStatuses = HashMap<String, BTreeMap<String, AgentState>>;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RemoteChannel {
@@ -87,6 +101,7 @@ pub struct SwarmOtherInstancesResult {
 /// twice in one channel (two files racing) appears once.
 pub fn other_channels(
     entries: &[AgentEntry],
+    statuses: &ChannelStatuses,
     own_channel: &str,
     own_url: &str,
     now_ms: u64,
@@ -110,6 +125,10 @@ pub fn other_channels(
             .or_insert_with(|| RemoteAgent {
                 name: e.agent_id.clone(),
                 block_id: e.block_id.clone(),
+                status: statuses
+                    .get(&e.channel)
+                    .and_then(|s| s.get(&e.agent_id.to_lowercase()))
+                    .copied(),
             });
     }
     by_channel
@@ -189,6 +208,7 @@ pub fn lan_hosts(
             .map(|name| RemoteAgent {
                 name: name.clone(),
                 block_id: String::new(),
+                status: p.agent_status.get(&name.to_lowercase()).copied(),
             })
             .collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
@@ -254,10 +274,96 @@ pub fn lan_hosts(
         .collect()
 }
 
+/// How long another channel on this machine gets to say what its agents are
+/// doing. It is loopback, so one that takes longer is hung, and the Swarm's poll
+/// shouldn't wait on it: its rows show names only until it answers.
+const CHANNEL_STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// One instance to ask for its agents' states: `(channel, local_url, auth_key)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelStatusTarget {
+    pub channel: String,
+    pub local_url: String,
+    pub auth_key: String,
+}
+
+fn is_loopback_url(url: &str) -> bool {
+    ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"]
+        .iter()
+        .any(|prefix| url.starts_with(prefix))
+}
+
+/// The instances whose agents [`other_channels`] lists and that are worth
+/// asking: one per `local_url`, loopback only (as the cross-channel fleet
+/// forwarder requires), never this instance, and not a stale one, whose rows
+/// are dimmed and show no state.
+pub fn channel_status_targets(
+    entries: &[AgentEntry],
+    own_channel: &str,
+    own_url: &str,
+    now_ms: u64,
+) -> Vec<ChannelStatusTarget> {
+    let mut by_url: BTreeMap<&str, ChannelStatusTarget> = BTreeMap::new();
+    for e in entries {
+        if e.channel.is_empty()
+            || e.channel == own_channel
+            || e.local_url == own_url
+            || !is_loopback_url(&e.local_url)
+            || now_ms.saturating_sub(e.updated_at) > STALE_AFTER_MS
+        {
+            continue;
+        }
+        by_url
+            .entry(&e.local_url)
+            .or_insert_with(|| ChannelStatusTarget {
+                channel: e.channel.clone(),
+                local_url: e.local_url.clone(),
+                auth_key: e.auth_key.clone(),
+            });
+    }
+    by_url.into_values().collect()
+}
+
+/// Asks each target's `agent-names` route, concurrently, for its agents'
+/// states. A target that fails, times out or answers badly contributes nothing.
+pub async fn channel_statuses(
+    http: &reqwest::Client,
+    targets: &[ChannelStatusTarget],
+) -> ChannelStatuses {
+    let answers = futures_util::future::join_all(targets.iter().map(|t| async move {
+        let resp = http
+            .get(format!("{}/agentmux/reactive/agent-names", t.local_url))
+            .header(agentmux_common::AUTH_KEY_HEADER, &t.auth_key)
+            .timeout(CHANNEL_STATUS_TIMEOUT)
+            .send()
+            .await
+            .ok()
+            .filter(|r| r.status().is_success())?;
+        let body = crate::backend::lan_discovery::LanDiscovery::read_body_capped(
+            resp,
+            crate::backend::lan_discovery::LAN_AGENT_NAMES_MAX_RESPONSE_BYTES,
+        )
+        .await
+        .ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&body).ok()?;
+        Some((
+            t.channel.clone(),
+            crate::backend::lan_discovery::parse_agent_names_body(&value).status,
+        ))
+    }))
+    .await;
+    let mut out = ChannelStatuses::new();
+    for (channel, status) in answers.into_iter().flatten() {
+        out.entry(channel).or_default().extend(status);
+    }
+    out
+}
+
 /// The full answer: this machine's other channels as one host (absent when there
 /// are none), then the LAN hosts.
 pub fn snapshot(
     entries: &[AgentEntry],
+    statuses: &ChannelStatuses,
     lan: &[LanInstance],
     own_addrs: &HashSet<IpAddr>,
     hostname: &str,
@@ -265,7 +371,7 @@ pub fn snapshot(
     own_url: &str,
     now_ms: u64,
 ) -> SwarmOtherInstancesResult {
-    let channels = other_channels(entries, own_channel, own_url, now_ms);
+    let channels = other_channels(entries, statuses, own_channel, own_url, now_ms);
     let mut hosts = Vec::new();
     if !channels.is_empty() {
         hosts.push(RemoteHost {
@@ -312,7 +418,7 @@ mod tests {
             entry("Loap", "dev-fix-lan", 1_000),
             entry("AgentX", "stable", 0),
         ];
-        let chans = other_channels(&entries, "stable", "", NOW);
+        let chans = other_channels(&entries, &ChannelStatuses::new(), "stable", "", NOW);
         assert_eq!(chans.len(), 1);
         assert_eq!(chans[0].channel, "dev-fix-lan");
         assert_eq!(
@@ -331,13 +437,21 @@ mod tests {
     fn a_stale_self_entry_by_url_is_left_out() {
         let mut me = entry("AgentX", "old-name", 0);
         me.local_url = "http://127.0.0.1:29706".to_string();
-        assert!(other_channels(&[me], "stable", "http://127.0.0.1:29706", NOW).is_empty());
+        assert!(other_channels(
+            &[me],
+            &ChannelStatuses::new(),
+            "stable",
+            "http://127.0.0.1:29706",
+            NOW
+        )
+        .is_empty());
     }
 
     #[test]
     fn freshness_marks_stale_then_hides() {
         let stale = other_channels(
             &[entry("Korp", "dev", STALE_AFTER_MS + 1)],
+            &ChannelStatuses::new(),
             "stable",
             "",
             NOW,
@@ -345,6 +459,7 @@ mod tests {
         assert!(stale[0].stale);
         assert!(other_channels(
             &[entry("Korp", "dev", HIDE_AFTER_MS + 1)],
+            &ChannelStatuses::new(),
             "stable",
             "",
             NOW
@@ -356,6 +471,7 @@ mod tests {
     fn an_agent_listed_twice_in_a_channel_appears_once() {
         let chans = other_channels(
             &[entry("Korp", "dev", 0), entry("korp", "dev", 10)],
+            &ChannelStatuses::new(),
             "stable",
             "",
             NOW,
@@ -365,13 +481,21 @@ mod tests {
 
     #[test]
     fn entries_without_a_channel_are_not_another_channel() {
-        assert!(other_channels(&[entry("Korp", "", 0)], "stable", "", NOW).is_empty());
+        assert!(other_channels(
+            &[entry("Korp", "", 0)],
+            &ChannelStatuses::new(),
+            "stable",
+            "",
+            NOW
+        )
+        .is_empty());
     }
 
     #[test]
     fn the_snapshot_names_this_machine_and_carries_no_credentials() {
         let snap = snapshot(
             &[entry("Korp", "dev", 0)],
+            &ChannelStatuses::new(),
             &[],
             &HashSet::new(),
             "narko",
@@ -394,11 +518,18 @@ mod tests {
             "{json}"
         );
         // No other channel: no host section at all.
-        assert!(
-            snapshot(&[], &[], &HashSet::new(), "narko", "stable", "", NOW)
-                .hosts
-                .is_empty()
-        );
+        assert!(snapshot(
+            &[],
+            &ChannelStatuses::new(),
+            &[],
+            &HashSet::new(),
+            "narko",
+            "stable",
+            "",
+            NOW
+        )
+        .hosts
+        .is_empty());
     }
 
     fn peer(
@@ -419,6 +550,7 @@ mod tests {
             port,
             auth_key: "lan-secret".to_string(),
             agents: agents.iter().map(|a| a.to_string()).collect(),
+            agent_status: Default::default(),
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
             last_polled_ok: 0,
@@ -523,7 +655,16 @@ mod tests {
             &["Manoz"],
             5,
         )];
-        let snap = snapshot(&[], &fresh, &HashSet::new(), "narko", "stable", "", NOW);
+        let snap = snapshot(
+            &[],
+            &ChannelStatuses::new(),
+            &fresh,
+            &HashSet::new(),
+            "narko",
+            "stable",
+            "",
+            NOW,
+        );
         let json = serde_json::to_string(&snap).unwrap();
         assert!(
             !json.contains("lan-secret") && !json.contains("10.0.0.26"),
@@ -582,7 +723,13 @@ mod tests {
     // The platform tag (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
     #[test]
     fn this_machines_other_channels_carry_this_machines_platform() {
-        let chans = other_channels(&[entry("Loap", "dev-fix", 0)], "stable", "", NOW);
+        let chans = other_channels(
+            &[entry("Loap", "dev-fix", 0)],
+            &ChannelStatuses::new(),
+            "stable",
+            "",
+            NOW,
+        );
         assert_eq!(chans[0].os, crate::backend::host_os::local_os());
     }
 
@@ -616,5 +763,147 @@ mod tests {
         let mut oses: Vec<String> = hosts[0].channels.iter().map(|c| c.os.clone()).collect();
         oses.sort();
         assert_eq!(oses, vec!["linux".to_string(), "windows".to_string()]);
+    }
+
+    // Phase 4: each agent's state (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md §3.4).
+    #[test]
+    fn another_channels_agents_carry_the_state_that_channel_reported() {
+        let statuses: ChannelStatuses = [(
+            "dev".to_string(),
+            [("korp".to_string(), AgentState::Waiting)]
+                .into_iter()
+                .collect(),
+        )]
+        .into_iter()
+        .collect();
+        let chans = other_channels(
+            &[entry("Korp", "dev", 0), entry("Loap", "dev", 0)],
+            &statuses,
+            "stable",
+            "",
+            NOW,
+        );
+        let got: Vec<(&str, Option<AgentState>)> = chans[0]
+            .agents
+            .iter()
+            .map(|a| (a.name.as_str(), a.status))
+            .collect();
+        assert_eq!(got, [("Korp", Some(AgentState::Waiting)), ("Loap", None)]);
+        // An agent with no state has no `status` key at all.
+        let json = serde_json::to_value(&chans[0].agents).unwrap();
+        assert_eq!(json[0]["status"], "waiting");
+        assert!(json[1].get("status").is_none(), "{json}");
+    }
+
+    #[test]
+    fn a_lan_peers_agents_carry_the_state_it_reported() {
+        let mut p = peer(
+            "Area54",
+            "stable",
+            "10.0.0.26",
+            29700,
+            &["Manoz", "Opaz"],
+            5,
+        );
+        p.agent_status.insert("manoz".into(), AgentState::Working);
+        let hosts = lan_hosts(&[p], &HashSet::new(), NOW);
+        let got: Vec<Option<AgentState>> = hosts[0].channels[0]
+            .agents
+            .iter()
+            .map(|a| a.status)
+            .collect();
+        assert_eq!(got, [Some(AgentState::Working), None]);
+    }
+
+    #[test]
+    fn status_targets_are_live_loopback_instances_other_than_this_one() {
+        let at = |name: &str, channel: &str, url: &str, age_ms: u64| {
+            let mut e = entry(name, channel, age_ms);
+            e.local_url = url.to_string();
+            e
+        };
+        let entries = [
+            at("Korp", "dev", "http://127.0.0.1:29702", 0),
+            at("Loap", "dev", "http://127.0.0.1:29702", 0),
+            at("Old", "gone", "http://127.0.0.1:29703", STALE_AFTER_MS + 1),
+            at("Far", "lan", "http://10.0.0.9:29700", 0),
+            at("Me", "renamed", "http://127.0.0.1:29700", 0),
+            at("Self", "stable", "http://127.0.0.1:29701", 0),
+            at("Nochan", "", "http://127.0.0.1:29704", 0),
+            at("Six", "v6", "http://[::1]:29705", 0),
+        ];
+        let targets = channel_status_targets(&entries, "stable", "http://127.0.0.1:29700", NOW);
+        let urls: Vec<(&str, &str)> = targets
+            .iter()
+            .map(|t| (t.channel.as_str(), t.local_url.as_str()))
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                ("dev", "http://127.0.0.1:29702"),
+                ("v6", "http://[::1]:29705")
+            ],
+            "one per instance; not stale, not off-machine, not this instance"
+        );
+        assert_eq!(targets[0].auth_key, "secret");
+    }
+
+    /// One-shot HTTP server answering any request with `body`, and the request it
+    /// received.
+    async fn serve_once(body: &'static str) -> (String, tokio::sync::oneshot::Receiver<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let _ = tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        (url, rx)
+    }
+
+    #[tokio::test]
+    async fn channel_statuses_asks_each_instance_and_skips_one_that_fails() {
+        let (url, request) = serve_once(
+            r#"{"agents":["Korp"],"now_ms":1,"agent_status":{"Korp":{"state":"working","since_ms":1}}}"#,
+        )
+        .await;
+        let targets = [
+            ChannelStatusTarget {
+                channel: "dev".into(),
+                local_url: url,
+                auth_key: "chan-key".into(),
+            },
+            // Nothing listens on the discard port.
+            ChannelStatusTarget {
+                channel: "dead".into(),
+                local_url: "http://127.0.0.1:9".into(),
+                auth_key: "k".into(),
+            },
+        ];
+        let statuses = channel_statuses(&reqwest::Client::new(), &targets).await;
+        assert_eq!(statuses.len(), 1, "{statuses:?}");
+        assert_eq!(statuses["dev"].get("korp"), Some(&AgentState::Working));
+        let request = request.await.unwrap().to_lowercase();
+        assert!(
+            request.starts_with("get /agentmux/reactive/agent-names "),
+            "{request}"
+        );
+        assert!(
+            request.contains(&format!(
+                "{}: chan-key",
+                agentmux_common::AUTH_KEY_HEADER.to_lowercase()
+            )),
+            "{request}"
+        );
     }
 }
