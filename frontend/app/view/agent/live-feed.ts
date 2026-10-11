@@ -124,14 +124,46 @@ export function blocksRollOff(node: DocumentNode): boolean {
  * a feed sitting at its limit from re-triggering on every flush.
  */
 export function feedOverLimits(nodes: readonly DocumentNode[], keepTurns: number): boolean {
-    if (nodes.length > LIVE_FEED_MAX_ROWS) return true;
+    return sizeOverLimits(feedSize(nodes), keepTurns);
+}
+
+/** What the limits are measured in: rows, turns (user messages) and bytes. */
+export interface FeedSize {
+    rows: number;
+    turns: number;
+    bytes: number;
+}
+
+/** One pass over the feed, shared by `sizeOverLimits` and `sizeAtBudget`. */
+export function feedSize(nodes: readonly DocumentNode[]): FeedSize {
     let turns = 0;
     let bytes = 0;
     for (const n of nodes) {
         if (n.type === "user_message") turns++;
         bytes += nodeBytesFull(n);
     }
-    return turns > keepTurns + 3 || bytes > LIVE_FEED_MAX_FINISHED_BYTES * 1.1;
+    return { rows: nodes.length, turns, bytes };
+}
+
+/** `feedOverLimits` on a measured size. */
+export function sizeOverLimits(size: FeedSize, keepTurns: number): boolean {
+    return size.rows > LIVE_FEED_MAX_ROWS || size.turns > keepTurns + 3 || size.bytes > LIVE_FEED_MAX_FINISHED_BYTES * 1.1;
+}
+
+/**
+ * Whether the feed already holds what it keeps, so scrolling up must stop
+ * paging older turns in and History takes over. No headroom: paging that
+ * reached the budget would only be rolled off again.
+ *
+ * A pane opens with about its budget (`LIVE_FEED_RESTORE_BYTES`), so before
+ * this, nothing had rolled off yet, scrolling up kept paging the whole
+ * transcript in, and the "Show agent history" row only appeared once the
+ * reader came back down and the overdue pass trimmed it
+ * (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9: the live
+ * feed doesn't page older content in).
+ */
+export function sizeAtBudget(size: FeedSize, keepTurns: number): boolean {
+    return size.rows >= LIVE_FEED_MAX_ROWS || size.turns > keepTurns || size.bytes >= LIVE_FEED_MAX_FINISHED_BYTES;
 }
 
 export interface RollOffInput {

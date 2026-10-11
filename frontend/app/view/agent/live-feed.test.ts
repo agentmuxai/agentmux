@@ -10,6 +10,8 @@ import { update } from "../../store/agent-document/reducer";
 import {
     blocksRollOff,
     feedOverLimits,
+    feedSize,
+    sizeAtBudget,
     LIVE_FEED_DEFAULT_TURNS,
     LIVE_FEED_MAX_FINISHED_BYTES,
     LIVE_FEED_MAX_ROWS,
@@ -291,5 +293,25 @@ describe("feedOverLimits (Codex on #4121)", () => {
     it("still honours an explicit turn cap", () => {
         expect(feedOverLimits(turns(10), 3)).toBe(true);
         expect(feedOverLimits(turns(6), 3)).toBe(false);
+    });
+});
+
+describe("sizeAtBudget: when scrolling up stops paging older turns in", () => {
+    it("is false under the budget and true once the feed holds it, with no headroom", () => {
+        expect(sizeAtBudget(feedSize(turns(10)), LIVE_FEED_DEFAULT_TURNS)).toBe(false);
+        const near: DocumentNode[] = [user("u0"), md("a0", "x".repeat(900_000))];
+        expect(sizeAtBudget(feedSize(near), LIVE_FEED_DEFAULT_TURNS)).toBe(false);
+        // At the budget, not 1.1x over it like feedOverLimits: a page that
+        // reached the budget would only roll off again.
+        const full: DocumentNode[] = [user("u0"), md("a0", "x".repeat(1_000_000))];
+        expect(sizeAtBudget(feedSize(full), LIVE_FEED_DEFAULT_TURNS)).toBe(true);
+        expect(feedOverLimits(full, LIVE_FEED_DEFAULT_TURNS)).toBe(false);
+    });
+
+    it("counts rows and an explicit turn cap too", () => {
+        const many: DocumentNode[] = Array.from({ length: LIVE_FEED_MAX_ROWS }, (_, i) => md(`m${i}`));
+        expect(sizeAtBudget(feedSize(many), LIVE_FEED_DEFAULT_TURNS)).toBe(true);
+        expect(sizeAtBudget(feedSize(turns(4)), 3)).toBe(true);
+        expect(sizeAtBudget(feedSize(turns(3)), 3)).toBe(false);
     });
 });
