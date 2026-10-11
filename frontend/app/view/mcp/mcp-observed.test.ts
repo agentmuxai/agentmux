@@ -125,6 +125,14 @@ describe("McpObservedModel", () => {
         expect(observedListMock).not.toHaveBeenCalled();
     });
 
+    test("an srv that sends no missing list reads as nothing missing", async () => {
+        const { missing: _omitted, ...older } = agents[0];
+        observedListMock.mockResolvedValueOnce([older]);
+        const model = new McpObservedModel();
+        await vi.waitFor(() => expect(model.agentsAtom()).toHaveLength(1));
+        expect(notLoadedBy(model.agentsAtom(), "git")).toEqual([]);
+    });
+
     test("an older reply never overwrites a newer one", async () => {
         let resolveFirst: (v: unknown) => void = () => {};
         observedListMock.mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)));

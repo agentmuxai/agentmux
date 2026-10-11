@@ -165,7 +165,8 @@ export class McpObservedModel {
         try {
             const agents = await RpcApi.McpObservedListCommand(TabRpcClient);
             if (request !== this.request) return;
-            this.setAgents(agents);
+            // An srv from before `missing` existed sends none.
+            this.setAgents(agents.map((a) => ({ ...a, missing: a.missing ?? [] })));
             this.setRows(groupObserved(agents));
         } catch (e) {
             if (request !== this.request) return;

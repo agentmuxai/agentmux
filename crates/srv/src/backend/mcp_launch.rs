@@ -177,8 +177,6 @@ mod tests {
         assert!(missing_servers(&[], &now).is_empty());
     }
 
-    /// What `insert_server_rows` skips is never launched, so never missing:
-    /// the two stay in step.
     /// Through the real stores: a catalog server switched on for all agents
     /// is missing from an agent that started before, until it reports it.
     #[test]
@@ -195,6 +193,8 @@ mod tests {
         assert!(missing_for_agent(&store, &store, "agent-1", &after).is_empty());
     }
 
+    /// What `insert_server_rows` skips is never launched, so never missing:
+    /// the two stay in step.
     #[test]
     fn a_server_that_is_never_launched_is_never_missing() {
         let rows = [row("git", "{}"), row("agentmux", "{}"), row("broken", "{not json")];
