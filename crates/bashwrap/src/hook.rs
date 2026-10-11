@@ -791,7 +791,7 @@ line' && cat $HOME/.env"#;
         })
         .to_string();
         let resp = record_response(&payload);
-        let claimed = crate::prefix::claim("sess-rec", Some("cargo build"));
+        let claimed = crate::prefix::claim("sess-rec", "cargo build");
         let described = claimed.as_ref().and_then(|c| c.description.clone());
         let wrapped = json!({
             "tool_name": "Bash", "tool_use_id": "toolu_w", "session_id": "sess-rec",
@@ -799,7 +799,7 @@ line' && cat $HOME/.env"#;
         })
         .to_string();
         let resp_wrapped = record_response(&wrapped);
-        let left = crate::prefix::claim("sess-rec", None);
+        let left = crate::prefix::claim("sess-rec", "any command");
         std::env::remove_var("AGENTMUX_BASHWRAP_CALLS_DIR");
         let _ = std::fs::remove_dir_all(&dir);
 

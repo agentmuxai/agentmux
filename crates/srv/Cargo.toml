@@ -1,6 +1,7 @@
 [package]
 name = "agentmux-srv"
 version.workspace = true
+license = "Apache-2.0"
 edition = "2021"
 description = "AgentMux Rust backend server"
 

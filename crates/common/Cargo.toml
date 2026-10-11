@@ -1,6 +1,7 @@
 [package]
 name = "agentmux-common"
 version.workspace = true
+license = "Apache-2.0"
 edition = "2021"
 description = "Shared utilities for AgentMux crates"
 

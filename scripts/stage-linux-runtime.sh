@@ -50,6 +50,9 @@ require "dist/bin/agentmux-srv-${VERSION}-linux.x64"
 require target/release/agentmux-mcp
 require target/release/agentmux-bashwrap
 require dist/frontend/index.html
+# Licence texts the build writes (scripts/third-party-notices.mjs); every package
+# must carry them.
+require dist/frontend/licenses/THIRD_PARTY_NOTICES.txt
 
 # --- Release gate: the bundled libcef.so MUST carry the BeginWindowDrag patch,
 #     or left-click window drag silently no-ops in the shipped package (the
