@@ -8,6 +8,49 @@
 
 use serde_json::Value;
 
+/// Whether a row is written into `.mcp.json` at all: not the reserved
+/// `agentmux` name, and a config that is JSON. [`insert_server_rows`] skips
+/// the others, so a server that is never launched is never "missing".
+pub(crate) fn is_launched(server: &crate::backend::storage::McpServer) -> bool {
+    server.name != "agentmux" && serde_json::from_str::<Value>(&server.config).is_ok()
+}
+
+/// The servers AgentMux launches an agent with that its CLI doesn't report
+/// (`reported`, from `backend::mcp_observed`), by name. That is a server
+/// added or bound after the agent started: `.mcp.json` is written at launch,
+/// so the agent needs a restart to get it. A server the CLI reports as
+/// failed is reported, so not missing.
+pub fn missing_servers(
+    expected: &[crate::backend::storage::McpServer],
+    reported: &[crate::backend::mcp_observed::ObservedServer],
+) -> Vec<String> {
+    let mut missing: Vec<String> = expected
+        .iter()
+        .filter(|s| is_launched(s) && !reported.iter().any(|r| r.name == s.name))
+        .map(|s| s.name.clone())
+        .collect();
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+/// [`missing_servers`] for `agent_id`: what AgentMux would launch it with now
+/// (`Store::effective_mcp_servers`, which gives a container agent only what
+/// is switched on for containers) against what its CLI reported.
+pub fn missing_for_agent(
+    refs: &crate::backend::storage::store::Store,
+    catalog: &crate::backend::storage::store::Store,
+    agent_id: &str,
+    reported: &[crate::backend::mcp_observed::ObservedServer],
+) -> Vec<String> {
+    let container = refs
+        .agent_def_get(agent_id)
+        .ok()
+        .flatten()
+        .is_some_and(|def| def.agent_type == "container");
+    missing_servers(&refs.effective_mcp_servers(catalog, agent_id, container), reported)
+}
+
 /// Put server rows into an `mcpServers` map, each under its name. A row
 /// named `agentmux` is skipped: the built-in entry always wins.
 pub(crate) fn insert_server_rows(mcp_servers: &mut serde_json::Map<String, Value>, servers: &[crate::backend::storage::McpServer]) {
@@ -113,6 +156,53 @@ mod tests {
         let v: Value = serde_json::from_str(&overlay_mcp_servers(built, &rows).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["git"]["command"], "new");
         assert_eq!(v["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
+    }
+
+    fn reported(name: &str, status: &str) -> crate::backend::mcp_observed::ObservedServer {
+        crate::backend::mcp_observed::ObservedServer {
+            name: name.to_string(),
+            status: status.to_string(),
+            source: "project".to_string(),
+            tools: 0,
+        }
+    }
+
+    /// A server launched after the agent started isn't reported; one the CLI
+    /// reports as failed is (it was launched), and so is the built-in.
+    #[test]
+    fn a_server_the_agent_does_not_report_is_missing() {
+        let expected = [row("git", "{}"), row("fetch", "{}"), row("memory", "{}")];
+        let now = [reported("agentmux", "connected"), reported("git", "connected"), reported("fetch", "failed")];
+        assert_eq!(missing_servers(&expected, &now), vec!["memory"]);
+        assert!(missing_servers(&[], &now).is_empty());
+    }
+
+    /// What `insert_server_rows` skips is never launched, so never missing:
+    /// the two stay in step.
+    /// Through the real stores: a catalog server switched on for all agents
+    /// is missing from an agent that started before, until it reports it.
+    #[test]
+    fn an_agent_that_started_before_a_server_was_switched_on_is_missing_it() {
+        use crate::backend::storage::{store::Store, McpServerReach};
+        let store = Store::open_in_memory().unwrap();
+        store.mcp_server_upsert_unique_global(&row("git", r#"{"command":"uvx"}"#)).unwrap();
+        let before = [reported("agentmux", "connected")];
+        assert!(missing_for_agent(&store, &store, "agent-1", &before).is_empty(), "not switched on yet");
+
+        store.mcp_server_set_reach("id-git", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
+        assert_eq!(missing_for_agent(&store, &store, "agent-1", &before), vec!["git"]);
+        let after = [reported("agentmux", "connected"), reported("git", "connected")];
+        assert!(missing_for_agent(&store, &store, "agent-1", &after).is_empty());
+    }
+
+    #[test]
+    fn a_server_that_is_never_launched_is_never_missing() {
+        let rows = [row("git", "{}"), row("agentmux", "{}"), row("broken", "{not json")];
+        let mut written = serde_json::Map::new();
+        insert_server_rows(&mut written, &rows);
+        let launched: Vec<&str> = rows.iter().filter(|s| is_launched(s)).map(|s| s.name.as_str()).collect();
+        assert_eq!(written.keys().map(String::as_str).collect::<Vec<_>>(), launched);
+        assert_eq!(missing_servers(&rows, &[]), vec!["git"]);
     }
 
     #[test]

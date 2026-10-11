@@ -85,6 +85,31 @@ export function groupObserved(agents: McpObservedAgent[]): ObservedServerRow[] {
     return list;
 }
 
+/** The running agents that should have a server by now (it is bound to
+ *  them, or switched on for all) but don't report it: they started before
+ *  that, and need a restart (`McpObservedAgent.missing`). By name. */
+export function notLoadedBy(agents: McpObservedAgent[], serverName: string): string[] {
+    return agents
+        .filter((a) => a.missing.includes(serverName))
+        .map((a) => a.label)
+        .sort((a, b) => a.localeCompare(b));
+}
+
+/** "Not loaded by AgentY and Korp. Restart them to apply.", or `null` when
+ *  every agent has it. Long lists are cut to three names. */
+export function notLoadedText(names: string[]): string | null {
+    if (names.length === 0) return null;
+    const shown = names.slice(0, 3);
+    const more = names.length - shown.length;
+    const list =
+        more > 0
+            ? `${shown.join(", ")} and ${more} more`
+            : shown.length > 1
+              ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`
+              : shown[0];
+    return `Not loaded by ${list}. Restart ${names.length === 1 ? "it" : "them"} to apply.`;
+}
+
 /** A row's state in a few words: all connected, or how many aren't. */
 export function rowSummary(row: ObservedServerRow): string {
     const failing = row.uses.filter((u) => u.status !== "connected").length;
@@ -113,6 +138,11 @@ export class McpObservedModel {
     rowsAtom: Accessor<ObservedServerRow[]> = this._rows[0];
     private setRows = this._rows[1];
 
+    private _agents = createSignal<McpObservedAgent[]>([]);
+    /** The agents as srv reported them, for what the rows don't carry. */
+    agentsAtom: Accessor<McpObservedAgent[]> = this._agents[0];
+    private setAgents = this._agents[1];
+
     private _loaded = createSignal(false);
     loadedAtom: Accessor<boolean> = this._loaded[0];
 
@@ -135,6 +165,7 @@ export class McpObservedModel {
         try {
             const agents = await RpcApi.McpObservedListCommand(TabRpcClient);
             if (request !== this.request) return;
+            this.setAgents(agents);
             this.setRows(groupObserved(agents));
         } catch (e) {
             if (request !== this.request) return;
@@ -142,7 +173,10 @@ export class McpObservedModel {
             // reconnect) has no reports: what is shown belongs to another
             // srv. Any other failure says nothing about the servers, so
             // what is shown stays.
-            if (String((e as Error)?.message ?? e).includes("unknown command")) this.setRows([]);
+            if (String((e as Error)?.message ?? e).includes("unknown command")) {
+                this.setAgents([]);
+                this.setRows([]);
+            }
         }
         this._loaded[1](true);
     }

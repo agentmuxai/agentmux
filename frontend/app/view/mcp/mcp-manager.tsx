@@ -15,6 +15,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { McpCatalogModel, reachLabel } from "./mcp-model";
 import { McpCatalogPicker } from "./McpCatalogPicker";
 import { McpInUse } from "./mcp-in-use";
+import { McpObservedModel, notLoadedBy, notLoadedText } from "./mcp-observed";
 import { findPreloadEntryByName } from "./mcp-preload-catalog";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import "../agent/components/AgentPrimitiveModal.scss";
@@ -69,6 +70,10 @@ function McpStatusPill(props: { serverId: string; serverName: string }): JSX.Ele
 export const McpManager = (): JSX.Element => {
     const model = new McpCatalogModel();
     onCleanup(() => model.dispose());
+    const observed = new McpObservedModel();
+    onCleanup(() => observed.dispose());
+    /** Why a catalog server isn't on every agent it should be: they started first. */
+    const notLoaded = (serverName: string) => notLoadedText(notLoadedBy(observed.agentsAtom(), serverName));
 
     // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
     const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
@@ -83,21 +88,24 @@ export const McpManager = (): JSX.Element => {
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
-            <McpInUse />
+            <McpInUse model={observed} />
             <Show
                 when={model.serversAtom().length > 0}
                 fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
             >
                 <For each={model.serversAtom()}>
                     {(server) => (
-                        <button
-                            class="agent-primitive-modal-list-item"
-                            classList={{ "is-selected": model.selectedIdAtom() === server.id }}
-                            onClick={() => model.handleSelect(server)}
-                        >
-                            <span class="agent-primitive-modal-list-item-name">{server.name}</span>
-                            <span class="agent-primitive-modal-list-item-badge">{reachLabel(server)}</span>
-                        </button>
+                        <>
+                            <button
+                                class="agent-primitive-modal-list-item"
+                                classList={{ "is-selected": model.selectedIdAtom() === server.id }}
+                                onClick={() => model.handleSelect(server)}
+                            >
+                                <span class="agent-primitive-modal-list-item-name">{server.name}</span>
+                                <span class="agent-primitive-modal-list-item-badge">{reachLabel(server)}</span>
+                            </button>
+                            <Show when={notLoaded(server.name)}>{(text) => <p class="mcp-not-loaded">{text()}</p>}</Show>
+                        </>
                     )}
                 </For>
             </Show>
@@ -128,6 +136,9 @@ export const McpManager = (): JSX.Element => {
                                                 ? "Every agent gets it"
                                                 : `Bound to ${reachLabel(server())}`}
                                         </p>
+                                        <Show when={notLoaded(server().name)}>
+                                            {(text) => <p class="mcp-not-loaded">{text()}</p>}
+                                        </Show>
                                         <Field
                                             label="All agents"
                                             description="Every agent gets it at launch, not only the ones it is bound to."

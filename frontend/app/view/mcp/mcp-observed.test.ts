@@ -20,13 +20,14 @@ vi.mock("@/app/store/mps", () => ({
     }),
 }));
 
-import { groupObserved, McpObservedModel, rowSummary, sourceLabel } from "./mcp-observed";
+import { groupObserved, McpObservedModel, notLoadedBy, notLoadedText, rowSummary, sourceLabel } from "./mcp-observed";
 
 const agents = [
     {
         block_id: "b2",
         label: "Korp",
         at_ms: 2,
+        missing: ["git"],
         servers: [
             { name: "agentmux", status: "connected", source: "builtin", tools: 95 },
             { name: "claude.ai Gmail", status: "needs-auth", source: "claudeai", tools: 0 },
@@ -36,6 +37,7 @@ const agents = [
         block_id: "b1",
         label: "AgentY",
         at_ms: 1,
+        missing: [],
         servers: [
             { name: "git", status: "failed", source: "catalog", tools: 0 },
             { name: "agentmux", status: "connected", source: "builtin", tools: 95 },
@@ -77,12 +79,30 @@ describe("groupObserved", () => {
     });
 });
 
+describe("not loaded", () => {
+    test("names the agents that should have a server but don't, by name", () => {
+        expect(notLoadedBy(agents, "git")).toEqual(["Korp"]);
+        expect(notLoadedBy(agents, "fetch")).toEqual([]);
+    });
+
+    test("says so in a sentence, and cuts a long list", () => {
+        expect(notLoadedText([])).toBeNull();
+        expect(notLoadedText(["Korp"])).toBe("Not loaded by Korp. Restart it to apply.");
+        expect(notLoadedText(["AgentY", "Korp"])).toBe("Not loaded by AgentY and Korp. Restart them to apply.");
+        expect(notLoadedText(["A", "B", "C"])).toBe("Not loaded by A, B and C. Restart them to apply.");
+        expect(notLoadedText(["A", "B", "C", "D", "E"])).toBe(
+            "Not loaded by A, B, C and 2 more. Restart them to apply."
+        );
+    });
+});
+
 describe("McpObservedModel", () => {
     test("loads, and reloads when a report or the catalog changes", async () => {
         observedListMock.mockResolvedValue(agents);
         const model = new McpObservedModel();
         await vi.waitFor(() => expect(model.rowsAtom()).toHaveLength(3));
         expect(model.loadedAtom()).toBe(true);
+        expect(notLoadedBy(model.agentsAtom(), "git")).toEqual(["Korp"]);
 
         observedListMock.mockClear();
         mpsHub.handlers.get("mcp:observed")?.({});
@@ -134,6 +154,7 @@ describe("McpObservedModel", () => {
         observedListMock.mockRejectedValueOnce(new Error("unknown command: mcp.observed.list"));
         await model.refresh();
         expect(model.rowsAtom()).toEqual([]);
+        expect(model.agentsAtom()).toEqual([]);
     });
 
     test("an srv without the command shows nothing, not an error", async () => {

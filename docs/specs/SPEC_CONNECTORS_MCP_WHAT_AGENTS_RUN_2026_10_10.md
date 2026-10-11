@@ -2,8 +2,9 @@
 
 **Date:** 2026-10-10
 **Status:** active. Phase 0 (one launch path, explicit reach) shipped in
-PR #4677. Phase 1 (observed servers) is PR #4683. Phase 2a (In use now) is
-PR #4685; Phase 2b and Phase 3 (other providers) are next.
+PR #4677. Phase 1 (observed servers) and Phase 2a (In use now) shipped in
+PR #4683 (with #4685). Phase 2b's catalog half ("Not loaded by") is in this
+PR; its startup-card half is deferred (§4). Phase 3 (other providers) is next.
 **Author:** QTest@narko
 **Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
 (the investigation and history). File references are as of `main` at
@@ -159,11 +160,28 @@ any running agent reports, and refreshes on `mcp:observed` and `mcp:changed`.
   catalog server.
 - **Empty state.** With no report since srv started, the list says so.
 
-**Next (2b).**
-- **Bound but not connected.** Agents a catalog server is meant to reach but
-  which don't report it, shown as "not connected" on its catalog row. This
-  needs the reach rule (§2.1) evaluated per running agent.
-- **The agent pane's startup card** uses the observed list when there is one.
+**Shipped (2b, catalog half).** A catalog server that should be on a running
+agent by now, bound to it or switched on for all agents, but isn't in what
+that agent's CLI reports, shows "Not loaded by AgentY and Korp. Restart them
+to apply." under its catalog row and in its detail.
+- **Why it happens.** `.mcp.json` is written when the agent launches, so a
+  server bound, or switched on, later reaches it only on its next start.
+- **How.** `mcp.observed.list` gives each agent a `missing` list:
+  `mcp_launch::missing_for_agent`, the servers AgentMux would launch it with
+  now (`effective_mcp_servers`, the container rule included) that it doesn't
+  report. A server the CLI reports as failed is reported, so not missing; one
+  AgentMux never writes (the reserved `agentmux` name, a config that isn't
+  JSON) is never missing. A test ties that to `insert_server_rows`.
+- **Only agents that report.** Panes that haven't sent the CLI's startup
+  report, and providers that don't send one (Phase 3), aren't listed.
+
+**Deferred (2b, startup card).** The agent pane's startup card lists the
+names in the folder's `.mcp.json`. Using the observed list instead means the
+session-start hook, which knows its pane, reading it, but the CLI's startup
+report may not have arrived when the hook fires; a card that sometimes shows
+the real list and sometimes the file's would be worse than one that always
+says what the CLI "should have read" (`startup_files.rs`). Revisit when the
+order is pinned down, with a contract test of it.
 
 ## 5. Phase 3: every provider; discovery
 
