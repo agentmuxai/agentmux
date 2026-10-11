@@ -105,18 +105,6 @@ svg [aria-label="tip"] g path {
     color: var(--border-color);
 }
 
-/* Monaco editor scrollbar styling */
-.monaco-editor .slider {
-    cursor: default;
-    background: rgba(255, 255, 255, 0.4);
-    border-radius: 0;
-    transition: background 0.2s ease;
-}
-
-.monaco-editor .slider:hover {
-    background: rgba(255, 255, 255, 0.6);
-}
-
 .ellipsis {
     display: block;
     white-space: nowrap;

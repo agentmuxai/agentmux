@@ -19,7 +19,7 @@ The shipped binaries include or link against, among others:
 
 - Chromium Embedded Framework (CEF) — BSD-3-Clause
 - xterm.js — MIT
-- Monaco Editor — MIT
+- CodeMirror 6 — MIT
 - SolidJS — MIT
 - [Font Awesome Free](https://fontawesome.com) 6.7.2 — icons CC BY 4.0, fonts
   SIL OFL 1.1, CSS MIT. Copyright Fonticons, Inc. Shipped as web fonts in
