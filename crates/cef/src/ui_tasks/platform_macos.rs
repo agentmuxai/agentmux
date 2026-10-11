@@ -489,21 +489,35 @@ pub(crate) fn post_make_pane_overlay_key(block_id: &str) {
 #[cfg(target_os = "macos")]
 mod window_number_tasks {
     use cef::*;
-    use std::sync::Arc;
+    use std::sync::{mpsc, Arc, Mutex};
     wrap_task! {
-        pub struct RefreshWindowNumbersTask { state: Arc<crate::state::AppState> }
+        pub struct RefreshWindowNumbersTask {
+            state: Arc<crate::state::AppState>,
+            done: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+        }
         impl Task {
-            fn execute(&self) { crate::app::macos_refresh_window_numbers(&self.state); }
+            fn execute(&self) {
+                crate::app::macos_refresh_window_numbers(&self.state);
+                if let Some(done) = self.done.lock().ok().and_then(|mut d| d.take()) {
+                    let _ = done.send(());
+                }
+            }
         }
     }
 }
 
 /// Re-read every window's number for the tab-redock hit test
-/// (`app::macos_refresh_window_numbers`), from any thread.
+/// (`app::macos_refresh_window_numbers`), from any thread but the UI thread.
+/// The receiver gets `()` once the UI thread has done it.
 #[cfg(target_os = "macos")]
-pub(crate) fn post_refresh_macos_window_numbers(state: &std::sync::Arc<crate::state::AppState>) {
-    let mut task = window_number_tasks::RefreshWindowNumbersTask::new(state.clone());
+pub(crate) fn post_refresh_macos_window_numbers(
+    state: &std::sync::Arc<crate::state::AppState>,
+) -> std::sync::mpsc::Receiver<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let done = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+    let mut task = window_number_tasks::RefreshWindowNumbersTask::new(state.clone(), done);
     cef::post_task(cef::ThreadId::UI, Some(&mut task));
+    rx
 }
 
 /// Swizzled `RenderWidgetHostViewCocoa::shouldIgnoreMouseEvent:` — always returns NO.

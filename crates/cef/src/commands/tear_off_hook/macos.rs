@@ -265,9 +265,17 @@ pub fn start_tab_drag_tracking(
 
     // A window hidden when it was created (every pool window, so every
     // torn-off window) had no window number to cache then, so re-read them
-    // all now that this drag may target one. The UI thread runs this long
-    // before the release that hit-tests against it.
-    crate::ui_tasks::post_refresh_macos_window_numbers(&state);
+    // all now that this drag may target one, and wait for it before the tap
+    // goes in, so even a quick release hit-tests against the fresh cache.
+    // This runs off the UI thread (IPC on spawn_blocking), so the wait can't
+    // block the task it waits for.
+    let refreshed = crate::ui_tasks::post_refresh_macos_window_numbers(&state);
+    if refreshed.recv_timeout(std::time::Duration::from_millis(250)).is_err() {
+        tracing::warn!(
+            target: "dnd:tabdrag:macos",
+            "[dnd:tabdrag:macos] window-number refresh didn't finish within 250 ms; using the cache as it is"
+        );
+    }
 
     if !accessibility_trusted() {
         tracing::warn!(
