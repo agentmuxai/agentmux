@@ -579,3 +579,30 @@ In agentmux-docs a GIF goes in `src/assets/` like a screenshot: Astro's image
 pipeline keeps the animation and serves it as an animated WebP, smaller than
 the GIF (checked: the 267 KB `stash-tour.gif` became a 176 KB, 133-frame
 WebP).
+
+## 13. One-command refresh (2026-10-11)
+
+Part 8 of the screenshot plan: when the UI changes, retaking the docs' images
+is one command, then a review.
+
+- **`publish.mjs --docs <clone> --from <run>...`** copies a run's images over
+  the docs' files of the same name. A shot's image is named `<id>.png`, or
+  `<id>-<size>.png` for a shot taken at several sizes, and a clip's
+  `<id>.gif`; a file of that name anywhere under the docs' `src/assets/` is
+  replaced. It never adds a file: an image the docs don't use yet is listed,
+  to be placed by hand with its text. A name found twice is reported as
+  ambiguous rather than guessed, and an image whose shot says it shows this
+  machine's data (`containsWorkspaceData: true`) is never copied. `--dry-run`
+  shows what would change.
+- **`refresh.mjs`** runs every suite with `capture.mjs`, in the order they
+  need (the memory suite uses an agent the agent suite creates), then
+  `record.mjs`, each into its own folder, and with `--docs` publishes them. A
+  suite that fails doesn't stop the others; the summary lists it.
+- **`README.md`** in `scripts/ui-screenshots/` gives the commands in order,
+  for whoever reruns them.
+
+The first full refresh (2026-10-11) retook 102 screenshots and the Stash clip
+with no failures and would have changed 55 docs files; it wasn't published,
+because the UI hadn't changed and the differences were live data (graphs,
+clocks, counters). It did show one gap: the Tower page has no screenshot.
+Review every changed image before committing a refresh, as with any shot.
