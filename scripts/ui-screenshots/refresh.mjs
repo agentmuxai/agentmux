@@ -65,6 +65,11 @@ function main() {
         console.error("set AGENTMUX_HOME_OVERRIDE to the capture instance's data folder (the agent suite installs its scripted Claude Code there)");
         process.exit(2);
     }
+    // Before twenty minutes of capturing, not after (muxreview on #4673).
+    if (args.docs && !existsSync(join(args.docs, "src", "assets"))) {
+        console.error(`--docs ${args.docs} doesn't look like an agentmux-docs clone (no src/assets)`);
+        process.exit(2);
+    }
     mkdirSync(args.out, { recursive: true });
     const results = [];
     for (const [label, script, scriptArgs] of commands(args)) {
@@ -76,9 +81,16 @@ function main() {
     for (const r of results) console.log(`${r.ok ? "ok    " : "FAILED"}  ${r.label}`);
     if (args.docs) {
         console.log(`\n=== publish into ${args.docs} ===`);
-        // A suite that crashed before writing its manifest has nothing to publish.
-        publish({ docs: args.docs, from: results.map((r) => r.dir).filter((d) => existsSync(join(d, "manifest.json"))) });
-        console.log("\nReview the docs clone's git diff, and look at each changed image, before you commit.");
+        try {
+            // A suite that crashed before writing its manifest has nothing to publish.
+            const steps = publish({ docs: args.docs, from: results.map((r) => r.dir).filter((d) => existsSync(join(d, "manifest.json"))) });
+            // As publish.mjs itself does: an ambiguous name wasn't published.
+            if (steps.some((s) => s.action === "ambiguous")) process.exitCode = 1;
+            console.log("\nReview the docs clone's git diff, and look at each changed image, before you commit.");
+        } catch (err) {
+            console.error(`publish failed: ${err.message}`);
+            process.exitCode = 1;
+        }
     } else {
         console.log(`\nOutput: ${args.out}. Publish with: node scripts/ui-screenshots/publish.mjs --docs <agentmux-docs> --from <each folder>`);
     }
