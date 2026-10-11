@@ -1,7 +1,7 @@
 # SPEC: Closing a tab asks for confirmation only when the user turns it on
 
 **Date:** 2026-10-10
-**Status:** implemented — this PR.
+**Status:** implemented — #4662.
 **Author:** Korp (narko), at the owner's request: "have the close tab modal default to disabled with a setting available in settings. Currently it defaults to show. We dont want it default anymore, but users can still enable it, write spec to file".
 **Affects:** `frontend/app/tab/tabbar.tsx`, `frontend/app/view/settings/sections/window-panes-section.tsx`, `schema/settings.json`, `settings-template.jsonc`, `frontend/types/srv-types.d.ts`.
 **Builds on:** `SPEC_TAB_UI_REFINEMENTS_2026_06_20.md` (the modal), `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §8 and §10 (how a close hides the tab).
