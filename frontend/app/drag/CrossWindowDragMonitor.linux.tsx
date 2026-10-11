@@ -61,7 +61,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             if (!payload) return;
 
             // Escape was pressed during this drag — abort here too, same
-            // reasoning as the darwin variant (reagent PR #2310 P1).
+            // reasoning as the darwin variant (#2310).
             // The page doesn't see Escape during the OS drag, so also ask the
             // drag's end (native-cancel.ts); the effect is read before the await.
             const dropEffect = e.dataTransfer?.dropEffect;
