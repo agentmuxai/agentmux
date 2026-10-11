@@ -127,6 +127,15 @@ describe("McpObservedModel", () => {
         expect(model.rowsAtom()).toHaveLength(3);
     });
 
+    test("reconnected to an srv without the command, the old rows go", async () => {
+        observedListMock.mockResolvedValueOnce(agents);
+        const model = new McpObservedModel();
+        await vi.waitFor(() => expect(model.rowsAtom()).toHaveLength(3));
+        observedListMock.mockRejectedValueOnce(new Error("unknown command: mcp.observed.list"));
+        await model.refresh();
+        expect(model.rowsAtom()).toEqual([]);
+    });
+
     test("an srv without the command shows nothing, not an error", async () => {
         observedListMock.mockRejectedValue(new Error("unknown command"));
         const model = new McpObservedModel();

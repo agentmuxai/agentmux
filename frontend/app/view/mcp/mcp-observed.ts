@@ -136,10 +136,13 @@ export class McpObservedModel {
             const agents = await RpcApi.McpObservedListCommand(TabRpcClient);
             if (request !== this.request) return;
             this.setRows(groupObserved(agents));
-        } catch {
-            // Keep what is shown: a failed refresh says nothing about the
-            // servers. An older srv without the command never loads any.
+        } catch (e) {
             if (request !== this.request) return;
+            // An srv without the command (an older one, perhaps after a
+            // reconnect) has no reports: what is shown belongs to another
+            // srv. Any other failure says nothing about the servers, so
+            // what is shown stays.
+            if (String((e as Error)?.message ?? e).includes("unknown command")) this.setRows([]);
         }
         this._loaded[1](true);
     }
