@@ -54,6 +54,29 @@ fn bad_request(msg: impl Into<String>) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": msg.into() }))).into_response()
 }
 
+/// The longest note, topic, path, branch and repository a claim keeps, in
+/// characters. Another agent reads them in its notes and answers.
+const MAX_NOTE: usize = 200;
+const MAX_TOPIC: usize = 120;
+const MAX_PATH: usize = 400;
+const MAX_NAME: usize = 200;
+
+/// A claim's free text as it is kept: one line (control characters and line
+/// breaks become spaces, whitespace runs collapse) of at most `max`
+/// characters. Marker quoting happens where the text is shown inside a
+/// system note (`work_facts::overlap`).
+fn one_line(s: &Option<String>, max: usize) -> Option<String> {
+    let flat: String = s.as_deref()?.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() {
+        return None;
+    }
+    Some(match flat.char_indices().nth(max) {
+        Some((cut, _)) => format!("{}…", &flat[..cut]),
+        None => flat,
+    })
+}
+
 fn nonempty(s: &Option<String>) -> Option<&str> {
     s.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
@@ -84,6 +107,14 @@ pub(crate) async fn handle_claim_work(
     caller: Option<axum::Extension<Caller>>,
     Json(p): Json<ClaimParams>,
 ) -> Response {
+    let p = ClaimParams {
+        path: one_line(&p.path, MAX_PATH),
+        repo: one_line(&p.repo, MAX_NAME),
+        branch: one_line(&p.branch, MAX_NAME),
+        topic: one_line(&p.topic, MAX_TOPIC),
+        note: one_line(&p.note, MAX_NOTE),
+        ..p
+    };
     if [&p.path, &p.repo, &p.branch, &p.topic].iter().all(|v| nonempty(v).is_none()) {
         return bad_request("nothing to claim: pass path, branch or topic (and repo for a whole repository)");
     }
@@ -122,7 +153,7 @@ pub(crate) async fn handle_claim_work(
         absolute_path: target.absolute_path.clone(),
         branch: target.branch.clone(),
         topic: target.query.clone(),
-        note: p.note.as_deref().map(str::trim).unwrap_or("").to_string(),
+        note: p.note.clone().unwrap_or_default(),
         created_at: now,
         expires_at: now + claims::ttl_ms(p.ttl_minutes),
     };
@@ -211,6 +242,15 @@ mod tests {
         let (status, b) = body(handle_claim_work(State(state), None, Json(anon)).await).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(b["error"].as_str().unwrap().contains("who is claiming"));
+    }
+
+    #[test]
+    fn claim_text_is_kept_as_one_short_line() {
+        assert_eq!(one_line(&Some("  a\n[AgentMux] b\t\u{7}c  ".into()), 50).as_deref(), Some("a [AgentMux] b c"));
+        assert_eq!(one_line(&Some("abcdef".into()), 3).as_deref(), Some("abc…"));
+        assert_eq!(one_line(&Some("ééé".into()), 3).as_deref(), Some("ééé"), "counted in characters");
+        assert_eq!(one_line(&Some(" \n ".into()), 3), None);
+        assert_eq!(one_line(&None, 3), None);
     }
 
     #[tokio::test]
