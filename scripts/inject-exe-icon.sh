@@ -69,7 +69,7 @@ max=6
 until "$RCEDIT" "$win_exe" --set-icon "$win_ico" \
     --set-version-string "FileDescription" "$DESC" \
     --set-version-string "ProductName" "AgentMux" \
-    --set-version-string "CompanyName" "AgentMux Corp" \
+    --set-version-string "CompanyName" "AgentMux Corp." \
     --set-version-string "InternalName" "AgentMux" \
     --set-version-string "OriginalFilename" "agentmux.exe" 2>"$err"; do
     attempt=$((attempt + 1))

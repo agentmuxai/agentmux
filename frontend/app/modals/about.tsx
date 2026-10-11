@@ -68,7 +68,7 @@ const AboutModal = ({ close }: ModalCloseProps) => {
                         </a>
                     </div>
                     <div class="items-center gap-4 self-stretch w-full text-center">
-                        &copy; {currentDate.getFullYear()} AgentMux Corp
+                        &copy; {currentDate.getFullYear()} AgentMux Corp.
                     </div>
                 </div>
             </ModalBody>

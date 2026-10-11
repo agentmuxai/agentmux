@@ -422,7 +422,7 @@ guarantees. See [LICENSE](./LICENSE) sections 7 (Disclaimer of Warranty) and
 AgentMux is released under the [Apache License 2.0](./LICENSE).
 
 - [NOTICE](./NOTICE) — required attributions per Apache License 2.0 § 4(d)
-- [LEGAL.md](./LEGAL.md) — corporate entity, trademark, contact
+- [LEGAL.md](./LEGAL.md) — corporate entity and legal contact
 - [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md) — third-party software and attributions
 - [SECURITY.md](./SECURITY.md) — vulnerability disclosure policy
 

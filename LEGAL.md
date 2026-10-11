@@ -8,7 +8,6 @@ AgentMux is developed and maintained by **AgentMux Corp.**, a corporation incorp
 |---|---|
 | **Legal name** | AgentMux Corp. |
 | **Jurisdiction** | Delaware, United States |
-| **Registered in** | California (foreign qualification) |
 
 ## Contact
 
@@ -18,11 +17,7 @@ For legal inquiries: [legal@agentmux.ai](mailto:legal@agentmux.ai)
 
 AgentMux is released under the [Apache License 2.0](./LICENSE).
 
-Copyright © 2026 AgentMux Corp. All rights reserved.
-
-## Trademark
-
-"AgentMux" is a trademark of AgentMux Corp.
+Copyright © 2025-2026 AgentMux Corp. Licensed under the Apache License 2.0.
 
 ## Third-Party Notices
 
