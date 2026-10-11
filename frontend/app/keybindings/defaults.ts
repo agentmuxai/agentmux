@@ -5,6 +5,8 @@
 // dispatcher, the terminal, the help pane, the menus and the docs all read it
 // (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6, §12).
 
+import type { KeyPlatform } from "./keys";
+
 export type KeyCategory = "Tabs & windows" | "Panes" | "Find & zoom" | "Terminal" | "Documents" | "Editor" | "Files" | "General";
 
 /** A pane that matches its own rows (registry.ts `matchPaneKey`). */
@@ -19,6 +21,9 @@ export interface KeyBindingRow {
     /** Keys on Windows/Linux. Window, tab and pane actions use Ctrl+Shift so
      *  Alt+letter stays free for the shell (report §11.2). */
     other?: string[];
+    /** Keys on Linux, in place of `other`, where a Linux desktop takes those
+     *  (docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §8.3). */
+    linux?: string[];
     /** `KeyContext` flags (registry.ts) joined with `&&`, each optionally `!`. */
     when?: string;
     /** Also fires while a terminal has focus; every other binding leaves the
@@ -90,15 +95,15 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
             skipShell: true,
         })
     ),
-    { command: "pane:swap:up", label: "Swap with pane above", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowUp"], other: ["ctrl+alt+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:swap:down", label: "Swap with pane below", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowDown"], other: ["ctrl+alt+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:swap:left", label: "Swap with pane left", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowLeft"], other: ["ctrl+alt+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:swap:right", label: "Swap with pane right", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowRight"], other: ["ctrl+alt+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:up", label: "Swap with pane above", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowUp"], other: ["ctrl+alt+shift+ArrowUp"], linux: ["ctrl+shift+s shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:down", label: "Swap with pane below", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowDown"], other: ["ctrl+alt+shift+ArrowDown"], linux: ["ctrl+shift+s shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:left", label: "Swap with pane left", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowLeft"], other: ["ctrl+alt+shift+ArrowLeft"], linux: ["ctrl+shift+s shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:right", label: "Swap with pane right", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowRight"], other: ["ctrl+alt+shift+ArrowRight"], linux: ["ctrl+shift+s shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
     { command: "pane:resize:up", label: "Move pane border up", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowUp"], other: ["alt+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
     { command: "pane:resize:down", label: "Move pane border down", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowDown"], other: ["alt+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
     { command: "pane:resize:left", label: "Move pane border left", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowLeft"], other: ["alt+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
     { command: "pane:resize:right", label: "Move pane border right", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowRight"], other: ["alt+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:refocus", label: "Refocus pane", category: "Panes", mac: ["meta+i"] },
+    { command: "pane:refocus", label: "Refocus pane", category: "Panes", mac: ["meta+i"], skipShell: true },
     { command: "agent:focusComposer", label: "Focus the message box", category: "Panes", mac: ["meta+l"], other: ["ctrl+l"], when: "viewType == agent" },
     { command: "pane:replaceWithLauncher", label: "Replace pane with launcher", category: "Panes", mac: ["ctrl+shift+k"], other: ["ctrl+shift+k"], when: "!textInputFocus", skipShell: true },
     { command: "pane:changeConnection", label: "Change connection", category: "Panes", mac: ["meta+shift+g"], other: ["ctrl+shift+g"], skipShell: true },
@@ -163,3 +168,9 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "term:paste", label: "Paste", category: "Terminal", other: ["ctrl+shift+v"], when: "terminalFocus && viewType == term", skipShell: true },
     { command: "term:clear", label: "Clear", category: "Terminal", mac: ["meta+k"], other: ["ctrl+shift+l"], when: "terminalFocus && viewType == term", skipShell: true },
 ];
+
+/** A row's keys on `platform`: Linux's own where it has them, else Windows/Linux's. */
+export function rowKeys(row: KeyBindingRow, platform: KeyPlatform): string[] {
+    if (platform === "mac") return row.mac ?? [];
+    return (platform === "linux" ? row.linux : undefined) ?? row.other ?? [];
+}

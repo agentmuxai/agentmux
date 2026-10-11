@@ -17,11 +17,12 @@ import { getApi } from "@/app/store/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetPackageInfo, WidgetState } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { setWidgetPackages, widgetPackages, widgetPackagesLoaded } from "@/app/store/widget-packages-store";
+import { refreshWidgetPackages, setWidgetPackages, widgetPackages, widgetPackagesLoaded, widgetPublishers } from "@/app/store/widget-packages-store";
 import { agentmuxHome } from "@/app/view/agent/agent-launch-env";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader } from "../settings-controls";
-import { describePermission, TRUSTED_WIDGET_WARNING } from "./widget-permissions";
+import { installLabel, WidgetApprovalDetails } from "./widget-approval-details";
+import { describePermission } from "./widget-permissions";
 
 export const WIDGETS_SETTINGS = {
     installed: {
@@ -53,7 +54,8 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
     const decide = async (approve: boolean) => {
         setBusy(true);
         try {
-            await getApi().approvals.decideWidget(props.pkg.id, props.pkg.hash, approve);
+            // With the key the prompt showed: srv refuses if another signs it now.
+            await getApi().approvals.decideWidget(props.pkg.id, props.pkg.hash, approve, props.pkg.signature?.fingerprint ?? "");
             props.onDone();
         } catch (e) {
             setError(errorText(e));
@@ -67,53 +69,19 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
             <div class="widget-approval-title">
                 <i class={`fa-solid fa-${props.pkg.icon}`} /> {updated() ? `${props.pkg.name} changed` : `Install ${props.pkg.name}?`}
             </div>
-            <div class="widget-approval-meta">
-                {props.pkg.version}
-                <Show when={props.pkg.author}> · by {props.pkg.author}</Show>
-                {" · "}
-                {props.pkg.kind === "trusted" ? "trusted" : "sandboxed"}
-                <Show when={props.pkg.implied}> · from widgets.json</Show>
-            </div>
-            <Show when={props.pkg.description}>
-                <div class="widget-approval-description">{props.pkg.description}</div>
-            </Show>
-            <Show
-                when={props.pkg.kind === "sandboxed"}
-                fallback={
-                    <div class="widget-approval-warning">
-                        <i class="fa-solid fa-triangle-exclamation" /> <strong>{TRUSTED_WIDGET_WARNING}</strong>
-                    </div>
-                }
-            >
-                <div class="widget-approval-permissions">
-                    <Show when={props.pkg.permissions.length > 0} fallback={<div>It asks for no permissions.</div>}>
-                        <div>It can:</div>
-                        <ul>
-                            <For each={props.pkg.permissions}>
-                                {(p) => {
-                                    const d = describePermission(p);
-                                    return (
-                                        <li classList={{ strong: !!d.strong }}>
-                                            <Show when={d.strong}>
-                                                <i class="fa-solid fa-triangle-exclamation" />{" "}
-                                            </Show>
-                                            {d.text}
-                                        </li>
-                                    );
-                                }}
-                            </For>
-                        </ul>
-                    </Show>
-                </div>
-            </Show>
+            <WidgetApprovalDetails pkg={props.pkg} />
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}
                 </div>
             </Show>
             <div class="widget-approval-actions">
-                <Button tone="accent" disabled={busy()} onClick={() => void decide(true)}>
-                    {updated() ? "Approve" : "Install"}
+                <Button
+                    tone={props.pkg.signature?.state === "key_changed" ? "danger" : "accent"}
+                    disabled={busy()}
+                    onClick={() => void decide(true)}
+                >
+                    {installLabel(props.pkg, updated() ? "Approve" : "Install")}
                 </Button>
                 <Button disabled={busy()} onClick={() => void decide(false).then(props.onDone)}>
                     Cancel
@@ -125,6 +93,7 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
 
 export function WidgetsSection(): JSX.Element {
     const list = widgetPackages();
+    const publishers = widgetPublishers();
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal<string | null>(null);
     const [asking, setAsking] = createSignal<string | null>(null);
@@ -248,6 +217,9 @@ export function WidgetsSection(): JSX.Element {
                                     <Show when={pkg.error ?? widgetLoadErrors()[pkg.id]}>
                                         {(e) => <div class="settings-config-error">{e()}</div>}
                                     </Show>
+                                    <div class={`widget-row-signature${pkg.signature?.state === "key_changed" ? " warning" : ""}`}>
+                                        {signatureShort(pkg)}
+                                    </div>
                                     <Show when={pkg.kind === "sandboxed" && pkg.permissions.length > 0}>
                                         <div class="widget-row-permissions">
                                             {pkg.permissions.map((p) => describePermission(p).text).join(" · ")}
@@ -320,7 +292,50 @@ export function WidgetsSection(): JSX.Element {
                         </For>
                     </div>
                 </Show>
+                <Show when={publishers().length > 0}>
+                    <div class="widgets-publishers">
+                        <div class="setting-devices-description">
+                            Publisher keys: the key each publisher's first signed widget was signed with. A later widget of theirs
+                            signed with another key gets a warning. Forget a key only if its author told you they changed it.
+                        </div>
+                        <For each={publishers()}>
+                            {(pin) => (
+                                <div class="widget-publisher-row" data-publisher={pin.publisher}>
+                                    <span class="widget-row-name">{pin.publisher}</span>
+                                    <code>{pin.fingerprint}</code>
+                                    <Show when={typeof getApi().approvals?.forgetWidgetKey === "function"}>
+                                        <Button
+                                            disabled={busy() === `key:${pin.publisher}`}
+                                            onClick={() =>
+                                                void run(`key:${pin.publisher}`, async () => {
+                                                    await getApi().approvals.forgetWidgetKey!(pin.publisher);
+                                                    await refreshWidgetPackages();
+                                                })
+                                            }
+                                        >
+                                            Forget key
+                                        </Button>
+                                    </Show>
+                                </div>
+                            )}
+                        </For>
+                    </div>
+                </Show>
             </div>
         </div>
     );
+}
+
+/** The list row's one line on who signed it. */
+function signatureShort(pkg: WidgetPackageInfo): string {
+    const s = pkg.signature;
+    switch (s?.state) {
+        case "signed":
+        case "signed_new":
+            return `Signed by ${s.publisher} · ${s.fingerprint}`;
+        case "key_changed":
+            return s.fingerprint ? `Signed by another key than ${s.publisher}'s (${s.fingerprint})` : `Not signed, unlike ${s.publisher}'s other widgets`;
+        default:
+            return "Not signed";
+    }
 }

@@ -436,6 +436,16 @@ jobs:
 
       - name: Doc Status vocabulary (changed docs only)
         run: bash scripts/check-doc-status.sh
+      # Unused Rust dependencies (#4207 S2). Every audit since 2026-07 found
+      # the same dead deps still present; this keeps the next one from
+      # landing. Reads Cargo.toml and source only, no build. A false
+      # positive goes in that crate's [package.metadata.cargo-machete].
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: No unused Rust dependencies (cargo machete)
+        run: cargo machete
       - name: Name-resolver callers (identity M3, spec §9.3)
         run: bash scripts/check-name-resolver-callers.sh
       - name: No new hand-rolled epoch time (use agentmux_common::time)
@@ -725,6 +735,15 @@ jobs:
       - name: tsc --noEmit
         if: matrix.shard == 1
         run: npx tsc --noEmit -p tsconfig.citypecheck.json
+      # npm dependencies match the imports (#4207 S2, the npm half of the
+      # cargo machete gate): fails on an unused dependency, or on an import
+      # that only resolves because npm hoisted someone else's dependency.
+      # knip.json's ignores: @emnapi/* are pinned on purpose (#2448, npm ci
+      # on Linux); "react" is a dead `/// <reference types>` in
+      # frontend/types/jsx.d.ts; `task` is the go-task binary.
+      - name: npm dependencies match imports (knip)
+        if: matrix.shard == 2
+        run: npx knip --dependencies --no-progress
       # Standalone, narrow config (eslint.theme-colors.config.js) --
       # deliberately NOT eslint.config.js's general ruleset, which has
       # 1200+ pre-existing violations unrelated to this and would make this

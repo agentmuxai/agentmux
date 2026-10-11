@@ -3,7 +3,7 @@
 //
 // Window-drag tasks: StartWindowDrag (Linux native drag), the macOS host-side
 // manual move loop, and the Windows Win32 manual move loop. Split out of
-// `ui_tasks.rs` unchanged.
+// the single-file `ui_tasks` module unchanged.
 
 use std::sync::Arc;
 use cef::*;

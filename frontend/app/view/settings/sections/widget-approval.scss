@@ -1,0 +1,30 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// widget-approval-details.tsx: what a widget asks for, in Settings → Widgets
+// and in an agent's install prompt.
+
+.widget-approval-details {
+    ul {
+        margin: var(--space-1) 0 var(--space-2) var(--space-4);
+    }
+
+    li.strong {
+        font-weight: 600;
+        color: var(--warning-color);
+    }
+}
+
+.widget-approval-meta {
+    color: var(--secondary-text-color);
+}
+
+.widget-approval-warning {
+    color: var(--warning-color);
+    margin: var(--space-2) 0;
+}
+
+.widget-approval-signature {
+    color: var(--secondary-text-color);
+    margin: var(--space-1) 0;
+}

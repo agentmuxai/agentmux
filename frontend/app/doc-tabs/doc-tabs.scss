@@ -5,6 +5,15 @@
 // pane header, above the pane's content. The pills themselves are
 // PaneTabStrip's.
 
+@use "../drop-feedback.scss" as drop;
+
+// A document tab from another pane hovering this one (doc-tab-hosts.ts
+// `registerDocTabDropZone`): the drop look goes on the pane's tab strip,
+// where the tab will land, wherever over the pane the pointer is.
+.doc-tab-host--drop-hover .pane-tab-strip {
+    @include drop.drop-target-hover;
+}
+
 .doc-tab-strip {
     display: flex;
     flex-shrink: 0;
@@ -13,5 +22,11 @@
 
     .doc-tab--preview .pane-tab-label {
         font-style: italic;
+    }
+
+    // A tab without an icon (Media's "New Tab") starts with its label: no
+    // empty icon box.
+    .doc-tab--no-icon .pane-tab-icon {
+        display: none;
     }
 }

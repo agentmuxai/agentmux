@@ -28,8 +28,9 @@ use std::time::{Duration, Instant};
 use agentmux_procstats::{ProcInfo, ProcKey, RateMeter};
 
 use crate::backend::process_tracker::registry::BlockMembers;
+use crate::backend::tower_agentmux::Describer;
 use crate::backend::process_tracker::{agent_started, TrackedProcess, TrackingConfidence};
-use crate::backend::rpc_types::{TowerHost, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
+use crate::backend::rpc_types::{TowerHost, TowerMachine, TowerProcess, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind};
 
 /// `TowerTask::id` of AgentMux's own processes.
 pub const AGENTMUX_TASK_ID: &str = "agentmux";
@@ -48,6 +49,26 @@ const STALE_AFTER: Duration = Duration::from_secs(10);
 /// Most processes one task's tree walk takes (a fork bomb shouldn't stall a
 /// sample).
 const MAX_TREE: usize = 2048;
+
+/// How long a task's exited process stays listed (dimmed, with what it
+/// used): long enough to see a build's compilers that a 2 s sample catches
+/// once or never. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.4.
+const EXITED_LINGER: Duration = Duration::from_secs(60);
+
+/// At most this many exited processes are kept, the newest: a big build
+/// runs thousands of compilers a minute.
+const MAX_EXITED: usize = 500;
+
+/// A task's process that has exited: what it was when last seen.
+#[derive(Clone)]
+struct Exited {
+    info: ProcInfo,
+    task: String,
+    role: TowerProcessRole,
+    peak: Option<u64>,
+    gone: Instant,
+    gone_ms: u64,
+}
 
 /// What the sampler is told about the panes.
 #[derive(Debug, Default)]
@@ -275,7 +296,8 @@ pub fn share(snap: &mut TowerSnapshot, top: usize, filter: &str, hidden: &dyn Fn
     let words: Vec<String> = filter.to_lowercase().split_whitespace().map(str::to_string).collect();
     host.processes.retain(|p| {
         let task = p.task.as_deref().and_then(|t| labels.get(t)).map_or("", String::as_str);
-        let hay = format!("{} {} {task}", p.name.to_lowercase(), p.pid);
+        let detail = p.detail.as_deref().unwrap_or("").to_lowercase();
+        let hay = format!("{} {} {task} {detail}", p.name.to_lowercase(), p.pid);
         words.iter().all(|w| hay.contains(w.as_str()))
     });
     host.matched = host.processes.len() as u32;
@@ -309,10 +331,16 @@ struct State {
     procs: RateMeter<ProcKey>,
     tasks: RateMeter<String>,
     sticky: HashMap<ProcKey, String>,
+    /// What each of AgentMux's own processes is (`tower_agentmux`).
+    describer: Describer,
     /// The last measurement: what a request within [`REUSE_WITHIN`] renders
     /// from, so it neither costs a second read nor shrinks the CPU window to
     /// milliseconds (one coarse clock tick over that would read as a spike).
     last: Option<Sampled>,
+    /// Each live process's most private memory seen.
+    peaks: HashMap<ProcKey, u64>,
+    /// Tasks' processes that exited within [`EXITED_LINGER`], oldest first.
+    exited: VecDeque<Exited>,
 }
 
 /// One measurement: the process table, every process's CPU rate, the grouping
@@ -324,6 +352,12 @@ struct Sampled {
     rates: Vec<Option<f64>>,
     grouping: Grouping,
     account_rates: HashMap<String, Option<f64>>,
+    /// AgentMux's own processes: index → what it is (`TowerProcess::detail`).
+    details: HashMap<usize, String>,
+    /// Each process's peak private memory, by index.
+    peaks: Vec<Option<u64>>,
+    /// Tasks' processes that exited within [`EXITED_LINGER`].
+    exited: Vec<Exited>,
 }
 
 /// The process-wide sampler. Its state is the previous sample (for CPU
@@ -345,7 +379,10 @@ impl Tower {
                 procs: RateMeter::new(),
                 tasks: RateMeter::new(),
                 sticky: HashMap::new(),
+                describer: Describer::default(),
                 last: None,
+                peaks: HashMap::new(),
+                exited: VecDeque::new(),
             }),
         }
     }
@@ -356,15 +393,18 @@ impl Tower {
     }
 
     /// A sample (module doc). BLOCKING: reads the process table, and `labels`
-    /// may read the store; call it off the async workers.
+    /// and `renderer` may read the store; call it off the async workers.
+    /// `renderer` says what a renderer PID serves ("window Main"), for the
+    /// AgentMux task's rows (`tower_agentmux::renderer_serves`).
     pub fn sample(
         &self,
         want_host: bool,
         hostname: &str,
         inputs: impl FnOnce() -> Inputs,
         labels: impl Fn(&str) -> Option<BlockLabel>,
+        renderer: impl Fn(u32) -> Option<String>,
     ) -> std::io::Result<TowerSnapshot> {
-        self.sample_from(agentmux_procstats::snapshot, want_host, hostname, inputs, labels)
+        self.sample_from(agentmux_procstats::snapshot, want_host, hostname, inputs, labels, renderer)
     }
 
     /// [`sample`](Self::sample) with the process table read by `snapshot`.
@@ -375,6 +415,7 @@ impl Tower {
         hostname: &str,
         inputs: impl FnOnce() -> Inputs,
         labels: impl Fn(&str) -> Option<BlockLabel>,
+        renderer: impl Fn(u32) -> Option<String>,
     ) -> std::io::Result<TowerSnapshot> {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let fresh = st.last.as_ref().is_some_and(|l| l.at.elapsed() < REUSE_WITHIN);
@@ -385,18 +426,28 @@ impl Tower {
                 st.procs = RateMeter::new();
                 st.tasks = RateMeter::new();
             }
-            let sampled = advance(&mut st, procs, &inputs(), now);
+            let sampled = advance(&mut st, procs, &inputs(), now, &agentmux_procstats::command_line_of);
             st.last = Some(sampled);
         }
         let last = st.last.as_ref().expect("measured above");
-        Ok(render(last, want_host, hostname, &labels))
+        Ok(render(last, want_host, hostname, &labels, &renderer))
     }
 }
 
 /// Measure: group the table, take every process's and task account's rate
 /// since the previous measurement, and remember sticky membership.
-fn advance(st: &mut State, procs: Vec<ProcInfo>, inputs: &Inputs, now: Instant) -> Sampled {
+/// `cmdline` reads a process's command line, for labelling AgentMux's own
+/// processes only (`tower_agentmux`).
+fn advance(
+    st: &mut State,
+    procs: Vec<ProcInfo>,
+    inputs: &Inputs,
+    now: Instant,
+    cmdline: &dyn Fn(ProcKey) -> Option<String>,
+) -> Sampled {
     let grouping = group(&procs, inputs, &st.sticky);
+    let details = st.describer.describe(&procs, &grouping.agentmux, inputs.own_pid, cmdline);
+    let (peaks, exited) = track_peaks_and_exits(st, &procs, now);
     // Every process's rate, every round, so the Host view has rates the
     // moment it is opened.
     let rates: Vec<Option<f64>> = procs
@@ -423,7 +474,58 @@ fn advance(st: &mut State, procs: Vec<ProcInfo>, inputs: &Inputs, now: Instant) 
         rates,
         grouping,
         account_rates,
+        details,
+        peaks,
+        exited,
     }
+}
+
+/// What a renderer row adds after its type: the window or pane it serves.
+fn renderer_suffix(detail: &str, pid: u32, renderer: &dyn Fn(u32) -> Option<String>) -> Option<String> {
+    (detail == "Renderer").then(|| renderer(pid)).flatten()
+}
+
+/// Update each process's peak memory, and note the tasks' members that were
+/// in the previous measurement and are gone from this one. Returns the
+/// peaks by index and the exited processes still within [`EXITED_LINGER`].
+fn track_peaks_and_exits(st: &mut State, procs: &[ProcInfo], now: Instant) -> (Vec<Option<u64>>, Vec<Exited>) {
+    let live: HashSet<ProcKey> = procs.iter().map(|p| p.key()).collect();
+    // Only a recent measurement says what exited just now. The sampler runs
+    // while a Tower pane is visible; after a gap (a hidden pane) what is gone
+    // went at any time in it, so nothing is listed as just exited.
+    let recent = st.last.as_ref().filter(|prev| now.duration_since(prev.at) <= STALE_AFTER);
+    if let Some(prev) = recent {
+        let gone_ms = agentmux_common::time::now_ms() as u64;
+        for g in &prev.grouping.tasks {
+            for &(i, role) in &g.members {
+                let p = &prev.procs[i];
+                if live.contains(&p.key()) {
+                    continue;
+                }
+                let peak = st.peaks.get(&p.key()).copied().or(p.mem_private);
+                st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, peak, gone: now, gone_ms });
+            }
+        }
+    }
+    // Gone past the linger, or (a PID reused with the same key is impossible,
+    // but a process seen gone in one read can reappear in the next) back.
+    st.exited.retain(|e| now.duration_since(e.gone) < EXITED_LINGER && !live.contains(&e.info.key()));
+    while st.exited.len() > MAX_EXITED {
+        st.exited.pop_front();
+    }
+    let mut peaks = HashMap::with_capacity(procs.len());
+    for p in procs {
+        let peak = match (st.peaks.get(&p.key()).copied(), p.mem_private) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        if let Some(v) = peak {
+            peaks.insert(p.key(), v);
+        }
+    }
+    st.peaks = peaks;
+    let by_index = procs.iter().map(|p| st.peaks.get(&p.key()).copied()).collect();
+    (by_index, st.exited.iter().cloned().collect())
 }
 
 /// A sum of rates, or `None` when none of them is known yet (a first
@@ -432,8 +534,14 @@ fn sum_known(rates: impl Iterator<Item = Option<f64>>) -> Option<f64> {
     rates.flatten().fold(None, |acc, r| Some(acc.unwrap_or(0.0) + r))
 }
 
-/// The answer from a measurement. Pure apart from `labels`.
-fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) -> Option<BlockLabel>) -> TowerSnapshot {
+/// The answer from a measurement. Pure apart from `labels` and `renderer`.
+fn render(
+    s: &Sampled,
+    want_host: bool,
+    hostname: &str,
+    labels: &dyn Fn(&str) -> Option<BlockLabel>,
+    renderer: &dyn Fn(u32) -> Option<String>,
+) -> TowerSnapshot {
     let (procs, rates, grouping) = (&s.procs, &s.rates, &s.grouping);
     let row = |i: usize, role: Option<TowerProcessRole>, task: Option<String>| {
         let p = &procs[i];
@@ -449,7 +557,34 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
             mem_commit: p.mem_commit,
             role,
             task,
+            detail: s.details.get(&i).map(|d| match renderer_suffix(d, p.pid, renderer) {
+                Some(serves) => format!("{d} · {serves}"),
+                None => d.clone(),
+            }),
+            cpu_time_ns: p.cpu_ns,
+            peak_mem: s.peaks.get(i).copied().flatten(),
+            exited_ms: None,
+            started_by: crate::backend::tool_calls::lookup(p.pid, p.started_at_ms).map(|c| c.description),
         }
+    };
+    let exited_of = |task: &str| -> Vec<TowerProcess> {
+        s.exited
+            .iter()
+            .filter(|e| e.task == task)
+            .map(|e| TowerProcess {
+                id: proc_id(&e.info),
+                pid: e.info.pid,
+                ppid: e.info.ppid,
+                name: e.info.name.clone(),
+                started_at_ms: e.info.started_at_ms,
+                role: Some(e.role),
+                cpu_time_ns: e.info.cpu_ns,
+                peak_mem: e.peak,
+                exited_ms: Some(e.gone_ms),
+                started_by: crate::backend::tool_calls::lookup(e.info.pid, e.info.started_at_ms).map(|c| c.description),
+                ..Default::default()
+            })
+            .collect()
     };
 
     let mut tasks = Vec::new();
@@ -459,8 +594,10 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
         } else {
             sum_known(g.members.iter().map(|m| rates[m.0]))
         };
-        // Nothing running and nothing used since the last sample: no row.
-        if g.members.is_empty() && cpu.unwrap_or(0.0) <= 0.0 {
+        let exited = exited_of(&g.id);
+        // Nothing running, nothing used since the last sample and nothing
+        // that just exited: no row.
+        if g.members.is_empty() && cpu.unwrap_or(0.0) <= 0.0 && exited.is_empty() {
             continue;
         }
         let Some(label) = labels(&g.id) else { continue };
@@ -473,6 +610,7 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
             cpu_account: g.cpu_time_ns.is_some(),
             mem: g.members.iter().filter_map(|&(i, _)| procs[i].mem_private).sum(),
             processes: g.members.iter().map(|&(i, role)| row(i, Some(role), None)).collect(),
+            exited: (!exited.is_empty()).then_some(exited),
         });
     }
 
@@ -490,6 +628,7 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
                 .iter()
                 .map(|&i| row(i, Some(TowerProcessRole::Main), None))
                 .collect(),
+            exited: None,
         });
     }
 
@@ -522,6 +661,13 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
         interval_ms: INTERVAL.as_millis() as u32,
         remote: false,
         tasks,
+        // Already measured for every process each round (`advance`), so the
+        // totals cost nothing even when the full list isn't asked for.
+        machine: Some(TowerMachine {
+            cpu: sum_known(rates.iter().copied()),
+            mem: procs.iter().filter_map(|p| p.mem_private).sum(),
+            processes: procs.len() as u32,
+        }),
         host,
     }
 }
@@ -539,12 +685,23 @@ mod tests {
         hostname: &str,
         labels: &dyn Fn(&str) -> Option<BlockLabel>,
     ) -> TowerSnapshot {
-        let sampled = advance(st, procs.to_vec(), inputs, now);
-        render(&sampled, want_host, hostname, labels)
+        let sampled = advance(st, procs.to_vec(), inputs, now, &|_| None);
+        let snap = render(&sampled, want_host, hostname, labels, &|_| None);
+        // As `Tower::sample_from` does: the next measurement compares to it.
+        st.last = Some(sampled);
+        snap
     }
 
     fn state() -> State {
-        State { procs: RateMeter::new(), tasks: RateMeter::new(), sticky: HashMap::new(), last: None }
+        State {
+            procs: RateMeter::new(),
+            tasks: RateMeter::new(),
+            sticky: HashMap::new(),
+            describer: Describer::default(),
+            last: None,
+            peaks: HashMap::new(),
+            exited: VecDeque::new(),
+        }
     }
 
     fn p(pid: u32, ppid: u32, name: &str) -> ProcInfo {
@@ -688,6 +845,62 @@ mod tests {
         Some(BlockLabel { label: format!("label {id}"), agent: id.starts_with("agent") })
     }
 
+    /// A build's compiler that exits between samples stays in its task's
+    /// `exited` list for a minute, with all the CPU it used and its peak
+    /// memory, then goes; it never counts as running.
+    #[test]
+    fn a_task_process_that_exits_lingers_a_minute_with_what_it_used() {
+        let mut st = state();
+        let t0 = Instant::now();
+        let mut snap = machine();
+        let inputs = Inputs { blocks: vec![tracked("agent-a", &[200, 201, 202, 203], &[200])], roots: vec![], own_pid: 110 };
+        let node = |snap: &mut Vec<ProcInfo>| snap.iter_mut().find(|x| x.pid == 203).unwrap().clone();
+        let set = |snap: &mut Vec<ProcInfo>, mem: u64, cpu_ns: u64| {
+            let n = snap.iter_mut().find(|x| x.pid == 203).unwrap();
+            n.mem_private = Some(mem);
+            n.cpu_ns = Some(cpu_ns);
+        };
+        set(&mut snap, 400, 1_000_000_000);
+        build(&mut st, &snap, &inputs, t0, false, "host", &label);
+        set(&mut snap, 100, 2_000_000_000);
+        let second = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(2), false, "host", &label);
+        let task = |s: &TowerSnapshot| s.tasks.iter().find(|t| t.id == "agent-a").cloned().unwrap();
+        let live = task(&second).processes.into_iter().find(|p| p.pid == 203).unwrap();
+        assert_eq!((live.peak_mem, live.cpu_time_ns), (Some(400), Some(2_000_000_000)), "the peak, not the current");
+        assert!(task(&second).exited.is_none());
+
+        let gone_key = node(&mut snap).key();
+        snap.retain(|x| x.pid != 203);
+        let third = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(4), false, "host", &label);
+        let t = task(&third);
+        assert!(t.processes.iter().all(|p| p.pid != 203), "an exited process isn't running");
+        let exited = t.exited.unwrap();
+        assert_eq!(exited.len(), 1);
+        let e = &exited[0];
+        assert_eq!(e.id, format!("{}:{}", gone_key.pid, gone_key.start_key));
+        assert_eq!((e.peak_mem, e.cpu_time_ns, e.cpu, e.mem), (Some(400), Some(2_000_000_000), None, None));
+        assert_eq!(e.role, Some(TowerProcessRole::Started));
+        assert!(e.exited_ms.is_some());
+
+        let later = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(4) + EXITED_LINGER, false, "host", &label);
+        assert!(task(&later).exited.is_none(), "gone after the linger");
+    }
+
+    /// After a gap (no Tower pane visible), what went missing in it isn't
+    /// listed as just exited.
+    #[test]
+    fn processes_gone_during_a_gap_are_not_listed_as_just_exited() {
+        let mut st = state();
+        let t0 = Instant::now();
+        let mut snap = machine();
+        let inputs = Inputs { blocks: vec![tracked("agent-a", &[200, 201, 202, 203], &[200])], roots: vec![], own_pid: 110 };
+        build(&mut st, &snap, &inputs, t0, false, "host", &label);
+        snap.retain(|x| x.pid != 203);
+        let after_gap = build(&mut st, &snap, &inputs, t0 + STALE_AFTER + Duration::from_secs(1), false, "host", &label);
+        let task = after_gap.tasks.iter().find(|t| t.id == "agent-a").unwrap();
+        assert!(task.exited.is_none(), "nothing just exited after a gap");
+    }
+
     #[test]
     fn rates_come_from_the_job_account_and_the_process_deltas() {
         let mut st = state();
@@ -724,6 +937,20 @@ mod tests {
         assert_eq!(node.task.as_deref(), Some("agent-a"));
         assert!(host.processes.iter().find(|x| x.pid == 900).unwrap().task.is_none());
         assert_eq!(node.id, "203:2030");
+
+        // The machine's totals come with every sample, the full list or not,
+        // and are the host list's own.
+        let machine = second.machine.clone().unwrap();
+        assert_eq!(machine.cpu, host.cpu);
+        assert_eq!(machine.mem, host.mem);
+        assert_eq!(machine.processes as usize, snap.len());
+        // (`build` measures again: a sample at the same instant has no CPU
+        // interval, so only what doesn't depend on one is compared.)
+        let without_list = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(2), false, "host", &label);
+        assert!(without_list.host.is_none());
+        let again = without_list.machine.unwrap();
+        assert_eq!((again.mem, again.processes), (machine.mem, machine.processes));
+        assert_eq!(first.machine.unwrap().cpu, None, "no made-up 0% on the first sample");
     }
 
     /// A build that started and finished between two samples: the tree has
@@ -800,9 +1027,9 @@ mod tests {
             Ok(machine())
         };
         let inputs = || Inputs { own_pid: 110, ..Default::default() };
-        let tasks_only = tower.sample_from(table, false, "h", inputs, label).unwrap();
+        let tasks_only = tower.sample_from(table, false, "h", inputs, label, |_| None).unwrap();
         assert!(tasks_only.host.is_none());
-        let with_host = tower.sample_from(table, true, "h", inputs, label).unwrap();
+        let with_host = tower.sample_from(table, true, "h", inputs, label, |_| None).unwrap();
         assert_eq!(reads.get(), 1, "one read for both");
         assert_eq!(with_host.ts_ms, tasks_only.ts_ms);
         assert_eq!(with_host.host.unwrap().processes.len(), machine().len());
@@ -815,8 +1042,8 @@ mod tests {
     fn a_real_sample_and_its_reuse() {
         let tower = Tower::new();
         let inputs = || Inputs { own_pid: std::process::id(), ..Default::default() };
-        let a = tower.sample(true, "h", inputs, |_| None).unwrap();
-        let b = tower.sample(false, "h", inputs, |_| None).unwrap();
+        let a = tower.sample(true, "h", inputs, |_| None, |_| None).unwrap();
+        let b = tower.sample(false, "h", inputs, |_| None, |_| None).unwrap();
         assert_eq!(a.ts_ms, b.ts_ms, "reused");
         assert!(a.host.as_ref().unwrap().processes.iter().any(|x| x.pid == std::process::id()));
         assert!(a.cpu_count >= 1);

@@ -7,6 +7,7 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/keybindings", () => ({
+    keyPlatform: () => "other",
     shortcutFor: (command: string) => (command === "pane:close" ? "⌘W" : ""),
     shortcutHelp: () => [
         { category: "Panes", entries: [{ label: "Split pane right", keys: ["⌘D"] }, { label: "Close pane", keys: ["⌘W"] }] },
@@ -16,6 +17,7 @@ vi.mock("@/app/keybindings", () => ({
 
 import { QuickTips } from "./quicktips";
 import { keyLabelWords } from "@/app/keybindings/help";
+import { setPlatform } from "@/util/platformutil";
 
 afterEach(() => cleanup());
 
@@ -53,6 +55,32 @@ describe("QuickTips filter", () => {
         render(() => <QuickTips filter="zzzz" />);
         expect(screen.getByText(/Nothing in Help matches/)).toBeTruthy();
         expect(screen.queryByText("Keyboard Shortcuts")).toBeNull();
+    });
+});
+
+describe("Mouse and gestures (SPEC_HELP_HIDDEN_TIPS_2026_10_10.md)", () => {
+    it("shows the hidden tips, and the filter finds them by gesture and place", () => {
+        setPlatform("win32");
+        render(() => <QuickTips filter="middle-click" />);
+        expect(screen.getByText("Mouse and gestures")).toBeTruthy();
+        expect(screen.getByText("Close the tab")).toBeTruthy();
+        expect(screen.getByText("Open it in a new tab")).toBeTruthy();
+        expect(screen.queryByText("Split pane right")).toBeNull();
+    });
+
+    it("hides the card when the filter matches no tip", () => {
+        render(() => <QuickTips filter="split" />);
+        expect(screen.queryByText("Mouse and gestures")).toBeNull();
+    });
+
+    it("leaves out a tip for another operating system", () => {
+        setPlatform("darwin");
+        render(() => <QuickTips filter="edge" />);
+        expect(screen.queryByText(/Give all the size change/)).toBeNull();
+        cleanup();
+        setPlatform("win32");
+        render(() => <QuickTips filter="edge" />);
+        expect(screen.getByText(/Give all the size change/)).toBeTruthy();
     });
 });
 

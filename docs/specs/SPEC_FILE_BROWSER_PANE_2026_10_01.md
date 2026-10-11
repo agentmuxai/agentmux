@@ -173,7 +173,7 @@ When the destination exists: **Replace, Skip, Keep both** (`name (2).ext`), with
 ### 7.3 Delete and undo
 - **Delete = move to the OS Trash**, no confirmation, with a toast and **Undo**. Uses the `trash` crate (Windows Recycle Bin, macOS Trash, freedesktop), on macOS with `NsFileManager` rather than the crate's Finder default, which prompts for Automation (§9.1.5). Its docs warn about undefined behaviour when called from multiple threads on Linux/FreeBSD, so all trash calls run on one dedicated worker.
 - **Permanent delete** (Shift+Delete, or Trash unavailable such as network shares): a confirmation naming the item(s), the count and "this can't be undone". No generic "Are you sure?".
-- **Undo** covers rename, move, new item and restore from trash. Windows and Linux use the `trash` crate's restore API. On macOS, `NSFileManager`'s `trashItemAtURL` returns the item's resulting URL in the Trash, so undo is a move back; whether the `trash` crate exposes that URL is to be checked, otherwise a direct `NSFileManager` call (a small new dependency) or the fallback of a toast offering "Reveal in Trash". Finder's "Put Back" is not offered for files trashed this way. The stack is per pane and in memory.
+- **Undo** covers rename, move, new item and restore from trash. Windows and Linux use the `trash` crate's restore API. On macOS the `trash` crate doesn't expose where an item went, so srv calls `NSFileManager`'s `trashItemAtURL` itself, keeps the resulting URL, and undo moves the item back, refusing if something has taken its name. It can only put back what was trashed since srv started. Finder's "Put Back" is not offered for files trashed this way. The stack is per pane and in memory.
 
 ### 7.4 Rename and create
 In-place, validated before the RPC: reserved device names, illegal characters, trailing dots and spaces (Windows silently strips them), empty names, and case-insensitive collisions. A **case-only rename** on a case-insensitive filesystem goes through a temporary name. New file and new folder create then enter rename mode.
@@ -403,7 +403,7 @@ The repo owner asked (2026-10-01) to implement the browser and "take it to the e
 4. **Mutation scope:** **any path, minus the protected list in §9**, which is refused outright in v1 rather than behind a typed confirmation.
 5. **Default root:** **Home** for a pane opened from the widget bar; `OpenFiles` opens wherever the agent says.
 6. **Undo across restarts:** **in memory, per pane.**
-7. **macOS Trash undo:** **not in v1.** Undo of a trash says it isn't supported on macOS yet; Windows and Linux restore through the `trash` crate.
+7. **macOS Trash undo:** not in v1; added later as a move back from where `trashItemAtURL` put the item (§7.3). Windows and Linux restore through the `trash` crate.
 8. **Remote roots:** **open.** Not needed for v1.
 9. **Dragging out to the OS:** **Copy path and Reveal for v1.**
 10. ~~Per-version bundle id~~ **Decided 2026-10-01: keep.** The reset on each release is intended, so every release re-tests the permission flow.

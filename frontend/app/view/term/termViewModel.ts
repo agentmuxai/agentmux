@@ -3,6 +3,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import { noteResolved, registerPaneCommandRunner, type RunResult } from "@/app/keybindings/app-api";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { isChordActive, resolveKeyEvent } from "@/app/store/keymodel-dispatch";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -74,6 +75,7 @@ class TermViewModel {
     searchAtoms?: SearchAtoms;
     voiceHandle: () => PaneVoiceHandle;
     private unregisterModel: () => void;
+    private unregisterCommands: () => void;
     private ctx: PaneTabHostContext;
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
@@ -313,6 +315,13 @@ class TermViewModel {
         // this block (the pane chrome's runtime badge, multi-input), which
         // then read those fields (ReAgent P1 on #3807).
         this.unregisterModel = termModels.register(blockId, this);
+        // The App API's RunCommand/PressKeys: the same commands as the keys,
+        // with a guard on paste (agents are first-class, with protections).
+        this.unregisterCommands = registerPaneCommandRunner(
+            blockId,
+            (command) => (command === "term:paste" ? this.agentPaste() : this.runTermCommand(command)),
+            async (command) => (command === "term:paste" ? this.pasteRefusal() : undefined)
+        );
     }
 
     isBasicTerm(): boolean {
@@ -369,6 +378,7 @@ class TermViewModel {
 
     dispose() {
         this.unregisterModel();
+        this.unregisterCommands();
         DefaultRouter.unregisterRoute(makeFeBlockRouteId(this.blockId));
         if (this.shellProcStatusUnsubFn) {
             this.shellProcStatusUnsubFn();
@@ -418,22 +428,10 @@ class TermViewModel {
             event.stopPropagation();
             return false;
         };
-        switch (resolved?.row.command) {
-            case "term:copy": {
-                const sel = this.termRef.current?.terminal.getSelection();
-                clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
-                return consume();
-            }
-            case "term:paste":
-                clipboardReadText()
-                    .then((text) => {
-                        this.termRef.current?.terminal.paste(text);
-                    })
-                    .catch((e) => console.log("clipboard read failed", e));
-                return consume();
-            case "term:clear":
-                this.termRef.current?.terminal?.clear();
-                return consume();
+        const command = resolved?.row.command;
+        if (command && this.runTermCommand(command)) {
+            noteResolved(command, "term");
+            return consume();
         }
         if ((resolved != null || isChordActive()) && appHandleKeyDown(muxEvent)) {
             return consume();
@@ -442,6 +440,49 @@ class TermViewModel {
         // stopPropagation keeps the app's document listener off it.
         event.stopPropagation();
         return true;
+    }
+
+    /**
+     * Why an agent may not paste now, or undefined. A line break in the
+     * clipboard runs that line unless the shell turned on bracketed paste, and
+     * an agent can't see what's on the clipboard the way a user can.
+     */
+    async pasteRefusal(): Promise<string | undefined> {
+        const terminal = this.termRef.current?.terminal;
+        if (!terminal) return "the terminal isn't ready";
+        if (terminal.modes.bracketedPasteMode) return undefined;
+        const text = await clipboardReadText().catch(() => "");
+        return /[\r\n]/.test(text)
+            ? "the clipboard has a line break and this shell hasn't turned on bracketed paste, so pasting would run that line; paste one line, or run the commands with the Shell tool"
+            : undefined;
+    }
+
+    async agentPaste(): Promise<RunResult> {
+        const why = await this.pasteRefusal();
+        if (why) return { ran: false, reason: `term:paste: ${why}` };
+        return this.runTermCommand("term:paste") ? { ran: true } : { ran: false, reason: "term:paste didn't apply" };
+    }
+
+    /** The terminal's own commands, run by its keys and by the App API's RunCommand. */
+    runTermCommand(command: string): boolean {
+        switch (command) {
+            case "term:copy": {
+                const sel = this.termRef.current?.terminal.getSelection();
+                clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
+                return true;
+            }
+            case "term:paste":
+                clipboardReadText()
+                    .then((text) => {
+                        this.termRef.current?.terminal.paste(text);
+                    })
+                    .catch((e) => console.log("clipboard read failed", e));
+                return true;
+            case "term:clear":
+                this.termRef.current?.terminal?.clear();
+                return true;
+        }
+        return false;
     }
 
     forceRestartController() {

@@ -15,6 +15,7 @@ mod identity;
 mod migrations;
 mod persist;
 mod persist_subscriber;
+mod proc_name;
 mod reducer;
 mod registry;
 mod sagas;
@@ -47,6 +48,7 @@ async fn main() {
     {
         let args: Vec<String> = std::env::args().collect();
         if args.get(1).map(String::as_str) == Some(backend::attachments::extract::CHILD_ARG) {
+            proc_name::set(proc_name::DOC_CHILD);
             std::process::exit(backend::attachments::extract::run_child(&args[2..]));
         }
     }
@@ -54,6 +56,9 @@ async fn main() {
     if bootstrap::maybe_run_crash_monitor() {
         return;
     }
+    // Linux: a stable name for ps/top instead of the versioned file name's
+    // first 15 bytes. This runs on the main thread (tokio's block_on).
+    proc_name::set(proc_name::MAIN);
 
     // Before anything changes the environment (srv_info.rs).
     srv_info::capture_home_dir();

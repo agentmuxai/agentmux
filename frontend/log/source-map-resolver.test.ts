@@ -14,7 +14,7 @@ import {
 /**
  * Build a SourceMapConsumer from a pre-encoded map literal. source-map-js
  * doesn't include a generator API, so we hand-author a tiny map with one
- * mapping point: generated line 3 col 0 → orig.ts line 11 col 5 (name "myFn").
+ * mapping point: generated line 3 col 0 → orig.ts line 11 col 5 (name "myFn"). (comment-hygiene: allow)
  *
  * The version field is the literal number `3` rather than a typed `number`;
  * `RawSourceMap.version` is typed `3` (literal) in source-map-js, which is
@@ -33,7 +33,7 @@ async function buildConsumer(): Promise<SourceMapConsumer> {
         sourcesContent: ["function myFn() { /* original */ }\n"],
         names: ["myFn"],
         // Three generated lines (two `;;`), one segment on line 3:
-        //   gen line 3, col 0 → orig.ts:11:5 (name myFn).
+        //   gen line 3, col 0 → orig.ts:11:5 (name myFn). (comment-hygiene: allow)
         // VLQ encoding of [0, 0, 10, 5, 0] → "AAUKA".
         mappings: ";;AAUKA",
     } as unknown as RawSourceMap;

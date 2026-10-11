@@ -13,13 +13,15 @@
 import http from "node:http";
 
 /**
- * Start the server. `toolInput` is the Bash call to script. Resolves to
- * `{ url, requests, close }`; `requests` records each request's path and kind,
- * for a failure message.
+ * Start the server. `toolInputs` is the Bash call to script, or a list of
+ * them, made one per request in order (ids `toolu_contract_1`, `_2`, ...).
+ * Resolves to `{ url, requests, close }`; `requests` records each request's
+ * path and kind, for a failure message.
  */
-export function startFakeAnthropic(toolInput) {
+export function startFakeAnthropic(toolInputs) {
+  const calls = Array.isArray(toolInputs) ? toolInputs : [toolInputs];
   const requests = [];
-  let toolCallSent = false;
+  let callsSent = 0;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
@@ -45,10 +47,10 @@ export function startFakeAnthropic(toolInput) {
       }
       const offersBash = Array.isArray(parsed.tools) && parsed.tools.some((t) => t?.name === "Bash");
       const content =
-        offersBash && !toolCallSent
-          ? [{ type: "tool_use", id: "toolu_contract_1", name: "Bash", input: toolInput }]
+        offersBash && callsSent < calls.length
+          ? [{ type: "tool_use", id: `toolu_contract_${callsSent + 1}`, name: "Bash", input: calls[callsSent] }]
           : [{ type: "text", text: "OK" }];
-      if (content[0].type === "tool_use") toolCallSent = true;
+      if (content[0].type === "tool_use") callsSent++;
       requests.push({ path, kind: content[0].type, stream: parsed.stream === true });
       const message = {
         id: `msg_contract_${requests.length}`,

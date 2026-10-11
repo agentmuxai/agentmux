@@ -39,7 +39,7 @@ pub mod cgroup_linux;
 
 pub mod scan;
 
-// `stub` is defined inline below; there is no `stub.rs`. A file-form
+// `stub` is defined inline below; there is no separate `stub` file. A file-form
 // `pub mod stub;` here would collide with it (E0428) and break `task dev`.
 
 /// A single process tracked by the host — PID + metadata enriched

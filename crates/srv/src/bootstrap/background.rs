@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Split out of bootstrap.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.3).
+//! Split out of the single-file bootstrap module unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.3).
 
 use super::*;
 
@@ -157,6 +157,14 @@ pub fn spawn_background_subsystems(
         backend::reactive::progress_watcher::run_agent_progress_loop(
             progress_filestore, progress_broker,
         ).await;
+    });
+
+    // Keep each agent's repository, branch and uncommitted files fresh for
+    // WhoIsWorkingOn and ListConversations (backend/work_facts/git.rs): git
+    // runs here, never on a request.
+    let work_facts_mstore = Arc::clone(mstore);
+    tokio::spawn(async move {
+        backend::work_facts::git::run_git_refresh_loop(work_facts_mstore).await;
     });
 
     // Reactive handler (global singleton) + poller

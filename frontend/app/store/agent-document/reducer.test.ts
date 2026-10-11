@@ -254,8 +254,7 @@ describe("agent document reducer", () => {
             // because the parser pre-merged the second text_delta and the
             // reducer processed updatedNodes before newNodes — so the update
             // was dropped as orphan and the un-merged first-delta node was
-            // appended. See reports/agentmux/PLAN_AGENT_PANE_TEXT_TRUNCATION_
-            // FIX_2026-05-28.md.
+            // appended.
             const r = update(initialState(), {
                 type: "StreamFlush",
                 newNodes:     [md("n1", "Y")],

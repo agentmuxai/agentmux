@@ -32,7 +32,7 @@
 // DEAD FILE REFERENCES (rule C7), also part of the gate:
 //   - An added comment that names a file not in the repo fails when the name
 //     is a doc (`SPEC_…`, `docs/…`) or a repo-rooted path (`crates/…`,
-//     `frontend/…`); a bare name (`persistent.rs`) or partial path only warns.
+//     `frontend/…`); a bare name (`persistent.rs`) or partial path only warns. (comment-hygiene: allow)
 //     The split follows a triage of every dead reference on main: repo paths
 //     were 95% genuinely stale and doc names 72%, bare names and partial paths
 //     under 60% (property accesses, other repos, history).
@@ -40,13 +40,16 @@
 //     that still names it, so a split updates its pointers in the same PR.
 //     Only names that no longer exist anywhere count (`mod.rs` leaving one
 //     directory proves nothing). This is what left 67 comments pointing at
-//     `persistent.rs` and `bootstrap.rs` after their splits.
+//     `persistent.rs` and `bootstrap.rs` after their splits. (comment-hygiene: allow)
 //   Comments are read in .ts/.tsx/.rs, the JavaScript family and stylesheets;
 //   the narration and density rules above stay on .ts/.tsx/.rs. Shell,
 //   PowerShell (`#` comments) and Markdown are not read.
 //   Runtime files AgentMux writes (CLAUDE.md, ...), sibling repos and the old
-//   `src-tauri/` tree are not repo files and are skipped. The same opt-out
-//   applies, for a deliberately historical or illustrative name.
+//   `src-tauri/` tree are not repo files and are skipped. So is a bare name the
+//   file's own code uses (a property access, a test's fixture, a file name read
+//   at runtime). The same opt-out applies, for a deliberately historical
+//   or illustrative name; a historical one usually reads better naming the
+//   module (`the single-file bootstrap module`) than a file that is gone.
 //
 // CODE-EQUAL. For every .ts/.tsx/.rs file that differs from the merge-base with
 // <base>, strips the comments and compares the rest, with whitespace outside
@@ -388,14 +391,26 @@ export function narrationRule(text) {
 // this repo.
 const REF_EXT = "rs|tsx?|jsx?|mjs|cjs|sh|ps1|scss|css|md";
 const REF_FILE = new RegExp(`\\.(?:${REF_EXT})$`);
+// commentRefs drops a name that is the tail of a glob (`Attachment*Event.ts`,
+// a word right before the `*`) or of an octal escape (`Caf\303\251.md`). A
+// Markdown-emphasised name (`*src/x.rs*`) and a Windows path (`frontend\app\x.ts`) (comment-hygiene: allow)
+// are still read.
 const REF_RE = new RegExp(`(?<![\\w./@-])((?:\\.{1,2}/)*(?:[\\w@.-]+/)*[\\w@-][\\w@.-]*\\.(?:${REF_EXT}))(?![\\w/-])`, "g");
+const OCTAL_ESCAPE_TAIL = /^[0-7]{3}\./;
 // Names that are real but not files in this repo: what AgentMux writes into an
 // agent's workdir or reads from a provider CLI's config, sibling repos, and the
 // pre-CEF `src-tauri/` tree that "ported from" comments cite. Measured against a
 // full triage of the tree's dead references (REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md §6).
-const FOREIGN_REF = /^(?:CLAUDE|CLAUDE\.local|AGENTS|GEMINI|QWEN|MEMORY|AGENTMUX_MEMORY|SKILL|SYSTEM|APPEND_SYSTEM|copilot-instructions)\.md$/;
+// Also: package paths (`vite/…`, `shiki/…`), the xterm.js repository, and a
+// crate's versioned source folder in the cargo registry (`keyring-2.3.3/…`).
+const FOREIGN_REF =
+    /^(?:CLAUDE|CLAUDE\.local|CLAUDE_CONTAINER|AGENTS|GEMINI|QWEN|KIMI|MEMORY|AGENTMUX_MEMORY|SKILL|SYSTEM|APPEND_SYSTEM|copilot-instructions)\.md$/;
+// Generic names that are foreign only on their own (a bundle's `notes.md`, a
+// provider's `system_prompt.md`, the TypeScript compiler's `lib.*.d.ts`): with a
+// folder in front (`docs/notes.md`) they name a repo file and are checked. (comment-hygiene: allow)
+const FOREIGN_BARE = /^(?:(?:system_prompt|notes)\.md|lib(?:\.[\w-]+)+\.d\.ts)$/;
 const FOREIGN_PREFIX =
-    /^(?:\.claude|\.codex|\.gemini|\.qwen|\.pi|\.copilot|\.agentmux|\.github\/instructions|~|HOME|agentmux-cloud|agentmux-ai|muxbus|reagent|src-tauri|node_modules)\//;
+    /^(?:\.claude|\.codex|\.gemini|\.qwen|\.pi|\.copilot|\.agentmux|\.github\/instructions|~|HOME|agentmux-cloud|agentmux-ai|muxbus|reagent|src-tauri|node_modules|vite|shiki|xtermjs|[\w-]+-\d+\.\d+\.\d+)\//;
 const DOC_NAME = /^(?:SPEC|REPORT|PLAN|RUNBOOK|RETRO|ADR|PRD|AUDIT)_[A-Za-z0-9_.-]+\.md$/;
 
 const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
@@ -407,7 +422,7 @@ export function cleanRef(ref) {
 
 /**
  * File references in a lexed file's comments: `[{ line, ref }]`, 1-based lines.
- * A name hard-wrapped across two comment lines (`SPEC_FOO_` / `2026_01_01.md`)
+ * A name hard-wrapped across two comment lines (`SPEC_FOO_` / `2026_01_01.md`) (comment-hygiene: allow)
  * is joined back together.
  */
 export function commentRefs(info) {
@@ -417,16 +432,19 @@ export function commentRefs(info) {
         const body = normalizeComment(l.text);
         for (const m of body.matchAll(REF_RE)) {
             let ref = m[1];
+            const before = body[m.index - 1];
+            if (before === "\\" && OCTAL_ESCAPE_TAIL.test(ref)) continue;
+            if (before === "*" && /\w/.test(body[m.index - 2] || "")) continue;
             const prev = idx > 0 ? normalizeComment(info.lines[idx - 1].text) : "";
             if (m.index === 0 && prev) {
                 const tail = /[\w@./-]+$/.exec(prev);
                 // Only a real mid-name break: the previous line ends in a word
                 // character plus `_`/`-` (`SPEC_FOO_`), or this piece starts with
-                // a digit (`2026_01_01.md`). An SCSS partial (`_x.scss`) or a
+                // a digit (`2026_01_01.md`). An SCSS partial (`_x.scss`) or a (comment-hygiene: allow)
                 // `--` separator is not a continuation.
                 if (tail && (/^_?\d/.test(ref) || /[A-Za-z0-9][_-]$/.test(tail[0]))) ref = tail[0] + ref;
             }
-            // `a.ts/b.ts` is a list of two names, not a path: a directory
+            // `a.ts/b.ts` is a list of two names, not a path: a directory (comment-hygiene: allow)
             // segment never carries a source extension.
             const segs = ref.split("/");
             const parts = segs.slice(0, -1).some((s) => REF_FILE.test(s)) ? segs.filter((s) => REF_FILE.test(s)) : [ref];
@@ -460,7 +478,8 @@ export function isForeignRef(ref) {
     // TypeScript/Rust tree; a `.js` path is still checked, and so is a bare
     // name when its file is removed (staleAfterMove does not use this).
     const bareJs = !r.includes("/") && /\.jsx?$/.test(r);
-    return bareJs || FOREIGN_REF.test(baseName(r)) || FOREIGN_PREFIX.test(r) || r.includes("...") || r.includes("*");
+    const bareGeneric = !r.includes("/") && FOREIGN_BARE.test(r);
+    return bareJs || bareGeneric || FOREIGN_REF.test(baseName(r)) || FOREIGN_PREFIX.test(r) || r.includes("...") || r.includes("*");
 }
 
 /** True when some tracked file is what `ref` names (by full path, path suffix, or basename). */
@@ -473,10 +492,30 @@ export function resolvesRef(ref, index) {
 }
 
 /**
+ * True when a bare name (`kind` "bare") is a name the file's own code uses,
+ * not a pointer at a repo file: a property access (`item.ts`, a timestamp (comment-hygiene: allow)
+ * field), a fixture a test passes around, or a file name the code reads or
+ * writes at runtime. Doc names and repo-rooted paths are never excused this way.
+ */
+export function isBareNonRef(ref, info) {
+    const r = cleanRef(ref);
+    if (!info?.code) return false;
+    const escaped = r.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    return new RegExp(`(?<![\\w$./\\\\-])${escaped}(?![\\w$/-])`).test(info.code);
+}
+
+/** True when a comment's file name needs no attention (rule C7). */
+function refIsFine(ref, info, index) {
+    if (isForeignRef(ref) || resolvesRef(ref, index)) return true;
+    return refKind(ref, index) === "bare" && isBareNonRef(ref, info);
+}
+
+/**
  * Dead file references on added lines of one file. An unresolved `doc` or
  * `path` reference is an error; a `bare` name only warns, because bare names
- * collide with property accesses (`item.ts`) and other repos' files. Comments
- * that only moved (see gateFile) are skipped.
+ * collide with property accesses and other repos' files (see isBareNonRef for
+ * the cases that are skipped outright). Comments that only moved (see
+ * gateFile) are skipped.
  */
 export function deadRefFindings(info, added, index, moved = new Set()) {
     const errors = [];
@@ -484,7 +523,7 @@ export function deadRefFindings(info, added, index, moved = new Set()) {
     for (const { line, ref, text } of commentRefs(info)) {
         if (!added.has(line) || text.includes(ALLOW_TOKEN)) continue;
         if (moved.has(normalizeComment(text))) continue;
-        if (isForeignRef(ref) || resolvesRef(ref, index)) continue;
+        if (refIsFine(ref, info, index)) continue;
         const kind = refKind(ref, index);
         const message =
             `comment names \`${ref}\`, which is not in this repo. Point it at the current file or drop it (rule C7). ` +
@@ -842,7 +881,7 @@ function runDeadRefs(json) {
     const rows = [];
     for (const { file, info } of lexTree(tree)) {
         for (const { line, ref, text } of commentRefs(info)) {
-            if (isForeignRef(ref) || resolvesRef(ref, index)) continue;
+            if (refIsFine(ref, info, index)) continue;
             rows.push({ file, line, ref, kind: refKind(ref, index), allowed: text.includes(ALLOW_TOKEN), text: text.trim() });
         }
     }
@@ -850,10 +889,13 @@ function runDeadRefs(json) {
         console.log(JSON.stringify(rows, null, 1));
         return 0;
     }
+    // Opted-out lines are deliberate; count them, but list only the rest.
+    const open = rows.filter((r) => !r.allowed);
     const by = {};
-    for (const r of rows) by[r.kind] = (by[r.kind] || 0) + 1;
-    for (const r of rows) console.log(`${r.file}:${r.line}: [${r.kind}] ${r.ref}`);
-    console.log(`\n${rows.length} unresolved reference(s): ${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+    for (const r of open) by[r.kind] = (by[r.kind] || 0) + 1;
+    for (const r of open) console.log(`${r.file}:${r.line}: [${r.kind}] ${r.ref}`);
+    const kinds = Object.entries(by).map(([k, v]) => `${k} ${v}`).join(", ");
+    console.log(`\n${open.length} unresolved reference(s)${kinds ? `: ${kinds}` : ""}; ${rows.length - open.length} opted out with \`${ALLOW_TOKEN}\`.`);
     return 0;
 }
 

@@ -17,7 +17,6 @@
 import type { DynamicImportLanguageRegistration } from "shiki/core";
 import {
     bundledLanguages as webLanguages,
-    bundledThemes,
     createBundledHighlighter,
     createSingletonShorthands,
     guessEmbeddedLanguages,
@@ -56,9 +55,22 @@ export const extraLanguages: Record<string, DynamicImportLanguageRegistration> =
     EXTRA.flatMap(([id, aliases, load]) => [id, ...aliases].map((name) => [name, load]))
 );
 
+/**
+ * Only the themes something renders with: HighlightedCode and the preview
+ * text use the dark one, and the shell highlighter colours both so a theme
+ * flip needs no re-highlight (embedded-highlight.ts). Registering Shiki's
+ * `bundledThemes` instead shipped all ~65 as chunks, about 1.3 MB of JS for
+ * two of them (#4207 F1). A new theme name must be added here, or Shiki
+ * rejects it at highlight time.
+ */
+const themes = {
+    "github-dark-high-contrast": () => import("shiki/themes/github-dark-high-contrast.mjs"),
+    "github-light-high-contrast": () => import("shiki/themes/github-light-high-contrast.mjs"),
+};
+
 const createHighlighter = createBundledHighlighter({
     langs: { ...webLanguages, ...extraLanguages },
-    themes: bundledThemes,
+    themes,
     engine: () => createOnigurumaEngine(import("shiki/wasm")),
 });
 

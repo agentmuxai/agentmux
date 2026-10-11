@@ -14,7 +14,7 @@
  * "your agents, with their current state", not "sessions across all
  * agents". Naming follows the new model.
  *
- * Renamed from RecentSessionsList.tsx (the cascade follow-up file
+ * Renamed from RecentSessionsList (the cascade follow-up file
  * shipped in PR #977 + #1008). The reattach mechanism, data source, and
  * row UI are unchanged from that file — only the labels move. The data
  * source stays `ListRecentSessionsCommand` because the row UI uses

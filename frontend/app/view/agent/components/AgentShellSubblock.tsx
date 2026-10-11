@@ -32,6 +32,7 @@ import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shel
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { isModKey } from "@/util/platformutil";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
@@ -432,7 +433,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
             // (app.tsx) — let it bubble there instead of zooming just this
             // sub-block. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!ev.ctrlKey || ev.shiftKey) return;
+            if (!isModKey(ev) || ev.shiftKey) return;
             const id = subBlockId();
             if (!id) return;
             ev.preventDefault();

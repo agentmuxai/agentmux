@@ -89,11 +89,6 @@
     max-width: 260px;
 }
 
-.browser-profile-dim {
-    cursor: default;
-    color: var(--secondary-text-color);
-}
-
 .browser-address-bar {
     flex: 1;
     height: 28px;
@@ -148,6 +143,23 @@
         display: flex;
         align-items: center;
         gap: var(--space-2);
+    }
+
+    // An agent waits on the user: the attention colour, a heavy left line,
+    // and a larger head (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §1).
+    &--agent {
+        background: var(--attention-bg-color);
+        border-left: 3px solid var(--attention-color);
+        border-bottom-color: color-mix(in srgb, var(--attention-color) 45%, transparent);
+
+        .browser-attention-head {
+            font-size: 14px;
+
+            > i {
+                color: var(--attention-color);
+                font-size: 16px;
+            }
+        }
     }
 
     .browser-attention-fields {

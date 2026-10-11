@@ -560,6 +560,26 @@ describe("ClaudeTranslator", () => {
             expect((events[0] as any).retryAfterMs).toBeNull();
         });
 
+        // Claude Code 2.1.x reports usage this way on ordinary requests.
+        it("a rate_limit_event that is only a usage report (allowed) is not a rate limit", () => {
+            const t = new ClaudeTranslator();
+            for (const status of ["allowed", "allowed_warning"]) {
+                const events = t.translate({
+                    type: "rate_limit_event",
+                    rate_limit_info: { status, resetsAt: 1791619200, rateLimitType: "five_hour" },
+                });
+                expect(events).toEqual([]);
+            }
+        });
+
+        it("a rejected rate_limit_event is a rate limit", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1791619200 } });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("provider_waiting");
+            expect((events[0] as any).retryAfterMs).toBeNull();
+        });
+
         it("reset clears all state", () => {
             const t = new ClaudeTranslator();
             // Build up some state

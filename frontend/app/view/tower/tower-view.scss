@@ -216,3 +216,227 @@ tr:hover .tower-reveal,
 .tower-reveal:focus-visible {
     opacity: 1;
 }
+
+// ── The Agents view: a rail of agents beside the selected one's processes,
+// laid out like Hangar's places and list. ──
+
+.tower-view {
+    container-type: inline-size;
+}
+
+.tower-agents {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: var(--space-3);
+}
+
+.tower-rail {
+    display: flex;
+    flex-direction: column;
+    width: 200px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-color);
+    padding-right: var(--space-2);
+    min-height: 0;
+
+    @container (max-width: 560px) {
+        width: 150px;
+    }
+}
+
+.tower-rail-bar {
+    padding-bottom: var(--space-1);
+}
+
+.tower-rail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow-y: auto;
+    outline: none;
+
+    &:focus-visible {
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+}
+
+// Two lines, so the name has the row's width: swatch, name and CPU, then
+// memory and the last minute's CPU under the name.
+.tower-rail-row {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    grid-template-areas:
+        "swatch name cpu"
+        ". mem spark";
+    align-items: center;
+    column-gap: var(--space-2);
+    row-gap: 2px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    > .tower-swatch {
+        grid-area: swatch;
+    }
+
+    @container (max-width: 560px) {
+        grid-template-areas: "swatch name cpu";
+
+        .tower-rail-mem,
+        .tower-spark {
+            display: none;
+        }
+    }
+}
+
+.tower-rail-row--selected {
+    background: var(--hover-bg-color);
+    box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+// The fixed entries sit under the agents, set apart by a rule above the first.
+.tower-rail-row--agent + .tower-rail-row:not(.tower-rail-row--agent) {
+    margin-top: var(--space-1);
+    border-top: 1px solid var(--border-color);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.tower-rail-name {
+    grid-area: name;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tower-rail-cpu {
+    grid-area: cpu;
+    font-variant-numeric: tabular-nums;
+}
+
+.tower-rail-mem {
+    grid-area: mem;
+    font-size: 0.9em;
+    font-variant-numeric: tabular-nums;
+}
+
+.tower-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.tower-swatch--fixed {
+    color: var(--secondary-text-color);
+    font-size: 10px;
+}
+
+.tower-spark {
+    grid-area: spark;
+    justify-self: end;
+    width: 60px;
+    height: 16px;
+    color: var(--secondary-text-color);
+}
+
+.tower-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-y: auto;
+}
+
+.tower-detail-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.tower-detail-name {
+    font-weight: 600;
+    font-size: 1.05em;
+}
+
+.tower-detail-totals {
+    font-size: 0.92em;
+    font-variant-numeric: tabular-nums;
+}
+
+.tower-detail-bar {
+    display: flex;
+    gap: var(--space-1);
+}
+
+// Where a tree row's arrow would be, so names line up whether or not a
+// process started anything.
+.tower-chevron-space {
+    display: inline-block;
+    width: 24px;
+    flex-shrink: 0;
+}
+
+.tower-many-row .tower-label {
+    font-weight: 500;
+}
+
+// ── The Processes view grouped by agent: each owner a header row, an agent's
+// in its color as a stripe down the group, the way the Agents rail shows it. ──
+
+.tower-owner-row {
+    .tower-label {
+        font-weight: 600;
+    }
+
+    td:first-child {
+        box-shadow: inset 3px 0 0 var(--tower-owner-color, transparent);
+    }
+}
+
+.tower-process-row--owned td:first-child {
+    box-shadow: inset 3px 0 0 var(--tower-owner-color);
+}
+
+// An app inside "Other processes": one level in, its processes two.
+.tower-group-row--nested .tower-name {
+    padding-left: 24px;
+}
+
+.tower-process-row--deep .tower-name {
+    padding-left: 54px;
+}
+
+// The owner carried over from the Agents view, with the way back to all.
+.tower-only {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--accent-color);
+    white-space: nowrap;
+}
+
+// A process that exited in the last minute: still in its tree, dimmed.
+.tower-process-row--exited {
+    opacity: 0.55;
+}
+
+// The tool call a process runs, after its name: muted, cut off if long.
+.tower-started-by {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+    font-style: italic;
+}

@@ -4,14 +4,33 @@
 // Shortcut labels for the current platform. Every place the UI shows a key
 // uses these, so a hint can't disagree with the binding.
 
-import { isMacOS } from "@/util/platformutil";
+import { isLinux, isMacOS } from "@/util/platformutil";
+import { noteResolved } from "./app-api";
+export { registerPaneCommandRunner } from "./app-api";
 import type { KeyPane } from "./defaults";
 import { helpSections, type HelpSection } from "./help";
 import { formatKey, parseKey, type KeyEventLike, type KeyPlatform } from "./keys";
-import { formatCommand, keybindingsVersion, keysFor, matchPaneKey } from "./registry";
+import { formatCommand, keybindingsVersion, keysFor, matchPaneKey, resolveKey, type KeyContext } from "./registry";
+
+let keyContext: () => KeyContext = () => ({ textInputFocus: false, terminalFocus: false, viewType: "", docTabsHost: false });
+
+/** Where focus is, for `isGlobalKey`: the dispatcher supplies it at load
+ *  (keymodel-dispatch's currentKeyContext), which avoids an import cycle. */
+export function setKeyContextProvider(provider: () => KeyContext): void {
+    keyContext = provider;
+}
+
+/**
+ * Whether the shortcut table gives this key a global command where focus is
+ * now. A pane's own key handler leaves such a key to the dispatcher, even an
+ * arrow or Page key it would otherwise take (⌃⇧↑ in the Files list).
+ */
+export function isGlobalKey(e: KeyboardEvent): boolean {
+    return resolveKey(keyEventLike(e), keyContext(), keyPlatform()) != null;
+}
 
 export function keyPlatform(): KeyPlatform {
-    return isMacOS() ? "mac" : "other";
+    return isMacOS() ? "mac" : isLinux() ? "linux" : "other";
 }
 
 /** The shortcut for a command ("Ctrl+Shift+T", "⌘T"), or "" if it has none. */
@@ -46,7 +65,9 @@ export function keyEventLike(e: KeyboardEvent): KeyEventLike {
 
 /** The command a pane's own handler should run for `e` (its `pane` rows). */
 export function paneCommandFor(e: KeyboardEvent, pane: KeyPane): string | null {
-    return matchPaneKey(keyEventLike(e), pane, keyPlatform());
+    const command = matchPaneKey(keyEventLike(e), pane, keyPlatform());
+    if (command) noteResolved(command, pane);
+    return command;
 }
 
 /** A command's keys in CodeMirror's syntax ("Ctrl-Shift-s", "Meta-s"), so an

@@ -11,6 +11,7 @@ import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager
 import { WardenSupervisorManager } from "@/app/view/warden-supervisor/warden-supervisor-manager";
 import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
+import { isModKey } from "@/util/platformutil";
 
 const RAIL: TabItem<WardenSection>[] = [
     { id: "host",       label: WARDEN_SECTION_LABELS.host,       icon: "server" },
@@ -39,7 +40,7 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
             // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
             // (app.tsx) — let it bubble there instead of zooming just this
             // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!ev.ctrlKey || ev.shiftKey) return;
+            if (!isModKey(ev) || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const STEP = 0.1;

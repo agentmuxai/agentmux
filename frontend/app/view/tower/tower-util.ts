@@ -4,7 +4,7 @@
 // Tower's pure helpers: formatting, sorting and filtering. The model and view
 // hold no logic of their own beyond wiring these to signals.
 
-import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
+import type { TowerProcess, TowerSnapshot, TowerTask } from "@/app/store/rpc-api";
 import { formatBytes } from "@/util/format-bytes";
 
 /** `machine`: percent of the whole machine, 0–100 whatever the core count
@@ -12,7 +12,9 @@ import { formatBytes } from "@/util/format-bytes";
  *  Activity Monitor, the pane badge). */
 export type CpuMode = "machine" | "core";
 
-export type TowerView = "tasks" | "host";
+/** `agents`: the rail of agents and what each runs. `processes`: every
+ *  process on the machine. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3. */
+export type TowerView = "agents" | "processes";
 
 export type SortKey = "name" | "cpu" | "mem" | "count";
 export interface Sort {
@@ -40,6 +42,23 @@ export function count(n: number, noun: string): string {
 
 export function formatMem(bytes: number | undefined): string {
     return bytes == null ? "—" : formatBytes(bytes);
+}
+
+/** CPU time used, from nanoseconds: "0.4 s", "12 s", "4 min 5 s",
+ *  "1 h 2 min". */
+export function formatCpuTime(ns: number | undefined): string {
+    if (ns == null || !Number.isFinite(ns)) return "—";
+    const sec = ns / 1e9;
+    if (sec < 60) return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} min ${Math.floor(sec % 60)} s`;
+    return `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
+/** How long ago, from two unix-ms times: "4 s ago", "2 min ago". */
+export function formatAgo(thenMs: number, nowMs: number): string {
+    const sec = Math.max(0, Math.round((nowMs - thenMs) / 1000));
+    return sec < 60 ? `${sec} s ago` : `${Math.floor(sec / 60)} min ago`;
 }
 
 /** Unknown values sort as the smallest, so "—" rows sink under a descending
@@ -115,6 +134,70 @@ export function sortGroups(groups: ProcessGroup[], sort: Sort): ProcessGroup[] {
     return [...groups].sort(compareWith(sort, value, (g) => g.name));
 }
 
+/** How the Processes view groups its list: by who started each process (the
+ *  agent, a terminal, AgentMux, or nothing AgentMux knows), by app, or not
+ *  at all. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.2. */
+export type ProcessGrouping = "agent" | "app" | "none";
+
+/** The processes one owner started, for the Processes view grouped by agent. */
+export interface OwnerGroup {
+    /** The agent's task id, or `terminals`, `agentmux`, `other`. */
+    key: string;
+    kind: RailKind;
+    label: string;
+    processes: TowerProcess[];
+    cpu?: number;
+    mem?: number;
+}
+
+/** Who started a process, as the Agents rail and the Processes groups name
+ *  it: its agent's task id, `terminals`, `agentmux`, or `other` (no task, or
+ *  a task that isn't listed). */
+export function ownerOf(p: TowerProcess, tasksById: ReadonlyMap<string, TowerTask>): [string, RailKind, string] {
+    const t = p.task ? tasksById.get(p.task) : undefined;
+    return !t
+        ? [OTHER_ID, "other", "Other processes"]
+        : t.kind === "agent"
+          ? [t.id, "agent", t.label]
+          : t.kind === "terminal"
+            ? [TERMINALS_ID, "terminals", "Terminals"]
+            : [AGENTMUX_ID, "agentmux", "AgentMux"];
+}
+
+/** Every process under its owner (`ownerOf`): one group per agent, then
+ *  every terminal's processes together, AgentMux's, and the rest. Groups
+ *  without processes are left out. */
+export function ownerGroups(processes: TowerProcess[], tasks: TowerTask[]): OwnerGroup[] {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const groups = new Map<string, OwnerGroup>();
+    for (const p of processes) {
+        const [key, kind, label] = ownerOf(p, byId);
+        let g = groups.get(key);
+        if (!g) {
+            g = { key, kind, label, processes: [] };
+            groups.set(key, g);
+        }
+        g.processes.push(p);
+    }
+    return [...groups.values()].map((g) => ({
+        ...g,
+        cpu: sumKnown(g.processes.map((p) => p.cpu)),
+        mem: sumKnown(g.processes.map((p) => p.mem)),
+    }));
+}
+
+const FIXED_ORDER: Record<RailKind, number> = { agent: 0, terminals: 1, agentmux: 2, other: 3 };
+
+/** Agents in `sort` order (by their totals, or count), then Terminals,
+ *  AgentMux and the other processes, always last and in that order. */
+export function sortOwnerGroups(groups: OwnerGroup[], sort: Sort): OwnerGroup[] {
+    const value = (g: OwnerGroup) => (sort.key === "cpu" ? g.cpu : sort.key === "mem" ? g.mem : g.processes.length);
+    const byAgent = compareWith(sort, value, (g: OwnerGroup) => g.label);
+    return [...groups].sort(
+        (a, b) => FIXED_ORDER[a.kind] - FIXED_ORDER[b.kind] || (a.kind === "agent" ? byAgent(a, b) : 0)
+    );
+}
+
 /** Every word of `query` appears in the name, the PID or the task's label. */
 export function filterProcesses(
     processes: TowerProcess[],
@@ -124,7 +207,7 @@ export function filterProcesses(
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length === 0) return processes;
     return processes.filter((p) => {
-        const hay = `${p.name} ${p.pid} ${p.task ? (taskLabel(p.task) ?? "") : ""}`.toLowerCase();
+        const hay = `${p.name} ${p.pid} ${p.task ? (taskLabel(p.task) ?? "") : ""} ${p.detail ?? ""}`.toLowerCase();
         return words.every((w) => hay.includes(w));
     });
 }
@@ -154,6 +237,268 @@ const TRACKING_LABELS: Record<string, string> = {
 
 export function trackingLabel(tracking: string): string {
     return TRACKING_LABELS[tracking] ?? tracking;
+}
+
+// ── The Agents view (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1) ──
+
+/** What a rail entry stands for: one agent pane, or one of the fixed entries
+ *  under the agents that make the rail add up to the machine. */
+export type RailKind = "agent" | "terminals" | "agentmux" | "other";
+
+export const TERMINALS_ID = "terminals";
+export const OTHER_ID = "other";
+/** `TowerTask::id` of AgentMux's own task (tower_sampler.rs). */
+export const AGENTMUX_ID = "agentmux";
+
+export interface RailEntry {
+    /** The agent's task (its block id), or a fixed entry's id. */
+    id: string;
+    kind: RailKind;
+    label: string;
+    /** Fraction of one core; absent when not known yet. */
+    cpu?: number;
+    mem?: number;
+    processes: number;
+    /** The tasks the entry stands for (none for "Everything else"). */
+    tasks: TowerTask[];
+}
+
+function sumKnown(xs: (number | undefined)[]): number | undefined {
+    const known = xs.filter((x): x is number => x != null);
+    return known.length ? known.reduce((a, b) => a + b, 0) : undefined;
+}
+
+/** The rail: each agent pane in the order the sampler lists them (pane
+ *  order), then Terminals (every terminal pane), AgentMux, and Everything
+ *  else: the machine's totals less every task's, when the snapshot has them. */
+export function railEntries(snap: TowerSnapshot): RailEntry[] {
+    const entries: RailEntry[] = [];
+    const ofKind = (kind: TowerTask["kind"]) => snap.tasks.filter((t) => t.kind === kind);
+    for (const t of ofKind("agent")) {
+        entries.push({
+            id: t.id,
+            kind: "agent",
+            label: t.label,
+            cpu: t.cpu,
+            mem: t.mem,
+            processes: t.processes.length,
+            tasks: [t],
+        });
+    }
+    const terminals = ofKind("terminal");
+    if (terminals.length) {
+        entries.push({
+            id: TERMINALS_ID,
+            kind: "terminals",
+            label: "Terminals",
+            cpu: sumKnown(terminals.map((t) => t.cpu)),
+            mem: terminals.reduce((n, t) => n + t.mem, 0),
+            processes: terminals.reduce((n, t) => n + t.processes.length, 0),
+            tasks: terminals,
+        });
+    }
+    for (const t of ofKind("agentmux")) {
+        entries.push({
+            id: t.id,
+            kind: "agentmux",
+            label: t.label,
+            cpu: t.cpu,
+            mem: t.mem,
+            processes: t.processes.length,
+            tasks: [t],
+        });
+    }
+    const machine = snap.machine;
+    if (machine) {
+        const tasksCpu = sumKnown(snap.tasks.map((t) => t.cpu)) ?? 0;
+        const tasksMem = snap.tasks.reduce((n, t) => n + t.mem, 0);
+        const tasksProcesses = snap.tasks.reduce((n, t) => n + t.processes.length, 0);
+        entries.push({
+            id: OTHER_ID,
+            kind: "other",
+            label: "Everything else",
+            // A task's CPU can include members that exited since the last
+            // sample, which the machine's own total doesn't: never below 0.
+            cpu: machine.cpu == null ? undefined : Math.max(0, machine.cpu - tasksCpu),
+            mem: Math.max(0, machine.mem - tasksMem),
+            processes: Math.max(0, machine.processes - tasksProcesses),
+            tasks: [],
+        });
+    }
+    return entries;
+}
+
+/** How the rail's agents are ordered; the fixed entries always come last. */
+export type RailSort = "pane" | "cpu" | "mem" | "name";
+
+/** The rail ordered by `sort`. A CPU order uses `smoothedCpu` (a recent
+ *  average) so rows don't swap on every refresh. */
+export function orderRail(
+    entries: RailEntry[],
+    sort: RailSort,
+    smoothedCpu: (id: string) => number | undefined
+): RailEntry[] {
+    const agents = entries.filter((e) => e.kind === "agent");
+    const fixed = entries.filter((e) => e.kind !== "agent");
+    const by: Record<RailSort, ((a: RailEntry, b: RailEntry) => number) | undefined> = {
+        pane: undefined,
+        name: (a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+        cpu: (a, b) => (smoothedCpu(b.id) ?? -1) - (smoothedCpu(a.id) ?? -1),
+        mem: (a, b) => (b.mem ?? -1) - (a.mem ?? -1),
+    };
+    const cmp = by[sort];
+    return [...(cmp ? [...agents].sort(cmp) : agents), ...fixed];
+}
+
+/** One process in a task's tree, with its descendants and their totals. */
+export interface ProcessNode {
+    process: TowerProcess;
+    children: ProcessNode[];
+    /** This process and every descendant: what a parent sorts and shows by. */
+    cpu?: number;
+    mem?: number;
+    /** CPU time this process and every descendant used, exited ones
+     *  included: what a build cost. Nanoseconds. */
+    cpuTime?: number;
+}
+
+/** A task's processes as trees, a parent above what it started
+ *  (`claude → bash → cargo → rustc`). A process's parent is trusted only if
+ *  it is in the same list and started no later than it: a reused PID is
+ *  never a parent. A process without one is a root. */
+export function buildProcessTree(processes: TowerProcess[]): ProcessNode[] {
+    // More than one process can have a pid: one that exited (still listed for
+    // a minute) and a later one that reused it.
+    const byPid = new Map<number, TowerProcess[]>();
+    for (const p of processes) {
+        const list = byPid.get(p.pid);
+        if (list) list.push(p);
+        else byPid.set(p.pid, [p]);
+    }
+    // The parent is the process with the child's ppid that started no later
+    // than it, and of those the latest to start (an earlier one with the pid
+    // had exited before the child began); with no start times to tell them
+    // apart, the live one.
+    const parentOf = (p: TowerProcess): TowerProcess | undefined => {
+        if (p.ppid == null || p.ppid === p.pid) return undefined;
+        const candidates = (byPid.get(p.ppid) ?? []).filter(
+            (c) =>
+                c.id !== p.id &&
+                (c.started_at_ms == null || p.started_at_ms == null || c.started_at_ms <= p.started_at_ms)
+        );
+        const rank = (c: TowerProcess) => [c.started_at_ms ?? -1, c.exited_ms == null ? 1 : 0];
+        return candidates.sort((a, b) => {
+            const [sa, la] = rank(a);
+            const [sb, lb] = rank(b);
+            return sb - sa || lb - la;
+        })[0];
+    };
+    const nodes = new Map<string, ProcessNode>(processes.map((p) => [p.id, { process: p, children: [] }]));
+    const roots: ProcessNode[] = [];
+    for (const p of processes) {
+        const parent = parentOf(p);
+        const node = nodes.get(p.id)!;
+        if (parent) nodes.get(parent.id)!.children.push(node);
+        else roots.push(node);
+    }
+    // A cycle (two processes naming each other) would leave both unreached:
+    // anything not under a root becomes one.
+    const reached = new Set<string>();
+    const walk = (n: ProcessNode) => {
+        if (reached.has(n.process.id)) return;
+        reached.add(n.process.id);
+        n.children.forEach(walk);
+    };
+    roots.forEach(walk);
+    for (const n of nodes.values()) {
+        if (!reached.has(n.process.id)) {
+            n.children = n.children.filter((c) => !reached.has(c.process.id));
+            roots.push(n);
+            walk(n);
+        }
+    }
+    const total = (n: ProcessNode, seen: Set<string>): void => {
+        seen.add(n.process.id);
+        n.children = n.children.filter((c) => !seen.has(c.process.id));
+        n.children.forEach((c) => total(c, seen));
+        n.cpu = sumKnown([n.process.cpu, ...n.children.map((c) => c.cpu)]);
+        n.mem = sumKnown([n.process.mem, ...n.children.map((c) => c.mem)]);
+        n.cpuTime = sumKnown([n.process.cpu_time_ns, ...n.children.map((c) => c.cpuTime)]);
+    };
+    const seen = new Set<string>();
+    roots.forEach((r) => total(r, seen));
+    return roots;
+}
+
+/** One line of the tree: a process (with its own subtree), or several
+ *  siblings with the same name and nothing under them (`rustc.exe ×6`). */
+export type TreeLine =
+    | { kind: "process"; key: string; node: ProcessNode }
+    | {
+          kind: "many";
+          key: string;
+          name: string;
+          nodes: ProcessNode[];
+          cpu?: number;
+          mem?: number;
+          cpuTime?: number;
+          peak?: number;
+          /** Folded processes that have exited (they fold apart from live ones). */
+          exited: boolean;
+      };
+
+/** What a process row is called: what one of AgentMux's own processes is
+ *  ("GPU", "Renderer · window Main"), else its executable's name. */
+export function processLabel(p: TowerProcess): string {
+    return p.detail || p.name || `PID ${p.pid}`;
+}
+
+/** Siblings in `sort` order (by their subtree totals), with same-named
+ *  childless ones folded into one line unless `fold` is false. AgentMux's
+ *  CEF processes all run one executable, so they fold by what they are
+ *  (`processLabel`), not by that shared name. */
+export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: boolean } = {}): TreeLine[] {
+    const fold = opts.fold ?? true;
+    const value = (n: ProcessNode) => (sort.key === "cpu" ? n.cpu : sort.key === "mem" ? n.mem : n.process.pid);
+    const sorted = [...siblings].sort(compareWith(sort, value, (n) => processLabel(n.process)));
+    // Exited processes fold apart from live ones of the same name.
+    const foldKey = (n: ProcessNode) =>
+        `${processLabel(n.process).toLowerCase()}${n.process.exited_ms != null ? "|exited" : ""}`;
+    const leavesByName = new Map<string, ProcessNode[]>();
+    for (const n of sorted) {
+        if (n.children.length) continue;
+        const key = foldKey(n);
+        const list = leavesByName.get(key);
+        if (list) list.push(n);
+        else leavesByName.set(key, [n]);
+    }
+    const lines: TreeLine[] = [];
+    const placed = new Set<string>();
+    for (const n of sorted) {
+        const key = foldKey(n);
+        const group = !fold || n.children.length ? undefined : leavesByName.get(key);
+        if (group && group.length > 1) {
+            if (placed.has(key)) continue;
+            placed.add(key);
+            lines.push({
+                kind: "many",
+                key: `many:${key}`,
+                name: processLabel(n.process),
+                nodes: group,
+                cpu: sumKnown(group.map((g) => g.cpu)),
+                mem: sumKnown(group.map((g) => g.mem)),
+                cpuTime: sumKnown(group.map((g) => g.cpuTime)),
+                peak: group.reduce<number | undefined>(
+                    (m, g) => (g.process.peak_mem == null ? m : Math.max(m ?? 0, g.process.peak_mem)),
+                    undefined
+                ),
+                exited: n.process.exited_ms != null,
+            });
+        } else {
+            lines.push({ kind: "process", key: n.process.id, node: n });
+        }
+    }
+    return lines;
 }
 
 /** A process row's hover text: everything the row has no column for. */

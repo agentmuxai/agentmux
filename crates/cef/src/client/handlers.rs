@@ -99,6 +99,18 @@ wrap_client! {
             }
             Some(AgentMuxPermissionHandler::new())
         }
+
+        // A renderer reporting its PID for Tower (renderer_map.rs). Nothing
+        // else is sent as a process message today.
+        fn on_process_message_received(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> ::std::os::raw::c_int {
+            crate::renderer_map::record(browser, source_process, message) as ::std::os::raw::c_int
+        }
     }
 }
 
@@ -258,7 +270,11 @@ struct HostKey {
 #[derive(Debug, serde::Deserialize)]
 struct HostKeys {
     mac: Vec<HostKey>,
+    /// Windows.
     other: Vec<HostKey>,
+    /// Linux: `other`, except where the table gives Linux its own keys
+    /// because the desktop takes the shared ones.
+    linux: Vec<HostKey>,
 }
 
 static HOST_KEYS: std::sync::LazyLock<HostKeys> = std::sync::LazyLock::new(|| {
@@ -276,7 +292,13 @@ fn app_shortcut_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac
 }
 
 fn host_key_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<&'static HostKey> {
-    let keys = if mac { &HOST_KEYS.mac } else { &HOST_KEYS.other };
+    let keys = if mac {
+        &HOST_KEYS.mac
+    } else if cfg!(target_os = "linux") {
+        &HOST_KEYS.linux
+    } else {
+        &HOST_KEYS.other
+    };
     keys.iter()
         .find(|k| k.ctrl == ctrl && k.shift == shift && k.alt == alt && k.meta == meta && k.vk == vk)
 }
@@ -371,6 +393,15 @@ fn browser_pane_shortcut_for(ctrl: bool, alt: bool, shift: bool, vk: i32) -> Opt
     }
 }
 
+/// The browser-pane shortcut that wins over an app shortcut on the same keys,
+/// in a focused browser pane: Ctrl/Cmd+Shift+N opens an Incognito tab, as in a
+/// browser, where the app has "new window". Out of a pane it is still "new
+/// window" (`run_browser_pane_shortcut` declines there). Every other pane
+/// shortcut is on keys the app leaves free (`pane_shortcuts_are_reachable`).
+fn pane_shortcut_before_app_keys(primary: bool, alt: bool, shift: bool, vk: i32) -> Option<BrowserPaneShortcut> {
+    browser_pane_shortcut_for(primary, alt, shift, vk).filter(|s| *s == BrowserPaneShortcut::NewIncognito)
+}
+
 /// Resolve the focused pane's `block_id` and run `shortcut` against it —
 /// either by emitting an event the frontend reacts to (`FocusAddress`, which
 /// needs to move DOM focus in the host webview) or by calling straight into
@@ -456,6 +487,12 @@ fn handle_pre_key_event(
         let (meta, mac) = ((ev.modifiers & EVENTFLAG_COMMAND_DOWN) != 0, true);
         #[cfg(not(target_os = "macos"))]
         let (meta, mac) = (false, false);
+        let primary = if mac { meta } else { ctrl };
+        if let Some(shortcut) = pane_shortcut_before_app_keys(primary, alt, shift, ev.windows_key_code) {
+            if run_browser_pane_shortcut(inner, browser.as_deref_mut(), shortcut) {
+                return 1;
+            }
+        }
         if let Some(key) = host_key_for(ctrl, shift, alt, meta, ev.windows_key_code, mac) {
             if forward_app_shortcut(inner, browser.as_deref_mut(), key) {
                 return 1;
@@ -657,6 +694,9 @@ wrap_life_span_handler! {
                 crate::browser_api::cdp::on_browser_closed(b.identifier());
             }
             let mut inner = self.inner.lock();
+            if let Some(b) = browser.as_deref() {
+                crate::renderer_map::forget(b.identifier());
+            }
             inner.on_before_close(browser);
         }
 
@@ -1130,14 +1170,49 @@ mod browser_pane_shortcut_tests {
         assert_eq!(app_shortcut_for(true, false, false, false, 0x54, false), None);
     }
 
+    /// Linux has its own list (the table can give Linux its own keys where
+    /// the desktop takes the shared ones); it resolves the shared keys too.
     #[test]
-    fn no_app_shortcut_shadows_a_browser_pane_shortcut() {
+    fn linux_list_parses_and_has_the_shared_keys() {
+        assert!(HOST_KEYS.linux.iter().any(|k| k.command == "tab:new" && k.ctrl && k.shift && k.vk == 0x54));
+    }
+
+    /// Every browser-pane shortcut reaches the pane: either no app shortcut is
+    /// on its keys, or it is taken before the app shortcuts. Ctrl/Cmd+Shift+N
+    /// (and Alt+Home) were added without this list growing, so a pane's
+    /// Ctrl+Shift+N opened a new window instead of an Incognito tab.
+    #[test]
+    fn pane_shortcuts_are_reachable() {
+        let chords = [
+            (true, false, false, VK_L),
+            (true, false, false, VK_R),
+            (false, true, false, VK_LEFT),
+            (false, true, false, VK_RIGHT),
+            (false, true, false, VK_HOME),
+            (true, false, true, VK_N),
+        ];
         for mac in [false, true] {
-            for (ctrl, alt, vk) in [(true, false, VK_L), (true, false, VK_R), (false, true, VK_LEFT), (false, true, VK_RIGHT)] {
-                let (c, m) = if mac { (false, ctrl) } else { (ctrl, false) };
-                assert_eq!(app_shortcut_for(c, false, alt, m, vk, mac), None, "mac={mac} vk={vk:#x}");
+            for (primary, alt, shift, vk) in chords {
+                let shortcut = browser_pane_shortcut_for(primary, alt, shift, vk);
+                assert!(shortcut.is_some(), "mac={mac} vk={vk:#x}: not a pane shortcut");
+                let (c, m) = if mac { (false, primary) } else { (primary, false) };
+                if app_shortcut_for(c, shift, alt, m, vk, mac).is_some() {
+                    assert_eq!(pane_shortcut_before_app_keys(primary, alt, shift, vk), shortcut, "mac={mac} vk={vk:#x}");
+                }
             }
         }
+    }
+
+    #[test]
+    fn a_panes_new_incognito_wins_over_new_window() {
+        // The app's "new window" is on the same keys, on both platforms...
+        assert_eq!(app_shortcut_for(true, true, false, false, VK_N, false), Some("window:new"));
+        assert_eq!(app_shortcut_for(false, true, false, true, VK_N, true), Some("window:new"));
+        // ...and a focused browser pane takes them first.
+        assert_eq!(pane_shortcut_before_app_keys(true, false, true, VK_N), Some(BrowserPaneShortcut::NewIncognito));
+        // No other pane shortcut is taken ahead of the app's.
+        assert_eq!(pane_shortcut_before_app_keys(true, false, false, VK_L), None);
+        assert_eq!(pane_shortcut_before_app_keys(false, true, false, VK_HOME), None);
     }
 
     #[test]

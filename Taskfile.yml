@@ -605,7 +605,7 @@ tasks:
             # Stamp the AgentMux icon onto the staged host exe — bootstrap.exe
             # ships Chrome's icon under the Phase 3 sandbox; winres can't edit a
             # built PE so rcedit rewrites the resource. Idempotent on the raw bin.
-            - cmd: bash scripts/inject-exe-icon.sh dist/cef/agentmux-cef.exe
+            - cmd: bash scripts/inject-exe-icon.sh dist/cef/agentmux-cef.exe "AgentMux v{{.VERSION}} (dev)"
             - echo "✓ Built host + launcher for Windows"
 
     build:host:darwin:
@@ -884,7 +884,9 @@ tasks:
                     echo "" >&2
                     echo "⚠️ ⚠️ ⚠️  BUNDLING AN UNPATCHED (stock upstream) CEF FRAMEWORK  ⚠️ ⚠️ ⚠️" >&2
                     echo "    Native window drag and per-pixel window transparency will silently" >&2
-                    echo "    no-op in this build. To use the patched framework: stage it at" >&2
+                    echo "    no-op in this build, and an Incognito tab, or a Personal tab in a" >&2
+                    echo "    second window, crashes the host (agentmuxai/cef#11). To use the" >&2
+                    echo "    patched framework (8037 at 6fba204 or later): stage it at" >&2
                     echo "    ~/cef-build/darwin/aarch64 or set AGENTMUX_CEF_RUNTIME_DIR_DARWIN." >&2
                     echo "    (Dev build continues anyway — this is advisory.)" >&2
                     echo "" >&2

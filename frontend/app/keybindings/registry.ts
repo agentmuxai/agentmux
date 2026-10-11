@@ -5,7 +5,7 @@
 // given where focus is. Pure: the dispatcher supplies the context.
 
 import { createSignal } from "solid-js";
-import { DEFAULT_KEYBINDINGS, type KeyBindingRow, type KeyPane } from "./defaults";
+import { DEFAULT_KEYBINDINGS, rowKeys, type KeyBindingRow, type KeyPane } from "./defaults";
 import { formatKey, matchKey, parseKey, sameKey, type KeyEventLike, type KeyPlatform, type KeySpec } from "./keys";
 
 /** Where focus is when a key is pressed. */
@@ -92,6 +92,13 @@ export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string
             continue;
         }
         const id = e.command.replace(/^-/, "");
+        if (id.startsWith("ext:")) {
+            // A widget's command runs only on the user's click (palette,
+            // status bar); bound to a key it would join the table agents'
+            // RunCommand reads (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.8).
+            warnings.push(`${where}: "${id}" is a widget's command, which can't be bound to a key`);
+            continue;
+        }
         if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) {
             // A typo on a default key would otherwise win and run nothing.
             warnings.push(`${where}: unknown command "${id}"`);
@@ -120,7 +127,8 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
     let rows = compiled.get(platform);
     if (!rows) {
         rows = [];
-        const mine = userBindings.filter((u) => u.platform == null || u.platform === platform);
+        // Your "other" entries apply on Linux too (it's Windows and Linux).
+        const mine = userBindings.filter((u) => u.platform == null || u.platform === platform || (u.platform === "other" && platform === "linux"));
         // By parsed key, not text: "Ctrl+Tab" and "mod+t" unbind ctrl+Tab and meta+t.
         const stepsOf = (key: string) => key.trim().split(/\s+/).map((s) => parseKey(s, platform));
         const sameSteps = (a: KeySpec[], b: KeySpec[]) => a.length === b.length && a.every((k, i) => sameKey(k, b[i]));
@@ -164,7 +172,7 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
         }
         rows.push(...userRows);
         for (const row of DEFAULT_KEYBINDINGS) {
-            for (const source of (platform === "mac" ? row.mac : row.other) ?? []) {
+            for (const source of rowKeys(row, platform)) {
                 const steps = source.split(" ").map((s) => parseKey(s, platform));
                 if (unbound(row.command, steps)) continue;
                 rows.push({ row, source, steps });

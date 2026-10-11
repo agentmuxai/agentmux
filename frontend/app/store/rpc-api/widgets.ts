@@ -11,12 +11,20 @@ import type { WidgetInstallResult } from "@/types/rpc/WidgetInstallResult";
 import type { WidgetCallResult } from "@/types/rpc/WidgetCallResult";
 import type { WidgetPackagesResult } from "@/types/rpc/WidgetPackagesResult";
 import type { WidgetReadFileResult } from "@/types/rpc/WidgetReadFileResult";
+import type { WidgetRequestsResult } from "@/types/rpc/WidgetRequestsResult";
 import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 
+export type { WidgetInstallRequest } from "@/types/rpc/WidgetInstallRequest";
+export type { StatusAlignment } from "@/types/rpc/StatusAlignment";
+export type { WidgetCommandInfo } from "@/types/rpc/WidgetCommandInfo";
 export type { WidgetKind } from "@/types/rpc/WidgetKind";
 export type { WidgetPackageInfo } from "@/types/rpc/WidgetPackageInfo";
 export type { WidgetPaneInfo } from "@/types/rpc/WidgetPaneInfo";
 export type { WidgetState } from "@/types/rpc/WidgetState";
+export type { SignatureState } from "@/types/rpc/SignatureState";
+export type { WidgetPublisherPin } from "@/types/rpc/WidgetPublisherPin";
+export type { WidgetSignatureInfo } from "@/types/rpc/WidgetSignatureInfo";
+export type { WidgetStatusItemInfo } from "@/types/rpc/WidgetStatusItemInfo";
 
 export const WidgetsApi = {
     /** Every installed widget package and its state. */
@@ -58,6 +66,11 @@ export const WidgetsApi = {
 
     WidgetsEndSessionCommand(client: RpcClient, data: { token: string }, opts?: RpcOpts): Promise<unknown> {
         return client.rpcCall("widgets.endsession", data, opts);
+    },
+
+    /** Agents' requests to install a widget, waiting for the user. */
+    WidgetsRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<WidgetRequestsResult> {
+        return client.rpcCall("widgets.requests", {}, opts);
     },
 
     /** One bridge method srv answers. A refusal's message is `widget-error:`

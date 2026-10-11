@@ -148,14 +148,10 @@ fn prune(r: &mut Registry) -> Vec<String> {
 
 /// Can `block` have its jar? Checked when `browser_pane_create` arrives, so
 /// a refusal goes back to the pane, which shows it, rather than leaving it
-/// blank. Also refuses an Incognito tab where panes can't have a jar of their
-/// own yet (Linux and macOS): it must not browse in the shared jar instead.
+/// blank.
 pub fn check_capacity(block: &str) -> Result<(), String> {
     let mut r = registry();
     let Some(identity) = r.by_block.get(block).cloned() else { return Ok(()) };
-    if !cfg!(windows) {
-        return Err("Incognito tabs and browser profiles are Windows only for now".to_string());
-    }
     if profile_id(&identity).is_some() {
         return Ok(());
     }
@@ -165,11 +161,6 @@ pub fn check_capacity(block: &str) -> Result<(), String> {
     } else {
         Err(format!("at most {MAX_INCOGNITO_JARS} Incognito tabs can be open at once: close one to open another"))
     }
-}
-
-/// Does `block` browse as an Incognito identity?
-pub fn has_identity(block: &str) -> bool {
-    registry().by_block.contains_key(block)
 }
 
 /// The jar `block`'s pane is created in (CEF UI thread). Creates an
@@ -245,6 +236,49 @@ pub fn is_waiting(label: &str) -> bool {
 /// Pane `label` was created: forget its waits.
 pub fn done_waiting(label: &str) {
     registry().waits.remove(label);
+}
+
+/// What a pane creation does about its jar (CEF UI thread).
+pub enum PaneJarStep {
+    /// Create the pane in this jar; `None` is its window's shared one.
+    Create(Option<cef::RequestContext>),
+    /// Its profile is still opening: run the creation again in 100 ms.
+    Retry,
+    /// Don't create the pane (the reason is logged).
+    Abort,
+}
+
+/// The jar step for pane `label` of `block`, shared by both creation paths
+/// (`creation.rs`): resolves the jar ([`context_for_block`]) and counts the
+/// waits for a profile that is still opening. `still_wanted` is asked only
+/// on a retry: a tab closed or re-created while it waited isn't created.
+pub fn pane_jar_step(
+    block: &str,
+    label: &str,
+    cache_root: Option<&str>,
+    still_wanted: impl FnOnce() -> bool,
+) -> PaneJarStep {
+    if is_waiting(label) && !still_wanted() {
+        tracing::info!(block, "[browser-identity] pane closed while its profile opened; not creating it");
+        done_waiting(label);
+        return PaneJarStep::Abort;
+    }
+    let ctx = match context_for_block(block, cache_root) {
+        Ok(PaneJar::Shared) => None,
+        Ok(PaneJar::Ready(ctx)) => Some(ctx),
+        // A browser created in it now would never finish: try again shortly.
+        Ok(PaneJar::Pending) if wait_once_more(label) => return PaneJarStep::Retry,
+        Ok(PaneJar::Pending) => {
+            tracing::warn!(block, "[browser-identity] pane not created: its profile never became ready");
+            return PaneJarStep::Abort;
+        }
+        Err(e) => {
+            tracing::warn!(block, error = %e, "[browser-identity] pane not created");
+            return PaneJarStep::Abort;
+        }
+    };
+    done_waiting(label);
+    PaneJarStep::Create(ctx)
 }
 
 // Sign a deleted profile out at once: its cookies go now. CEF keeps an
@@ -387,8 +421,12 @@ mod tests {
         assert_eq!(profile_id("profile:"), None);
         assert_eq!(profile_id("incognito:0f0e2d1c-aaaa"), None);
         set_for_block("idt-p", Some("profile:p-work1"));
-        assert!(has_identity("idt-p"));
-        assert_eq!(check_capacity("idt-p").is_ok(), cfg!(windows));
+        // Profiles and Incognito tabs have a jar of their own on every
+        // platform (Linux and macOS through agentmuxai/cef#11).
+        assert!(check_capacity("idt-p").is_ok());
+        set_for_block("idt-i", Some("incognito:0f0e2d1c-bbbb"));
+        assert!(check_capacity("idt-i").is_ok());
+        set_for_block("idt-i", None);
         // No cache root: no folder to put the profile in, so no pane.
         assert!(context_for_block("idt-p", None).is_err());
         set_for_block("idt-p", None);

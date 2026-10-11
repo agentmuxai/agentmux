@@ -9,7 +9,7 @@
 import { createEffect, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
-import { docTabKeyAction } from "@/app/doc-tabs/doc-tabs-controller";
+import { docTabAction, docTabKeyAction, type DocTabKeyAction } from "@/app/doc-tabs/doc-tabs-controller";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -27,6 +27,8 @@ import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
+import { EDITOR_STATE_FIELDS, provideEditorStates, takeMovedEditorState, trackSave } from "./editor-doc-tabs";
+import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
@@ -37,7 +39,9 @@ import "./editor-view.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
+import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
+import { isModKey } from "@/util/platformutil";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -114,6 +118,66 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const [liveDoc, setLiveDoc] = createSignal("");
     const isMarkdown = (): boolean => model.languageAtom() === "markdown";
 
+    const runTabAction = (action: DocTabKeyAction): void => {
+        const active = model.activeIdAtom();
+        switch (action.kind) {
+            case "new":
+                void model.openScratch(false);
+                break;
+            case "close":
+                if (active) model.closeTab(active);
+                break;
+            case "cycle":
+                model.cycleTab(action.delta);
+                break;
+            case "reopen":
+                model.reopenLastClosed();
+                break;
+            case "move":
+                model.moveActiveTab(action.delta);
+                break;
+        }
+    };
+
+    // The editor's own commands, run by its keys and by the App API's
+    // RunCommand alike. False when the command doesn't apply right now.
+    const runEditorCommand = (command: string): boolean => {
+        const tabAction = docTabAction(command);
+        if (tabAction) {
+            runTabAction(tabAction);
+            return true;
+        }
+        switch (command) {
+            // Find → CodeMirror's native find panel (find/replace, regex,
+            // case, whole-word). Only in source view — in rendered markdown
+            // there's nothing editable to search. See
+            // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
+            case "editor:find":
+                if (!cmView || model.editorMode() === "preview") return false;
+                openSearchPanel(cmView);
+                return true;
+            // Toggle between preview and source modes.
+            case "editor:togglePreview":
+                if (!isMarkdown()) return false;
+                model.toggleEditorMode();
+                return true;
+            case "editor:save":
+                if (model.activeTabAtom()?.isScratch) {
+                    triggerSaveAs();
+                } else {
+                    void trackSave(model, model.activeIdAtom(), model.saveFile());
+                }
+                return true;
+            // Phase 1: Save As is only implemented for scratch tabs.
+            case "editor:saveAs":
+                if (!model.activeTabAtom()?.isScratch) return false;
+                triggerSaveAs();
+                return true;
+        }
+        return false;
+    };
+    onCleanup(registerPaneCommandRunner(model.blockId, runEditorCommand));
+
     // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
     // block meta, same path used by terminal/agent/swarm). Capture phase so
     // we intercept before CodeMirror's bubble-phase wheel; preventDefault
@@ -126,7 +190,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
             // (app.tsx) — let it bubble there instead of zooming just this
             // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!ev.ctrlKey || ev.shiftKey) return;
+            if (!isModKey(ev) || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const STEP = 0.1;
@@ -150,45 +214,15 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             if (tabKey && !(ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement)) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                const active = model.activeIdAtom();
-                switch (tabKey.kind) {
-                    case "new":
-                        void model.openScratch(false);
-                        break;
-                    case "close":
-                        if (active) model.closeTab(active);
-                        break;
-                    case "cycle":
-                        model.cycleTab(tabKey.delta);
-                        break;
-                    case "reopen":
-                        model.reopenLastClosed();
-                        break;
-                    case "move":
-                        model.moveActiveTab(tabKey.delta);
-                        break;
-                }
+                runTabAction(tabKey);
                 return;
             }
             // The editor's keys are the `editor:*` rows of the shortcut table.
+            // Save and Save As are CodeMirror keys (saveKeymap below).
             const command = paneCommandFor(ev, "editor");
-            // Find → CodeMirror's native find panel (find/replace, regex,
-            // case, whole-word). Only in source view — in rendered markdown
-            // there's nothing editable to search. See
-            // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
-            if (command === "editor:find") {
-                if (!cmView || model.editorMode() === "preview") return;
+            if ((command === "editor:find" || command === "editor:togglePreview") && runEditorCommand(command)) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                openSearchPanel(cmView);
-                return;
-            }
-            // Toggle between preview and source modes.
-            if (command === "editor:togglePreview") {
-                if (!isMarkdown()) return;
-                ev.preventDefault();
-                ev.stopPropagation();
-                model.toggleEditorMode();
             }
         };
         rootRef.addEventListener("keydown", handleEditorKeys, { capture: true });
@@ -221,23 +255,21 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             ...codeMirrorKeys("editor:save").map((key) => ({
                 key,
                 run: () => {
-                    if (model.activeTabAtom()?.isScratch) {
-                        triggerSaveAs();
-                    } else {
-                        void model.saveFile();
-                    }
-                    return true;
+                    const ran = runEditorCommand("editor:save");
+                    if (ran) noteResolved("editor:save", "editor");
+                    return ran;
                 },
             })),
             ...codeMirrorKeys("editor:saveAs").map((key) => ({
                 key,
                 run: () => {
-                    // Phase 1: Save As is only implemented for scratch tabs.
-                    // Don't swallow the key for non-scratch tabs so the OS
-                    // default (or a future handler) can still see it.
-                    if (!model.activeTabAtom()?.isScratch) return false;
-                    triggerSaveAs();
-                    return true;
+                    // False for non-scratch tabs, so the key isn't swallowed
+                    // and the OS default (or a future handler) can still see it.
+                    // Noted only when it applied, or PressKeys counts a key
+                    // that did nothing as resolved.
+                    const ran = runEditorCommand("editor:saveAs");
+                    if (ran) noteResolved("editor:saveAs", "editor");
+                    return ran;
                 },
             })),
         ]);
@@ -372,6 +404,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // wired below.
     const cmStates = new Map<string, EditorState>();
     let activeTabIdForCm: string | null = null;
+    // A tab moving to another Editor takes its state from here: the live one
+    // for the tab in front, the saved one for the rest (editor-doc-tabs.ts).
+    onCleanup(provideEditorStates(model, (tabId) => (tabId === activeTabIdForCm ? cmView?.state : cmStates.get(tabId))));
 
     // Guards setupEditor against concurrent invocation. It is async and awaits
     // `loadLanguage()` BETWEEN destroying the previous view and constructing
@@ -394,6 +429,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         const container = containerRef();
         if (!container) return;
         const gen = ++setupGeneration;
+        const tabId = untrack(model.activeIdAtom);
 
         // Destroy previous instance
         if (cmView) {
@@ -454,11 +490,23 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             model.cmViewRef.current = null;
         }
 
+        // A tab moved in from another Editor brings its undo history and
+        // selection (editor-doc-tabs.ts), rebuilt here with this view's own
+        // extensions. Taken only now, past the superseded check above, so a
+        // superseded build leaves it for the next one.
+        const moved = tabId ? takeMovedEditorState(model, tabId) : undefined;
+        let state: EditorState | undefined;
+        // Only when it is the text shown: a clean tab is read fresh on
+        // arrival, and its file may have changed meanwhile.
+        if (moved !== undefined && (moved as { doc?: unknown }).doc === content) {
+            try {
+                state = EditorState.fromJSON(moved, { extensions }, EDITOR_STATE_FIELDS);
+            } catch {
+                state = undefined; // its text is still `content`
+            }
+        }
         cmView = new EditorView({
-            state: EditorState.create({
-                doc: content,
-                extensions,
-            }),
+            state: state ?? EditorState.create({ doc: content, extensions }),
             parent: container,
         });
         setLiveDoc(content); // seed preview from the freshly-built doc
@@ -665,12 +713,22 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         )
     );
 
+    // An Editor tab from another pane, dropped anywhere on this one, joins it.
+    onMount(() => {
+        if (rootRef) onCleanup(registerDocTabDropZone(rootRef, "editor", model.blockId));
+    });
+
     // Clear cached CodeMirror state when its tab closes, so re-opening
     // the same file later starts fresh (matches user expectation —
     // closed-then-reopened ≠ "still has unsaved changes").
     const unsubSliceEvents = model.onSliceEvent((event) => {
         if (event.type === "TabClosed") {
             cmStates.delete(event.tabId);
+            // The tab in front left. It isn't the outgoing tab to snapshot
+            // when the next one shows: a tab moved to another pane keeps its
+            // id, and a snapshot taken now would come back over its newer
+            // text if it is moved back.
+            if (activeTabIdForCm === event.tabId) activeTabIdForCm = null;
         }
     });
 
@@ -723,8 +781,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     };
 
     const handleSaveAsConfirm = async (path: string) => {
+        const tabId = saveAsTabId();
         setSaveAsTabId(null);
-        if (path) await model.saveFileAs(path);
+        if (path) await trackSave(model, tabId, model.saveFileAs(path));
     };
 
     // ── File-tree context menu ────────────────────────────────────────

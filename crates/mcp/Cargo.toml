@@ -23,7 +23,6 @@ anyhow = "1"
 xcap = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 uuid = { version = "1", features = ["v4"] }
-dirs = "5"
 # Process-tree walking so CaptureWindow can exclude the caller's own
 # AgentMux instance (see main.rs's own_instance_pids() doc comment).
 # Version matches agentmux-srv's own pin — 0.34.2 had a real Windows
@@ -36,3 +35,12 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Windows icon + version info (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+# `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
+# embeds the Windows icon/version resource from build.rs.
+[package.metadata.cargo-machete]
+ignored = ["winres"]

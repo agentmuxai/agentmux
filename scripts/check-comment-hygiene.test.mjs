@@ -13,6 +13,7 @@ import {
     compareCodeEqual,
     deadRefFindings,
     gateFile,
+    isBareNonRef,
     isForeignRef,
     isScanPath,
     isSourcePath,
@@ -416,6 +417,53 @@ describe("file references", () => {
         expect(isForeignRef("agentmux-cloud/docs/PLAN_X.md")).toBe(true);
         expect(isForeignRef("persistent.rs")).toBe(false);
         expect(isForeignRef("crates/srv/src/app.rs")).toBe(false);
+    });
+
+    it("treats provider files, TypeScript libs, packages and registry crates as foreign", () => {
+        for (const ref of ["notes.md", "KIMI.md", "system_prompt.md", "CLAUDE_CONTAINER.md", "lib.dom.d.ts",
+            "lib.es2022.full.d.ts", "vite/client.d.ts", "shiki/langs/rust.mjs", "keyring-2.3.3/src/windows.rs"]) {
+            expect(isForeignRef(ref), ref).toBe(true);
+        }
+        expect(isForeignRef("libfoo.d.ts")).toBe(false);
+        expect(isForeignRef("vitest/src/x.ts")).toBe(false);
+        // Generic names are foreign only on their own: in a path they name a repo file.
+        for (const ref of ["docs/notes.md", "frontend/app/notes.md", "crates/x/system_prompt.md", "frontend/types/lib.dom.d.ts"]) {
+            expect(isForeignRef(ref), ref).toBe(false);
+        }
+        expect(isForeignRef("agents/KIMI.md")).toBe(true);
+    });
+
+    it("does not read a name glued to a glob or an escape", () => {
+        const refs = (src) => commentRefs(ts(src)).map((r) => r.ref);
+        expect(refs("// Payloads in frontend/types/rpc/Attachment*Event.ts;\n")).toEqual([]);
+        expect(refs("// a non-ASCII byte (\"docs/specs/Caf\\303\\251.md\")\n")).toEqual([]);
+        expect(refs("// see a.ts and *.md\n")).toEqual(["a.ts"]);
+        // Markdown emphasis is not a glob: the name inside is read.
+        expect(refs("// See *crates/srv/src/gone.rs* first\n")).toEqual(["crates/srv/src/gone.rs"]);
+        // A Windows path still yields its file name, so a rename can flag it.
+        expect(refs("// e.g. C:\\repo\\gone.ts or frontend\\app\\gone.ts\n")).toEqual(["gone.ts", "gone.ts"]);
+        expect(refs("// a stray \\x.md and \\12.md stay names\n")).toEqual(["x.md", "12.md"]);
+    });
+
+    it("excuses a bare name the file's own code uses: a property access or a fixture", () => {
+        const code = ts("// `item.ts + 1` and `last.ts`\nconst gap = item.ts - last.ts;\n");
+        expect(isBareNonRef("item.ts", code)).toBe(true);
+        expect(isBareNonRef("last.ts", code)).toBe(true);
+        // `xitem.ts` is not what the code spells.
+        expect(isBareNonRef("xitem.ts", ts("// x\nconst t = item.ts;\n"))).toBe(false);
+        expect(isBareNonRef("gone.rs", rs("// see gone.rs\nfn main() {}\n"))).toBe(false);
+        // A fixture the test passes around, partial path included.
+        const fixture = ts('// reads src/a.ts, then a.md\nrun("Read 1:2 src/a.ts", ["a.md"]);\n');
+        expect(isBareNonRef("src/a.ts", fixture)).toBe(true);
+        expect(isBareNonRef("a.md", fixture)).toBe(true);
+    });
+
+    it("still flags a stale production pointer in a test comment, and a doc name or path anywhere", () => {
+        // The comment names a deleted module the test's code never mentions.
+        const info = ts('// split from a single rpc-api.ts\n// see docs/specs/SPEC_GONE_2026_01_01.md\nimport { x } from "./rpc-api/index";\n');
+        const res = deadRefFindings(info, new Set([1, 2]), index);
+        expect(res.warnings.map((w) => w.line)).toEqual([1]);
+        expect(res.errors.map((e) => e.line)).toEqual([2]);
     });
 
     it("errors on an added dead doc or repo path, warns on a bare name, skips the rest", () => {

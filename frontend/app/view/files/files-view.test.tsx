@@ -112,6 +112,7 @@ vi.mock("@/app/store/mps", () => ({
 }));
 
 import { getPaneTab } from "@/app/block/pane-tab-registry";
+import { runCommand } from "@/app/keybindings/app-api";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
@@ -265,6 +266,10 @@ describe("the Files pane: navigation", () => {
         fireEvent.dblClick(v.row("src"));
         await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
         expect(v.meta()["files:path"]).toBe(`${HOME}\\src`);
+        // Tooling reads the folder shown here (verify-shortcuts.mjs's temp-tree guard).
+        const root = v.container.querySelector(".files-view");
+        expect(root?.getAttribute("data-path")).toBe(`${HOME}\\src`);
+        expect(root?.getAttribute("data-connection") ?? "").toBe("");
         fireEvent.keyDown(v.list(), { key: "ArrowLeft", altKey: true });
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.keyDown(v.list(), { key: "ArrowRight", altKey: true });
@@ -273,6 +278,39 @@ describe("the Files pane: navigation", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         // Up lands on the folder it came out of.
         await waitFor(() => expect(v.model.selection().focus).toBe("src"));
+    });
+
+    it("leaves a key the table gives a global command to the dispatcher (Masty's macOS L3)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("a10.md"));
+        const before = v.model.selection().focus;
+        // Ctrl+Shift+↑ is pane:focus:up: not swallowed as a list move.
+        expect(fireEvent.keyDown(v.list(), { key: "ArrowUp", ctrlKey: true, shiftKey: true })).toBe(true);
+        expect(v.model.selection().focus).toBe(before);
+        // A plain ↑ is still the list's.
+        expect(fireEvent.keyDown(v.list(), { key: "ArrowUp" })).toBe(false);
+        expect(v.model.selection().focus).not.toBe(before);
+    });
+
+    it("goes back, forward and up through the App API's RunCommand too", async () => {
+        const errors: unknown[] = [];
+        const onError = (e: ErrorEvent) => errors.push(e.error);
+        window.addEventListener("error", onError);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        fireEvent.click(v.row("main.rs"));
+        const deps = { platform: "other" as const, focusedBlockId: () => "b1", focusBlock: () => true, runGlobal: () => false };
+        expect(runCommand("files:back", "b1", deps)).toEqual({ ran: true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(runCommand("files:forward", "b1", deps)).toEqual({ ran: true });
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        expect(runCommand("files:up", "b1", deps)).toEqual({ ran: true });
+        await waitFor(() => expect(v.model.selection().focus).toBe("src"));
+        window.removeEventListener("error", onError);
+        expect(errors).toEqual([]);
     });
 
     it("opens a file by its kind, beside the pane", async () => {
@@ -374,6 +412,7 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
         expect(h.rpc.FsWatchCommand).not.toHaveBeenCalled();
         expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalled();
         expect(v.container.querySelector(".files-crumb-host")?.textContent).toContain("user@box");
+        expect(v.container.querySelector(".files-view")?.getAttribute("data-connection")).toBe("user@box");
         // The host is listed under Remote, and marked as the one shown.
         await waitFor(() => expect(v.container.querySelector(".files-place-active")?.textContent).toContain("user@box"));
         expect(v.container.textContent).not.toContain("wsl://Ubuntu");
@@ -704,6 +743,18 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         fireEvent.keyDown(input, { key: "Escape" });
         await waitFor(() => expect(v.names()).toHaveLength(4));
         expect(v.container.querySelector(".files-filter-input")).toBeNull();
+    });
+
+    it("Escape on the list clears the filter too, though Escape is also a global row (muxreview on #4636)", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "f", ctrlKey: true });
+        const input = await waitFor(() => v.container.querySelector(".files-filter-input") as HTMLInputElement);
+        fireEvent.input(input, { target: { value: "A" } });
+        await waitFor(() => expect(v.names()).toEqual(["a2.md", "a10.md"]));
+        // Focus back on the list, filter still applied.
+        fireEvent.keyDown(v.list(), { key: "Escape" });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
     });
 
     it("a new folder clears the filter", async () => {
@@ -1159,6 +1210,27 @@ describe("the Files pane: live", () => {
         h.state.dirs.set(HOME, [f("new.txt")]);
         h.state.handlers.forEach((fn) => fn({ data: { dir: HOME } }));
         await waitFor(() => expect(v.names()).toEqual(["new.txt"]));
+    });
+
+    it("drops a selected file that went away without a stale-read error, and keeps working", async () => {
+        const errors: unknown[] = [];
+        const onError = (e: ErrorEvent) => errors.push(e.error);
+        window.addEventListener("error", onError);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        // Select every row, so the re-list below prunes the selection in the
+        // same update as it drops the rows.
+        fireEvent.keyDown(v.list(), { key: "a", ctrlKey: true });
+        await waitFor(() => expect(v.model.selection().names.size).toBe(4));
+        h.state.dirs.set(HOME, [f("b.txt")]);
+        h.state.handlers.forEach((fn) => fn({ data: { dir: HOME } }));
+        await waitFor(() => expect(v.names()).toEqual(["b.txt"]));
+        expect([...v.model.selection().names]).toEqual(["b.txt"]);
+        // Still responsive afterwards.
+        fireEvent.keyDown(v.list(), { key: "a", ctrlKey: true });
+        await waitFor(() => expect(v.model.selection().names.size).toBe(1));
+        window.removeEventListener("error", onError);
+        expect(errors).toEqual([]);
     });
 
     it("waits until it's shown to re-list a change made while hidden", async () => {

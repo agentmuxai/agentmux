@@ -45,6 +45,7 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
+import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
@@ -187,6 +188,8 @@ function getViewElem(
         return <CenteredDiv>No View</CenteredDiv>;
     }
     if (viewModel.viewComponent == null) {
+        // A widget's pane whose widget isn't running: say why.
+        if (blockView.startsWith("ext:")) return <MissingWidget blockId={blockId} view={blockView} />;
         return <CenteredDiv>No View Component</CenteredDiv>;
     }
     const VC = viewModel.viewComponent;

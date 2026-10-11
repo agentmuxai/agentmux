@@ -1056,6 +1056,7 @@ fn last_line_preview_and_activity(
 /// error, matching every other handler in this file.
 pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> impl IntoResponse {
     let mut agents: Vec<serde_json::Value> = Vec::new();
+    let work_facts = super::work_facts_handlers::start_conversation_facts(&state); // beside the previews below
 
     // Host tier — direct local read, no network.
     for reg in state.reactive_handler.list_agents() {
@@ -1067,13 +1068,10 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
         agents.push(json!({
             "name": reg.agent_id,
             "tier": "host",
+            "block_id": reg.block_id,
             "turn_active": turn_active,
-            // Real transcript-write time when available (see
-            // last_line_preview_and_activity's doc comment) — falls back
-            // to registration time only when there's no output yet at
-            // all, which is still a meaningful "how long has this agent
-            // existed" signal in that one specific case, not a stand-in
-            // for a genuinely unknown value.
+            // Transcript-write time (see last_line_preview_and_activity);
+            // registration time only while there is no output at all.
             "last_activity_ms": activity_ms.unwrap_or(reg.last_seen),
             "last_message_preview": preview,
         }));
@@ -1139,6 +1137,7 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
                     "name": entry.agent_id,
                     "tier": "cross-channel",
                     "channel": entry.channel,
+                    "block_id": entry.block_id,
                     "turn_active": turn_active,
                     "last_activity_ms": entry.updated_at,
                     "last_message_preview": preview,
@@ -1177,6 +1176,7 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
         }
     }
 
+    super::work_facts_handlers::annotate_conversations(work_facts, &mut agents).await; // their `work`
     Json(json!({ "agents": agents })).into_response()
 }
 

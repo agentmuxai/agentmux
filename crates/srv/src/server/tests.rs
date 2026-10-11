@@ -1179,6 +1179,77 @@ async fn ui_browser_navigate_rejects_a_forged_agent_identity() {
     );
 }
 
+// ── Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4) ─────
+
+#[tokio::test]
+async fn ui_run_command_returns_the_host_result() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ran":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("split:right");
+    let (status, json) = post_json(&build_router(state), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["ran"], true);
+}
+
+#[tokio::test]
+async fn ui_run_command_refuses_a_permanent_delete_before_the_host() {
+    let state = test_state();
+    // A host that would accept anything: the refusal has to come from srv.
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ran":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("files:deletePermanently");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(json["error"].as_str().unwrap().contains("not available to agents"), "{json}");
+}
+
+#[tokio::test]
+async fn ui_run_command_pane_close_goes_through_close_pane() {
+    let state = test_state();
+    // A host that would accept anything: pane:close must not reach it.
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ran":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+
+    // No target: it says which pane it needs, rather than closing the focused one.
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("pane:close");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(json["error"].as_str().unwrap().contains("needs `target`"), "{json}");
+
+    // A target: ClosePane's own path, which looks the pane up (none here).
+    let (_agent_id, mut body) = signed_ui_auth(&state, "b1");
+    body["command"] = serde_json::json!("pane:close");
+    body["target"] = serde_json::json!("no-such-block");
+    let (status, json) = post_json(&build_router(state.clone()), "/api/v1/ui/shortcuts/run", body).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
+    assert!(json["error"].as_str().unwrap().contains("block not found"), "{json}");
+}
+
+#[tokio::test]
+async fn shortcut_routes_reject_a_forged_agent_identity() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    for (uri, field, value) in [
+        ("/api/v1/ui/shortcuts/list", "", ""),
+        ("/api/v1/ui/shortcuts/run", "command", "split:right"),
+        ("/api/v1/ui/shortcuts/press", "keys", "ctrl+shift+d"),
+    ] {
+        let (victim_agent_id, _) = signed_ui_auth(&state, "victim-block");
+        let (_, mut forged) = signed_ui_auth(&state, "attacker-block");
+        forged["agent_id"] = serde_json::json!(victim_agent_id);
+        if !field.is_empty() {
+            forged[field] = serde_json::json!(value);
+        }
+        let (status, _) = post_json(&build_router(state.clone()), uri, forged).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri} must verify the caller's identity");
+    }
+}
+
 #[tokio::test]
 async fn reactive_agents_returns_empty_list() {
     let app = test_router();

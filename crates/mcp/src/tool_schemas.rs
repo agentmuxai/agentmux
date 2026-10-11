@@ -218,10 +218,27 @@ pub(crate) const SEARCH_HISTORY_TOOL: &str = r#"{
 // here.
 pub(crate) const LIST_CONVERSATIONS_TOOL: &str = r#"{
   "name": "ListConversations",
-  "description": "See every agent's most recent activity across host, cross-channel (other AgentMux channels on this same host), LAN, and connected WAN in one call — a faster alternative to DiscoverAgents + N x GetAgentTranscript. Host and cross-channel entries include turn_active, last_activity_ms, and a last_message_preview (tail transcript line). LAN and WAN entries are liveness-only (remote_fetch_required: true) — reading their conversation content isn't supported yet. Read-only. Takes no arguments.",
+  "description": "See every agent's most recent activity across host, cross-channel (other AgentMux channels on this same host), LAN, and connected WAN in one call — a faster alternative to DiscoverAgents + N x GetAgentTranscript. Host and cross-channel entries include turn_active, last_activity_ms, and a last_message_preview (tail transcript line). Host and cross-channel entries also carry work: the agent's goal, repo, branch, uncommitted files, recent edits, todo summary and current tool (see WhoIsWorkingOn to search them). LAN and WAN entries are liveness-only (remote_fetch_required: true) — reading their conversation content isn't supported yet. Read-only. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
+  }
+}"#;
+
+// Who else is working on the same thing
+// (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.2): srv's
+// `/api/v1/work-facts/who`, over every agent on this computer, all channels.
+pub(crate) const WHO_IS_WORKING_ON_TOOL: &str = r#"{
+  "name": "WhoIsWorkingOn",
+  "description": "Find out which other agents are working on the same file, folder, repository, branch or topic, so you don't duplicate or overwrite their work. Call it before starting work in a repository, and before opening a PR. It only informs: nothing is locked or blocked. Covers every agent on this computer, in every AgentMux channel; agents on other computers (LAN, cloud) are listed by name and status only. Each agent has its own clone, so files are compared by repository and path inside it: an absolute path in your clone or a repository-relative path both work, and a folder matches everything under it. With no arguments it lists who is working in your current repository. Returns JSON: agents (you excluded), strongest first, each {agent, channel, status, goal, repo, branch, git_checked_ms, matches: [{kind, detail, since_ms}]}, where kind is dirty (uncommitted changes in their clone), edited (they changed it recently), branch (same branch), repo (same repository), goal or todo (query matched their goal or checklist). Git facts (repo, branch, uncommitted files) are refreshed in the background, usually every 20 to 30 seconds; git_checked_ms says when each agent's were taken. If someone else is changing the same thing, message them with SendMessage before you change it.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":   { "type": "string", "description": "A file or folder: absolute in your clone, or relative to the repository root" },
+      "repo":   { "type": "string", "description": "owner/repo or a remote URL. Defaults to the repository you are in" },
+      "branch": { "type": "string", "description": "A branch name: who else is on it" },
+      "query":  { "type": "string", "description": "Words to look for in other agents' goals and todo lists, case-insensitive, all must appear (e.g. \"muxbus allowlist\")" }
+    }
   }
 }"#;
 
@@ -306,6 +323,40 @@ pub(crate) const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+// Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4): the
+// Help pane's table, in the window that holds the caller's own pane.
+pub(crate) const LIST_SHORTCUTS_TOOL: &str = r#"{
+  "name": "ListShortcuts",
+  "description": "List AgentMux's keyboard shortcuts as the Help pane shows them on this platform, including the user's own remaps: for each, its command id, label, category, the keys as shown (\"Ctrl+Shift+D\", \"⌘D\") and in the table's syntax (`raw`, what PressKeys takes), the context it needs (`when`), and the pane that handles it (`pane`: files, editor or doctabs), if any. Use the command ids with RunCommand and the raw keys with PressKeys.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const RUN_COMMAND_TOOL: &str = r#"{
+  "name": "RunCommand",
+  "description": "Run a keyboard shortcut's command (an id from ListShortcuts, e.g. split:right, tab:new, files:refresh) as if its key were pressed, in the window that holds your own pane. Pass target to focus a pane anywhere in that window first (it switches to the pane's tab); without it the command acts on the focused pane. A pane's own commands (files:*, editor:*, doctab:*, term:copy/paste/clear) need that pane focused or targeted. Commands keep the protections a user has: tab:close asks before closing, files:trash can be undone. pane:close needs target, and closes that pane the way ClosePane does: a pane you're in closes at once, another agent's pane waits 15 seconds for its user to keep it (the answer says it's pending). term:paste is refused when the clipboard has a line break and the shell hasn't turned on bracketed paste, since pasting would run that line. files:deletePermanently is refused (it can't be undone). Returns whether it ran, and why not if it didn't.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "command": { "type": "string", "description": "Command id from ListShortcuts" },
+      "target": { "type": "string", "description": "Optional: id of a pane in your window, in any tab, or of one of a pane's tabs, to focus first: the window switches to that tab and the pane shows it" }
+    },
+    "required": ["command"]
+  }
+}"#;
+
+pub(crate) const PRESS_KEYS_TOOL: &str = r#"{
+  "name": "PressKeys",
+  "description": "Press a keyboard shortcut as real key events with modifiers, in the window that holds your own pane, and report which command the key resolved to. keys is one of ListShortcuts' raw keys (\"ctrl+shift+d\", \"meta+d\"; a chord is two keys separated by a space); only keys in the shortcut table are accepted, and a key bound to files:deletePermanently or pane:close anywhere is refused (pane:close's key closes at once; use RunCommand pane:close for the undo), and so is the paste key when the clipboard has a line break and the shell hasn't turned on bracketed paste. Pass target to focus a pane anywhere in that window first (it switches to the pane's tab). Returns the modifiers sent (on macOS `meta` is ⌘); the commands the table binds the key to; `resolved`, the command that actually ran and who ran it (the app or a pane), or null; and `closed_dialog`, true when the key closed a dialog that handles it itself (Escape in the palette or a confirmation), which the app's dispatcher never sees. The keys go to the page, after the OS and the macOS menu bar, so a key the OS takes can still pass here: PressKeys checks the app's handling, not the OS.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "keys": { "type": "string", "description": "A raw key from ListShortcuts, in the table's syntax" },
+      "target": { "type": "string", "description": "Optional: id of a pane in your window, in any tab, or of one of a pane's tabs, to focus first: the window switches to that tab and the pane shows it" }
+    },
+    "required": ["keys"]
+  }
+}"#;
+
 // Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
 // — no-mouse, selector/JS-level control of a browser pane, layered on the
 // same identity/own-pane scoping UIClick/UIQuery/UIScreenshot use.
@@ -325,7 +376,7 @@ pub(crate) const OPEN_BROWSER_TOOL: &str = r#"{
       "split": { "type": "string", "enum": ["right", "left", "up", "down"], "description": "Where to place the pane relative to your own (default: right)" },
       "title": { "type": "string", "description": "Optional pane title" },
       "allowed_origins": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "description": "Optional: keep the pane on these sites. Each is example.com (https://example.com), *.example.com (it and its subdomains, https) or a full origin like http://localhost:3000. url must be on the list. A navigation elsewhere (a link, a redirect, a popup) doesn't happen: the user is asked in the pane, and Allow adds that site. Include every site a sign-in on the way needs." },
-      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes (Windows only for now). Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use it\"); any other profile is refused." }
+      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes. Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use it\"); any other profile is refused." }
     },
     "required": ["url"]
   }
@@ -744,6 +795,40 @@ pub(crate) const OPEN_MEDIA_TOOL: &str = r#"{
       "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
     },
     "required": ["file"]
+  }
+}"#;
+
+pub(crate) const WIDGET_LIST_TOOL: &str = r#"{
+  "name": "WidgetList",
+  "description": "List the AgentMux widgets installed on this machine: id, name, version, kind (sandboxed or trusted), state (approved, needs_approval, changed, invalid with its error, disabled), permissions, folder and the views it adds. Use it to see whether a widget you built installed, and what view to pass to OpenWidget.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const WIDGET_INSTALL_TOOL: &str = r#"{
+  "name": "WidgetInstall",
+  "description": "Install a widget package you built (a folder with a widget.json, that widget.json, or a .zip) and ask the user to approve it. AgentMux validates and copies it, then shows the user a prompt naming you, the widget and every permission it asks for; you can't approve it yourself. Returns once the user answers or the wait ends: status installed (with its views), declined, pending (still waiting; the user can answer later in Settings → Widgets), or the validation error to fix. Installing again with changes replaces the old version and asks again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":      { "type": "string",  "description": "The package folder, its widget.json, or a .zip; relative paths are in your workspace" },
+      "replace":   { "type": "boolean", "description": "Replace an installed package with the same id (default true)" },
+      "wait_secs": { "type": "integer", "description": "How long to wait for the user's answer, in seconds (default 300, at most 600)" }
+    },
+    "required": ["path"]
+  }
+}"#;
+
+pub(crate) const OPEN_WIDGET_TOOL: &str = r#"{
+  "name": "OpenWidget",
+  "description": "Open a pane of an installed, approved widget next to this conversation. view is one of the widget's views from WidgetList (ext:<id>/<pane>). meta sets keys of the pane's own widget state (what the widget reads with meta.get), e.g. {\"repo\": \"owner/name\"}. Fails, saying why, if the widget isn't approved or is turned off. If the widget then shows an error, read it, fix the package, and WidgetInstall again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "view":  { "type": "string", "description": "The view to open, e.g. ext:acme.todo/main" },
+      "meta":  { "type": "object", "description": "The pane's initial widget state, as the widget's own keys" },
+      "split": { "type": "string", "enum": ["right", "down"], "description": "Where to place the pane relative to this agent pane (default: right)" }
+    },
+    "required": ["view"]
   }
 }"#;
 

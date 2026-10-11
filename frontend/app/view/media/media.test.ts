@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { basenameOf, createMediaDropHook, dirnameOf, extOf, mediaDropVerdict, mediaPaneTab, mediaTitle } from "./media";
+import { basenameOf, createMediaDropHook, dirnameOf, extOf, mediaDropVerdict, mediaPaneTab, mediaSplitBlockDef, mediaTitle } from "./media";
 
 describe("extOf", () => {
     it("returns the lowercase extension without a dot", () => {
@@ -104,5 +104,17 @@ describe("media pane file drop", () => {
         await createMediaDropHook(actions).drop({ paths: ["C:/docs/report.pdf"], files: [] });
         expect(actions.showPath).not.toHaveBeenCalled();
         expect(actions.cantOpen).toHaveBeenCalledWith("report.pdf");
+    });
+});
+
+// SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md
+describe("splitting a media pane", () => {
+    it("opens an empty media pane, not a copy of this one's files", () => {
+        expect(mediaPaneTab.capabilities?.splitBlockDef).toBe(mediaSplitBlockDef);
+        const source = {
+            oid: "b1",
+            meta: { view: "media", doctabs: { tabs: [{ path: "/a.png" }] }, "media:path": "/a.png", "media:open": [{ id: "1", path: "/b.png" }] },
+        } as unknown as Block;
+        expect(mediaPaneTab.capabilities!.splitBlockDef!(source)).toEqual({ meta: { view: "media" } });
     });
 });

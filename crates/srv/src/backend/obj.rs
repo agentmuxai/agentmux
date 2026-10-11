@@ -585,7 +585,7 @@ mod tests {
     /// lying to that contract and nothing else would say so.
     ///
     /// And when the `websocket.rs` commands are eventually typed, two structs
-    /// sharing a name would generate two `BlockDef.ts` files into the same
+    /// sharing a name would generate two `BlockDef` TypeScript files into the same
     /// export directory, one silently overwriting the other. Knowing the shapes
     /// agree is the precondition for merging them, or for choosing either as
     /// canonical. This test does not fix the duplication; it stops it becoming

@@ -324,7 +324,11 @@
         },
         "notify:sound:agent.waiting.for.input": {
           "type": "boolean",
-          "description": "Play a sound when an agent has been idle and waiting for user input for a while. Default true."
+          "description": "Play a looping tone while an agent waits for you: a question, a tool permission, a browser hand-off or approval, an SSH consent or a widget install. Quiet while you're looking at that pane. Default true."
+        },
+        "notify:waiting:browser": {
+          "type": "boolean",
+          "description": "Include browser hand-offs and approvals in the waiting tone, tab flash and notification. Default true."
         },
         "notify:sound:agent.shutdown.pending": {
           "type": "boolean",
@@ -534,6 +538,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "Optional cap on how many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit; the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened."
+        },
+        "markdown:streamtailinplace": {
+          "type": "boolean",
+          "default": true,
+          "description": "While a message streams, update the still-open last block's text in place instead of rebuilding that block on every update (a growing code block, paragraph, list item or table cell). Set false to restore rebuilding it each time. Takes effect when a message is next rendered. See docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md."
         },
         "agent:askquestiontimeoutms": {
           "type": "integer",

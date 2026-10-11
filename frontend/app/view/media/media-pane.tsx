@@ -11,13 +11,15 @@
  */
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { DocTabsController, handleDocTabKey, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
+import { docTabAction, DocTabsController, handleDocTabKey, runDocTabAction, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
+import { controllerHost, registerDocTabDropZone, registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 import { AUDIO_EXTENSIONS, basenameOf, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { hostHas } from "@/app/host/host-caps";
+import { registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
-import { createEffect, on, Show, untrack, type JSX } from "solid-js";
+import { createEffect, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { MediaView } from "./media-view";
 import { keyLabel } from "@/app/keybindings";
 
@@ -64,10 +66,12 @@ export function mediaIcon(path: string): string {
     return "photo-film";
 }
 
+/** A tab with no file yet is "New Tab", as in a browser: a place to load a
+ *  file, not a document to save. It has no icon; a file's tab has its kind's. */
 export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     keyOf: (d) => d.path || `blank:${d.blank ?? 0}`,
-    titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "Media")),
-    iconOf: (d) => mediaIcon(d.path || d.file?.name || ""),
+    titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "New Tab")),
+    iconOf: (d) => (isEmpty(d) ? undefined : mediaIcon(d.path || d.file?.name || "")),
     serialize: (d) => d.path,
     deserialize: (st) => (typeof st === "string" && st ? { path: st } : null),
     // Ctrl+T, "+": a tab to pick a file into.
@@ -79,6 +83,7 @@ export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
 
 export class MediaPaneModel {
     readonly tabs: DocTabsController<MediaDoc>;
+    private readonly unregisterHost: () => void;
 
     constructor(private readonly ctx: PaneTabHostContext) {
         // A pane from before tabs, or opened on a file (OpenMedia, a click
@@ -89,12 +94,20 @@ export class MediaPaneModel {
             { meta: () => ctx.meta() as Record<string, unknown> | undefined, setMeta: (p) => ctx.setMeta(p) },
             [typeof start === "string" && start ? { path: start } : { path: "", blank: ++blanks }]
         );
+        // Its tabs can move to and from other Media panes (doc-tab-hosts.ts),
+        // an empty one too. An empty tab in front gives way to a file moved
+        // in, as it does to a file opened here. A pane left with no tabs gets
+        // an empty one, as when its last tab closes (MediaPane below).
+        this.unregisterHost = registerDocTabHost(
+            ctx.blockId,
+            controllerHost(this.tabs, "media", { isPlaceholder: (t) => isEmpty(t.payload) })
+        );
     }
 
-    /** The pane's title: the file in front. */
+    /** The pane's title: the file in front, or "Media" while it shows none. */
     title(): string {
         const t = this.tabs.active();
-        return t ? MEDIA_DOC_TABS.titleOf(t.payload) : "Media";
+        return t && !isEmpty(t.payload) ? MEDIA_DOC_TABS.titleOf(t.payload) : "Media";
     }
 
     /** A tab now shows `path`: its title follows, and the pane's
@@ -150,6 +163,7 @@ export class MediaPaneModel {
     }
 
     dispose(): void {
+        this.unregisterHost();
         this.tabs.dispose();
     }
 }
@@ -214,6 +228,22 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
         handleDocTabKey(e, tabs);
     };
 
+    // The App API's RunCommand runs the same tab actions as the keys.
+    onCleanup(
+        registerPaneCommandRunner(ctx.blockId, (command) => {
+            const action = docTabAction(command);
+            if (!action) return false;
+            runDocTabAction(action, tabs);
+            return true;
+        })
+    );
+
+    // A Media tab from another pane, dropped anywhere on this one, joins it.
+    let rootRef: HTMLDivElement | undefined;
+    onMount(() => {
+        if (rootRef) onCleanup(registerDocTabDropZone(rootRef, "media", ctx.blockId));
+    });
+
     const pickInto = async (): Promise<void> => {
         if (!hostHas("nativeDialogs")) return;
         const path = await getApi()?.showOpenFileDialog?.();
@@ -221,8 +251,14 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
     };
 
     return (
-        <div class="media-pane flex flex-col w-full h-full" tabIndex={-1} onKeyDown={onKeyDown}>
-            <DocTabStrip ctl={tabs} tooltipOf={(t) => t.payload.path || "No file yet"} addTitle={`New tab (${keyLabel("ctrl+t")})`} />
+        <div ref={rootRef} class="media-pane flex flex-col w-full h-full" tabIndex={-1} onKeyDown={onKeyDown}>
+            <DocTabStrip
+                ctl={tabs}
+                docType="media"
+                blockId={ctx.blockId}
+                tooltipOf={(t) => t.payload.path || "No file yet"}
+                addTitle={`New tab (${keyLabel("ctrl+t")})`}
+            />
             <div class="media-pane-doc flex-1" style={{ position: "relative", "min-height": 0 }}>
                 {/* Keyed by tab: switching tabs mounts that tab's file. */}
                 <Show

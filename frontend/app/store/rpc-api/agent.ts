@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Agent definitions, skills, history, instances, processes, drones, and the
-// agent run loop (input/stop/spawn). Split from the original rpc-api.ts.
+// agent run loop (input/stop/spawn). Split from the original rpc-api file.
 
 import { RpcClient } from "../rpc-client";
 

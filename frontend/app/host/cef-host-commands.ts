@@ -165,8 +165,11 @@ export const cefApprovals: ApprovalHostApi = {
     decideBrowserAttention: async (blockId, id, decision) => {
         await invokeCommand("browser_attention_resolve", { block_id: blockId, id, decision });
     },
-    decideWidget: async (id, hash, approve) => {
-        await invokeCommand("widget_approval_decide", { id, hash, decision: approve ? "approve" : "cancel" });
+    decideWidget: async (id, hash, approve, signer) => {
+        await invokeCommand("widget_approval_decide", { id, hash, decision: approve ? "approve" : "cancel", signer: signer ?? "" });
+    },
+    forgetWidgetKey: async (publisher) => {
+        await invokeCommand("widget_approval_decide", { id: publisher, hash: "", decision: "forget_key" });
     },
     requestMemoryAdoption: async (args) => {
         await invokeCommand("memory_adoption_request", args);

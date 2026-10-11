@@ -28,6 +28,9 @@ export interface ConfirmModalProps {
     cancelLabel?: string;              // default "Cancel"
     /** Destructive confirmation — red line button + initial focus on Cancel. */
     destructive?: boolean;
+    /** An agent waits on this answer: the filled attention button (ignored
+     *  when `destructive`). */
+    attention?: boolean;
     onConfirm: () => void | Promise<void>;
     onCancel: () => void;
 }
@@ -70,7 +73,7 @@ export const ConfirmModal: Component<ConfirmModalProps> = (props) => {
                     {props.cancelLabel ?? "Cancel"}
                 </Button>
                 <Button
-                    tone={props.destructive ? "danger" : "accent"}
+                    tone={props.destructive ? "danger" : props.attention ? "attention" : "accent"}
                     busy={pending()}
                     onClick={() => void handleConfirm()}
                 >

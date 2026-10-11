@@ -8,7 +8,7 @@
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
-import type { NewRemote, RemotesViewModel } from "./remotes-model";
+import type { RemotesViewModel } from "./remotes-model";
 import {
     displayName,
     groupRemotes,
@@ -25,6 +25,7 @@ import {
 import "./remotes-view.scss";
 import { Button, FilterInput, IconButton } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
+import { connectionName, parseDestination } from "./add-remote";
 
 interface MenuState {
     items: ContextMenuItem[];
@@ -388,33 +389,31 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
     );
 }
 
-const EMPTY_REMOTE: NewRemote = { alias: "", hostname: "", user: "", port: "", identityfile: "", proxyjump: "" };
-
-const ADD_FIELDS: { key: keyof NewRemote; label: string; placeholder: string }[] = [
-    { key: "alias", label: "Alias", placeholder: "db1" },
-    { key: "hostname", label: "Host name or address", placeholder: "db1.example.com" },
-    { key: "user", label: "User", placeholder: "as in your ssh config" },
-    { key: "port", label: "Port", placeholder: "22" },
-    { key: "identityfile", label: "Identity file", placeholder: "~/.ssh/id_ed25519" },
-    { key: "proxyjump", label: "Jump host", placeholder: "bastion" },
-];
-
-/** Add remote (§4.4): appends a Host block to ~/.ssh/config, after the user
- *  confirms the exact block in the approval window. */
+/** Add remote (§4.4): one field, the destination as you'd type it after
+ *  `ssh`; a name, identity file and jump host under Advanced. Just a
+ *  destination is saved in AgentMux's settings; an identity file or jump host
+ *  is written to ~/.ssh/config, after the user confirms the exact block. */
 function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): JSX.Element {
-    const [host, setHost] = createSignal<NewRemote>({ ...EMPTY_REMOTE });
+    const [destination, setDestination] = createSignal("");
+    const [name, setName] = createSignal("");
+    const [identityfile, setIdentityfile] = createSignal("");
+    const [proxyjump, setProxyjump] = createSignal("");
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal("");
+    const parsed = () => parseDestination(destination());
+    const writesSshConfig = () => !!(identityfile().trim() || proxyjump().trim());
     const submit = async (e: Event) => {
         e.preventDefault();
-        if (!host().alias.trim()) {
-            setError("A remote needs an alias.");
+        const d = parsed();
+        if (!d) {
+            setError(destination().trim() ? "Type it as user@host:port (the port is optional)." : "Type the host to connect to.");
             return;
         }
         setBusy(true);
         setError("");
         try {
-            if (await props.model.addRemote(host())) props.onDone();
+            const added = await props.model.addRemote(d, { name: name(), identityfile: identityfile(), proxyjump: proxyjump() });
+            if (added) props.onDone();
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -423,34 +422,60 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
     };
     return (
         <form class="remotes-add" onSubmit={(e) => void submit(e)}>
-            <div class="remotes-settings">
-                <For each={ADD_FIELDS}>
-                    {(f, i) => (
-                        <label class="remotes-setting">
-                            <span>{f.label}</span>
-                            <input
-                                type="text"
-                                placeholder={f.placeholder}
-                                value={host()[f.key]}
-                                onInput={(e) => setHost({ ...host(), [f.key]: e.currentTarget.value })}
-                                ref={(el) => {
-                                    if (i() === 0) focusOnOpen(el);
-                                }}
-                            />
-                        </label>
-                    )}
-                </For>
-            </div>
-            <div class="remotes-add-note">
-                Added to the end of ~/.ssh/config (a copy of the file is kept first), so every ssh on this computer
-                sees it. You'll see exactly what is written before it is.
-            </div>
+            <input
+                class="remotes-add-destination"
+                type="text"
+                aria-label="Connect to"
+                placeholder="user@host:port"
+                value={destination()}
+                onInput={(e) => setDestination(e.currentTarget.value)}
+                ref={focusOnOpen}
+            />
+            <details class="remotes-add-more">
+                <summary>Advanced</summary>
+                <div class="remotes-settings">
+                    <label class="remotes-setting">
+                        <span>Name</span>
+                        <input
+                            type="text"
+                            placeholder={(() => {
+                                const d = parsed();
+                                return d ? connectionName(d) : "user@host:port";
+                            })()}
+                            value={name()}
+                            onInput={(e) => setName(e.currentTarget.value)}
+                        />
+                    </label>
+                    <label class="remotes-setting">
+                        <span>Identity file</span>
+                        <input
+                            type="text"
+                            placeholder="~/.ssh/id_ed25519"
+                            value={identityfile()}
+                            onInput={(e) => setIdentityfile(e.currentTarget.value)}
+                        />
+                    </label>
+                    <label class="remotes-setting" title="An SSH server to hop through to reach this one (ssh's ProxyJump)">
+                        <span>Connect through</span>
+                        <input
+                            type="text"
+                            placeholder="user@bastion"
+                            value={proxyjump()}
+                            onInput={(e) => setProxyjump(e.currentTarget.value)}
+                        />
+                    </label>
+                </div>
+                <div class="remotes-add-note">
+                    With an identity file or a host to connect through, the remote is added to the end of ~/.ssh/config (a copy of
+                    the file is kept first), and you'll see exactly what is written before it is.
+                </div>
+            </details>
             <Show when={error()}>
                 <div class="remotes-detail-error">{error()}</div>
             </Show>
             <div class="remotes-detail-actions">
                 <button type="submit" disabled={busy()}>
-                    {busy() ? "Adding…" : "Add"}
+                    {busy() ? (writesSshConfig() ? "Waiting for you to confirm…" : "Adding…") : "Add"}
                 </button>
                 <button type="button" onClick={() => props.onDone()}>
                     Cancel

@@ -208,7 +208,7 @@ pub fn export_bundle(bundle: &Bundle, skills: &[Skill]) -> BundleExport {
     );
     // Compared case-INSENSITIVELY (stores the lowercased form) because the
     // most common export/extract targets (Windows, macOS default) have
-    // case-insensitive filesystems -- "Docs/A.md" and "docs/a.md" collide
+    // case-insensitive filesystems -- "Docs/A.md" and "docs/a.md" collide (comment-hygiene: allow)
     // on extraction there even though they're distinct paths byte-for-byte
     // (reagent P2, PR #2333). The path actually written to `files` keeps
     // its original case; only the collision check is case-folded.
@@ -217,7 +217,7 @@ pub fn export_bundle(bundle: &Bundle, skills: &[Skill]) -> BundleExport {
         if let Some(safe_path) = sanitize_context_relative_path(&entry.path) {
             let out_path = format!("instructions/context/{safe_path}");
             // Two distinct source paths can normalize to the same output
-            // (e.g. "docs/a.md" and "docs/./a.md", or a case-only
+            // (e.g. "docs/a.md" and "docs/./a.md", or a case-only (comment-hygiene: allow)
             // difference) -- without this check the second silently
             // overwrites the first's `files` entry, and the zip archive
             // ends up with the same duplicate risk (reagent P2, PR #2333).
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn colliding_context_file_paths_case_insensitive() {
-        // reagent P2, PR #2333: "Docs/A.md" and "docs/a.md" are distinct
+        // reagent P2, PR #2333: "Docs/A.md" and "docs/a.md" are distinct (comment-hygiene: allow)
         // byte-for-byte but collide on extraction on the most common
         // export targets (Windows, macOS default case-insensitive
         // filesystems) -- must be caught the same way an exact-match

@@ -27,14 +27,13 @@
 
 import { createEffect, on, onCleanup } from "solid-js";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
-import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
+import { endWaitingForYou, isAgentWaitingForYou, startWaitingForYou } from "@/app/notification/waiting-for-you";
+import { reconcileWhenHistoryLoads, syncAwaitingUser } from "./awaiting-user";
+import { getPaneModel } from "@/app/store/agent-pane-registration";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { makeORef } from "@/app/store/mos";
-import { ObjectService } from "@/app/store/services";
 import { MOS } from "@/app/store/global";
 import { META_AWAITING_USER } from "@/app/store/swarm-line";
-import { fireAndForget } from "@/util/util";
 import type { DocumentNode, ToolNode } from "../types";
 import type { AnswerOutcome } from "../components/AgentQuestionPanel";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -122,41 +121,40 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
     // still pending (ReAgent P1 on #4234). A flag that outlives a crash is
     // harmless because the swarm honours it only for an agent with a turn in
     // flight, and the session-end clear (useBlockActivity) removes it too.
-    const setAwaitingUser = (waiting: boolean) =>
-        fireAndForget(() =>
-            ObjectService.UpdateObjectMeta(makeORef("block", opts.blockId), {
-                [META_AWAITING_USER]: waiting ? true : null,
-            } as any)
-        );
     createEffect(on(pendingQuestions, (qs, prevQs) => {
         const hadAny = (prevQs?.length ?? 0) > 0;
         const hasAny = qs.length > 0;
         if (hasAny && !hadAny) {
             waitingToneActive = true;
-            setAwaitingUser(true);
-            firePaneEvent(opts.blockId, {
-                type: "waiting-for-input",
-                question: qs[0]?.question?.questions?.[0]?.question,
+            startWaitingForYou(opts.blockId, "question", qs[0]?.question?.questions?.[0]?.question, {
                 questionCount: qs[0]?.question?.questions?.length,
+                // While the pane is unmounted (a tab switch) its document is
+                // unregistered and reads empty, which isn't an answer: it
+                // still waits until the pane is deleted or mounts again.
+                stillWaiting: () => getPaneModel(opts.blockId) === null || pendingQuestions().length > 0,
             });
+            syncAwaitingUser(opts.blockId);
         } else if (!hasAny && hadAny) {
             waitingToneActive = false;
-            setAwaitingUser(false);
-            firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "submitted" });
+            endWaitingForYou(opts.blockId, "question", "submitted");
+            // Still true if a tool permission waits too.
+            syncAwaitingUser(opts.blockId);
         } else if (!hasAny && prevQs === undefined) {
             // First run at mount with nothing pending: a `true` left in the block
             // meta from before (the question was answered while this pane was not
             // mounted) is stale, and nothing else would clear it.
-            if (MOS.getMuxObjectAtom<Block>(`block:${opts.blockId}`)()?.meta?.[META_AWAITING_USER]) {
-                setAwaitingUser(false);
+            if (MOS.getMuxObjectAtom<Block>(`block:${opts.blockId}`)()?.meta?.[META_AWAITING_USER] && !isAgentWaitingForYou(opts.blockId)) {
+                syncAwaitingUser(opts.blockId);
             }
         }
     }));
+    // An unmount isn't the end of the wait: a tab switch unmounts the pane
+    // while its question is still pending, and the tone should keep asking.
+    // The registry ends it when the question is no longer pending or the
+    // pane is deleted (stillWaiting above), mounted or not; a pane that
+    // mounts again keeps the one entry.
     onCleanup(() => {
-        if (waitingToneActive) {
-            firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "closed" });
-            waitingToneActive = false;
-        }
+        waitingToneActive = false;
     });
 
     // AskUserQuestion answer handler.
@@ -352,6 +350,16 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             applyDoc(originals);
         });
     };
+
+    // After history has loaded: a wait still registered from before this
+    // mount, for a question no longer pending (it was cancelled while the
+    // pane was unmounted), ends. Not at mount itself: the document is empty
+    // until history replays, and ending then would resolve the notification
+    // for a question that's still there.
+    const reconcileWaiting = () => {
+        if (pendingQuestions().length === 0) endWaitingForYou(opts.blockId, "question", "submitted");
+    };
+    reconcileWhenHistoryLoads(opts.blockId, reconcileWaiting);
 
     return { pendingQuestions, handleAnswer, handleCancel };
 }

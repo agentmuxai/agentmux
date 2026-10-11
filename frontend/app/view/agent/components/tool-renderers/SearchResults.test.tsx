@@ -5,7 +5,12 @@ import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openExternal = vi.fn();
-vi.mock("@/store/global", () => ({ getApi: () => ({ openExternal }) }));
+vi.mock("@/store/global", () => ({
+    getApi: () => ({ openExternal }),
+    // The summary renders through Markdown, which reads its
+    // `markdown:streamtailinplace` kill switch on mount.
+    getSettingsKeyAtom: () => () => undefined,
+}));
 
 import { SearchResults } from "./SearchResults";
 import { registerToolRenderers } from ".";

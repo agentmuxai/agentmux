@@ -144,6 +144,10 @@ export const WpsEvent = {
     WidgetPackages: "widgetpackages",
     /** A widget package's storage changed: `{ id, keys }`. */
     WidgetStorage: "widgetstorage",
+    /** Agents' widget install requests waiting for the user: `{ requests }`. */
+    WidgetRequests: "widgetrequests",
+    /** A call to action srv holds open started or ended (the waiting tone). */
+    UserAttention: "userattention",
     LanInstances: "laninstances",
     LanInstancesError: "laninstances:error",
     LanInstancesFirewall: "laninstances:firewall",

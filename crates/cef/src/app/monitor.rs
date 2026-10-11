@@ -4,7 +4,7 @@
 // Monitor / DPI geometry utilities — work-area lookup and centered-
 // window placement math used by `AgentMuxWindowDelegate::on_window_created`
 // (see the parent `app` module) and by pool/tear-off window placement
-// elsewhere in the crate. Split out of `app.rs` (now `app/mod.rs`).
+// elsewhere in the crate. Split out of the single-file `app` module (now `app/mod.rs`).
 
 use cef::*;
 

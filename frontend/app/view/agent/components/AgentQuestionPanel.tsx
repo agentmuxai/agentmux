@@ -565,7 +565,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                                 Accept Recommended
                             </Button>
                             <Button
-                                tone="accent"
+                                tone="attention"
                                 class="agent-question-panel-btn agent-question-panel-btn--submit"
                                 disabled={!allAnswered()}
                                 onClick={() => submit()}

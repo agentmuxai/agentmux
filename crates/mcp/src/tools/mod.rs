@@ -16,11 +16,13 @@ mod global_memory;
 mod history;
 mod loops;
 mod memory;
+mod overlap;
 mod panes;
 mod presets;
 mod pty_shell;
 mod shell;
 mod ui;
+mod widgets;
 mod work;
 
 /// What every handler may need from the MCP process.
@@ -77,6 +79,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         panes,
         fleet,
         history,
+        overlap,
         ui,
         browser,
         loops,
@@ -85,7 +88,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         memory,
         global_memory,
         presets,
-        accounts
+        accounts,
+        widgets
     );
     anyhow::bail!("unknown tool: {name}")
 }
@@ -103,11 +107,13 @@ mod tests {
         ("history", include_str!("history.rs")),
         ("loops", include_str!("loops.rs")),
         ("memory", include_str!("memory.rs")),
+        ("overlap", include_str!("overlap.rs")),
         ("panes", include_str!("panes.rs")),
         ("presets", include_str!("presets.rs")),
         ("pty_shell", include_str!("pty_shell.rs")),
         ("shell", include_str!("shell.rs")),
         ("ui", include_str!("ui.rs")),
+        ("widgets", include_str!("widgets.rs")),
         ("work", include_str!("work.rs")),
     ];
 

@@ -35,6 +35,7 @@ vi.mock("@/app/store/global", () => ({
 
 import { META_AWAITING_USER } from "@/app/store/swarm-line";
 import { useAgentQuestions } from "./useAgentQuestions";
+import { __resetWaitingForYou } from "@/app/notification/waiting-for-you";
 
 function question(): ToolNode {
     return {
@@ -59,6 +60,7 @@ function mount(initial: DocumentNode[]) {
 }
 
 beforeEach(() => {
+    __resetWaitingForYou();
     hub.updates.length = 0;
     hub.blockMeta = {};
 });

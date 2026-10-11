@@ -64,7 +64,7 @@ export function statusOf(text) {
  * Every file-looking token a doc cites. Two shapes count:
  *  - anything in backticks that ends in a source/config extension
  *    (`crates/srv/src/server/reactive.rs`, `runner.rs`)
- *  - a bare slash-containing path ending in one (crates/srv/src/x.rs), for
+ *  - a bare slash-containing path ending in one (crates/srv/src/x.rs), for (comment-hygiene: allow)
  *    docs that don't backtick their citations.
  * A trailing `:123` / `:120-140` line reference is stripped. Returned
  * deduplicated, in first-seen order.

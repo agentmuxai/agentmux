@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Types for @agentmux/widget-sdk v1, the client of the AgentMux widget bridge,
+ * Types for @agentmuxai/widget-sdk v1, the client of the AgentMux widget bridge,
  * protocol 1 (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6, §7).
  */
 
@@ -64,6 +64,18 @@ export interface HeaderAction {
 
 export type MenuItem = { id: string; label: string; disabled?: boolean } | { separator: true };
 
+/** How a status bar item looks now; a field left out shows the manifest's. */
+export interface StatusItemLook {
+    /** 1–40 characters. */
+    text?: string;
+    /** A Font Awesome icon name. */
+    icon?: string;
+    /** At most 120 characters; AgentMux shows it after the widget's name. */
+    tooltip?: string;
+    tone?: "info" | "success" | "warning" | "error";
+    hidden?: boolean;
+}
+
 export interface FetchInit {
     method?: string;
     headers?: Record<string, string>;
@@ -104,6 +116,10 @@ export interface EventMap {
     theme: Theme;
     meta: { meta: Record<string, unknown> };
     action: { id: string; source: "header" | "menu" };
+    /** One of the widget's commands (`contributes.commands`) was run from the
+     *  palette, or one of its status items was clicked. Sent to the pane it
+     *  runs in, opened for it if none was. */
+    command: { id: string; source: "palette" | "status" };
     /** The package's storage changed, from any of its panes in any window. */
     storage: { keys: string[] };
     dispose: Record<string, never>;
@@ -128,6 +144,9 @@ export interface AgentMux {
         toast(text: string, kind?: "info" | "success" | "warning" | "error"): Promise<void>;
         /** Opens an http(s) link in a browser pane next to the widget. */
         openUrl(url: string): Promise<void>;
+        /** Updates one of the widget's status bar items while this pane is
+         *  open; with no look, the manifest's is shown again. */
+        setStatusItem(id: string, look?: StatusItemLook): Promise<void>;
     };
     theme: { get(): Promise<Theme> };
     panes: {

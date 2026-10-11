@@ -5,7 +5,7 @@
 // open_new_window / open_subwindow, the dev-Vite-port + host-runtime-dir
 // resolution that feeds the loaded URL, and the FrontendUrlError surface.
 //
-// Final carve of the commands/window.rs modularization (Plan 1); with it,
+// Final carve of the `commands::window` modularization (Plan 1); with it,
 // `mod.rs` becomes a pure re-export shim. Pure move — no behavior change.
 //
 // `open_new_window` / `open_subwindow` are `pub` (dispatched by ipc.rs).

@@ -71,24 +71,18 @@ pub(crate) fn live_jars(state: &AppState) -> Option<Vec<String>> {
 }
 
 /// Check the identity a client gives a new browser tab (`pane.open`): an
-/// Incognito one that is well formed, on a host that can give it a jar of its
-/// own, within the cap unless it shares a jar already open. Anything else
+/// Incognito one that is well formed, within the cap unless it shares a jar
+/// already open. Anything else
 /// fails the open rather than quietly browsing in the shared jar.
 pub(crate) fn check_new_tab(state: &AppState, meta: &MetaMapType) -> Result<(), String> {
     let Some(v) = meta.get(IDENTITY_META_KEY) else { return Ok(()) };
     let identity = v.as_str().unwrap_or("");
     if let Some(id) = profile_id(identity) {
-        if !cfg!(windows) {
-            return Err("browser profiles are Windows only for now".to_string());
-        }
         let known = profile_ids().ok_or("couldn't read the browser profiles")?;
         return if known.contains(id) { Ok(()) } else { Err(format!("there is no browser profile {id:?}")) };
     }
     if !is_incognito(identity) {
         return Err(format!("{IDENTITY_META_KEY} must be incognito:<id> or profile:<id>"));
-    }
-    if !cfg!(windows) {
-        return Err("Incognito tabs are Windows only for now".to_string());
     }
     let open = live_jars(state).ok_or("couldn't count the Incognito tabs open")?;
     if !open.iter().any(|j| j == identity) && open.len() >= MAX_INCOGNITO_JARS {
@@ -108,11 +102,8 @@ pub(crate) fn inherit(meta: &mut MetaMapType, opener: &Block) {
 }
 
 /// How many more Incognito jars a layout replay may open: the cap less those
-/// open now (none when they can't be counted, or off Windows).
+/// open now (none when they can't be counted).
 pub(crate) fn jars_available(state: &AppState) -> usize {
-    if !cfg!(windows) {
-        return 0;
-    }
     live_jars(state).map_or(0, |open| MAX_INCOGNITO_JARS.saturating_sub(open.len()))
 }
 
@@ -296,10 +287,12 @@ mod tests {
         };
         assert!(check_new_tab(&state, &MetaMapType::new()).is_ok());
         assert!(check_new_tab(&state, &with(json!("incognito:short"))).is_err());
-        assert!(check_new_tab(&state, &with(json!("profile:p-none"))).is_err());
+        // Profiles work on every platform: an unknown one is refused as unknown.
+        let unknown = check_new_tab(&state, &with(json!("profile:p-none"))).unwrap_err();
+        assert!(unknown.contains("there is no browser profile"), "{unknown}");
         assert!(check_new_tab(&state, &with(json!("profile:Bad Id"))).is_err());
         assert!(check_new_tab(&state, &with(json!(5))).is_err());
         let ok = check_new_tab(&state, &with(json!("incognito:cccccccc-3333")));
-        assert_eq!(ok.is_ok(), cfg!(windows), "{ok:?}");
+        assert!(ok.is_ok(), "{ok:?}");
     }
 }

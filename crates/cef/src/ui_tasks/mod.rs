@@ -13,7 +13,7 @@
 // Used on Linux (and macOS). On Windows, Win32 APIs are used directly since
 // they are safe to call from any thread.
 //
-// This module was split from a single `ui_tasks.rs` into category submodules
+// This module was split from a single `ui_tasks` file into category submodules
 // (pure reorganization — zero logic / public-API changes). Every task type and
 // `post_*` / `get_*` function is re-exported below so external call sites keep
 // using `crate::ui_tasks::…` unchanged.
@@ -36,7 +36,7 @@ mod platform_macos;
 pub use window::*;
 pub use drag::*;
 pub use pool::*;
-pub use popup::{post_close_popup, post_show_popup};
+pub use popup::{post_close_popup, post_close_popup_window, post_show_popup};
 #[cfg(not(target_os = "windows"))]
 pub use pane_geometry::*;
 // `clear_pane_swizzle_statics` is always present (real impl on macOS, no-op

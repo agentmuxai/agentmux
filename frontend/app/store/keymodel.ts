@@ -251,9 +251,11 @@ export {
     appHandleKeyDown,
     disableGlobalKeybindings,
     enableGlobalKeybindings,
+    installShortcutApi,
     keyboardMouseDownHandler,
     registerControlShiftTracking,
     registerHostShortcuts,
+    registerChordCapture,
 } from "./keymodel-dispatch";
 
 export { globalRefocus, globalRefocusWithTimeout } from "./keymodel-nav";

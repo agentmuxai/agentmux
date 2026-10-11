@@ -36,7 +36,7 @@ pub enum TowerProcessRole {
 /// (1.0 = one core fully busy); the pane divides by `cpu_count` for "percent
 /// of the machine". Absent values are ones the OS wouldn't give without
 /// elevation, never zeros.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TowerProcess {
     /// `pid:start`, unique across PID reuse.
@@ -72,6 +72,31 @@ pub struct TowerProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub task: Option<String>,
+    /// One of AgentMux's own processes: what it is ("GPU", "Renderer",
+    /// "Network service", "Server", "Launcher", …). Absent for any other
+    /// process, and for one of AgentMux's the backend can't place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
+    /// CPU time used so far (user + kernel), nanoseconds: for an exited
+    /// process, all it used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub cpu_time_ns: Option<u64>,
+    /// The most private memory seen while it was sampled, bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub peak_mem: Option<u64>,
+    /// In a task's `exited` list: when it was first seen gone, unix ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub exited_ms: Option<u64>,
+    /// The agent tool call this process runs, as the agent described it
+    /// ("Run the srv tests"): set on the wrapper at the root of the call's
+    /// process tree (`backend::tool_calls`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub started_by: Option<String>,
 }
 
 /// A pane and every process it started, or AgentMux itself.
@@ -97,6 +122,13 @@ pub struct TowerTask {
     #[ts(type = "number")]
     pub mem: u64,
     pub processes: Vec<TowerProcess>,
+    /// Its processes that exited in the last minute, kept so a build's
+    /// short-lived compilers aren't missed by a 2 s sample: no CPU rate or
+    /// memory any more, but their CPU time and peak memory.
+    /// SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub exited: Option<Vec<TowerProcess>>,
 }
 
 /// Every process on the machine this user may see.
@@ -122,6 +154,22 @@ pub struct TowerHost {
     pub matched: u32,
 }
 
+/// The whole machine's totals, without its process list: what lets the
+/// Agents view's rail add up to the machine ("Everything else" is the machine
+/// less every task). SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMachine {
+    /// All processes' CPU, fraction of one core; absent on a first sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cpu: Option<f64>,
+    /// All processes' private memory, bytes.
+    #[ts(type = "number")]
+    pub mem: u64,
+    pub processes: u32,
+}
+
 /// `tower.sample`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -141,6 +189,10 @@ pub struct TowerSnapshot {
     /// command lines.
     pub remote: bool,
     pub tasks: Vec<TowerTask>,
+    /// This computer's (or a paired one's) totals, on every sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub machine: Option<TowerMachine>,
     /// Present when the request asked for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

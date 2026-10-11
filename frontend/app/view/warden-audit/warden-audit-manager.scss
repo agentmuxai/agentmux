@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Migrated from the original monolithic warden.scss's audit-feed rules, now
+// Migrated from the original monolithic warden stylesheet's audit-feed rules, now
 // scoped to its own manager component. Extended with "nudge"/"declined"
 // status variants for Supervisor-originated rows (entry.outcome set) —
 // deliberately neutral (blue-ish), not red/green, since a decline is not a
