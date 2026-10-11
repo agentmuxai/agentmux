@@ -484,3 +484,42 @@ account shows: Log in, Login via terminal, and Bind for an existing account.
 
 Run it as §8.4, with `--suite agent`, the same `--redact` pairs as §9.4, and
 `AGENTMUX_HOME_OVERRIDE` in the environment.
+
+## 11. Memory, Connectors and widgets (2026-10-11)
+
+Part 4 of the screenshot plan: the Memory and Connectors panes with data in
+them, and a widget waiting for approval.
+
+### 11.1 Page dialogs
+
+A `window.confirm()` blocks the page until it's answered. CEF draws it inside
+the window (a tab-modal box, so a user sees it), but CDP neither reports it
+(`Page.javascriptDialogOpening`) nor answers it
+(`Page.handleJavaScriptDialog` says no dialog is showing), and every later
+command, input included, then waits forever. The first memory run hit this:
+Escape in a new Global Memory entry asks "Discard your unsaved changes?", and
+the run hung until the instance was restarted. So `capture.mjs` replaces
+`confirm`, `alert` and `prompt` in the page it drives, now and in every page
+it loads (`Page.addScriptToEvaluateOnNewDocument`): `confirm` answers Cancel,
+the safe answer to both "discard changes?" and "delete …?", and each call is
+recorded in `window.__screenshotDialogs`. Only the capture instance's page is
+affected.
+
+### 11.2 The memory suite
+
+`--suite memory` (`memory-shots.mjs`). Setup adds, only where it's missing:
+three Global Memory entries, two bundles (one with Codex instructions that
+replace the bundle's own), two made-up accounts whose secrets are environment
+variable names (`secret_ref` backend `env`; upsert doesn't probe them), Personal
+memory files for the agent suite's `api-tests` agent, and the docs' sample
+`notes` widget, installed with `widgets.install` but not approved. Skills and
+MCP servers are shown as the app ships them. Remotes isn't captured: it lists
+the hosts in the OS user's `~/.ssh/config` (§8.3).
+
+Shots: Memory → Global, an entry, a new entry; Personal, an agent's files;
+Skills, a new skill; Bundles, a bundle, editing it (with its per-provider
+instructions); Connectors → Accounts, adding one; MCP servers, a new one; and
+Settings → Widgets with the sample widget's approval prompt. Each opens its
+pane from the hamburger menu in a window tab of its own, maximized at
+1100×760, and closes the tab afterwards. Run it after the agent suite, which
+creates `api-tests`.
