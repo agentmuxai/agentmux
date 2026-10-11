@@ -444,9 +444,24 @@ unsafe fn is_on_resize_border(win: *mut std::ffi::c_void, loc_x: f64, loc_y: f64
     if mask & 8 == 0 || mask & (1 << 14) != 0 {
         return false;
     }
-    let frame: extern "C" fn(*mut c_void, *const c_void) -> NSRect =
-        std::mem::transmute(objc_msgSend as *const c_void);
-    let f = frame(win, sel_registerName(b"frame\0".as_ptr() as _));
+    let sel_frame = sel_registerName(b"frame\0".as_ptr() as _);
+    // A 32-byte struct comes back through objc_msgSend_stret on x86_64
+    // (as in app/monitor.rs).
+    #[cfg(target_arch = "x86_64")]
+    let f = {
+        extern "C" { fn objc_msgSend_stret(); }
+        let frame: extern "C" fn(*mut NSRect, *mut c_void, *const c_void) =
+            std::mem::transmute(objc_msgSend_stret as *const c_void);
+        let mut out = NSRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        frame(&mut out, win, sel_frame);
+        out
+    };
+    #[cfg(not(target_arch = "x86_64"))]
+    let f = {
+        let frame: extern "C" fn(*mut c_void, *const c_void) -> NSRect =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        frame(win, sel_frame)
+    };
     loc_x < RESIZE_BORDER_PT
         || loc_y < RESIZE_BORDER_PT
         || loc_x > f.w - RESIZE_BORDER_PT
