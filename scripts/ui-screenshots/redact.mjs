@@ -119,6 +119,14 @@ export function redactExpression(pairs) {
     return `(${redactDocument.toString()})(${JSON.stringify(pairs)})`;
 }
 
+/** The regexes for `pairs`, as redactDocument builds them: each name as text
+ *  (escaped), a whole word, not inside a longer address, any case. Runs in
+ *  the page too (serialized by liveRedactExpression). */
+export function redactionRules(pairs) {
+    const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return pairs.map((p) => ({ re: new RegExp(`(?<![A-Za-z0-9]|\\d\\.)${escape(p.from)}(?![A-Za-z0-9]|\\.\\d)`, "gi"), to: p.to }));
+}
+
 /** A `Runtime.evaluate` expression that redacts now and then keeps redacting
  *  whatever the page renders, until `stopLiveRedactionExpression`: for a
  *  recording, where text drawn mid-clip must be redacted before it's painted.
@@ -139,8 +147,9 @@ export function liveRedactExpression(pairs) {
             observer.observe(document.body, options);
         });
         observer.observe(document.body, options);
-        const escape = (s) => s.replace(/[.*+?^\${}()|[\]\\]/g, "\\$&");
-        const rules = pairs.map((p) => ({ re: new RegExp("(?<![A-Za-z0-9]|\\d\\.)" + escape(p.from) + "(?![A-Za-z0-9]|\\.\\d)", "gi"), to: p.to }));
+        // Injected with toString(), like redactDocument: written inside this
+        // template literal, its regex escaping would lose its backslashes.
+        const rules = (${redactionRules.toString()})(pairs);
         const fixField = (el) => {
             if (!el || typeof el.value !== "string" || !el.value) return;
             let v = el.value;

@@ -89,6 +89,20 @@ describe("live redaction", () => {
         expect(f.value).toBe("demo again");
     });
 
+    it("treats names with regex characters as text, in fields too (muxreview on #4670)", async () => {
+        const pairs = [
+            { from: "a.b+c(1)", to: "x" },
+            { from: "C:\\Users\\al[i]ce", to: "C:\\Users\\demo" },
+        ];
+        document.body.innerHTML = `<p id="p">a.b+c(1) and axb+c(1)</p><input id="f" value="">`;
+        (0, eval)(liveRedactExpression(pairs));
+        expect(document.getElementById("p").textContent).toBe("x and axb+c(1)");
+        const f = document.getElementById("f");
+        f.value = "C:\\Users\\al[i]ce\\proj, a.b+c(1)";
+        f.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(f.value).toBe("C:\\Users\\demo\\proj, x");
+    });
+
     it("stops when told to", async () => {
         (0, eval)(liveRedactExpression([{ from: "alice", to: "demo" }]));
         (0, eval)(stopLiveRedactionExpression);
