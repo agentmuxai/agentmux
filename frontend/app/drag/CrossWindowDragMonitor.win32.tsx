@@ -122,6 +122,13 @@ function CrossWindowDragMonitor(): JSX.Element {
                 return;
             }
 
+            // The drag's own dragend may have arrived during that query and
+            // handled the release already; then it isn't this fallback's.
+            if (_currentDragPayload !== payload) {
+                Logger.debug("dnd:cross", "fallback: dragend handled the release meanwhile");
+                return;
+            }
+
             if (isButtonPressed) {
                 // User is still holding the button — just hovering, not dropping.
                 Logger.debug("dnd:cross", "fallback: button still pressed, rescheduling");

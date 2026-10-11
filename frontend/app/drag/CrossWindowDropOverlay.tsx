@@ -63,8 +63,9 @@ function CrossWindowDropOverlay(): JSX.Element {
         let unlistenEnd: (() => void) | null = null;
         let unlistenStart: (() => void) | null = null;
 
-        api.listen("cross-drag-update", (event: { payload: CrossDragUpdateEvent }) => {
-            const data = event.payload;
+        // The host hands listeners the payload itself (platform/ipc.ts
+        // `listenEvent`), not an `{ payload }` wrapper.
+        api.listen<CrossDragUpdateEvent>("cross-drag-update", (data) => {
             if (data.targetWindow === wl && data.sourceWindow !== wl) {
                 setIsTarget(true);
                 setDragType(data.dragType);
@@ -74,8 +75,7 @@ function CrossWindowDropOverlay(): JSX.Element {
             }
         }).then((fn) => { unlistenUpdate = fn; });
 
-        api.listen("cross-drag-end", (event: { payload: CrossDragEndEvent }) => {
-            const data = event.payload;
+        api.listen<CrossDragEndEvent>("cross-drag-end", (data) => {
             Logger.info("dnd:overlay", "cross-drag ended", { dragId: data.dragId, result: data.result, targetWindow: data.targetWindow });
             setIsTarget(false);
             setDragType(null);
