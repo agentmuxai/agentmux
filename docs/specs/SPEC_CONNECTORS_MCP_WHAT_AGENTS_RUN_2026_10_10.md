@@ -31,11 +31,16 @@ Phases 1–3 (observed servers, showing them, other providers) are next.
 
 ### 2.1 Reach
 
-Two new columns on `db_mcp_servers`, in both the identity store and
-`objects.db`, as additive `ALTER TABLE` statements with default 0.
+A table of its own beside `db_mcp_servers`: `db_mcp_server_reach (mcp_id,
+all_agents, in_containers, updated_at)`. It sits in the identity store
+(schema v12), with a copy in `objects.db` (v44) for parity. With no row, both
+switches are off. A separate table rather than new columns on
+`db_mcp_servers`, so nothing that copies catalog rows changes (the generic
+`managed` layer, the m0016/m0031 carries, bundle import), and older builds
+never see it. Deleting a server deletes its row.
 
 **`all_agents`** gives the server to every agent.
-- It is stored on the catalog row in the identity store, which survives an
+- It is stored with the catalog in the identity store, which survives an
   upgrade, unlike an agent bind (`db_agent_mcp_ref` lives in the
   per-version `objects.db` until durable bindings Phase 6).
 - So "All agents" is the reliable way to keep a server on everywhere.
@@ -64,8 +69,10 @@ and for a container agent only global rows with `in_containers`.
 - `writeagentconfig`, the picker path, now overlays the same effective
   servers onto the frontend's `.mcp.json` (the `agentmux` entry plus the
   agent's legacy blob) before signing keys are injected.
-- Both use `agent_config::overlay_mcp_servers`, which never lets a row named
-  `agentmux` replace the built-in entry.
+- That is `mcp_launch::add_to_files`, which calls
+  `mcp_launch::overlay_mcp_servers`.
+- Both paths put the rows in with `mcp_launch::insert_server_rows`, which
+  never lets a row named `agentmux` replace the built-in entry.
 - An older frontend that sends no `agent_id` gets the old content.
 
 ### 2.3 Catalog commands and pane
