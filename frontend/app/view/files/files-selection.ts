@@ -9,6 +9,8 @@
  * docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.3.
  */
 
+import type { FsEntry } from "@/types/rpc/FsEntry";
+
 export interface Selection {
     /** Selected names. */
     names: ReadonlySet<string>;
@@ -81,6 +83,15 @@ export function toggleFocused(sel: Selection): Selection {
     if (names.has(sel.focus)) names.delete(sel.focus);
     else names.add(sel.focus);
     return { ...sel, names, anchor: sel.focus };
+}
+
+/** The folder whose list row or tile an event's target is in, if it is one. */
+export function folderAt(target: EventTarget | null, byName: ReadonlyMap<string, FsEntry>): FsEntry | undefined {
+    if (!(target instanceof Element)) return undefined;
+    const el = target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
+    const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
+    const entry = name ? byName.get(name) : undefined;
+    return entry?.is_dir ? entry : undefined;
 }
 
 export function selectAll(sel: Selection, order: readonly string[]): Selection {

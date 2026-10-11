@@ -43,7 +43,7 @@ import {
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
 import { crumbsOf, isWithin, joinPath, nameProblem, samePath, stemLength } from "./files-path";
-import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection";
+import { clickRow, folderAt, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
@@ -401,15 +401,6 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         void openFolderInNewTab(model.blockId, dir, model.connection() || undefined).catch((err) =>
             model.setStatus({ text: `Couldn't open a new tab: ${errorText(err)}`, tone: "error" })
         );
-    };
-
-    /** The folder row or tile under an event's target, if it is one. */
-    const folderAt = (target: EventTarget | null): FsEntry | undefined => {
-        if (!(target instanceof Element)) return undefined;
-        const el = target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
-        const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
-        const entry = name ? byName().get(name) : undefined;
-        return entry?.is_dir ? entry : undefined;
     };
 
     const askDeletePermanently = (list: FsEntry[]): void => {
@@ -986,20 +977,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
                     }}
                     onContextMenu={onListContextMenu}
-                    // On Windows, a middle press over the scrolling list starts
-                    // Chromium's autoscroll, and no auxclick follows. Over a
-                    // folder, stop that so the click below arrives.
-                    onMouseDown={(e) => {
-                        if (e.button === 1 && folderAt(e.target)) e.preventDefault();
-                    }}
+                    // Windows: a middle press over the list starts autoscroll, and no auxclick follows.
+                    onMouseDown={(e) => e.button === 1 && folderAt(e.target, byName()) && e.preventDefault()}
                     onAuxClick={(e) => {
                         // Middle-click a folder: open it in a new tab.
-                        if (e.button !== 1) return;
-                        const entry = folderAt(e.target);
-                        if (entry) {
-                            e.preventDefault();
-                            openInNewTab(model.pathOf(entry.name));
-                        }
+                        const entry = e.button === 1 && folderAt(e.target, byName());
+                        if (!entry) return;
+                        e.preventDefault();
+                        openInNewTab(model.pathOf(entry.name));
                     }}
                     onClick={(e) => {
                         if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
