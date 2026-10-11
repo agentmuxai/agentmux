@@ -39,11 +39,13 @@ export async function moveDocTabToNewPane(sourceBlockId: string, tabId: string, 
     }
     const source = MOS.getObjectValue(MOS.makeORef("block", sourceBlockId)) as Block | undefined;
     const def = splitBlockDefFor(source, () => ({ meta: { view: source?.meta?.view } }));
+    // The layout the split goes into, taken now, as the split takes it: the
+    // window tab on screen may change while the new pane comes up.
+    const layout = getLayoutModelForStaticTab();
     const split = side === "left" || side === "right" ? createBlockSplitHorizontally : createBlockSplitVertically;
     const newBlockId = await split(def, besideBlockId, side === "left" || side === "up" ? "before" : "after");
     if ((await whenDocTabHost(newBlockId)) && dropDocTab(sourceBlockId, tabId, newBlockId)) return true;
     // Refused after all, or the pane never came up: no empty pane left behind.
-    const layout = getLayoutModelForStaticTab();
     const node = layout?.getNodeByBlockId(newBlockId);
     if (node) void layout.closeNode(node.id);
     return false;
