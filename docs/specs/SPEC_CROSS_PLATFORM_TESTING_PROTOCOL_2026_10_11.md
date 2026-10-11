@@ -1,7 +1,7 @@
 # Cross-platform testing protocol: one lead, one agent per platform
 
 **Date:** 2026-10-11
-**Status:** active
+**Status:** living — the maintained process for cross-platform testing. First used for the Esc and redock checks on #4691 (2026-10-11).
 **Author:** AgentA@Area54, at the operator's request
 **Builds on:** what worked in [SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md](SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md) (one owner per platform, a shared checklist, results in the spec) and in [PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) / [SPEC_HELP_HIDDEN_TIPS_2026_10_10.md](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) (hand checks on all three platforms).
 
