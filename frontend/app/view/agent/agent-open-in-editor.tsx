@@ -15,6 +15,7 @@
 
 import { IconButton } from "@/app/element/ui";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { createContext, Show, useContext, type Accessor, type JSX } from "solid-js";
 
 export interface AgentPaneFiles {
@@ -54,7 +55,7 @@ export function resolveAgentPath(path: string, baseDir: string): string {
  * doesn't reuse a pane when one is given.
  */
 export async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {
-    await TabRpcClient.rpcCall(
+    const opened = (await TabRpcClient.rpcCall(
         "pane.open",
         {
             view: "editor",
@@ -64,8 +65,21 @@ export async function openInEditorBeside(files: AgentPaneFiles, path: string): P
             reuse_editor_pane: true,
         },
         {}
-    );
+    )) as { block_id?: string } | undefined;
+    // A new pane beside a magnified agent pane would stay hidden behind it,
+    // and the click would look like it did nothing: show it (un-magnify,
+    // without moving focus). The frontend places a new pane a moment after
+    // srv answers, so try for a short while.
+    const blockId = opened?.block_id;
+    if (!blockId) return;
+    for (let i = 0; i < SHOW_TRIES; i++) {
+        if (await showBlockWithoutFocus(blockId)) return;
+        await new Promise((r) => setTimeout(r, SHOW_TRY_MS));
+    }
 }
+
+const SHOW_TRIES = 10;
+const SHOW_TRY_MS = 50;
 
 /** The button, for a Markdown preview's top-right actions; nothing outside a host agent's pane. */
 export function OpenInEditorButton(props: { path: string }): JSX.Element {

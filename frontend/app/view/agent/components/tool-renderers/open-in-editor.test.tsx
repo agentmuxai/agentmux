@@ -6,14 +6,16 @@
  * (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §2).
  */
 
-import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
-    rpcCall: vi.fn(async (..._args: unknown[]) => ({})),
+    rpcCall: vi.fn(async (..._args: unknown[]) => ({ block_id: "editor-9" })),
+    show: vi.fn(async (_blockId: string) => true),
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: h.rpcCall } }));
+vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: h.show }));
 
 import { AgentPaneProviders } from "../../agent-media";
 import { AgentPaneFilesProvider, resolveAgentPath } from "../../agent-open-in-editor";
@@ -23,6 +25,7 @@ import { ToolBlock } from "../ToolBlock";
 afterEach(() => {
     cleanup();
     h.rpcCall.mockClear();
+    h.show.mockClear();
 });
 
 const read = (path: string): ToolNode => ({
@@ -106,20 +109,36 @@ describe("Open in editor on a Markdown file preview", () => {
         expect(button(container)).toBeNull();
     });
 
-    it("isn't there for a container agent, whose paths are inside its container", () => {
-        const pane = (agentType: string) =>
+    it("is only there for an agent known to run on this host", () => {
+        const pane = (agentMode: string | undefined, agentType: string | undefined) =>
             inPane(read("/work/notes.md"), (block) => (
                 <AgentPaneProviders
                     dormant={() => false}
-                    block={() => ({ oid: "agent-1", meta: { "cmd:cwd": "/work" } })}
-                    agent={() => ({ working_directory: "/work", agent_type: agentType })}
+                    block={() => ({ oid: "agent-1", meta: { "cmd:cwd": "/work", ...(agentMode ? { agentMode } : {}) } })}
+                    agent={() => (agentType ? { working_directory: "/work", agent_type: agentType } : undefined)}
                 >
                     {block()}
                 </AgentPaneProviders>
             ));
-        expect(button(pane("container").container)).toBeNull();
-        cleanup();
-        expect(button(pane("host").container)).not.toBeNull();
+        const shown = (mode: string | undefined, type: string | undefined) => {
+            const has = button(pane(mode, type).container) != null;
+            cleanup();
+            return has;
+        };
+        // A container agent's paths are inside its container.
+        expect(shown("container", undefined)).toBe(false);
+        expect(shown(undefined, "container")).toBe(false);
+        // The pane's own agentMode wins over a definition that hasn't loaded.
+        expect(shown("host", undefined)).toBe(true);
+        expect(shown(undefined, "host")).toBe(true);
+        // Neither known yet (definitions still loading, or deleted): no button.
+        expect(shown(undefined, undefined)).toBe(false);
+    });
+
+    it("shows the editor it opened, so a magnified agent pane doesn't hide it", async () => {
+        const { container } = inPane(read("C:/repo/docs/notes.md"));
+        fireEvent.click(button(container)!);
+        await waitFor(() => expect(h.show).toHaveBeenCalledWith("editor-9"));
     });
 });
 
