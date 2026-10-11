@@ -123,6 +123,6 @@ So in both occurrences the crash comes right after the pane for the same block i
 
 - **Synthetic mouse input works** from a process with Accessibility permission (`CGEventPost`); it found F1 and the #4688 bug. Edge presses must land within a few points of the real border; a window that has moved needs its position re-read first. Screen capture does not work without Screen Recording permission, so pane contents cannot be seen, only window frames and alpha.
 - **A scripted drag that grabs the wrong thing can tear off a tab.** The header's draggable area and the tab strip are close together; move the press point into the empty strip beside the tabs, and never run synthetic drags on a window someone is using.
-- **A dev window started as a background job is killed after ~30 minutes.** Start it detached with `nohup`.
+- **A dev window started as a background job of an agent shell is killed after ~30 minutes.** Start it detached, but never with `< /dev/null`: Vite exits when its stdin closes (F6). Use `tail -f /dev/null | nohup task dev > log 2>&1 &` and, for a window that must stay up for hours, also run Vite alone in its own session with `CI=true` (F6 has the details).
 - **Fast drags matter.** A 30 pt/frame drag showed pane lag (300 pt p90) that a 4 pt/frame drag (60 pt p90) understated.
 - The probes (`scripts/perf/macos-paint/`) and the numbers behind F3 are in #4615.
