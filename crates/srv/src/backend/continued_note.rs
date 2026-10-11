@@ -13,7 +13,7 @@
 //! capped or failed model call means no note, never a held-up session.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -36,18 +36,60 @@ const CARD_SLACK_MS: i64 = 5_000;
 /// the same launch, and the retry carries the record again.
 const REPEAT_WINDOW_MS: i64 = 2 * 60_000;
 
-static NOTED: LazyLock<Mutex<HashMap<String, i64>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The latest spawn of each pane that carries the record, and when each pane
+/// last showed a note.
+#[derive(Default)]
+struct Notes {
+    /// block → (this spawn's token, its "record not yet sent" flag). A newer
+    /// spawn replaces the entry, so an older spawn's task stands down: its
+    /// flag belongs to a process that is gone, and the user may already have
+    /// typed into the new one (codex P2 on #4707).
+    current: HashMap<String, (u64, Arc<AtomicBool>)>,
+    /// block → when its last note was shown.
+    shown: HashMap<String, i64>,
+}
 
-/// Claims the note for `block_id` at `now`. False when one was claimed inside
-/// [`REPEAT_WINDOW_MS`].
-fn claim(block_id: &str, now: i64) -> bool {
-    let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
-    noted.retain(|_, at| now - *at < REPEAT_WINDOW_MS);
-    if noted.contains_key(block_id) {
-        return false;
+static NOTES: LazyLock<Mutex<Notes>> = LazyLock::new(|| Mutex::new(Notes::default()));
+static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
+
+fn notes() -> std::sync::MutexGuard<'static, Notes> {
+    NOTES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Notes {
+    fn shown_recently(&self, block_id: &str, now: i64) -> bool {
+        self.shown.get(block_id).is_some_and(|at| now - *at < REPEAT_WINDOW_MS)
     }
-    noted.insert(block_id.to_string(), now);
-    true
+
+    /// Records `token` as `block_id`'s latest spawn. False when a note was
+    /// shown inside [`REPEAT_WINDOW_MS`]: no second note for the same switch.
+    fn register(&mut self, block_id: &str, token: u64, pending: Arc<AtomicBool>, now: i64) -> bool {
+        if self.shown_recently(block_id, now) {
+            return false;
+        }
+        self.current.insert(block_id.to_string(), (token, pending));
+        true
+    }
+
+    /// Whether `token` is still `block_id`'s latest spawn and its record
+    /// hasn't gone out with a user message.
+    fn still_wanted(&self, block_id: &str, token: u64) -> bool {
+        self.current
+            .get(block_id)
+            .is_some_and(|(t, pending)| *t == token && pending.load(Ordering::Acquire))
+    }
+
+    /// Takes the right to show the note, once: `token` is still wanted and no
+    /// note was shown inside the window.
+    fn take_show(&mut self, block_id: &str, token: u64, now: i64) -> bool {
+        if !self.still_wanted(block_id, token) || self.shown_recently(block_id, now) {
+            return false;
+        }
+        self.current.remove(block_id);
+        self.shown.retain(|_, at| now - *at < REPEAT_WINDOW_MS);
+        self.shown.insert(block_id.to_string(), now);
+        true
+    }
 }
 
 /// Schedules the note for a session spawned at `spawned_ms` carrying `record`.
@@ -61,7 +103,8 @@ pub(crate) fn schedule(
     record_pending: Arc<AtomicBool>,
     spawned_ms: i64,
 ) {
-    if !claim(&block_id, spawned_ms) {
+    let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
+    if !notes().register(&block_id, token, record_pending, spawned_ms) {
         return;
     }
     tokio::spawn(async move {
@@ -69,11 +112,11 @@ pub(crate) fn schedule(
         let deadline = tokio::time::Instant::now() + CARD_WAIT;
         while !crate::server::memory_delivery_handlers::startup_card_written_since(&block_id, since)
             && tokio::time::Instant::now() < deadline
-            && record_pending.load(Ordering::Acquire)
+            && notes().still_wanted(&block_id, token)
         {
             tokio::time::sleep(CARD_POLL).await;
         }
-        if !record_pending.load(Ordering::Acquire) {
+        if !notes().still_wanted(&block_id, token) {
             return;
         }
         let Some(text) =
@@ -81,8 +124,9 @@ pub(crate) fn schedule(
         else {
             return;
         };
-        // The user may have typed while the model was writing.
-        if !record_pending.load(Ordering::Acquire) {
+        // The user may have typed, or a newer spawn taken over, while the
+        // model was writing.
+        if !notes().take_show(&block_id, token, agentmux_common::time::now_ms()) {
             return;
         }
         tracing::info!(block_id = %block_id, "continuity: pick-up note written");
@@ -104,11 +148,32 @@ pub(crate) fn schedule(
 mod tests {
     use super::*;
 
+    fn flag(v: bool) -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(v))
+    }
+
+    #[test]
+    fn a_newer_spawn_takes_over_and_the_older_task_stands_down() {
+        let mut n = Notes::default();
+        let (old, new) = (flag(true), flag(true));
+        assert!(n.register("b", 1, old.clone(), 1_000));
+        assert!(n.register("b", 2, new.clone(), 2_000), "a respawn before any note is shown registers");
+        assert!(!n.still_wanted("b", 1), "the older spawn's task stands down");
+        assert!(n.still_wanted("b", 2));
+        // The user types into the new process: its flag clears, no note.
+        new.store(false, Ordering::Release);
+        assert!(!n.take_show("b", 2, 3_000));
+        assert!(!n.take_show("b", 1, 3_000), "the old flag (still true) can't publish either");
+    }
+
     #[test]
     fn one_note_per_pane_inside_the_window() {
-        assert!(claim("block-note-a", 1_000_000));
-        assert!(!claim("block-note-a", 1_000_000 + REPEAT_WINDOW_MS - 1), "a retry's respawn writes no second note");
-        assert!(claim("block-note-b", 1_000_000), "another pane has its own note");
-        assert!(claim("block-note-a", 1_000_000 + REPEAT_WINDOW_MS), "a later switch gets a note again");
+        let mut n = Notes::default();
+        assert!(n.register("b", 1, flag(true), 1_000));
+        assert!(n.take_show("b", 1, 1_500));
+        assert!(!n.take_show("b", 1, 1_600), "shown once");
+        assert!(!n.register("b", 2, flag(true), 1_000 + REPEAT_WINDOW_MS - 1), "a retry's respawn writes no second note");
+        assert!(n.register("c", 3, flag(true), 2_000), "another pane has its own note");
+        assert!(n.register("b", 4, flag(true), 1_500 + REPEAT_WINDOW_MS), "a later switch gets a note again");
     }
 }
