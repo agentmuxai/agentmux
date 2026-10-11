@@ -1,0 +1,275 @@
+{
+    "model": "claude-sonnet-5-5",
+    "account": "dev@acme.example",
+    "msPerChunk": 35,
+    "turns": [
+        {
+            "match": "hello",
+            "steps": [
+                {
+                    "text": "Hi! What would you like to work on in acme-web?"
+                }
+            ],
+            "usage": {
+                "input_tokens": 310,
+                "output_tokens": 14,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0
+            },
+            "costUsd": 0.0012
+        },
+        {
+            "match": "1 items",
+            "steps": [
+                {
+                    "thinking": "The badge always appends \"items\". I should look at Cart.tsx, pluralize the label, and add a test for one item and several."
+                },
+                {
+                    "text": "Let me look at the cart badge first."
+                },
+                {
+                    "tool": "Read",
+                    "input": {
+                        "file_path": "D:/demo/acme-web/src/components/Cart.tsx"
+                    },
+                    "result": "     1\texport function Cart(props: { items: number }) {\n     2\t  return <span class=\"cart\">{props.items} items</span>;\n     3\t}\n",
+                    "extra": {
+                        "type": "text",
+                        "file": {
+                            "filePath": "D:/demo/acme-web/src/components/Cart.tsx",
+                            "numLines": 3,
+                            "startLine": 1,
+                            "totalLines": 3
+                        }
+                    }
+                },
+                {
+                    "tool": "TodoWrite",
+                    "input": {
+                        "todos": [
+                            {
+                                "content": "Pluralize the cart badge label",
+                                "status": "in_progress",
+                                "activeForm": "Pluralizing the cart badge label"
+                            },
+                            {
+                                "content": "Add tests for one and several items",
+                                "status": "pending",
+                                "activeForm": "Adding tests for one and several items"
+                            },
+                            {
+                                "content": "Run the test suite",
+                                "status": "pending",
+                                "activeForm": "Running the test suite"
+                            }
+                        ]
+                    },
+                    "result": "Todos have been modified successfully."
+                },
+                {
+                    "text": "The label is hard-coded to \"items\". I'll choose the word from the count."
+                },
+                {
+                    "tool": "Edit",
+                    "input": {
+                        "file_path": "D:/demo/acme-web/src/components/Cart.tsx",
+                        "old_string": "  return <span class=\"cart\">{props.items} items</span>;",
+                        "new_string": "  const label = props.items === 1 ? \"item\" : \"items\";\n  return <span class=\"cart\">{props.items} {label}</span>;"
+                    },
+                    "result": "The file D:/demo/acme-web/src/components/Cart.tsx has been updated successfully.",
+                    "extra": {
+                        "filePath": "D:/demo/acme-web/src/components/Cart.tsx",
+                        "type": "update",
+                        "structuredPatch": [
+                            {
+                                "oldStart": 1,
+                                "oldLines": 3,
+                                "newStart": 1,
+                                "newLines": 4,
+                                "lines": [
+                                    " export function Cart(props: { items: number }) {",
+                                    "-  return <span class=\"cart\">{props.items} items</span>;",
+                                    "+  const label = props.items === 1 ? \"item\" : \"items\";",
+                                    "+  return <span class=\"cart\">{props.items} {label}</span>;",
+                                    " }"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "tool": "TodoWrite",
+                    "input": {
+                        "todos": [
+                            {
+                                "content": "Pluralize the cart badge label",
+                                "status": "completed",
+                                "activeForm": "Pluralizing the cart badge label"
+                            },
+                            {
+                                "content": "Add tests for one and several items",
+                                "status": "in_progress",
+                                "activeForm": "Adding tests for one and several items"
+                            },
+                            {
+                                "content": "Run the test suite",
+                                "status": "pending",
+                                "activeForm": "Running the test suite"
+                            }
+                        ]
+                    },
+                    "result": "Todos have been modified successfully."
+                },
+                {
+                    "tool": "Edit",
+                    "input": {
+                        "file_path": "D:/demo/acme-web/tests/cart.test.ts",
+                        "old_string": "  it(\"counts items\", () => expect(1 + 1).toBe(2));",
+                        "new_string": "  it(\"says item for one\", () => expect(label(1)).toBe(\"1 item\"));\n  it(\"says items for several\", () => expect(label(3)).toBe(\"3 items\"));"
+                    },
+                    "result": "The file D:/demo/acme-web/tests/cart.test.ts has been updated successfully.",
+                    "extra": {
+                        "filePath": "D:/demo/acme-web/tests/cart.test.ts",
+                        "type": "update",
+                        "structuredPatch": [
+                            {
+                                "oldStart": 3,
+                                "oldLines": 3,
+                                "newStart": 3,
+                                "newLines": 4,
+                                "lines": [
+                                    " describe(\"cart\", () => {",
+                                    "-  it(\"counts items\", () => expect(1 + 1).toBe(2));",
+                                    "+  it(\"says item for one\", () => expect(label(1)).toBe(\"1 item\"));",
+                                    "+  it(\"says items for several\", () => expect(label(3)).toBe(\"3 items\"));",
+                                    " });"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "tool": "Bash",
+                    "input": {
+                        "command": "npm test -- --run",
+                        "description": "Run the test suite"
+                    },
+                    "runMs": 1800,
+                    "result": "> acme-web@1.4.2 test\n> vitest --run\n\n RUN  v2.1.9 D:/demo/acme-web\n\n ✓ tests/cart.test.ts (2 tests) 3ms\n\n Test Files  1 passed (1)\n      Tests  2 passed (2)\n   Duration  412ms",
+                    "extra": {
+                        "stdout": "> acme-web@1.4.2 test\n> vitest --run\n\n RUN  v2.1.9 D:/demo/acme-web\n\n ✓ tests/cart.test.ts (2 tests) 3ms\n\n Test Files  1 passed (1)\n      Tests  2 passed (2)\n   Duration  412ms",
+                        "stderr": "",
+                        "interrupted": false
+                    }
+                },
+                {
+                    "tool": "TodoWrite",
+                    "input": {
+                        "todos": [
+                            {
+                                "content": "Pluralize the cart badge label",
+                                "status": "completed",
+                                "activeForm": "Pluralizing the cart badge label"
+                            },
+                            {
+                                "content": "Add tests for one and several items",
+                                "status": "completed",
+                                "activeForm": "Adding tests for one and several items"
+                            },
+                            {
+                                "content": "Run the test suite",
+                                "status": "completed",
+                                "activeForm": "Running the test suite"
+                            }
+                        ]
+                    },
+                    "result": "Todos have been modified successfully."
+                },
+                {
+                    "text": "Done. The cart badge now reads **1 item** for one and **3 items** for several.\n\n- `src/components/Cart.tsx`: the label is chosen from the count.\n- `tests/cart.test.ts`: two tests, for one item and for several.\n\nBoth tests pass."
+                }
+            ],
+            "usage": {
+                "input_tokens": 2140,
+                "output_tokens": 612,
+                "cache_creation_input_tokens": 4100,
+                "cache_read_input_tokens": 21800
+            },
+            "costUsd": 0.0384
+        },
+        {
+            "match": "in the header too",
+            "steps": [
+                {
+                    "thinking": "The header should show the cart total. First I need to know where cart state lives; a subagent can search while I read the header."
+                },
+                {
+                    "tool": "Task",
+                    "input": {
+                        "description": "Find where cart state lives",
+                        "prompt": "Find where the cart's items and prices are stored in acme-web, and how components read them.",
+                        "subagent_type": "Explore"
+                    },
+                    "runMs": 2400,
+                    "result": "Cart state is passed down as props from App.tsx; prices come from getProducts() in src/api/products.ts. There is no store yet."
+                },
+                {
+                    "tool": "Read",
+                    "input": {
+                        "file_path": "D:/demo/acme-web/src/components/Header.tsx"
+                    },
+                    "result": "     1\texport function Header() {\n     2\t  return <header class=\"header\">Acme</header>;\n     3\t}\n",
+                    "extra": {
+                        "type": "text",
+                        "file": {
+                            "filePath": "D:/demo/acme-web/src/components/Header.tsx",
+                            "numLines": 3,
+                            "startLine": 1,
+                            "totalLines": 3
+                        }
+                    }
+                },
+                {
+                    "text": "Cart state is passed down from `App.tsx` as props, and prices come from `getProducts()`. To show the total in the header I'll",
+                    "holdMs": 600000
+                }
+            ]
+        },
+        {
+            "match": "where should it go",
+            "steps": [
+                {
+                    "text": "Before I add it, one choice is yours."
+                },
+                {
+                    "ask": {
+                        "questions": [
+                            {
+                                "question": "Where should the cart total appear in the header?",
+                                "header": "Placement",
+                                "multiSelect": false,
+                                "options": [
+                                    {
+                                        "label": "Next to the cart badge (Recommended)",
+                                        "description": "\"3 items · $42.00\", in the badge you already have."
+                                    },
+                                    {
+                                        "label": "On the right of the header",
+                                        "description": "A separate total, aligned right."
+                                    },
+                                    {
+                                        "label": "Only in a tooltip",
+                                        "description": "Shown when you hover the badge."
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "text": "Thanks, I'll put it next to the badge."
+                }
+            ]
+        }
+    ]
+}

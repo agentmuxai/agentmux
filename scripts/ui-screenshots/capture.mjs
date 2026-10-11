@@ -11,12 +11,13 @@
 //
 // Usage:
 //   node scripts/ui-screenshots/capture.mjs [--port N] [--out DIR] [--only id1,id2]
-//       [--suite manual|widgets|chrome] [--sizes small,medium,large|all]
+//       [--suite manual|widgets|chrome|agent] [--sizes small,medium,large|all]
 //       [--redact from=to]... [--no-redact]
 //
 // --suite picks the manifest: `manual` (shots.mjs, the default), `widgets`
 // (widget-shots.mjs, every widget in every size) or `chrome` (chrome-shots.mjs:
-// menus, the status bar and Settings, spec §9). --sizes limits which of
+// menus, the status bar and Settings, spec §9) or `agent` (agent-shots.mjs: the
+// agent pane, driven by a scripted Claude Code, spec §10). --sizes limits which of
 // sizes.mjs's sizes a shot with `sizes: true` is captured in (default: all);
 // see the spec's §8.
 //
@@ -45,7 +46,7 @@ import { checkVerify } from "./verify.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Suite name → manifest module (relative to this directory). */
-const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs" };
+const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs" };
 
 function parseArgs(argv) {
     const args = {
@@ -156,7 +157,7 @@ class CdpSession {
 
     /** Evaluates `expression` in the page and returns its value (must be JSON-serializable). */
     async evaluate(expression) {
-        const result = await this.send("Runtime.evaluate", { expression, returnByValue: true });
+        const result = await this.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
         if (result.exceptionDetails) {
             throw new Error(`evaluate() threw: ${result.exceptionDetails.text}`);
         }
@@ -373,7 +374,8 @@ async function captureOne(session, shot, redaction) {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const { shots } = await import(SUITES[args.suite]);
+    const suite = await import(SUITES[args.suite]);
+    const { shots } = suite;
     const selected = args.only ? shots.filter((s) => args.only.includes(s.id)) : shots;
     if (selected.length === 0) {
         console.error("No shots selected — check --only against shots.mjs's ids.");
@@ -392,6 +394,13 @@ async function main() {
     // many pairs there were and how many replacements were made.
     const redaction = args.redact ? { pairs: machinePairs(undefined, args.redactExtra), replacements: 0 } : null;
     console.log(redaction ? `Redacting ${redaction.pairs.length} name(s) before each capture.` : "Redaction is off (--no-redact).");
+
+    // A suite may prepare the instance first (the agent suite seeds agents
+    // and installs its scripted CLI); a failed setup ends the run.
+    if (suite.setup) {
+        console.log("Setting up the suite...");
+        await suite.setup(session);
+    }
 
     const manifest = [];
     const failures = [];
