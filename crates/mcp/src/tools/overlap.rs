@@ -36,18 +36,38 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
-            let query = who_query(arguments, &agent, block_id);
-            let asked_pr = arguments.get("pr").is_some_and(|v| !v.is_null());
-            if asked_pr && !query.iter().any(|(k, _)| matches!(*k, "path" | "repo" | "branch" | "query")) {
-                anyhow::bail!("pr is not supported yet: pass path, repo, branch or query");
+            let (pr_repo, pr) = match arguments.get("pr").filter(|v| !v.is_null()) {
+                Some(v) => {
+                    let (repo, n) = pr_ref(v)
+                        .ok_or_else(|| anyhow::anyhow!("pr must be a PR number (12, \"#12\") or its GitHub URL"))?;
+                    (repo, Some(n))
+                }
+                None => (None, None),
+            };
+            let mut query = who_query(arguments, &agent, block_id);
+            // A PR's URL names its repository: ask about that one.
+            if let Some(url_repo) = pr_repo {
+                match arg(arguments, "repo") {
+                    Some(r) if normalize_repo(r) != normalize_repo(&url_repo) => {
+                        anyhow::bail!("pr is a PR of {url_repo}, but repo is {r}: pass one or the other");
+                    }
+                    Some(_) => {}
+                    None => query.push(("repo", url_repo)),
+                }
             }
             let url = format!("{}/api/v1/work-facts/who", local_url.trim_end_matches('/'));
             let mut body = srv_get_json(client, &url, auth_key, &query, "WhoIsWorkingOn").await?;
-            if asked_pr {
-                if let Some(obj) = body.as_object_mut() {
-                    obj.insert("pr_note".into(), json!("pr is not supported yet and was ignored"));
-                }
-            }
+            add_open_prs(&mut body, arguments, pr, &agent, |path| {
+                // Only the file, its repository and who is asking: srv
+                // matches each criterion on its own, so a branch or query
+                // here would list agents that touch none of the PR's files.
+                let mut q = query.clone();
+                q.retain(|(k, _)| matches!(*k, "repo" | "agent" | "block"));
+                q.push(("path", path));
+                let url = url.clone();
+                async move { srv_get_json(client, &url, auth_key, &q, "WhoIsWorkingOn").await.ok() }
+            })
+            .await;
             Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
         }
         "ClaimWork" | "ReleaseWork" => {
@@ -68,6 +88,135 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
         }
         _ => Err(not_in_family()),
+    }
+}
+
+/// A PR: `12`, `"12"`, `"#12"`, or its URL
+/// (`https://github.com/<owner>/<repo>/pull/12`, with anything after the
+/// number, like `/files` or `#issuecomment-…`), which also names its
+/// repository: `(Some("owner/repo"), 12)`.
+fn pr_ref(v: &Value) -> Option<(Option<String>, u64)> {
+    if let Some(n) = v.as_u64() {
+        return (n > 0).then_some((None, n));
+    }
+    let s = v.as_str()?.trim();
+    let number = |t: &str| t.parse::<u64>().ok().filter(|n| *n > 0);
+    let Some((before, after)) = s.split_once("/pull/") else {
+        return number(s.trim_start_matches('#')).map(|n| (None, n));
+    };
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    let rest = &after[digits.len()..];
+    if !(rest.is_empty() || rest.starts_with(['/', '#', '?'])) {
+        return None;
+    }
+    let mut parts = before.rsplit('/');
+    let (repo, owner) = (parts.next()?, parts.next()?);
+    if repo.is_empty() || owner.is_empty() || owner.contains(':') {
+        return None;
+    }
+    Some((Some(format!("{owner}/{repo}")), number(&digits)?))
+}
+
+/// `owner/repo`, lowercased, from `owner/repo`, a remote URL
+/// (`https://github.com/o/r.git`) or an ssh remote (`git@github.com:o/r`).
+fn normalize_repo(repo: &str) -> String {
+    let s = repo.trim().trim_end_matches('/').trim_end_matches(".git").replace(':', "/");
+    let mut parts = s.rsplit('/').filter(|p| !p.is_empty());
+    match (parts.next(), parts.next()) {
+        (Some(name), Some(owner)) => format!("{owner}/{name}").to_ascii_lowercase(),
+        _ => s.to_ascii_lowercase(),
+    }
+}
+
+/// Files of the asked PR whose local facts are fetched, at most.
+const PR_FILES_CHECKED: usize = 10;
+
+/// Add the open PRs that touch the question (`open_prs.rs`) to srv's answer,
+/// for the repository srv resolved. With `pr`, the agents on this computer
+/// are the ones with that PR's files changed or edited (`ask_path`, srv's
+/// answer for one file), not everyone in the repository. A failure is
+/// reported in the answer (`pr_error`) and never fails the call.
+async fn add_open_prs<F, Fut>(body: &mut Value, arguments: &Value, pr: Option<u64>, me: &str, ask_path: F)
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Option<Value>>,
+{
+    let repo = body.pointer("/asked/repo").and_then(Value::as_str).map(str::to_string);
+    let Some(repo) = repo.filter(|r| r.contains('/') && !r.starts_with("local:")) else {
+        if pr.is_some() {
+            body["pr_error"] = json!("pr needs a repository on GitHub (owner/repo)");
+        }
+        return;
+    };
+    let mut prs = match open_prs::open_prs(&repo).await {
+        Ok(prs) => prs,
+        Err(e) => {
+            body["pr_error"] = json!(e);
+            return;
+        }
+    };
+    // An asked PR the list didn't hold (opened since it was cached): read it.
+    if let Some(n) = pr.filter(|n| !prs.iter().any(|p| p.number == *n)) {
+        match open_prs::open_pr(&repo, n).await {
+            Ok(Some(p)) => prs.push(p),
+            Ok(None) => {}
+            Err(e) => {
+                body["pr_error"] = json!(e);
+                return;
+            }
+        }
+    }
+    let host = open_prs::this_host();
+    let path = body.pointer("/asked/path").and_then(Value::as_str).map(str::to_string);
+    let asked = open_prs::Asked {
+        path: path.as_deref(),
+        branch: arg(arguments, "branch"),
+        query: arg(arguments, "query"),
+        pr,
+    };
+    let matches = match open_prs::pr_matches(&prs, &asked, me, &host) {
+        Ok(m) => m,
+        Err(e) => {
+            body["pr_error"] = json!(e);
+            return;
+        }
+    };
+    if let Some(files) = pr.and_then(|n| prs.iter().find(|p| p.number == n)).map(|p| p.files.clone()) {
+        let mut agents: Vec<Value> = Vec::new();
+        for file in files.iter().take(PR_FILES_CHECKED) {
+            if let Some(answer) = ask_path(file.clone()).await {
+                merge_agents(&mut agents, answer.get("agents").and_then(Value::as_array).cloned().unwrap_or_default());
+            }
+        }
+        body["agents"] = Value::Array(agents);
+        if files.len() > PR_FILES_CHECKED {
+            body["pr_note"] = json!(format!(
+                "the PR changes {} files; agents on this computer were checked against the first {PR_FILES_CHECKED}",
+                files.len()
+            ));
+        }
+    }
+    open_prs::merge_into(body, matches, &host, &repo);
+}
+
+/// Merge srv answers for several files: one entry per agent and channel,
+/// with every distinct match.
+fn merge_agents(into: &mut Vec<Value>, from: Vec<Value>) {
+    for agent in from {
+        let key = |a: &Value| (a.get("agent").cloned(), a.get("channel").cloned());
+        match into.iter_mut().find(|a| key(a) == key(&agent)) {
+            Some(existing) => {
+                let new = agent.get("matches").and_then(Value::as_array).cloned().unwrap_or_default();
+                if let Some(list) = existing.get_mut("matches").and_then(Value::as_array_mut) {
+                    for m in new {
+                        if !list.contains(&m) {
+                            list.push(m);
+                        }
+                    }
+                }
+            }
+            None => into.push(agent),
+        }
     }
 }
 
@@ -101,6 +250,42 @@ fn release_body(arguments: &Value, agent: &str, block_id: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pr_is_a_number_a_hash_number_or_a_url_naming_its_repository() {
+        assert_eq!(pr_ref(&json!(12)), Some((None, 12)));
+        assert_eq!(pr_ref(&json!("12")), Some((None, 12)));
+        assert_eq!(pr_ref(&json!("#12")), Some((None, 12)));
+        let url = |u: &str| pr_ref(&json!(u));
+        assert_eq!(url("https://github.com/o/r/pull/4683"), Some((Some("o/r".into()), 4683)));
+        assert_eq!(url("https://github.com/o/r/pull/4683/"), Some((Some("o/r".into()), 4683)));
+        assert_eq!(url("https://github.com/o/r/pull/4683/files"), Some((Some("o/r".into()), 4683)));
+        assert_eq!(url("https://github.com/o/r/pull/4683#issuecomment-1"), Some((Some("o/r".into()), 4683)));
+        assert_eq!(url("https://github.com/o/r/pull/4683x"), None);
+        assert_eq!(url("https://github.com/o/r/issues/12"), None);
+        assert_eq!(url("main"), None);
+        assert_eq!(pr_ref(&json!(0)), None);
+    }
+
+    #[test]
+    fn repositories_are_compared_whole_not_by_suffix() {
+        assert_eq!(normalize_repo("Foo/Bar"), "foo/bar");
+        assert_eq!(normalize_repo("https://github.com/foo/bar.git"), "foo/bar");
+        assert_eq!(normalize_repo("git@github.com:foo/bar"), "foo/bar");
+        assert_ne!(normalize_repo("notfoo/bar"), normalize_repo("foo/bar"));
+    }
+
+    #[test]
+    fn answers_for_several_files_merge_by_agent() {
+        let mut agents = Vec::new();
+        merge_agents(&mut agents, vec![json!({ "agent": "A", "channel": "c", "matches": [{ "kind": "dirty", "detail": "x" }] })]);
+        merge_agents(&mut agents, vec![
+            json!({ "agent": "A", "channel": "c", "matches": [{ "kind": "dirty", "detail": "x" }, { "kind": "edited", "detail": "y" }] }),
+            json!({ "agent": "B", "channel": "c", "matches": [] }),
+        ]);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0]["matches"].as_array().unwrap().len(), 2);
+    }
 
     #[test]
     fn only_given_arguments_and_the_callers_identity_are_sent() {

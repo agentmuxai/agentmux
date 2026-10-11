@@ -37,7 +37,7 @@ use tokio::time::interval;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::mps::{Broker, MuxEvent};
-use crate::backend::work_facts::overlap_notes::NewEdit;
+use crate::backend::work_facts::overlap_notes::{NewEdit, NewPr};
 
 use super::get_global_handler;
 
@@ -98,6 +98,100 @@ fn is_todo_tool(name: &str) -> bool {
 /// the agent's recent files, which `backend::work_facts` compares across
 /// agents (docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.1).
 const FILE_EDIT_TOOL_NAMES: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// A tool that runs a shell command (Claude's `Bash`, a provider's `shell`,
+/// AgentMux's own `Shell`), by name.
+fn is_shell_tool(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("bash") || lower.ends_with("shell")
+}
+
+/// Whether a shell command opens a PR: `gh-agent pr create` or `gh pr create`,
+/// anywhere in it (`cd x && gh-agent pr create --title …`, or inside a quoted
+/// shell call like Codex's `pwsh -Command 'gh-agent pr create …'`), the
+/// program named by its path or with `.cmd`/`.exe` too.
+#[cfg(test)]
+fn is_pr_create(command: &str) -> bool {
+    pr_create(command).is_some()
+}
+
+/// The PR being opened in a shell command (see [`is_pr_create`]), with the
+/// `--head` and `--base` it names, if any. Flags may sit between the words
+/// (`gh --repo o/r pr create`, `gh pr -R o/r create`); the command ends at a
+/// shell separator.
+fn pr_create(command: &str) -> Option<NewPrCommand> {
+    let clean = |w: &str| w.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')' | ';')).to_string();
+    let raw: Vec<&str> = command.split_whitespace().collect();
+    for (i, first) in raw.iter().enumerate() {
+        let word = clean(first);
+        let program = word.rsplit(['/', '\\']).next().unwrap_or(&word);
+        let program = program.trim_end_matches(".cmd").trim_end_matches(".exe");
+        if !matches!(program, "gh" | "gh-agent") {
+            continue;
+        }
+        let mut rest: Vec<String> = Vec::new();
+        for w in &raw[i + 1..] {
+            if matches!(*w, "&&" | "||" | "|" | ";") {
+                break;
+            }
+            rest.push(clean(w));
+            if w.ends_with(';') {
+                break;
+            }
+        }
+        // `pr create`, skipping flags (`-R`/`--repo` take a value).
+        let (mut k, mut words) = (0, Vec::new());
+        while k < rest.len() && words.len() < 2 {
+            match rest[k].as_str() {
+                "-R" | "--repo" => k += 2,
+                w if w.starts_with('-') => k += 1,
+                w => {
+                    words.push(w.to_string());
+                    k += 1;
+                }
+            }
+        }
+        if words != ["pr", "create"] {
+            continue;
+        }
+        let mut pr = NewPrCommand::default();
+        while k < rest.len() {
+            let w = rest[k].as_str();
+            let next = || rest.get(k + 1).cloned();
+            match w {
+                "-H" | "--head" => {
+                    pr.head = next();
+                    k += 2;
+                    continue;
+                }
+                "-B" | "--base" => {
+                    pr.base = next();
+                    k += 2;
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(v) = w.strip_prefix("--head=") {
+                pr.head = Some(v.to_string());
+            } else if let Some(v) = w.strip_prefix("--base=") {
+                pr.base = Some(v.to_string());
+            }
+            k += 1;
+        }
+        return Some(pr);
+    }
+    None
+}
+
+/// The head and base a PR-create command names (`--head`, `--base`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct NewPrCommand {
+    head: Option<String>,
+    base: Option<String>,
+}
+
+/// PR creations kept per sweep, at most.
+const MAX_NEW_PRS: usize = 4;
 
 /// Most recent files kept per block, distinct paths, newest first.
 pub const MAX_RECENT_FILES: usize = 50;
@@ -212,6 +306,9 @@ struct BlockState {
     /// Edits read live since the sweep last took them, oldest first: what
     /// the overlap notes check (`work_facts::overlap_notes`).
     new_edits: Vec<RecentFile>,
+    /// PRs it started opening, read live since the sweep last took them: what
+    /// the PR overlap note checks (`work_facts::overlap_notes::on_new_prs`).
+    new_prs: Vec<NewPrCommand>,
     /// This block's output has been looked at before.
     seen: bool,
 }
@@ -258,6 +355,19 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
             state.open.retain(|(open_id, _)| *open_id != id);
         }
 
+        // Codex reports a shell command as an `item.started` event of type
+        // `command_execution`, not a `tool_use`.
+        if v.get("type").and_then(|t| t.as_str()) == Some("item.started") {
+            let item = v.get("item");
+            let is_command = item.and_then(|i| i.get("type")).and_then(|t| t.as_str()) == Some("command_execution");
+            let command = item.and_then(|i| i.get("command")).and_then(|c| c.as_str());
+            if let Some(pr) = command.filter(|_| is_command).and_then(pr_create) {
+                if live_now_ms.is_some() && state.new_prs.len() < MAX_NEW_PRS {
+                    state.new_prs.push(pr);
+                }
+            }
+        }
+
         for frame in tool_frames(&v) {
             if frame.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
                 continue;
@@ -270,6 +380,16 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
                 if state.open.len() > MAX_OPEN_TOOLS {
                     state.open.remove(0);
                 }
+            }
+
+            if is_shell_tool(name) {
+                let opens = frame_input(frame).and_then(|i| first_string(i, &["command", "cmd"])).and_then(|c| pr_create(&c));
+                if let Some(pr) = opens {
+                    if live_now_ms.is_some() && state.new_prs.len() < MAX_NEW_PRS {
+                        state.new_prs.push(pr);
+                    }
+                }
+                continue;
             }
 
             if FILE_EDIT_TOOL_NAMES.contains(&name) {
@@ -551,6 +671,10 @@ struct SweepOutcome {
     progress: AgentProgress,
 }
 
+/// One sweep's result: the states back, what to publish, and the edits and
+/// PRs the overlap notes check.
+type Swept = (HashMap<String, BlockState>, Vec<SweepOutcome>, (Vec<NewEdit>, Vec<NewPr>));
+
 /// The whole file-reading half of a sweep, run OFF the async runtime.
 ///
 /// `FileStore::stat`/`read_at` are synchronous, mutex-guarded SQLite reads, and
@@ -565,9 +689,10 @@ fn sweep_blocking(
     mut states: HashMap<String, BlockState>,
     last_published: &HashMap<String, AgentProgress>,
     force_republish: bool,
-) -> (HashMap<String, BlockState>, Vec<SweepOutcome>, Vec<NewEdit>) {
+) -> Swept {
     let mut out = Vec::new();
     let mut edits = Vec::new();
+    let mut prs = Vec::new();
 
     for (agent_id, block_id) in agents {
         // Same gate as the summary loop: an idle or non-agent pane has no
@@ -583,6 +708,12 @@ fn sweep_blocking(
             agent_id: agent_id.clone(),
             block_id: block_id.clone(),
             path: f.path,
+        }));
+        prs.extend(state.new_prs.drain(..).map(|p| NewPr {
+            agent_id: agent_id.clone(),
+            block_id: block_id.clone(),
+            head: p.head,
+            base: p.base,
         }));
         let progress = state.progress();
 
@@ -600,7 +731,7 @@ fn sweep_blocking(
         out.push(SweepOutcome { agent_id, block_id, progress });
     }
 
-    (states, out, edits)
+    (states, out, (edits, prs))
 }
 
 /// Run the progress sweep loop. Never returns.
@@ -642,7 +773,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         // re-seeds from the tail (flagged partial), which is degraded but
         // recoverable, whereas returning here would end progress reporting for
         // the life of the process.
-        let (returned_states, outcomes, edits) = match joined {
+        let (returned_states, outcomes, (edits, prs)) = match joined {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(error = %e, "progress sweep task failed; state reset for next tick");
@@ -652,6 +783,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         states = returned_states;
         // Hands off and returns at once: the check runs on its own task.
         crate::backend::work_facts::overlap_notes::on_new_edits(edits);
+        crate::backend::work_facts::overlap_notes::on_new_prs(prs);
         *snapshot().write() = states
             .iter()
             .map(|(block_id, s)| {
@@ -1195,5 +1327,60 @@ mod tests {
         assert!(AgentProgress::default().is_empty());
         let p = run(&[tool_use("a", "Read")]);
         assert!(!p.is_empty(), "an in-flight tool is worth publishing on its own");
+    }
+
+    #[test]
+    fn a_pr_create_is_recognized_in_any_shell_command() {
+        assert!(is_pr_create("gh-agent pr create --title x --body y"));
+        assert!(is_pr_create("cd /w/agentmux && gh pr create --fill"));
+        assert!(is_pr_create("/usr/local/bin/gh-agent pr create -t x"));
+        assert!(is_pr_create("C:\\npm\\gh-agent.cmd pr create -t x"));
+        assert!(!is_pr_create("gh-agent pr view 12"));
+        assert!(!is_pr_create("echo gh pr list; grep create"));
+        assert!(!is_pr_create("git commit -m 'gh-agent pr: create'"));
+        assert!(is_shell_tool("Bash") && is_shell_tool("mcp__agentmux__Shell") && !is_shell_tool("Edit"));
+        assert!(is_pr_create("pwsh.exe -NoProfile -Command 'gh-agent pr create -t x'"));
+    }
+
+    /// gh's inherited flags can sit between the words, and the PR's head and
+    /// base can be named.
+    #[test]
+    fn a_pr_create_with_flags_and_its_head_and_base() {
+        assert!(is_pr_create("gh --repo owner/repo pr create -t x"));
+        assert!(is_pr_create("gh pr -R owner/repo create -t x"));
+        assert!(!is_pr_create("gh --repo pr view create"), "the value of --repo is not a word");
+        assert!(!is_pr_create("gh pr view 1 && echo create"));
+        let pr = |c: &str| pr_create(c).unwrap();
+        assert_eq!(pr("gh-agent pr create -H agenty/x -B release"), NewPrCommand {
+            head: Some("agenty/x".into()),
+            base: Some("release".into())
+        });
+        assert_eq!(pr("gh pr create --head=me:feature --title t").head.as_deref(), Some("me:feature"));
+        assert_eq!(pr("gh pr create -t x && git push --base y"), NewPrCommand::default(), "flags of the next command are not its");
+    }
+
+    /// Codex's shell commands are `item.started` events, as its 0.154.0
+    /// fixture records them (frontend/test/fixtures/providers/codex/0.154.0/command.jsonl).
+    #[test]
+    fn a_codex_pr_create_is_handed_to_the_overlap_note() {
+        let started = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"pwsh.exe -NoProfile -Command 'gh-agent pr create -t x'","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#;
+        let completed = started.replace("item.started", "item.completed");
+        let mut st = BlockState::default();
+        apply_lines(&mut st, &[started, completed.as_str()], Some(1_000));
+        assert_eq!(st.new_prs.len(), 1, "the start counts, its completion does not");
+    }
+
+    #[test]
+    fn only_a_live_pr_create_is_handed_to_the_overlap_note() {
+        let line = |cmd: &str| format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"p1","name":"Bash","input":{{"command":"{cmd}"}}}}]}}}}"#
+        );
+        let mut backlog = BlockState::default();
+        apply_lines(&mut backlog, &[line("gh-agent pr create -t x").as_str()], None);
+        assert!(backlog.new_prs.is_empty(), "backlog is history");
+        let mut live = BlockState::default();
+        apply_lines(&mut live, &[line("gh-agent pr create -t x").as_str(), line("ls").as_str()], Some(1_000));
+        assert_eq!(live.new_prs, vec![NewPrCommand::default()]);
+        assert_eq!(live.open.len(), 2, "both calls still count as in flight");
     }
 }

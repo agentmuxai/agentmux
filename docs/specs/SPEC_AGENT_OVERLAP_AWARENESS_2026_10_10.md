@@ -1,6 +1,6 @@
 # SPEC: agents can see who else is working on the same thing
 
-**Status:** active (phase 1: #4630; phase 2, overlap notes for files: #4653; phase 3a, claims: #4659; phase 3b, open PRs, to follow)
+**Status:** active (phase 1: #4630; phase 2, overlap notes for files: #4653; phase 3a, claims: #4659; phase 3b, open PRs and the PR note: built, see §3.5)
 **Date:** 2026-10-10
 **Asked by:** the owner: "agents may be working on the same thing … an API to verify they aren't stepping on anyone else's toes."
 
@@ -120,6 +120,28 @@ Phase 3a as built:
 PRs come from GitHub, so they work across computers. `WhoIsWorkingOn({ pr })` and the PR note read open PRs through
 the caller's `gh-agent` (the agent's own GitHub identity; srv holds no GitHub credentials) and attribute them by the
 `<Agent>@<host>:` title prefix that CI already requires. Results are cached for 2 minutes.
+
+Phase 3b as built:
+- **`WhoIsWorkingOn` reads open PRs in the agent's own MCP process** (`crates/mcp/src/tools/open_prs.rs`): `gh-agent pr
+  list --json number,title,headRefName,files` for the repository srv resolved, killed after 20 s, cached 2 minutes
+  per repository. A PR is credited to the agent its `<Agent>@<host>: ` title prefix names; one without it (a person's or a
+  bot's, which the prefix rule exempts) is credited to its GitHub author, with no host. The caller's own PRs (same agent and host) are left out. A match is kind `pr`: it joins the local agent of that
+  name when the PR is from this computer, else the agent is listed on its own with `channel: "github"` and its host,
+  which covers agents on other computers. A path matches PRs changing it or anything under it; a branch, a PR on it;
+  a query, PR titles with every word; several, a PR matching any (as srv does); none, every open PR. If GitHub can't be read, `pr_error` says
+  why and the rest of the answer stands.
+- **`WhoIsWorkingOn({ pr })`** (a number or URL) answers who else changes that PR's files: other open PRs sharing a
+  file, and the agents on this computer with any of its first 10 files changed or edited (srv asked per file).
+- **The PR note is computed by srv from local facts only**, so srv still has no GitHub identity. The progress watcher
+  sees a live shell call running `gh-agent pr create` or `gh pr create` (gh's flags may sit between the words;
+  Codex's `command_execution` events count too); srv takes the files the PR changes, `git diff --name-only
+  base...head` with the command's `--head`/`--base`, else the checked-out branch and its `gh-merge-base`, else the
+  default branch (a head or base it can't find means no note), and compares them with other agents' uncommitted
+  changes, recent edits and claims, and with the files committed on their own branches of the same repository on
+  this computer (up to 8 clones), which are usually their open PRs. One note names each other agent and how
+  (`Agent4 has uncommitted changes in a.rs; Agent5 changes b.rs on its branch agent5/y`), at most once per (pane,
+  branch) per 2 hours, under `agent:overlapnotes`. Open PRs from other computers are `WhoIsWorkingOn`'s, and the note
+  says so.
 
 ## 4. Phases
 
