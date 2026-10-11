@@ -147,9 +147,9 @@ function median(nums: number[]): number {
 
 /**
  * How long this compaction will probably take, in ms, from earlier ones, or
- * null with no history (`compactionEstimate` then uses the default). Median duration (one slow run doesn't move it), scaled by the
- * current context size relative to the samples' but clamped to 0.5x..2x, then
- * kept within 5s..600s.
+ * null with no history (`compactionEstimate` then uses the default). Median
+ * duration (one slow run doesn't move it), scaled by the current context size
+ * relative to the samples' but clamped to 0.5x..2x, then kept within 5s..600s.
  */
 export function estimateCompactionMs(samples: readonly CompactionSample[], contextTokens: number | null | undefined): number | null {
     if (samples.length === 0) return null;
