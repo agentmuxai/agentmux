@@ -1,6 +1,7 @@
 [package]
 name = "agentmux-cef"
 version.workspace = true
+license = "Apache-2.0"
 description = "AgentMux Host — Desktop app with bundled Chromium"
 authors = ["AgentMux Corp."]
 edition = "2021"

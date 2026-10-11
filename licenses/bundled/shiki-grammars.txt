@@ -1,0 +1,6 @@
+Shiki language grammars and colour themes (bundled through @shikijs/langs and
+@shikijs/themes, MIT, listed in the npm section)
+The grammars and themes are collected from many upstream projects, each under
+its own licence. The source and licence of every grammar and theme are listed
+by the tm-grammars and tm-themes projects:
+https://github.com/shikijs/textmate-grammars-themes

@@ -13,6 +13,7 @@ import { defineConfig, searchForWorkspaceRoot, type Plugin } from "vite";
 import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { shikiPrebundleDeps } from "./scripts/shiki-prebundle.mjs";
+import { thirdPartyNotices } from "./scripts/third-party-notices.mjs";
 
 /**
  * Maps Taskfile {{OS}} values to Node.js process.platform equivalents.
@@ -281,6 +282,8 @@ export default defineConfig({
         solid({ hot: !process.env.VITEST }),
         tailwindcss(),
         stripKatexLegacyFonts(),
+        // Licence texts for everything the build ships, in dist/frontend/licenses/.
+        thirdPartyNotices({ repoRoot: __dirname }),
     ],
 
     envDir: path.resolve(__dirname, "frontend"),

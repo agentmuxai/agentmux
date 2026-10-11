@@ -7,5 +7,6 @@ This product includes software developed at:
   Copyright 2025, Command Line Inc.
   Licensed under the Apache License, Version 2.0.
 
-Third-party dependency notices are listed in ACKNOWLEDGEMENTS.md and in the
-dependency manifests (package.json, Cargo.toml).
+The notices and licences of the third-party software in AgentMux are in
+THIRD_PARTY_NOTICES.txt, in the licenses folder of every AgentMux package
+(generated at build time by scripts/third-party-notices.mjs).

@@ -187,6 +187,9 @@ require target/release/agentmux-mcp
 require target/release/agentmux-bashwrap
 require "$SRV"
 require dist/frontend/index.html
+# Licence texts the build writes (scripts/third-party-notices.mjs); every package
+# must carry them.
+require dist/frontend/licenses/THIRD_PARTY_NOTICES.txt
 require dist/schema/settings.json
 require "dist/Frameworks/Chromium Embedded Framework.framework"
 [ -f "$ENTITLEMENTS" ] || { echo "❌ missing entitlements: $ENTITLEMENTS" >&2; exit 1; }
