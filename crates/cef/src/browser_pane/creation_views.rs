@@ -514,14 +514,22 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // NSWindow setFrame: path instead — same as the creation task.
     #[cfg(target_os = "macos")]
     if visible {
-        tracing::debug!(
-            label = %label, window_label = %window_label,
-            "[browser-pane] resize_browser_pane_view: visible=true, scheduling SetPaneBoundsViewsTask (will unconditionally set_visible(1) on execute)"
-        );
         let overlay_wnum = state.browser_pane_overlay_wnums
             .try_lock()
             .and_then(|m| m.get(label).copied())
             .unwrap_or(0);
+        // A pane that is already showing only needs its frame moved, here and
+        // now. The full task below re-shows the pane, which makes CEF reset
+        // its frame and needs a repair 50 ms later; run on every resize tick,
+        // that kept panes ~0.3 s behind a window drag
+        // (ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md §6.2).
+        if crate::ui_tasks::move_shown_pane_overlay(&controller, overlay_wnum, &rect) {
+            return;
+        }
+        tracing::debug!(
+            label = %label, window_label = %window_label,
+            "[browser-pane] resize_browser_pane_view: pane not showing, scheduling SetPaneBoundsViewsTask"
+        );
         crate::ui_tasks::post_set_pane_bounds_views(
             state,
             label,
