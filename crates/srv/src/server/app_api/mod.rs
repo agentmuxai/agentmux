@@ -53,6 +53,8 @@ pub(crate) mod pane;
 // `dev_server::handle_register_dev_server` directly, same pattern as
 // `pane`'s `handle_close_pane` just above.
 pub(crate) mod dev_server;
+// pub(crate): `agentmux-mcp doctor`'s routes, in `routes.rs`.
+pub(crate) mod mcp_health;
 // pub(crate): the viewer feed reads transcripts through `read_range`.
 pub(crate) mod blockfile;
 pub(crate) mod session;

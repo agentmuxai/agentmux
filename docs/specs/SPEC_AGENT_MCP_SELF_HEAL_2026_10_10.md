@@ -1,7 +1,7 @@
 # SPEC: Agent MCP self-heal — notice when an agent's AgentMux tools are down, and repair it without the operator
 
 **Date:** 2026-10-10
-**Status:** proposed. Phase 0 (the bashwrap fix) ships with this spec; Phases 1–4 are next.
+**Status:** proposed. Phase 0 (the bashwrap fix) shipped with this spec in PR #4671; most of Phases 1–3 follow in the next PR (§12). Phase 4 and the deferred parts are next.
 **Author:** AgentY@narko
 **Trigger:** repo owner, 2026-10-11, after an agent came up on v0.59.19 with its `agentmux` MCP server dead: "this gives us an opportunity to add a feature. In case such a situation happens again, agents need a way to self-heal."
 **Grounded in:** `main` at `75fdca23b`, plus the Claude Code MCP logs of the affected agents. File references are as of that commit.
@@ -191,8 +191,8 @@ First cut: Claude Code (the only provider with a control protocol for MCP). The 
 
 **Spike, before Phase 1** (a day, in an isolated `task dev` instance, never in a live one):
 1. ~~Does the current CLI add `CLAUDE_CODE_SHELL_PREFIX` to MCP launches?~~ Yes, read from the CLI's code (2.1.288): stdio MCP servers and non-PowerShell hooks both get it (report §3).
-2. The exact `mcp_status` and `mcp_reconnect` payloads and answers, and whether `reconnect` re-resolves the launch command.
-3. Does `system/init` carry `mcp_servers` with a status?
+2. ~~The exact `mcp_status` and `mcp_reconnect` payloads?~~ Read from the CLI's code: `{subtype: "mcp_status"}` answers `{mcpServers: [{name, status, …}]}`; `{subtype: "mcp_reconnect", serverName}` answers success, or an error carrying the server's error or `Server status: <status>`. It reconnects with the server's config as the CLI holds it, so it re-runs the same launch command.
+3. ~~Does `system/init` carry `mcp_servers` with a status?~~ Yes: `mcp_servers: [{name, status}]`, status `connected`, `failed`, `pending`, `needs-auth` or `disabled`.
 4. Does the safe profile (no prefix) actually bring MCP back on the incident build?
 
 ## 10. Tests
@@ -206,6 +206,20 @@ First cut: Claude Code (the only provider with a control protocol for MCP). The 
 
 ## 11. Decisions for the repo owner
 
-1. **Safe profile restarts the CLI.** Is an automatic restart (between turns, once an hour, conversation kept) acceptable, or should rung 5 ask the operator first?
+1. **Safe profile restarts the CLI.** Is an automatic restart (between turns, conversation kept) acceptable, or should rung 5 ask the operator first? Built as automatic, once per pane unless the agent asks again (`doctor --heal`), with `agent:mcpselfheal` to turn it off; the owner can still change this.
 2. **`doctor --heal` trust.** It uses the agents-are-trusted rule from the self-quit spec. Is that the right level for a bounded, own-block repair?
 3. ~~**Phase 0 timing.**~~ Shipped first, with this spec and the report (repo owner, 2026-10-11: "write report to file and proceed with implementation").
+
+## 12. Implementation status (2026-10-11)
+
+**Built** (the PR after #4671):
+- **Detection, signal A only.** `backend/mcp_health.rs` reads the `agentmux` entry of every `system/init` frame, and re-asks with `mcp_status` while it is `pending` (twice, 15 s apart; then it counts as failed). The hooks are two calls to `observe_mcp_frame` in `persistent/stdout_reader.rs`; the controller's half is in `persistent/lifecycle.rs`.
+- **The ladder** without rungs 3 and 4: reconnect, reconnect again after 5 s (each checked with `mcp_status` 2 s later, because the CLI answers `mcp_reconnect` with success even for a server that still fails to start, as a run of the real CLI showed), then the safe-profile restart (`bash_prefix::apply_for_spawn` leaves the prefix out for that pane for the rest of srv's life), else give up. The restart is once per pane unless the agent asks again. A step with no answer for 2 minutes stops holding the next one back.
+- **Telling:** one pane row per episode (`agentmux_mcp_health`, `frontend/app/view/agent/cli-notice.ts`), updated in place; one `[AgentMux]` note to the agent, only when AgentMux gives up, with the error quoted.
+- **`agent:mcpselfheal`** (default on): off means notices and the note only, no repair.
+- **`agentmux-mcp doctor [--heal]`** (`crates/mcp/src/doctor.rs`) and its routes, `POST /api/v1/agent/self/mcp-health` and `/mcp-heal` (`server/app_api/mcp_health.rs`), which find the caller's pane from its agent token. Run in the incident session, `doctor` names the cause in one line: the server starts directly but not through the shell prefix.
+
+**Deferred:**
+- **Signal B (the hello stamp) and the shared record.** QTest's Connectors work needs every server's observed status, so QTest builds one per-pane "observed MCP servers" record (all servers from `system/init`, tool counts, the hello stamp, an event and a list RPC), hooked where `observe_mcp_frame` is. `mcp_health` then reads the `agentmux` entry from it, so there is one parser.
+- **Signal C (launch self-test)** and **rungs 3–4** (rewrite `.mcp.json`, absolute path): after QTest's Phase 0 has srv build `.mcp.json` on both launch paths, so srv can rewrite it without the frontend.
+- **Phase 4** (dock and Swarm chip, other providers).

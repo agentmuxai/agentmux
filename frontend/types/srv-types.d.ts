@@ -1242,6 +1242,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "agent:mcpselfheal"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:livefeed"?: boolean;

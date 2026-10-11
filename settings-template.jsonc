@@ -160,6 +160,10 @@
     // agent on this computer is also changing, so it can message them first.
     // "agent:overlapnotes":        true,
 
+    // When an agent's AgentMux tools (its MCP server) don't connect, reconnect
+    // them, then restart the agent once without the shell prefix.
+    // "agent:mcpselfheal":         true,
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,

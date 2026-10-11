@@ -654,7 +654,7 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -669,6 +669,12 @@ export interface CliNoticeNode {
     to?: string;
     /** `version_changed`: the version AgentMux pins, when known. */
     pinned?: string | null;
+    /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
+    mcpState?: "healing" | "restarting" | "ok" | "gave_up";
+    /** `mcp_health`, while `healing`: which reconnect. */
+    step?: number;
+    /** `mcp_health`: the agent runs without the shell prefix (the safe profile). */
+    safeProfile?: boolean;
     timestamp: number;
 }
 

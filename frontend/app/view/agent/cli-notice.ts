@@ -12,6 +12,9 @@
  * - `agentmux_cli_version_changed` — "Claude Code updated: 2.1.218 →
  *   2.1.285", with a warning when the running version isn't the one AgentMux
  *   pins.
+ * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
+ *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
+ *   frame of one episode shares an `episode`, so it is one row that updates.
  *
  * Shared by the live path (`useAgentStream.ts`) and replay
  * (`parseHistoryLines.ts`), like `session-outcome.ts`. The provider CLI never
@@ -23,6 +26,9 @@ import type { CliNoticeNode } from "./types";
 
 export const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
 export const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
+export const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
+
+const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
 
 function str(v: unknown): string | null {
     return typeof v === "string" && v.length > 0 ? v : null;
@@ -91,6 +97,22 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
+    if (e.subtype === MCP_HEALTH_SUBTYPE) {
+        const episode = str(e.episode);
+        const mcpState = MCP_STATES.find((s) => s === e.state);
+        if (!episode || !mcpState) return null;
+        return {
+            type: "cli_notice",
+            id: `mcp-health-${episode}`,
+            kind: "mcp_health",
+            provider,
+            mcpState,
+            step: typeof e.step === "number" ? e.step : undefined,
+            error: str(e.error) ?? undefined,
+            safeProfile: e.safe_profile === true,
+            timestamp,
+        };
+    }
     if (e.subtype === CLI_VERSION_CHANGED_SUBTYPE) {
         const from = str(e.from);
         const to = str(e.to);
@@ -122,6 +144,7 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
     if (node.kind === "compaction_failed") {
         return { label: `${name} couldn't compact the conversation`, detail: node.error ?? null, tone: "error" };
     }
+    if (node.kind === "mcp_health") return mcpHealthText(node);
     if (node.kind === "install") {
         switch (node.state) {
             case "installing":
@@ -140,4 +163,37 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
         detail: offPin ? `Not the version AgentMux pins (${node.pinned})` : null,
         tone: offPin ? "warn" : "info",
     };
+}
+
+const SAFE_PROFILE_DETAIL = "Running without the shell prefix until AgentMux restarts";
+
+/** The repair of the agent's AgentMux MCP server, one row per episode. */
+function mcpHealthText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+    const error = node.error ?? null;
+    switch (node.mcpState) {
+        case "healing":
+            return {
+                label: `AgentMux tools didn't connect. Reconnecting (try ${node.step ?? 1} of 2)…`,
+                detail: error,
+                tone: "warn",
+            };
+        case "restarting":
+            return {
+                label: "AgentMux tools still aren't connected. Restarting the agent without the shell prefix…",
+                detail: error,
+                tone: "warn",
+            };
+        case "ok":
+            return {
+                label: "AgentMux tools are connected again",
+                detail: node.safeProfile ? SAFE_PROFILE_DETAIL : null,
+                tone: "info",
+            };
+        default:
+            return {
+                label: "AgentMux tools aren't connected, and AgentMux couldn't repair them",
+                detail: [error, "The agent was told to run `agentmux-mcp doctor`."].filter(Boolean).join(". "),
+                tone: "error",
+            };
+    }
 }

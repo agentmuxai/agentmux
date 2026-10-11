@@ -6,13 +6,22 @@
 //! rewriting the call (docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md).
 
 /// Set the prefix in an agent's spawn environment
-/// (`input::build_persistent_spawn_env`).
-pub(crate) fn apply_for_spawn(env_vars: &mut std::collections::HashMap<String, String>) {
-    apply_bash_shell_prefix(
-        env_vars,
-        crate::backend::tool_store::bashwrap_path(),
-        std::env::var(BASHWRAP_MODE_ENV).ok().as_deref(),
-    );
+/// (`input::build_persistent_spawn_env`). Not for a pane in the MCP
+/// self-heal's safe profile: its MCP server failed to start and reconnecting
+/// didn't help, so its CLI runs without the prefix, as with
+/// `AGENTMUX_BASHWRAP_MODE=rewrite` (`backend::mcp_health`).
+pub(crate) fn apply_for_spawn(env_vars: &mut std::collections::HashMap<String, String>, block_id: &str) {
+    let mode = mode_for(block_id);
+    apply_bash_shell_prefix(env_vars, crate::backend::tool_store::bashwrap_path(), mode.as_deref());
+}
+
+/// `rewrite` for a pane in the safe profile, else srv's own setting.
+fn mode_for(block_id: &str) -> Option<String> {
+    if crate::backend::mcp_health::is_safe_profile(block_id) {
+        tracing::info!(block_id, "MCP self-heal safe profile: starting the agent without the shell prefix");
+        return Some("rewrite".to_string());
+    }
+    std::env::var(BASHWRAP_MODE_ENV).ok()
 }
 
 /// srv's own environment variable that turns the shell prefix off:
@@ -72,5 +81,20 @@ mod tests {
         let mut env = std::collections::HashMap::from([(PREFIX.to_string(), "/home/me/log-commands.sh".to_string())]);
         apply_bash_shell_prefix(&mut env, Some("/x/agentmux-bashwrap".into()), None);
         assert_eq!(env[PREFIX], "/home/me/log-commands.sh");
+    }
+
+    /// A pane whose MCP server failed and wouldn't reconnect starts without
+    /// the prefix; other panes are unaffected.
+    #[test]
+    fn a_pane_in_the_safe_profile_gets_no_prefix() {
+        use crate::backend::mcp_health::{on_reconnect, on_status, Status};
+        let block = format!("safe-profile-test-{}", uuid::Uuid::new_v4());
+        on_status(&block, "p1", Status::Failed, None, true, 0);
+        on_reconnect(&block, "p1", Err("Connection closed".into()), 1);
+        on_reconnect(&block, "p1", Err("Connection closed".into()), 2);
+        assert_eq!(super::mode_for(&block).as_deref(), Some("rewrite"));
+        if std::env::var("AGENTMUX_BASHWRAP_MODE").is_err() {
+            assert_eq!(super::mode_for("another-pane"), None);
+        }
     }
 }
