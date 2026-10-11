@@ -81,9 +81,15 @@ which builds `build:frontend`/`build:backend`/`build:host`/`copy:schema`/`bundle
      MacOS/
        agentmux-cef                          ← host (re-execs itself for renderer/gpu;
                                                 no Helper.app needed, --no-sandbox)
-       agentmux-srv-<VERSION>-darwin.arm64    ← backend sidecar (resolve_backend_binary)
+       agentmux-srv-<VERSION>-darwin.arm64    ← backend sidecar (resolve_backend_binary);
+                                                a symlink into Helpers/AgentMux Server.app
+       tools/bin/agentmux-{mcp,bashwrap}      ← agents' PATH; symlinks into Helpers/
        frontend/                              ← bundled UI (resolve_frontend_base_url)
        *.dylib + vk_swiftshader_icd.json      ← GL libs (Chromium DIR_MODULE = exe dir)
+     Helpers/
+       AgentMux Server.app, AgentMux MCP.app, AgentMux Shell Wrapper.app
+                                              ← the real srv, mcp and bashwrap files, so
+                                                Activity Monitor shows them with the icon
      Frameworks/
        Chromium Embedded Framework.framework  ← cef-rs ../Frameworks lookup
      Resources/
@@ -91,8 +97,10 @@ which builds `build:frontend`/`build:backend`/`build:host`/`copy:schema`/`bundle
    ```
 
 2. **Signs inside-out** with `--options runtime` (hardened runtime), deepest first — the GL
-   dylibs, the framework's `Libraries/*.dylib`, the framework bundle, the `agentmux-srv`
-   backend, the host, then the `.app` bundle. The backend + host + app get
+   dylibs, the framework's `Libraries/*.dylib`, the framework bundle, the helper apps for
+   `agentmux-srv`, `agentmux-mcp` and `agentmux-bashwrap` (srv's keeps the fixed identifier
+   `ai.agentmux.srv`, which the login keychain's "Always Allow" is tied to), the host, then
+   the `.app` bundle. The backend + host + app get
    `build/entitlements.mac.plist` (CEF JIT + CLI feature access). Signing each Mach-O before
    sealing the bundle is required for notarization to accept them.
 

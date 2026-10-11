@@ -312,6 +312,26 @@ fn protected_paths_are_refused() {
     assert!(ok("/srv/data/file"), "an ordinary folder outside home");
 }
 
+/// On macOS srv's real file is in a helper app nested in AgentMux.app; the
+/// installation is still the whole of AgentMux.app.
+#[test]
+fn the_installation_is_the_outermost_app_bundle() {
+    let p = |s: &str| PathBuf::from(s);
+    assert_eq!(
+        install_dir_of(&p("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/agentmux-srv")),
+        Some(p("/Applications/AgentMux.app").as_path())
+    );
+    assert_eq!(
+        install_dir_of(&p("/Applications/AgentMux.app/Contents/MacOS/agentmux-cef")),
+        Some(p("/Applications/AgentMux.app").as_path())
+    );
+    assert_eq!(
+        install_dir_of(&p("/opt/agentmux/bin/agentmux-srv")),
+        Some(p("/opt/agentmux/bin").as_path()),
+        "no bundle: the executable's folder"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn protection_ignores_case_and_verbatim_prefixes_on_windows() {

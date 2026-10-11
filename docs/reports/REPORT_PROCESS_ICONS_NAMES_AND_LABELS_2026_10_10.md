@@ -1,6 +1,6 @@
 # AgentMux's processes in the OS task manager: icons, names and pane labels on Windows, macOS and Linux
 
-**Status:** implemented — §9 items 1 to 4 are built: Windows icons and names, the build in the host name and macOS helper icons (#4595), the Linux srv name (#4596), and Tower's labelled AgentMux rows (#4598, and renderers named by the window or pane they serve in the PR that sets this status). Item 5 is not built: Tower shows the same. Item 6 is not built (§9). §8.2's per-type CEF names on Linux were dropped (§8.2).
+**Status:** implemented — §9 items 1 to 4 are built: Windows icons and names, the build in the host name and macOS helper icons (#4595), the Linux srv name (#4596), and Tower's labelled AgentMux rows (#4598, and renderers named by the window or pane they serve in the PR that sets this status). Item 5 is not built: Tower shows the same. Item 6's macOS half is built: srv, mcp and bashwrap run from nested helper apps (§8.1, §9); its Linux half, theme icons by process name, is not. §8.2's per-type CEF names on Linux were dropped (§8.2).
 **Date:** 2026-10-10 | **Version:** main at 0.59.18 (`f2da6d823`); Windows measured on 0.59.16 and 0.59.17 portables and four `task dev` builds running side by side. macOS and Linux findings are from the packaging scripts, not from a running machine (§10).
 **Requested by:** repo owner: "in the background processes … AgentMux Server, and all the agentmux-bashwrap, mcp, etc, we want to use our icons, currently they are using generic ones"; then "there are many entries with just 'AgentMux' … are we able to get more information in the name?", "do they relate to actual panes in the agentmux instances? can they be labeled?" and "can we ensure the icons are supported on 3 platforms?"
 **Author:** Loap.
@@ -170,7 +170,15 @@ Names, though, are per process on Linux, unlike Windows:
 5. **Command-line marker for the Details tab** (§6.2). Optional once Tower shows the same.
 6. **macOS nested helper apps** for srv/mcp/bashwrap, and Linux theme icons by process name (§8). Larger (bundle layout, signing; per-desktop verification).
 
-**Not built, and why.** Item 5: Tower now names every AgentMux process, the window or pane included, so a marker on the Details tab's command line would repeat it less usefully. Item 6: moving srv, mcp and bashwrap into nested `.app` bundles changes the signed bundle layout and how srv and the agents' PATH find those binaries, and it can only be verified on a Mac (Activity Monitor's attribution through a symlink in particular); theme icons by process name need checking per Linux desktop before they can be promised. Both are worth doing as their own change, verified on those platforms.
+**Not built, and why.** Item 5: Tower now names every AgentMux process, the window or pane included, so a marker on the Details tab's command line would repeat it less usefully. Item 6, Linux half: theme icons by process name need checking per Linux desktop before they can be promised.
+
+**Item 6, macOS half, as built.** `AgentMux.app/Contents/Helpers/` holds `AgentMux Server.app`, `AgentMux MCP.app` and `AgentMux Shell Wrapper.app` (LSUIElement, `AgentMux.icns`), each with the real file under its usual name (`agentmux-srv`, `agentmux-mcp`, `agentmux-bashwrap`). The old locations, `Contents/MacOS/agentmux-srv-<ver>-darwin.<arch>` and `Contents/MacOS/tools/bin/…`, are relative symlinks into them. Measured on macOS with a packaged, signed build:
+
+- A process started through such a symlink, directly or by bare name on `PATH`, is reported by the kernel (`proc_pidpath`, which Tower reads) at its real path inside the helper app, while its own `current_exe()` is the symlink's path. So srv's `exe_dir` stays `Contents/MacOS`: the launcher and `sidecar::resolve_backend_binary` find srv where they did, and `tools/bin`, the remote helpers and the frontend resolve as before. The one code change: `fs_ops`'s protected installation is the outermost `.app` (it canonicalizes the path, which now leads into the nested app).
+- `codesign --verify --deep --strict` passes. srv's helper app is signed as `ai.agentmux.srv`, the identifier the login keychain's "Always Allow" is tied to. In a throwaway keychain, an item created by a bare binary signed `ai.agentmux.srv` was read without a prompt by a different build of it in the nested layout, and refused to the same layout signed with another identifier: the item trusts the designated requirement (identifier and team), not the path. So updating to this layout shouldn't bring back a keychain prompt.
+- Tower names srv's row `agentmux-srv` (it was `agentmux-srv-<ver>-darwin.arm64`) and still labels it Server. An agent pane's `PATH` resolves both tools through `tools/bin`.
+- Notarization: a DMG of this layout was accepted by Apple's notary service with no issues.
+- Not yet confirmed: how Activity Monitor shows these processes (it needs eyes on a screen).
 
 ## 10. How to verify
 
