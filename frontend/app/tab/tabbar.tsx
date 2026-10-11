@@ -17,6 +17,7 @@ import { WorkspaceService } from "../store/services";
 import { driveTabSelection, resolveDisplayActiveTabId } from "./active-tab-display";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
+import { asksBeforeClosingTab, DONT_ASK_AGAIN } from "./tab-close-confirm";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { useTabDragAndDrop } from "./tab-reorder";
 import { revealTabInStrip } from "./tab-strip-scroll";
@@ -220,7 +221,8 @@ function TabBar(props: TabBarProps): JSX.Element {
         if (tabIds().length <= 1) return;
         if (pendingCloseTabId() === tabId) return; // modal already open for this tab
         if (pendingHiddenTabIds().has(tabId)) return; // already confirmed, RPC pending
-        if ((settingsAtom() as any)["tab:skipcloseconfirm"]) {
+        // Asking first is opt-in (tab-close-confirm.ts).
+        if (!asksBeforeClosingTab(settingsAtom() as Record<string, unknown>)) {
             handleClose(tabId);
         } else {
             // Repo-owner-directed UX, amended (SPEC_TAB_CLOSE_BUTTON_SELECT_
@@ -410,7 +412,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                         setPendingCloseTabId(null);
                         if (skipFuture) {
                             fireAndForget(() =>
-                                RpcApi.SetConfigCommand(TabRpcClient, { "tab:skipcloseconfirm": true } as any)
+                                RpcApi.SetConfigCommand(TabRpcClient, DONT_ASK_AGAIN as any)
                             );
                         }
                         handleClose(tabId);

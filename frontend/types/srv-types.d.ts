@@ -1148,7 +1148,7 @@ declare global {
         "blockheader:showblockids"?: boolean;
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
-        "tab:skipcloseconfirm"?: boolean;
+        "tab:confirmclose"?: boolean;
         "splash:disabled"?: boolean;
         "app:runinbackground"?: boolean;
         "app:showtray"?: boolean;
