@@ -300,7 +300,7 @@ fn is_loopback_url(url: &str) -> bool {
 ///
 /// Each instance is asked with its freshest entry's key: an instance that
 /// restarted on the same URL has a new per-launch key, while its older entries
-/// keep the old one until they are rewritten or age out (Codex P2 on #4703).
+/// keep the old one until they are rewritten or age out (#4703).
 pub fn channel_status_targets(
     entries: &[AgentEntry],
     own_channel: &str,
@@ -856,9 +856,9 @@ mod tests {
         assert_eq!(targets[0].auth_key, "secret");
     }
 
-    /// Codex P2 on #4703: an instance that restarted on the same URL has a new
-    /// key, and its older entries keep the old one for a while. Whatever order
-    /// the registry lists them in, the freshest entry's key is used.
+    /// An instance that restarted on the same URL has a new key, and its older
+    /// entries keep the old one for a while. Whatever order the registry lists
+    /// them in, the freshest entry's key is used (#4703).
     #[test]
     fn a_restarted_instance_is_asked_with_its_newest_key() {
         let at = |name: &str, age_ms: u64, key: &str| {
