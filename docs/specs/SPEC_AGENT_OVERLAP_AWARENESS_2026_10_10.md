@@ -124,8 +124,8 @@ the caller's `gh-agent` (the agent's own GitHub identity; srv holds no GitHub cr
 Phase 3b as built:
 - **`WhoIsWorkingOn` reads open PRs in the agent's own MCP process** (`crates/mcp/src/tools/open_prs.rs`): `gh-agent pr
   list --json number,title,headRefName,files` for the repository srv resolved, killed after 20 s, cached 2 minutes
-  per repository. A PR is credited to the agent its `<Agent>@<host>: ` title prefix names; one without it (a bot's) is
-  left out, and so are the caller's own (same agent and host). A match is kind `pr`: it joins the local agent of that
+  per repository. A PR is credited to the agent its `<Agent>@<host>: ` title prefix names; one without it (a person's or a
+  bot's, which the prefix rule exempts) is credited to its GitHub author, with no host. The caller's own PRs (same agent and host) are left out. A match is kind `pr`: it joins the local agent of that
   name when the PR is from this computer, else the agent is listed on its own with `channel: "github"` and its host,
   which covers agents on other computers. A path matches PRs changing it or anything under it; a branch, a PR on it;
   a query, PR titles with every word; the whole repository, every open PR. If GitHub can't be read, `pr_error` says

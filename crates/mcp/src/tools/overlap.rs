@@ -58,8 +58,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/work-facts/who", local_url.trim_end_matches('/'));
             let mut body = srv_get_json(client, &url, auth_key, &query, "WhoIsWorkingOn").await?;
             add_open_prs(&mut body, arguments, pr, &agent, |path| {
+                // Only the file, its repository and who is asking: srv
+                // matches each criterion on its own, so a branch or query
+                // here would list agents that touch none of the PR's files.
                 let mut q = query.clone();
-                q.retain(|(k, _)| *k != "path");
+                q.retain(|(k, _)| matches!(*k, "repo" | "agent" | "block"));
                 q.push(("path", path));
                 let url = url.clone();
                 async move { srv_get_json(client, &url, auth_key, &q, "WhoIsWorkingOn").await.ok() }

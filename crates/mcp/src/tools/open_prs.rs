@@ -6,7 +6,8 @@
 //! are read through this agent's own `gh-agent` (srv holds no GitHub
 //! credential), credited to the agent named by the `<Agent>@<host>: ` title
 //! prefix CI requires, and cached for 2 minutes per repository. A PR without
-//! that prefix (a bot's) is left out.
+//! that prefix (a person's or a bot's, which the prefix rule exempts) is
+//! credited to its GitHub author, with no host.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -30,9 +31,10 @@ pub(super) struct OpenPr {
     pub title: String,
     pub branch: String,
     pub files: Vec<String>,
-    /// From the title prefix.
+    /// From the title prefix, else the PR's GitHub author.
     pub agent: String,
-    pub host: String,
+    /// From the title prefix; `None` without one.
+    pub host: Option<String>,
 }
 
 /// `AgentY@narko: fix(x): …` → `("AgentY", "narko")`.
@@ -43,7 +45,7 @@ pub(super) fn title_author(title: &str) -> Option<(String, String)> {
     (ok(agent) && ok(host)).then(|| (agent.to_string(), host.to_string()))
 }
 
-/// `gh pr list --json number,title,headRefName,files`'s output.
+/// `gh pr list --json number,title,headRefName,files,author`'s output.
 pub(super) fn parse_pr_list(text: &str) -> Result<Vec<OpenPr>, String> {
     let list: Value = serde_json::from_str(text.trim()).map_err(|e| format!("gh-agent printed something other than JSON: {e}"))?;
     let items = list.as_array().ok_or("gh-agent printed something other than a list")?;
@@ -51,7 +53,13 @@ pub(super) fn parse_pr_list(text: &str) -> Result<Vec<OpenPr>, String> {
         .iter()
         .filter_map(|p| {
             let title = p.get("title")?.as_str()?.to_string();
-            let (agent, host) = title_author(&title)?;
+            let (agent, host) = match title_author(&title) {
+                Some((agent, host)) => (agent, Some(host)),
+                None => {
+                    let login = p.pointer("/author/login").and_then(Value::as_str).unwrap_or("unknown");
+                    (login.to_string(), None)
+                }
+            };
             let files = p
                 .get("files")
                 .and_then(Value::as_array)
@@ -98,7 +106,7 @@ fn run_gh_agent(repo: &str) -> Result<String, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(GH_AGENT);
-    cmd.args(["pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "number,title,headRefName,files"])
+    cmd.args(["pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "number,title,headRefName,files,author"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -155,7 +163,7 @@ pub(super) struct Asked<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PrMatch {
     pub agent: String,
-    pub host: String,
+    pub host: Option<String>,
     pub detail: String,
 }
 
@@ -176,12 +184,14 @@ fn files_phrase(files: &[&String]) -> String {
 /// caller's own PRs (same agent and host) are left out. `Err` when `pr` names
 /// no open PR here.
 pub(super) fn pr_matches(prs: &[OpenPr], asked: &Asked, me_agent: &str, me_host: &str) -> Result<Vec<PrMatch>, String> {
-    let mine = |p: &OpenPr| p.agent.eq_ignore_ascii_case(me_agent) && p.host.eq_ignore_ascii_case(me_host);
+    let mine = |p: &OpenPr| {
+        p.agent.eq_ignore_ascii_case(me_agent) && p.host.as_deref().is_some_and(|h| h.eq_ignore_ascii_case(me_host))
+    };
     let asked_files: Option<&[String]> = match asked.pr {
         Some(n) => Some(
             &prs.iter()
                 .find(|p| p.number == n)
-                .ok_or_else(|| format!("PR #{n} is not an open PR with an <Agent>@<host> title in this repository"))?
+                .ok_or_else(|| format!("PR #{n} is not an open PR in this repository"))?
                 .files,
         ),
         None => None,
@@ -231,14 +241,15 @@ pub(super) fn merge_into(body: &mut Value, matches: Vec<PrMatch>, me_host: &str,
     };
     for m in matches {
         let entry = json!({ "kind": "pr", "detail": m.detail, "since_ms": null });
-        let local = m.host.eq_ignore_ascii_case(me_host);
+        let local = m.host.as_deref().is_some_and(|h| h.eq_ignore_ascii_case(me_host));
         let existing = agents.iter_mut().find(|a| {
             let name = a.get("agent").and_then(Value::as_str).unwrap_or_default();
             let host = a.get("host").and_then(Value::as_str);
             name.eq_ignore_ascii_case(&m.agent)
-                && match host {
-                    Some(h) => h.eq_ignore_ascii_case(&m.host),
-                    None => local,
+                && match (host, m.host.as_deref()) {
+                    (Some(h), Some(mh)) => h.eq_ignore_ascii_case(mh),
+                    (Some(_), None) => false,
+                    (None, _) => local,
                 }
         });
         match existing {
@@ -272,7 +283,7 @@ mod tests {
     use super::*;
 
     fn pr(number: u64, title: &str, branch: &str, files: &[&str]) -> OpenPr {
-        let (agent, host) = title_author(title).unwrap();
+        let (agent, host) = title_author(title).map(|(a, h)| (a, Some(h))).unwrap_or(("someone".into(), None));
         OpenPr { number, title: title.into(), branch: branch.into(), files: files.iter().map(|f| f.to_string()).collect(), agent, host }
     }
 
@@ -286,14 +297,17 @@ mod tests {
     }
 
     #[test]
-    fn reads_gh_output_and_leaves_out_prs_without_the_prefix() {
+    fn reads_gh_output_crediting_a_pr_without_the_prefix_to_its_author() {
         let text = r#"[
-          {"number": 12, "title": "Agent4@narko: feat: x", "headRefName": "agent4/x",
+          {"number": 12, "title": "Agent4@narko: feat: x", "headRefName": "agent4/x", "author": {"login": "app/muxagent"},
            "files": [{"path": "crates/a.rs", "additions": 1, "deletions": 0}]},
-          {"number": 13, "title": "Bump serde from 1.0 to 1.1", "headRefName": "dependabot/x", "files": []}
+          {"number": 13, "title": "Bump serde from 1.0 to 1.1", "headRefName": "dependabot/x",
+           "author": {"login": "app/dependabot"}, "files": [{"path": "Cargo.lock"}]}
         ]"#;
         let prs = parse_pr_list(text).unwrap();
-        assert_eq!(prs, vec![pr(12, "Agent4@narko: feat: x", "agent4/x", &["crates/a.rs"])]);
+        assert_eq!(prs[0], pr(12, "Agent4@narko: feat: x", "agent4/x", &["crates/a.rs"]));
+        assert_eq!((prs[1].agent.as_str(), prs[1].host.as_deref()), ("app/dependabot", None));
+        assert_eq!(prs[1].files, vec!["Cargo.lock".to_string()]);
         assert!(parse_pr_list("not json").is_err());
     }
 
@@ -310,8 +324,8 @@ mod tests {
     fn a_path_matches_prs_changing_it_or_anything_under_it() {
         let asked = Asked { path: Some("crates/srv"), ..Default::default() };
         let got = pr_matches(&sample(), &asked, "AgentY", "narko").unwrap();
-        let names: Vec<_> = got.iter().map(|m| (m.agent.as_str(), m.host.as_str())).collect();
-        assert_eq!(names, vec![("Agent4", "narko"), ("AgentY", "area54")], "my own PR is left out, my namesake isn't");
+        let names: Vec<_> = got.iter().map(|m| (m.agent.as_str(), m.host.as_deref())).collect();
+        assert_eq!(names, vec![("Agent4", Some("narko")), ("AgentY", Some("area54"))], "my own PR is left out, my namesake isn't");
         assert_eq!(got[0].detail, "PR #11 (Agent4@narko: presence) changes crates/srv/a.rs, crates/srv/b.rs");
         let file = Asked { path: Some("crates/srv/b.rs"), ..Default::default() };
         assert_eq!(pr_matches(&sample(), &file, "AgentY", "narko").unwrap().len(), 1);
@@ -328,6 +342,19 @@ mod tests {
             "PR #13 (AgentY@area54: same name, other computer) also changes crates/srv/a.rs",
         ]);
         assert!(pr_matches(&sample(), &Asked { pr: Some(99), ..Default::default() }, "x", "y").is_err());
+    }
+
+    /// A person's or a bot's PR (no prefix) can be asked about, and shows as
+    /// its author's.
+    #[test]
+    fn a_pr_without_the_prefix_can_be_asked_about_and_is_listed() {
+        let mut prs = sample();
+        prs.push(pr(30, "Bump serde", "dependabot/serde", &["crates/srv/a.rs"]));
+        let asked = Asked { pr: Some(30), ..Default::default() };
+        let got = pr_matches(&prs, &asked, "AgentY", "narko").unwrap();
+        assert_eq!(got.len(), 2, "#11 and #13 share its file; my own #10 is left out");
+        let by_path = pr_matches(&prs, &Asked { path: Some("crates/srv/a.rs"), ..Default::default() }, "AgentY", "narko").unwrap();
+        assert!(by_path.iter().any(|m| m.agent == "someone" && m.host.is_none()));
     }
 
     #[test]
@@ -354,12 +381,14 @@ mod tests {
             { "agent": "Agent4", "channel": "local-main", "matches": [{ "kind": "dirty", "detail": "x" }] }
         ]});
         let matches = vec![
-            PrMatch { agent: "agent4".into(), host: "narko".into(), detail: "PR #11".into() },
-            PrMatch { agent: "Agent4".into(), host: "area54".into(), detail: "PR #14".into() },
+            PrMatch { agent: "agent4".into(), host: Some("narko".into()), detail: "PR #11".into() },
+            PrMatch { agent: "Agent4".into(), host: Some("area54".into()), detail: "PR #14".into() },
+            PrMatch { agent: "app/dependabot".into(), host: None, detail: "PR #15".into() },
         ];
         merge_into(&mut body, matches, "narko", "o/r");
         let agents = body["agents"].as_array().unwrap();
-        assert_eq!(agents.len(), 2);
+        assert_eq!(agents.len(), 3);
+        assert_eq!(agents[2]["host"], Value::Null);
         assert_eq!(agents[0]["matches"][1], json!({ "kind": "pr", "detail": "PR #11", "since_ms": null }));
         assert_eq!(agents[1]["host"], "area54");
         assert_eq!(agents[1]["channel"], "github");
