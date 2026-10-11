@@ -388,7 +388,10 @@ export function buildNotices({ repoRoot, jsPackages, rustPackages, rustError }) 
   return { text, problems };
 }
 
-/** Vite plugin: write licenses/ into the build output. */
+/**
+ * Vite plugin: write licenses/ into the build output.
+ * @returns {import("vite").Plugin}
+ */
 export function thirdPartyNotices({ repoRoot, strict = Boolean(process.env.RELEASE_CHANNEL) }) {
   return {
     name: "agentmux-third-party-notices",
