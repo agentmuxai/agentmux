@@ -1889,12 +1889,20 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        Unattributed request; never guessed. Dual-written, not yet read.
 ///        Identity M4c-1 of
 ///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9.
-///   v12 — db_mcp_server_reach (parity with OBJECT_SCHEMA_VERSION v44):
-///        the catalog's reach switches live with the catalog, here, so they
-///        survive an upgrade where an agent bind (`db_agent_mcp_ref`, in
-///        `objects.db`) does not. A new table, so the counter bumps (same
-///        reasoning as v5).
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 12;
+///
+/// Added WITHOUT a bump: `db_mcp_server_reach` (OBJECT_SCHEMA_VERSION v44
+/// has the same table). The catalog's reach switches live with the catalog,
+/// here, so they survive an upgrade where an agent bind
+/// (`db_agent_mcp_ref`, in `objects.db`) does not. This store is one file
+/// shared by every AgentMux on the computer, installed and dev builds alike,
+/// and `check_schema_compat` makes any build that speaks an older version
+/// refuse it. So a bump here locks every older AgentMux on the computer out
+/// as soon as one newer build starts: a dev build of a branch with a bump
+/// did exactly that on 2026-10-11. A table an older build never reads needs
+/// no lock: an older build ignores it, a newer one creates it if missing.
+/// Bump only for a change an older build would misread or corrupt.
+/// `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 11;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -2199,8 +2207,8 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_ids_mcp_servers_is_global ON db_mcp_servers(is_global);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_mcp_servers_global_name
             ON db_mcp_servers(name) WHERE is_global = 1;
-        -- v12: who a catalog server reaches beyond its binds — see
-        -- IDENTITY_STORE_SCHEMA_VERSION's v12 doc comment.
+        -- Who a catalog server reaches beyond its binds. Added without a
+        -- version bump — see IDENTITY_STORE_SCHEMA_VERSION's doc comment.
         CREATE TABLE IF NOT EXISTS db_mcp_server_reach (
             mcp_id        TEXT PRIMARY KEY,
             all_agents    INTEGER NOT NULL DEFAULT 0,

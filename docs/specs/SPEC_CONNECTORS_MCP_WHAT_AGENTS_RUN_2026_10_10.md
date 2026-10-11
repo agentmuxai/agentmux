@@ -32,8 +32,14 @@ Phases 1–3 (observed servers, showing them, other providers) are next.
 ### 2.1 Reach
 
 A table of its own beside `db_mcp_servers`: `db_mcp_server_reach (mcp_id,
-all_agents, in_containers, updated_at)`. It sits in the identity store
-(schema v12), with a copy in `objects.db` (v44) for parity. With no row, both
+all_agents, in_containers, updated_at)`. It sits in the identity store,
+with a copy in `objects.db` (v44) for parity. The identity store's schema
+version is **not** bumped. That file is shared by every AgentMux on the
+computer, and a build refuses a store stamped with a newer version, so a
+bump would lock every older AgentMux out as soon as one newer build starts.
+A dev build of this branch, when it still bumped to v12, did exactly that;
+the store was set back to v11. An older build ignores this table, so it
+needs no lock. With no row, both
 switches are off. A separate table rather than new columns on
 `db_mcp_servers`, so nothing that copies catalog rows changes (the generic
 `managed` layer, the m0016/m0031 carries, bundle import), and older builds
