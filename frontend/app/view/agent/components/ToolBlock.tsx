@@ -613,7 +613,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 icon={tall() ? "compress" : "expand"}
                                 label={tall() ? "Shorter preview" : "Taller preview"}
                                 density="compact"
-                                aria-pressed={tall()}
+                                // The label says the state; no aria-pressed on top.
                                 onClick={(e: MouseEvent) => {
                                     e.stopPropagation();
                                     setTall(!tall());
