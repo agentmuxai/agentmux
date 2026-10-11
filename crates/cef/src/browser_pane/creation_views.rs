@@ -523,7 +523,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
         // its frame and needs a repair 50 ms later; run on every resize tick,
         // that kept panes ~0.3 s behind a window drag
         // (ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md §6.2).
-        let base = crate::browser_panes::bounds::layout_base(&window_label);
+        let base = crate::browser_panes::bounds::layout_base(label);
         if crate::ui_tasks::move_shown_pane_overlay(&controller, overlay_wnum, &rect, base.as_ref()) {
             return;
         }
@@ -614,6 +614,7 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
     #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().remove(label);
+    crate::browser_panes::bounds::note_layout_base(label, None);
     let Some((window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,

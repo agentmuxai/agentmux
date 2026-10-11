@@ -134,26 +134,33 @@ impl LayoutBase {
     }
 }
 
+/// What each pane's latest rect was laid out against, by pane label. Kept
+/// per pane, not per window: a batch can carry only some of a window's panes
+/// (a display's scale changed and only some panes' timers have reported), and
+/// a pane's rect must always be read against the base it was measured with.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 static LAYOUT_BASES: LazyLock<Mutex<HashMap<String, LayoutBase>>> = LazyLock::new(Default::default);
 
-/// Remember what `window_label`'s rects were laid out against; called on the
-/// UI thread as they are applied.
+/// Remember what pane `label`'s rect was laid out against (`None`: a rect
+/// with no base, which is used as sent). UI thread, as the rect is applied.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn note_layout_base(window_label: &str, base: LayoutBase) {
-    LAYOUT_BASES.lock().insert(window_label.to_string(), base);
+pub(crate) fn note_layout_base(label: &str, base: Option<LayoutBase>) {
+    let mut bases = LAYOUT_BASES.lock();
+    match base {
+        Some(b) => bases.insert(label.to_string(), b),
+        None => bases.remove(label),
+    };
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn layout_base(window_label: &str) -> Option<LayoutBase> {
-    LAYOUT_BASES.lock().get(window_label).copied()
+pub(crate) fn layout_base(label: &str) -> Option<LayoutBase> {
+    LAYOUT_BASES.lock().get(label).copied()
 }
 
 /// The window's size changed: move its shown panes to where the page will
 /// put them, without waiting for it. UI thread only.
 #[cfg(target_os = "macos")]
 pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
-    let Some(base) = layout_base(window_label) else { return };
     let panes: Vec<(String, cef::OverlayController)> = state
         .browser_pane_overlays
         .lock()
@@ -162,6 +169,7 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
         .map(|(label, (_, c))| (label.clone(), c.clone()))
         .collect();
     for (label, controller) in panes {
+        let Some(base) = layout_base(&label) else { continue };
         let Some((x, y, width, height)) = state.browser_pane_physical_rects.lock().get(&label).copied() else {
             continue;
         };
@@ -257,10 +265,7 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             let pending = PENDING.lock().take(&self.window_label);
-            if let Some(base) = pending.base {
-                note_layout_base(&self.window_label, base);
-            }
-            apply(&self.state, &self.window_label, &pending.rects);
+            apply(&self.state, &self.window_label, &pending.rects, pending.base);
             for w in pending.waiters {
                 let _ = w.send(());
             }
@@ -269,7 +274,8 @@ wrap_task! {
 }
 
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
-fn apply(state: &Arc<AppState>, window_label: &str, rects: &[PaneBounds]) {
+/// Each pane's base is installed with its rect (`note_layout_base`).
+fn apply(state: &Arc<AppState>, window_label: &str, rects: &[PaneBounds], base: Option<LayoutBase>) {
     let live: Vec<(&PaneBounds, String)> = rects
         .iter()
         .filter(|r| state.browser_pane_window_label(&r.block_id).as_deref() == Some(window_label))
@@ -277,6 +283,9 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[PaneBounds]) {
         .collect();
     if live.is_empty() {
         return;
+    }
+    for (_, label) in &live {
+        note_layout_base(label, base);
     }
     #[cfg(target_os = "windows")]
     apply_windows(state, &live);
