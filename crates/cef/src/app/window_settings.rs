@@ -61,12 +61,33 @@ const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DE
 fn linux_app_id() -> &'static [u8] {
     static APP_ID: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
     APP_ID.get_or_init(|| {
+        let is_dev = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(agentmux_common::is_dev_build_exe))
+            .unwrap_or(false);
+        if let Some(id) = dev_app_id(is_dev, std::env::var("AGENTMUX_DEV_APP_ID").ok()) {
+            return id.into_bytes();
+        }
         let channel = std::env::var("AGENTMUX_CHANNEL")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| BUILD_CHANNEL_DEFAULT.to_string());
         format!("agentmux-{channel}-{}", env!("CARGO_PKG_VERSION")).into_bytes()
     })
+}
+
+/// `task dev`'s app_id: the name of the `.desktop` file it installed, passed as
+/// `AGENTMUX_DEV_APP_ID`. A dev window can't use `AGENTMUX_CHANNEL`: the
+/// launcher overwrites it with its own `dev-<branch>-<clone id>` channel, which
+/// no `.desktop` file is named after, so the desktop showed its generic icon.
+/// Honored only by a dev build (judged by where the binary is, not by the
+/// environment), so a value inherited by a pane's shell can't rename a packaged
+/// build's windows; and only if it is a plausible app_id.
+#[cfg(target_os = "linux")]
+fn dev_app_id(is_dev_build: bool, env: Option<String>) -> Option<String> {
+    let id = env.filter(|_| is_dev_build)?;
+    let valid = !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
+    valid.then_some(id)
 }
 
 /// Custom extern "C" shim invoked by libcef to populate
@@ -241,4 +262,27 @@ pub(crate) fn read_window_transparent_setting() -> bool {
         // scanning lower-priority locations in case an older file has it.
     }
     false
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod dev_app_id_tests {
+    use super::dev_app_id;
+
+    #[test]
+    fn a_dev_build_uses_the_name_task_dev_installed() {
+        let id = "agentmux-dev-main-0.59.20".to_string();
+        assert_eq!(dev_app_id(true, Some(id.clone())), Some(id));
+    }
+
+    #[test]
+    fn a_packaged_build_ignores_an_inherited_value() {
+        assert_eq!(dev_app_id(false, Some("agentmux-dev-main-0.59.20".into())), None);
+    }
+
+    #[test]
+    fn an_unset_empty_or_odd_value_is_ignored() {
+        assert_eq!(dev_app_id(true, None), None);
+        assert_eq!(dev_app_id(true, Some(String::new())), None);
+        assert_eq!(dev_app_id(true, Some("agentmux dev/main".into())), None);
+    }
 }

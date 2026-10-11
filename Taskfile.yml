@@ -1109,28 +1109,33 @@ tasks:
                 # safe to run on every dev launch. Best-effort: a missing
                 # `convert`/`gtk-update-icon-cache` doesn't fail the launch.
                 #
-                # AGENTMUX_CHANNEL here is exported (not just a local var) so
-                # the launcher/host exec later in this same script inherits
-                # it — window_settings.rs::linux_app_id() reads it directly.
-                # linux_app_id() never consults RuntimeMode's dev-branch
-                # auto-detection (that's a separate code path used only by
-                # data-dir resolution) — absent this export it falls back to
-                # the compile-time BUILD_CHANNEL_DEFAULT ("stable" for a
-                # plain `task dev`), so the dev binary would advertise the
-                # generic agentmux-stable-<version> while this .desktop
-                # file's StartupWMClass stayed at the legacy "agentmux"
-                # default — a 3-way mismatch breaking icon-matching for the
-                # single most common dev workflow (reagent P1 on PR #3323).
-                # This override only affects the WM app_id — dev mode's own
-                # data-dir isolation intentionally ignores AGENTMUX_CHANNEL
-                # (see crates/common/src/data_paths.rs), so this has no
-                # effect on which data dir the dev instance actually uses.
+                # The app_id is computed once and used twice: as this .desktop
+                # file's name/StartupWMClass, and as AGENTMUX_DEV_APP_ID, which
+                # a dev host's window_settings.rs::linux_app_id() uses as-is.
+                # It can't come from AGENTMUX_CHANNEL: the launcher overwrites
+                # that for the host with its own dev-<branch>-<clone id>
+                # channel, which no .desktop file is named after, and every
+                # dev window showed the desktop's generic cog (retro:
+                # docs/retro/retro-linux-dev-taskbar-icon-2026-10-11.md).
+                # AGENTMUX_CHANNEL is still exported for the launcher's splash.
+                # Neither export affects which data dir the dev instance uses:
+                # dev mode's isolation ignores AGENTMUX_CHANNEL
+                # (crates/common/src/data_paths.rs).
                 if [ "{{OS}}" = "linux" ]; then
-                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -d '\n' | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
                   export AGENTMUX_CHANNEL="dev-${DEV_BRANCH_SLUG:-default}"
+                  export AGENTMUX_DEV_APP_ID="agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}"
                   bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
-                    "agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}" \
+                    "$AGENTMUX_DEV_APP_ID" \
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
+                  # A snap-installed `task` labels every process it starts with
+                  # its AppArmor profile, and GNOME shows a labelled window as
+                  # that snap's, never as the app its app_id names: the dock
+                  # gets a generic icon no matter what we install.
+                  if grep -q '^snap\.' /proc/self/attr/current 2>/dev/null; then
+                    echo "⚠ task is running as a snap, so GNOME shows dev windows with a generic icon."
+                    echo "  Install task outside snap to get the AgentMux icon: https://taskfile.dev/installation/"
+                  fi
                 fi
 
                 # Per-clone Vite port — companion to RuntimeMode::Dev clone_id
@@ -1392,16 +1397,23 @@ tasks:
                 mkdir -p "$DEV_DIR"
                 cp -r dist/cef/* "$DEV_DIR"/
 
-                # See dev:serve's identical block for why AGENTMUX_CHANNEL is
-                # exported here (must match window_settings.rs::linux_app_id()'s
-                # env read so this .desktop's StartupWMClass matches the
-                # dev binary's real app_id/WM_CLASS).
+                # See dev:serve's identical block: AGENTMUX_DEV_APP_ID names
+                # both this .desktop file and the dev binary's app_id/WM_CLASS.
                 if [ "{{OS}}" = "linux" ]; then
-                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -d '\n' | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
                   export AGENTMUX_CHANNEL="dev-${DEV_BRANCH_SLUG:-default}"
+                  export AGENTMUX_DEV_APP_ID="agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}"
                   bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
-                    "agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}" \
+                    "$AGENTMUX_DEV_APP_ID" \
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
+                  # A snap-installed `task` labels every process it starts with
+                  # its AppArmor profile, and GNOME shows a labelled window as
+                  # that snap's, never as the app its app_id names: the dock
+                  # gets a generic icon no matter what we install.
+                  if grep -q '^snap\.' /proc/self/attr/current 2>/dev/null; then
+                    echo "⚠ task is running as a snap, so GNOME shows dev windows with a generic icon."
+                    echo "  Install task outside snap to get the AgentMux icon: https://taskfile.dev/installation/"
+                  fi
                 fi
 
                 # Mirror dev:serve's pre-check + strictPort pattern + per-clone
