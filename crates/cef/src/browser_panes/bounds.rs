@@ -182,11 +182,10 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
 #[derive(Default)]
 struct Pending {
     /// In first-arrival order; a newer rect for a pane replaces its entry in place.
-    rects: Vec<PaneBounds>,
+    /// Each with what its batch was laid out against; installed with the
+    /// rect, so a window resize never reads a rect against another's base.
+    rects: Vec<(PaneBounds, Option<LayoutBase>)>,
     waiters: Vec<oneshot::Sender<()>>,
-    /// What the newest batch was laid out against; installed with the rects,
-    /// so a window resize in between never reads old rects against a newer base.
-    base: Option<LayoutBase>,
     /// A UI task for this window is posted and hasn't run yet.
     scheduled: bool,
 }
@@ -204,11 +203,10 @@ impl PendingByWindow {
         base: Option<LayoutBase>,
     ) -> (oneshot::Receiver<()>, bool) {
         let p = self.0.entry(window.to_string()).or_default();
-        p.base = base.or(p.base);
         for r in rects {
-            match p.rects.iter_mut().find(|e| e.block_id == r.block_id) {
-                Some(e) => *e = r,
-                None => p.rects.push(r),
+            match p.rects.iter_mut().find(|(e, _)| e.block_id == r.block_id) {
+                Some(e) => *e = (r, base),
+                None => p.rects.push((r, base)),
             }
         }
         let (tx, rx) = oneshot::channel();
@@ -265,7 +263,7 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             let pending = PENDING.lock().take(&self.window_label);
-            apply(&self.state, &self.window_label, &pending.rects, pending.base);
+            apply(&self.state, &self.window_label, &pending.rects);
             for w in pending.waiters {
                 let _ = w.send(());
             }
@@ -275,17 +273,19 @@ wrap_task! {
 
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
 /// Each pane's base is installed with its rect (`note_layout_base`).
-fn apply(state: &Arc<AppState>, window_label: &str, rects: &[PaneBounds], base: Option<LayoutBase>) {
-    let live: Vec<(&PaneBounds, String)> = rects
-        .iter()
-        .filter(|r| state.browser_pane_window_label(&r.block_id).as_deref() == Some(window_label))
-        .filter_map(|r| state.live_browser_pane_label(&r.block_id).map(|label| (r, label)))
-        .collect();
+fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option<LayoutBase>)]) {
+    let mut live: Vec<(&PaneBounds, String)> = Vec::with_capacity(rects.len());
+    for (r, base) in rects {
+        if state.browser_pane_window_label(&r.block_id).as_deref() != Some(window_label) {
+            continue;
+        }
+        if let Some(label) = state.live_browser_pane_label(&r.block_id) {
+            note_layout_base(&label, *base);
+            live.push((r, label));
+        }
+    }
     if live.is_empty() {
         return;
-    }
-    for (_, label) in &live {
-        note_layout_base(label, base);
     }
     #[cfg(target_os = "windows")]
     apply_windows(state, &live);
@@ -404,7 +404,7 @@ mod tests {
         let _ = p.enqueue("main", vec![b("x", 1), b("y", 2)], None);
         let _ = p.enqueue("main", vec![b("x", 9)], None);
         let taken = p.take("main");
-        assert_eq!(taken.rects, vec![b("x", 9), b("y", 2)]);
+        assert_eq!(taken.rects, vec![(b("x", 9), None), (b("y", 2), None)]);
         assert_eq!(taken.waiters.len(), 2);
     }
 
@@ -449,13 +449,16 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_batch_s_layout_base_is_installed_with_the_rects() {
+    fn each_pending_rect_keeps_its_own_batch_s_layout_base() {
         let mut p = PendingByWindow::default();
         let newer = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 900, "height": 800 } }));
-        let _ = p.enqueue("main", vec![b("x", 1)], Some(base()));
+        let _ = p.enqueue("main", vec![b("x", 1), b("y", 1)], Some(base()));
         let _ = p.enqueue("main", vec![b("y", 2)], newer);
-        let _ = p.enqueue("main", vec![b("x", 3)], None);
-        assert_eq!(p.take("main").base, newer);
+        let _ = p.enqueue("main", vec![b("z", 3)], None);
+        assert_eq!(
+            p.take("main").rects,
+            vec![(b("x", 1), Some(base())), (b("y", 2), newer), (b("z", 3), None)]
+        );
     }
 
     #[test]
