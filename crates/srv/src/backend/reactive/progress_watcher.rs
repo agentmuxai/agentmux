@@ -599,6 +599,10 @@ struct SweepOutcome {
     progress: AgentProgress,
 }
 
+/// One sweep's result: the states back, what to publish, and the edits and
+/// PRs the overlap notes check.
+type Swept = (HashMap<String, BlockState>, Vec<SweepOutcome>, (Vec<NewEdit>, Vec<NewPr>));
+
 /// The whole file-reading half of a sweep, run OFF the async runtime.
 ///
 /// `FileStore::stat`/`read_at` are synchronous, mutex-guarded SQLite reads, and
@@ -607,9 +611,6 @@ struct SweepOutcome {
 /// several times a second — tolerable at `activity_watcher`'s 20s, much less so
 /// here. `states` is moved in and back out rather than shared behind a lock:
 /// only this loop ever touches it, and one owner is simpler than one mutex.
-/// One sweep's result: the states back, what to publish, and the edits and
-/// PRs the overlap notes check.
-type Swept = (HashMap<String, BlockState>, Vec<SweepOutcome>, (Vec<NewEdit>, Vec<NewPr>));
 
 fn sweep_blocking(
     filestore: &FileStore,
