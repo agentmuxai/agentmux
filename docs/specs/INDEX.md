@@ -1116,6 +1116,7 @@ partial list.
 | [`ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06`](ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md) | Architecture: network credential → route map |
 | [`AUDIT_SQLITE_SYSTEMS_2026_05_19`](AUDIT_SQLITE_SYSTEMS_2026_05_19.md) | AUDIT: SQLite Systems in AgentMux |
 | [`CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17`](CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md) | PR Checklist: Agent Credential / Definition / Portable-Config / History Routing |
+| [`SPEC_CROSS_PLATFORM_TESTING_PROTOCOL_2026_10_11`](SPEC_CROSS_PLATFORM_TESTING_PROTOCOL_2026_10_11.md) | Cross-platform testing protocol: one lead, one agent per platform |
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 | [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | TRACKING — Agent availability & automatic backgrounding |
