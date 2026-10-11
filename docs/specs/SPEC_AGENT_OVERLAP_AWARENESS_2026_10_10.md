@@ -1,6 +1,6 @@
 # SPEC: agents can see who else is working on the same thing
 
-**Status:** active (phase 1: #4630; phases 2 and 3 to follow)
+**Status:** active (phase 1: #4630; phase 2, overlap notes for files: #4653; phase 3 to follow)
 **Date:** 2026-10-10
 **Asked by:** the owner: "agents may be working on the same thing … an API to verify they aren't stepping on anyone else's toes."
 
