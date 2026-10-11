@@ -1,7 +1,7 @@
 # RCA: "Agent encountered an error" and two "Given to the agent" cards after an account switch
 
 **Date:** 2026-10-11 · **Author:** agent2
-**Status:** fixed: all three fixes in §4 are implemented, in the same change as this report.
+**Status:** implemented: all three fixes in §4, in the same change as this report.
 **Seen in:** a local 0.59.20 build (`main` @ `0526a5c0f`), Claude Code 2.1.288, Windows. Agent2's pane, right after the operator switched the agent from one Claude account to another.
 **Evidence:** the instance's srv log (19:08:45 to 19:09:17 UTC), the pane's own transcript (the `output` file in the shared transcript store), and the new account's Claude project dir.
 
