@@ -78,6 +78,14 @@ srv checks for an overlap when an agent's watcher sees it edit a file, and when 
   `[AgentMux] Agent4 also has uncommitted changes in crates/srv/src/muxbus/presence.rs (repo agentmuxai/agentmux, branch agent4/presence). Message them before changing it.`
 - At most one note per (other agent, file) per 2 hours, and at most 3 notes per agent per 10 minutes (then one
   summary). No note for the agent's own other clones.
+- Phase 2 as built: only edits the watcher reads live are checked (never a backlog read after a restart), each
+  (pane, file) at most once a minute. The check runs on its own task, with the other channels' facts fetched under
+  the same per-channel timeout as `WhoIsWorkingOn`, so the watcher never waits. Edits of the same file by agents of
+  the same name (another clone, pane or channel) are never reported. One note names every other agent on that file;
+  the fourth note in an agent's 10 minutes is the summary (`… 4 files you edited in the last 10 minutes are also
+  being changed by other agents; the latest is …. No more of these notes for N minutes: … call WhoIsWorkingOn …`),
+  then nothing until the window ends. The note goes to the editing agent only. Off per install with the setting
+  `agent:overlapnotes: false` (default on).
 - **PR:** on `gh-agent pr create` / `gh pr create`, srv lists the other agents' open PRs in the same repository whose
   changed files intersect this branch's, and notes them once.
 

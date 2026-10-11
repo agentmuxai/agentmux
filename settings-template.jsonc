@@ -147,6 +147,11 @@
     // this off is invisible even if you have it on.
     // "network:lan_discovery":     false,
 
+    // -- Agents --
+    // Tell an agent, in a short [AgentMux] note, when it edits a file another
+    // agent on this computer is also changing, so it can message them first.
+    // "agent:overlapnotes":        true,
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,

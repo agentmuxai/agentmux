@@ -23,22 +23,15 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::reactive::types::AgentRegistration;
+use crate::backend::work_facts::cross_channel::{self, own_channel};
 use crate::backend::work_facts::{self, matching, WorkFacts};
 
 use super::caller::Caller;
 use super::AppState;
 
-/// Per-channel timeout for the cross-channel fetch: one dead channel must
-/// not stall the answer.
-const CROSS_CHANNEL_TIMEOUT_MS: u64 = 1500;
-
 /// Shown with every answer, so an agent reads it as information.
 const NOTE: &str = "Informational only: nothing is locked or blocked. If someone else is changing the same \
                     thing, message them (SendMessage) before you change it.";
-
-fn own_channel() -> String {
-    std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string())
-}
 
 /// This srv's own agents' facts. Store reads, so off the async workers.
 async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
@@ -50,64 +43,9 @@ async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
         .unwrap_or_default()
 }
 
-/// Another AgentMux channel's srv on this computer.
-struct Peer {
-    local_url: String,
-    auth_key: String,
-    channel: String,
-}
-
-/// Every other channel's srv in the host-global registry, once each.
-fn other_channels(state: &AppState) -> Vec<Peer> {
-    let own = own_channel();
-    let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
-        return Vec::new();
-    };
-    let mut seen: HashMap<String, Peer> = HashMap::new();
-    for e in crate::backend::reactive::registry::list_all_shared(&shared_dir) {
-        if e.channel == own || e.local_url == state.local_web_url || e.auth_key.is_empty() {
-            continue;
-        }
-        seen.entry(e.local_url.clone()).or_insert(Peer {
-            local_url: e.local_url,
-            auth_key: e.auth_key,
-            channel: e.channel,
-        });
-    }
-    seen.into_values().collect()
-}
-
-/// Every other channel's agents' facts, fetched concurrently, plus the
-/// channels that didn't answer in time.
+/// Every other channel's agents' facts, plus the channels that didn't answer.
 async fn cross_channel_facts(state: &AppState) -> (Vec<WorkFacts>, Vec<String>) {
-    let mut set = tokio::task::JoinSet::new();
-    for peer in other_channels(state) {
-        let client = state.http_client.clone();
-        set.spawn(async move {
-            let fetch = client
-                .get(format!("{}/api/v1/work-facts", peer.local_url.trim_end_matches('/')))
-                .header(agentmux_common::AUTH_KEY_HEADER, &peer.auth_key)
-                .send();
-            let body = match tokio::time::timeout(std::time::Duration::from_millis(CROSS_CHANNEL_TIMEOUT_MS), fetch).await
-            {
-                Ok(Ok(resp)) if resp.status().is_success() => resp.json::<serde_json::Value>().await.ok(),
-                _ => None,
-            };
-            let agents: Option<Vec<WorkFacts>> =
-                body.and_then(|b| serde_json::from_value(b.get("agents")?.clone()).ok());
-            (peer.channel, agents)
-        });
-    }
-    let (mut facts, mut unreachable) = (Vec::new(), Vec::new());
-    while let Some(res) = set.join_next().await {
-        match res {
-            Ok((_, Some(agents))) => facts.extend(agents),
-            Ok((channel, None)) => unreachable.push(channel),
-            Err(_) => {}
-        }
-    }
-    unreachable.sort();
-    (facts, unreachable)
+    cross_channel::fetch(&state.http_client, &state.local_web_url).await
 }
 
 /// `GET /api/v1/work-facts`: this srv's own agents' work facts.
