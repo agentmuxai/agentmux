@@ -28,12 +28,15 @@ function dragEvent(type: string, data: Record<string, string> = windowTabDragDat
 }
 
 const merge = vi.fn();
+let onStrip = true;
+const target = { accepts: () => onStrip, merge };
 let dispose: () => void = () => {};
 
 beforeEach(() => {
     linux = true;
     claim.mockClear();
     merge.mockClear();
+    onStrip = true;
     window.dispatchEvent(dragEvent("dragstart", {})); // a fresh drag here...
     window.dispatchEvent(dragEvent("dragend", {})); // ...that has ended
 });
@@ -60,7 +63,7 @@ describe("maybeDroppedInAnotherWindow", () => {
 
 describe("acceptWindowTabsFromOtherWindows", () => {
     it("accepts a window tab from another window, merges it, and claims the drop", () => {
-        dispose = acceptWindowTabsFromOtherWindows("main", merge);
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
         const over = dragEvent("dragover");
         window.dispatchEvent(over);
         expect(over.defaultPrevented).toBe(true);
@@ -73,10 +76,24 @@ describe("acceptWindowTabsFromOtherWindows", () => {
         expect(claim).toHaveBeenCalledWith("main");
     });
 
+    // As in Chrome, only the tab strip merges: anywhere else the tab tears off.
+    it("doesn't accept a drop off the tab strip", () => {
+        onStrip = false;
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
+        const over = dragEvent("dragover");
+        window.dispatchEvent(over);
+        const drop = dragEvent("drop");
+        window.dispatchEvent(drop);
+        expect(over.defaultPrevented).toBe(false);
+        expect(drop.defaultPrevented).toBe(false);
+        expect(merge).not.toHaveBeenCalled();
+        expect(claim).not.toHaveBeenCalled();
+    });
+
     // The commonest redock: a torn-off window's only tab, back into main. Its
     // source has no cross-window drag-end to consume a claim, so none is made.
     it("merges a window's last tab without claiming the drop", () => {
-        dispose = acceptWindowTabsFromOtherWindows("main", merge);
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
         const lone = { ...tab, isLastTab: true };
         window.dispatchEvent(dragEvent("drop", windowTabDragData(lone)));
         expect(merge).toHaveBeenCalledWith(lone, expect.anything());
@@ -87,7 +104,7 @@ describe("acceptWindowTabsFromOtherWindows", () => {
     // this window-level listener sees the drop: an in-window reorder must
     // still not read as a drop from elsewhere (#4706).
     it("leaves this window's own drags alone, through to their drop", () => {
-        dispose = acceptWindowTabsFromOtherWindows("main", merge);
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
         window.dispatchEvent(dragEvent("dragstart"));
         const over = dragEvent("dragover");
         window.dispatchEvent(over);
@@ -98,7 +115,7 @@ describe("acceptWindowTabsFromOtherWindows", () => {
     });
 
     it("accepts drags from elsewhere again once its own drag has ended", () => {
-        dispose = acceptWindowTabsFromOtherWindows("main", merge);
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
         window.dispatchEvent(dragEvent("dragstart"));
         window.dispatchEvent(dragEvent("dragend"));
         window.dispatchEvent(dragEvent("drop"));
@@ -106,7 +123,7 @@ describe("acceptWindowTabsFromOtherWindows", () => {
     });
 
     it("leaves other drags alone, and a marker without readable details", () => {
-        dispose = acceptWindowTabsFromOtherWindows("main", merge);
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
         const over = dragEvent("dragover", { Files: "" });
         window.dispatchEvent(over);
         window.dispatchEvent(dragEvent("drop", { Files: "" }));
@@ -118,7 +135,7 @@ describe("acceptWindowTabsFromOtherWindows", () => {
 
     it("does nothing off Linux", () => {
         linux = false;
-        dispose = acceptWindowTabsFromOtherWindows("main", merge);
+        dispose = acceptWindowTabsFromOtherWindows("main", target);
         const over = dragEvent("dragover");
         window.dispatchEvent(over);
         expect(over.defaultPrevented).toBe(false);

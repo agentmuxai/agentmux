@@ -90,19 +90,23 @@ export function useTabTearOffEvents(
         const physicalToClientX = (px: number) => px / dpr() - window.screenX;
         const physicalToClientY = (py: number) => py / dpr() - window.screenY;
 
+        /** Whether the point `clientY` is over this window's tab strip: the
+         *  only place a window tab from another window merges. A release
+         *  anywhere else tears off, as in Chrome. */
+        const overStrip = (clientY: number) => {
+            const stripRect = tabBarScrollRef()?.getBoundingClientRect();
+            return !!stripRect && clientY >= stripRect.top && clientY <= stripRect.bottom;
+        };
+
         /**
-         * Move a window tab from another window into this one: at `clientX`
-         * when it's over the strip; elsewhere in the window it's appended,
-         * or ignored when `stripOnly` (a hook's release over the content area
-         * is the cross-drag pipeline's to append). A window's last tab is
-         * restored here and its emptied window closed; the main window's last
-         * tab never moves (SPEC §4.3).
+         * Move a window tab from another window into this one, at `clientX`
+         * on the strip. A window's last tab is restored here and its emptied
+         * window closed; the main window's last tab never moves (SPEC §4.3).
          */
         const mergeTabFromAnotherWindow = (
             payload: WindowTabDragData,
             clientX: number,
             clientY: number,
-            stripOnly: boolean,
             via: string,
         ) => {
             setInsertionPoint(null);
@@ -114,15 +118,11 @@ export function useTabTearOffEvents(
                         return;
                     }
                     if (payload.fromWsId === ownWsId) return; // a same-workspace "move" would reorder-to-end
-                    const stripRect = tabBarScrollRef()?.getBoundingClientRect();
-                    const overStrip = !!stripRect && clientY >= stripRect.top && clientY <= stripRect.bottom;
-                    if (!overStrip && stripOnly) {
+                    if (!overStrip(clientY)) {
                         Logger.info("dnd", `${via} — cursor not over strip, ignoring`, payload);
                         return;
                     }
-                    const insertIdx = overStrip
-                        ? insertionPointToIndex(computeInsertionPoint(clientX), tabIds())
-                        : tabIds().length;
+                    const insertIdx = insertionPointToIndex(computeInsertionPoint(clientX), tabIds());
                     if (payload.isLastTab && payload.sourceWindowLabel === "main") {
                         Logger.info("dnd", `${via} — declining last tab of main window`, payload);
                         return;
@@ -291,20 +291,20 @@ export function useTabTearOffEvents(
                             payload,
                             physicalToClientX(payload.cursorX),
                             physicalToClientY(payload.cursorY),
-                            true,
                             "tabdrag:merge-direct",
                         ),
                 ),
             );
 
             // Linux has no hook: the window the tab is dropped on merges it
-            // from its own DOM drop (foreign-drop.ts), anywhere in the window.
+            // from its own DOM drop on its strip (foreign-drop.ts).
             const ownLabel = await getApi().getWindowLabel();
             if (!mounted) return;
             trackOrDispose(
-                acceptWindowTabsFromOtherWindows(ownLabel, (data, e) =>
-                    mergeTabFromAnotherWindow(data, e.clientX, e.clientY, false, "cross-window drop"),
-                ),
+                acceptWindowTabsFromOtherWindows(ownLabel, {
+                    accepts: (e) => overStrip(e.clientY),
+                    merge: (data, e) => mergeTabFromAnotherWindow(data, e.clientX, e.clientY, "cross-window drop"),
+                }),
             );
 
             // Phase 5 — cancel-back. Source window receives this on

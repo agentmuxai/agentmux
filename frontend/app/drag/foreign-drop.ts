@@ -8,9 +8,11 @@
  * no client its windows' screen positions, and off Windows there's no window
  * hit test at all. The window the tab was dropped on can, though: it gets the
  * drop. So the dragged tab carries its details ({@link WINDOW_TAB_MIME}), and a
- * window that sees them from another window accepts the drop and merges the
- * tab itself, the same way the Windows and macOS hooks' `tabdrag:merge-direct`
- * does (a window's last tab restores into it and closes the emptied window).
+ * window that sees them from another window accepts a drop on its tab strip
+ * and merges the tab itself, the same way the Windows and macOS hooks'
+ * `tabdrag:merge-direct` does (a window's last tab restores into it and
+ * closes the emptied window). Anywhere else in the window it isn't accepted,
+ * and the tab tears off, as in Chrome.
  *
  * The source must not also act on the release. It can't know for sure that
  * another window took it: on X11 a release over the desktop also ends with
@@ -85,23 +87,27 @@ function isWindowTabFromElsewhere(e: DragEvent): boolean {
     return !dragStartedHere && (e.dataTransfer?.types ?? []).includes(WINDOW_TAB_MIME);
 }
 
+/** Where a window accepts a window tab from another window, and what it does with one. */
+export interface WindowTabDropTarget {
+    /** Whether this point takes the drop (the tab strip). */
+    accepts: (e: DragEvent) => boolean;
+    merge: (data: WindowTabDragData, e: DragEvent) => void;
+}
+
 /**
- * Linux: accept window tabs dragged in from other windows. Each one dropped
- * here goes to `merge`, and is claimed with the host so its source doesn't
- * also tear it off. Returns the disposer.
+ * Linux: accept window tabs dragged in from other windows where `target`
+ * accepts them. Each one dropped there goes to `target.merge`, and is claimed
+ * with the host so its source doesn't also tear it off. Returns the disposer.
  */
-export function acceptWindowTabsFromOtherWindows(
-    windowLabel: string,
-    merge: (data: WindowTabDragData, e: DragEvent) => void,
-): () => void {
+export function acceptWindowTabsFromOtherWindows(windowLabel: string, target: WindowTabDropTarget): () => void {
     if (!isLinux()) return () => {};
     const onDragOver = (e: DragEvent) => {
-        if (!isWindowTabFromElsewhere(e)) return;
+        if (!isWindowTabFromElsewhere(e) || !target.accepts(e)) return;
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     };
     const onDrop = (e: DragEvent) => {
-        if (!isWindowTabFromElsewhere(e)) return;
+        if (!isWindowTabFromElsewhere(e) || !target.accepts(e)) return;
         e.preventDefault();
         const data = parseWindowTabDragData(e.dataTransfer?.getData(WINDOW_TAB_MIME));
         if (!data) {
@@ -114,7 +120,7 @@ export function acceptWindowTabsFromOtherWindows(
                 .claimCrossDragTarget?.(windowLabel)
                 .catch((err) => Logger.warn("dnd:cross", "claim_cross_drag_target failed", { error: String(err) }));
         }
-        merge(data, e);
+        target.merge(data, e);
     };
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("drop", onDrop);
