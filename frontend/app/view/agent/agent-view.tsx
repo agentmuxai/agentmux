@@ -1216,7 +1216,13 @@ export const AgentPresentationView = ({
         // `hidden` covers a dormant pane-stack member and a hidden window tab
         // alike; this provider gates only rendering (the timers read `hidden`
         // directly). The same providers carry the cwd for inline media.
-        <AgentPaneProviders dormant={hidden} block={block} agent={currentAgent} loadToolResult={liveFeed.loadToolResult}>
+        <AgentPaneProviders
+            dormant={hidden}
+            block={block}
+            agent={currentAgent}
+            blockId={model.blockId}
+            loadToolResult={liveFeed.loadToolResult}
+        >
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls

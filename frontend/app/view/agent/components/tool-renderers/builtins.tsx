@@ -14,6 +14,7 @@ import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
+import { OpenInEditorButton } from "../../agent-open-in-editor";
 import { codeDoc, markdownBodyText } from "../../preview-text/docs";
 import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
@@ -161,6 +162,9 @@ function renderRead(node: ToolNode): JSX.Element {
                     <span class="agent-tool-read-range">{formatFileRangeLong(range!)}</span>
                 </Show>
                 <span class="agent-tool-file-path">{filePath}</span>
+                <Show when={doc && isMarkdownPath(filePath)}>
+                    <OpenInEditorButton path={filePath} />
+                </Show>
             </div>
             <Show when={facts}>
                 <div class="agent-tool-read-facts">
@@ -232,6 +236,9 @@ function renderWrite(node: ToolNode): JSX.Element {
                 <span class="agent-tool-file-path">{filePath}</span>
                 <Show when={bytes != null}>
                     <span class="agent-tool-write-bytes">{formatBytes(bytes!)}</span>
+                </Show>
+                <Show when={doc && isMarkdownPath(filePath)}>
+                    <OpenInEditorButton path={filePath} />
                 </Show>
             </div>
             <Show when={doc} fallback={<div class="agent-tool-write-info">No content written.</div>}>

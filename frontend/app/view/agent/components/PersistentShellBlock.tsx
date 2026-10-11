@@ -99,7 +99,6 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     return (
         <div
-            ref={setPeekRowEl}
             class={clsx("agent-shell-block", {
                 "running": props.node.status === "running",
                 "exited-ok": props.node.status === "exited-ok",
@@ -108,10 +107,16 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                 "expanded": expanded(),
                 "collapsed": !expanded(),
             })}
-            onMouseEnter={handlePeekEnter}
-            onMouseLeave={handlePeekLeave}
         >
-            <div class="agent-shell-summary" onClick={props.onTogglePin}>
+            {/* The peek is the summary line's, not the expanded output's, as for
+                a tool call (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §1). */}
+            <div
+                ref={setPeekRowEl}
+                class="agent-shell-summary"
+                onClick={props.onTogglePin}
+                onMouseEnter={handlePeekEnter}
+                onMouseLeave={handlePeekLeave}
+            >
                 <span class="agent-shell-sigil">{statusSigil()}</span>
                 <span class="agent-shell-title">{props.node.title}</span>
                 <span class="agent-shell-elapsed">[{elapsed()}]</span>

@@ -402,7 +402,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             fallback={<AnsweredQuestionMessage node={props.node} cancelled={isCancelledQuestion()} />}
         >
             <div
-                ref={setPeekRowEl}
                 class={clsx("agent-tool-block", {
                     collapsed: !expanded(),
                     expanded: expanded(),
@@ -422,22 +421,25 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 // names CSS needs to target one specific open-ended tool without touching the
                 // shared "other" styling every other unrecognized tool also falls back to.
                 data-tool-name={props.node.toolName?.toLowerCase()}
-                // Peek-hover fires from anywhere in the row (not just the tool-name
-                // text) per SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25 —
-                // merged with the pre-existing userHolding handlers below rather
-                // than adding a second listener pair, since SolidJS only keeps the
-                // last onMouseEnter/onMouseLeave assigned to a given element.
+                // Hold an open, pin-toggled (panel) tool while the mouse is anywhere in it.
                 onMouseEnter={() => {
-                    // Hold an open, pin-toggled (panel) tool while the mouse is in it.
                     if (disclosure().open && disclosure().toggle === "pin") setUserHolding(true);
-                    handlePeekEnter();
                 }}
-                onMouseLeave={() => {
-                    setUserHolding(false);
-                    handlePeekLeave();
-                }}
+                onMouseLeave={() => setUserHolding(false)}
             >
-                <div class="agent-tool-summary" onClick={onHeaderClick}>
+                {/* The peek belongs to the tool call's line, anywhere on it, but
+                    not to its expanded output: a peek over the output covered
+                    the text being read or selected
+                    (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §1).
+                    The anchor moves with the handlers, so the panel is placed
+                    against, and bridged from, the line. */}
+                <div
+                    ref={setPeekRowEl}
+                    class="agent-tool-summary"
+                    onClick={onHeaderClick}
+                    onMouseEnter={handlePeekEnter}
+                    onMouseLeave={handlePeekLeave}
+                >
                     <span class="agent-tool-status-icon">{statusIcon()}</span>
                     <span class="agent-tool-name-peek-anchor">
                         <Show
