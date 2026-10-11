@@ -30,6 +30,9 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
             { view: "ext:acme.notes/main", name: "main", label: "Notes", icon: "note-sticky", entry: "index.html", singleton: false, default_meta: {} },
             { view: "ext:acme.notes/list", name: "list", label: "List", icon: "list", entry: "list.html", singleton: false, default_meta: {} },
         ],
+        commands: [],
+        status_items: [],
+        signature: { state: "unsigned", publisher: "acme", fingerprint: null, pinned: null },
         files_url: "/agentmux/widget-files/acme.notes/h/k/",
         implied: false,
         folder: "",
@@ -144,6 +147,23 @@ describe("ui", () => {
         expect(errorOf(await handleBridgeRequest(h, state, "ui.openUrl", { url: "javascript:alert(1)" })).code).toBe(ERR.INVALID_PARAMS);
         await handleBridgeRequest(h, state, "ui.openUrl", { url: "https://example.com/x" });
         expect(h.openUrl).toHaveBeenCalledWith("https://example.com/x");
+    });
+
+    it("updates only a status item the manifest declares, within its limits", async () => {
+        const item = { id: "count", text: "Notes", icon: "note-sticky", tooltip: null, command: null, alignment: "right" as const };
+        const h = Object.assign(host(pkg({ status_items: [item] })), { setStatusItem: vi.fn() });
+        const state = await ready(h);
+        await handleBridgeRequest(h, state, "ui.setStatusItem", { id: "count", text: "3 notes", tone: "success", icon: "check" });
+        expect(h.setStatusItem).toHaveBeenLastCalledWith("count", { text: "3 notes", tone: "success", icon: "check" });
+        await handleBridgeRequest(h, state, "ui.setStatusItem", { id: "count" });
+        expect(h.setStatusItem).toHaveBeenLastCalledWith("count", null);
+        const code = async (params: Record<string, unknown>) => errorOf(await handleBridgeRequest(h, state, "ui.setStatusItem", params)).code;
+        expect(await code({ id: "other", text: "x" })).toBe(ERR.NOT_FOUND);
+        expect(await code({ id: "count", text: "x".repeat(41) })).toBe(ERR.INVALID_PARAMS);
+        expect(await code({ id: "count", text: "  " })).toBe(ERR.INVALID_PARAMS);
+        expect(await code({ id: "count", icon: 'x" onclick="' })).toBe(ERR.INVALID_PARAMS);
+        expect(await code({ id: "count", tone: "attention" })).toBe(ERR.INVALID_PARAMS);
+        expect(h.setStatusItem).toHaveBeenCalledTimes(2);
     });
 });
 

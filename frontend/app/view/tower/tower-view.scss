@@ -173,11 +173,17 @@
     min-width: 0;
 }
 
-// The executable after what a process is ("Renderer  AgentMux Helper
-// (Renderer)"): it takes only the room the label leaves, cut short in a
-// narrow pane, so it neither runs into the CPU column nor cuts the label.
-.tower-exe {
+// What follows a process's name (its executable, the tool call it runs):
+// it takes only the room the name leaves, cut short in a narrow pane, so it
+// neither runs into the CPU column nor cuts the name.
+.tower-name-tail {
+    display: flex;
     flex: 1 1 0;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.tower-exe {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -435,4 +441,19 @@ tr:hover .tower-reveal,
     padding-left: var(--space-2);
     border-left: 2px solid var(--accent-color);
     white-space: nowrap;
+}
+
+// A process that exited in the last minute: still in its tree, dimmed.
+.tower-process-row--exited {
+    opacity: 0.55;
+}
+
+// The tool call a process runs, after its name: muted, cut off if long.
+.tower-started-by {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+    font-style: italic;
 }

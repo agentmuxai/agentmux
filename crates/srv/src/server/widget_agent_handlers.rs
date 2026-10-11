@@ -115,11 +115,14 @@ pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(b
         return error(StatusCode::INTERNAL_SERVER_ERROR, format!("{id} was copied in but isn't listed"));
     };
     let views: Vec<String> = pkg.panes.iter().map(|p| p.view.clone()).collect();
+    // Who signed it, so the agent can tell the user what the prompt says
+    // (SPEC_WIDGET_SHARING_2026_10_10.md §2.3).
+    let signature = pkg.signature.clone();
     match pkg.state {
-        WidgetState::Approved => return Json(json!({ "status": "installed", "id": id, "views": views })).into_response(),
+        WidgetState::Approved => return Json(json!({ "status": "installed", "id": id, "views": views, "signature": signature })).into_response(),
         WidgetState::Invalid => return error(StatusCode::BAD_REQUEST, pkg.error.unwrap_or_else(|| "the package isn't valid".into())),
         WidgetState::Disabled => {
-            return Json(json!({ "status": "disabled", "id": id, "views": views, "message": "the user turned this widget off; it stays off" }))
+            return Json(json!({ "status": "disabled", "id": id, "views": views, "signature": signature, "message": "the user turned this widget off; it stays off" }))
                 .into_response()
         }
         _ => {}
@@ -139,16 +142,18 @@ pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(b
     tracing::info!(id = %id, agent = %agent, "an agent asked to install a widget; waiting for the user");
     let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(DEFAULT_WAIT).min(MAX_WAIT);
     match tokio::time::timeout(wait, answer).await {
-        Ok(Ok(Answer::Approved)) => Json(json!({ "status": "installed", "id": id, "views": views })).into_response(),
+        Ok(Ok(Answer::Approved)) => Json(json!({ "status": "installed", "id": id, "views": views, "signature": signature })).into_response(),
         Ok(Ok(Answer::Declined)) | Ok(Err(_)) => Json(json!({
             "status": "declined",
             "id": id,
+            "signature": signature,
             "message": "the user didn't approve it; it stays in Settings → Widgets until they approve or remove it",
         }))
         .into_response(),
         Err(_) => Json(json!({
             "status": "pending",
             "id": id,
+            "signature": signature,
             "message": "the user hasn't answered yet; the request stays open in AgentMux",
         }))
         .into_response(),

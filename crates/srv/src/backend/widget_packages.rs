@@ -21,12 +21,18 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::wconfig::WidgetConfigType;
+use super::widget_signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
 
 pub const MANIFEST_FILE: &str = "widget.json";
 pub const MANIFEST_VERSION: u32 = 1;
 pub const MAX_PACKAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_PACKAGE_FILES: usize = 2000;
+/// Palette commands and status bar items a package may add (spec §6.8).
+pub const MAX_COMMANDS: usize = 20;
+pub const MAX_STATUS_ITEMS: usize = 4;
 const APPROVALS_FILE: &str = "widget-approvals.json";
+/// Publisher → the key its first approved signed package was signed with.
+const PUBLISHERS_FILE: &str = "widget-publishers.json";
 
 /// Every permission a manifest may ask for (spec §6.4). `net:<origin>` is
 /// checked separately.
@@ -58,15 +64,54 @@ pub struct ManifestPane {
     pub singleton: bool,
 }
 
+/// A command palette entry (spec §6.8).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestCommand {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// The pane it runs in; the first pane when left out.
+    #[serde(default)]
+    pub pane: Option<String>,
+    #[serde(default)]
+    pub keywords: Option<String>,
+}
+
+/// A status bar item (spec §6.8).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestStatusItem {
+    pub id: String,
+    pub text: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub tooltip: Option<String>,
+    /// One of the package's commands, run on a click; the first pane opens
+    /// when left out.
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub alignment: Option<StatusAlignment>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum StatusAlignment {
+    Left,
+    #[default]
+    Right,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ManifestContributes {
     #[serde(default)]
     pub panes: Vec<ManifestPane>,
-    /// Reserved for W5; accepted and ignored.
     #[serde(default)]
-    pub commands: Option<serde_json::Value>,
+    pub commands: Vec<ManifestCommand>,
     #[serde(default, rename = "statusItems")]
-    pub status_items: Option<serde_json::Value>,
+    pub status_items: Vec<ManifestStatusItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +161,11 @@ fn is_slug(s: &str) -> bool {
 
 pub fn valid_id(id: &str) -> bool {
     id.len() <= 64 && matches!(id.split_once('.'), Some((a, b)) if is_slug(a) && is_slug(b))
+}
+
+/// A Font Awesome name: lowercase letters, digits and `-`.
+fn valid_icon(icon: &Option<String>) -> bool {
+    icon.as_deref().is_none_or(|i| i.len() <= 60 && is_slug(i))
 }
 
 fn valid_semver(v: &str) -> bool {
@@ -217,13 +267,72 @@ pub fn validate(m: &Manifest, folder: &str) -> Result<(), String> {
             }
         }
     }
+    validate_contributions(m)
+}
+
+/// `contributes.commands` and `contributes.statusItems` (spec §6.8).
+fn validate_contributions(m: &Manifest) -> Result<(), String> {
+    let c = &m.contributes;
+    if c.commands.len() > MAX_COMMANDS {
+        return Err(format!("contributes.commands lists more than {MAX_COMMANDS} commands"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for cmd in &c.commands {
+        if !is_slug(&cmd.id) || cmd.id.len() > 60 {
+            return Err(format!("command id {:?} must be lowercase letters, digits and -", cmd.id));
+        }
+        if !seen.insert(cmd.id.as_str()) {
+            return Err(format!("two commands have the id {:?}", cmd.id));
+        }
+        if cmd.title.trim().is_empty() || cmd.title.chars().count() > 60 {
+            return Err(format!("command {:?} needs a title of 1–60 characters", cmd.id));
+        }
+        if !valid_icon(&cmd.icon) {
+            return Err(format!("command {:?}: icon must be a Font Awesome name", cmd.id));
+        }
+        if cmd.keywords.as_deref().is_some_and(|k| k.chars().count() > 200) {
+            return Err(format!("command {:?}: keywords are longer than 200 characters", cmd.id));
+        }
+        if let Some(p) = &cmd.pane {
+            if !c.panes.iter().any(|pane| &pane.name == p) {
+                return Err(format!("command {:?} runs in pane {p:?}, which the package doesn't contribute", cmd.id));
+            }
+        }
+    }
+    if c.status_items.len() > MAX_STATUS_ITEMS {
+        return Err(format!("contributes.statusItems lists more than {MAX_STATUS_ITEMS} items"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for item in &c.status_items {
+        if !is_slug(&item.id) || item.id.len() > 60 {
+            return Err(format!("status item id {:?} must be lowercase letters, digits and -", item.id));
+        }
+        if !seen.insert(item.id.as_str()) {
+            return Err(format!("two status items have the id {:?}", item.id));
+        }
+        if item.text.trim().is_empty() || item.text.chars().count() > 40 {
+            return Err(format!("status item {:?} needs a text of 1–40 characters", item.id));
+        }
+        if item.tooltip.as_deref().is_some_and(|t| t.chars().count() > 120) {
+            return Err(format!("status item {:?}: tooltip is longer than 120 characters", item.id));
+        }
+        if !valid_icon(&item.icon) {
+            return Err(format!("status item {:?}: icon must be a Font Awesome name", item.id));
+        }
+        if let Some(cmd) = &item.command {
+            if !c.commands.iter().any(|x| &x.id == cmd) {
+                return Err(format!("status item {:?} runs command {cmd:?}, which the package doesn't contribute", item.id));
+            }
+        }
+    }
     Ok(())
 }
 
 // ── Files and the content hash (spec §5.1, §8.2) ────────────────────────────
 
 /// Every file in `dir` (relative path → SHA-256 hex), within the limits, with
-/// no symlinks.
+/// no symlinks. `widget.sig` at the root is left out: it signs the hash of
+/// the rest (SPEC_WIDGET_SHARING_2026_10_10.md §2.1).
 pub fn hash_files(dir: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     let mut total: u64 = 0;
@@ -248,6 +357,9 @@ pub fn hash_files(dir: &Path) -> Result<BTreeMap<String, String>, String> {
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join("/");
+            if rel == sig::SIG_FILE {
+                continue;
+            }
             let bytes = std::fs::read(&path).map_err(|e| format!("can't read {rel}: {e}"))?;
             total += bytes.len() as u64;
             if total > MAX_PACKAGE_BYTES {
@@ -288,6 +400,9 @@ pub struct Approval {
     pub approved_at: i64,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The publisher key that signed it (base64), if it was signed.
+    #[serde(default)]
+    pub signer: Option<String>,
 }
 
 fn yes() -> bool {
@@ -336,6 +451,30 @@ pub struct WidgetPaneInfo {
     pub default_meta: serde_json::Map<String, serde_json::Value>,
 }
 
+/// A palette command, as the UI registers it (spec §6.8).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetCommandInfo {
+    pub id: String,
+    pub title: String,
+    pub icon: String,
+    /// The view of the pane it runs in.
+    pub view: String,
+    pub keywords: String,
+}
+
+/// A status bar item, before any pane of the widget updates it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetStatusItemInfo {
+    pub id: String,
+    pub text: String,
+    pub icon: String,
+    pub tooltip: Option<String>,
+    pub command: Option<String>,
+    pub alignment: StatusAlignment,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetPackageInfo {
@@ -358,6 +497,10 @@ pub struct WidgetPackageInfo {
     /// The current content hash (empty when the files couldn't be read).
     pub hash: String,
     pub panes: Vec<WidgetPaneInfo>,
+    pub commands: Vec<WidgetCommandInfo>,
+    pub status_items: Vec<WidgetStatusItemInfo>,
+    /// Who signed it, against this instance's pinned publishers.
+    pub signature: WidgetSignatureInfo,
     /// Where its files are served, ending in `/`, while it is approved and
     /// enabled; relative to srv's web endpoint.
     pub files_url: Option<String>,
@@ -444,8 +587,8 @@ pub fn implied_from_v1(key: &str, entry: &WidgetConfigType, widgets_dir: &Path) 
         min_agent_mux: None,
         contributes: ManifestContributes {
             panes: vec![ManifestPane { name: slug, label: None, icon: None, entry: None, default_meta: None, singleton: false }],
-            commands: None,
-            status_items: None,
+            commands: vec![],
+            status_items: vec![],
         },
     };
     let _ = view;
@@ -472,8 +615,8 @@ pub fn files_key(secret: &str, id: &str, hash: &str) -> String {
     hex::encode(&mac.finalize().into_bytes()[..16])
 }
 
-/// Combine what's on disk with this instance's approvals.
-pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Option<&str>) -> WidgetPackageInfo {
+/// Combine what's on disk with this instance's approvals and pins.
+pub fn describe(found: &Found, approvals: &Approvals, pins: &Pins, secret: &str, v1_view: Option<&str>) -> WidgetPackageInfo {
     let folder = found.dir.display().to_string();
     let invalid = |error: String| WidgetPackageInfo {
         id: found.id.clone(),
@@ -491,6 +634,9 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         error: Some(error),
         hash: String::new(),
         panes: vec![],
+        commands: vec![],
+        status_items: vec![],
+        signature: sig::describe(&found.id, None, pins),
         files_url: None,
         implied: found.implied,
         folder: folder.clone(),
@@ -511,11 +657,16 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         return invalid(format!("its entry {entry:?} isn't in the package"));
     }
     let hash = package_hash(files);
+    let signer = match sig::check(&found.dir, &m.id, &m.version, &hash) {
+        None => None,
+        Some(Ok(key)) => Some(key),
+        Some(Err(e)) => return invalid(e),
+    };
     let kind = m.kind();
     let approval = approvals.get(&m.id);
     let state = match approval {
         None => WidgetState::NeedsApproval,
-        Some(a) if a.hash != hash || a.kind != kind => WidgetState::Changed,
+        Some(a) if a.hash != hash || a.kind != kind || a.signer != signer => WidgetState::Changed,
         Some(a) if !a.enabled => WidgetState::Disabled,
         Some(_) => WidgetState::Approved,
     };
@@ -532,6 +683,34 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
             entry: p.entry.clone().unwrap_or_else(|| m.default_entry()),
             singleton: p.singleton,
             default_meta: p.default_meta.clone().unwrap_or_default(),
+        })
+        .collect::<Vec<WidgetPaneInfo>>();
+    let commands = m
+        .contributes
+        .commands
+        .iter()
+        .map(|c| {
+            let pane = c.pane.as_deref().unwrap_or(&m.contributes.panes[0].name);
+            WidgetCommandInfo {
+                id: c.id.clone(),
+                title: c.title.clone(),
+                icon: c.icon.clone().unwrap_or_else(|| icon.clone()),
+                view: panes.iter().find(|p| p.name == pane).map(|p| p.view.clone()).unwrap_or_default(),
+                keywords: c.keywords.clone().unwrap_or_default(),
+            }
+        })
+        .collect();
+    let status_items = m
+        .contributes
+        .status_items
+        .iter()
+        .map(|s| WidgetStatusItemInfo {
+            id: s.id.clone(),
+            text: s.text.clone(),
+            icon: s.icon.clone().unwrap_or_else(|| icon.clone()),
+            tooltip: s.tooltip.clone(),
+            command: s.command.clone(),
+            alignment: s.alignment.unwrap_or_default(),
         })
         .collect();
     let files_url = (state == WidgetState::Approved)
@@ -552,6 +731,9 @@ pub fn describe(found: &Found, approvals: &Approvals, secret: &str, v1_view: Opt
         error: None,
         hash,
         panes,
+        commands,
+        status_items,
+        signature: sig::describe(&m.id, signer.as_deref(), pins),
         files_url,
         implied: found.implied,
         folder,
@@ -586,6 +768,7 @@ pub fn widget_entries(packages: &[WidgetPackageInfo]) -> HashMap<String, WidgetC
 pub struct WidgetPackages {
     pub widgets_dir: PathBuf,
     approvals_path: PathBuf,
+    pins_path: PathBuf,
     secret: String,
     inner: Mutex<Inner>,
 }
@@ -596,6 +779,7 @@ struct Inner {
     v1_views: HashMap<String, String>,
     packages: Vec<WidgetPackageInfo>,
     approvals: Approvals,
+    pins: Pins,
 }
 
 static SERVICE: OnceLock<Arc<WidgetPackages>> = OnceLock::new();
@@ -615,7 +799,9 @@ impl WidgetPackages {
     pub fn new(widgets_dir: PathBuf, data_dir: &Path, secret: String) -> Self {
         let approvals_path = data_dir.join(APPROVALS_FILE);
         let approvals = read_approvals(&approvals_path);
-        Self { widgets_dir, approvals_path, secret, inner: Mutex::new(Inner { approvals, ..Default::default() }) }
+        let pins_path = data_dir.join(PUBLISHERS_FILE);
+        let pins = sig::read_pins(&pins_path);
+        Self { widgets_dir, approvals_path, pins_path, secret, inner: Mutex::new(Inner { approvals, pins, ..Default::default() }) }
     }
 
     pub fn install_global(self) -> &'static Arc<WidgetPackages> {
@@ -652,7 +838,7 @@ impl WidgetPackages {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let packages = found
             .iter()
-            .map(|f| describe(f, &inner.approvals, &self.secret, v1_views.get(&f.id).map(String::as_str)))
+            .map(|f| describe(f, &inner.approvals, &inner.pins, &self.secret, v1_views.get(&f.id).map(String::as_str)))
             .collect::<Vec<_>>();
         inner.found = found;
         inner.v1_views = v1_views;
@@ -664,9 +850,12 @@ impl WidgetPackages {
         self.inner.lock().unwrap_or_else(|p| p.into_inner()).packages.clone()
     }
 
-    /// Record the user's approval of exactly `hash` (the host-only route
-    /// calls this). Fails if the package changed since the prompt was shown.
-    pub fn approve(&self, id: &str, hash: &str) -> Result<(), String> {
+    /// Record the user's approval of exactly `hash`, signed by the key whose
+    /// fingerprint the prompt showed (`shown_signer`, "" for unsigned); the
+    /// host-only route calls this. Fails if the package or its signature
+    /// changed since the prompt was shown: `widget.sig` isn't in the hash, so
+    /// it is checked here (SPEC_WIDGET_SHARING_2026_10_10.md §2.3).
+    pub fn approve(&self, id: &str, hash: &str, shown_signer: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let found = inner.found.iter().find(|f| f.id == id).ok_or("no such widget")?;
         let m = found.manifest.as_ref().map_err(|e| e.clone())?;
@@ -674,6 +863,19 @@ impl WidgetPackages {
         if package_hash(files) != hash {
             return Err("the widget changed since you were asked; review it again".to_string());
         }
+        let signer = match sig::check(&found.dir, &m.id, &m.version, hash) {
+            None => None,
+            Some(Ok(key)) => Some(key),
+            Some(Err(e)) => return Err(e),
+        };
+        if signer.as_deref().map(sig::fingerprint).unwrap_or_default() != shown_signer {
+            return Err("the widget's signature changed since you were asked; review it again".to_string());
+        }
+        // The first signed package of a publisher pins it to its key; a
+        // later one signed otherwise doesn't move the pin
+        // (SPEC_WIDGET_SHARING_2026_10_10.md §2.2).
+        let publisher = sig::publisher_of(id).to_string();
+        let pin = signer.clone().filter(|_| !inner.pins.contains_key(&publisher));
         let approval = Approval {
             hash: hash.to_string(),
             kind: m.kind(),
@@ -681,9 +883,68 @@ impl WidgetPackages {
             files: files.clone(),
             approved_at: chrono::Utc::now().timestamp(),
             enabled: true,
+            signer,
         };
+        if let Some(key) = pin {
+            inner.pins.insert(publisher, key);
+            sig::write_pins(&self.pins_path, &inner.pins)?;
+        }
         inner.approvals.insert(id.to_string(), approval);
         write_approvals(&self.approvals_path, &inner.approvals)
+    }
+
+    /// Who signed a package, against this instance's pins.
+    pub fn describe_signature(&self, id: &str, signer: Option<&str>) -> WidgetSignatureInfo {
+        sig::describe(id, signer, &self.inner.lock().unwrap_or_else(|p| p.into_inner()).pins)
+    }
+
+    /// An approved sandboxed package's approved bytes, for a bundle export
+    /// (SPEC_WIDGET_SHARING_2026_10_10.md §3.4): every file hashed again
+    /// against the approval, never a newer copy on disk, and its
+    /// `widget.sig` when it still names the approved signer.
+    pub fn approved_package(&self, id: &str) -> Result<(String, BTreeMap<String, Vec<u8>>), String> {
+        let (dir, approval) = {
+            let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            let a = inner.approvals.get(id).filter(|a| a.enabled).cloned().ok_or(format!("{id} isn't installed and turned on"))?;
+            let dir = inner.found.iter().find(|f| f.id == id && !f.implied).map(|f| f.dir.clone()).ok_or(format!("{id} isn't a widget package"))?;
+            (dir, a)
+        };
+        if approval.kind != WidgetKind::Sandboxed {
+            return Err(format!("{id} is a trusted widget; bundles carry sandboxed widgets only"));
+        }
+        let mut files = BTreeMap::new();
+        for (path, file_hash) in &approval.files {
+            let bytes = std::fs::read(dir.join(path)).map_err(|e| format!("{id}: can't read {path}: {e}"))?;
+            if hex::encode(Sha256::digest(&bytes)) != *file_hash {
+                return Err(format!("{id} changed since you approved it; approve it again first"));
+            }
+            files.insert(path.clone(), bytes);
+        }
+        if let Some(signer) = &approval.signer {
+            let text = std::fs::read(dir.join(sig::SIG_FILE)).map_err(|_| format!("{id} lost its signature since you approved it"))?;
+            let manifest: Manifest = serde_json::from_slice(files.get(MANIFEST_FILE).ok_or("no widget.json")?).map_err(|e| e.to_string())?;
+            if sig::check(&dir, id, &manifest.version, &approval.hash) != Some(Ok(signer.clone())) {
+                return Err(format!("{id}'s signature changed since you approved it"));
+            }
+            files.insert(sig::SIG_FILE.to_string(), text);
+        }
+        Ok((approval.hash, files))
+    }
+
+    /// The publishers this instance has pinned to a key, for Settings.
+    pub fn publishers(&self) -> Vec<WidgetPublisherPin> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.pins.iter().map(|(publisher, key)| WidgetPublisherPin { publisher: publisher.clone(), fingerprint: sig::fingerprint(key) }).collect()
+    }
+
+    /// Forget a publisher's key (the user's **Forget key**, through the host
+    /// route): its next signed package pins it again.
+    pub fn forget_publisher(&self, publisher: &str) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if inner.pins.remove(publisher).is_none() {
+            return Err(format!("no key is kept for {publisher:?}"));
+        }
+        sig::write_pins(&self.pins_path, &inner.pins)
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
@@ -999,211 +1260,5 @@ fn unzip(zip_path: &Path, to: &Path) -> Result<(), String> {
 use std::io::Read as _;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn manifest(id: &str) -> serde_json::Value {
-        serde_json::json!({
-            "manifestVersion": 1,
-            "id": id,
-            "name": "Test",
-            "version": "1.0.0",
-            "permissions": ["storage", "net:https://api.github.com"],
-            "contributes": { "panes": [{ "name": "main" }] }
-        })
-    }
-
-    fn package(root: &Path, id: &str) -> PathBuf {
-        let dir = root.join(id);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(MANIFEST_FILE), manifest(id).to_string()).unwrap();
-        std::fs::write(dir.join("index.html"), "<p>hi</p>").unwrap();
-        dir
-    }
-
-    fn service(root: &Path) -> WidgetPackages {
-        WidgetPackages::new(root.join("widgets"), &root.join("data"), "secret".into())
-    }
-
-    #[test]
-    fn ids_versions_and_permissions_are_checked() {
-        assert!(valid_id("acme.pr-dashboard"));
-        assert!(!valid_id("Acme.x") && !valid_id("acme") && !valid_id("a.b.c") && !valid_id("acme."));
-        assert!(valid_semver("1.2.0") && valid_semver("1.2.0-beta.1") && !valid_semver("1.2"));
-        assert!(valid_permission("storage") && valid_permission("net:https://api.github.com"));
-        assert!(valid_permission("net:https://*.example.com") && valid_permission("net:http://127.0.0.1:8188"));
-        assert!(!valid_permission("net:https://*") && !valid_permission("net:https://a.com/path"));
-        assert!(!valid_permission("net:ftp://a.com") && !valid_permission("everything"));
-        assert!(!valid_permission("net:https://user@a.com"));
-    }
-
-    #[test]
-    fn a_manifest_must_match_its_folder_and_keep_meta_namespaced() {
-        let mut m: Manifest = serde_json::from_value(manifest("acme.test")).unwrap();
-        assert!(validate(&m, "acme.test").is_ok());
-        assert!(validate(&m, "acme.other").unwrap_err().contains("folder"));
-        m.contributes.panes[0].default_meta = Some(serde_json::Map::from_iter([("view".into(), "term".into())]));
-        assert!(validate(&m, "acme.test").unwrap_err().contains("widget:"));
-        m.contributes.panes[0].default_meta = None;
-        m.contributes.panes[0].entry = Some("../escape.html".into());
-        assert!(validate(&m, "acme.test").unwrap_err().contains("inside the package"));
-    }
-
-    #[test]
-    fn a_new_package_needs_approval_and_approval_names_its_exact_files() {
-        let tmp = tempfile::tempdir().unwrap();
-        let svc = service(tmp.path());
-        package(&svc.widgets_dir, "acme.test");
-        let p = &svc.rescan(&HashMap::new())[0];
-        assert_eq!(p.state, WidgetState::NeedsApproval);
-        assert_eq!(p.files_url, None);
-        assert_eq!(p.panes[0].view, "ext:acme.test/main");
-
-        svc.approve("acme.test", &p.hash).unwrap();
-        let p = svc.rescan(&HashMap::new())[0].clone();
-        assert_eq!(p.state, WidgetState::Approved);
-        assert_eq!(p.granted, vec!["storage".to_string(), "net:https://api.github.com".to_string()]);
-        let url = p.files_url.clone().unwrap();
-        let key = url.trim_end_matches('/').rsplit('/').next().unwrap();
-        assert_eq!(svc.read_file("acme.test", &p.hash, key, "index.html").unwrap(), b"<p>hi</p>");
-
-        // An approval of a stale hash is refused.
-        assert!(svc.approve("acme.test", "0000").is_err());
-    }
-
-    #[test]
-    fn an_edited_file_is_never_served_and_the_package_asks_again() {
-        let tmp = tempfile::tempdir().unwrap();
-        let svc = service(tmp.path());
-        let dir = package(&svc.widgets_dir, "acme.test");
-        let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
-        let key = files_key("secret", "acme.test", &hash);
-
-        // Edited after approval, before any rescan: the read itself catches it.
-        std::fs::write(dir.join("index.html"), "<script>evil()</script>").unwrap();
-        assert_eq!(svc.read_file("acme.test", &hash, &key, "index.html"), Err(FileError::Changed));
-        // A file added after approval isn't served either.
-        std::fs::write(dir.join("extra.js"), "x").unwrap();
-        assert_eq!(svc.read_file("acme.test", &hash, &key, "extra.js"), Err(FileError::NotFound));
-        // And the rescan marks it changed, with no files URL.
-        let p = svc.rescan(&HashMap::new())[0].clone();
-        assert_eq!(p.state, WidgetState::Changed);
-        assert_eq!(p.files_url, None);
-    }
-
-    #[test]
-    fn files_need_the_right_key_and_stay_inside_the_package() {
-        let tmp = tempfile::tempdir().unwrap();
-        let svc = service(tmp.path());
-        package(&svc.widgets_dir, "acme.test");
-        std::fs::write(svc.widgets_dir.join("secret.txt"), "nope").unwrap();
-        let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
-        let key = files_key("secret", "acme.test", &hash);
-        assert_eq!(svc.read_file("acme.test", &hash, "guess", "index.html"), Err(FileError::NotFound));
-        assert_eq!(svc.read_file("acme.test", &hash, &key, "../secret.txt"), Err(FileError::NotFound));
-        assert_eq!(svc.read_file("acme.test", &hash, &key, "/etc/passwd"), Err(FileError::NotFound));
-    }
-
-    #[test]
-    fn disabling_stops_serving_and_removes_the_widget_bar_entry() {
-        let tmp = tempfile::tempdir().unwrap();
-        let svc = service(tmp.path());
-        package(&svc.widgets_dir, "acme.test");
-        let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
-        let packages = svc.rescan(&HashMap::new());
-        let entries = widget_entries(&packages);
-        assert_eq!(entries["ext@acme.test/main"].block_def.meta["view"], "ext:acme.test/main");
-
-        svc.set_enabled("acme.test", false).unwrap();
-        let packages = svc.rescan(&HashMap::new());
-        assert_eq!(packages[0].state, WidgetState::Disabled);
-        assert!(widget_entries(&packages).is_empty());
-        let key = files_key("secret", "acme.test", &hash);
-        assert_eq!(svc.read_file("acme.test", &hash, &key, "index.html"), Err(FileError::NotFound));
-    }
-
-    #[test]
-    fn approvals_are_kept_per_instance_data_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let svc = service(tmp.path());
-        package(&svc.widgets_dir, "acme.test");
-        let hash = svc.rescan(&HashMap::new())[0].hash.clone();
-        svc.approve("acme.test", &hash).unwrap();
-        // Same widgets folder, another instance's data dir: asks again.
-        let other = WidgetPackages::new(tmp.path().join("widgets"), &tmp.path().join("other-data"), "s2".into());
-        assert_eq!(other.rescan(&HashMap::new())[0].state, WidgetState::NeedsApproval);
-        // The same instance after a restart remembers.
-        let again = service(tmp.path());
-        assert_eq!(again.rescan(&HashMap::new())[0].state, WidgetState::Approved);
-    }
-
-    #[test]
-    fn a_v1_module_entry_is_an_implied_trusted_package() {
-        let tmp = tempfile::tempdir().unwrap();
-        let svc = service(tmp.path());
-        let hello = svc.widgets_dir.join("hello");
-        std::fs::create_dir_all(&hello).unwrap();
-        std::fs::write(hello.join("index.js"), "export default {}").unwrap();
-        let mut entry = WidgetConfigType { label: "Hello".into(), module: "hello/index.js".into(), ..Default::default() };
-        entry.block_def.meta.insert("view".into(), "ext:hello".into());
-        let v1 = HashMap::from([("ext@hello".to_string(), entry)]);
-        let p = svc.rescan(&v1)[0].clone();
-        assert_eq!(p.id, "local.hello");
-        assert_eq!(p.kind, WidgetKind::Trusted);
-        assert!(p.implied);
-        assert_eq!(p.state, WidgetState::NeedsApproval);
-        assert_eq!(p.panes[0].view, "ext:hello");
-        assert_eq!(p.panes[0].entry, "index.js");
-        // A v1 widget keeps its own widget-bar entry; none is added.
-        svc.approve("local.hello", &p.hash).unwrap();
-        assert!(widget_entries(&svc.rescan(&v1)).is_empty());
-    }
-
-    #[test]
-    fn installing_counts_the_bytes_written_not_what_a_zip_declares() {
-        let tmp = tempfile::tempdir().unwrap();
-        let out = tmp.path().join("f");
-        let mut near_full = Budget { bytes: MAX_PACKAGE_BYTES - 4, files: 0 };
-        assert!(near_full.copy(&mut &b"1234"[..], &out).is_ok());
-        assert!(near_full.copy(&mut &b"5"[..], &out).unwrap_err().contains("over 50 MB"));
-        let mut many = Budget { bytes: 0, files: MAX_PACKAGE_FILES };
-        assert!(many.copy(&mut &b"x"[..], &out).unwrap_err().contains("files"));
-    }
-
-    #[test]
-    fn install_copies_a_folder_or_a_zip_and_refuses_a_bad_one() {
-        let tmp = tempfile::tempdir().unwrap();
-        let widgets = tmp.path().join("widgets");
-        let src = package(&tmp.path().join("src"), "acme.test");
-        assert_eq!(install(&widgets, &src, false).unwrap(), "acme.test");
-        assert!(widgets.join("acme.test/index.html").exists());
-        assert!(install(&widgets, &src.join(MANIFEST_FILE), false).unwrap_err().contains("already installed"));
-        assert_eq!(install(&widgets, &src.join(MANIFEST_FILE), true).unwrap(), "acme.test");
-        // The replaced version's own files don't linger.
-        std::fs::write(widgets.join("acme.test/old-only.txt"), "x").unwrap();
-        assert_eq!(install(&widgets, &src, true).unwrap(), "acme.test");
-        assert!(!widgets.join("acme.test/old-only.txt").exists());
-        assert!(widgets.join("acme.test/index.html").exists());
-
-        // A zip with the package in one top-level folder.
-        let zip_path = tmp.path().join("pkg.zip");
-        {
-            let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
-            let opts = zip::write::SimpleFileOptions::default();
-            z.start_file("acme.zipped/widget.json", opts).unwrap();
-            std::io::Write::write_all(&mut z, manifest("acme.zipped").to_string().as_bytes()).unwrap();
-            z.start_file("acme.zipped/index.html", opts).unwrap();
-            std::io::Write::write_all(&mut z, b"<p>z</p>").unwrap();
-            z.finish().unwrap();
-        }
-        assert_eq!(install(&widgets, &zip_path, false).unwrap(), "acme.zipped");
-
-        let bad = tmp.path().join("bad");
-        std::fs::create_dir_all(&bad).unwrap();
-        std::fs::write(bad.join(MANIFEST_FILE), "{\"manifestVersion\": 9}").unwrap();
-        assert!(install(&widgets, &bad, false).is_err());
-    }
-}
+#[path = "widget_packages_tests.rs"]
+mod tests;

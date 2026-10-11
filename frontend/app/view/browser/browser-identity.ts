@@ -40,9 +40,3 @@ export function newIncognitoIdentity(): string {
 export function newTabUrl(currentUrl: string | undefined, home: string): string {
     return currentUrl && /^https?:\/\//i.test(currentUrl) ? currentUrl : home;
 }
-
-/** Whether this platform can give a pane a jar of its own yet. Windows only
- *  until the Linux/macOS work (spec §7.2, Phase 3). */
-export function canOpenIncognito(platform: string): boolean {
-    return platform === "win32";
-}

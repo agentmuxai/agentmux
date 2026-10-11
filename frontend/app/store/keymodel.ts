@@ -255,6 +255,7 @@ export {
     keyboardMouseDownHandler,
     registerControlShiftTracking,
     registerHostShortcuts,
+    registerChordCapture,
 } from "./keymodel-dispatch";
 
 export { globalRefocus, globalRefocusWithTimeout } from "./keymodel-nav";

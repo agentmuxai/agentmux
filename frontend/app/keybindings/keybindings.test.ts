@@ -255,6 +255,14 @@ describe("the keybindings setting", () => {
         expect(setUserKeybindings([{ key: "ctrl+shift+e", command: "open:files" }], (id) => id === "open:files")).toEqual([]);
     });
 
+    it("never binds a widget's command, so agents' RunCommand can't reach one", () => {
+        const known = (id: string) => id === "ext:acme.prs/refresh";
+        expect(setUserKeybindings([{ key: "ctrl+shift+e", command: "ext:acme.prs/refresh" }], known)).toEqual([
+            `keybindings[0]: "ext:acme.prs/refresh" is a widget's command, which can't be bound to a key`,
+        ]);
+        expect(resolveKey(ev("E", "KeyE", { ctrlKey: true, shiftKey: true }), NONE, "other")?.row.command).not.toBe("ext:acme.prs/refresh");
+    });
+
     it("bumps the version views follow", () => {
         const before = keybindingsVersion();
         setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right" }]);

@@ -218,10 +218,27 @@ pub(crate) const SEARCH_HISTORY_TOOL: &str = r#"{
 // here.
 pub(crate) const LIST_CONVERSATIONS_TOOL: &str = r#"{
   "name": "ListConversations",
-  "description": "See every agent's most recent activity across host, cross-channel (other AgentMux channels on this same host), LAN, and connected WAN in one call — a faster alternative to DiscoverAgents + N x GetAgentTranscript. Host and cross-channel entries include turn_active, last_activity_ms, and a last_message_preview (tail transcript line). LAN and WAN entries are liveness-only (remote_fetch_required: true) — reading their conversation content isn't supported yet. Read-only. Takes no arguments.",
+  "description": "See every agent's most recent activity across host, cross-channel (other AgentMux channels on this same host), LAN, and connected WAN in one call — a faster alternative to DiscoverAgents + N x GetAgentTranscript. Host and cross-channel entries include turn_active, last_activity_ms, and a last_message_preview (tail transcript line). Host and cross-channel entries also carry work: the agent's goal, repo, branch, uncommitted files, recent edits, todo summary and current tool (see WhoIsWorkingOn to search them). LAN and WAN entries are liveness-only (remote_fetch_required: true) — reading their conversation content isn't supported yet. Read-only. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
+  }
+}"#;
+
+// Who else is working on the same thing
+// (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.2): srv's
+// `/api/v1/work-facts/who`, over every agent on this computer, all channels.
+pub(crate) const WHO_IS_WORKING_ON_TOOL: &str = r#"{
+  "name": "WhoIsWorkingOn",
+  "description": "Find out which other agents are working on the same file, folder, repository, branch or topic, so you don't duplicate or overwrite their work. Call it before starting work in a repository, and before opening a PR. It only informs: nothing is locked or blocked. Covers every agent on this computer, in every AgentMux channel; agents on other computers (LAN, cloud) are listed by name and status only. Each agent has its own clone, so files are compared by repository and path inside it: an absolute path in your clone or a repository-relative path both work, and a folder matches everything under it. With no arguments it lists who is working in your current repository. Returns JSON: agents (you excluded), strongest first, each {agent, channel, status, goal, repo, branch, git_checked_ms, matches: [{kind, detail, since_ms}]}, where kind is dirty (uncommitted changes in their clone), edited (they changed it recently), branch (same branch), repo (same repository), goal or todo (query matched their goal or checklist). Git facts (repo, branch, uncommitted files) are refreshed in the background, usually every 20 to 30 seconds; git_checked_ms says when each agent's were taken. If someone else is changing the same thing, message them with SendMessage before you change it.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":   { "type": "string", "description": "A file or folder: absolute in your clone, or relative to the repository root" },
+      "repo":   { "type": "string", "description": "owner/repo or a remote URL. Defaults to the repository you are in" },
+      "branch": { "type": "string", "description": "A branch name: who else is on it" },
+      "query":  { "type": "string", "description": "Words to look for in other agents' goals and todo lists, case-insensitive, all must appear (e.g. \"muxbus allowlist\")" }
+    }
   }
 }"#;
 
@@ -359,7 +376,7 @@ pub(crate) const OPEN_BROWSER_TOOL: &str = r#"{
       "split": { "type": "string", "enum": ["right", "left", "up", "down"], "description": "Where to place the pane relative to your own (default: right)" },
       "title": { "type": "string", "description": "Optional pane title" },
       "allowed_origins": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "description": "Optional: keep the pane on these sites. Each is example.com (https://example.com), *.example.com (it and its subdomains, https) or a full origin like http://localhost:3000. url must be on the list. A navigation elsewhere (a link, a redirect, a popup) doesn't happen: the user is asked in the pane, and Allow adds that site. Include every site a sign-in on the way needs." },
-      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes (Windows only for now). Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use it\"); any other profile is refused." }
+      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes. Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use it\"); any other profile is refused." }
     },
     "required": ["url"]
   }

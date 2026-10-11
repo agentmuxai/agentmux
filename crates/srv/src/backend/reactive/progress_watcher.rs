@@ -37,6 +37,7 @@ use tokio::time::interval;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::work_facts::overlap_notes::NewEdit;
 
 use super::get_global_handler;
 
@@ -93,8 +94,70 @@ fn is_todo_tool(name: &str) -> bool {
     TODO_TOOL_NAMES.contains(&name) || name.contains("Todo")
 }
 
+/// Tools whose input names a file the agent is changing. Their paths become
+/// the agent's recent files, which `backend::work_facts` compares across
+/// agents (docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.1).
+const FILE_EDIT_TOOL_NAMES: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// Most recent files kept per block, distinct paths, newest first.
+pub const MAX_RECENT_FILES: usize = 50;
+
+/// One file an agent changed, as its tool call named it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecentFile {
+    /// The path exactly as the tool input wrote it (usually absolute).
+    pub path: String,
+    pub tool: String,
+    /// When the call was made: the transcript line's own `timestamp`, else
+    /// the moment this watcher read it live. A line without a timestamp read
+    /// as backlog (see [`apply_lines`]) is not recorded at all, so a block
+    /// first seen mid-session never reads as "edited just now".
+    pub ts_ms: u64,
+}
+
+/// A transcript line's own time, when it carries one (`timestamp`, RFC 3339
+/// or Unix ms, as Claude's session lines do).
+fn line_timestamp(v: &serde_json::Value) -> Option<u64> {
+    let ts = v.get("timestamp")?;
+    if let Some(n) = ts.as_u64() {
+        return Some(n);
+    }
+    chrono::DateTime::parse_from_rfc3339(ts.as_str()?)
+        .ok()
+        .and_then(|dt| u64::try_from(dt.timestamp_millis()).ok())
+}
+
+/// What the watcher currently knows about one block, for readers outside
+/// the sweep loop.
+#[derive(Debug, Clone, Default)]
+pub struct WatchedWork {
+    pub progress: AgentProgress,
+    pub recent_files: Vec<RecentFile>,
+}
+
+/// The latest [`WatchedWork`] per block id, replaced after every sweep.
+fn snapshot() -> &'static parking_lot::RwLock<HashMap<String, WatchedWork>> {
+    static SNAPSHOT: std::sync::LazyLock<parking_lot::RwLock<HashMap<String, WatchedWork>>> =
+        std::sync::LazyLock::new(Default::default);
+    &SNAPSHOT
+}
+
+/// Read access to the watcher's state for one block: its checklist, current
+/// tool and recent files. `None` until the watcher has swept it once.
+pub fn watched_work(block_id: &str) -> Option<WatchedWork> {
+    snapshot().read().get(block_id).cloned()
+}
+
+/// Record that `path` was just changed by `tool`: moved to the front if it
+/// was already listed, and the list kept to [`MAX_RECENT_FILES`].
+fn note_recent_file(files: &mut Vec<RecentFile>, path: &str, tool: &str, ts_ms: u64) {
+    files.retain(|f| f.path != path);
+    files.insert(0, RecentFile { path: path.to_string(), tool: tool.to_string(), ts_ms });
+    files.truncate(MAX_RECENT_FILES);
+}
+
 /// One checklist entry as the Swarm renders it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TodoItem {
     pub text: String,
     /// `pending` | `in_progress` | `completed`. Passed through as the provider
@@ -144,6 +207,13 @@ struct BlockState {
     open: Vec<(String, String)>,
     /// See [`AgentProgress::todos_partial`].
     partial: bool,
+    /// Files named by edit tools, newest first (see [`note_recent_file`]).
+    recent_files: Vec<RecentFile>,
+    /// Edits read live since the sweep last took them, oldest first: what
+    /// the overlap notes check (`work_facts::overlap_notes`).
+    new_edits: Vec<RecentFile>,
+    /// This block's output has been looked at before.
+    seen: bool,
 }
 
 impl BlockState {
@@ -170,7 +240,13 @@ impl BlockState {
 /// Pure w.r.t. I/O so it can be unit-tested against real transcript shapes
 /// without a FileStore. Called once per tick with only the lines appended since
 /// the previous call — never the whole file.
-fn apply_lines(state: &mut BlockState, lines: &[&str]) {
+///
+/// A recent file takes its line's own timestamp. Without one it takes
+/// `live_now_ms`: the read time when these lines were just written, `None`
+/// when they are backlog read on first sight of the block (srv restarted, or
+/// the block predates the watcher), whose read time says nothing about when
+/// the edit happened. Such an edit is not recorded.
+fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>) {
     for line in lines {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -194,6 +270,22 @@ fn apply_lines(state: &mut BlockState, lines: &[&str]) {
                 if state.open.len() > MAX_OPEN_TOOLS {
                     state.open.remove(0);
                 }
+            }
+
+            if FILE_EDIT_TOOL_NAMES.contains(&name) {
+                if let Some(path) = frame_input(frame)
+                    .and_then(|i| first_string(i, &["file_path", "notebook_path"]))
+                {
+                    if let Some(ts) = line_timestamp(&v).or(live_now_ms) {
+                        note_recent_file(&mut state.recent_files, &path, name, ts);
+                        // Backlog is history, not something the agent is
+                        // doing now: only live edits are checked for overlap.
+                        if live_now_ms.is_some() && state.new_edits.len() < MAX_RECENT_FILES {
+                            state.new_edits.push(RecentFile { path, tool: name.to_string(), ts_ms: ts });
+                        }
+                    }
+                }
+                continue;
             }
 
             if !is_todo_tool(name) {
@@ -389,15 +481,24 @@ fn first_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
 /// of the work for this block.
 fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockState) -> bool {
     let size = match filestore.stat(block_id, "output") {
-        Ok(Some(wf)) if wf.size > 0 => wf.size,
-        _ => return false,
+        Ok(Some(wf)) => wf.size,
+        Ok(None) => 0,
+        Err(_) => return false,
     };
+    // Whatever is already there the first time this block is looked at is
+    // backlog; only what appears after that was written live (see
+    // `apply_lines` on stamping recent files).
+    let first_sight = !state.seen;
+    state.seen = true;
+    if size <= 0 {
+        return false;
+    }
 
     // The file shrank — a new session reusing the block, or a truncation. Our
     // accumulated state describes a transcript that no longer exists, so start
     // over rather than mixing two conversations' checklists.
     if size < state.next_offset {
-        *state = BlockState::default();
+        *state = BlockState { seen: true, ..BlockState::default() };
     }
 
     if state.next_offset == 0 && size > MAX_READ_BYTES {
@@ -437,7 +538,8 @@ fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockSt
     if lines.is_empty() {
         return false;
     }
-    apply_lines(state, &lines);
+    let live_now_ms = (!first_sight).then(agentmux_common::time::now_ms_u64);
+    apply_lines(state, &lines, live_now_ms);
     true
 }
 
@@ -463,8 +565,9 @@ fn sweep_blocking(
     mut states: HashMap<String, BlockState>,
     last_published: &HashMap<String, AgentProgress>,
     force_republish: bool,
-) -> (HashMap<String, BlockState>, Vec<SweepOutcome>) {
+) -> (HashMap<String, BlockState>, Vec<SweepOutcome>, Vec<NewEdit>) {
     let mut out = Vec::new();
+    let mut edits = Vec::new();
 
     for (agent_id, block_id) in agents {
         // Same gate as the summary loop: an idle or non-agent pane has no
@@ -476,6 +579,11 @@ fn sweep_blocking(
 
         let state = states.entry(block_id.clone()).or_default();
         let had_new = consume_new_output(filestore, &block_id, state);
+        edits.extend(state.new_edits.drain(..).map(|f| NewEdit {
+            agent_id: agent_id.clone(),
+            block_id: block_id.clone(),
+            path: f.path,
+        }));
         let progress = state.progress();
 
         // Nothing new AND nothing already published for this block — an agent
@@ -492,7 +600,7 @@ fn sweep_blocking(
         out.push(SweepOutcome { agent_id, block_id, progress });
     }
 
-    (states, out)
+    (states, out, edits)
 }
 
 /// Run the progress sweep loop. Never returns.
@@ -534,7 +642,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         // re-seeds from the tail (flagged partial), which is degraded but
         // recoverable, whereas returning here would end progress reporting for
         // the life of the process.
-        let (returned_states, outcomes) = match joined {
+        let (returned_states, outcomes, edits) = match joined {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(error = %e, "progress sweep task failed; state reset for next tick");
@@ -542,6 +650,14 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
             }
         };
         states = returned_states;
+        // Hands off and returns at once: the check runs on its own task.
+        crate::backend::work_facts::overlap_notes::on_new_edits(edits);
+        *snapshot().write() = states
+            .iter()
+            .map(|(block_id, s)| {
+                (block_id.clone(), WatchedWork { progress: s.progress(), recent_files: s.recent_files.clone() })
+            })
+            .collect();
 
         for SweepOutcome { agent_id, block_id, progress } in outcomes {
             last_published.insert(block_id.clone(), progress.clone());
@@ -600,8 +716,135 @@ mod tests {
 
     /// One tick's worth of lines.
     fn feed(state: &mut BlockState, lines: &[String]) {
+        feed_at(state, lines, 1_000);
+    }
+
+    fn feed_at(state: &mut BlockState, lines: &[String], now_ms: u64) {
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-        apply_lines(state, &refs);
+        apply_lines(state, &refs, Some(now_ms));
+    }
+
+    fn output_store(block: &str, text: &str) -> FileStore {
+        use crate::backend::storage::filestore::{FileMeta, FileOpts};
+        let fs = FileStore::open_in_memory().unwrap();
+        fs.make_file(block, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_data(block, "output", text.as_bytes()).unwrap();
+        fs
+    }
+
+    /// An srv restart (or any first sight of a block) reads the backlog: an
+    /// edit there without its own timestamp must not read as "edited now",
+    /// one with a timestamp keeps it, and what is written afterwards is live.
+    #[test]
+    fn a_first_sight_backlog_does_not_read_as_just_edited() {
+        let block = "b-backlog";
+        let stamped = r#"{"type":"assistant","timestamp":"2026-10-01T10:00:00Z","message":{"content":[{"type":"tool_use","id":"s1","name":"Edit","input":{"file_path":"/r/stamped.rs"}}]}}"#;
+        let backlog = format!("{}
+{}
+", edit_call("e1", "Edit", "file_path", "/r/old.rs"), stamped);
+        let fs = output_store(block, &backlog);
+        let mut st = BlockState::default();
+        assert!(consume_new_output(&fs, block, &mut st));
+        let got: Vec<(&str, u64)> = st.recent_files.iter().map(|f| (f.path.as_str(), f.ts_ms)).collect();
+        assert_eq!(got, vec![("/r/stamped.rs", 1_790_848_800_000)], "the untimed backlog edit is not recorded");
+        assert!(st.new_edits.is_empty(), "backlog edits are never checked for overlap");
+
+        let before = agentmux_common::time::now_ms_u64();
+        fs.append_data(block, "output", format!("{}
+", edit_call("e2", "Write", "file_path", "/r/new.rs")).as_bytes())
+            .unwrap();
+        assert!(consume_new_output(&fs, block, &mut st));
+        assert_eq!(st.recent_files[0].path, "/r/new.rs");
+        assert!(st.recent_files[0].ts_ms >= before, "a live edit takes the read time");
+        let live: Vec<&str> = st.new_edits.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(live, vec!["/r/new.rs"], "a live edit is handed to the overlap check");
+    }
+
+    /// A block first seen while still empty: everything after is live.
+    #[test]
+    fn a_block_first_seen_empty_records_its_first_edits() {
+        let block = "b-empty";
+        let fs = FileStore::open_in_memory().unwrap();
+        let mut st = BlockState::default();
+        assert!(!consume_new_output(&fs, block, &mut st));
+        let fs = output_store(block, &format!("{}
+", edit_call("e1", "Edit", "file_path", "/r/a.rs")));
+        assert!(consume_new_output(&fs, block, &mut st));
+        assert_eq!(st.recent_files.len(), 1);
+    }
+
+    fn edit_call(id: &str, tool: &str, key: &str, path: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"{tool}","input":{{"{key}":"{path}","old_string":"a","new_string":"b"}}}}]}}}}"#
+        )
+    }
+
+    /// A fake output stream with Edit / Write / MultiEdit / NotebookEdit
+    /// calls fills recent files, newest first, with the read time.
+    #[test]
+    fn edit_tools_fill_recent_files_newest_first() {
+        let mut st = BlockState::default();
+        feed_at(
+            &mut st,
+            &[
+                edit_call("e1", "Edit", "file_path", "C:/r/a.rs"),
+                tool_result("e1"),
+                edit_call("e2", "Write", "file_path", "C:/r/b.rs"),
+                edit_call("e3", "MultiEdit", "file_path", "C:/r/c.rs"),
+            ],
+            10,
+        );
+        feed_at(&mut st, &[edit_call("e4", "NotebookEdit", "notebook_path", "C:/r/n.ipynb")], 20);
+        let got: Vec<(&str, &str, u64)> =
+            st.recent_files.iter().map(|f| (f.path.as_str(), f.tool.as_str(), f.ts_ms)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("C:/r/n.ipynb", "NotebookEdit", 20),
+                ("C:/r/c.rs", "MultiEdit", 10),
+                ("C:/r/b.rs", "Write", 10),
+                ("C:/r/a.rs", "Edit", 10),
+            ]
+        );
+        // The checklist and current tool are unchanged by the new bookkeeping.
+        assert!(st.progress().todos.is_empty());
+        assert_eq!(st.progress().current_tool.as_deref(), Some("Write"));
+    }
+
+    #[test]
+    fn editing_a_file_again_moves_it_to_the_front_without_duplicating_it() {
+        let mut st = BlockState::default();
+        feed_at(&mut st, &[edit_call("e1", "Edit", "file_path", "/r/a.rs")], 1);
+        feed_at(&mut st, &[edit_call("e2", "Edit", "file_path", "/r/b.rs")], 2);
+        feed_at(&mut st, &[edit_call("e3", "Write", "file_path", "/r/a.rs")], 3);
+        let got: Vec<(&str, u64)> = st.recent_files.iter().map(|f| (f.path.as_str(), f.ts_ms)).collect();
+        assert_eq!(got, vec![("/r/a.rs", 3), ("/r/b.rs", 2)]);
+        assert_eq!(st.recent_files[0].tool, "Write");
+    }
+
+    #[test]
+    fn recent_files_stay_bounded() {
+        let mut st = BlockState::default();
+        let calls: Vec<String> = (0..MAX_RECENT_FILES + 7)
+            .map(|i| edit_call(&format!("e{i}"), "Edit", "file_path", &format!("/r/f{i}.rs")))
+            .collect();
+        feed(&mut st, &calls);
+        assert_eq!(st.recent_files.len(), MAX_RECENT_FILES);
+        assert_eq!(st.recent_files[0].path, format!("/r/f{}.rs", MAX_RECENT_FILES + 6));
+    }
+
+    #[test]
+    fn reads_and_other_tools_add_no_recent_files() {
+        let mut st = BlockState::default();
+        feed(
+            &mut st,
+            &[
+                edit_call("r1", "Read", "file_path", "/r/a.rs"),
+                edit_call("g1", "Grep", "file_path", "/r/b.rs"),
+                edit_call("w1", "Edit", "old_string", "no path"),
+            ],
+        );
+        assert!(st.recent_files.is_empty());
     }
 
     fn run(lines: &[String]) -> AgentProgress {

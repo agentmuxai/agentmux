@@ -58,8 +58,39 @@ wrap_task! {
             //     BrowserView. See
             //     `docs/specs/embedded-browser-panes-linux-macos-2026-05-03.md`.
 
+            // The jar this tab browses in (its `browser:identity`), shared by
+            // both paths (`identity::pane_jar_step`). One that can't be made
+            // fails the pane rather than falling back to the shared jar, which
+            // would put the tab in your Personal session.
+            use crate::browser_pane::identity::{self, PaneJarStep};
+            let cache_root = self.state.cef_cache_dir.lock().clone();
+            // A retry, after waiting for its profile: the tab may have closed
+            // or been re-created meanwhile, and a browser made now would be
+            // one nothing tracks.
+            let still_wanted = || {
+                self.state.host_state.lock().browser_panes.get(&self.block_id).is_some_and(|e| {
+                    e.label == self.label && e.lifecycle == crate::state::BrowserPaneLifecycle::Live
+                })
+            };
+            let retry_later = || {
+                let mut again = CreateBrowserPaneTask::new(
+                    self.state.clone(),
+                    self.block_id.clone(),
+                    self.label.clone(),
+                    self.url.clone(),
+                    self.rect.clone(),
+                    self.window_label.clone(),
+                );
+                post_delayed_task(ThreadId::UI, Some(&mut again), 100);
+            };
+
             #[cfg(not(target_os = "windows"))]
             {
+                let jar = match identity::pane_jar_step(&self.block_id, &self.label, cache_root.as_deref(), still_wanted) {
+                    PaneJarStep::Create(jar) => jar,
+                    PaneJarStep::Retry => return retry_later(),
+                    PaneJarStep::Abort => return,
+                };
                 crate::browser_pane::creation_views::create_browser_pane_view(
                     self.state.clone(),
                     self.block_id.clone(),
@@ -67,6 +98,7 @@ wrap_task! {
                     self.url.clone(),
                     self.rect.clone(),
                     self.window_label.clone(),
+                    jar,
                 );
                 return;
             }
@@ -140,6 +172,19 @@ wrap_task! {
                     );
                 };
 
+                let mut request_context =
+                    match identity::pane_jar_step(&self.block_id, &self.label, cache_root.as_deref(), still_wanted) {
+                        PaneJarStep::Create(jar) => jar,
+                        PaneJarStep::Retry => {
+                            dequeue();
+                            return retry_later();
+                        }
+                        PaneJarStep::Abort => {
+                            dequeue();
+                            return;
+                        }
+                    };
+
                 // App-owned wrapper HWND, WS_CHILD of the target window at the
                 // pane's rect — CEF's browser embeds INTO this instead of
                 // directly into the target window. See browser_pane::wrapper's
@@ -149,55 +194,6 @@ wrap_task! {
                 // without risking the close_browser cascade into main.
                 // SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md +
                 // retro-browser-pane-renderer-leak-2026-07-07.md.
-                // The jar this tab browses in (its `browser:identity`). One
-                // that can't be made fails the pane rather than falling back
-                // to the shared jar, which would put an Incognito tab in your
-                // Personal session.
-                let cache_root = self.state.cef_cache_dir.lock().clone();
-                use crate::browser_pane::identity::{self, PaneJar};
-                // A retry, after waiting for its profile: the tab may have
-                // closed or been re-created meanwhile, and a browser made now
-                // would be one nothing tracks.
-                let still_wanted = || {
-                    self.state.host_state.lock().browser_panes.get(&self.block_id).is_some_and(|e| {
-                        e.label == self.label && e.lifecycle == crate::state::BrowserPaneLifecycle::Live
-                    })
-                };
-                if identity::is_waiting(&self.label) && !still_wanted() {
-                    tracing::info!(block_id = %self.block_id, "[browser-identity] pane closed while its profile opened; not creating it");
-                    identity::done_waiting(&self.label);
-                    dequeue();
-                    return;
-                }
-                let mut request_context = match identity::context_for_block(&self.block_id, cache_root.as_deref()) {
-                    Ok(PaneJar::Shared) => None,
-                    Ok(PaneJar::Ready(ctx)) => Some(ctx),
-                    Ok(PaneJar::Pending) => {
-                        // Its profile is still being opened: a browser created
-                        // in it now would never finish. Try again shortly.
-                        dequeue();
-                        if identity::wait_once_more(&self.label) {
-                            let mut again = CreateBrowserPaneTask::new(
-                                self.state.clone(),
-                                self.block_id.clone(),
-                                self.label.clone(),
-                                self.url.clone(),
-                                self.rect.clone(),
-                                self.window_label.clone(),
-                            );
-                            post_delayed_task(ThreadId::UI, Some(&mut again), 100);
-                        } else {
-                            tracing::warn!(block_id = %self.block_id, "[browser-identity] pane not created: its profile never became ready");
-                        }
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!(block_id = %self.block_id, error = %e, "[browser-identity] pane not created");
-                        dequeue();
-                        return;
-                    }
-                };
-                identity::done_waiting(&self.label);
                 let wrapper_hwnd = match crate::browser_pane::wrapper::create_wrapper(
                     &self.label,
                     parent_hwnd_raw,

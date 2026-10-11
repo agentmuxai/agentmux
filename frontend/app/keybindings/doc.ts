@@ -5,10 +5,30 @@
 // page), generated from the shortcut table so it can't drift from the keys.
 
 import { helpSections } from "./help";
+import { formatKey } from "./keys";
+import { gestureLabels, TIPS, type TipRow } from "./tips";
+
+/** A tip's gesture for one platform, or "—" where it doesn't apply. */
+function tipGesture(tip: TipRow, platform: "mac" | "other", applies: boolean): string {
+    if (!applies) return "—";
+    return gestureLabels(tip, platform)
+        .map((alt) => (alt[0] === "hold" ? `hold ${alt.slice(1).join(" + ")}` : alt.join(" + ")))
+        .join(" or ");
+}
+
+/** A tip's text, with each `{key:…}` shown as "⌘Z / Ctrl+Z" where the platforms differ. */
+function tipText(tip: TipRow): string {
+    return tip.label.replace(/\{key:([^}]+)\}/g, (_m, spec: string) => {
+        const mac = formatKey(spec, "mac");
+        const other = formatKey(spec, "other");
+        return mac === other ? mac : `${mac} / ${other}`;
+    });
+}
 
 export function keybindingsDoc(): string {
     const mac = helpSections("mac");
     const other = helpSections("other");
+    const linux = helpSections("linux");
     const out: string[] = [
         "# Keyboard shortcuts",
         "",
@@ -23,11 +43,31 @@ export function keybindingsDoc(): string {
     for (const category of categories) {
         const m = mac.find((s) => s.category === category)?.entries ?? [];
         const o = other.find((s) => s.category === category)?.entries ?? [];
+        const l = linux.find((s) => s.category === category)?.entries ?? [];
         const labels = [...new Set([...m, ...o].map((e) => e.label))];
         out.push(`## ${category}`, "", "| Action | macOS | Windows / Linux |", "|---|---|---|");
         for (const label of labels) {
             const keys = (list: typeof m) => list.find((e) => e.label === label)?.keys.join(", ") || "—";
-            out.push(`| ${label} | ${keys(m)} | ${keys(o)} |`);
+            // Linux's own keys, where its desktop takes the shared ones.
+            const both = keys(o) === keys(l) ? keys(o) : `Windows: ${keys(o)}; Linux: ${keys(l)}`;
+            out.push(`| ${label} | ${keys(m)} | ${both} |`);
+        }
+        out.push("");
+    }
+    out.push(
+        "## Mouse and gestures",
+        "",
+        "Gestures that aren't plain keys: modifier + mouse, double- and middle-click, drag and drop, and keys a pane handles itself. The Help pane shows the same list, under Mouse and gestures. Generated from frontend/app/keybindings/tips.ts, where each row is tied to the code it describes.",
+        ""
+    );
+    const areas = [...new Set(TIPS.map((t) => t.area))];
+    for (const area of areas) {
+        out.push(`### ${area}`, "", "| What it does | Where | macOS | Windows / Linux |", "|---|---|---|---|");
+        for (const tip of TIPS.filter((t) => t.area === area)) {
+            const os = tip.os ?? ["win32", "darwin", "linux"];
+            const pc = os.includes("win32") && os.includes("linux") ? "" : os.includes("win32") ? " (Windows only)" : os.includes("linux") ? " (Linux only)" : "";
+            const pcApplies = os.includes("win32") || os.includes("linux");
+            out.push(`| ${tipText(tip)} | ${tip.where ?? ""} | ${tipGesture(tip, "mac", os.includes("darwin"))} | ${tipGesture(tip, "other", pcApplies)}${pcApplies ? pc : ""} |`);
         }
         out.push("");
     }

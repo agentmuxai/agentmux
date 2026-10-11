@@ -4,6 +4,8 @@
 // Editor module barrel — its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
+import { editorDocTabHost } from "./editor-doc-tabs";
 import { EditorViewModel } from "./editor-model";
 import { EditorViewComponent } from "./editor-view";
 import { editorSplitBlockDef } from "./editor-split";
@@ -22,13 +24,18 @@ export const editorPaneTab: PaneTabManifest = {
     capabilities: { lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true, splitBlockDef: editorSplitBlockDef },
     create: (ctx) => {
         const model = new EditorViewModel(ctx);
+        // Its tabs can move to and from other Editor panes (editor-doc-tabs.ts).
+        const unregisterHost = registerDocTabHost(ctx.blockId, editorDocTabHost(model));
         return {
             component: () => <EditorViewComponent model={model} />,
             liveTitle: () => ({ text: model.viewName() }),
             headerText: () => model.viewText(),
             contextMenu: () => model.getBodyContextMenuItems(),
             focus: () => model.giveFocus(),
-            dispose: () => model.dispose(),
+            dispose: () => {
+                unregisterHost();
+                model.dispose();
+            },
         };
     },
 };

@@ -8,7 +8,6 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { Button, Switch, TextInput } from "@/app/element/ui";
-import { getPlatform } from "@/util/platformutil";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import {
     browserProfiles,
@@ -27,7 +26,7 @@ export const BROWSER_SETTINGS = {
         id: "browser.profiles",
         label: "Browser profiles",
         description:
-            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; it can always use an Incognito tab.",
+            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; on Windows it can also use an Incognito tab.",
         section: "browser",
         keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work", "agent", "agents"],
     },
@@ -118,7 +117,6 @@ export function BrowserSection(): JSX.Element {
     const [newName, setNewName] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
     onMount(() => void loadBrowserProfiles());
-    const windowsOnly = getPlatform() !== "win32";
 
     const add = async () => {
         const name = newName().trim();
@@ -137,9 +135,6 @@ export function BrowserSection(): JSX.Element {
             <SectionHeader label={BROWSER_SETTINGS.profiles.label} />
             <div id={`setting-${BROWSER_SETTINGS.profiles.id}`} class="setting-row">
                 <div class="setting-devices-description">{BROWSER_SETTINGS.profiles.description}</div>
-                <Show when={windowsOnly}>
-                    <div class="setting-devices-empty">Browser profiles are Windows only for now.</div>
-                </Show>
                 <div class="browser-profile-list">
                     <div class="browser-profile-row">
                         <span class="browser-profile-badge browser-profile-badge-personal" aria-hidden="true">
@@ -149,24 +144,22 @@ export function BrowserSection(): JSX.Element {
                     </div>
                     <For each={browserProfiles()}>{(p) => <ProfileRow profile={p} />}</For>
                 </div>
-                <Show when={!windowsOnly}>
-                    <div class="browser-profile-add">
-                        <TextInput
-                            detached
-                            aria-label="New profile name"
-                            placeholder="New profile name"
-                            value={newName()}
-                            maxLength={40}
-                            onInput={(e) => setNewName(e.currentTarget.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") void add();
-                            }}
-                        />
-                        <Button icon="plus" disabled={!newName().trim()} onClick={() => void add()}>
-                            Add profile
-                        </Button>
-                    </div>
-                </Show>
+                <div class="browser-profile-add">
+                    <TextInput
+                        detached
+                        aria-label="New profile name"
+                        placeholder="New profile name"
+                        value={newName()}
+                        maxLength={40}
+                        onInput={(e) => setNewName(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") void add();
+                        }}
+                    />
+                    <Button icon="plus" disabled={!newName().trim()} onClick={() => void add()}>
+                        Add profile
+                    </Button>
+                </div>
                 <Show when={error()}>
                     <div class="settings-config-error" role="alert">
                         {error()}

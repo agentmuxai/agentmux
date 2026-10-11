@@ -14,7 +14,7 @@
  * hands the page when it loads. No dependencies.
  */
 
-export const SDK_VERSION = "1.0.0";
+export const SDK_VERSION = "1.2.0";
 export const PROTOCOL = 1;
 
 const ERROR_NAMES = {
@@ -104,6 +104,10 @@ class Client {
         this.nextId = 1;
         this.pending = new Map();
         this.listeners = new Map();
+        // `command` events that came before anyone listened: a pane opened
+        // for a command gets it right after the handshake, maybe before the
+        // widget's `on("command")`. Delivered to the first listener.
+        this.unheard = [];
         this.closed = false;
         port.onmessage = (ev) => this.receive(ev.data);
         port.start?.();
@@ -120,6 +124,10 @@ class Client {
         }
         if (msg.method && msg.id == null) {
             if (msg.method === "dispose") this.closed = true;
+            if (msg.method === "command" && !this.listeners.get("command")?.size) {
+                if (this.unheard.length < 20) this.unheard.push(msg.params ?? {});
+                return;
+            }
             for (const cb of this.listeners.get(msg.method) ?? []) {
                 try {
                     cb(msg.params ?? {});
@@ -142,6 +150,10 @@ class Client {
     on(event, cb) {
         if (!this.listeners.has(event)) this.listeners.set(event, new Set());
         this.listeners.get(event).add(cb);
+        if (event === "command" && this.unheard.length) {
+            const kept = this.unheard.splice(0);
+            queueMicrotask(() => kept.forEach((params) => this.receive({ jsonrpc: "2.0", method: "command", params })));
+        }
         return () => this.listeners.get(event)?.delete(cb);
     }
 }
@@ -179,7 +191,7 @@ export async function connect(options = {}) {
     return {
         /** What `hello` returned: widget id/version/pane, AgentMux version, granted permissions, theme, meta, visibility, focused. */
         info,
-        /** Subscribe to an event (`visibility`, `focus`, `theme`, `meta`, `action`, `dispose`); returns an unsubscribe. */
+        /** Subscribe to an event (`visibility`, `focus`, `theme`, `meta`, `action`, `command`, `storage`, `dispose`); returns an unsubscribe. */
         on: (event, cb) => c.on(event, cb),
         /** Any method, including ones this SDK has no wrapper for. */
         call,
@@ -193,6 +205,8 @@ export async function connect(options = {}) {
             setContextMenu: (items) => call("ui.setContextMenu", { items }),
             toast: (text, kind) => call("ui.toast", kind ? { text, kind } : { text }),
             openUrl: (url) => call("ui.openUrl", { url }),
+            /** One of the widget's status bar items (`contributes.statusItems`): `{ text, icon, tooltip, tone, hidden }`; left-out fields show the manifest's. */
+            setStatusItem: (id, look = {}) => call("ui.setStatusItem", { id, ...look }),
         },
         theme: {
             get: () => call("theme.get"),

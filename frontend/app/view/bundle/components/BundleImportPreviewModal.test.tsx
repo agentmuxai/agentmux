@@ -38,6 +38,7 @@ function makePreview(): BundleImportPreviewResponse {
         // hand-written response type, so this fixture could omit it. Generating
         // the type from Rust surfaced that.
         project_instructions: [],
+        widgets: [],
         name: "test-bundle",
         description: "",
         instructions_preview: "",
@@ -112,5 +113,41 @@ describe("BundleImportPreviewModalPanel — MCP servers", () => {
         expect(screen.getByText("Not imported: MCP servers")).toBeInTheDocument();
         const row = screen.getByText("github").closest(".bundle-import-checkbox-row")!;
         expect(row.querySelector("input")).toBeNull();
+    });
+});
+
+describe("BundleImportPreviewModalPanel — widgets", () => {
+    const widget = (over: Record<string, unknown> = {}) => ({
+        id: "acme.board",
+        name: "Board",
+        version: "1.2.0",
+        description: null,
+        author: "Acme",
+        kind: "sandboxed" as const,
+        permissions: ["storage"],
+        hash: "h",
+        signature: { state: "signed_new" as const, publisher: "acme", fingerprint: "K7Q2-MZ4D-PX3A-9TWE", pinned: null },
+        installed_version: null,
+        installed_state: null,
+        same_as_installed: false,
+        error: null,
+        ...over,
+    });
+
+    it("offers each widget with who signed it and what it may do, and passes the chosen ones on", async () => {
+        vi.mocked(RpcApi.SkillCatalogListCommand).mockResolvedValue([]);
+        const preview = {
+            ...makePreview(),
+            skills: [],
+            widgets: [widget(), widget({ id: "acme.tool", name: "Tool", error: "bundles can carry sandboxed widgets only" })],
+        };
+        const onNext = vi.fn();
+        render(() => <BundleImportPreviewModalPanel preview={preview} onNext={onNext} onCancel={() => {}} />);
+        expect(screen.getByText("Each widget asks for your approval before it runs.")).toBeInTheDocument();
+        expect(screen.getByText(/Signed by acme · K7Q2-MZ4D-PX3A-9TWE/)).toBeInTheDocument();
+        expect(screen.getByText("It can: Keep its own data on this computer")).toBeInTheDocument();
+        expect(screen.getByText(/Can't be imported: bundles can carry sandboxed widgets only/)).toBeInTheDocument();
+        await userEvent.click(screen.getByText("Next"));
+        expect(onNext.mock.calls[0][0].includeWidgets).toEqual(["acme.board"]);
     });
 });
