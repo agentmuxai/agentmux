@@ -1,5 +1,88 @@
 # AgentMux Version History
 
+## 0.59.19 — 2026-10-10
+
+- The agent pane's Working row no longer types the same line out again every second: each new line, including a turn's first, types out once and stays until something new replaces it. The pulsing dot beside it is now a small ASCII spinner in the pane's color. It also no longer shows a false "Rate limited — retrying" whenever Claude Code reports normal usage. The session goal is no longer added, faded, after the current step; it shows on its own when nothing more specific is happening.
+- Editor and Media file tabs can be dragged to reorder them.
+- A Media pane's file tab can be dragged onto another Media pane to move it there.
+- A popup pane opened from a browser pane an agent limited to some sites is limited from its very first page load, so an immediate redirect can't slip past the limit.
+- An Editor's file tab can be dragged onto another Editor to move it there, with its unsaved changes and undo history.
+- Dev: the real-browser layout tests run in Chrome's headless shell, so on macOS they no longer add Google Chrome icons to the Dock's recent apps.
+- fix(panes): a local pane's header no longer shows a "Local" connection chip; remote panes keep theirs
+- In a browser, a provider login's page opens in a window opened at your click, so the browser doesn't block it
+- Agents' background Bash commands run in the background again, keep the timeout they ask for, and show their description (not AgentMux's wrapper) when they finish
+- CI: a non-blocking macOS compile check on PRs that change Rust
+- Widgets are now packages you install and approve: Settings → Widgets lists them, a widget runs only after you approve it there, and it asks again whenever its files change.
+- Browser panes get a Home button and a Profile button. The Profile menu opens a new Incognito tab in the same pane: a tab with its own cookie jar, separate from your normal browsing and from every other Incognito tab (Windows for now).
+- Cross-instance agent messages are verified by the sending agent's own ID, so an agent that moved to another AgentMux instance no longer arrives as unverified
+- Media viewer: scroll to zoom an image about the cursor, drag to pan, double-click to switch between fit and actual size, and + - 0 1 or the arrow keys from the keyboard.
+- Agent messages between machines on the LAN now carry the sending agent's ID, recorded in the delivery audit log as claimed by that LAN path
+- An agent's messages and UI-automation requests on its own machine are verified by its agent token, so an outdated signing key no longer marks them unverified
+- Widgets can now run sandboxed: a package of plain HTML and JavaScript runs in its own isolated frame and talks to AgentMux through the new widget SDK (@agentmux/widget-sdk), with starter samples for plain JavaScript and React + Vite.
+- Browser panes can browse as named profiles: create one from the Profile menu, give it a name and colour, and its tabs keep their own sign-ins on disk, apart from Personal and Incognito. Manage profiles in Settings → Browser.
+- Sandboxed widgets can now keep their own data, reach the web origins they declared, open and save files you pick, copy to the clipboard, and see and message your agents, each only with the permission you approved. New samples: notes, a GitHub PR dashboard and ask-an-agent.
+- Agents can build a widget for you: they install it with the new WidgetInstall tool, you see what it asks for and approve it (an agent can't), and they open it with OpenWidget. WidgetList shows what's installed.
+- Agents can open a browser pane Incognito, or in a browser profile you've let agents use (Settings → Browser, "Agents may use it"), with OpenBrowser's new profile option.
+- Media panes show their tab bar with one file open too, as the Editor does, so the file's tab and the "+" for a new tab are always there.
+- Comments: fix or reword the 162 references to files that no longer exist; the checker stops flagging property accesses and test fixtures
+- feat(browser): named browser profiles work on Linux and macOS (Incognito tabs stay Windows only for now)
+- An empty Media document tab is called "New Tab", with no icon and no gap where one would be; tabs showing a file keep their icon, and the pane itself is still titled "Media".
+- Agents' Bash commands now stream through Claude Code's shell prefix instead of being rewritten, so your own deny and ask rules for Bash apply inside AgentMux, and the CLI sees the real command
+- Add remote is one field, user@host:port (the port optional: your ssh config's, else 22); a name, identity file and jump host are under Advanced. A remote with just a destination is saved in AgentMux's settings without touching ~/.ssh/config.
+- Docs: plan to verify every Help pane shortcut on Windows, macOS and Linux and drive them from the agent App API
+- Tower's Agents view: a rail of the agents running here, by color, with what each costs, and the selected agent's processes as a tree (rustc.exe ×6 under cargo under the agent's shell)
+- Splitting an editor or media pane now opens an empty pane of the same kind, keeping the editor's settings, instead of a second pane with the same documents open.
+- feat(app-api): ListShortcuts, RunCommand and PressKeys run the Help pane's shortcuts for agents, in their own window
+- The widget SDK is on npm as @agentmuxai/widget-sdk: install it for its types, or to bundle a copy into a widget.
+- Windows: AgentMux Server, the MCP bridge and the shell wrapper show the AgentMux icon and a readable name in Task Manager, and the main process names its build; macOS: the CEF helper apps carry the AgentMux icon.
+- Linux: AgentMux Server shows as agentmux-srv in ps, top and system monitors instead of a truncated name that changed every release; its document-parsing child shows as agentmux-srvdoc.
+- Tower: AgentMux's own processes say what they are (Main process, Renderer, GPU, Network service, Server, Launcher), instead of the same executable name repeated.
+- fix(files,shortcuts): the Files pane no longer breaks with a stale-read error when a listing drops a selected row; PressKeys moves the caret to its target pane; ⌘I refocuses from a terminal; agents can't trash on macOS (no undo there yet); and the verify script picks the right window and keeps Files rows in their folder
+- Incognito tabs now work on Linux and macOS, and a Personal tab in a second window keeps your real sign-ins there instead of a temporary session. Both come from a fix in AgentMux's CEF build.
+- Tower: each renderer says what it serves, such as "Renderer · window Main", "Renderer · browser pane github.com" or "Renderer · pool window (idle)".
+- In a browser pane, Ctrl+Shift+N (Cmd+Shift+N on macOS) now opens an Incognito tab, as its menu says, instead of a new window.
+- fix(browser): a sign-in popup that closes itself no longer freezes AgentMux on Linux and macOS
+- When an agent needs you, its call to action now stands out: a fluorescent attention colour in every theme, a filled main button that glows gently, and a heavier banner or panel, for browser hand-offs and approvals, questions, tool permissions, SSH consent, memory adoption, saved-credential approval and widget installs.
+- fix(layout): minimized panes keep a header-sized chip under chrome zoom instead of showing their content or clipping the header
+- docs(plan): a plan to iron out the kinks found while verifying the shortcuts on macOS, Linux and Windows
+- When an agent waits for you, you now hear it for every kind of request, not just questions: tool permissions, browser hand-offs and approvals, SSH consent and widget installs play the waiting tone, flash the pane's tab in time with it, and show the OS notification. Switching tabs no longer silences a question that's still waiting.
+- Tower's Processes view groups every process under the agent that started it, in the agent's color, with Terminals, AgentMux and the rest (by app) after; a search shows each match under its owner
+- fix(app-api): RunCommand/PressKeys targets can name a pane tab (it becomes the visible one), and PressKeys waits for the caret before refusing
+- fix(files): on macOS, undo puts an item back from the Trash; agents can move files to the Trash there again
+- Dev: the shortcut verification script's Files rows that change files on disk now run only in a temporary folder it makes itself and removes afterwards, and are refused if the Files pane has left it. Editor rows take a plain-text editor (--editor-text) for save, Save As and find. DevTools calls time out instead of hanging.
+- Tower: going from an agent in the Agents view to Processes shows only that agent's processes, with Show all to see everything
+- fix(app-api): A4 — the editor's Save keys count as resolved only when they apply, and PressKeys reports a dialog that closed itself
+- docs(spec): a spec for showing the Help pane's hidden gestures (modifier + mouse, double- and middle-click, drag and drop, pane-local keys)
+- Tower: a process an agent ran that exited in the last minute stays in its tree, dimmed, with the CPU time it used; More columns adds CPU time and peak memory
+- fix(windows): A5 — a pre-warmed pool window says so in its title and a data-pool-window attribute until it's claimed, so DevTools clients can tell it from a real window
+- fix(browser): on Linux, opening a menu over a browser pane no longer shows a hidden tab's page at the window's corner
+- Tower: the process an agent's Bash call runs says which call it is, as the agent described it (⟵ Run the srv tests), in the Agents tree and the Processes list
+- fix(terminal): a new local terminal without a folder starts in your home folder, not in the folder AgentMux was started from
+- dev: a dev build logs why Vite fully reloads the page
+- Dev: scripts/verify-shortcuts-l3-linux.mjs presses each Linux shortcut key through ydotool and reports whether it reaches AgentMux or the desktop takes it first, skipping the keys GNOME binds and refusing to run unless the AgentMux window has keyboard focus.
+- A tab in a pane you haven't selected drags on the first press (it took two), and when you close the document tab in front, the tab that takes its place gives a short bounce, so the change shows even among tabs of the same name.
+- feat(app-api): A3 — agents can close a pane with RunCommand (through ClosePane's 15-second undo) and paste into a terminal (guarded against running a line)
+- perf(markdown): a streaming message's open block (code fence, paragraph, list item, table cell) updates its text in place instead of being rebuilt on every commit
+- chore(deps): drop unused Rust deps (cef: tokio-tungstenite, futures-util; launcher, mcp: dirs) and gate unused deps in CI with cargo machete
+- Agents can ask who else is working on a file, repo, branch or topic (WhoIsWorkingOn), and see each other's goal, branch and uncommitted files.
+- feat(help): the Help pane shows 34 hidden gestures (modifier + mouse, double- and middle-click, drag and drop, pane-local keys), each tied to the code it describes
+- Waiting-for-you follow-ups: a window opened while an agent is already waiting on you hears it; a tool permission now shows as "Waiting for you" like a question; browser hand-offs can be left out of the tone (Settings → Sounds); and switching tabs no longer marks a waiting question as answered.
+- perf(frontend): ship only the two Shiki themes the app uses instead of all ~65 (-1.2 MiB JS)
+- feat(app-api): A2 — RunCommand and PressKeys reach a pane in any tab of the agent's window, switching to that tab
+- fix(layout): A7 — a new tab doesn't give the agent picker keyboard focus; the first other pane gets it
+- fix(files): the Files pane no longer swallows global shortcuts like ⌘/, Ctrl+Shift+↑/↓ or Shift+⌘PageUp while it has focus
+- fix(macos): pane zoom with scroll, Swarm's zoom keys and the agent pane's search use ⌘ on macOS like the rest of the app; Help shows those tips
+- Widgets can add command palette entries and status bar items: declare them in widget.json, and a running pane updates its items with ui.setStatusItem and hears its commands as the command event. The status bar is now a registry, and the PR dashboard sample adds both.
+- docs(plan): kinks plan status — A2, A3, A7 and the macOS L3 pass done
+- docs(plan): Linux real-key results — every Linux key reaches AgentMux except pane:swap
+- Linux: swapping a pane with its neighbour is now Ctrl+Shift+S, then Shift+Arrow, because GNOME uses Ctrl+Alt+Shift+Arrow to move the window to another workspace. Windows and macOS keep their keys; the Help pane and the shortcuts page show the Linux key.
+- Shortcuts: a chord's second key can have a modifier. Pressing Shift (or Ctrl, Alt) on its own no longer cancels a waiting chord, and the second key goes to the chord before a pane such as the Files list can use it.
+- Widgets can be signed: a widget.sig makes the install prompt say who published a widget, and warns when a later widget of the same publisher is signed by another key. The SDK's agentmux-widget command signs and checks packages; Settings → Widgets lists the publisher keys AgentMux remembers.
+- fix(help): the Files Space toggle tip shows only on Windows and Linux; on macOS Spotlight and the input-source switch take that key
+- perf(fonts): Hack Nerd Mono's 10,071 icon glyphs ship once in a shared file instead of in all four styles (-2.9 MB)
+- fix(cef-build): cef-verify-patches.sh no longer false-fails on Linux, and its no-op check works there
+- chore(deps): declare npm packages the frontend imports but relied on hoisting for, drop unused parse-srcset, and gate npm deps in CI with knip
+
 ## 0.59.18 — 2026-10-09
 
 - Tool previews render through one pipeline: tabs show 2 columns a level in code wherever the line number ends, code and command output scroll instead of wrapping mid-word, diff highlights span the whole line, streamed output looks the same as the finished result, and leftover terminal escape codes no longer show.
