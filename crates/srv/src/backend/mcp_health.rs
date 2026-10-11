@@ -224,6 +224,10 @@ struct Pane {
     verifying: bool,
     /// The agent asked (`heal_now`): one more safe-profile restart is allowed.
     asked: bool,
+    /// The process that asked for the safe-profile restart. A restart can
+    /// wait for the turn to end, and until then that process may still
+    /// report the server failed: only another process's failure gives up.
+    restart_from: Option<String>,
 }
 
 impl Pane {
@@ -239,6 +243,7 @@ impl Pane {
             last_error: None,
             verifying: false,
             asked: false,
+            restart_from: None,
         }
     }
 
@@ -289,6 +294,10 @@ impl Pane {
         self.reconnects = 0;
         self.pending_checks = 0;
         self.last_error = None;
+        // A later failure starts over: the extra restart `heal_now` allowed
+        // was for this episode.
+        self.asked = false;
+        self.restart_from = None;
         Decision { action: Action::None, notice }
     }
 }
@@ -308,12 +317,14 @@ impl Heal {
     fn pane(&mut self, block_id: &str, process: &str, now: u64) -> &mut Pane {
         let pane = self.panes.entry(block_id.to_string()).or_insert_with(|| Pane::new(process, now));
         if pane.process != process {
-            let carry = (pane.phase == Phase::Restarting).then(|| (pane.episode.clone(), pane.last_error.clone()));
+            let carry = (pane.phase == Phase::Restarting)
+                .then(|| (pane.episode.clone(), pane.last_error.clone(), pane.restart_from.clone()));
             *pane = Pane::new(process, now);
-            if let Some((episode, last_error)) = carry {
+            if let Some((episode, last_error, restart_from)) = carry {
                 pane.phase = Phase::Restarting;
                 pane.episode = episode;
                 pane.last_error = last_error;
+                pane.restart_from = restart_from;
             }
         }
         pane
@@ -376,6 +387,8 @@ impl Heal {
 
     fn failed(pane: &mut Pane, block_id: &str, auto: bool, safe: bool, now: u64) -> Decision {
         match pane.phase {
+            // Still the process waiting to be restarted.
+            Phase::Restarting if pane.restart_from.as_deref() == Some(pane.process.as_str()) => Decision::none(),
             // The restart's own process failed too.
             Phase::Restarting => pane.give_up(block_id, now, safe),
             Phase::GaveUp => Decision::none(),
@@ -424,6 +437,7 @@ impl Heal {
             return pane.give_up(block_id, now, safe);
         }
         pane.phase = Phase::Restarting;
+        pane.restart_from = Some(pane.process.clone());
         let notice = pane.notice("restarting", 0, true);
         self.safe.insert(block_id.to_string(), now);
         Decision { action: Action::SafeProfileRestart, notice }
@@ -687,6 +701,38 @@ mod tests {
         h.on_status("b", "p3", Status::Failed, None, true, 10);
         h.on_reconnect("b", "p3", Err("e".into()), 11);
         assert_eq!(h.on_reconnect("b", "p3", Err("e".into()), 12).action, Action::GiveUp);
+    }
+
+    /// A restart deferred to the turn's end: the old process's next `init`
+    /// still reports the server failed, and must not give up before the
+    /// replacement has had its turn.
+    #[test]
+    fn the_old_process_failing_again_before_its_restart_is_not_the_restart_failing() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Err("e".into()), 1);
+        assert_eq!(h.on_reconnect("b", "p1", Err("e".into()), 2).action, Action::SafeProfileRestart);
+        assert_eq!(h.on_status("b", "p1", Status::Failed, None, true, 3), Decision::none());
+        assert_eq!(h.snapshot("b").unwrap().phase, Phase::Restarting);
+        let d = h.on_status("b", "p2", Status::Connected, None, true, 4);
+        assert_eq!(d.notice.map(|n| n.state), Some("ok"));
+    }
+
+    /// The extra restart `heal_now` allows is for that episode only.
+    #[test]
+    fn a_heal_that_worked_leaves_no_extra_restart_for_later() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Err("e".into()), 1);
+        h.on_reconnect("b", "p1", Err("e".into()), 2);
+        h.on_status("b", "p2", Status::Failed, None, true, 3); // gave up, in the safe profile
+        h.heal_now("b", "p2", 10).unwrap();
+        h.on_reconnect("b", "p2", Ok(()), 11);
+        h.on_status("b", "p2", Status::Connected, None, true, 12); // the heal worked
+        // A later, separate failure of the same process: reconnects, then gives up.
+        h.on_status("b", "p2", Status::Failed, None, true, 20);
+        h.on_reconnect("b", "p2", Err("e".into()), 21);
+        assert_eq!(h.on_reconnect("b", "p2", Err("e".into()), 22).action, Action::GiveUp);
     }
 
     #[test]
