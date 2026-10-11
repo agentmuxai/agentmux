@@ -10,14 +10,13 @@
  * marks the drag escaped, and a break-off still opens a window. The drag does
  * leave a trace, though. Escape ends it at once, while the left button is
  * still held, and the page gets a `dragend` with no drop effect, as it does
- * for a release over nothing. Two things tell them apart:
+ * for a release over nothing. They are told apart by:
  *
- * - the button: still down after Escape, up after a release. The host reads it
- *   without any permission (`GetAsyncKeyState`, `CGEventSourceButtonState`, an
- *   X11 pointer query);
- * - the key itself: once the drag is over, the page does get Escape's key
- *   events. On Linux (native Wayland, where the button can't be read) the
- *   `keyup` arrives about 10 ms after the `dragend`.
+ * - the button, wherever the host can read it: still down after Escape, up
+ *   after a release (`GetAsyncKeyState`, `CGEventSourceButtonState`, an X11
+ *   pointer query; none of them needs a permission);
+ * - the key, where it can't (native Wayland): once the drag is over the page
+ *   gets Escape's `keyup`, when the key is let go.
  *
  * On macOS the tear-off hook's tap also reports Escape when it has the
  * permission it needs; this works without it, and for pane tabs, which have
@@ -31,14 +30,15 @@
 import { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 
-/** How long after a bare `dragend` an Escape key event still counts as the
- *  cancel that ended it (Linux measured 9–13 ms). A release waits this long
- *  before it acts. */
-export const ESCAPE_AFTER_DRAGEND_MS = 60;
+/** Where the button can't be read: how long after a bare `dragend` the
+ *  Escape that ended it may still be let go (its `keyup`), and so how long a
+ *  release waits before it acts. A held key is let go well within this. */
+export const ESCAPE_KEY_WAIT_MS = 300;
 
 /** An Escape the page saw this soon before the `dragend` counts too. */
 const ESCAPE_BEFORE_DRAGEND_MS = 50;
 
+/** When the page last saw one of Escape's key events. */
 let lastEscapeAt = Number.NEGATIVE_INFINITY;
 
 /** Escape's key events, whenever they come: the `keyup` that follows a
@@ -56,16 +56,17 @@ export function isCancelledDragEnd(dropEffect: string | undefined, buttonStillDo
     return dropEffect === "none" && buttonStillDown;
 }
 
-/** Whether an Escape key event came near the `dragend` at `endedAt`: from
- *  just before it until {@link ESCAPE_AFTER_DRAGEND_MS} after. Returns as soon
- *  as one is seen. */
+/** Whether one of Escape's key events falls between just before the
+ *  `dragend` at `endedAt` and {@link ESCAPE_KEY_WAIT_MS} after it. Returns as
+ *  soon as one does. */
 async function escapeKeyNear(endedAt: number): Promise<boolean> {
     const since = endedAt - ESCAPE_BEFORE_DRAGEND_MS;
-    const until = endedAt + ESCAPE_AFTER_DRAGEND_MS;
-    while (lastEscapeAt < since && performance.now() < until) {
+    const until = endedAt + ESCAPE_KEY_WAIT_MS;
+    const inWindow = () => lastEscapeAt >= since && lastEscapeAt <= until;
+    while (!inWindow() && performance.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    return lastEscapeAt >= since;
+    return inWindow();
 }
 
 /**
@@ -76,16 +77,16 @@ async function escapeKeyNear(endedAt: number): Promise<boolean> {
 export async function endedByEscape(dropEffect: string | undefined): Promise<boolean> {
     if (dropEffect !== "none") return false;
     const endedAt = performance.now();
-    let buttonStillDown = false;
+    let buttonStillDown: boolean | null = null;
     try {
         buttonStillDown = await getApi().getMouseButtonState();
     } catch (e) {
-        // A host that can't read the button (the web, a Wayland session
-        // without X): the key decides.
-        Logger.warn("dnd:cross", "get_mouse_button_state failed after dragend", { error: String(e) });
+        // A host that can't read the button (native Wayland, the web): the
+        // key decides.
+        Logger.info("dnd:cross", "button state can't be read after dragend", { error: String(e) });
     }
-    const escapeSeen = buttonStillDown ? false : await escapeKeyNear(endedAt);
-    const cancelled = isCancelledDragEnd(dropEffect, buttonStillDown) || escapeSeen;
+    const escapeSeen = buttonStillDown == null ? await escapeKeyNear(endedAt) : null;
+    const cancelled = buttonStillDown != null ? isCancelledDragEnd(dropEffect, buttonStillDown) : escapeSeen === true;
     Logger.info("dnd:cross", "dragend with no drop effect", { buttonStillDown, escapeSeen, cancelled });
     return cancelled;
 }
