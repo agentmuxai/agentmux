@@ -220,16 +220,22 @@ fn host_key(connection: &str) -> String {
 
 /// `block_id` was opened by `agent` (a verified agent's `pane.open` on a host).
 pub fn note_agent_pane(block_id: &str, agent: &str) {
-    if block_id.is_empty() {
-        return;
-    }
-    let mut panes = lock();
-    if panes.by_block.insert(block_id.to_string(), agent.to_string()).is_none() {
-        panes.order.push_back(block_id.to_string());
-    }
-    while panes.order.len() > MAX_AGENT_PANES {
-        if let Some(old) = panes.order.pop_front() {
-            panes.by_block.remove(&old);
+    lock().note(block_id, agent);
+}
+
+impl AgentPanes {
+    /// [`note_agent_pane`] in this set: past [`MAX_AGENT_PANES`] the oldest go.
+    fn note(&mut self, block_id: &str, agent: &str) {
+        if block_id.is_empty() {
+            return;
+        }
+        if self.by_block.insert(block_id.to_string(), agent.to_string()).is_none() {
+            self.order.push_back(block_id.to_string());
+        }
+        while self.order.len() > MAX_AGENT_PANES {
+            if let Some(old) = self.order.pop_front() {
+                self.by_block.remove(&old);
+            }
         }
     }
 }
@@ -419,12 +425,14 @@ mod tests {
         assert!(!agent_opening("me@opening-host"));
     }
 
+    /// In a set of its own: filling the shared one evicted what the test
+    /// above had just noted, when the two ran at once.
     #[test]
     fn the_agent_panes_kept_are_bounded() {
+        let mut panes = AgentPanes::default();
         for i in 0..MAX_AGENT_PANES + 10 {
-            note_agent_pane(&format!("blk-bound-{i}"), "korp");
+            panes.note(&format!("blk-bound-{i}"), "korp");
         }
-        let panes = lock();
         assert!(panes.by_block.len() <= MAX_AGENT_PANES);
         assert_eq!(panes.by_block.len(), panes.order.len());
         assert!(!panes.by_block.contains_key("blk-bound-0"), "the oldest went");

@@ -135,8 +135,8 @@ pub fn missing_binary_message() -> String {
 }
 
 /// The `ssh` arguments for a pane. `control_dir`, on macOS and Linux, is where
-/// connection-sharing sockets live (`ControlMaster`), so a second pane to the
-/// same host reuses the first one's connection and asks for nothing.
+/// connection-sharing sockets live (`ControlMaster`), so a second pane on the
+/// same connection reuses the first one's and asks for nothing.
 pub fn launch(
     dest: &SshDest,
     cmd: &str,
@@ -165,20 +165,66 @@ pub fn launch(
     opt(format!("SetEnv={set_env}"));
     if let Some(dir) = control_dir {
         opt("ControlMaster=auto".into());
-        opt(format!("ControlPath={}", dir.join("%C").display()));
+        opt(control_path_option(dir, dest));
         opt("ControlPersist=10m".into());
     }
+    push_destination(&mut args, dest);
+    if let Some(remote) = remote_command(cmd, cmd_args, cwd) {
+        args.push(remote);
+    }
+    args
+}
+
+/// The port, if any, then `--` and the destination: `--` ends ssh's options,
+/// so the destination can never be read as one (conn.rs also refuses a
+/// leading `-`).
+fn push_destination(args: &mut Vec<String>, dest: &SshDest) {
     if let Some(port) = dest.port {
         args.push("-p".into());
         args.push(port.to_string());
     }
-    // `--` ends ssh's options: the destination can never be read as one
-    // (conn.rs also refuses a leading `-`).
     args.push("--".into());
     args.push(dest.destination.clone());
-    if let Some(remote) = remote_command(cmd, cmd_args, cwd) {
-        args.push(remote);
-    }
+}
+
+/// Hex characters of the connection name's hash in a socket's name.
+const NAME_HASH_HEX: usize = 8;
+
+/// The longest socket name ssh binds in a control dir: the name's hash, `-`,
+/// the 40-hex `%C`, and while binding `.` plus 16 random characters.
+const SOCKET_NAME_MAX: usize = NAME_HASH_HEX + 1 + 40 + 17;
+
+/// `ControlPath=` for `dest`'s shared connection in `dir`: `<name hash>-%C`.
+/// ssh's `%C` hashes the user, host and port ssh resolves, not the name it was
+/// given, so two aliases for one account (one with a key, one password-only)
+/// shared whichever connection logged in first, and the password-only one got
+/// in without asking (#4513). The connection's own name keeps them apart; `%C`
+/// stays so an alias pointed elsewhere gets a new connection.
+fn control_path_option(dir: &Path, dest: &SshDest) -> String {
+    use sha2::{Digest, Sha256};
+    let name = hex::encode(&Sha256::digest(dest.name().as_bytes())[..NAME_HASH_HEX / 2]);
+    format!("ControlPath={}", dir.join(format!("{name}-%C")).display())
+}
+
+/// What to ask a shared connection (`ssh -O`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Control {
+    /// Answers (exit 0) while the connection is up, which it is only once the
+    /// user has logged in: at a password prompt there is none yet.
+    Check,
+    /// Close it: every session on it ends, with ssh's exit 255.
+    Exit,
+}
+
+/// The `ssh` arguments asking `dest`'s shared connection in `dir` to `op`:
+/// the same socket a pane's [`launch`] shares.
+pub fn control(dest: &SshDest, dir: &Path, op: Control) -> Vec<String> {
+    let word = match op {
+        Control::Check => "check",
+        Control::Exit => "exit",
+    };
+    let mut args = vec!["-o".into(), control_path_option(dir, dest), "-O".into(), word.into()];
+    push_destination(&mut args, dest);
     args
 }
 
@@ -255,12 +301,30 @@ pub fn quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
-/// What a pane says when its `ssh` ended: why, for a connection failure, and
-/// nothing for an ordinary exit (the remote shell ended).
-pub fn exit_message(dest: &str, code: u32) -> Option<String> {
-    (code == EXIT_CONNECTION_FAILED).then(|| {
-        format!("ssh could not connect to {dest}, or the connection dropped (see the terminal for ssh's own message)")
-    })
+/// Whether `ssh` ending with `code` means it had no connection, or lost it,
+/// rather than that the remote shell ended (`exit` included). A session on a
+/// shared connection that was closed or died ends this way too.
+pub fn connection_lost(code: u32) -> bool {
+    code == EXIT_CONNECTION_FAILED
+}
+
+/// Whether a pane's `ssh`, ended with `code`, lost its connection (or never
+/// had one). `stopped_by_srv`: srv ended it itself (the pane closed, or
+/// restarted), and ssh then exits 255 too (closing its pty does, and a session
+/// on a shared connection does on SIGTERM), which is no lost connection.
+pub fn pane_lost_connection(code: Option<u32>, stopped_by_srv: bool) -> bool {
+    !stopped_by_srv && code.is_some_and(connection_lost)
+}
+
+/// What the connection's status says when a pane's `ssh` lost it.
+pub fn lost_message(dest: &str) -> String {
+    format!("ssh could not connect to {dest}, or the connection dropped (see the terminal for ssh's own message)")
+}
+
+/// The line a plain SSH pane shows, under ssh's own reason, when it has no
+/// connection: the pane stays, and Enter starts ssh again.
+pub fn lost_note(conn: &str) -> String {
+    format!("No connection to {conn}: it dropped, or could not be made. Press Enter to try again.")
 }
 
 /// Where `ControlMaster` sockets go (macOS and Linux; Windows' OpenSSH has no
@@ -288,6 +352,13 @@ pub fn control_dir(config_home: &Path) -> Option<PathBuf> {
 #[cfg(not(unix))]
 pub fn control_dir(_config_home: &Path) -> Option<PathBuf> {
     None
+}
+
+/// [`control_dir`] for this srv's channel: where every `ssh` it runs to a host
+/// (panes, agents' commands, the helper, files) shares one connection. `None`
+/// where ssh can't share connections, and then there is nothing to ask `-O`.
+pub fn shared_control_dir() -> Option<PathBuf> {
+    control_dir(&crate::backend::base::get_mux_config_dir())
 }
 
 /// [`control_dir`] under `base`: `base/ssh-<8 hex of config_home>`, each
@@ -319,10 +390,11 @@ fn private_dir(dir: &Path) -> Option<()> {
 }
 
 /// Whether ssh can bind a socket in `dir`: the longest path it binds is
-/// `dir/<40-hex %C>.<16 random>`, and it has to fit in `sun_path` with its NUL.
+/// `dir/<name hash>-<40-hex %C>.<16 random>` ([`SOCKET_NAME_MAX`]), and it has
+/// to fit in `sun_path` with its NUL.
 fn socket_fits(dir: &Path) -> bool {
     let sun_path = if cfg!(target_os = "linux") { 108 } else { 104 };
-    dir.as_os_str().len() + 1 + 40 + 17 < sun_path
+    dir.as_os_str().len() + 1 + SOCKET_NAME_MAX < sun_path
 }
 
 #[cfg(test)]
@@ -437,11 +509,60 @@ mod tests {
         assert_eq!(args.last().unwrap(), "area54");
     }
 
-    /// The longest socket path ssh binds in `dir`: `/`, the 40-hex `%C`, and
-    /// while binding `.` plus 16 random characters. It must stay under the
-    /// OS's `sun_path` (104 bytes on macOS, 108 on Linux, NUL included).
+    fn control_path_opt(args: &[String]) -> &str {
+        args.iter().find(|a| a.starts_with("ControlPath=")).expect("a ControlPath")
+    }
+
+    /// Two `Host` aliases for one account (one with a key, one password-only)
+    /// resolve to the same user, host and port, which is all ssh's `%C`
+    /// hashes: they shared whichever connection logged in first, so the
+    /// password-only alias got in without asking (#4513, finding 3). The
+    /// connection's own name keeps them apart.
+    #[test]
+    fn two_aliases_for_one_account_get_their_own_shared_connection() {
+        let dir = Path::new("/tmp/agentmux-501/ssh-1a2b3c4d");
+        let path = |d: &SshDest| control_path_opt(&launch(d, "", &[], "", Some(dir))).to_string();
+        let (key, pw) = (dest("exp-key", None), dest("exp-pw", None));
+        assert_ne!(path(&key), path(&pw));
+        assert_eq!(path(&key), path(&dest("exp-key", None)), "one name, one connection");
+        assert_ne!(path(&dest("u@h", Some(22))), path(&dest("u@h", Some(2222))), "the port is part of the name");
+        // ssh's own %C stays in it: an alias pointed somewhere else gets a new one.
+        assert!(path(&key).ends_with("-%C"), "{}", path(&key));
+    }
+
+    /// `ssh -O` reaches the very connection a pane's ssh shares: same socket,
+    /// same destination and port.
+    #[test]
+    fn control_asks_the_connection_a_pane_shares() {
+        let dir = Path::new("/tmp/agentmux-501/ssh-1a2b3c4d");
+        let d = dest("tester@area54", Some(2222));
+        let pane = launch(&d, "", &[], "", Some(dir));
+        let check = control(&d, dir, Control::Check);
+        assert_eq!(control_path_opt(&check), control_path_opt(&pane));
+        assert_eq!(&check[check.len() - 6..], ["-O", "check", "-p", "2222", "--", "tester@area54"]);
+        let exit = control(&d, dir, Control::Exit);
+        assert_eq!(&exit[exit.len() - 6..], ["-O", "exit", "-p", "2222", "--", "tester@area54"]);
+    }
+
+    /// Exit 255 is ssh's own failure (no connection, or it dropped: also a
+    /// session on a shared connection that was closed); any other code is the
+    /// remote shell's, `exit` included.
+    #[test]
+    fn only_ssh_s_own_failure_is_a_lost_connection() {
+        assert!(connection_lost(255));
+        for code in [0, 1, 2, 127, 130] {
+            assert!(!connection_lost(code), "{code}");
+        }
+        let note = lost_note("area54");
+        assert!(note.contains("area54") && note.contains("Press Enter"), "{note}");
+    }
+
+    /// The longest socket path ssh binds in `dir`: `/`, the connection's 8-hex
+    /// name, `-`, the 40-hex `%C`, and while binding `.` plus 16 random
+    /// characters. It must stay under the OS's `sun_path` (104 bytes on macOS,
+    /// 108 on Linux, NUL included).
     fn bind_path_len(dir: &Path) -> usize {
-        dir.as_os_str().len() + 1 + 40 + 17
+        dir.as_os_str().len() + 1 + 8 + 1 + 40 + 17
     }
 
     #[cfg(unix)]
@@ -502,7 +623,7 @@ mod tests {
     fn a_socket_fits_only_below_sun_path() {
         let sun_path = if cfg!(target_os = "linux") { 108 } else { 104 };
         let dir = |len: usize| PathBuf::from(format!("/{}", "d".repeat(len - 1)));
-        let longest = sun_path - 1 - (1 + 40 + 17);
+        let longest = sun_path - 1 - (1 + 8 + 1 + 40 + 17);
         assert!(socket_fits(&dir(longest)));
         assert!(!socket_fits(&dir(longest + 1)));
         // The stable channel's old dir on macOS, for an 8-letter user name.
@@ -545,12 +666,20 @@ mod tests {
 
     #[test]
     fn only_a_connection_failure_is_an_error() {
-        assert!(exit_message("area54", 255)
-            .unwrap()
-            .contains("could not connect to area54"));
-        assert_eq!(exit_message("area54", 0), None);
-        assert_eq!(exit_message("area54", 1), None);
-        assert_eq!(exit_message("area54", 130), None);
+        assert!(lost_message("area54").contains("could not connect to area54"));
+        assert!(pane_lost_connection(Some(255), false));
+        for code in [Some(0), Some(1), Some(130), None] {
+            assert!(!pane_lost_connection(code, false), "{code:?}");
+        }
+    }
+
+    /// srv ending a pane's ssh itself (the pane closed, or restarted) makes it
+    /// exit 255 too: closing its pty does at once, and a session on a shared
+    /// connection exits 255 on SIGTERM (measured, OpenSSH 9). That is not a
+    /// lost connection: no line in the pane, no error on the host.
+    #[test]
+    fn ssh_ended_by_srv_is_not_a_lost_connection() {
+        assert!(!pane_lost_connection(Some(255), true));
     }
 
     /// `~` is the remote home: left for the remote shell to expand.

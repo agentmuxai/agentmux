@@ -60,29 +60,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             Box::pin(async move {
                 // `{ connname, logblockid? }`
-                let name = data
-                    .get("connname")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                ensure(&broker, &name).await.map(|_| None)
+                ensure(&broker, &str_field(&data, "connname")).await.map(|_| None)
             })
         }),
     );
 
-    let broker = state.broker.clone();
+    let app = state.clone();
     engine.register_handler(
         COMMAND_CONN_CONNECT,
         Box::new(move |data, _ctx| {
-            let broker = broker.clone();
+            let app = app.clone();
             Box::pin(async move {
                 // `{ host, keywords?, logblockid? }`
-                let name = data
-                    .get("host")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                ensure(&broker, &name).await.map(|_| None)
+                connect(&app, &str_field(&data, "host"), &str_field(&data, "logblockid"))
+                    .await
+                    .map(|_| None)
             })
         }),
     );
@@ -95,10 +87,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 // The connection name, as a bare string.
                 let name = data.as_str().unwrap_or_default().to_string();
-                if let Ok(target) = ConnTarget::parse(&name) {
-                    if !target.is_local() {
+                match ConnTarget::parse(&name) {
+                    // Closes the shared connection: the sessions on it end,
+                    // and the next pane logs in again.
+                    Ok(ConnTarget::Ssh(_)) => crate::backend::remote::link::disconnect(&name).await,
+                    Ok(ConnTarget::Wsl(_)) => {
                         status::set(Some(&broker), &name, state::DISCONNECTED, None);
                     }
+                    _ => {}
                 }
                 Ok(None)
             })
@@ -215,10 +211,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_REMOTE_AGENT_REVOKE, move |cmd: CommandRemoteAgentRevokeData, _ctx| {
         let broker = broker.clone();
         async move {
-            let name = match ConnTarget::parse(&cmd.connection)? {
-                t @ ConnTarget::Ssh(_) => t.name(),
-                _ => return Err(format!("{} is not an SSH host", one_line(&cmd.connection, 80))),
-            };
+            let name = ssh_host(&cmd.connection, NOT_SSH)?;
             let revoked = crate::backend::remote::agent_access::revoke(&cmd.agent, &name)
                 .map_err(|e| format!("could not revoke {}'s access to {name}: {e}", one_line(&cmd.agent, 60)))?;
             if revoked {
@@ -282,13 +275,23 @@ async fn add_remote(state: &AppState, cmd: CommandRemoteAddData) -> Result<(), S
     Ok(())
 }
 
-/// Log in to `connection` and run `true` (§4.4): success, or ssh's message.
-async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<RemoteTestResult, String> {
-    use crate::backend::remote::host::HostSsh;
-    let name = match ConnTarget::parse(connection)? {
-        t @ ConnTarget::Ssh(_) => t.name(),
-        _ => return Err(format!("{} is not an SSH host", one_line(connection, 80))),
-    };
+const NOT_SSH: &str = "is not an SSH host";
+
+/// `connection`'s canonical name if it is an SSH host; otherwise
+/// "<connection> `otherwise`".
+fn ssh_host(connection: &str, otherwise: &str) -> Result<String, String> {
+    match ConnTarget::parse(connection)? {
+        t @ ConnTarget::Ssh(_) => Ok(t.name()),
+        _ => Err(format!("{} {otherwise}", one_line(connection, 80))),
+    }
+}
+
+/// [`ssh_host`] for a host AgentMux already lists (the user's ssh config,
+/// settings, or a connection they made), for what logs in with the user's
+/// keys: never to one an RPC names, since anything holding srv's key can send
+/// one, an agent included.
+async fn known_ssh_host(state: &AppState, connection: &str) -> Result<String, String> {
+    let name = ssh_host(connection, NOT_SSH)?;
     let known = remotes::list(state.config_watcher.get_full_config().connections.clone())
         .await
         .iter()
@@ -296,11 +299,39 @@ async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<
     if !known {
         return Err(format!("{} isn't one of your remotes", one_line(&name, 80)));
     }
-    let mut host = HostSsh::for_connection(&name)?;
-    let _grant = (!block.is_empty()).then(|| host.ask_user_in(block, &name, &state.auth_key)).flatten();
-    let out = host.run("true", None, SSH_WITH_PROMPTS).await;
-    Ok(match out.and_then(|o| o.ok()) {
-        Ok(_) => RemoteTestResult { ok: true, message: String::new() },
+    Ok(name)
+}
+
+/// Log in to SSH host `name` (a [`known_ssh_host`]) and run `true`, with
+/// ssh's prompts going to the user in the window of pane `block`, if any.
+/// The connection's status follows (`link::login`), and the connection stays
+/// up a while after (`ControlPersist`), so the next pane on it asks nothing.
+async fn log_in(state: &AppState, name: &str, block: &str) -> Result<(), String> {
+    use crate::backend::remote::{host::HostSsh, link};
+    let mut host = HostSsh::for_connection(name)?;
+    let _grant = (!block.is_empty()).then(|| host.ask_user_in(block, name, &state.auth_key)).flatten();
+    link::login(name, async {
+        host.run("true", None, SSH_WITH_PROMPTS).await.and_then(|o| o.ok()).map(|_| ())
+    })
+    .await
+}
+
+/// What `connconnect` does (a Remotes row's Connect, a pane's Reconnect): log
+/// in to an SSH host; for anything else, what `connensure` does.
+async fn connect(state: &AppState, connection: &str, block: &str) -> Result<(), String> {
+    ensure(&state.broker, connection).await?;
+    if !matches!(ConnTarget::parse(connection)?, ConnTarget::Ssh(_)) {
+        return Ok(());
+    }
+    let name = known_ssh_host(state, connection).await?;
+    log_in(state, &name, block).await
+}
+
+/// Log in to `connection` and run `true` (§4.4): success, or ssh's message.
+async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<RemoteTestResult, String> {
+    let name = known_ssh_host(state, connection).await?;
+    Ok(match log_in(state, &name, block).await {
+        Ok(()) => RemoteTestResult { ok: true, message: String::new() },
         Err(message) => RemoteTestResult { ok: false, message },
     })
 }
@@ -310,10 +341,7 @@ async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<
 /// pane `block`, naming the sessions that will end.
 async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Result<(), String> {
     use crate::backend::remote::{files, helper_hosts, helper_install, host::HostSsh};
-    let name = match ConnTarget::parse(connection)? {
-        t @ ConnTarget::Ssh(_) => t.name(),
-        _ => return Err(format!("{} has no AgentMux helper to remove", one_line(connection, 80))),
-    };
+    let name = ssh_host(connection, "has no AgentMux helper to remove")?;
     if block.is_empty() {
         return Err("removing the helper needs the pane asking, to ask the user in".into());
     }
@@ -439,11 +467,11 @@ fn str_field(data: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-/// What `connensure` and `connconnect` do: accept `local`; accept a WSL distro
-/// that is installed (Windows only); accept an SSH destination where the
-/// system `ssh` is (its own prompts then happen in the pane's terminal); refuse
-/// a bad name with the reason. Every WSL or SSH outcome is recorded as the
-/// status the pane's overlay shows.
+/// What `connensure` does: accept `local`; accept a WSL distro that is
+/// installed (Windows only), which is then connected; accept an SSH
+/// destination where the system `ssh` is, claiming nothing (only a login
+/// connects it: a pane's ssh, or `connconnect`); refuse a bad name with the
+/// reason, recorded as the status the pane's overlay shows.
 pub(crate) async fn ensure(broker: &Broker, name: &str) -> Result<(), String> {
     let (installed, ssh_found) = match ConnTarget::parse(name)? {
         ConnTarget::Wsl(_) => (crate::backend::remote::wsl::list().await, false),
@@ -473,10 +501,7 @@ pub(crate) fn ensure_with(
         ConnTarget::Wsl(distro) => {
             format!("WSL distribution '{distro}' is not installed (wsl.exe --list shows what is)")
         }
-        ConnTarget::Ssh(_) if ssh_found => {
-            status::set(Some(broker), name, state::CONNECTED, None);
-            return Ok(());
-        }
+        ConnTarget::Ssh(_) if ssh_found => return Ok(()),
         ConnTarget::Ssh(_) => crate::backend::remote::ssh::missing_binary_message(),
     };
     // Keyed by the name exactly as the pane's meta holds it, not the canonical
@@ -902,12 +927,14 @@ mod tests {
 
         let err = ensure("test-ensure-host").unwrap_err();
         assert!(err.contains("need the ssh command"), "{err}");
-        // With ssh: connected, so the overlay leaves the terminal to ssh's own prompts.
+        // With ssh: accepted, and nothing claimed. Having an ssh command is
+        // not a login: the host showed connected before anything had
+        // connected (#4513). A pane's ssh, or a login, says how it is.
         assert_eq!(
             ensure_with(&broker, "test-ensure-ssh-ok", none, true, true),
             Ok(())
         );
-        assert!(status::all()
+        assert!(!status::all()
             .iter()
             .any(|s| s.connection == "test-ensure-ssh-ok" && s.connected));
         let st = status::all()

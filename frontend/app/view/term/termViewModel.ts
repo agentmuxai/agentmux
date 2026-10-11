@@ -43,6 +43,7 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import { isNewerControllerStatus } from "./controller-status";
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
 class TermViewModel {
@@ -371,8 +372,7 @@ class TermViewModel {
 
     updateShellProcStatus(fullStatus: BlockControllerRuntimeStatus) {
         if (fullStatus == null) return;
-        const curStatus = this.shellProcFullStatus();
-        if (curStatus == null || curStatus.version < fullStatus.version) {
+        if (isNewerControllerStatus(this.shellProcFullStatus(), fullStatus)) {
             this.shellProcFullStatus._set(fullStatus);
         }
     }

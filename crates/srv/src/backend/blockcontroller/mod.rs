@@ -97,6 +97,12 @@ pub fn cmd_env_of(meta: &MetaMapType) -> HashMap<String, String> {
     meta_string_map(meta, META_KEY_CMD_ENV)
 }
 
+/// A line from AgentMux in a terminal pane's output: dimmed, in brackets, on a
+/// line of its own, so it reads as AgentMux's and not the shell's.
+pub fn pane_note(text: &str) -> Vec<u8> {
+    format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").into_bytes()
+}
+
 /// The agent id an env map names: `AGENTMUX_AGENT_ID`, else the legacy
 /// `WAVEMUX_AGENT_ID`, trimmed, skipping blank values.
 pub(crate) fn agent_id_from_env<'a>(lookup: impl Fn(&str) -> Option<&'a str>) -> Option<String> {

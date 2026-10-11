@@ -5,6 +5,7 @@
 import { Search, useSearch } from "@/app/element/search";
 import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, useBlockAtom, MOS } from "@/store/global";
 import { backendStatusAtom } from "@/store/backendStatus";
+import { resyncsOnConnChange } from "@/store/conn-status-rules";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { ISearchOptions } from "@xterm/addon-search";
@@ -44,20 +45,11 @@ function TermResyncHandler(props: { blockId: string; model: TermViewModel }): JS
 
     createEffect(() => {
         const cs = connStatus();
-        if (!props.model.termRef.current?.hasResized) {
-            lastConnStatus = cs;
-            return;
-        }
-        const isConnected = cs?.status == "connected";
-        const wasConnected = lastConnStatus?.status == "connected";
-        const curConnName = cs?.connection;
-        const lastConnName = lastConnStatus?.connection;
-        if (isConnected == wasConnected && curConnName == lastConnName) {
-            lastConnStatus = cs;
-            return;
-        }
-        props.model.termRef.current?.resyncController("resync handler");
+        const resync = props.model.termRef.current?.hasResized && resyncsOnConnChange(lastConnStatus, cs);
         lastConnStatus = cs;
+        if (resync) {
+            props.model.termRef.current?.resyncController("resync handler");
+        }
     });
 
     // Resync when backend transitions to "running" after a restart.

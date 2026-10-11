@@ -39,30 +39,51 @@ pub fn set(
     update(broker, connection, |entry| apply(entry, status, error))
 }
 
-/// A pane's process on `connection` started (an SSH pane's `ssh`): one more
-/// pane has it open, and it is connected, so the overlay never covers the
-/// terminal while `ssh` asks there for a password.
-pub fn pane_started(broker: Option<&Broker>, connection: &str) -> ConnStatus {
+/// A pane's process on `connection` started (an SSH pane's `ssh`, a durable
+/// pane's attach): one more pane has it open. `logged_in` says it is a live
+/// login already (a durable pane's helper answered, or nothing better can be
+/// known); otherwise it is only connecting, its `ssh` perhaps waiting at a
+/// password prompt, until the shared connection answers (`remote::link`). A
+/// connection already up stays up.
+pub fn pane_started(broker: Option<&Broker>, connection: &str, logged_in: bool) -> ConnStatus {
     update(broker, connection, |entry| {
         entry.activeconnnum += 1;
-        apply(entry, state::CONNECTED, None);
+        let up = logged_in || entry.status == state::CONNECTED;
+        apply(entry, if up { state::CONNECTED } else { state::CONNECTING }, None);
     })
 }
 
 /// A pane's process on `connection` ended. A status is shared by every pane on
 /// the connection, and the overlay covers each of them, so while another pane
-/// still has it open it stays connected. The last one leaves it `error` with
-/// `error` when it could not connect, and `disconnected` otherwise.
-pub fn pane_ended(broker: Option<&Broker>, connection: &str, error: Option<&str>) -> ConnStatus {
+/// still has it open nothing changes. The last one leaves it `error` with
+/// `error` when it could not connect or lost the connection. Otherwise it is
+/// `disconnected` if `settle`; else it is left for the shared connection's
+/// watcher (`remote::link`), since that connection can outlive its last pane.
+pub fn pane_ended(
+    broker: Option<&Broker>,
+    connection: &str,
+    error: Option<&str>,
+    settle: bool,
+) -> ConnStatus {
     update(broker, connection, |entry| {
         entry.activeconnnum = (entry.activeconnnum - 1).max(0);
         if entry.activeconnnum == 0 {
             match error {
                 Some(message) => apply(entry, state::ERROR, Some(message)),
-                None => apply(entry, state::DISCONNECTED, None),
+                None if settle => apply(entry, state::DISCONNECTED, None),
+                None => {}
             }
         }
     })
+}
+
+/// `connection`'s status, if it has one.
+pub fn get(connection: &str) -> Option<ConnStatus> {
+    registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(connection)
+        .cloned()
 }
 
 fn apply(entry: &mut ConnStatus, status: &str, error: Option<&str>) {
@@ -158,25 +179,56 @@ mod tests {
     #[test]
     fn a_connection_stays_connected_while_any_pane_has_it_open() {
         let name = "test-status-two-panes";
-        pane_started(None, name);
-        let s = pane_started(None, name);
+        pane_started(None, name, true);
+        let s = pane_started(None, name, true);
         assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 2));
-        let s = pane_ended(None, name, Some("could not connect"));
+        let s = pane_ended(None, name, Some("could not connect"), true);
         assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 1));
-        let s = pane_ended(None, name, Some("could not connect"));
+        let s = pane_ended(None, name, Some("could not connect"), true);
         assert_eq!(
             (s.status.as_str(), s.activeconnnum, s.error.as_str()),
             (state::ERROR, 0, "could not connect")
         );
 
         let name = "test-status-clean-exit";
-        pane_started(None, name);
-        let s = pane_ended(None, name, None);
+        pane_started(None, name, true);
+        let s = pane_ended(None, name, None, true);
         assert_eq!(
             (s.status.as_str(), s.activeconnnum),
             (state::DISCONNECTED, 0)
         );
-        let s = pane_ended(None, name, None);
+        let s = pane_ended(None, name, None, true);
         assert_eq!(s.activeconnnum, 0, "never below zero");
+    }
+
+    /// A pane's ssh starting is not a login: it may be waiting at a password
+    /// prompt. The host was shown connected the moment it started (#4513).
+    /// It stays connecting until the login is known, and a connection already
+    /// up stays up when another pane joins it.
+    #[test]
+    fn a_starting_ssh_is_connecting_until_its_login_is_known() {
+        let name = "test-status-login-pending";
+        let s = pane_started(None, name, false);
+        assert_eq!((s.status.as_str(), s.connected, s.hasconnected), (state::CONNECTING, false, false));
+        let s = set(None, name, state::CONNECTED, None);
+        assert!(s.connected);
+        let s = pane_started(None, name, false);
+        assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 2), "joins the live connection");
+    }
+
+    /// The shared connection can outlive its last pane (`ControlPersist`):
+    /// unless told to settle, a clean last end leaves the status to the
+    /// watcher that asks the connection. A failure still says why at once.
+    #[test]
+    fn a_clean_last_end_is_left_to_the_watcher_unless_settled() {
+        let name = "test-status-unsettled";
+        pane_started(None, name, true);
+        let s = pane_ended(None, name, None, false);
+        assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 0));
+        assert_eq!(get(name).map(|g| g.status), Some(state::CONNECTED.to_string()));
+        pane_started(None, name, true);
+        let s = pane_ended(None, name, Some("Shared connection closed"), false);
+        assert_eq!((s.status.as_str(), s.error.as_str()), (state::ERROR, "Shared connection closed"));
+        assert!(get("test-status-never-seen").is_none());
     }
 }

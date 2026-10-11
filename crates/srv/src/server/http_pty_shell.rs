@@ -37,7 +37,7 @@ pub(super) async fn handle_pty_shell_create(
     let connection = match &target {
         AgentTarget::Local => "local".to_string(),
         AgentTarget::Wsl(d) => crate::backend::remote::ConnTarget::Wsl(d.clone()).name(),
-        AgentTarget::Ssh(dest) => crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
+        AgentTarget::Ssh(dest) => dest.name(),
     };
     // An SSH host runs with the user's identity: their consent first, and the
     // askpass helper must exist, since its prompts may never reach the
