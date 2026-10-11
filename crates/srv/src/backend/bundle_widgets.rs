@@ -247,6 +247,14 @@ pub fn zip_export_with_widgets(
 ) -> Result<Vec<u8>, String> {
     use std::io::Write;
     use zip::write::SimpleFileOptions;
+    // The import limits: a bundle that no AgentMux would import isn't written.
+    if widgets.len() > MAX_BUNDLE_WIDGETS {
+        return Err(format!("a bundle carries at most {MAX_BUNDLE_WIDGETS} widgets"));
+    }
+    let total: u64 = widgets.iter().flat_map(|(_, _, files)| files.values()).map(|b| b.len() as u64).sum();
+    if total > MAX_BUNDLE_WIDGET_BYTES {
+        return Err(format!("a bundle's widgets are at most {} MB in all", MAX_BUNDLE_WIDGET_BYTES / (1024 * 1024)));
+    }
     let mut buf = std::io::Cursor::new(Vec::new());
     let mut writer = zip::ZipWriter::new(&mut buf);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);

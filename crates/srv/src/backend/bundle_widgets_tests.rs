@@ -188,3 +188,13 @@ fn a_same_files_install_that_isnt_approved_isnt_unchanged() {
     assert!(preview(&w, &declared, &[installed(WidgetState::Approved)], no_signature).same_as_installed);
     assert!(!preview(&w, &declared, &[installed(WidgetState::NeedsApproval)], no_signature).same_as_installed);
 }
+
+#[test]
+fn an_export_over_the_import_limits_is_refused() {
+    let export = super::super::bundle_export::BundleExport { root_slug: "b".into(), files: vec![], skipped_skills: vec![], warnings: vec![] };
+    let many: Vec<(String, String, BTreeMap<String, Vec<u8>>)> =
+        (0..=MAX_BUNDLE_WIDGETS).map(|i| (format!("acme.w{i}"), String::new(), BTreeMap::new())).collect();
+    assert!(zip_export_with_widgets(&export, &many).unwrap_err().contains("at most"));
+    let big = BTreeMap::from([("blob.bin".to_string(), vec![0u8; (MAX_BUNDLE_WIDGET_BYTES + 1) as usize])]);
+    assert!(zip_export_with_widgets(&export, &[("acme.big".into(), String::new(), big)]).unwrap_err().contains("in all"));
+}
