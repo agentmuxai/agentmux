@@ -403,7 +403,7 @@ fn split_widgets(
 ) -> Result<Vec<crate::backend::bundle_widgets::BundleWidget>, String> {
     use crate::backend::bundle_widgets as bw;
     files.retain(|f| !bw::is_widget_path(&f.path));
-    warnings.retain(|w| !bw::is_widget_path(w));
+    warnings.retain(|w| !bw::is_widget_warning(w));
     bw::read_from_zip(raw)
 }
 

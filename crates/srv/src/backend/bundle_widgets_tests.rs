@@ -118,3 +118,73 @@ fn installing_copies_the_package_in_as_one_waiting_for_approval() {
     assert_eq!(p.state, WidgetState::NeedsApproval, "a bundle never approves a widget");
     assert_eq!(p.hash, hash_of(&w));
 }
+
+#[test]
+fn a_warning_about_a_widget_entry_is_recognised_with_or_without_its_wrapper() {
+    assert!(is_widget_warning("widgets/acme.board/logo.png: not valid UTF-8 text; skipped"));
+    assert!(is_widget_warning("my-bundle/widgets/acme.board/../x: not a safe path; skipped"));
+    assert!(!is_widget_warning("instructions/AGENTS.md: failed to read entry"));
+}
+
+#[test]
+fn a_bundles_widgets_are_bounded_in_number_and_in_all() {
+    let m = manifest("acme.w0", "sandboxed");
+    let mut entries: Vec<(String, Vec<u8>)> = vec![("bundle.json".into(), b"{}".to_vec())];
+    for i in 0..=MAX_BUNDLE_WIDGETS {
+        entries.push((format!("widgets/acme.w{i}/widget.json"), m.clone().into_bytes()));
+    }
+    let refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    assert!(read_from_zip(&zip_of(&refs)).unwrap_err().contains("more than"));
+
+    // Highly compressible bytes: 3 widgets of 40 MB each pass the widget
+    // limit one by one, and fail the total.
+    let big = vec![0u8; 40 * 1024 * 1024];
+    let mut entries: Vec<(String, Vec<u8>)> = vec![("bundle.json".into(), b"{}".to_vec())];
+    for i in 0..3 {
+        entries.push((format!("widgets/acme.b{i}/blob.bin"), big.clone()));
+    }
+    let refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let mut w = zip::ZipWriter::new(&mut buf);
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in &refs {
+        w.start_file(*name, opts).unwrap();
+        w.write_all(bytes).unwrap();
+    }
+    w.finish().unwrap();
+    let zip = buf.into_inner();
+    assert!(zip.len() < 2 * 1024 * 1024, "the archive itself is small");
+    assert!(read_from_zip(&zip).unwrap_err().contains("in all"));
+}
+
+#[test]
+fn a_same_files_install_that_isnt_approved_isnt_unchanged() {
+    let w = widget("acme.board", "sandboxed");
+    let hash = hash_of(&w);
+    let declared = BTreeMap::from([("acme.board".to_string(), hash.clone())]);
+    let installed = |state: WidgetState| WidgetPackageInfo {
+        id: "acme.board".into(),
+        name: "Board".into(),
+        version: "1.0.0".into(),
+        description: None,
+        author: None,
+        homepage: None,
+        icon: String::new(),
+        default_hue: None,
+        kind: WidgetKind::Sandboxed,
+        permissions: vec![],
+        granted: vec![],
+        state,
+        error: None,
+        hash: hash.clone(),
+        panes: vec![],
+        commands: vec![],
+        status_items: vec![],
+        signature: sig::describe("acme.board", None, &Default::default()),
+        files_url: None,
+        implied: false,
+        folder: String::new(),
+    };
+    assert!(preview(&w, &declared, &[installed(WidgetState::Approved)], no_signature).same_as_installed);
+    assert!(!preview(&w, &declared, &[installed(WidgetState::NeedsApproval)], no_signature).same_as_installed);
+}

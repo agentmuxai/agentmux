@@ -21,10 +21,22 @@ use super::widget_signature::{self as sig, WidgetSignatureInfo};
 
 /// Where a bundle keeps its widgets, relative to the bundle's root.
 pub const WIDGETS_DIR: &str = "widgets";
+/// At most this many widgets in one bundle.
+pub const MAX_BUNDLE_WIDGETS: usize = 20;
+/// All of a bundle's widgets together, decompressed: each is also held to
+/// the widget limit (50 MB), but this bounds the whole archive, whatever
+/// its compression ratio.
+pub const MAX_BUNDLE_WIDGET_BYTES: u64 = 100 * 1024 * 1024;
 
 /// Is `path` (bundle-relative, as the text importer sees it) part of a widget?
 pub fn is_widget_path(path: &str) -> bool {
     path.strip_prefix(WIDGETS_DIR).is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Is the text importer's warning about a widget entry? Its warnings start
+/// with the entry's path, wrapper-stripped or (for an unsafe path) raw.
+pub fn is_widget_warning(warning: &str) -> bool {
+    is_widget_path(warning) || warning.split_once('/').is_some_and(|(_, rest)| is_widget_path(rest))
 }
 
 /// One widget package read out of a bundle.
@@ -49,6 +61,7 @@ pub fn read_from_zip(zip_bytes: &[u8]) -> Result<Vec<BundleWidget>, String> {
         names.iter().all(|n| n.split_once('/').is_some_and(|(r, _)| r == w))
     });
     let mut out: BTreeMap<String, BundleWidget> = BTreeMap::new();
+    let mut total: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| format!("zip archive: entry {i}: {e}"))?;
         if entry.is_dir() {
@@ -72,16 +85,24 @@ pub fn read_from_zip(zip_bytes: &[u8]) -> Result<Vec<BundleWidget>, String> {
         if entry.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
             return Err(format!("{name} is a link; a widget can't contain links"));
         }
+        if !out.contains_key(id) && out.len() >= MAX_BUNDLE_WIDGETS {
+            return Err(format!("the bundle carries more than {MAX_BUNDLE_WIDGETS} widgets"));
+        }
         let w = out.entry(id.to_string()).or_insert_with(|| BundleWidget { id: id.to_string(), ..Default::default() });
         let used: u64 = w.files.values().map(|b| b.len() as u64).sum();
+        // Read at most one byte past what either limit leaves, so neither a
+        // large entry nor a high compression ratio can force more.
+        let room = (wp::MAX_PACKAGE_BYTES - used).min(MAX_BUNDLE_WIDGET_BYTES - total);
         let mut bytes = Vec::new();
-        (&mut entry)
-            .take(wp::MAX_PACKAGE_BYTES - used + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("{name}: {e}"))?;
-        if used + bytes.len() as u64 > wp::MAX_PACKAGE_BYTES {
-            return Err(format!("widget {id} is over {} MB", wp::MAX_PACKAGE_BYTES / (1024 * 1024)));
+        (&mut entry).take(room + 1).read_to_end(&mut bytes).map_err(|e| format!("{name}: {e}"))?;
+        if bytes.len() as u64 > room {
+            return Err(if used + bytes.len() as u64 > wp::MAX_PACKAGE_BYTES {
+                format!("widget {id} is over {} MB", wp::MAX_PACKAGE_BYTES / (1024 * 1024))
+            } else {
+                format!("the bundle's widgets are over {} MB in all", MAX_BUNDLE_WIDGET_BYTES / (1024 * 1024))
+            });
         }
+        total += bytes.len() as u64;
         w.files.insert(path.to_string(), bytes);
         if w.files.len() > wp::MAX_PACKAGE_FILES {
             return Err(format!("widget {id} has over {} files", wp::MAX_PACKAGE_FILES));
@@ -200,7 +221,10 @@ pub fn preview(
     if let Some(i) = installed.iter().find(|i| i.id == w.id) {
         p.installed_version = Some(i.version.clone());
         p.installed_state = Some(i.state.clone());
+        // Unchanged only if it is approved at these files and key: one still
+        // waiting (or declined, or changed) asks again.
         p.same_as_installed = !p.hash.is_empty()
+            && i.state == WidgetState::Approved
             && i.hash == p.hash
             && i.signature.fingerprint == p.signature.as_ref().and_then(|s| s.fingerprint.clone());
     }
