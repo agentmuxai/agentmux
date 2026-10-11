@@ -236,6 +236,15 @@ wrap_window_delegate! {
             }
         }
 
+        // macOS: browser panes move with the window as it is resized, not a
+        // frame or two later when the page has laid out (bounds.rs `LayoutBase`).
+        #[cfg(target_os = "macos")]
+        fn on_window_bounds_changed(&self, _window: Option<&mut Window>, _new_bounds: Option<&Rect>) {
+            if let Some((state, label)) = &self.window_registration {
+                crate::browser_panes::bounds::follow_window_resize(state, label);
+            }
+        }
+
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
             // 2026-07-05): trace window destruction so the close-debug file

@@ -178,6 +178,8 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            // A single-pane rect carries no layout base: it is used as sent.
+            crate::browser_panes::bounds::note_layout_base(&self.label, None);
             crate::browser_pane::creation_views::resize_browser_pane_view(
                 &self.state, &self.label, self.rect.clone(),
             );

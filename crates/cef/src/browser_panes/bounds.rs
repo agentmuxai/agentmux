@@ -84,11 +84,107 @@ pub(crate) fn parse_set_rects_args(args: &serde_json::Value) -> Result<(String, 
     Ok((window_label, out))
 }
 
+/// What the page laid a batch out against, in the rects' physical pixels: its
+/// viewport and the tile layout holding the panes.
+///
+/// The page learns a window's new size a frame or more after the window has
+/// it, and a pane only moves once the page has laid out and sent its rect,
+/// so during a drag the pane's content trails the page's chrome around it.
+/// On macOS the host moves shown panes as soon as the window's size changes
+/// (`follow_window_resize`), stretching the page's last rects by the change:
+/// the tile layout keeps its insets from the window's edges and every pane
+/// scales with it. The page's own rect for the new size replaces the guess.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) struct LayoutBase {
+    viewport: (i32, i32),
+    /// x, y, width, height of the tile layout; the whole viewport if unknown.
+    layout: (i32, i32, i32, i32),
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl LayoutBase {
+    /// `{ viewport: { width, height }, layout?: { x, y, width, height } }` from a batch.
+    pub(crate) fn parse(args: &serde_json::Value) -> Option<Self> {
+        let int = |v: &serde_json::Value, k: &str| v.get(k).and_then(|n| n.as_i64()).map(|n| n as i32);
+        let vp = args.get("viewport")?;
+        let viewport = (int(vp, "width")?, int(vp, "height")?);
+        if viewport.0 <= 0 || viewport.1 <= 0 {
+            return None;
+        }
+        let layout = args
+            .get("layout")
+            .and_then(|l| Some((int(l, "x")?, int(l, "y")?, int(l, "width")?, int(l, "height")?)))
+            .filter(|l| l.2 > 0 && l.3 > 0)
+            .unwrap_or((0, 0, viewport.0, viewport.1));
+        Some(Self { viewport, layout })
+    }
+
+    /// Where `rect`, laid out against this base, goes in a viewport of
+    /// `width` x `height`.
+    pub(crate) fn predict(&self, rect: &Rect, width: i32, height: i32) -> Rect {
+        let (lx, ly, lw, lh) = self.layout;
+        let sx = (lw + width - self.viewport.0).max(1) as f64 / lw as f64;
+        let sy = (lh + height - self.viewport.1).max(1) as f64 / lh as f64;
+        let map = |v: i32, origin: i32, s: f64| origin + ((v - origin) as f64 * s).round() as i32;
+        let (x, y) = (map(rect.x, lx, sx), map(rect.y, ly, sy));
+        let right = map(rect.x + rect.width, lx, sx);
+        let bottom = map(rect.y + rect.height, ly, sy);
+        Rect { x, y, width: (right - x).max(1), height: (bottom - y).max(1) }
+    }
+}
+
+/// What each pane's latest rect was laid out against, by pane label. Kept
+/// per pane, not per window: a batch can carry only some of a window's panes
+/// (a display's scale changed and only some panes' timers have reported), and
+/// a pane's rect must always be read against the base it was measured with.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+static LAYOUT_BASES: LazyLock<Mutex<HashMap<String, LayoutBase>>> = LazyLock::new(Default::default);
+
+/// Remember what pane `label`'s rect was laid out against (`None`: a rect
+/// with no base, which is used as sent). UI thread, as the rect is applied.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn note_layout_base(label: &str, base: Option<LayoutBase>) {
+    let mut bases = LAYOUT_BASES.lock();
+    match base {
+        Some(b) => bases.insert(label.to_string(), b),
+        None => bases.remove(label),
+    };
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn layout_base(label: &str) -> Option<LayoutBase> {
+    LAYOUT_BASES.lock().get(label).copied()
+}
+
+/// The window's size changed: move its shown panes to where the page will
+/// put them, without waiting for it. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
+    let panes: Vec<(String, cef::OverlayController)> = state
+        .browser_pane_overlays
+        .lock()
+        .iter()
+        .filter(|(_, (w, _))| w == window_label)
+        .map(|(label, (_, c))| (label.clone(), c.clone()))
+        .collect();
+    for (label, controller) in panes {
+        let Some(base) = layout_base(&label) else { continue };
+        let Some((x, y, width, height)) = state.browser_pane_physical_rects.lock().get(&label).copied() else {
+            continue;
+        };
+        let wnum = state.browser_pane_overlay_wnums.try_lock().and_then(|m| m.get(&label).copied()).unwrap_or(0);
+        crate::ui_tasks::move_shown_pane_overlay(&controller, wnum, &Rect { x, y, width, height }, Some(&base));
+    }
+}
+
 /// A window's rects waiting for the UI thread, and who is waiting on them.
 #[derive(Default)]
 struct Pending {
     /// In first-arrival order; a newer rect for a pane replaces its entry in place.
-    rects: Vec<PaneBounds>,
+    /// Each with what its batch was laid out against; installed with the
+    /// rect, so a window resize never reads a rect against another's base.
+    rects: Vec<(PaneBounds, Option<LayoutBase>)>,
     waiters: Vec<oneshot::Sender<()>>,
     /// A UI task for this window is posted and hasn't run yet.
     scheduled: bool,
@@ -100,12 +196,17 @@ struct PendingByWindow(HashMap<String, Pending>);
 impl PendingByWindow {
     /// Merge `rects` into `window`'s pending set. Returns the receiver that
     /// fires once they are applied, and whether the caller must post a task.
-    fn enqueue(&mut self, window: &str, rects: Vec<PaneBounds>) -> (oneshot::Receiver<()>, bool) {
+    fn enqueue(
+        &mut self,
+        window: &str,
+        rects: Vec<PaneBounds>,
+        base: Option<LayoutBase>,
+    ) -> (oneshot::Receiver<()>, bool) {
         let p = self.0.entry(window.to_string()).or_default();
         for r in rects {
-            match p.rects.iter_mut().find(|e| e.block_id == r.block_id) {
-                Some(e) => *e = r,
-                None => p.rects.push(r),
+            match p.rects.iter_mut().find(|(e, _)| e.block_id == r.block_id) {
+                Some(e) => *e = (r, base),
+                None => p.rects.push((r, base)),
             }
         }
         let (tx, rx) = oneshot::channel();
@@ -126,11 +227,17 @@ static PENDING: LazyLock<Mutex<PendingByWindow>> = LazyLock::new(Default::defaul
 impl BrowserPaneManager {
     /// Move `window_label`'s panes to `rects` in one UI-thread step. Resolves
     /// when they have moved, or after `APPLY_WAIT`.
-    pub async fn set_rects(&self, state: &Arc<AppState>, window_label: &str, rects: Vec<PaneBounds>) {
+    pub async fn set_rects(
+        &self,
+        state: &Arc<AppState>,
+        window_label: &str,
+        rects: Vec<PaneBounds>,
+        base: Option<LayoutBase>,
+    ) {
         if rects.is_empty() {
             return;
         }
-        let (applied, post) = PENDING.lock().enqueue(window_label, rects);
+        let (applied, post) = PENDING.lock().enqueue(window_label, rects, base);
         if post {
             let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
             if post_task(ThreadId::UI, Some(&mut task)) == 0 {
@@ -165,12 +272,18 @@ wrap_task! {
 }
 
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
-fn apply(state: &Arc<AppState>, window_label: &str, rects: &[PaneBounds]) {
-    let live: Vec<(&PaneBounds, String)> = rects
-        .iter()
-        .filter(|r| state.browser_pane_window_label(&r.block_id).as_deref() == Some(window_label))
-        .filter_map(|r| state.live_browser_pane_label(&r.block_id).map(|label| (r, label)))
-        .collect();
+/// Each pane's base is installed with its rect (`note_layout_base`).
+fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option<LayoutBase>)]) {
+    let mut live: Vec<(&PaneBounds, String)> = Vec::with_capacity(rects.len());
+    for (r, base) in rects {
+        if state.browser_pane_window_label(&r.block_id).as_deref() != Some(window_label) {
+            continue;
+        }
+        if let Some(label) = state.live_browser_pane_label(&r.block_id) {
+            note_layout_base(&label, *base);
+            live.push((r, label));
+        }
+    }
     if live.is_empty() {
         return;
     }
@@ -274,32 +387,85 @@ mod tests {
     #[test]
     fn posts_one_task_per_window_until_it_runs() {
         let mut p = PendingByWindow::default();
-        let (_a, post_a) = p.enqueue("main", vec![b("x", 1)]);
-        let (_b, post_b) = p.enqueue("main", vec![b("y", 2)]);
-        let (_c, post_c) = p.enqueue("floating-1", vec![b("z", 3)]);
+        let (_a, post_a) = p.enqueue("main", vec![b("x", 1)], None);
+        let (_b, post_b) = p.enqueue("main", vec![b("y", 2)], None);
+        let (_c, post_c) = p.enqueue("floating-1", vec![b("z", 3)], None);
         assert!(post_a);
         assert!(!post_b);
         assert!(post_c);
         p.take("main");
-        let (_d, post_d) = p.enqueue("main", vec![b("x", 4)]);
+        let (_d, post_d) = p.enqueue("main", vec![b("x", 4)], None);
         assert!(post_d);
     }
 
     #[test]
     fn a_newer_rect_replaces_a_panes_pending_one_in_place() {
         let mut p = PendingByWindow::default();
-        let _ = p.enqueue("main", vec![b("x", 1), b("y", 2)]);
-        let _ = p.enqueue("main", vec![b("x", 9)]);
+        let _ = p.enqueue("main", vec![b("x", 1), b("y", 2)], None);
+        let _ = p.enqueue("main", vec![b("x", 9)], None);
         let taken = p.take("main");
-        assert_eq!(taken.rects, vec![b("x", 9), b("y", 2)]);
+        assert_eq!(taken.rects, vec![(b("x", 9), None), (b("y", 2), None)]);
         assert_eq!(taken.waiters.len(), 2);
+    }
+
+    fn t(r: Rect) -> (i32, i32, i32, i32) {
+        (r.x, r.y, r.width, r.height)
+    }
+
+    fn base() -> LayoutBase {
+        // A 1000x800 page whose tile layout leaves a 70 px top bar and a 50 px status bar.
+        LayoutBase::parse(&serde_json::json!({
+            "viewport": { "width": 1000, "height": 800 },
+            "layout": { "x": 0, "y": 70, "width": 1000, "height": 680 },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_same_size_keeps_a_rect() {
+        let r = Rect { x: 500, y: 100, width: 500, height: 300 };
+        assert_eq!(t(base().predict(&r, 1000, 800)), t(r));
+    }
+
+    #[test]
+    fn a_right_edge_pane_follows_the_window_and_scales_with_the_layout() {
+        let r = Rect { x: 500, y: 100, width: 500, height: 300 };
+        assert_eq!(t(base().predict(&r, 800, 800)), (400, 100, 400, 300));
+    }
+
+    #[test]
+    fn the_top_and_bottom_bars_keep_their_size() {
+        // The pane fills the layout; 136 px less height all comes out of it.
+        let r = Rect { x: 0, y: 70, width: 1000, height: 680 };
+        assert_eq!(t(base().predict(&r, 1000, 664)), (0, 70, 1000, 544));
+    }
+
+    #[test]
+    fn a_batch_without_a_layout_scales_with_the_viewport() {
+        let b = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 1000, "height": 800 } })).unwrap();
+        let r = Rect { x: 500, y: 0, width: 500, height: 800 };
+        assert_eq!(t(b.predict(&r, 1200, 800)), (600, 0, 600, 800));
+        assert!(LayoutBase::parse(&serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn each_pending_rect_keeps_its_own_batch_s_layout_base() {
+        let mut p = PendingByWindow::default();
+        let newer = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 900, "height": 800 } }));
+        let _ = p.enqueue("main", vec![b("x", 1), b("y", 1)], Some(base()));
+        let _ = p.enqueue("main", vec![b("y", 2)], newer);
+        let _ = p.enqueue("main", vec![b("z", 3)], None);
+        assert_eq!(
+            p.take("main").rects,
+            vec![(b("x", 1), Some(base())), (b("y", 2), newer), (b("z", 3), None)]
+        );
     }
 
     #[test]
     fn taking_wakes_every_waiter() {
         let mut p = PendingByWindow::default();
-        let (mut rx1, _) = p.enqueue("main", vec![b("x", 1)]);
-        let (mut rx2, _) = p.enqueue("main", vec![b("y", 2)]);
+        let (mut rx1, _) = p.enqueue("main", vec![b("x", 1)], None);
+        let (mut rx2, _) = p.enqueue("main", vec![b("y", 2)], None);
         for w in p.take("main").waiters {
             w.send(()).unwrap();
         }

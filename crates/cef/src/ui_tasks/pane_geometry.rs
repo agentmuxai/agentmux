@@ -849,11 +849,17 @@ wrap_task! {
 /// its window's client area), without the show, window scan and repair of
 /// `SetPaneBoundsViewsTask`: one `setFrame:display:` on the overlay NSWindow
 /// and the matching `set_bounds`, which keeps CEF's Views layout from putting
-/// the old frame back. Returns false, having changed nothing, when the pane
-/// is hidden or its NSWindow can't be found; the caller then posts the full
-/// task. UI thread only.
+/// the old frame back. With `base`, the rect is first stretched to the
+/// window's current size (`LayoutBase`). Returns false, having changed
+/// nothing, when the pane is hidden or its NSWindow can't be found; the caller
+/// then posts the full task. UI thread only.
 #[cfg(target_os = "macos")]
-pub fn move_shown_pane_overlay(controller: &OverlayController, overlay_wnum: isize, rect: &Rect) -> bool {
+pub fn move_shown_pane_overlay(
+    controller: &OverlayController,
+    overlay_wnum: isize,
+    rect: &Rect,
+    base: Option<&crate::browser_panes::bounds::LayoutBase>,
+) -> bool {
     use std::ffi::{c_char, c_void};
     type Id = *mut c_void;
     type Sel = *const c_void;
@@ -898,6 +904,16 @@ pub fn move_shown_pane_overlay(controller: &OverlayController, overlay_wnum: isi
         };
         let sel_frame = sel_registerName(b"frame\0".as_ptr() as _);
         let parent_frame = get_frame(parent, sel_frame);
+        // Rects the page laid out for an older window size move with the
+        // window: see `LayoutBase`.
+        let rect = &match base {
+            Some(b) => b.predict(
+                rect,
+                (parent_frame.size.w * scale).round() as i32,
+                (parent_frame.size.h * scale).round() as i32,
+            ),
+            None => rect.clone(),
+        };
         let (pane_x, pane_y) = (rect.x as f64 / scale, rect.y as f64 / scale);
         let (pane_w, pane_h) = (rect.width as f64 / scale, rect.height as f64 / scale);
         let target = NSRect {
