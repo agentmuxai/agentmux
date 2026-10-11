@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package AgentMux as a portable directory + ZIP (Windows x64).
+# Package AgentMux as a portable directory + .7z archive (Windows x64).
 # Usage: bash scripts/package-portable.sh [output-dir]
 #
 # Default output: ~/Desktop/agentmux-{version}-x64-portable/
@@ -28,7 +28,7 @@ LABEL="${AGENTMUX_BUILD_LABEL:-$VERSION}"
 CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
 OUTDIR="${1:-$HOME/Desktop}"
 PORTABLE="$OUTDIR/agentmux-$LABEL-x64-portable"
-ZIPPATH="$OUTDIR/agentmux-$LABEL-x64-portable.zip"
+ARCHIVE_PATH="$OUTDIR/agentmux-$LABEL-x64-portable.7z"
 
 echo "Packaging AgentMux $LABEL Portable..."
 
@@ -81,7 +81,7 @@ if [ -d "$PORTABLE" ] && command -v powershell.exe >/dev/null 2>&1; then
 fi
 
 # Clean previous
-rm -rf "$PORTABLE" "$ZIPPATH"
+rm -rf "$PORTABLE" "$ARCHIVE_PATH"
 
 # Create structure. No `data/` dir: portable builds are stateless on disk —
 # user data lives in ~/.agentmux/versions/<version>/ (agentmux-common::
@@ -108,7 +108,8 @@ cat > "$PORTABLE/README.txt" <<READMEEOF
 AgentMux $LABEL - Portable Edition
 
 Quick Start:
-  1. Extract this folder (or ZIP) anywhere
+  1. Extract this folder (or the .7z archive) anywhere.
+     Windows 11 opens .7z itself; on Windows 10 use 7-Zip (https://7-zip.org).
   2. Run agentmux.exe
 
 Requirements:
@@ -301,49 +302,53 @@ fi
 # Size
 DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
 
-# ZIP
+# Archive: a solid LZMA2 .7z (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
+# On 0.59.19 that is 127 MiB, against 205 MiB for the Deflate .zip it replaced.
 #
-# Tries pwsh 7 first (Compress-Archive with proper module), then falls back to
-# Windows PowerShell 5, then to `tar -a -cf` (bsdtar on Win10+). If *none*
-# succeed the script exits non-zero instead of silently reporting "N/A", which
-# is how a broken packaging run used to produce a portable folder on the
-# desktop with no ZIP beside it.
+# 7-Zip only: there is no fallback to another format. A fallback would ship a
+# different file under a different name, and a missing archive (or the wrong
+# one) is what this check exists to catch. winget and the 7-Zip installer
+# don't put 7z on PATH, so its default install folder is looked in too.
+find_7z() {
+    local c
+    for c in 7z 7za; do
+        if command -v "$c" >/dev/null 2>&1; then
+            command -v "$c"
+            return 0
+        fi
+    done
+    for c in "${PROGRAMFILES:-C:/Program Files}/7-Zip/7z.exe" "C:/Program Files/7-Zip/7z.exe"; do
+        if [ -x "$c" ]; then
+            echo "$c"
+            return 0
+        fi
+    done
+    return 1
+}
+
 cd "$OUTDIR"
-ZIP_NAME="agentmux-$LABEL-x64-portable.zip"
-rm -f "$ZIP_NAME"
+ARCHIVE_NAME=$(basename "$ARCHIVE_PATH")
+rm -f "$ARCHIVE_NAME"
 
-portable_basename=$(basename "$PORTABLE")
-zip_made=0
-
-if command -v pwsh >/dev/null 2>&1; then
-    if pwsh -Command "Compress-Archive -Path '${portable_basename}/*' -DestinationPath '$ZIP_NAME' -Force" >/dev/null 2>&1; then
-        zip_made=1
-    fi
-fi
-
-if [ "$zip_made" -eq 0 ]; then
-    if powershell -Command "Compress-Archive -Path '${portable_basename}/*' -DestinationPath '$ZIP_NAME' -Force" >/dev/null 2>&1; then
-        zip_made=1
-    fi
-fi
-
-if [ "$zip_made" -eq 0 ]; then
-    # `-C "$portable_basename" .` archives the contents at the ZIP root,
-    # matching Compress-Archive's `-Path '…/*'` behavior above. Without
-    # `-C`, bsdtar wraps everything under a `$portable_basename/` directory
-    # which breaks consumers expecting a flat layout (launcher + runtime/
-    # at the ZIP root).
-    if tar -a -cf "$ZIP_NAME" -C "$portable_basename" . >/dev/null 2>&1; then
-        zip_made=1
-    fi
-fi
-
-if [ "$zip_made" -eq 0 ] || [ ! -f "$ZIP_NAME" ]; then
-    echo "ERROR: failed to create $ZIP_NAME — Compress-Archive (pwsh + powershell) and tar -a both failed" >&2
+if ! SEVENZIP=$(find_7z); then
+    echo "ERROR: 7-Zip not found, so $ARCHIVE_NAME can't be made." >&2
+    echo "       Install it (winget install 7zip.7zip) or put 7z on PATH, then re-run." >&2
     exit 1
 fi
 
-ZIP_SIZE=$(du -sh "$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
+# Run from inside the folder so the launcher and runtime/ sit at the archive
+# root, with no wrapping folder.
+portable_basename=$(basename "$PORTABLE")
+if ! (cd "$portable_basename" && "$SEVENZIP" a -t7z -m0=lzma2 -mx=9 -ms=on -mmt=on "../$ARCHIVE_NAME" . >/dev/null); then
+    echo "ERROR: 7-Zip failed to create $ARCHIVE_NAME" >&2
+    exit 1
+fi
+if ! "$SEVENZIP" t "$ARCHIVE_NAME" >/dev/null; then
+    echo "ERROR: $ARCHIVE_NAME failed 7-Zip's integrity test" >&2
+    exit 1
+fi
+
+ARCHIVE_SIZE=$(du -sh "$ARCHIVE_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 
 # Append compact size row to VERSION_HISTORY.md under the "## Sizes" table
 # if it exists. REPO_ROOT was captured at the top of the script BEFORE the
@@ -360,11 +365,12 @@ if [ -z "${AGENTMUX_BUILD_LABEL:-}" ] \
     && [ -f "$REPO_ROOT/VERSION_HISTORY.md" ] \
     && grep -q "^## Sizes " "$REPO_ROOT/VERSION_HISTORY.md" 2>/dev/null; then
     DIR_BYTES=$(find "$PORTABLE" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')
-    ZIP_BYTES=$(stat -c '%s' "$ZIP_NAME" 2>/dev/null || echo 0)
+    ARCHIVE_BYTES=$(stat -c '%s' "$ARCHIVE_NAME" 2>/dev/null || echo 0)
     DIR_MIB=$(awk "BEGIN {printf \"%.1f\", $DIR_BYTES/1024/1024}")
-    ZIP_MIB=$(awk "BEGIN {printf \"%.1f\", $ZIP_BYTES/1024/1024}")
+    ARCHIVE_MIB=$(awk "BEGIN {printf \"%.1f\", $ARCHIVE_BYTES/1024/1024}")
     TODAY=$(date +%Y-%m-%d)
-    ROW="| $VERSION | $TODAY | $ZIP_MIB MiB | $DIR_MIB MiB | |"
+    # The table's "ZIP" column holds the archive's size, now a .7z.
+    ROW="| $VERSION | $TODAY | $ARCHIVE_MIB MiB | $DIR_MIB MiB | |"
 
     # Insert the row immediately after the header separator line of the
     # Sizes table (the `|---|---|...` line). awk in-place via temp file.
@@ -382,4 +388,4 @@ fi
 echo ""
 echo "[SUCCESS] Portable $LABEL"
 echo "  Directory: $PORTABLE ($DIR_SIZE)"
-echo "  ZIP: $ZIPPATH ($ZIP_SIZE)"
+echo "  Archive: $ARCHIVE_PATH ($ARCHIVE_SIZE)"

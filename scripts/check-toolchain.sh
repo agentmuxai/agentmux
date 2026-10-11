@@ -104,6 +104,13 @@ case "$OS_NAME" in
     check "rust (cargo)" cargo "1.77" "https://rustup.rs/ (rustup-init.exe), then install Visual Studio Build Tools with the 'Desktop development with C++' workload, or: rustup update"
     check "cmake" cmake "3.20" "Ships with Visual Studio Build Tools — install the 'Desktop development with C++' workload from https://visualstudio.microsoft.com/visual-cpp-build-tools/"
     check "ninja" ninja "1.10" "Ships with Visual Studio but is not always on PATH — see CLAUDE.md's Build Prerequisites section for the exact copy command"
+    # Only `task package` needs it (the portable is a .7z), so a note, not a
+    # failure. Looked for where package-portable.sh looks.
+    if command -v 7z >/dev/null 2>&1 || command -v 7za >/dev/null 2>&1 || [ -x "${PROGRAMFILES:-C:/Program Files}/7-Zip/7z.exe" ]; then
+      echo "  OK   7-Zip (for task package)"
+    else
+      echo "  NOTE 7-Zip not found — only 'task package' needs it, for the portable .7z: winget install 7zip.7zip"
+    fi
     ;;
   *)
     echo "  Unrecognized platform ($OS_NAME) — skipping cmake/ninja/rust version checks. See BUILD.md."

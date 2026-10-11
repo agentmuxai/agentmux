@@ -57,7 +57,7 @@ The app must know how it was installed to determine the correct update path.
 |------|----------|---------------|
 | `msix` | Windows | Open Microsoft Store page for AgentMux |
 | `nsis` | Windows | Download `.exe` installer, launch it |
-| `portable` | Windows | Download `.zip`, open containing folder |
+| `portable` | Windows | Download `.7z`, open containing folder |
 | `dmg` | macOS | Download `.dmg`, open it |
 | `appimage` | Linux | Download `.AppImage`, replace in-place |
 | `unknown` | Any | Open GitHub releases page in browser |
@@ -154,11 +154,11 @@ The "Update Available" indicator in the status bar:
 5. User clicks again → backend launches the installer exe and exits the app
 6. The NSIS installer handles the upgrade in-place
 
-### Portable (Windows ZIP)
+### Portable (Windows .7z)
 
 1. User clicks "Update v0.33.0"
 2. Status → `downloading`
-3. Backend downloads `AgentMux_X.Y.Z_x64-portable.zip` to the user's Downloads folder
+3. Backend downloads `agentmux-X.Y.Z-x64-portable.7z` to the user's Downloads folder
 4. Status → `ready` with label "Update Downloaded"
 5. User clicks again → open the Downloads folder in Explorer
 6. User manually extracts and replaces (portable users expect this)
@@ -194,7 +194,7 @@ Map install type to GitHub release asset filename pattern:
 | Install Type | Asset Pattern |
 |-------------|---------------|
 | `nsis` | `AgentMux_*_x64-setup.exe` |
-| `portable` | `AgentMux_*_x64-portable.zip` |
+| `portable` | `agentmux-*-x64-portable.7z` |
 | `dmg` | `AgentMux_*_aarch64.dmg` or `AgentMux_*_x64.dmg` |
 | `appimage` | `AgentMux_*_amd64.AppImage` |
 | `msix` | N/A (Store handles it) |
