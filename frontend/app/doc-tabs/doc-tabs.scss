@@ -46,3 +46,37 @@
         display: none;
     }
 }
+
+// A document tab hovering near a pane's edge (doc-tab-new-pane.ts
+// `registerDocTabSplitTarget`): the half of the pane where the new pane goes,
+// drawn as the layout's own placeholder for a pane being moved there.
+.tile-node.doc-tab-split--left,
+.tile-node.doc-tab-split--right,
+.tile-node.doc-tab-split--up,
+.tile-node.doc-tab-split--down {
+    &::after {
+        content: "";
+        position: absolute;
+        z-index: var(--zindex-layout-placeholder-container);
+        background-color: var(--drop-target-bg);
+        border: 1px solid var(--drop-zone-armed-border);
+        box-sizing: border-box;
+        pointer-events: none;
+    }
+}
+
+.tile-node.doc-tab-split--left::after {
+    inset: 0 50% 0 0;
+}
+
+.tile-node.doc-tab-split--right::after {
+    inset: 0 0 0 50%;
+}
+
+.tile-node.doc-tab-split--up::after {
+    inset: 0 0 50% 0;
+}
+
+.tile-node.doc-tab-split--down::after {
+    inset: 50% 0 0 0;
+}

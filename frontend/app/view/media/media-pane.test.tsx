@@ -294,13 +294,16 @@ describe("moving Media tabs between panes", () => {
         b.dispose();
     });
 
-    it("an empty tab moved onto a pane showing only its empty tab joins it", () => {
+    it("an empty tab moved onto a pane showing only its empty tab takes its place; beside a file, it joins", () => {
         const a = new MediaPaneModel(ctxFor("blank-a"));
         const b = new MediaPaneModel(ctxFor("blank-b"));
         const blank = a.tabs.activeId()!;
         expect(moveDocTab("blank-a", blank, "blank-b")).toEqual({ moved: true });
+        expect(b.tabs.tabs().map((t) => t.id)).toEqual([blank]);
+        b.open("C:/out/1.png");
+        a.tabs.newDocument();
+        expect(moveDocTab("blank-a", a.tabs.activeId()!, "blank-b")).toEqual({ moved: true });
         expect(b.tabs.tabs()).toHaveLength(2);
-        expect(b.tabs.activeId()).toBe(blank);
         a.dispose();
         b.dispose();
     });

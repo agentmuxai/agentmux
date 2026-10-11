@@ -157,8 +157,9 @@ describe("moving a document tab between panes", () => {
 });
 
 describe("the pane-wide drop zone", () => {
-    const drag = (tabId: string, sourceBlockId: string, docType = "media") => ({
+    const drag = (tabId: string, sourceBlockId: string, docType = "media", at = { clientX: 50, clientY: 50 }) => ({
         source: { data: { type: docTabItemType, tabId, docType, sourceBlockId } },
+        input: at,
     });
 
     it("takes a tab of its type from another pane, and declines its own, other types and other drags", () => {
@@ -169,7 +170,21 @@ describe("the pane-wide drop zone", () => {
         expect(zone.canDrop(drag("t", "a"))).toBe(true);
         expect(zone.canDrop(drag("t", "b"))).toBe(false);
         expect(zone.canDrop(drag("t", "a", "editor"))).toBe(false);
-        expect(zone.canDrop({ source: { data: { type: "PANE_TAB_ITEM", blockId: "x" } } })).toBe(false);
+        expect(zone.canDrop({ source: { data: { type: "PANE_TAB_ITEM", blockId: "x" } }, input: { clientX: 50, clientY: 50 } })).toBe(false);
+    });
+
+    it("near the pane's edge, steps aside: the tab goes into a new pane there", () => {
+        const tile = document.createElement("div");
+        tile.className = "tile-node";
+        tile.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
+        const el = document.createElement("div");
+        tile.appendChild(el);
+        registerDocTabDropZone(el, "media", "b");
+        const zone = hub.dropTargets[0];
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 50, clientY: 50 }))).toBe(true);
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 30, clientY: 50 }))).toBe(true);
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 5, clientY: 50 }))).toBe(false);
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 50, clientY: 97 }))).toBe(false);
     });
 
     /** pragmatic-dnd's drop location: the accepting targets, innermost first. */

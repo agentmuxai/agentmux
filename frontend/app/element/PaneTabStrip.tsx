@@ -921,6 +921,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     ...(props.getTabClass?.(props.tab) ?? {}),
                 }}
                 style={colorStyle()}
+                data-tab-id={id()}
                 ref={(el) => { pillRef = el; }}
                 onMouseDown={onMouseDown}
                 onClick={onClick}

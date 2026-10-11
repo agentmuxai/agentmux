@@ -1,7 +1,7 @@
 # Plan — the Editor's document tabs on the shared surfaces
 
 **Date:** 2026-10-10
-**Status:** active — built in the PR that adds this plan.
+**Status:** proposed — built on branch `agent2/editor-on-doc-tabs`, not merged yet; this line gets the PR number when it is.
 **Author:** Agent2@narko
 **Builds on:**
 - [SPEC_DOCUMENT_TABS_2026_10_02.md](SPEC_DOCUMENT_TABS_2026_10_02.md) §6.1 (the Editor on document tabs) and §6.3 (Media)

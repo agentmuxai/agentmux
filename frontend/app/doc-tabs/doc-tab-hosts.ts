@@ -18,6 +18,7 @@
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { asDocTabDragData } from "@/app/drag/drag-types";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
+import { docTabSplitSide, tileOf } from "./doc-tab-split-side";
 import type { DocDropAt, DocTab } from "./doc-tabs";
 import type { DocTabsModel } from "./doc-tabs-controller";
 import "./doc-tabs.scss";
@@ -57,6 +58,8 @@ const hosts = new Map<string, DocTabHost>();
  *  the second's. */
 export function registerDocTabHost(blockId: string, host: DocTabHost): () => void {
     hosts.set(blockId, host);
+    for (const resolve of waiting.get(blockId) ?? []) resolve(host);
+    waiting.delete(blockId);
     return () => {
         if (hosts.get(blockId) === host) hosts.delete(blockId);
     };
@@ -64,6 +67,30 @@ export function registerDocTabHost(blockId: string, host: DocTabHost): () => voi
 
 export function docTabHost(blockId: string): DocTabHost | undefined {
     return hosts.get(blockId);
+}
+
+const waiting = new Map<string, ((host: DocTabHost | undefined) => void)[]>();
+
+/** Block `blockId`'s host once it registers (a pane just created mounts a
+ *  moment later), or undefined after `timeoutMs`. */
+export function whenDocTabHost(blockId: string, timeoutMs = 5000): Promise<DocTabHost | undefined> {
+    const now = hosts.get(blockId);
+    if (now) return Promise.resolve(now);
+    return new Promise((resolve) => {
+        const list = waiting.get(blockId) ?? [];
+        const done = (host: DocTabHost | undefined) => {
+            clearTimeout(timer);
+            resolve(host);
+        };
+        const timer = setTimeout(() => {
+            const left = (waiting.get(blockId) ?? []).filter((r) => r !== done);
+            if (left.length) waiting.set(blockId, left);
+            else waiting.delete(blockId);
+            resolve(undefined);
+        }, timeoutMs);
+        list.push(done);
+        waiting.set(blockId, list);
+    });
 }
 
 export type MoveResult = { moved: true } | { moved: false; reason?: string };
@@ -108,7 +135,8 @@ export interface DocTabsHostHooks<P> {
     refuseGive?(tab: DocTab<P>): string | null;
     /** A tab that shows nothing yet (Media's "Click to load media"): when one
      *  is in front, an arriving tab with a document takes its place rather
-     *  than joining it; another placeholder joins it. */
+     *  than joining it. Another placeholder joins it, unless it is the pane's
+     *  only tab (a pane just made for the tab), so no pane shows two. */
     isPlaceholder?(tab: DocTab<P>): boolean;
     /** The state of its type that a tab takes along besides itself, read
      *  before it leaves (the Editor's unsaved text, its undo history). */
@@ -143,7 +171,8 @@ export function docTabsHost<P>(tabs: DocTabsModel<P>, docType: string, hooks: Do
             const tab = hooks.arriving?.(transfer.tab as DocTab<P>, transfer.live) ?? (transfer.tab as DocTab<P>);
             const activeId = tabs.activeId();
             const front = activeId ? find(activeId) : undefined;
-            const placeholder = front && hooks.isPlaceholder?.(front) && !hooks.isPlaceholder(tab) ? front : undefined;
+            const placeholder =
+                front && hooks.isPlaceholder?.(front) && (!hooks.isPlaceholder(tab) || tabs.tabs().length === 1) ? front : undefined;
             tabs.attach(tab, at ?? (placeholder ? { targetId: placeholder.id, position: "after" } : undefined));
             // Gone, not closed: nothing to reopen. Only once the tab is in.
             if (placeholder && find(tab.id)) tabs.detach(placeholder.id);
@@ -164,9 +193,12 @@ export function registerDocTabDropZone(el: HTMLElement, docType: string, blockId
     const setHover = (on: boolean) => el.classList.toggle("doc-tab-host--drop-hover", on);
     const cleanup = dropTargetForElements({
         element: el,
-        canDrop: ({ source }) => {
+        canDrop: ({ source, input }) => {
             const data = asDocTabDragData(source.data);
-            return !!data && data.docType === docType && data.sourceBlockId !== blockId;
+            if (!data || data.docType !== docType || data.sourceBlockId === blockId) return false;
+            // Near the pane's edge the tab goes into a new pane beside it
+            // (doc-tab-new-pane.ts), not into this one.
+            return docTabSplitSide(tileOf(el), input.clientX, input.clientY) == null;
         },
         onDragEnter: () => setHover(true),
         onDragLeave: () => setHover(false),

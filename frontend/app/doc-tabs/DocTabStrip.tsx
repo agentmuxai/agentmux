@@ -16,11 +16,13 @@
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md.
  */
 
+import { registerContextMenuRegion } from "@/app/block/context-menu-region";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
-import { Show, type JSX } from "solid-js";
+import { onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { DocTab } from "./doc-tabs";
 import type { DocTabsModel } from "./doc-tabs-controller";
 import { dropDocTab } from "./doc-tab-hosts";
+import { moveDocTabToNewPane } from "./doc-tab-new-pane";
 import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
 
@@ -46,9 +48,34 @@ export function DocTabStrip<P>(props: {
     tabClass?: (tab: DocTab<P>) => Record<string, boolean>;
 }): JSX.Element {
     const ctl = props.ctl;
+    // A right-click on a tab adds its items to the pane menu (blockframe's
+    // body menu reads the region). The tab is noted as the click starts, so
+    // the items, built a moment later, act on it.
+    let rightClicked: string | null = null;
+    const noteTab = (e: MouseEvent) => {
+        rightClicked = (e.target as Element | null)?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null;
+    };
+    const tabMenu = (): ContextMenuItem[] => {
+        const id = rightClicked;
+        if (!id || !ctl.tabs().some((t) => t.id === id)) return [];
+        return [
+            { label: "Move to New Pane", click: () => void moveDocTabToNewPane(props.blockId, id, props.blockId, "right") },
+            { label: "Close Tab", click: () => void ctl.close(id) },
+        ];
+    };
+    const bindMenu = (el: HTMLDivElement) => {
+        onMount(() => {
+            el.addEventListener("contextmenu", noteTab, true);
+            const off = registerContextMenuRegion(el, { items: tabMenu });
+            onCleanup(() => {
+                el.removeEventListener("contextmenu", noteTab, true);
+                off();
+            });
+        });
+    };
     return (
         <Show when={props.show?.() ?? ctl.showStrip()}>
-            <div class="doc-tab-strip" role="presentation">
+            <div class="doc-tab-strip" role="presentation" ref={bindMenu}>
                 {props.leading}
                 <Show when={ctl.tabs().length > 0}>
                     <PaneTabStrip<DocTab<P>>
