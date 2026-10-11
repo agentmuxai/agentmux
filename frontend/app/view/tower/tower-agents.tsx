@@ -286,10 +286,10 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                             <SortHeader model={m} key="mem" label="Memory" numeric />
                             <Show when={m.moreColumns()}>
                                 <th class="tower-num" title="CPU time used, with everything it started">
-                                    CPU time
+                                    <span class="tower-th-label ui-density-compact">CPU time</span>
                                 </th>
                                 <th class="tower-num" title="The most private memory seen">
-                                    Peak
+                                    <span class="tower-th-label ui-density-compact">Peak</span>
                                 </th>
                             </Show>
                             <SortHeader model={m} key="count" label="PID" numeric />

@@ -16,6 +16,7 @@
 
 .tower-toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-2);
@@ -24,10 +25,11 @@
 }
 
 // In a narrow pane the machine picker gives way, not the view tabs, which
-// otherwise shrank to nothing and left no way to switch views.
+// otherwise shrank to nothing and left no way to switch views; below its
+// minimum the toolbar wraps instead of cutting "This computer" to "Tl".
 .tower-machine {
     max-width: 220px;
-    min-width: 0;
+    min-width: 120px;
 }
 
 .tower-toolbar > .ui-tabs {
@@ -129,12 +131,18 @@
         background: var(--main-bg-color);
         z-index: 1;
 
+        // CPU and Memory; then the PID, last in every table. With the Agents
+        // view's More columns the 4th is CPU time and the 5th Peak (a memory
+        // figure), so the PID is 6th: each column is sized, or the spare width
+        // went to Peak and the PID as well as the Process names.
         &:nth-child(2),
-        &:nth-child(3) {
+        &:nth-child(3),
+        &:nth-child(5) {
             width: 92px;
         }
 
-        &:nth-child(4) {
+        &:nth-child(4),
+        &:nth-child(6) {
             width: 84px;
         }
     }
@@ -572,20 +580,38 @@ tr:hover .tower-reveal,
     font-size: 0.8em;
 }
 
-// A narrow pane: the number columns give the names room.
+// A narrow pane: the number columns give the names room. A memory figure
+// ("259.6 MB") needs about 70 px with the cell's padding; at 64 it was cut
+// and the table overflowed its pane.
 .tower-view .tower-table th {
     @container (max-width: 640px) {
-        &:nth-child(2),
-        &:nth-child(3) {
+        &:nth-child(2) {
             width: 64px;
         }
 
+        &:nth-child(3),
+        &:nth-child(5) {
+            width: 76px;
+        }
+
         &:nth-child(4),
-        &:nth-child(5),
         &:nth-child(6) {
             width: 56px;
         }
     }
+}
+
+// A header that doesn't sort (More columns' CPU time and Peak), set like the
+// sorting ones' compact buttons rather than in the table's own font.
+.tower-th-label {
+    display: flex;
+    align-items: center;
+    min-height: var(--ui-height);
+    padding: var(--ui-pad-y) var(--ui-pad-x);
+    font-size: var(--ui-font-size);
+    font-weight: var(--ui-font-weight);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
 }
 
 // How long ago an exited process went: short, and never wrapped under its
