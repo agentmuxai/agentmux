@@ -49,6 +49,8 @@ The app restarted itself and restored its windows. macOS wrote a crash report (`
 - **Unverified:** whether it needs the warm-pool window (a pool window may already hold the pane's profile association), a pane that was just closed in the old window (the deferred destroy racing the new create), or just any tab move with a pane. A pane that is already in a pool window, or a tab without a pane, was not tried.
 - `close_browser(force=1)` and `OverlayController` destroy are deliberately deferred in `browser_pane/creation_views.rs` (`detach_browser_pane_view`) because of an earlier crash of the same family (`weak_ptr.h:250`, tab tear-off); this one may be the same race from the other side.
 
+**Other agent's data point (2026-10-11):** Masty reported 7 tab tear-offs (window tabs and pane tabs, none holding a browser pane) on a dev build of `main` with no crash. That fits the crash needing a tab with a browser pane in it, but is not proof.
+
 **To do:** reproduce on `main` with the log level raised; try (a) a tab with a pane torn off to a new window, (b) the same with no warm pool, (c) a tab with two panes; then find which object is attached twice.
 
 ---
@@ -77,6 +79,24 @@ The app restarted itself and restored its windows. macOS wrote a crash report (`
 | (new, not in the report) | #4688 | with a browser pane open, no window edge or corner could start a resize (a mouse hook skipped AppKit's resize tracking). Present since the hook was added; reproduced on a `main` dev build, and reported by the owner on the installed 0.59.16 |
 
 **To do:** a short "what shipped" section in the report, and strike M1 and M2 from its open list. M3 (a real-mouse drag) was in effect done by the owner testing the build by hand: "very smooth".
+
+---
+
+## F6. A dev window sat on its startup splash because its Vite server disappeared (cause unknown)
+
+**Seen:** 2026-10-11 ~13:24 local, `task dev` of `main` on a fresh branch (data dir `agento-tearoff-repro`), started detached with `nohup`. Vite came up (`ready in 2665 ms` on port 5340), the app window opened, and the page loaded, but the UI never rendered: `#main` had no children after 190 s, 250 resources loaded, none pending, nothing in the page's console.
+
+**Then:** reloading the page failed with `ERR_CONNECTION_REFUSED` on `localhost:5340` for every module. Nothing was listening on 5340; the `task dev` process and its launcher were still alive, so the app had no code server and `task dev` did not notice or restart it.
+
+**Not known:** what ended Vite. The host load average was 10–17 (other agents compiling and running their own dev builds on this machine) and another agent started its own `task dev` a few minutes before; its Vite uses a different port (the Taskfile picks the port per clone), so a port clash is not the explanation. No Vite error is in the log.
+
+**Workaround:** stop the `task dev` tree by PID and start it again; the second start worked. A health check for the Vite port in `task dev` (or a clear message when it vanishes) would have saved ~5 minutes.
+
+---
+
+## F7. A page-driving script that creates a block right after the window opens fails
+
+`BackendEndpointNotSetError: object.CreateBlock: backend endpoint not set yet`, from a CDP script that called `createTab`/`createBlock` on a window whose backend endpoints were not injected yet. Wait for `document.title` to show a tab before driving the page.
 
 ---
 
