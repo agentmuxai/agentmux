@@ -3,8 +3,8 @@
 **Date:** 2026-10-10
 **Status:** active. Phase 0 (one launch path, explicit reach) shipped in
 PR #4677. Phase 1 (observed servers) and Phase 2a (In use now) shipped in
-PR #4683 (with #4685). Phase 2b's catalog half ("Not loaded by") is in this
-PR; its startup-card half is deferred (§4). Phase 3 (other providers) is next.
+PR #4683 (with #4685). Phase 2b's catalog half ("Not loaded by") is PR #4701;
+its startup-card half is deferred (§4). Phase 3 (other providers) is next.
 **Author:** QTest@narko
 **Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
 (the investigation and history). File references are as of `main` at
