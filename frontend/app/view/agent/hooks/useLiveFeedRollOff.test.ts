@@ -8,9 +8,16 @@ import { useLiveFeedRollOff } from "./useLiveFeedRollOff";
 
 const userMsg = (id: string) => ({ type: "user_message", id, message: id }) as unknown as DocumentNode;
 
-function mount(opts: { outputFormat?: string; rollOff?: { prefixTurns: number; gapsBefore: string[] } } = {}) {
+function mount(
+    opts: {
+        outputFormat?: string;
+        rollOff?: { prefixTurns: number; gapsBefore: string[] };
+        nodes?: DocumentNode[];
+        historyOffset?: number;
+    } = {}
+) {
     const dispatched: Array<{ type: string }> = [];
-    const [doc] = createSignal<DocumentNode[]>([userMsg("u1"), userMsg("u2"), userMsg("keep")]);
+    const [doc] = createSignal<DocumentNode[]>(opts.nodes ?? [userMsg("u1"), userMsg("u2"), userMsg("keep")]);
     const [docState, setDocState] = createSignal({
         collapsedNodes: new Set<string>(),
         heldOpenNodes: new Set<string>(),
@@ -41,7 +48,7 @@ function mount(opts: { outputFormat?: string; rollOff?: { prefixTurns: number; g
             block: () => undefined,
             agentAtoms: () => ({ documentStateAtom: [docState, setDocState] }) as never,
             hidden: () => false,
-            history: { historyOffset: () => 0 },
+            history: { historyOffset: () => opts.historyOffset ?? 0 },
         });
         return { feed, dispose };
     });
@@ -88,5 +95,47 @@ describe("useLiveFeedRollOff", () => {
         expect(m.feed.earlierHistoryAvailable()).toBe(true);
         expect([...m.feed.gapsBefore()]).toEqual(["keep", "gone"]);
         m.dispose();
+    });
+
+    // A pane opens with about its budget restored and nothing rolled off.
+    // Scrolling up used to page the whole transcript in, and "Show agent
+    // history" only appeared after coming back down and a pass trimmed it.
+    describe("paging older turns in stops at the budget", () => {
+        // About 1 MB: at the budget, but under feedOverLimits' 1.1x trigger, so
+        // no roll-off pass is due — the state a freshly opened pane is in.
+        const fullFeed = (): DocumentNode[] => [
+            userMsg("u1"),
+            { type: "markdown", id: "a1", content: "x".repeat(1_000_000) } as unknown as DocumentNode,
+            userMsg("u2"),
+        ];
+
+        it("under the budget, scrolling up still pages older turns in", () => {
+            const m = mount({ historyOffset: 500 });
+            expect(m.feed.canPageOlder()).toBe(true);
+            expect(m.feed.earlierHistoryAvailable()).toBe(false);
+            m.dispose();
+        });
+
+        it("at the budget, it stops and the History row shows before any roll-off", () => {
+            const m = mount({ nodes: fullFeed(), historyOffset: 500 });
+            expect(m.feed.canPageOlder()).toBe(false);
+            expect(m.feed.earlierHistoryAvailable()).toBe(true);
+            // The count of earlier turns isn't known: they never loaded.
+            expect(m.feed.earlierTurnsKnown()).toBeUndefined();
+            m.dispose();
+        });
+
+        it("shows no History row when the whole transcript is already loaded", () => {
+            const m = mount({ nodes: fullFeed(), historyOffset: 0 });
+            expect(m.feed.earlierHistoryAvailable()).toBe(false);
+            m.dispose();
+        });
+
+        it("with the live feed off, paging is unchanged", () => {
+            const m = mount({ nodes: fullFeed(), historyOffset: 500, outputFormat: "some-other-format" });
+            expect(m.feed.canPageOlder()).toBe(true);
+            expect(m.feed.earlierHistoryAvailable()).toBe(false);
+            m.dispose();
+        });
     });
 });

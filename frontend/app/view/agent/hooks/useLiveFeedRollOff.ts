@@ -7,7 +7,7 @@ import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store"
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
-import { feedOverLimits, liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "../live-feed";
+import { feedSize, liveFeedSupported, resolveLiveFeedTurns, sizeAtBudget, sizeOverLimits, visibleIdsOf } from "../live-feed";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readToolResult, type ToolResultLoader } from "../tool-result-loader";
@@ -139,7 +139,16 @@ export function useLiveFeedRollOff(opts: {
     // transition, not on every flush. A pass made while the reader was up in
     // older rows may keep them all, so it runs again once they're back at the
     // bottom.
-    const feedOverBudget = createMemo(() => liveFeedOn() && feedOverLimits(paneModel.document(), liveFeedTurns));
+    const size = createMemo(() => (liveFeedOn() ? feedSize(paneModel.document()) : null));
+    const feedOverBudget = createMemo(() => {
+        const s = size();
+        return s !== null && sizeOverLimits(s, liveFeedTurns);
+    });
+    // Holds what it keeps: no more paging older turns in (see sizeAtBudget).
+    const feedFull = createMemo(() => {
+        const s = size();
+        return s !== null && sizeAtBudget(s, liveFeedTurns);
+    });
     createEffect(
         on(feedOverBudget, (over) => {
             if (over) scheduleRollOff();
@@ -180,13 +189,18 @@ export function useLiveFeedRollOff(opts: {
         )
     );
 
-    // Scrolling up pages older lines in while the pane's range is contiguous:
-    // once turns have rolled off the front, the lines just before the loaded
-    // range no longer join what's on screen, so History takes over.
-    const canPageOlder = (): boolean => !liveFeedOn() || rolledOffTurns() === 0;
-    // A new session's divider no longer hides what came before it, so only
-    // roll-off sends earlier turns to History.
-    const earlierHistoryAvailable = createMemo(() => liveFeedOn() && rolledOffTurns() > 0);
+    // Scrolling up pages older lines in while the pane's range is contiguous
+    // and under its budget. Once turns have rolled off the front, the lines
+    // just before the loaded range no longer join what's on screen; once the
+    // feed holds its budget, more would only roll off again. History takes
+    // over in both cases.
+    const canPageOlder = (): boolean => !liveFeedOn() || (rolledOffTurns() === 0 && !feedFull());
+    // Earlier turns are in History when they rolled off, or when the
+    // transcript has lines before the loaded range that the feed won't page
+    // in. A new session's divider no longer hides what came before it.
+    const earlierHistoryAvailable = createMemo(
+        () => liveFeedOn() && (rolledOffTurns() > 0 || (history.historyOffset() > 0 && feedFull()))
+    );
     // "N earlier turns" only when N is the whole story: everything before the
     // feed was loaded from line 0 and rolled off here.
     const earlierTurnsKnown = (): number | undefined =>
