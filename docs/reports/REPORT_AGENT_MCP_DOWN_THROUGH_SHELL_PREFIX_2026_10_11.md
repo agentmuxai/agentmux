@@ -61,7 +61,7 @@ When a prefixed script has no `eval` in it (a hook, or an MCP server with argume
 In `crates/bashwrap/src/prefix.rs`:
 
 1. **A lone word is a prefix call too.** Any single argument that isn't a subcommand or a flag is now taken as the CLI's prefix call.
-2. **Only a Bash call's script claims a Bash call's record.** A script without the CLI's `eval` runs as it is and never claims: a lone word is started directly as a program (no shell to mangle a Windows path; on Unix by `exec`, so the CLI's signals reach it), and a command line goes to `bash -c` as before.
+2. **Only a Bash call's script claims a Bash call's record.** A script without the CLI's `eval` runs as it is and never claims: a lone word is started directly as a program (found through `PATHEXT` on Windows, so a `.cmd` shim starts; on Unix by `exec`, so the CLI's signals reach it), and a command line goes to `bash -c` as before. On Windows, a command line whose program is a Windows path (`C:\tools\server.exe --port 1`) is split back into words and started directly instead, because bash would strip its backslashes; only an MCP server's line can have one, since the CLI makes a hook's paths POSIX.
 3. **Tests:** unit tests for the new shapes and for a non-Bash script leaving a waiting call alone; an integration test (`tests/prefix_runs_mcp_servers.rs`) that starts the real binary the way the CLI starts an MCP server and checks that stdin reaches the program and its stdout comes back byte for byte, with its exit code.
 
 Checked by hand on Windows: the fixed binary started as `agentmux-bashwrap agentmux-mcp` completes `initialize` and lists all 95 tools. The v0.59.19 binary prints the error above.

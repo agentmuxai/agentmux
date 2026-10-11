@@ -348,21 +348,26 @@ async fn report_call(tool_id: String, description: String) {
 /// stdio, untouched: an MCP server speaks JSON-RPC on it, so one added byte
 /// breaks it. A lone word is a program, started directly (no shell to
 /// mangle a Windows path, nothing to locate first); anything else is a
-/// command line, which the CLI joined unquoted, so bash runs it.
+/// command line, which the CLI joined unquoted, so bash runs it. Except on
+/// Windows when the program is a Windows path: bash would strip its
+/// backslashes, and only an MCP server's line can have one (the CLI makes a
+/// hook's paths POSIX), so it is split back into words, as the CLI joined it.
 fn run_passthrough(script: &str) -> Result<i32> {
     let script = script.trim();
-    if script.contains(char::is_whitespace) {
-        return run_plain(script);
+    let mut words = script.split_whitespace();
+    let program = words.next().unwrap_or_default();
+    if !script.contains(char::is_whitespace) || (cfg!(windows) && program.contains('\\')) {
+        return run_program(program, &words.collect::<Vec<_>>());
     }
-    run_program(script)
+    run_plain(script)
 }
 
 /// Become the program, so the CLI's signals and pid reach it. Returns only
 /// when it can't be started.
 #[cfg(unix)]
-fn run_program(program: &str) -> Result<i32> {
+fn run_program(program: &str, args: &[&str]) -> Result<i32> {
     use std::os::unix::process::CommandExt;
-    let err = std::process::Command::new(program).exec();
+    let err = std::process::Command::new(program).args(args).exec();
     eprintln!("agentmux-bashwrap: cannot run {program}: {err}");
     Ok(127)
 }
@@ -373,9 +378,10 @@ fn run_program(program: &str) -> Result<i32> {
 /// shim (what a global npm install puts on `PATH`) starts too: std looks
 /// only for `.exe`, but runs a `.cmd` given its full path.
 #[cfg(windows)]
-fn run_program(program: &str) -> Result<i32> {
+fn run_program(program: &str, args: &[&str]) -> Result<i32> {
     let resolved = which::which(program).unwrap_or_else(|_| PathBuf::from(program));
     let mut cmd = std::process::Command::new(resolved);
+    cmd.args(args);
     // A console program, like bash.exe in `run_plain`.
     cmd.no_window();
     match cmd.status() {
@@ -481,10 +487,29 @@ mod tests {
         let mut paths = vec![dir.clone()];
         paths.extend(std::env::split_paths(&old_path));
         std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-        let code = run_program("bw-shim-test");
+        let code = run_program("bw-shim-test", &[]);
         std::env::set_var("PATH", &old_path);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(code.unwrap(), 9);
+    }
+
+    /// `C:\tools\server.exe --port 1`, an MCP server's joined line: started
+    /// directly with its arguments, not through bash, which would eat the
+    /// backslashes.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_with_arguments_starts_without_bash() {
+        let dir = std::env::temp_dir().join(format!("bashwrap-winpath-test-{}-{}", std::process::id(), now_ms()));
+        if dir.to_string_lossy().contains(char::is_whitespace) {
+            return; // A path with a space is a command line the CLI made ambiguous.
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("server.cmd");
+        std::fs::write(&script, "@exit /b %1\r\n").unwrap();
+        let line = format!("{} 5", script.display());
+        let code = run_passthrough(&line);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(code.unwrap(), 5, "its argument reached it");
     }
 
     #[test]
