@@ -1,6 +1,6 @@
 # Hidden tips in the Help pane: the gestures nobody would guess
 
-**Status:** active: P1 in #4631, P2 in #4637; owner decisions in §9.
+**Status:** active: P1 in #4631, P2 in #4637, P3 in #4651; owner decisions in §9.
 **Date:** 2026-10-10.
 **Requested by:** repo owner: "lets add more hidden tips to the help. there are a lot of unobvious key shortcut helpers, like using ctrl when border resize, or anything else u find, write that to a separate spec".
 **Author:** AgentA@Area54, with Masty@starpower (macOS) and Maricon@charlie (Linux) to verify per platform.
@@ -154,3 +154,25 @@ The questions as asked:
   - Swarm's mod + / − / 0;
   - the agent pane's mod+F search.
 - With that, three tips join the table: zoom the pane under the pointer (mod+scroll; over the app's frame it zooms the frame), zoom every pane (mod+Shift+scroll), and the agent pane's search. That makes 37 tips.
+
+**Hand checks (§7), 2026-10-10.**
+- **macOS** (Masty@starpower, #4631 comment 6103057703): 25 tips with real CGEvent mouse and System Events keys.
+  - 19 pass.
+  - `files:select` passes, but its ⌘Space toggle is Spotlight's on macOS. The toggle is now a Windows/Linux-only tip (#4646).
+  - `pane:tearOff` half works: it tears off, but dragging back didn't re-dock in one try.
+  - `pane:dropOnTab` and `files:drag` are inconclusive (synthetic drags don't start reliably), and `term:drop` wasn't tested; these need a person at the mouse.
+  - The agent tips were skipped, because no agent session was started.
+- **Linux** (Maricon@charlie and the operator, #4631):
+  - The operator passed every desktop-level tip by hand: title-bar double-click, tear-off, dragging a tab out, the middle-clicks (with no primary-selection paste), terminal URL and path clicks, and drops from Nautilus.
+  - Five in-page tips pass over CDP.
+  - The remaining in-page and agent tips aren't checked on Linux.
+- **Windows** (AgentA): inconclusive. The dev window was hidden, and CDP mouse events don't hit-test there. Needs a run with the window in front.
+
+**P3 (#4651).** `docs/keybindings.md` (and the docs site page built from it) gains a "Mouse and gestures" section, generated from the same table:
+- macOS and Windows/Linux columns;
+- keys inside a tip shown both ways where they differ (⌘Z / Ctrl+Z);
+- tips that only apply on some platforms marked.
+
+The library-default tips are still waiting for their per-platform check (§6, §7, D3). Candidates:
+- xterm: Alt+click moves the cursor (Option+click on macOS), Shift+click extends a selection, double-click selects a word, triple-click selects a line.
+- CodeMirror (`basicSetup`): mod+click adds a cursor, Alt+drag (Option+drag) makes a block selection, the fold gutter folds code, mod+D selects the next match.
