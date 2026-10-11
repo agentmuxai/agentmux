@@ -41,20 +41,19 @@ export function useAgentMedia(): Accessor<MarkdownMediaOpts | undefined> {
  */
 export function AgentPaneProviders(props: {
     dormant: Accessor<boolean>;
-    block: Accessor<{ meta?: Record<string, unknown> } | null | undefined>;
+    /** The pane's block: its `oid` is where "Open in editor" splits from. */
+    block: Accessor<{ oid?: string; meta?: Record<string, unknown> } | null | undefined>;
     agent: Accessor<{ working_directory?: string; agent_type?: string } | null | undefined>;
-    /** The pane's block id; without one, no "Open in editor". */
-    blockId?: string;
     /** Reads an unloaded tool result back (tool-result-loader.tsx). */
     loadToolResult?: ToolResultLoader;
     children: JSX.Element;
 }): JSX.Element {
     const baseDir = (): string => (props.block()?.meta?.["cmd:cwd"] as string) || props.agent()?.working_directory || "";
     // A container agent's paths are inside its container: nothing to open here.
-    const files = (): AgentPaneFiles | undefined =>
-        props.blockId && props.agent()?.agent_type !== "container"
-            ? { blockId: props.blockId, baseDir: baseDir() }
-            : undefined;
+    const files = (): AgentPaneFiles | undefined => {
+        const blockId = props.block()?.oid;
+        return blockId && props.agent()?.agent_type !== "container" ? { blockId, baseDir: baseDir() } : undefined;
+    };
     return (
         <AgentDormancyProvider dormant={props.dormant}>
             <AgentMediaProvider baseDir={baseDir}>

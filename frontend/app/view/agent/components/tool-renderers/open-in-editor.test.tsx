@@ -106,9 +106,8 @@ describe("Open in editor on a Markdown file preview", () => {
             inPane(read("/work/notes.md"), (block) => (
                 <AgentPaneProviders
                     dormant={() => false}
-                    block={() => ({ meta: { "cmd:cwd": "/work" } })}
+                    block={() => ({ oid: "agent-1", meta: { "cmd:cwd": "/work" } })}
                     agent={() => ({ working_directory: "/work", agent_type: agentType })}
-                    blockId="agent-1"
                 >
                     {block()}
                 </AgentPaneProviders>
