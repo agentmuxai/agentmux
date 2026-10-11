@@ -163,8 +163,11 @@
         white-space: nowrap;
     }
 
-    th.tower-num .tower-sort {
-        margin-left: auto;
+    // A number column's header sits over the right-aligned numbers. The sort
+    // button fills its cell, so it's the button's content that goes right.
+    th.tower-num .tower-sort,
+    th.tower-num .tower-th-label {
+        justify-content: flex-end;
     }
 }
 
