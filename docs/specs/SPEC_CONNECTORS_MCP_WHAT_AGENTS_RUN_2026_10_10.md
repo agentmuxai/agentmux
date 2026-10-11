@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-10
 **Status:** active. Phase 0 (one launch path, explicit reach) shipped in
-PR #4677. Phase 1 (observed servers) is in this PR. Phases 2–3 (showing them,
+PR #4677. Phase 1 (observed servers) is PR #4683. Phases 2–3 (showing them,
 other providers) are next.
 **Author:** QTest@narko
 **Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
