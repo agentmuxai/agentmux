@@ -14,7 +14,7 @@ import { CompactionSummaryTracker } from "./context-delivery";
 import { interceptFrame, type FrameSink } from "./frame-intercepts";
 import { createTranslator } from "./providers/translator-factory";
 import { sessionOutcomeNodeId } from "@/app/store/agent-document/session-outcome";
-import { buildMemoryInjectedNode } from "./memory-injected";
+import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
 import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
@@ -295,7 +295,13 @@ export class HistoryParser {
                     parser.noteFallbackCard();
                 }
                 const node = buildMemoryInjectedNode(raw, { now: stampFor(lineIdx) ?? 0 });
-                if (node) put(node, indexById.get(node.id));
+                if (!node) return;
+                const replaced = indexById.has(node.id) ? undefined : supersededCard(nodes, node);
+                if (replaced) {
+                    put({ ...node, id: replaced.id }, indexById.get(replaced.id));
+                } else {
+                    put(node, indexById.get(node.id));
+                }
             },
         };
 
