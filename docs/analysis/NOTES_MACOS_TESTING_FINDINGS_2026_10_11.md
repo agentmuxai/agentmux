@@ -90,6 +90,8 @@ The app restarted itself and restored its windows. macOS wrote a crash report (`
 
 **Cause (confirmed by the fix):** Vite shuts down when its stdin closes (it skips this only when `CI=true`). `nohup task dev < /dev/null` gives Vite a closed stdin; an ordinary background job keeps it open. Starting `task dev` with its stdin held open, `tail -f /dev/null | nohup task dev > log 2>&1 &`, kept Vite up for more than 3 minutes and the UI rendered. Other agents' dev builds on the machine were not the cause (an early suspicion, since another agent's `task dev` was running each time).
 
+**Not fully fixed by that:** the `tail -f /dev/null | nohup task dev` window kept its Vite for the first few minutes, but about an hour and a half later its Vite was gone again (the `tail` process was gone too, so Vite's stdin had closed once more; why `tail` ended is unknown, possibly cleaned up with the agent's shell session). The app and window were still running, only the code server was missing. Starting Vite alone in its own session (`CI=true`, `start_new_session=True`, stdin from /dev/null) restored it without touching the window, and it held. A bare `nohup npx vite ... &` from the agent shell died silently.
+
 **Gap in `task dev`:** it does not notice that its own Vite has gone, and the window shows a splash or a reload loop with no explanation. A health check on the Vite port, or `CI=true` for Vite, would have saved ~40 minutes.
 
 ---
