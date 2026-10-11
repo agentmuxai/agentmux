@@ -1,3 +1,4 @@
+// Copyright 2026, Command Line Inc.
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
