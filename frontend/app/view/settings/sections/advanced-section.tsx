@@ -25,6 +25,14 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         keywords: ["auto select", "question timeout", "agent:askquestiontimeoutms"],
     },
+    overlapNotes: {
+        id: "advanced.overlap_notes",
+        label: "Overlap notes",
+        description:
+            "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first",
+        section: "advanced",
+        keywords: ["same file", "conflict", "other agents", "WhoIsWorkingOn", "agent:overlapnotes"],
+    },
     iconOnlyWidgetLabels: {
         id: "advanced.icon_only_widget_labels",
         label: "Icon-only widget labels",
@@ -106,6 +114,17 @@ export function AdvancedSection(): JSX.Element {
                         min={1} step={1}
                         value={((s()["agent:askquestiontimeoutms"] as number) ?? 30000) / 1000}
                         onChange={(v) => set("agent:askquestiontimeoutms", Math.round(v * 1000))}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.overlapNotes.id}
+                label={ADVANCED_SETTINGS.overlapNotes.label}
+                description={ADVANCED_SETTINGS.overlapNotes.description}
+                control={
+                    <ToggleControl
+                        checked={(s()["agent:overlapnotes"] as boolean) ?? true}
+                        onChange={(v) => set("agent:overlapnotes", v)}
                     />
                 }
             />

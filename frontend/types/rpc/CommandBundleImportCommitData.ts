@@ -19,4 +19,9 @@ export type CommandBundleImportCommitData = { file_path?: string, zip_base64?: s
 /**
  * Indices into the preview's `context_files`, by `id`.
  */
-include_context_files: number[], include_skills: Array<BundleImportSkillSelection>, };
+include_context_files: number[], include_skills: Array<BundleImportSkillSelection>, 
+/**
+ * The bundle's widgets to install, by id (SPEC_WIDGET_SHARING_2026_10_10.md
+ * §3.3). Each asks for the user's approval; none is approved by this.
+ */
+include_widgets: Array<string>, };

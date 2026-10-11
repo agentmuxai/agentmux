@@ -1240,6 +1240,7 @@ declare global {
         "attachments:claudesessioninlinemb"?: number;
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
+        "agent:overlapnotes"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:livefeed"?: boolean;

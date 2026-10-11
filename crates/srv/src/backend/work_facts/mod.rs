@@ -15,10 +15,15 @@
 //!
 //! Files are compared across clones as (repository, repository-relative
 //! path), since every agent has its own clone. Nothing here blocks anyone:
-//! the facts only inform.
+//! the facts only inform, through `WhoIsWorkingOn` ([`matching`]) and the
+//! overlap notes an agent gets when it edits a file another agent is also
+//! changing ([`overlap`], [`overlap_notes`]).
 
+pub mod cross_channel;
 pub mod git;
 pub mod matching;
+pub mod overlap;
+pub mod overlap_notes;
 pub mod paths;
 
 use std::path::Path;

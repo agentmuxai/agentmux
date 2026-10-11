@@ -265,6 +265,14 @@ async fn main() {
     // Keeps the host's copy of which panes agents own current (for its popup
     // decisions; docs/specs/SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
     server::browser_host_sync::spawn(state.clone());
+    // Overlap notes (an agent editing a file another agent is also changing
+    // is told who): the progress watcher's edits are checked from here on.
+    backend::work_facts::overlap_notes::install(
+        Arc::clone(&state.mstore),
+        Arc::clone(&state.config_watcher),
+        state.http_client.clone(),
+        state.local_web_url.clone(),
+    );
     let routers = build_routers(state);
     let router = routers.full;
 

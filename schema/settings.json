@@ -544,6 +544,11 @@
           "default": true,
           "description": "While a message streams, update the still-open last block's text in place instead of rebuilding that block on every update (a growing code block, paragraph, list item or table cell). Set false to restore rebuilding it each time. Takes effect when a message is next rendered. See docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md."
         },
+        "agent:overlapnotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent edits a file another agent on this computer has uncommitted or edited in the last two hours (same repository and path, in any clone), AgentMux sends the editing agent a short [AgentMux] note naming the other agent, so it can message them first. Rate-limited: one note per other agent and file every two hours, three per agent per ten minutes. Set false to turn the notes off. See docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.3."
+        },
         "agent:askquestiontimeoutms": {
           "type": "integer",
           "minimum": 1000,

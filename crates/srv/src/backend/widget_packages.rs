@@ -893,6 +893,44 @@ impl WidgetPackages {
         write_approvals(&self.approvals_path, &inner.approvals)
     }
 
+    /// Who signed a package, against this instance's pins.
+    pub fn describe_signature(&self, id: &str, signer: Option<&str>) -> WidgetSignatureInfo {
+        sig::describe(id, signer, &self.inner.lock().unwrap_or_else(|p| p.into_inner()).pins)
+    }
+
+    /// An approved sandboxed package's approved bytes, for a bundle export
+    /// (SPEC_WIDGET_SHARING_2026_10_10.md §3.4): every file hashed again
+    /// against the approval, never a newer copy on disk, and its
+    /// `widget.sig` when it still names the approved signer.
+    pub fn approved_package(&self, id: &str) -> Result<(String, BTreeMap<String, Vec<u8>>), String> {
+        let (dir, approval) = {
+            let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            let a = inner.approvals.get(id).filter(|a| a.enabled).cloned().ok_or(format!("{id} isn't installed and turned on"))?;
+            let dir = inner.found.iter().find(|f| f.id == id && !f.implied).map(|f| f.dir.clone()).ok_or(format!("{id} isn't a widget package"))?;
+            (dir, a)
+        };
+        if approval.kind != WidgetKind::Sandboxed {
+            return Err(format!("{id} is a trusted widget; bundles carry sandboxed widgets only"));
+        }
+        let mut files = BTreeMap::new();
+        for (path, file_hash) in &approval.files {
+            let bytes = std::fs::read(dir.join(path)).map_err(|e| format!("{id}: can't read {path}: {e}"))?;
+            if hex::encode(Sha256::digest(&bytes)) != *file_hash {
+                return Err(format!("{id} changed since you approved it; approve it again first"));
+            }
+            files.insert(path.clone(), bytes);
+        }
+        if let Some(signer) = &approval.signer {
+            let text = std::fs::read(dir.join(sig::SIG_FILE)).map_err(|_| format!("{id} lost its signature since you approved it"))?;
+            let manifest: Manifest = serde_json::from_slice(files.get(MANIFEST_FILE).ok_or("no widget.json")?).map_err(|e| e.to_string())?;
+            if sig::check(&dir, id, &manifest.version, &approval.hash) != Some(Ok(signer.clone())) {
+                return Err(format!("{id}'s signature changed since you approved it"));
+            }
+            files.insert(sig::SIG_FILE.to_string(), text);
+        }
+        Ok((approval.hash, files))
+    }
+
     /// The publishers this instance has pinned to a key, for Settings.
     pub fn publishers(&self) -> Vec<WidgetPublisherPin> {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
