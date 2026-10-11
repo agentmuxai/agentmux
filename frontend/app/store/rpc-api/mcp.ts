@@ -39,6 +39,9 @@ import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
 import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
 import type { CommandMcpCatalogSetReachData } from "@/types/rpc/CommandMcpCatalogSetReachData";
+import type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
+export type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
+export type { McpObservedServer } from "@/types/rpc/McpObservedServer";
 import type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
 import type { McpBindResult } from "@/types/rpc/McpBindResult";
 import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
@@ -138,6 +141,12 @@ export const McpApi = {
         opts?: RpcOpts,
     ): Promise<{ all_agents: boolean; in_containers: boolean }> {
         return client.rpcCall("mcp.catalog.set_reach", data, opts);
+    },
+
+    /** The MCP servers each running agent's CLI reports having, with the
+     *  source of each (`builtin`, `catalog`, or the CLI's own label). */
+    McpObservedListCommand(client: RpcClient, opts?: RpcOpts): Promise<McpObservedAgent[]> {
+        return client.rpcCall("mcp.observed.list", {}, opts);
     },
 
     McpCatalogDeleteCommand(

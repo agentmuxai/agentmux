@@ -759,6 +759,7 @@ impl PersistentSubprocessController {
             stdout_seq_read,
             session_id_field,
             my_generation_read,
+            mcp_owner_read: my_registration_nonce,
             global_output_zone,
             record_fence,
             segment_read,
@@ -828,6 +829,7 @@ impl PersistentSubprocessController {
             my_generation_wait,
             pid_wait,
             nonce_wait,
+            mcp_owner_wait: my_registration_nonce,
         }));
 
         Ok(())

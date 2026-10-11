@@ -21,6 +21,9 @@ pub(super) struct StdoutReaderCtx {
     pub(super) stdout_seq_read: Arc<AtomicU64>,
     pub(super) session_id_field: String,
     pub(super) my_generation_read: u64,
+    /// This spawn's process-wide registration nonce: whose MCP report this
+    /// reader records (`backend::mcp_observed`).
+    pub(super) mcp_owner_read: u64,
     pub(super) global_output_zone: Option<String>,
     pub(super) record_fence: Option<crate::backend::agent_admission::RecordFence>,
     pub(super) segment_read: super::segments::SegmentRef,
@@ -45,6 +48,7 @@ impl PersistentSubprocessController {
             stdout_seq_read,
             session_id_field,
             my_generation_read,
+            mcp_owner_read,
             global_output_zone,
             record_fence,
             segment_read,
@@ -188,6 +192,11 @@ impl PersistentSubprocessController {
                 if parsed.get("subtype").and_then(|v| v.as_str()) == Some("init") {
                     if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
                         ctrl.observe_mcp_frame(&parsed, my_generation_read);
+                    }
+                    // Every server it reports, for Connectors (`backend::mcp_observed`);
+                    // a replaced process's late init never writes over a newer one's.
+                    if crate::backend::mcp_observed::record_init(&block_id_read, mcp_owner_read, &parsed) {
+                        crate::backend::mcp_observed::publish(broker_read.as_deref(), &block_id_read);
                     }
                 }
                 // The CLI version this agent now runs, from Claude's own

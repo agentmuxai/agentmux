@@ -19,6 +19,7 @@ on:
         paths:
             - "crates/bashwrap/**"
             - "crates/srv/src/backend/providers.rs"
+            - "crates/srv/src/backend/mcp_observed.rs"
             - "frontend/app/view/agent/providers/catalog.ts"
             - "scripts/cli-contract/**"
             - ".github/workflows/cli-hook-contract.yml"
@@ -65,3 +66,6 @@ jobs:
                   node scripts/cli-contract/bashwrap-hook-contract.mjs \
                     --claude "$RUNNER_TEMP/claude/node_modules/.bin/claude" \
                     --bashwrap "$GITHUB_WORKSPACE/target/debug/agentmux-bashwrap"
+
+            - name: Run the MCP servers contract
+              run: node scripts/cli-contract/mcp-servers-contract.mjs --claude "$RUNNER_TEMP/claude/node_modules/.bin/claude"

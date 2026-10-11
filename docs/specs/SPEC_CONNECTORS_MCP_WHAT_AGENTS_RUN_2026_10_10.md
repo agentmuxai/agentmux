@@ -1,8 +1,9 @@
 # SPEC: Connectors → MCP servers shows what agents run
 
 **Date:** 2026-10-10
-**Status:** active. Phase 0 (one launch path, explicit reach) is PR #4677;
-Phases 1–3 (observed servers, showing them, other providers) are next.
+**Status:** active. Phase 0 (one launch path, explicit reach) shipped in
+PR #4677. Phase 1 (observed servers) is PR #4683. Phase 2a (In use now) is
+PR #4685; Phase 2b and Phase 3 (other providers) are next.
 **Author:** QTest@narko
 **Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
 (the investigation and history). File references are as of `main` at
@@ -104,34 +105,65 @@ and for a container agent only global rows with `in_containers`.
   doesn't.
 - The pane: the badge and the switches.
 
-## 3. Phase 1: observed servers (shared with self-heal)
+## 3. Phase 1: observed servers
 
-One record per block of the MCP servers the agent's CLI reports, built once
-and read by both this spec and `SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`
-(§4.1 signals A and B).
-- **Claude.** `system/init` `mcp_servers` gives a name and status. `tools`
-  gives a tool count per `mcp__<server>__` prefix. Later init frames update
-  it.
-- **Any provider.** The `agentmux-mcp` hello: the first token-bearing
-  `agents/self/keys` call per spawn.
-- **Published** as an `mcp:observed` event and served by an
-  `mcp.observed.list` command. Names and statuses only, never configs.
-- **Who builds it** is agreed with AgentY before work starts.
-- **Contract test.** The real CLI against the fake API
-  (`scripts/cli-contract/`): one stub stdio server reports connected, one
-  that exits reports failed.
+`backend/mcp_observed.rs` keeps, per pane, the MCP servers the agent's CLI
+says it has, from every source.
+
+- **Claude.** The `system/init` frame's `mcp_servers` gives each server's
+  name, status (`connected`, `failed`, `needs-auth`, `pending`) and the CLI's
+  own source label:
+  - `project` (`.mcp.json`, where AgentMux's servers go);
+  - `user` (the account's config);
+  - `local`;
+  - `dynamic` (`--mcp-config`, plugins);
+  - `managed`;
+  - `enterprise`;
+  - `claudeai` (claude.ai connectors, named "claude.ai …").
+
+  The frame's `tools` gives a tool count per server: the CLI names them
+  `mcp__<name>__<tool>`, with every character of the name other than letters,
+  digits, `_` and `-` made `_`. Each later init frame replaces the record.
+- **Where it hooks in.** The init handling in
+  `persistent/stdout_reader.rs`, beside self-heal's
+  `observe_mcp_frame` (`SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`), which
+  reads only the `agentmux` entry for its repair ladder. Each reads the same
+  frame for its own purpose; neither changes the other.
+- **Published** as an `mcp:observed` event (on a change only, since a
+  resumed turn's init repeats the list).
+- **Served** by `mcp.observed.list`, which names AgentMux's own sources:
+  `builtin` for `agentmux`, `catalog` for a catalog server of that name,
+  otherwise the CLI's label. It gives each pane's agent id and Tower label,
+  and drops panes that no longer exist.
+- **Names, statuses and counts only.** The frame carries no config.
+- **Contract test.** `scripts/cli-contract/mcp-servers-contract.mjs`, in the
+  `cli-hook-contract` workflow, runs the real CLI against the fake API with
+  servers in `.mcp.json`, the account config and `--mcp-config`, one of them
+  exiting at once. It checks each one's status, source and tool names.
+- **Not in Phase 1.** The `agentmux-mcp` hello, for providers without an init
+  frame: none of them gets `agentmux-mcp` yet (Phase 3). Live status changes
+  mid-session: self-heal's `mcp_status` requests could feed the record later.
 
 ## 4. Phase 2: show it
 
-Connectors → MCP servers lists every observed server, grouped by source:
-AgentMux catalog, built in (`agentmux`), and the agent's account or project
-(claude.ai connectors, account config, plugins, a project's own `.mcp.json`
-entries).
-- Each row shows which agents report it and its status per agent. Agents a
-  catalog server is meant to reach but which don't report it show as "not
-  connected".
-- Non-catalog rows are read-only and say where they come from.
-- The agent pane's startup card uses the observed list when there is one.
+**Shipped (2a).** Connectors → MCP servers opens with **In use now**, above
+the catalog (`mcp-in-use.tsx`, `mcp-observed.ts`). It has one row per server
+any running agent reports, and refreshes on `mcp:observed` and `mcp:changed`.
+- **Order.** AgentMux's own first (built in, catalog), then claude.ai
+  connectors, account config, project, local, added at launch, managed.
+- **Each row** gives the server's source in words and a summary ("2 agents,
+  1 not connected"). Under it is each reporting agent with a status dot:
+  connected, failed, needs sign-in, starting.
+- **A server two agents get from different sources** is one row per source.
+- **The rows are read-only.** The catalog below stays the place to change a
+  catalog server.
+- **Empty state.** With no report since srv started, the list says so.
+
+**Next (2b).**
+- **Bound but not connected.** Agents a catalog server is meant to reach but
+  which don't report it, shown as "not connected" on its catalog row. This
+  needs the reach rule (§2.1) evaluated per running agent.
+- **The agent pane's startup card** uses the observed list when there is one.
 
 ## 5. Phase 3: every provider; discovery
 
