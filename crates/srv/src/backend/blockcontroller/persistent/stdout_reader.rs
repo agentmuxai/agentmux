@@ -189,6 +189,8 @@ impl PersistentSubprocessController {
                     if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
                         ctrl.observe_mcp_frame(&parsed, my_generation_read);
                     }
+                    // Every server it reports, for Connectors (`backend::mcp_observed`).
+                    crate::backend::mcp_observed::observe_init(&block_id_read, &parsed, broker_read.as_deref());
                 }
                 // The CLI version this agent now runs, from Claude's own
                 // `system/init` frame: every spawn path passes here, and

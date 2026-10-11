@@ -28,6 +28,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_catalog_delete(engine, state);
     register_mcp_catalog_probe(engine, state);
     register_mcp_catalog_set_reach(engine, state);
+    register_mcp_observed_list(engine, state);
     register_mcp_catalog_bind(engine, state);
     register_mcp_catalog_list_for_agent(engine, state);
     register_mcp_catalog_unbind(engine, state);
@@ -554,6 +555,75 @@ fn register_mcp_catalog_set_reach(engine: &Arc<WshRpcEngine>, state: &AppState) 
     );
 }
 
+/// The MCP servers each running agent's CLI reports having
+/// (`backend::mcp_observed`), with AgentMux's own sources named: `builtin`
+/// for the `agentmux` server, `catalog` for a catalog server of that name.
+/// Names and statuses only; a pane that no longer exists is dropped.
+fn register_mcp_observed_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let mstore = state.mstore.clone();
+    let identity_store = state.identity_store.clone();
+    engine.register_typed(
+        COMMAND_MCP_OBSERVED_LIST,
+        move |_req: McpObservedListData, _ctx| {
+            let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
+            async move {
+                let catalog: std::collections::HashSet<String> = mstore
+                    .mcp_server_list_global(&identity_store)
+                    .map_err(|e| format!("mcp.observed.list: {e}"))?
+                    .into_iter()
+                    .map(|item| item.server.name)
+                    .collect();
+                Ok(observed_agents(&mstore, &catalog))
+            }
+        },
+    );
+}
+
+/// Where an observed server comes from: AgentMux's own sources by name
+/// (its `agentmux` server, a catalog server), else what the CLI said.
+fn observed_source(name: &str, cli_source: String, catalog: &std::collections::HashSet<String>) -> String {
+    if name == "agentmux" {
+        "builtin".to_string()
+    } else if catalog.contains(name) {
+        "catalog".to_string()
+    } else {
+        cli_source
+    }
+}
+
+fn observed_agents(
+    mstore: &crate::backend::storage::store::Store,
+    catalog: &std::collections::HashSet<String>,
+) -> Vec<McpObservedAgent> {
+    let mut agents = Vec::new();
+    for (block_id, observation) in crate::backend::mcp_observed::all() {
+        let Some(label) = crate::server::app_api::tower_pane::block_label(mstore, &block_id) else {
+            crate::backend::mcp_observed::forget(&block_id);
+            continue;
+        };
+        let servers = observation
+            .servers
+            .into_iter()
+            .map(|s| McpObservedServer {
+                source: observed_source(&s.name, s.source, catalog),
+                name: s.name,
+                status: s.status,
+                tools: s.tools,
+            })
+            .collect();
+        agents.push(McpObservedAgent {
+            agent_id: crate::identity::resolver::block_agent_id(mstore, &block_id),
+            label: label.label,
+            at_ms: observation.at_ms,
+            servers,
+            block_id,
+        });
+    }
+    agents.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.block_id.cmp(&b.block_id)));
+    agents
+}
+
 /// Health/prerequisite probe for a global catalog server, callable without
 /// an agent context (mirrors mcp.catalog.*'s window-scoped, no-`check_s1`
 /// shape) — this is what lets the Armory's MCP Servers tab show a
@@ -577,4 +647,18 @@ fn register_mcp_catalog_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
+
+#[cfg(test)]
+mod observed_tests {
+    use super::observed_source;
+
+    #[test]
+    fn agentmux_and_catalog_servers_are_named_as_ours_the_rest_keep_the_clis_label() {
+        let catalog: std::collections::HashSet<String> = ["git".to_string()].into();
+        assert_eq!(observed_source("agentmux", "project".into(), &catalog), "builtin");
+        assert_eq!(observed_source("git", "project".into(), &catalog), "catalog");
+        assert_eq!(observed_source("claude.ai Gmail", "claudeai".into(), &catalog), "claudeai");
+        assert_eq!(observed_source("mine", "project".into(), &catalog), "project");
+    }
 }

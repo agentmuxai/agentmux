@@ -104,6 +104,43 @@ pub struct CommandMcpCatalogUpsertData {
     pub config: String,
 }
 
+/// One MCP server an agent's CLI reports, in `mcp.observed.list`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct McpObservedServer {
+    pub name: String,
+    /// `connected`, `failed`, `needs-auth` or `pending`, as the CLI says it.
+    pub status: String,
+    /// Where it comes from: `builtin` (AgentMux's own `agentmux` server),
+    /// `catalog` (a Connectors catalog server of that name), else the CLI's
+    /// label: `project`, `user`, `local`, `dynamic`, `managed`, `enterprise`
+    /// or `claudeai` (`backend::mcp_observed`).
+    pub source: String,
+    /// How many of the agent's tools come from it.
+    pub tools: u32,
+}
+
+/// One running agent's MCP servers, in `mcp.observed.list`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct McpObservedAgent {
+    pub block_id: String,
+    /// The agent the pane runs, when it names one.
+    #[ts(optional)]
+    pub agent_id: Option<String>,
+    /// The pane's name, as Tower shows it.
+    pub label: String,
+    /// When the CLI last reported (epoch ms).
+    #[ts(type = "number")]
+    pub at_ms: u64,
+    pub servers: Vec<McpObservedServer>,
+}
+
+/// `mcp.observed.list` — window-scoped, no parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct McpObservedListData {}
+
 /// `mcp.catalog.set_reach` — window-scoped. Who a catalog server reaches
 /// beyond its binds: `all_agents` gives it to every agent, `in_containers`
 /// to container agents too. `mcp.catalog.upsert` leaves both as they are.
