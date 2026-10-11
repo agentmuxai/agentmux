@@ -173,7 +173,8 @@ impl Store {
     #[cfg(test)]
     pub fn apply_identity_schema_for_tests(&self) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
-        run_identity_store_schema(&conn)
+        run_identity_store_schema(&conn)?;
+        Ok(conn.execute_batch(super::work_claims::SCHEMA)?)
     }
 
     /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
@@ -234,6 +235,7 @@ impl Store {
         )?;
         check_schema_compat(&conn, IDENTITY_STORE_SCHEMA_VERSION, "identity-store.db")?;
         run_identity_store_schema(&conn)?;
+        conn.execute_batch(super::work_claims::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),

@@ -269,6 +269,7 @@ async fn main() {
     // is told who): the progress watcher's edits are checked from here on.
     backend::work_facts::overlap_notes::install(
         Arc::clone(&state.mstore),
+        Arc::clone(&state.identity_store),
         Arc::clone(&state.config_watcher),
         state.http_client.clone(),
         state.local_web_url.clone(),

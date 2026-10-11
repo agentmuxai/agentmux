@@ -564,6 +564,18 @@ fn neutralize_markers(msg: &str) -> String {
     out
 }
 
+/// Text that goes inside one of srv's own `[AgentMux]` system notes but was
+/// not written by srv: another agent's claim note or topic, a file path, a
+/// branch or agent name. Sanitized like a delivered body, flattened to one
+/// line (every control character and line break becomes a space, runs of
+/// whitespace collapse), and with marker delimiters quoted, so it can neither
+/// start a line of its own nor open an `[AgentMux]` note, a jekt block or a
+/// broadcast header.
+pub fn quote_in_system_note(text: &str) -> String {
+    let flat: String = sanitize_message(text).chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    neutralize_markers(&flat.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// Validate an AgentMux URL for SSRF protection.
 ///
 /// Only allows https:// or http://localhost/127.0.0.1/::1.

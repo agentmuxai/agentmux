@@ -60,6 +60,35 @@ pub(crate) async fn srv_get_json(
     })
 }
 
+/// POST a JSON body to a srv route and return its JSON answer, failures
+/// described as [`srv_get_json`] describes them.
+pub(crate) async fn srv_post_json(
+    client: &reqwest::Client,
+    url: &str,
+    auth_key: &str,
+    body: &Value,
+    what: &str,
+) -> Result<Value> {
+    let resp = client
+        .post(url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(describe_transport_error(what, url, &e)))?;
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| anyhow::anyhow!("{what}: reading AgentMux's response failed: {e}"))?;
+    if !status.is_success() {
+        anyhow::bail!(describe_http_error(what, status, &text));
+    }
+    serde_json::from_str(&text).map_err(|e| {
+        anyhow::anyhow!("{what}: AgentMux answered HTTP {status} but not with JSON ({e})")
+    })
+}
+
 pub(crate) fn describe_transport_error(what: &str, url: &str, e: &reqwest::Error) -> String {
     let mut causes = String::new();
     let mut source = std::error::Error::source(e);
