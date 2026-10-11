@@ -110,14 +110,84 @@ fn is_shell_tool(name: &str) -> bool {
 /// anywhere in it (`cd x && gh-agent pr create --title …`, or inside a quoted
 /// shell call like Codex's `pwsh -Command 'gh-agent pr create …'`), the
 /// program named by its path or with `.cmd`/`.exe` too.
+#[cfg(test)]
 fn is_pr_create(command: &str) -> bool {
-    let words: Vec<&str> =
-        command.split_whitespace().map(|w| w.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')' | ';'))).collect();
-    words.windows(3).any(|w| {
-        let program = w[0].rsplit(['/', '\\']).next().unwrap_or(w[0]);
+    pr_create(command).is_some()
+}
+
+/// The PR being opened in a shell command (see [`is_pr_create`]), with the
+/// `--head` and `--base` it names, if any. Flags may sit between the words
+/// (`gh --repo o/r pr create`, `gh pr -R o/r create`); the command ends at a
+/// shell separator.
+fn pr_create(command: &str) -> Option<NewPrCommand> {
+    let clean = |w: &str| w.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')' | ';')).to_string();
+    let raw: Vec<&str> = command.split_whitespace().collect();
+    for (i, first) in raw.iter().enumerate() {
+        let word = clean(first);
+        let program = word.rsplit(['/', '\\']).next().unwrap_or(&word);
         let program = program.trim_end_matches(".cmd").trim_end_matches(".exe");
-        matches!(program, "gh" | "gh-agent") && w[1] == "pr" && w[2] == "create"
-    })
+        if !matches!(program, "gh" | "gh-agent") {
+            continue;
+        }
+        let mut rest: Vec<String> = Vec::new();
+        for w in &raw[i + 1..] {
+            if matches!(*w, "&&" | "||" | "|" | ";") {
+                break;
+            }
+            rest.push(clean(w));
+            if w.ends_with(';') {
+                break;
+            }
+        }
+        // `pr create`, skipping flags (`-R`/`--repo` take a value).
+        let (mut k, mut words) = (0, Vec::new());
+        while k < rest.len() && words.len() < 2 {
+            match rest[k].as_str() {
+                "-R" | "--repo" => k += 2,
+                w if w.starts_with('-') => k += 1,
+                w => {
+                    words.push(w.to_string());
+                    k += 1;
+                }
+            }
+        }
+        if words != ["pr", "create"] {
+            continue;
+        }
+        let mut pr = NewPrCommand::default();
+        while k < rest.len() {
+            let w = rest[k].as_str();
+            let next = || rest.get(k + 1).cloned();
+            match w {
+                "-H" | "--head" => {
+                    pr.head = next();
+                    k += 2;
+                    continue;
+                }
+                "-B" | "--base" => {
+                    pr.base = next();
+                    k += 2;
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(v) = w.strip_prefix("--head=") {
+                pr.head = Some(v.to_string());
+            } else if let Some(v) = w.strip_prefix("--base=") {
+                pr.base = Some(v.to_string());
+            }
+            k += 1;
+        }
+        return Some(pr);
+    }
+    None
+}
+
+/// The head and base a PR-create command names (`--head`, `--base`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct NewPrCommand {
+    head: Option<String>,
+    base: Option<String>,
 }
 
 /// PR creations kept per sweep, at most.
@@ -238,7 +308,7 @@ struct BlockState {
     new_edits: Vec<RecentFile>,
     /// PRs it started opening, read live since the sweep last took them: what
     /// the PR overlap note checks (`work_facts::overlap_notes::on_new_prs`).
-    new_prs: usize,
+    new_prs: Vec<NewPrCommand>,
     /// This block's output has been looked at before.
     seen: bool,
 }
@@ -291,8 +361,10 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
             let item = v.get("item");
             let is_command = item.and_then(|i| i.get("type")).and_then(|t| t.as_str()) == Some("command_execution");
             let command = item.and_then(|i| i.get("command")).and_then(|c| c.as_str());
-            if is_command && command.is_some_and(is_pr_create) && live_now_ms.is_some() && state.new_prs < MAX_NEW_PRS {
-                state.new_prs += 1;
+            if let Some(pr) = command.filter(|_| is_command).and_then(pr_create) {
+                if live_now_ms.is_some() && state.new_prs.len() < MAX_NEW_PRS {
+                    state.new_prs.push(pr);
+                }
             }
         }
 
@@ -311,11 +383,11 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
             }
 
             if is_shell_tool(name) {
-                let opens_pr = frame_input(frame)
-                    .and_then(|i| first_string(i, &["command", "cmd"]))
-                    .is_some_and(|c| is_pr_create(&c));
-                if opens_pr && live_now_ms.is_some() && state.new_prs < MAX_NEW_PRS {
-                    state.new_prs += 1;
+                let opens = frame_input(frame).and_then(|i| first_string(i, &["command", "cmd"])).and_then(|c| pr_create(&c));
+                if let Some(pr) = opens {
+                    if live_now_ms.is_some() && state.new_prs.len() < MAX_NEW_PRS {
+                        state.new_prs.push(pr);
+                    }
                 }
                 continue;
             }
@@ -611,7 +683,6 @@ type Swept = (HashMap<String, BlockState>, Vec<SweepOutcome>, (Vec<NewEdit>, Vec
 /// several times a second — tolerable at `activity_watcher`'s 20s, much less so
 /// here. `states` is moved in and back out rather than shared behind a lock:
 /// only this loop ever touches it, and one owner is simpler than one mutex.
-
 fn sweep_blocking(
     filestore: &FileStore,
     agents: Vec<(String, String)>,
@@ -638,9 +709,12 @@ fn sweep_blocking(
             block_id: block_id.clone(),
             path: f.path,
         }));
-        if std::mem::take(&mut state.new_prs) > 0 {
-            prs.push(NewPr { agent_id: agent_id.clone(), block_id: block_id.clone() });
-        }
+        prs.extend(state.new_prs.drain(..).map(|p| NewPr {
+            agent_id: agent_id.clone(),
+            block_id: block_id.clone(),
+            head: p.head,
+            base: p.base,
+        }));
         let progress = state.progress();
 
         // Nothing new AND nothing already published for this block — an agent
@@ -1268,6 +1342,23 @@ mod tests {
         assert!(is_pr_create("pwsh.exe -NoProfile -Command 'gh-agent pr create -t x'"));
     }
 
+    /// gh's inherited flags can sit between the words, and the PR's head and
+    /// base can be named.
+    #[test]
+    fn a_pr_create_with_flags_and_its_head_and_base() {
+        assert!(is_pr_create("gh --repo owner/repo pr create -t x"));
+        assert!(is_pr_create("gh pr -R owner/repo create -t x"));
+        assert!(!is_pr_create("gh --repo pr view create"), "the value of --repo is not a word");
+        assert!(!is_pr_create("gh pr view 1 && echo create"));
+        let pr = |c: &str| pr_create(c).unwrap();
+        assert_eq!(pr("gh-agent pr create -H agenty/x -B release"), NewPrCommand {
+            head: Some("agenty/x".into()),
+            base: Some("release".into())
+        });
+        assert_eq!(pr("gh pr create --head=me:feature --title t").head.as_deref(), Some("me:feature"));
+        assert_eq!(pr("gh pr create -t x && git push --base y"), NewPrCommand::default(), "flags of the next command are not its");
+    }
+
     /// Codex's shell commands are `item.started` events, as its 0.154.0
     /// fixture records them (frontend/test/fixtures/providers/codex/0.154.0/command.jsonl).
     #[test]
@@ -1276,7 +1367,7 @@ mod tests {
         let completed = started.replace("item.started", "item.completed");
         let mut st = BlockState::default();
         apply_lines(&mut st, &[started, completed.as_str()], Some(1_000));
-        assert_eq!(st.new_prs, 1, "the start counts, its completion doesn't");
+        assert_eq!(st.new_prs.len(), 1, "the start counts, its completion does not");
     }
 
     #[test]
@@ -1286,10 +1377,10 @@ mod tests {
         );
         let mut backlog = BlockState::default();
         apply_lines(&mut backlog, &[line("gh-agent pr create -t x").as_str()], None);
-        assert_eq!(backlog.new_prs, 0, "backlog is history");
+        assert!(backlog.new_prs.is_empty(), "backlog is history");
         let mut live = BlockState::default();
         apply_lines(&mut live, &[line("gh-agent pr create -t x").as_str(), line("ls").as_str()], Some(1_000));
-        assert_eq!(live.new_prs, 1);
+        assert_eq!(live.new_prs, vec![NewPrCommand::default()]);
         assert_eq!(live.open.len(), 2, "both calls still count as in flight");
     }
 }

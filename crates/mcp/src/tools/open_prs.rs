@@ -226,25 +226,28 @@ pub(super) fn pr_matches(prs: &[OpenPr], asked: &Asked, me_agent: &str, me_host:
                 continue;
             }
             format!("{label} also changes {}", files_phrase(&shared))
-        } else if let Some(path) = path {
-            let touched: Vec<&String> = p.files.iter().filter(|f| under(f, path)).collect();
-            if touched.is_empty() {
-                continue;
-            }
-            format!("{label} changes {}", files_phrase(&touched))
-        } else if let Some(branch) = asked.branch {
-            if p.branch != branch {
-                continue;
-            }
-            format!("{label} is on branch {branch}")
-        } else if !words.is_empty() {
-            let title = p.title.to_lowercase();
-            if !words.iter().all(|w| title.contains(w.as_str())) {
-                continue;
-            }
-            label
-        } else {
+        } else if path.is_none() && asked.branch.is_none() && words.is_empty() {
             format!("{label} changes {} files", p.files.len())
+        } else {
+            // Every selector given, like srv's answer: a PR matching any one is in.
+            let mut why = Vec::new();
+            if let Some(path) = path {
+                let touched: Vec<&String> = p.files.iter().filter(|f| under(f, path)).collect();
+                if !touched.is_empty() {
+                    why.push(format!("changes {}", files_phrase(&touched)));
+                }
+            }
+            if let Some(branch) = asked.branch.filter(|b| p.branch == *b) {
+                why.push(format!("is on branch {branch}"));
+            }
+            let title = p.title.to_lowercase();
+            if !words.is_empty() && words.iter().all(|w| title.contains(w.as_str())) {
+                why.push("matches the query".to_string());
+            }
+            if why.is_empty() {
+                continue;
+            }
+            format!("{label} {}", why.join("; "))
         };
         out.push(PrMatch { agent: p.agent.clone(), host: p.host.clone(), detail });
     }
@@ -385,6 +388,18 @@ mod tests {
         let all = pr_matches(&sample(), &Asked { path: Some(""), ..Default::default() }, "AgentY", "narko").unwrap();
         assert_eq!(all.len(), 3);
         assert_eq!(all[1].detail, "PR #12 (Lark@area54: widgets catalog) changes 1 files");
+    }
+
+    /// Like srv, a PR matching any of the selectors given is in.
+    #[test]
+    fn every_selector_given_counts() {
+        let asked = Asked { path: Some("crates/srv/b.rs"), branch: Some("lark/w"), query: Some("presence"), ..Default::default() };
+        let got = pr_matches(&sample(), &asked, "AgentY", "narko").unwrap();
+        let details: Vec<_> = got.iter().map(|m| m.detail.as_str()).collect();
+        assert_eq!(details, vec![
+            "PR #11 (Agent4@narko: presence) changes crates/srv/b.rs; matches the query",
+            "PR #12 (Lark@area54: widgets catalog) is on branch lark/w",
+        ]);
     }
 
     #[test]

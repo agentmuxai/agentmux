@@ -52,6 +52,12 @@ pub struct NewEdit {
 pub struct NewPr {
     pub agent_id: String,
     pub block_id: String,
+    /// `--head` (a branch, or `owner:branch`), when the command named one;
+    /// else the branch checked out.
+    pub head: Option<String>,
+    /// `--base`, when named; else the branch's `gh-merge-base`, else the
+    /// default branch.
+    pub base: Option<String>,
 }
 
 /// One PR note per (pane, branch) in this long.
@@ -245,10 +251,17 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
     let claims = claims.unwrap_or_default();
 
     let Some(me) = all.iter().find(|f| f.block_id == pr.block_id).cloned() else { return };
-    let (Some(root), Some(repo_key), Some(branch)) = (me.repo_root.clone(), me.repo_key(), me.branch.clone()) else {
+    // The PR's own head and base: `--head`/`--base`, else the checked-out
+    // branch and its `gh-merge-base`, else the default branch.
+    let head = pr.head.as_deref().map(|h| h.rsplit(':').next().unwrap_or(h).to_string()).or(me.branch.clone());
+    let (Some(root), Some(repo_key), Some(branch)) = (me.repo_root.clone(), me.repo_key(), head) else {
         return;
     };
-    let files = super::git::branch_files(&root).await;
+    let base = match pr.base.clone() {
+        Some(b) => Some(b),
+        None => super::git::merge_base_setting(&root, &branch).await,
+    };
+    let files = super::git::branch_files(&root, base.as_deref(), &branch).await;
     if files.is_empty() {
         return;
     }
@@ -270,7 +283,7 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
     }
     let mut branch_files = Vec::new();
     for (agent, their_root, their_branch) in theirs {
-        let changed = super::git::branch_files(&their_root).await;
+        let changed = super::git::branch_files(&their_root, None, &their_branch).await;
         branch_files.push((agent, their_branch, changed));
     }
     let repo = me.repo.clone().unwrap_or_else(|| root.clone());

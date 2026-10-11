@@ -128,13 +128,15 @@ Phase 3b as built:
   bot's, which the prefix rule exempts) is credited to its GitHub author, with no host. The caller's own PRs (same agent and host) are left out. A match is kind `pr`: it joins the local agent of that
   name when the PR is from this computer, else the agent is listed on its own with `channel: "github"` and its host,
   which covers agents on other computers. A path matches PRs changing it or anything under it; a branch, a PR on it;
-  a query, PR titles with every word; the whole repository, every open PR. If GitHub can't be read, `pr_error` says
+  a query, PR titles with every word; several, a PR matching any (as srv does); none, every open PR. If GitHub can't be read, `pr_error` says
   why and the rest of the answer stands.
 - **`WhoIsWorkingOn({ pr })`** (a number or URL) answers who else changes that PR's files: other open PRs sharing a
   file, and the agents on this computer with any of its first 10 files changed or edited (srv asked per file).
 - **The PR note is computed by srv from local facts only**, so srv still has no GitHub identity. The progress watcher
-  sees a live shell call running `gh-agent pr create` or `gh pr create`; srv takes the files the agent's branch
-  changes (`git diff --name-only <origin/HEAD|main|master>...HEAD`) and compares them with other agents' uncommitted
+  sees a live shell call running `gh-agent pr create` or `gh pr create` (gh's flags may sit between the words;
+  Codex's `command_execution` events count too); srv takes the files the PR changes, `git diff --name-only
+  base...head` with the command's `--head`/`--base`, else the checked-out branch and its `gh-merge-base`, else the
+  default branch (a head or base it can't find means no note), and compares them with other agents' uncommitted
   changes, recent edits and claims, and with the files committed on their own branches of the same repository on
   this computer (up to 8 clones), which are usually their open PRs. One note names each other agent and how
   (`Agent4 has uncommitted changes in a.rs; Agent5 changes b.rs on its branch agent5/y`), at most once per (pane,
