@@ -41,6 +41,9 @@ pub struct Target {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MatchKind {
+    /// That agent claimed it (`ClaimWork`, [`super::claims`]): its own word
+    /// that it is working on this, so it comes first.
+    Claim,
     /// The file has uncommitted changes in that agent's clone.
     Dirty,
     /// That agent's edit tools changed the file recently.
@@ -126,12 +129,12 @@ pub fn resolve(q: &WhoQuery, caller: Option<&WorkFacts>, all: &[WorkFacts]) -> R
 }
 
 /// Lowercase alphanumeric words.
-fn words(s: &str) -> HashSet<String> {
+pub(super) fn words(s: &str) -> HashSet<String> {
     s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect()
 }
 
 /// Every word of the query appears in `text`, case-insensitively.
-fn mentions(query_words: &HashSet<String>, text: &str) -> bool {
+pub(super) fn mentions(query_words: &HashSet<String>, text: &str) -> bool {
     !query_words.is_empty() && query_words.is_subset(&words(text))
 }
 
@@ -266,6 +269,12 @@ pub fn who_is_working_on(t: &Target, others: &[WorkFacts]) -> Vec<WhoResult> {
             })
         })
         .collect();
+    sort_results(&mut results);
+    results
+}
+
+/// Strongest match first, then most recent, then by name.
+pub(super) fn sort_results(results: &mut [WhoResult]) {
     results.sort_by(|a, b| {
         let strongest = |r: &WhoResult| r.matches.first().map(|m| m.kind);
         let newest = |r: &WhoResult| r.matches.iter().filter_map(|m| m.since_ms).max();
@@ -274,7 +283,6 @@ pub fn who_is_working_on(t: &Target, others: &[WorkFacts]) -> Vec<WhoResult> {
             .then_with(|| newest(b).cmp(&newest(a)))
             .then_with(|| a.agent.cmp(&b.agent))
     });
-    results
 }
 
 #[cfg(test)]

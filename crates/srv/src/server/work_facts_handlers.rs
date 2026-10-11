@@ -12,7 +12,9 @@
 //!   LAN and WAN agents are listed by name only: their facts stay on their
 //!   own computer.
 //!
-//! Also adds the facts to `ListConversations` entries ([`annotate_conversations`]).
+//! Both answers include live work claims (`ClaimWork`, §3.4,
+//! `work_claims_handlers`). Also adds the facts to `ListConversations`
+//! entries ([`annotate_conversations`]).
 
 use std::collections::HashMap;
 
@@ -24,7 +26,7 @@ use serde_json::json;
 
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::work_facts::cross_channel::{self, own_channel};
-use crate::backend::work_facts::{self, matching, WorkFacts};
+use crate::backend::work_facts::{self, claims, matching, WorkFacts};
 
 use super::caller::Caller;
 use super::AppState;
@@ -34,7 +36,7 @@ const NOTE: &str = "Informational only: nothing is locked or blocked. If someone
                     thing, message them (SendMessage) before you change it.";
 
 /// This srv's own agents' facts. Store reads, so off the async workers.
-async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
+pub(super) async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
     let regs = state.reactive_handler.list_agents();
     let store = state.mstore.clone();
     let channel = own_channel();
@@ -44,7 +46,7 @@ async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
 }
 
 /// Every other channel's agents' facts, plus the channels that didn't answer.
-async fn cross_channel_facts(state: &AppState) -> (Vec<WorkFacts>, Vec<String>) {
+pub(super) async fn cross_channel_facts(state: &AppState) -> (Vec<WorkFacts>, Vec<String>) {
     cross_channel::fetch(&state.http_client, &state.local_web_url).await
 }
 
@@ -69,7 +71,7 @@ pub struct WhoParams {
 /// The caller's own block: by its token's UID, else the block id it sent,
 /// else its name when exactly one registered agent has it. Only used to
 /// leave the caller out and to read its own repository, so a name is enough.
-fn caller_block(regs: &[AgentRegistration], uid: Option<&str>, block: Option<&str>, agent: Option<&str>) -> Option<String> {
+pub(super) fn caller_block(regs: &[AgentRegistration], uid: Option<&str>, block: Option<&str>, agent: Option<&str>) -> Option<String> {
     if let Some(uid) = uid {
         if let Some(r) = regs.iter().find(|r| r.uid.as_deref() == Some(uid)) {
             return Some(r.block_id.clone());
@@ -88,7 +90,7 @@ fn caller_block(regs: &[AgentRegistration], uid: Option<&str>, block: Option<&st
 }
 
 /// Take the caller's own facts out of `facts`.
-fn split_caller(facts: Vec<WorkFacts>, caller_block: Option<&str>) -> (Option<WorkFacts>, Vec<WorkFacts>) {
+pub(super) fn split_caller(facts: Vec<WorkFacts>, caller_block: Option<&str>) -> (Option<WorkFacts>, Vec<WorkFacts>) {
     let (mine, others): (Vec<_>, Vec<_>) =
         facts.into_iter().partition(|f| caller_block.is_some_and(|b| f.block_id == b));
     (mine.into_iter().next(), others)
@@ -119,7 +121,11 @@ pub(crate) async fn handle_who_is_working_on(
     let regs = state.reactive_handler.list_agents();
     let uid = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string));
     let me_block = caller_block(&regs, uid.as_deref(), p.block.as_deref(), p.agent.as_deref());
-    let (local, (cross, unreachable)) = tokio::join!(local_facts(&state), cross_channel_facts(&state));
+    let store = state.identity_store.clone();
+    let now = agentmux_common::time::now_ms();
+    let live_claims = tokio::task::spawn_blocking(move || store.work_claims_live(now).unwrap_or_default());
+    let (local, (cross, unreachable), live_claims) =
+        tokio::join!(local_facts(&state), cross_channel_facts(&state), live_claims);
     let (me, mut others) = split_caller(local, me_block.as_deref());
     others.extend(cross);
 
@@ -128,7 +134,15 @@ pub(crate) async fn handle_who_is_working_on(
         Ok(t) => t,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     };
-    let agents = matching::who_is_working_on(&target, &others);
+    let mut agents = matching::who_is_working_on(&target, &others);
+    // Everyone's claims but the caller's own (by UID, else by name).
+    let me_name = me.as_ref().map(|m| m.agent.clone()).or(p.agent).unwrap_or_default();
+    let theirs: Vec<_> = live_claims
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| !claims::is_own(c, &me_name, uid.as_deref().unwrap_or("")))
+        .collect();
+    claims::add_claim_matches(&mut agents, &target, &theirs, &others, now);
     Json(json!({
         "asked": target,
         "caller": me.as_ref().map(|m| json!({ "agent": m.agent, "repo": m.repo, "branch": m.branch })),

@@ -20,6 +20,7 @@ use std::future::Future;
 use std::sync::{Arc, OnceLock};
 
 use crate::backend::storage::store::Store;
+use crate::backend::storage::work_claims::WorkClaim;
 use crate::backend::wconfig::ConfigState;
 
 use super::overlap::{self, Decision, RateLimiter};
@@ -40,6 +41,8 @@ pub struct NewEdit {
 /// What the check needs from the running srv, set once it exists.
 struct Context {
     store: Arc<Store>,
+    /// The identity store, where every channel's work claims are.
+    claims: Arc<Store>,
     config: Arc<ConfigState>,
     client: reqwest::Client,
     own_url: String,
@@ -54,8 +57,14 @@ fn limiter() -> &'static parking_lot::Mutex<RateLimiter> {
 
 /// Turn the notes on for this srv. Until this is called (and in tests),
 /// [`on_new_edits`] does nothing.
-pub fn install(store: Arc<Store>, config: Arc<ConfigState>, client: reqwest::Client, own_url: String) {
-    let _ = CONTEXT.set(Context { store, config, client, own_url });
+pub fn install(
+    store: Arc<Store>,
+    claims: Arc<Store>,
+    config: Arc<ConfigState>,
+    client: reqwest::Client,
+    own_url: String,
+) {
+    let _ = CONTEXT.set(Context { store, claims, config, client, own_url });
 }
 
 /// Whether the notes are on (`agent:overlapnotes`, default on).
@@ -117,13 +126,17 @@ async fn check_and_notify(ctx: &'static Context, edits: Vec<NewEdit>) {
     let store = ctx.store.clone();
     let regs_for_facts = regs.clone();
     let local = tokio::task::spawn_blocking(move || collect_local(&store, &regs_for_facts, &channel));
-    let (local, (cross, _)) = tokio::join!(local, cross_channel::fetch(&ctx.client, &ctx.own_url));
+    let claims_store = ctx.claims.clone();
+    let claims = tokio::task::spawn_blocking(move || {
+        claims_store.work_claims_live(agentmux_common::time::now_ms()).unwrap_or_default()
+    });
+    let (local, claims, (cross, _)) = tokio::join!(local, claims, cross_channel::fetch(&ctx.client, &ctx.own_url));
     let mut all: Vec<WorkFacts> = local.unwrap_or_default();
     all.extend(cross);
-
+    let claims = claims.unwrap_or_default();
     let now = agentmux_common::time::now_ms_u64();
     for edit in edits {
-        let Some(text) = note_for(&edit, &all, &mut limiter().lock(), now) else { continue };
+        let Some(text) = note_for(&edit, &all, &claims, &mut limiter().lock(), now) else { continue };
         // By UID when the pane has one, so a name two panes share still
         // reaches the one that edited.
         let target = regs
@@ -137,11 +150,19 @@ async fn check_and_notify(ctx: &'static Context, edits: Vec<NewEdit>) {
     }
 }
 
-/// The note (if any) for one edit, given every agent's facts.
-fn note_for(edit: &NewEdit, all: &[WorkFacts], limiter: &mut RateLimiter, now_ms: u64) -> Option<String> {
+/// The note (if any) for one edit, given every agent's facts and the live
+/// work claims.
+fn note_for(
+    edit: &NewEdit,
+    all: &[WorkFacts],
+    claims: &[WorkClaim],
+    limiter: &mut RateLimiter,
+    now_ms: u64,
+) -> Option<String> {
     let me = all.iter().find(|f| f.block_id == edit.block_id);
     let file = overlap::locate(&edit.path, me, all)?;
     let found = overlap::overlaps(&file, &edit.agent_id, all, now_ms);
+    let found = overlap::with_claims(found, &file, &edit.agent_id, claims);
     if found.is_empty() {
         return None;
     }
@@ -196,19 +217,19 @@ mod tests {
         let mut rl = RateLimiter::default();
         let e = edit("AgentY", "b1", r"C:\w\agenty\agentmux\crates\srv\src\muxbus\presence.rs");
         assert_eq!(
-            note_for(&e, &all, &mut rl, NOW).as_deref(),
+            note_for(&e, &all, &[], &mut rl, NOW).as_deref(),
             Some(
                 "[AgentMux] Agent4 also has uncommitted changes in crates/srv/src/muxbus/presence.rs \
                  (repo agentmuxai/agentmux, branch agent4/x). Message them before changing it."
             )
         );
-        assert_eq!(note_for(&e, &all, &mut rl, NOW + 1000), None, "once per pair");
+        assert_eq!(note_for(&e, &all, &[], &mut rl, NOW + 1000), None, "once per pair");
 
         // The other agent editing its own dirty file hears nothing about itself.
         let theirs = edit("Agent4", "b2", "C:/w/agent4/agentmux/crates/srv/src/muxbus/presence.rs");
-        assert_eq!(note_for(&theirs, &all, &mut rl, NOW), None);
+        assert_eq!(note_for(&theirs, &all, &[], &mut rl, NOW), None);
         // A file outside every known repository is never matched.
-        assert_eq!(note_for(&edit("AgentY", "b1", "D:/tmp/notes.md"), &all, &mut rl, NOW), None);
+        assert_eq!(note_for(&edit("AgentY", "b1", "D:/tmp/notes.md"), &all, &[], &mut rl, NOW), None);
     }
 
     /// The watcher's hand-off returns while the check is still running: a

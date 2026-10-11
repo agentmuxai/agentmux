@@ -2084,6 +2084,30 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             ON db_work_queue(claim_expires)
             WHERE claim_expires IS NOT NULL;
 
+        -- Work claims (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md section 3.4,
+        -- storage/work_claims.rs): an agent saying it is working on a path,
+        -- branch or topic, with an expiry. Never blocks anyone. Here, beside
+        -- the work queue, so every channel sees every claim; a table of its
+        -- own because a lapsed queue lease goes back to open and would be
+        -- handed out as work. A NEW table with no ALTER, so the version is
+        -- deliberately NOT bumped: this batch runs on every open, and a bump
+        -- would make every older installed build refuse this shared store.
+        CREATE TABLE IF NOT EXISTS db_work_claims (
+            id            TEXT PRIMARY KEY,
+            agent         TEXT NOT NULL,
+            agent_uid     TEXT NOT NULL DEFAULT '',
+            channel       TEXT NOT NULL DEFAULT '',
+            repo          TEXT,
+            path          TEXT,
+            absolute_path TEXT,
+            branch        TEXT,
+            topic         TEXT,
+            note          TEXT NOT NULL DEFAULT '',
+            created_at    INTEGER NOT NULL,
+            expires_at    INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_work_claims_expires ON db_work_claims(expires_at);
+
         CREATE TABLE IF NOT EXISTS db_agent_credentials (
             agent_id       TEXT PRIMARY KEY,
             client_id      TEXT NOT NULL DEFAULT '',

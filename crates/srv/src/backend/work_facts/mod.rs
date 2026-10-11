@@ -18,7 +18,9 @@
 //! the facts only inform, through `WhoIsWorkingOn` ([`matching`]) and the
 //! overlap notes an agent gets when it edits a file another agent is also
 //! changing ([`overlap`], [`overlap_notes`]).
+//! What agents say they are working on (`ClaimWork`, [`claims`]) joins both.
 
+pub mod claims;
 pub mod cross_channel;
 pub mod git;
 pub mod matching;

@@ -43,6 +43,18 @@ pub struct EditedFile {
 pub enum OverlapKind {
     Dirty,
     Edited,
+    /// Only a claim covers the file: no uncommitted change or recent edit.
+    Claimed,
+}
+
+/// Another agent's live claim on the file or a folder above it
+/// (`ClaimWork`, [`super::claims`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimRef {
+    /// What was claimed, as [`super::claims::describe`] says it.
+    pub what: String,
+    pub note: String,
+    pub claimed_ms: i64,
 }
 
 /// Another agent working on the same file.
@@ -53,6 +65,7 @@ pub struct Overlap {
     pub branch: Option<String>,
     /// That agent's last edit of the file (Unix ms), when known.
     pub edited_ms: Option<u64>,
+    pub claim: Option<ClaimRef>,
 }
 
 /// Where `path` (absolute, as the edit tool named it) is: the editor's own
@@ -95,7 +108,7 @@ pub fn overlaps(file: &EditedFile, me_agent: &str, all: &[WorkFacts], now_ms: u6
             (false, Some(_)) => OverlapKind::Edited,
             (false, None) => continue,
         };
-        let candidate = Overlap { agent: f.agent.clone(), kind, branch: f.branch.clone(), edited_ms: recent };
+        let candidate = Overlap { agent: f.agent.clone(), kind, branch: f.branch.clone(), edited_ms: recent, claim: None };
         // The same agent in two channels or panes: the stronger, newer one.
         let key = f.agent.to_lowercase();
         match by_agent.get(&key) {
@@ -112,6 +125,45 @@ pub fn overlaps(file: &EditedFile, me_agent: &str, all: &[WorkFacts], now_ms: u6
     out
 }
 
+/// Add the live claims that cover `file` ([`super::claims::covering`]) to
+/// `found`: to the claimer's entry when it also changed the file, else as a
+/// [`OverlapKind::Claimed`] entry of its own. One claim per agent, the
+/// narrowest (longest path).
+pub fn with_claims(
+    mut found: Vec<Overlap>,
+    file: &EditedFile,
+    me_agent: &str,
+    claims: &[crate::backend::storage::work_claims::WorkClaim],
+) -> Vec<Overlap> {
+    let mut covering = super::claims::covering(file, me_agent, claims);
+    covering.sort_by_key(|c| std::cmp::Reverse(c.path.as_deref().map_or(0, str::len)));
+    for c in covering {
+        let claim =
+            ClaimRef { what: super::claims::describe(c), note: c.note.trim().to_string(), claimed_ms: c.created_at };
+        match found.iter_mut().find(|o| o.agent.eq_ignore_ascii_case(&c.agent)) {
+            Some(o) if o.claim.is_none() => o.claim = Some(claim),
+            Some(_) => {}
+            None => found.push(Overlap {
+                agent: c.agent.clone(),
+                kind: OverlapKind::Claimed,
+                branch: c.branch.clone(),
+                edited_ms: None,
+                claim: Some(claim),
+            }),
+        }
+    }
+    found.sort_by(|a, b| {
+        a.kind.cmp(&b.kind).then_with(|| b.edited_ms.cmp(&a.edited_ms)).then_with(|| a.agent.cmp(&b.agent))
+    });
+    found
+}
+
+/// The claim, as a clause: `claimed crates/srv in o/r 40 minutes ago ("presence work")`.
+fn claimed(c: &ClaimRef, now_ms: u64) -> String {
+    let note = if c.note.is_empty() { String::new() } else { format!(" (\"{}\")", c.note) };
+    format!("claimed {} {}{note}", c.what, super::claims::ago(now_ms as i64, c.claimed_ms))
+}
+
 /// "just now", "1 minute ago", "25 minutes ago".
 fn ago(now_ms: u64, ts_ms: u64) -> String {
     match now_ms.saturating_sub(ts_ms) / 60_000 {
@@ -124,10 +176,15 @@ fn ago(now_ms: u64, ts_ms: u64) -> String {
 /// What another agent did to the file: "has uncommitted changes in it",
 /// "edited it 5 minutes ago".
 fn doing(o: &Overlap, now_ms: u64) -> String {
-    match (o.kind, o.edited_ms) {
+    let did = match (o.kind, o.edited_ms) {
         (OverlapKind::Dirty, _) => "has uncommitted changes in it".to_string(),
         (OverlapKind::Edited, Some(ts)) => format!("edited it {}", ago(now_ms, ts)),
         (OverlapKind::Edited, None) => "edited it recently".to_string(),
+        (OverlapKind::Claimed, _) => return o.claim.as_ref().map(|c| claimed(c, now_ms)).unwrap_or_default(),
+    };
+    match &o.claim {
+        Some(c) => format!("{did} and {}", claimed(c, now_ms)),
+        None => did,
     }
 }
 
@@ -141,10 +198,18 @@ pub fn note_text(file: &EditedFile, overlaps: &[Overlap], now_ms: u64) -> String
             (OverlapKind::Dirty, _) => format!("has uncommitted changes in {}", file.rel),
             (OverlapKind::Edited, Some(ts)) => format!("edited {} {}", file.rel, ago(now_ms, ts)),
             (OverlapKind::Edited, None) => format!("recently edited {}", file.rel),
+            (OverlapKind::Claimed, _) => {
+                let claim = o.claim.as_ref().map(|c| claimed(c, now_ms)).unwrap_or_default();
+                return format!(
+                    "[AgentMux] {} {claim}, which holds {}, the file you just edited. Message them before changing it.",
+                    o.agent, file.rel
+                );
+            }
         };
         let branch = o.branch.as_deref().map(|b| format!(", branch {b}")).unwrap_or_default();
+        let claim = o.claim.as_ref().map(|c| format!(", and {}", claimed(c, now_ms))).unwrap_or_default();
         return format!(
-            "[AgentMux] {} also {what} (repo {}{branch}). Message them before changing it.",
+            "[AgentMux] {} also {what} (repo {}{branch}){claim}. Message them before changing it.",
             o.agent, file.repo
         );
     }
@@ -288,6 +353,7 @@ mod tests {
             kind: OverlapKind::Dirty,
             branch: Some(format!("{}/x", name.to_lowercase())),
             edited_ms: None,
+            claim: None,
         }
     }
 
@@ -382,6 +448,7 @@ mod tests {
             kind: OverlapKind::Edited,
             branch: Some("agent5/y".into()),
             edited_ms: Some(NOW - 12 * MIN),
+            claim: None,
         };
         assert_eq!(
             note_text(&f, std::slice::from_ref(&e), NOW),
@@ -446,5 +513,50 @@ mod tests {
         assert!(!rl.should_check("b1", "C:/r/a.rs", NOW + 1000));
         assert!(rl.should_check("b2", "C:/r/a.rs", NOW + 1000));
         assert!(rl.should_check("b1", "C:/r/a.rs", NOW + RECHECK_MS));
+    }
+
+    fn claim_on(agent: &str, path: &str, minutes_ago: u64) -> crate::backend::storage::work_claims::WorkClaim {
+        crate::backend::storage::work_claims::WorkClaim {
+            id: format!("c-{agent}"),
+            agent: agent.into(),
+            channel: "stable".into(),
+            repo: Some("o/r".into()),
+            path: Some(path.into()),
+            note: "presence work".into(),
+            created_at: (NOW - minutes_ago * MIN) as i64,
+            expires_at: (NOW + 60 * MIN) as i64,
+            ..Default::default()
+        }
+    }
+
+    /// A claim on the file or a folder above it is an overlap even with no
+    /// change, and joins the claimer's own entry when it changed the file too.
+    #[test]
+    fn claims_on_an_edited_file_are_overlaps_too() {
+        let f = file("crates/srv/src/muxbus/presence.rs");
+        let only_claim = with_claims(Vec::new(), &f, "Me", &[claim_on("Agent5", "crates/srv/src/muxbus", 40)]);
+        assert_eq!(only_claim.len(), 1);
+        assert_eq!(only_claim[0].kind, OverlapKind::Claimed);
+        assert_eq!(
+            note_text(&f, &only_claim, NOW),
+            "[AgentMux] Agent5 claimed crates/srv/src/muxbus in o/r 40 minutes ago (\"presence work\"), which holds \
+             crates/srv/src/muxbus/presence.rs, the file you just edited. Message them before changing it."
+        );
+
+        let both = with_claims(vec![dirty("Agent4")], &f, "Me", &[claim_on("Agent4", "crates", 5), claim_on("Agent4", "crates/srv", 3)]);
+        assert_eq!(both.len(), 1, "one entry per agent");
+        assert_eq!(both[0].kind, OverlapKind::Dirty);
+        assert_eq!(both[0].claim.as_ref().map(|c| c.what.as_str()), Some("crates/srv in o/r"), "the narrowest claim");
+        assert!(note_text(&f, &both, NOW).ends_with(
+            "(repo o/r, branch agent4/x), and claimed crates/srv in o/r 3 minutes ago (\"presence work\"). Message them before changing it."
+        ));
+
+        let mine = with_claims(Vec::new(), &f, "agent5", &[claim_on("Agent5", "crates", 1)]);
+        assert!(mine.is_empty(), "the editor's own claim is no overlap");
+
+        let several = with_claims(vec![dirty("Agent4")], &f, "Me", &[claim_on("Agent5", "crates/srv", 2)]);
+        let text = note_text(&f, &several, NOW);
+        assert!(text.contains("Agent4 has uncommitted changes in it"), "{text}");
+        assert!(text.contains("Agent5 claimed crates/srv in o/r 2 minutes ago"), "{text}");
     }
 }

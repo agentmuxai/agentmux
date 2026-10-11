@@ -230,7 +230,7 @@ pub(crate) const LIST_CONVERSATIONS_TOOL: &str = r#"{
 // `/api/v1/work-facts/who`, over every agent on this computer, all channels.
 pub(crate) const WHO_IS_WORKING_ON_TOOL: &str = r#"{
   "name": "WhoIsWorkingOn",
-  "description": "Find out which other agents are working on the same file, folder, repository, branch or topic, so you don't duplicate or overwrite their work. Call it before starting work in a repository, and before opening a PR. It only informs: nothing is locked or blocked. Covers every agent on this computer, in every AgentMux channel; agents on other computers (LAN, cloud) are listed by name and status only. Each agent has its own clone, so files are compared by repository and path inside it: an absolute path in your clone or a repository-relative path both work, and a folder matches everything under it. With no arguments it lists who is working in your current repository. Returns JSON: agents (you excluded), strongest first, each {agent, channel, status, goal, repo, branch, git_checked_ms, matches: [{kind, detail, since_ms}]}, where kind is dirty (uncommitted changes in their clone), edited (they changed it recently), branch (same branch), repo (same repository), goal or todo (query matched their goal or checklist). Git facts (repo, branch, uncommitted files) are refreshed in the background, usually every 20 to 30 seconds; git_checked_ms says when each agent's were taken. If someone else is changing the same thing, message them with SendMessage before you change it.",
+  "description": "Find out which other agents are working on the same file, folder, repository, branch or topic, so you don't duplicate or overwrite their work. Call it before starting work in a repository, and before opening a PR. It only informs: nothing is locked or blocked. Covers every agent on this computer, in every AgentMux channel; agents on other computers (LAN, cloud) are listed by name and status only. Each agent has its own clone, so files are compared by repository and path inside it: an absolute path in your clone or a repository-relative path both work, and a folder matches everything under it. With no arguments it lists who is working in your current repository. Returns JSON: agents (you excluded), strongest first, each {agent, channel, status, goal, repo, branch, git_checked_ms, matches: [{kind, detail, since_ms}]}, where kind is claim (they said they are working on it, with ClaimWork), dirty (uncommitted changes in their clone), edited (they changed it recently), branch (same branch), repo (same repository), goal or todo (query matched their goal or checklist). Git facts (repo, branch, uncommitted files) are refreshed in the background, usually every 20 to 30 seconds; git_checked_ms says when each agent's were taken. If someone else is changing the same thing, message them with SendMessage before you change it.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -238,6 +238,35 @@ pub(crate) const WHO_IS_WORKING_ON_TOOL: &str = r#"{
       "repo":   { "type": "string", "description": "owner/repo or a remote URL. Defaults to the repository you are in" },
       "branch": { "type": "string", "description": "A branch name: who else is on it" },
       "query":  { "type": "string", "description": "Words to look for in other agents' goals and todo lists, case-insensitive, all must appear (e.g. \"muxbus allowlist\")" }
+    }
+  }
+}"#;
+
+// Saying what you are working on (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md
+// §3.4): srv's `/api/v1/work-claims`. Informational, never a lock.
+pub(crate) const CLAIM_WORK_TOOL: &str = r#"{
+  "name": "ClaimWork",
+  "description": "Say what you are working on: a file or folder, a branch, or a topic, with a short note. Other agents on this computer, in every AgentMux channel, then see your claim in WhoIsWorkingOn, and get a note if they edit a file inside it. It never locks or blocks anything. Claim before a larger change in a shared repository, not for every edit. Claiming the same thing again renews it. A claim lapses on its own after ttl_minutes (default 120, at most 1440); release it with ReleaseWork when you are done. Returns JSON: claim {id, agent, repo, path, branch, topic, note, created_at, expires_at}, and others_working_on_it (as WhoIsWorkingOn returns agents): if it names anyone, message them with SendMessage before you go on.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":        { "type": "string", "description": "A file or folder: absolute in your clone, or relative to the repository root" },
+      "repo":        { "type": "string", "description": "owner/repo or a remote URL. Defaults to the repository you are in. Alone, it claims the whole repository" },
+      "branch":      { "type": "string", "description": "A branch you are working on" },
+      "topic":       { "type": "string", "description": "What the work is about, in a few words (e.g. \"muxbus allowlist\"); WhoIsWorkingOn's query matches it" },
+      "note":        { "type": "string", "description": "One line for the others: what you are doing" },
+      "ttl_minutes": { "type": "integer", "description": "How long the claim lasts, in minutes (default 120, 5 to 1440)" }
+    }
+  }
+}"#;
+
+pub(crate) const RELEASE_WORK_TOOL: &str = r#"{
+  "name": "ReleaseWork",
+  "description": "Release a claim you made with ClaimWork, when the work is done or dropped. With id, releases that claim; without, releases all of yours. Only your own claims can be released. Returns JSON: released (the claims released).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The claim's id, from ClaimWork. Omit to release all of your claims" }
     }
   }
 }"#;

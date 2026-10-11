@@ -1,6 +1,6 @@
 # SPEC: agents can see who else is working on the same thing
 
-**Status:** active (phase 1: #4630; phase 2, overlap notes for files: #4653; phase 3 to follow)
+**Status:** active (phase 1: #4630; phase 2, overlap notes for files: #4653; phase 3a, claims: this PR; phase 3b, open PRs, to follow)
 **Date:** 2026-10-10
 **Asked by:** the owner: "agents may be working on the same thing … an API to verify they aren't stepping on anyone else's toes."
 
@@ -96,6 +96,25 @@ existing lease store (host-wide, across channels, expiring), so a crashed agent'
 in `WhoIsWorkingOn` (kind `claim`) and in overlap notes ("Agent5 claimed crates/srv/src/muxbus/ 40 min ago: presence
 work"). Claims never block.
 
+Phase 3a as built:
+- **Storage.** Not work-queue rows after all, but a table of their own beside the queue in the same host-wide
+  identity store (`db_work_claims`, `storage/work_claims.rs`). A queue item whose lease lapses goes back to `open`,
+  where `WorkClaim` would hand it to another agent as an instruction; a claim must simply disappear. Expired
+  claims are filtered out on every read and deleted on the next write. The new table does not bump the identity
+  store's schema version: the schema runs on every open, and a bump would make every older installed build refuse
+  the shared store.
+- **Target.** `ClaimWork({ path?, repo?, branch?, topic?, note?, ttl_minutes? })` resolves its target exactly as
+  `WhoIsWorkingOn` resolves a question (repository and repository-relative path; the caller's repository by
+  default; `repo` alone claims the whole repository). `ttl_minutes` defaults to 120, within 5 to 1440. Claiming the
+  same target again renews the claim and keeps its id. The answer includes `others_working_on_it`.
+- **Matching.** A claim matches a question when either path holds the other, on the same branch, for the
+  repository as a whole, or when the query's words all appear in its topic, note or path. A claim is listed first
+  among an agent's matches; an agent known only by its claim is listed with status `not running`.
+- **Notes.** An edit inside another agent's claimed path (same repository) is an overlap even without a change,
+  under the same rate limits; a claimer that also changed the file has the claim added to its line.
+- **Release.** `ReleaseWork({ id? })` releases that claim, or all the caller's. Holder rules are the work queue's:
+  by UID when both sides have one, else by name. The caller's own claims never show in its own answers.
+
 ### 3.5 Open PRs
 
 PRs come from GitHub, so they work across computers. `WhoIsWorkingOn({ pr })` and the PR note read open PRs through
@@ -108,7 +127,8 @@ the caller's `gh-agent` (the agent's own GitHub identity; srv holds no GitHub cr
 |---|---|
 | 1 | Work facts (3.1); `WhoIsWorkingOn` without PRs (3.2); the facts on `ListConversations` |
 | 2 | Overlap notes for files (3.3, file half) |
-| 3 | Claims (3.4); open PRs in `WhoIsWorkingOn` and the PR note (3.5, 3.3 PR half) |
+| 3a | Claims (3.4) |
+| 3b | Open PRs in `WhoIsWorkingOn` and the PR note (3.5, 3.3 PR half) |
 
 Each phase is one PR. Phase 1 is useful alone: an agent can check before starting.
 
