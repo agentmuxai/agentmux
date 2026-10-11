@@ -65,6 +65,7 @@ struct LoopEntry {
 /// when the agent pane closes.
 type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
+mod doctor;
 mod self_keys;
 mod tool_schemas;
 use tool_schemas::*;
@@ -73,6 +74,11 @@ use window_capture::*;
 
 #[tokio::main]
 async fn main() {
+    // `agentmux-mcp doctor [--heal]`, from the agent's shell: why its AgentMux
+    // tools aren't connected, with no MCP session (doctor.rs).
+    if std::env::args().nth(1).as_deref() == Some("doctor") {
+        std::process::exit(doctor::run(std::env::args().skip(2).collect()).await);
+    }
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
     // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers/input.rs

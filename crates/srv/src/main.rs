@@ -274,6 +274,9 @@ async fn main() {
         state.http_client.clone(),
         state.local_web_url.clone(),
     );
+    // An agent's AgentMux MCP server that didn't connect is noticed and
+    // repaired (`agent:mcpselfheal`).
+    backend::mcp_health::install(Arc::clone(&state.config_watcher));
     let routers = build_routers(state);
     let router = routers.full;
 
