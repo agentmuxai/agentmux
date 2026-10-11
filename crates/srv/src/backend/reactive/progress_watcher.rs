@@ -37,6 +37,7 @@ use tokio::time::interval;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::work_facts::overlap_notes::NewEdit;
 
 use super::get_global_handler;
 
@@ -208,6 +209,9 @@ struct BlockState {
     partial: bool,
     /// Files named by edit tools, newest first (see [`note_recent_file`]).
     recent_files: Vec<RecentFile>,
+    /// Edits read live since the sweep last took them, oldest first: what
+    /// the overlap notes check (`work_facts::overlap_notes`).
+    new_edits: Vec<RecentFile>,
     /// This block's output has been looked at before.
     seen: bool,
 }
@@ -274,6 +278,11 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
                 {
                     if let Some(ts) = line_timestamp(&v).or(live_now_ms) {
                         note_recent_file(&mut state.recent_files, &path, name, ts);
+                        // Backlog is history, not something the agent is
+                        // doing now: only live edits are checked for overlap.
+                        if live_now_ms.is_some() && state.new_edits.len() < MAX_RECENT_FILES {
+                            state.new_edits.push(RecentFile { path, tool: name.to_string(), ts_ms: ts });
+                        }
                     }
                 }
                 continue;
@@ -556,8 +565,9 @@ fn sweep_blocking(
     mut states: HashMap<String, BlockState>,
     last_published: &HashMap<String, AgentProgress>,
     force_republish: bool,
-) -> (HashMap<String, BlockState>, Vec<SweepOutcome>) {
+) -> (HashMap<String, BlockState>, Vec<SweepOutcome>, Vec<NewEdit>) {
     let mut out = Vec::new();
+    let mut edits = Vec::new();
 
     for (agent_id, block_id) in agents {
         // Same gate as the summary loop: an idle or non-agent pane has no
@@ -569,6 +579,11 @@ fn sweep_blocking(
 
         let state = states.entry(block_id.clone()).or_default();
         let had_new = consume_new_output(filestore, &block_id, state);
+        edits.extend(state.new_edits.drain(..).map(|f| NewEdit {
+            agent_id: agent_id.clone(),
+            block_id: block_id.clone(),
+            path: f.path,
+        }));
         let progress = state.progress();
 
         // Nothing new AND nothing already published for this block — an agent
@@ -585,7 +600,7 @@ fn sweep_blocking(
         out.push(SweepOutcome { agent_id, block_id, progress });
     }
 
-    (states, out)
+    (states, out, edits)
 }
 
 /// Run the progress sweep loop. Never returns.
@@ -627,7 +642,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         // re-seeds from the tail (flagged partial), which is degraded but
         // recoverable, whereas returning here would end progress reporting for
         // the life of the process.
-        let (returned_states, outcomes) = match joined {
+        let (returned_states, outcomes, edits) = match joined {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(error = %e, "progress sweep task failed; state reset for next tick");
@@ -635,6 +650,8 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
             }
         };
         states = returned_states;
+        // Hands off and returns at once: the check runs on its own task.
+        crate::backend::work_facts::overlap_notes::on_new_edits(edits);
         *snapshot().write() = states
             .iter()
             .map(|(block_id, s)| {
@@ -730,6 +747,7 @@ mod tests {
         assert!(consume_new_output(&fs, block, &mut st));
         let got: Vec<(&str, u64)> = st.recent_files.iter().map(|f| (f.path.as_str(), f.ts_ms)).collect();
         assert_eq!(got, vec![("/r/stamped.rs", 1_790_848_800_000)], "the untimed backlog edit is not recorded");
+        assert!(st.new_edits.is_empty(), "backlog edits are never checked for overlap");
 
         let before = agentmux_common::time::now_ms_u64();
         fs.append_data(block, "output", format!("{}
@@ -738,6 +756,8 @@ mod tests {
         assert!(consume_new_output(&fs, block, &mut st));
         assert_eq!(st.recent_files[0].path, "/r/new.rs");
         assert!(st.recent_files[0].ts_ms >= before, "a live edit takes the read time");
+        let live: Vec<&str> = st.new_edits.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(live, vec!["/r/new.rs"], "a live edit is handed to the overlap check");
     }
 
     /// A block first seen while still empty: everything after is live.
