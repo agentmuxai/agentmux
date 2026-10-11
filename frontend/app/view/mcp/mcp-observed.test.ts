@@ -88,6 +88,28 @@ describe("McpObservedModel", () => {
         expect(mpsHub.handlers.size).toBe(0);
     });
 
+    test("an older reply never overwrites a newer one", async () => {
+        let resolveFirst: (v: unknown) => void = () => {};
+        observedListMock.mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)));
+        observedListMock.mockResolvedValueOnce(agents);
+        const model = new McpObservedModel();
+        await model.refresh();
+        expect(model.rowsAtom()).toHaveLength(3);
+        resolveFirst([]);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(model.rowsAtom()).toHaveLength(3);
+    });
+
+    test("a failed refresh keeps the rows shown", async () => {
+        observedListMock.mockResolvedValueOnce(agents);
+        const model = new McpObservedModel();
+        await vi.waitFor(() => expect(model.rowsAtom()).toHaveLength(3));
+        observedListMock.mockRejectedValueOnce(new Error("socket closed"));
+        await model.refresh();
+        expect(model.rowsAtom()).toHaveLength(3);
+    });
+
     test("an srv without the command shows nothing, not an error", async () => {
         observedListMock.mockRejectedValue(new Error("unknown command"));
         const model = new McpObservedModel();

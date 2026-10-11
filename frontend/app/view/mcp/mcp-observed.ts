@@ -100,6 +100,8 @@ export class McpObservedModel {
     loadedAtom: Accessor<boolean> = this._loaded[0];
 
     private unsubs: (() => void)[];
+    /** The latest refresh: an older reply arriving after it is dropped. */
+    private request = 0;
 
     constructor() {
         void this.refresh();
@@ -111,11 +113,15 @@ export class McpObservedModel {
     }
 
     async refresh(): Promise<void> {
+        const request = ++this.request;
         try {
-            this.setRows(groupObserved(await RpcApi.McpObservedListCommand(TabRpcClient)));
+            const agents = await RpcApi.McpObservedListCommand(TabRpcClient);
+            if (request !== this.request) return;
+            this.setRows(groupObserved(agents));
         } catch {
-            // An older srv without the command: nothing to show.
-            this.setRows([]);
+            // Keep what is shown: a failed refresh says nothing about the
+            // servers. An older srv without the command never loads any.
+            if (request !== this.request) return;
         }
         this._loaded[1](true);
     }
