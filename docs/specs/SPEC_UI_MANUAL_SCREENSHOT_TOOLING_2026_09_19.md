@@ -434,7 +434,9 @@ stream-json ...`), it reads user messages on stdin and plays turns from
 `fake-claude/conversation.json`: streamed thinking and text, tool calls with
 their results (a Read's line range and an Edit's patch go in
 `tool_use_result`, as Claude Code writes them), an AskUserQuestion that waits
-for its answer, and a `wait` that holds a turn open for a mid-turn shot. A
+for its answer, and a text step's `holdMs`, which pauses before the reply
+ends so a mid-turn shot catches it still streaming (a `wait` step only pauses
+between steps, and the pane takes a finished reply as the end of the turn). A
 message plays the first unplayed turn whose `match` it contains. AgentMux's own
 context message at launch gets an empty turn, and the pane's Stop ends the turn
 being played. The stand-in never reads or writes a file: its tool calls only
