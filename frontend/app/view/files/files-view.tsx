@@ -43,7 +43,7 @@ import {
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
 import { crumbsOf, isWithin, joinPath, nameProblem, samePath, stemLength } from "./files-path";
-import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection";
+import { clickRow, folderAt, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
@@ -977,16 +977,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
                     }}
                     onContextMenu={onListContextMenu}
+                    // Windows: a middle press over the list starts autoscroll, and no auxclick follows.
+                    onMouseDown={(e) => e.button === 1 && folderAt(e.target, byName()) && e.preventDefault()}
                     onAuxClick={(e) => {
                         // Middle-click a folder: open it in a new tab.
-                        if (e.button !== 1 || !(e.target instanceof Element)) return;
-                        const el = e.target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
-                        const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
-                        const entry = name ? byName().get(name) : undefined;
-                        if (entry?.is_dir) {
-                            e.preventDefault();
-                            openInNewTab(model.pathOf(entry.name));
-                        }
+                        const entry = e.button === 1 && folderAt(e.target, byName());
+                        if (!entry) return;
+                        e.preventDefault();
+                        openInNewTab(model.pathOf(entry.name));
                     }}
                     onClick={(e) => {
                         if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });

@@ -186,3 +186,18 @@ They join the table for macOS and Linux; Windows follows once it's checked there
 Two notes:
 - **Code folding fails on every platform.** The gutter is hidden on purpose (`editor-view.scss`, #1427, "no folding UI"), and CodeMirror's fold key Ctrl+Shift+[ is the app's `tab:prev`. So there's no folding tip; whether folding comes back is an owner decision.
 - **⌘D in the editor on macOS** selects the next match instead of running `split:right`. On Windows and Linux there's no conflict, since Split right is Ctrl+Shift+D.
+
+**Windows hand check (#4660), 2026-10-10.** AgentA@Area54 drove a dev build with real OS input (mouse and keys sent through Windows itself, not CDP), with the window in front.
+- **Library defaults: all seven pass,** so they now show on every platform.
+  - xterm: double-click selects a word, triple-click a line, Shift+click extends the selection, and Alt+click moves the cursor on the prompt line.
+  - CodeMirror: Ctrl+click adds a cursor, Alt+drag makes a three-line block selection, and Ctrl+D selects the next match (no split).
+- **App tips that pass:**
+  - Window: title-bar double-click (maximize and restore); Shift+drag on the window edge (only the edge pane takes the change; a plain drag scales every pane).
+  - Panes: Shift+drag on a border (only the two panes beside it change); header double-click; header drag; holding Ctrl+Shift shows the numbers; Ctrl+wheel and Ctrl+Shift+wheel zoom; drop on a window tab; tear-off, and dragging the floating window back docks it.
+  - Tabs: rename by double-click (Esc cancels), right-click menu, middle-click closes a pane tab, wheel over the strip, dragging a tab out.
+  - Terminal: Ctrl+Shift+F, and Enter / Shift+Enter in the find bar.
+  - Editor: a tree click opens an italic preview tab, a double-click keeps it.
+  - Files: Ctrl+click / Shift+click, Ctrl+Space, "/" and type-ahead and Backspace, double-click on the path.
+- **Fixed here: middle-clicking a folder in Files did nothing on Windows.** A middle press over the scrolling list starts Chromium's autoscroll there, and no `auxclick` follows, so the folder never opened. The list now cancels that press over a folder (`files-view.tsx`), and the folder opens in a new tab. Linux has no middle-click autoscroll, which is why it passed there.
+- **Still open: Esc while dragging a window tab out doesn't cancel on Windows.** The tab still opens in a new window. The drag runs in Windows' own drag loop, which likely keeps the page's Escape listener from seeing the key (`tab-reorder.ts`). It's a follow-up; the tip stays as it is until that's fixed.
+- **Not checked on Windows:** dropping files onto a terminal, dragging Files rows onto a pane, the Media and browser tips, and the agent tips (no agent session was started).
