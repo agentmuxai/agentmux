@@ -20,6 +20,10 @@ pub(super) struct ExportReq {
     pub(crate) id: String,
     #[serde(default)]
     pub(crate) format: String,
+    /// Installed sandboxed widgets to carry, by id (zip only;
+    /// SPEC_WIDGET_SHARING_2026_10_10.md §3.4).
+    #[serde(default)]
+    pub(crate) widgets: Vec<String>,
 }
 
 pub(super) fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -79,9 +83,22 @@ pub(super) fn bundle_export_impl(
         all_warnings.push(MEMORY_NOT_EXPORTED_WARNING.to_string());
     }
 
+    if !req.widgets.is_empty() && req.format != "zip" {
+        return Err("bundle.export: widgets travel only in a zip (format: \"zip\")".to_string());
+    }
     if req.format == "zip" {
-        let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
-            .map_err(|e| format!("bundle.export: {e}"))?;
+        let zip_bytes = if req.widgets.is_empty() {
+            crate::backend::bundle_export::zip_bundle_export(&export)
+        } else {
+            let svc = crate::backend::widget_packages::service().ok_or("bundle.export: widget packages aren't available")?;
+            let mut widgets = Vec::new();
+            for id in &req.widgets {
+                let (hash, files) = svc.approved_package(id).map_err(|e| format!("bundle.export: {e}"))?;
+                widgets.push((id.clone(), hash, files));
+            }
+            crate::backend::bundle_widgets::zip_export_with_widgets(&export, &widgets)
+        }
+        .map_err(|e| format!("bundle.export: {e}"))?;
         use base64::Engine as _;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
         return Ok(json!({

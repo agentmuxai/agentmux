@@ -17,6 +17,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BundleImportSelectionState, BundleImportSkillSelectionState } from "@/app/element/modal-layer";
 import type { BundleImportPreviewResponse } from "@/app/store/rpc-api";
+import { describePermission, describeSignature } from "@/app/view/settings/sections/widget-permissions";
 
 interface BundleImportPreviewModalPanelProps {
     preview: BundleImportPreviewResponse;
@@ -45,6 +46,12 @@ export const BundleImportPreviewModalPanel = (
         preview.skills.map((s) => ({ sourceDir: s.source_dir, checked: true, renameValue: "" })),
     );
     const [warningsDismissed, setWarningsDismissed] = createSignal(false);
+    // Widgets the bundle carries (SPEC_WIDGET_SHARING_2026_10_10.md §3.3): on
+    // by default, except one that can't be imported or is installed already.
+    const offeredWidgets = () => (preview.widgets ?? []).filter((w) => !w.error && !w.same_as_installed);
+    const [widgetChecked, setWidgetChecked] = createSignal<Record<string, boolean>>(
+        Object.fromEntries((preview.widgets ?? []).filter((w) => !w.error && !w.same_as_installed).map((w) => [w.id, true])),
+    );
 
     // §4.1 point 2: the modal fetches the full existing global skill-name
     // list ONCE, up front, via skill.catalog.list -- not just the subset
@@ -95,6 +102,9 @@ export const BundleImportPreviewModalPanel = (
                 .filter((cf) => contextChecked()[cf.id])
                 .map((cf) => cf.id),
             skills: skills(),
+            includeWidgets: offeredWidgets()
+                .filter((w) => widgetChecked()[w.id])
+                .map((w) => w.id),
         });
     };
 
@@ -233,6 +243,54 @@ export const BundleImportPreviewModalPanel = (
                                             <div class="bundle-import-hint bundle-import-hint-warn">
                                                 This name is also taken — pick another.
                                             </div>
+                                        </Show>
+                                    </div>
+                                );
+                            }}
+                        </For>
+                    </section>
+                </Show>
+
+                <Show when={(preview.widgets ?? []).length > 0}>
+                    <section class="bundle-import-section">
+                        <h3 class="bundle-import-section-title">Widgets</h3>
+                        <div class="bundle-import-hint">Each widget asks for your approval before it runs.</div>
+                        <For each={preview.widgets}>
+                            {(w) => {
+                                const sig = describeSignature(w.signature);
+                                return (
+                                    <div class="bundle-import-skill-row" data-widget-id={w.id}>
+                                        <label class="bundle-import-checkbox-row">
+                                            <input
+                                                type="checkbox"
+                                                checked={!!widgetChecked()[w.id]}
+                                                disabled={!!w.error || w.same_as_installed}
+                                                onChange={(e) =>
+                                                    setWidgetChecked((prev) => ({ ...prev, [w.id]: e.currentTarget.checked }))
+                                                }
+                                            />
+                                            <span class="bundle-import-item-name">{w.name}</span>
+                                            <span class="bundle-import-item-meta">
+                                                {w.version}
+                                                {w.author ? ` · by ${w.author}` : ""}
+                                            </span>
+                                        </label>
+                                        <Show
+                                            when={!w.error}
+                                            fallback={<div class="bundle-import-hint bundle-import-hint-warn">Can't be imported: {w.error}</div>}
+                                        >
+                                            <Show when={w.same_as_installed}>
+                                                <div class="bundle-import-hint">Already installed at this version.</div>
+                                            </Show>
+                                            <Show when={!w.same_as_installed && w.installed_version}>
+                                                <div class="bundle-import-hint">Replaces version {w.installed_version} you have.</div>
+                                            </Show>
+                                            <p class={`bundle-import-item-description${sig.warning ? " bundle-import-hint-warn" : ""}`}>{sig.text}</p>
+                                            <p class="bundle-import-item-description">
+                                                {w.permissions.length > 0
+                                                    ? `It can: ${w.permissions.map((p) => describePermission(p).text).join(" · ")}`
+                                                    : "It asks for no permissions."}
+                                            </p>
                                         </Show>
                                     </div>
                                 );

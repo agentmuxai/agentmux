@@ -44,6 +44,8 @@ function summaryLine(selection: BundleImportSelectionState): string {
     if (includedSkills.length > 0) {
         parts.push(`${includedSkills.length} skill${includedSkills.length === 1 ? "" : "s"}`);
     }
+    const widgets = selection.includeWidgets?.length ?? 0;
+    if (widgets > 0) parts.push(`${widgets} widget${widgets === 1 ? "" : "s"}, each asking for your approval`);
     return parts.length > 0 ? `Importing: ${parts.join(", ")}.` : "Nothing selected to import.";
 }
 
@@ -72,9 +74,10 @@ export const BundleImportConfirmModalPanel = (
                         source_dir: s.sourceDir,
                         ...(s.renameValue.trim() ? { import_as: s.renameValue.trim() } : {}),
                     })),
+                include_widgets: props.selection.includeWidgets ?? [],
             });
             setSubmitting(false);
-            if (res.skipped_skills.length > 0 || res.warnings.length > 0) {
+            if (res.skipped_skills.length > 0 || res.warnings.length > 0 || (res.widgets ?? []).length > 0) {
                 // Real, expected partial-failure outcome -- show the
                 // result inline rather than closing immediately.
                 setResult(res);
@@ -111,6 +114,17 @@ export const BundleImportConfirmModalPanel = (
                                     Skipped skill(s): {result()!.skipped_skills.join(", ")}
                                 </div>
                             </Show>
+                            <For each={result()!.widgets ?? []}>
+                                {(w) => (
+                                    <div class={`bundle-import-hint${w.status === "failed" ? " bundle-import-hint-warn" : ""}`}>
+                                        {w.status === "waiting"
+                                            ? `${w.id}: installed, waiting for your approval.`
+                                            : w.status === "unchanged"
+                                              ? `${w.id}: already installed.`
+                                              : `${w.id}: not installed: ${w.error ?? "it failed"}`}
+                                    </div>
+                                )}
+                            </For>
                             <Show when={result()!.warnings.length > 0}>
                                 <div class="bundle-import-warnings-banner">
                                     <For each={result()!.warnings}>

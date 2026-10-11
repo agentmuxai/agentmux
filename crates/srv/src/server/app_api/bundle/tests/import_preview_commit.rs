@@ -104,6 +104,7 @@ async fn commit_rejects_on_digest_mismatch_and_writes_nothing() {
     let state = test_state();
     let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -128,6 +129,7 @@ async fn commit_applies_bundle_name_override_not_parsed_name() {
     let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
     let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -153,6 +155,7 @@ async fn commit_bounds_an_oversized_bundle_name_override() {
     let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
     let oversized_name = "n".repeat(bi::MAX_BUNDLE_NAME_CHARS + 500);
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -185,6 +188,7 @@ async fn commit_dedupes_repeated_source_dirs_in_include_skills_first_occurrence_
         .map(|i| SkillSelection { source_dir: "skills/deploy".to_string(), import_as: Some(format!("deploy-{i}")) })
         .collect();
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -233,6 +237,7 @@ async fn commit_caps_include_skills_at_max_imported_skills() {
     include_skills.push(SkillSelection { source_dir: "skills/c".to_string(), import_as: None });
 
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -264,6 +269,7 @@ async fn commit_selects_context_files_by_id_not_display_path() {
     let digest = bi::content_digest_files(&bi_files);
     // Only select id 1 (b.md) -- verify a.md (id 0) is excluded. (comment-hygiene: allow)
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -308,6 +314,7 @@ async fn commit_skips_colliding_skill_left_with_an_empty_rename() {
         files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
     let digest = bi::content_digest_files(&bi_files);
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -348,6 +355,7 @@ async fn commit_imports_colliding_skill_under_a_non_empty_rename() {
         files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
     let digest = bi::content_digest_files(&bi_files);
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -414,6 +422,7 @@ async fn commit_bounds_an_oversized_import_as_in_the_already_exists_warning() {
         files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
     let digest = bi::content_digest_files(&bi_files);
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -459,6 +468,7 @@ async fn commit_imports_no_mcp_servers_and_names_them_in_a_warning() {
         files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
     let digest = bi::content_digest_files(&bi_files);
     let req = CommitReq {
+        include_widgets: vec![],
         file_path: None,
         zip_base64: None,
         files: Some(files),
@@ -561,4 +571,55 @@ fn resolve_import_input_rejects_when_zero_or_multiple_inputs_given() {
     assert!(none.contains("exactly one"));
     let both = resolve_import_input(Some("x".to_string()), Some("y".to_string()), None, budget).unwrap_err();
     assert!(both.contains("exactly one"));
+}
+
+/// A bundle exported with a widget (SPEC_WIDGET_SHARING_2026_10_10.md §3):
+/// its preview lists the widget, checked, and its binary files never reach
+/// the text importer (no "not valid UTF-8" warning).
+#[tokio::test]
+async fn a_bundle_exported_with_a_widget_previews_it() {
+    use crate::backend::bundle_export::{BundleExport, BundleExportFile};
+    use crate::backend::bundle_widgets as bw;
+    let state = test_state();
+    let png: &[u8] = &[0x89, b'P', b'N', b'G', 0, 0xff, 0xfe];
+    let widget = bw::BundleWidget {
+        id: "acme.board".into(),
+        files: std::collections::BTreeMap::from([
+            (
+                "widget.json".to_string(),
+                serde_json::json!({ "manifestVersion": 1, "id": "acme.board", "name": "Board", "version": "1.2.0", "contributes": { "panes": [{ "name": "main" }] } })
+                    .to_string()
+                    .into_bytes(),
+            ),
+            ("index.html".to_string(), b"<p>board</p>".to_vec()),
+            ("logo.png".to_string(), png.to_vec()),
+        ]),
+    };
+    let (_tmp, root) = bw::stage(&widget).unwrap();
+    let hash = crate::backend::widget_packages::package_hash(&crate::backend::widget_packages::hash_files(&root).unwrap());
+    let export = BundleExport {
+        root_slug: "with-widget".into(),
+        files: vec![
+            BundleExportFile {
+                path: "bundle.json".into(),
+                content: serde_json::json!({
+                    "$schema": bi::SCHEMA_V0_3, "name": "with-widget", "version": "0.1.0", "description": "",
+                    "components": { "instructions": ["instructions/AGENTS.md"] }, "metadata": {}
+                })
+                .to_string(),
+            },
+            BundleExportFile { path: "instructions/AGENTS.md".into(), content: "Use the board.".into() },
+        ],
+        skipped_skills: vec![],
+        warnings: vec![],
+    };
+    let zip = bw::zip_export_with_widgets(&export, &[(widget.id.clone(), hash.clone(), widget.files.clone())]).unwrap();
+    use base64::Engine as _;
+    let req = PreviewReq { file_path: None, zip_base64: Some(base64::engine::general_purpose::STANDARD.encode(&zip)), files: None };
+    let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.mstore, req).await.unwrap();
+    assert_eq!(resp.instructions_preview, "Use the board.");
+    assert_eq!(resp.widgets.len(), 1);
+    let w = &resp.widgets[0];
+    assert_eq!((w.id.as_str(), w.version.as_str(), w.hash.as_str(), w.error.as_deref()), ("acme.board", "1.2.0", hash.as_str(), None));
+    assert!(resp.warnings.iter().all(|x| !x.contains("widgets/")), "{:?}", resp.warnings);
 }
