@@ -16,9 +16,10 @@
 // picker's My Agents.
 //
 // A conversation shot creates its agent through the picker's Create new agent
-// form in a window tab of its own, as a user would (the form binds the first
-// Claude account, the demo one), so the agent starts with no history. Cleanup
-// closes the tab, which stops the agent, and deletes it.
+// form in a window tab of its own, as a user would, so the agent starts with
+// no history. The form leaves the agent unbound, so the shot clicks the pane's
+// "Bind: dev@acme.example" for the demo account. Cleanup closes the tab, which
+// stops the agent, and deletes it.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
