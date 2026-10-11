@@ -195,6 +195,12 @@ fi
 
 # Frontend
 cp -r dist/frontend/* "$PORTABLE/runtime/frontend/"
+# Licence texts the build writes (scripts/third-party-notices.mjs); every package
+# must carry them.
+if [ ! -f "$PORTABLE/runtime/frontend/licenses/THIRD_PARTY_NOTICES.txt" ]; then
+    echo "ERROR: dist/frontend/licenses/THIRD_PARTY_NOTICES.txt is missing; rebuild the frontend (task build:frontend)." >&2
+    exit 1
+fi
 
 # CEF core
 cp dist/cef/libcef.dll "$PORTABLE/runtime/"
