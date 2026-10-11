@@ -768,9 +768,6 @@ impl PersistentSubprocessController {
     }
 }
 
-/// Wait for the process's reader tasks once it has ended (stderr up to 500ms,
-/// stdout up to 10s), aborting any that overruns. `after` names how the process
-/// ended ("process exit" or "kill") in the warning.
 /// The CLI is gone, so its MCP servers are too (`backend::mcp_observed`),
 /// unless a new process already replaced it and reports its own. Here, not
 /// at the reader's end of input: a reader can be aborted unfinished
@@ -791,6 +788,9 @@ fn forget_mcp_servers(
     }
 }
 
+/// Wait for the process's reader tasks once it has ended (stderr up to 500ms,
+/// stdout up to 10s), aborting any that overruns. `after` names how the process
+/// ended ("process exit" or "kill") in the warning.
 async fn settle_reader_tasks(
     block_id: &str,
     stderr_reader_handle: Option<tokio::task::JoinHandle<()>>,
