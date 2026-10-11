@@ -8,6 +8,10 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { McpObservedListCommand: (...args: unknown[]) => observedListMock(...args) },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const reconnect = vi.hoisted(() => ({ handlers: [] as (() => void)[] }));
+vi.mock("@/app/store/ws", () => ({
+    addWSReconnectHandler: (h: () => void) => reconnect.handlers.push(h),
+}));
 const mpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
 vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
@@ -86,6 +90,19 @@ describe("McpObservedModel", () => {
         expect(observedListMock).toHaveBeenCalledTimes(2);
         model.dispose();
         expect(mpsHub.handlers.size).toBe(0);
+    });
+
+    test("reloads when the connection to srv comes back, until disposed", async () => {
+        const model = new McpObservedModel();
+        await vi.waitFor(() => expect(model.loadedAtom()).toBe(true));
+        expect(reconnect.handlers).toHaveLength(1);
+        observedListMock.mockClear();
+        reconnect.handlers[0]();
+        expect(observedListMock).toHaveBeenCalledTimes(1);
+        model.dispose();
+        observedListMock.mockClear();
+        reconnect.handlers[0]();
+        expect(observedListMock).not.toHaveBeenCalled();
     });
 
     test("an older reply never overwrites a newer one", async () => {

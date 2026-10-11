@@ -12,6 +12,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { addWSReconnectHandler } from "@/app/store/ws";
 import type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
 import { createSignal, type Accessor } from "solid-js";
 
@@ -91,6 +92,22 @@ export function rowSummary(row: ObservedServerRow): string {
     return failing === 0 ? agents : `${agents}, ${failing} not connected`;
 }
 
+/** Every open model, refreshed when the connection to srv comes back: srv's
+ *  reports live in its memory, so a restarted srv has none, and can't send
+ *  an event for the ones it lost. `addWSReconnectHandler` has no
+ *  unregister, so one handler serves them all. */
+const openModels = new Set<McpObservedModel>();
+let reconnectHandlerAdded = false;
+
+function refreshOnReconnect(model: McpObservedModel): void {
+    openModels.add(model);
+    if (reconnectHandlerAdded) return;
+    reconnectHandlerAdded = true;
+    addWSReconnectHandler(() => {
+        for (const m of openModels) void m.refresh();
+    });
+}
+
 export class McpObservedModel {
     private _rows = createSignal<ObservedServerRow[]>([]);
     rowsAtom: Accessor<ObservedServerRow[]> = this._rows[0];
@@ -104,6 +121,7 @@ export class McpObservedModel {
     private request = 0;
 
     constructor() {
+        refreshOnReconnect(this);
         void this.refresh();
         // A report changed, or the catalog did (a server's source can become
         // "catalog").
@@ -127,6 +145,7 @@ export class McpObservedModel {
     }
 
     dispose(): void {
+        openModels.delete(this);
         for (const unsub of this.unsubs) unsub();
     }
 }
