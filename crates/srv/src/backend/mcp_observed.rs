@@ -19,10 +19,12 @@
 //! nothing secret passes through here. The health of the `agentmux` entry
 //! and its repair are `mcp_health`'s; this only records.
 //!
-//! Callers record and forget while holding the controller's lock, after
-//! checking their process is still the current one (`spawn_generation`): a
-//! replaced process's reader or waiter must not write over or clear the
-//! new one's servers. This module's own lock is only ever taken inside it.
+//! Each report belongs to the spawn that sent it, by the spawn's
+//! process-wide registration nonce (`persistent::next_registration_nonce`),
+//! which only grows. A report is kept only over one from an older or the
+//! same spawn, and a spawn's exit clears only its own: so a replaced process,
+//! even one of a replaced controller whose `spawn_generation` restarted,
+//! never writes over or clears a newer process's servers.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -47,6 +49,9 @@ pub struct ObservedServer {
 pub struct Observation {
     pub servers: Vec<ObservedServer>,
     pub at_ms: u64,
+    /// The spawn that reported it (module doc).
+    #[serde(skip)]
+    pub owner: u64,
 }
 
 static OBSERVED: LazyLock<Mutex<HashMap<String, Observation>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -95,22 +100,38 @@ pub fn parse_init(frame: &Value) -> Option<Vec<ObservedServer>> {
     )
 }
 
-/// Keep what a pane's CLI reported. True when it changed, so the caller
-/// tells the panes (`mcp:observed`); a resumed turn's init repeats it.
-pub fn record(block_id: &str, servers: Vec<ObservedServer>, at_ms: u64) -> bool {
+/// Keep what spawn `owner` of a pane reported, unless a newer spawn already
+/// reported. True when it changed, so the caller tells the panes
+/// (`mcp:observed`); a resumed turn's init repeats it.
+pub fn record(block_id: &str, owner: u64, servers: Vec<ObservedServer>, at_ms: u64) -> bool {
     let mut map = observed();
-    let changed = map.get(block_id).map(|o| o.servers != servers).unwrap_or(true);
-    map.insert(block_id.to_string(), Observation { servers, at_ms });
+    let changed = match map.get(block_id) {
+        Some(o) if o.owner > owner => return false,
+        Some(o) => o.servers != servers || o.owner != owner,
+        None => true,
+    };
+    map.insert(block_id.to_string(), Observation { servers, at_ms, owner });
     changed
 }
 
-/// Record an init frame's servers. True when they changed: the caller then
-/// publishes (`publish`), after letting go of its own lock.
-pub fn record_init(block_id: &str, frame: &Value) -> bool {
+/// Record an init frame's servers for spawn `owner`. True when they changed:
+/// the caller then publishes (`publish`).
+pub fn record_init(block_id: &str, owner: u64, frame: &Value) -> bool {
     match parse_init(frame) {
-        Some(servers) => record(block_id, servers, agentmux_common::time::now_ms_u64()),
+        Some(servers) => record(block_id, owner, servers, agentmux_common::time::now_ms_u64()),
         None => false,
     }
+}
+
+/// Spawn `owner` exited: drop its report, not a newer spawn's. True when
+/// there was one.
+pub fn forget_owned(block_id: &str, owner: u64) -> bool {
+    let mut map = observed();
+    if map.get(block_id).is_some_and(|o| o.owner == owner) {
+        map.remove(block_id);
+        return true;
+    }
+    false
 }
 
 /// Tell the panes a report changed or went (`mcp:observed`).
@@ -130,8 +151,8 @@ pub fn all() -> HashMap<String, Observation> {
     observed().clone()
 }
 
-/// Drop a pane's report: its CLI exited, or its block is gone. True when
-/// there was one.
+/// Drop a pane's report whoever sent it: its block is gone. True when there
+/// was one.
 pub fn forget(block_id: &str) -> bool {
     observed().remove(block_id).is_some()
 }
@@ -183,11 +204,11 @@ mod tests {
     fn a_repeated_report_is_not_a_change() {
         let block = "mcp-observed-test-block";
         let servers = parse_init(&init_frame()).unwrap();
-        assert!(record(block, servers.clone(), 1));
-        assert!(!record(block, servers.clone(), 2), "same servers again");
+        assert!(record(block, 7, servers.clone(), 1));
+        assert!(!record(block, 7, servers.clone(), 2), "same servers again");
         let mut fewer = servers;
         fewer.pop();
-        assert!(record(block, fewer, 3));
+        assert!(record(block, 7, fewer, 3));
         assert_eq!(all().get(block).map(|o| o.at_ms), Some(3));
         forget(block);
         assert!(!all().contains_key(block));
@@ -196,10 +217,23 @@ mod tests {
     #[test]
     fn an_init_frame_is_recorded_once_and_forgotten_once() {
         let block = "mcp-observed-test-ended";
-        assert!(record_init(block, &init_frame()));
-        assert!(!record_init(block, &init_frame()), "the same report again");
-        assert!(!record_init(block, &json!({"type": "system"})), "not an init frame");
-        assert!(forget(block));
-        assert!(!forget(block), "nothing left to forget");
+        assert!(record_init(block, 3, &init_frame()));
+        assert!(!record_init(block, 3, &init_frame()), "the same report again");
+        assert!(!record_init(block, 3, &json!({"type": "system"})), "not an init frame");
+        assert!(forget_owned(block, 3));
+        assert!(!forget_owned(block, 3), "nothing left to forget");
+    }
+
+    /// A replaced spawn (an older nonce), even under a new controller whose
+    /// generation restarted, never writes over or clears the newer one's.
+    #[test]
+    fn an_older_spawn_never_overwrites_or_clears_a_newer_ones_report() {
+        let block = "mcp-observed-test-owner";
+        assert!(record_init(block, 10, &init_frame()));
+        assert!(!record_init(block, 9, &json!({"mcp_servers": []})), "older spawn's late init");
+        assert_eq!(all().get(block).map(|o| o.servers.len()), Some(4));
+        assert!(!forget_owned(block, 9), "older spawn's exit");
+        assert!(all().contains_key(block));
+        assert!(forget_owned(block, 10));
     }
 }
