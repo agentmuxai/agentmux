@@ -18,7 +18,7 @@ export interface TipRow {
     /**
      * The gesture, as "+"-joined tokens: modifiers (`shift`, `ctrl`, `alt`,
      * `mod` = ⌘ on macOS, Ctrl elsewhere), pointer words (`click`, `dblclick`,
-     * `middleclick`, `rightclick`, `drag`, `wheel`, `drop`, `hold`), or a key
+     * `tripleclick`, `middleclick`, `rightclick`, `drag`, `wheel`, `drop`, `hold`), or a key
      * (`key:Space`). Alternatives are separated by " / ".
      */
     gesture: string;
@@ -193,6 +193,35 @@ export const TIPS: TipRow[] = [
         label: "Copy them into the terminal's folder",
         source: { file: "frontend/app/view/term/term.tsx", anchor: "No working directory for this terminal" },
     },
+    // Library defaults (xterm), checked by hand on macOS and Linux (#4651);
+    // Windows joins once checked there (spec D3).
+    {
+        id: "term:altClick",
+        area: "Terminal",
+        gesture: "alt+click",
+        where: "on the prompt line",
+        label: "Move the cursor there (the terminal sends the shell arrow keys)",
+        os: ["darwin", "linux"],
+        source: { file: "frontend/app/view/term/termwrap.ts", anchor: "this.terminal = new Terminal({" },
+    },
+    {
+        id: "term:shiftClick",
+        area: "Terminal",
+        gesture: "shift+click",
+        where: "in a terminal",
+        label: "Extend the selection to there",
+        os: ["darwin", "linux"],
+        source: { file: "frontend/app/view/term/termwrap.ts", anchor: "this.terminal = new Terminal({" },
+    },
+    {
+        id: "term:select",
+        area: "Terminal",
+        gesture: "dblclick / tripleclick",
+        where: "in a terminal",
+        label: "Select a word / a whole line",
+        os: ["darwin", "linux"],
+        source: { file: "frontend/app/view/term/termwrap.ts", anchor: "this.terminal = new Terminal({" },
+    },
     {
         id: "term:ctrlF",
         area: "Terminal",
@@ -210,6 +239,37 @@ export const TIPS: TipRow[] = [
         where: "on a file in the editor's file tree",
         label: "A click opens a preview tab, a double-click a tab that stays; F2 renames",
         source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "onDblClick={handleDblClick}" },
+    },
+
+    // Library defaults (CodeMirror basicSetup), checked by hand on macOS and
+    // Linux (#4651); Windows joins once checked there. Not code folding: the
+    // gutter is hidden on purpose (editor-view.scss, #1427).
+    {
+        id: "editor:multiCursor",
+        area: "Editor",
+        gesture: "mod+click",
+        where: "in an editor",
+        label: "Add another cursor",
+        os: ["darwin", "linux"],
+        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+    },
+    {
+        id: "editor:blockSelect",
+        area: "Editor",
+        gesture: "alt+drag",
+        where: "in an editor",
+        label: "Make a column (block) selection",
+        os: ["darwin", "linux"],
+        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
+    },
+    {
+        id: "editor:nextMatch",
+        area: "Editor",
+        gesture: "mod+key:D",
+        where: "in an editor",
+        label: "Select the next match of the selected text",
+        os: ["darwin", "linux"],
+        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
     },
 
     // ── Files ──
@@ -372,6 +432,7 @@ const MOD_LABEL: Record<string, [mac: string, other: string]> = {
 const POINTER_LABEL: Record<string, string> = {
     click: "click",
     dblclick: "double-click",
+    tripleclick: "triple-click",
     middleclick: "middle-click",
     rightclick: "right-click",
     drag: "drag",
