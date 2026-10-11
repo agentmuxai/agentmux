@@ -478,12 +478,13 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                                 onClick={() => m.toggleExpanded(foldKey(props.node.process))}
                             />
                         </Show>
-                        <ProcessName process={props.node.process} />
-                        <Show when={exitedMs()}>
-                            {(ms) => (
-                                <span class="tower-muted">exited {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}</span>
-                            )}
-                        </Show>
+                        <ProcessName process={props.node.process}>
+                            <Show when={exitedMs()}>
+                                {(ms) => (
+                                    <span class="tower-muted">exited {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}</span>
+                                )}
+                            </Show>
+                        </ProcessName>
                     </div>
                 </td>
                 <td class="tower-num" title={subtree()}>
