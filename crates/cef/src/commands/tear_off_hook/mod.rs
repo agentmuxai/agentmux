@@ -82,3 +82,6 @@ pub fn start_tab_drag_tracking(
 ) -> Result<(), String> {
     Ok(())
 }
+
+#[cfg(target_os = "windows")]
+pub(crate) use windows::window_label_at;

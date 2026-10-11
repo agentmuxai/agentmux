@@ -637,20 +637,7 @@ fn candidate_label_under_cursor_locked(
     x: i32,
     y: i32,
 ) -> Option<String> {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetAncestor, WindowFromPoint, GA_ROOT,
-    };
-
-    let pt = POINT { x, y };
-    let hwnd = unsafe { WindowFromPoint(pt) };
-    if hwnd.is_null() {
-        return None;
-    }
-    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
-    let root = if root.is_null() { hwnd } else { root };
-
-    let label = label_for_top_level(ctx, browsers, root)?;
+    let label = window_label_at(&ctx.state, browsers, x, y)?;
     if label == ctx.dragged_label {
         return None;
     }
@@ -665,10 +652,31 @@ fn candidate_label_under_cursor_locked(
     if matches!(ctx.mode, HookMode::TabDrag { .. }) && label == ctx.source_label {
         return None;
     }
-    if !is_instance_label(&label) {
+    Some(label)
+}
+
+/// The AgentMux window under the screen point `x`, `y` (physical pixels,
+/// as `GetCursorPos` gives them): the top-level window there, then its
+/// label (`label_for_top_level`). The hook's candidate test and the
+/// cross-window drag's hit test (`commands::drag::hit_test_windows`) both
+/// ask this, so they can't disagree about which window is where.
+#[cfg(target_os = "windows")]
+pub(crate) fn window_label_at(
+    state: &crate::state::AppState,
+    browsers: &std::collections::HashMap<String, cef::Browser>,
+    x: i32,
+    y: i32,
+) -> Option<String> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
+
+    let hwnd = unsafe { WindowFromPoint(POINT { x, y }) };
+    if hwnd.is_null() {
         return None;
     }
-    Some(label)
+    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    let root = if root.is_null() { hwnd } else { root };
+    label_for_top_level(state, browsers, root).filter(|label| is_instance_label(label))
 }
 
 /// The label of the browser whose top-level window is `root`, from the live
@@ -701,7 +709,7 @@ fn candidate_label_under_cursor_locked(
 ///    live main browser's own host handle can veto it.
 #[cfg(target_os = "windows")]
 fn label_for_top_level(
-    ctx: &HookContext,
+    state: &crate::state::AppState,
     browsers: &std::collections::HashMap<String, cef::Browser>,
     root: *mut std::ffi::c_void,
 ) -> Option<String> {
@@ -715,7 +723,7 @@ fn label_for_top_level(
         }
     }
 
-    let cached = cached_window_labels(ctx, root);
+    let cached = cached_window_labels(state, root);
     let [label] = cached.as_slice() else {
         return None;
     };
@@ -729,7 +737,7 @@ fn label_for_top_level(
     // A pool window serving the primary: its renderer registered "main",
     // so the pool label has no backend window of its own. The live main
     // browser vetoes it when its own host handle places main elsewhere.
-    if label.starts_with("window-pool-") && ctx.state.backend_window_id(label).is_none() {
+    if label.starts_with("window-pool-") && state.backend_window_id(label).is_none() {
         let main = browsers.get("main")?;
         return match host_top_level(main) {
             Some(elsewhere) if elsewhere != root => None,
@@ -773,8 +781,8 @@ fn host_top_level(browser: &cef::Browser) -> Option<*mut std::ffi::c_void> {
 
 /// The window labels `window_hwnds` has cached for `hwnd`.
 #[cfg(target_os = "windows")]
-fn cached_window_labels(ctx: &HookContext, hwnd: *mut std::ffi::c_void) -> Vec<String> {
-    ctx.state
+fn cached_window_labels(state: &crate::state::AppState, hwnd: *mut std::ffi::c_void) -> Vec<String> {
+    state
         .window_hwnds
         .lock()
         .iter()
