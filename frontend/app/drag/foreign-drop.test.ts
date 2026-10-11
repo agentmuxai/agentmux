@@ -5,12 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const claim = vi.fn<(label: string) => Promise<void>>(() => Promise.resolve());
 let linux = true;
-let localSession: object | null = null;
 
 vi.mock("@/store/global", () => ({ getApi: () => ({ claimCrossDragTarget: claim }) }));
 vi.mock("@/util/platformutil", () => ({ isLinux: () => linux }));
 vi.mock("@/util/logger", () => ({ Logger: { info: vi.fn(), warn: vi.fn() } }));
-vi.mock("./drag-session", () => ({ session: () => localSession }));
 
 import { WINDOW_TAB_MIME, acceptWindowTabsFromOtherWindows, maybeDroppedInAnotherWindow } from "./foreign-drop";
 
@@ -25,15 +23,16 @@ let dispose: () => void = () => {};
 
 beforeEach(() => {
     linux = true;
-    localSession = null;
     claim.mockClear();
-    window.dispatchEvent(dragEvent("dragstart", [])); // a fresh drag here
+    window.dispatchEvent(dragEvent("dragstart", [])); // a fresh drag here...
+    window.dispatchEvent(dragEvent("dragend", [])); // ...that has ended
 });
 
 afterEach(() => dispose());
 
 describe("maybeDroppedInAnotherWindow", () => {
     it("is a drop elsewhere when the drag ended with move and no drop here", () => {
+        window.dispatchEvent(dragEvent("dragstart", []));
         expect(maybeDroppedInAnotherWindow("move")).toBe(true);
     });
 
@@ -63,14 +62,25 @@ describe("acceptWindowTabsFromOtherWindows", () => {
         expect(claim).toHaveBeenCalledWith("window-pool-2");
     });
 
-    it("leaves this window's own drags alone", () => {
+    // Codex on #4706: the drag library ends the drag session in its own drop
+    // handler, before this window-level listener sees the drop; an in-window
+    // reorder must still not read as a drop from elsewhere.
+    it("leaves this window's own drags alone, through to their drop", () => {
         dispose = acceptWindowTabsFromOtherWindows("main");
-        localSession = { kind: "window-tab" };
+        window.dispatchEvent(dragEvent("dragstart"));
         const over = dragEvent("dragover");
         window.dispatchEvent(over);
         window.dispatchEvent(dragEvent("drop"));
         expect(over.defaultPrevented).toBe(false);
         expect(claim).not.toHaveBeenCalled();
+    });
+
+    it("accepts drags from elsewhere again once its own drag has ended", () => {
+        dispose = acceptWindowTabsFromOtherWindows("main");
+        window.dispatchEvent(dragEvent("dragstart"));
+        window.dispatchEvent(dragEvent("dragend"));
+        window.dispatchEvent(dragEvent("drop"));
+        expect(claim).toHaveBeenCalledWith("main");
     });
 
     it("leaves other drags alone (no window-tab marker)", () => {

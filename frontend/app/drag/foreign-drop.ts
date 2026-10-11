@@ -24,7 +24,6 @@
 import { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { isLinux } from "@/util/platformutil";
-import { session } from "./drag-session";
 
 /** The marker a dragged window tab carries, so another window can tell it from other drags. */
 export const WINDOW_TAB_MIME = "application/x-agentmux-window-tab";
@@ -33,9 +32,18 @@ export const WINDOW_TAB_MIME = "application/x-agentmux-window-tab";
  *  started here resets it). */
 let droppedHere = false;
 
+/** Whether the drag under way started in this window: from its `dragstart`
+ *  to its `dragend`. Not the drag session, which a drop handler ends before
+ *  the window-level `drop` listener below runs. */
+let dragStartedHere = false;
+
 if (typeof window !== "undefined") {
-    window.addEventListener("dragstart", () => (droppedHere = false), true);
+    window.addEventListener("dragstart", () => {
+        droppedHere = false;
+        dragStartedHere = true;
+    }, true);
     window.addEventListener("drop", () => (droppedHere = true), true);
+    window.addEventListener("dragend", () => (dragStartedHere = false), true);
 }
 
 /**
@@ -49,7 +57,7 @@ export function maybeDroppedInAnotherWindow(dropEffect: string | undefined): boo
 
 /** A window-tab drag that started in another window. */
 function isWindowTabFromElsewhere(e: DragEvent): boolean {
-    return session() == null && (e.dataTransfer?.types ?? []).includes(WINDOW_TAB_MIME);
+    return !dragStartedHere && (e.dataTransfer?.types ?? []).includes(WINDOW_TAB_MIME);
 }
 
 /**
