@@ -349,6 +349,8 @@ describe("Tower", () => {
         const cc = screen.getByText("cc.exe").closest("tr")!;
         expect(cc).toHaveClass("tower-process-row--exited");
         expect(within(cc).getByText("exited 4 s ago")).toBeInTheDocument();
+        // Right after the name, not at the far edge of the name cell.
+        expect(within(cc).getByText("exited 4 s ago").parentElement).toHaveClass("tower-name-tail");
         // It isn't counted as running.
         expect(within(screen.getByTestId("tower-rail-block-a")).getByText("50%")).toBeInTheDocument();
 

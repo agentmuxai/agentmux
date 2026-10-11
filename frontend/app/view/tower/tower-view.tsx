@@ -280,10 +280,11 @@ function ProcessRow(props: {
         >
             <td class="tower-name">
                 <div class="tower-name-line">
-                    <ProcessName process={props.process} />
-                    <Show when={props.taskLabel}>
-                        {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
-                    </Show>
+                    <ProcessName process={props.process}>
+                        <Show when={props.taskLabel}>
+                            {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
+                        </Show>
+                    </ProcessName>
                 </div>
             </td>
             <td class="tower-num">{props.cpu(props.process.cpu)}</td>
