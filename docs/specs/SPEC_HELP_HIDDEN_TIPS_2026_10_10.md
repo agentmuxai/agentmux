@@ -1,6 +1,6 @@
 # Hidden tips in the Help pane: the gestures nobody would guess
 
-**Status:** active: P1 in #4631, P2 in #4637, P3 in #NNNN; owner decisions in §9.
+**Status:** active: P1 in #4631, P2 in #4637, P3 in #4651; owner decisions in §9.
 **Date:** 2026-10-10.
 **Requested by:** repo owner: "lets add more hidden tips to the help. there are a lot of unobvious key shortcut helpers, like using ctrl when border resize, or anything else u find, write that to a separate spec".
 **Author:** AgentA@Area54, with Masty@starpower (macOS) and Maricon@charlie (Linux) to verify per platform.
@@ -168,7 +168,7 @@ The questions as asked:
   - The remaining in-page and agent tips aren't checked on Linux.
 - **Windows** (AgentA): inconclusive. The dev window was hidden, and CDP mouse events don't hit-test there. Needs a run with the window in front.
 
-**P3 (#NNNN).** `docs/keybindings.md` (and the docs site page built from it) gains a "Mouse and gestures" section, generated from the same table:
+**P3 (#4651).** `docs/keybindings.md` (and the docs site page built from it) gains a "Mouse and gestures" section, generated from the same table:
 - macOS and Windows/Linux columns;
 - keys inside a tip shown both ways where they differ (⌘Z / Ctrl+Z);
 - tips that only apply on some platforms marked.
