@@ -24,7 +24,7 @@ import { docTabItemType } from "@/app/drag/drag-types";
 import { DocTabsController, type DocTabsSpec } from "./doc-tabs-controller";
 import {
     ALREADY_OPEN_THERE,
-    controllerHost,
+    docTabsHost,
     docTabHost,
     dropDocTab,
     moveDocTab,
@@ -44,9 +44,9 @@ const host = () => ({ meta: () => ({}), setMeta: () => {} });
 const keys = (ctl: DocTabsController<P>) => ctl.tabs().map((t) => t.key);
 
 const unregister: (() => void)[] = [];
-function pane(blockId: string, paths: string[], opts: Parameters<typeof controllerHost<P>>[2] = {}, docType = "media") {
+function pane(blockId: string, paths: string[], opts: Parameters<typeof docTabsHost<P>>[2] = {}, docType = "media") {
     const ctl = new DocTabsController(spec, host(), paths.map((path) => ({ path })));
-    unregister.push(registerDocTabHost(blockId, controllerHost(ctl, docType, opts)));
+    unregister.push(registerDocTabHost(blockId, docTabsHost(ctl, docType, opts)));
     return ctl;
 }
 
@@ -123,9 +123,30 @@ describe("moving a document tab between panes", () => {
         expect(hub.cantMove).not.toHaveBeenCalled();
     });
 
+    it("hooks: live state is read before the tab leaves, and the arriving tab is set up before it lands", () => {
+        const order: string[] = [];
+        const a = new DocTabsController(spec, host(), [{ path: "/1" }, { path: "/2" }]);
+        const b = new DocTabsController(spec, host(), [{ path: "/x" }]);
+        unregister.push(
+            registerDocTabHost("ha", docTabsHost(a, "media", { liveOf: (t) => (order.push(`live ${t.key} ${a.tabs().length}`), { text: "unsaved" }) }))
+        );
+        unregister.push(
+            registerDocTabHost(
+                "hb",
+                docTabsHost(b, "media", {
+                    arriving: (t, live) => (order.push(`arriving ${t.key} ${JSON.stringify(live)} ${b.tabs().length}`), { ...t, title: "renamed" }),
+                    arrived: (t) => order.push(`arrived ${t.key} ${b.tabs().length}`),
+                })
+            )
+        );
+        expect(moveDocTab("ha", a.tabs()[1].id, "hb")).toEqual({ moved: true });
+        expect(order).toEqual(['live /2 2', 'arriving /2 {"text":"unsaved"} 1', "arrived /2 2"]);
+        expect(b.tabs().map((t) => t.title)).toEqual(["x", "renamed"]);
+    });
+
     it("a pane's unregister removes only its own registration", () => {
-        const first = controllerHost(new DocTabsController(spec, host(), []), "media");
-        const second = controllerHost(new DocTabsController(spec, host(), []), "media");
+        const first = docTabsHost(new DocTabsController(spec, host(), []), "media");
+        const second = docTabsHost(new DocTabsController(spec, host(), []), "media");
         const off1 = registerDocTabHost("k", first);
         const off2 = registerDocTabHost("k", second);
         off1();
@@ -136,8 +157,9 @@ describe("moving a document tab between panes", () => {
 });
 
 describe("the pane-wide drop zone", () => {
-    const drag = (tabId: string, sourceBlockId: string, docType = "media") => ({
+    const drag = (tabId: string, sourceBlockId: string, docType = "media", at = { clientX: 50, clientY: 50 }) => ({
         source: { data: { type: docTabItemType, tabId, docType, sourceBlockId } },
+        input: at,
     });
 
     it("takes a tab of its type from another pane, and declines its own, other types and other drags", () => {
@@ -148,7 +170,21 @@ describe("the pane-wide drop zone", () => {
         expect(zone.canDrop(drag("t", "a"))).toBe(true);
         expect(zone.canDrop(drag("t", "b"))).toBe(false);
         expect(zone.canDrop(drag("t", "a", "editor"))).toBe(false);
-        expect(zone.canDrop({ source: { data: { type: "PANE_TAB_ITEM", blockId: "x" } } })).toBe(false);
+        expect(zone.canDrop({ source: { data: { type: "PANE_TAB_ITEM", blockId: "x" } }, input: { clientX: 50, clientY: 50 } })).toBe(false);
+    });
+
+    it("near the pane's edge, steps aside: the tab goes into a new pane there", () => {
+        const tile = document.createElement("div");
+        tile.className = "tile-node";
+        tile.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
+        const el = document.createElement("div");
+        tile.appendChild(el);
+        registerDocTabDropZone(el, "media", "b");
+        const zone = hub.dropTargets[0];
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 50, clientY: 50 }))).toBe(true);
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 30, clientY: 50 }))).toBe(true);
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 5, clientY: 50 }))).toBe(false);
+        expect(zone.canDrop(drag("t", "a", "media", { clientX: 50, clientY: 97 }))).toBe(false);
     });
 
     /** pragmatic-dnd's drop location: the accepting targets, innermost first. */

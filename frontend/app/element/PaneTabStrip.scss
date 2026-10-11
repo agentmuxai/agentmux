@@ -80,10 +80,11 @@
     // full-width — reported live as "a horizontal line just under the +"
     // (most visible on a single-tab pane, where the strip IS only the "+").
     //
-    // Scoped rather than removed outright: the editor's file-tab strip
-    // (editor-tab-strip.tsx) and the history strip (AgentHistoryTabView.tsx)
-    // still render PaneTabStrip as their OWN standalone row, where this
-    // border is the only thing separating them from the content below.
+    // Scoped rather than removed outright: the history strip
+    // (AgentHistoryTabView.tsx) still renders PaneTabStrip as its OWN
+    // standalone row, where this border is the only thing separating it
+    // from the content below. (The document-tab strip, DocTabStrip.tsx,
+    // draws its own full-width line and drops this one.)
     //
     // The `+ 1px` above goes with it: it exists only to stop border-box
     // carving that border out of the declared height (see the long comment

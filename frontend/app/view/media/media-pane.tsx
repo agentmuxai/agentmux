@@ -13,7 +13,7 @@
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { docTabAction, DocTabsController, handleDocTabKey, runDocTabAction, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
-import { controllerHost, registerDocTabDropZone, registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
+import { docTabsHost, registerDocTabDropZone, registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 import { AUDIO_EXTENSIONS, basenameOf, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 import { hostHas } from "@/app/host/host-caps";
 import { registerPaneCommandRunner } from "@/app/keybindings/app-api";
@@ -100,7 +100,7 @@ export class MediaPaneModel {
         // an empty one, as when its last tab closes (MediaPane below).
         this.unregisterHost = registerDocTabHost(
             ctx.blockId,
-            controllerHost(this.tabs, "media", { isPlaceholder: (t) => isEmpty(t.payload) })
+            docTabsHost(this.tabs, "media", { isPlaceholder: (t) => isEmpty(t.payload) })
         );
     }
 

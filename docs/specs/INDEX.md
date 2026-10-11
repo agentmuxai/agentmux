@@ -195,6 +195,7 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01`](PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md) | Docs cleanup — execution plan |
+| [`PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10`](PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10.md) | Plan — the Editor's document tabs on the shared surfaces |
 | [`PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02`](PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) | Plan — consolidate the agent pane's two (really three) separate login CTAs |
 | [`PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03`](PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md) | Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap) |
 | [`REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26`](REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) | Report: auto-detecting long-running tool calls (sleep and beyond) and docking them — status refresh, 2026-07-26 |

@@ -50,6 +50,7 @@ vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantOpen: () => {
 vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: async () => {} }));
 
 import { EditorViewModel } from "./editor-model";
+import { editorDocTabs } from "./editor-doc-tabs";
 
 // A fresh block per pane: the slice's event sink is installed once per
 // module (editor-model.ts), so slots are never reset here.
@@ -187,7 +188,7 @@ describe("the Editor's document tabs", () => {
         model = mount().model;
         await model.openFile("c:/repo/a.ts");
         await model.openFile("c:/repo/b.md");
-        model.moveActiveTab(-1);
+        editorDocTabs(model).move(model.activeIdAtom()!, -1);
         expect(model.tabsAtom().map((t) => t.filePath)).toEqual(["c:/repo/b.md", "c:/repo/a.ts"]);
         model.closeTab(model.activeIdAtom()!);
         expect(model.tabsAtom().map((t) => t.filePath)).toEqual(["c:/repo/a.ts"]);

@@ -35,7 +35,8 @@ import {
     unregisterEditorPane,
     getAllActiveScratchIds,
 } from "@/app/store/editor-pane-state-store";
-import { DOC_TABS_META, hydrateDocTabs, persistDocTabs } from "@/app/doc-tabs/doc-tabs";
+import { DOC_TABS_META, hydrateDocTabs } from "@/app/doc-tabs/doc-tabs";
+import { DocTabsSaver } from "@/app/doc-tabs/doc-tabs-controller";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
@@ -75,8 +76,6 @@ const META_PENDING_OPEN_FILES = "editor:pending_open_files";
 
 export type EditorMode = "preview" | "source" | "split";
 const META_SCRATCH = "editor:scratch";
-/** How long tab changes settle before they are written to the block. */
-const DOC_TABS_SAVE_DELAY_MS = 300;
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
 const TREE_WIDTH_MAX = 600;
@@ -225,11 +224,13 @@ export class EditorViewModel {
     private _unsubFileChanged: () => void = () => {};
     private _disposePendingOpenFilesEffect: () => void = () => {};
 
-    // ── Document-tab persistence (SPEC_DOCUMENT_TABS §5.3) ──────────────
-    private _docTabsTimer: ReturnType<typeof setTimeout> | null = null;
-    /** The record last written, so an unchanged tab list isn't rewritten
-     *  (a buffer loading changes the slice, not the record). */
-    private _docTabsWritten = "";
+    // Document-tab persistence (SPEC_DOCUMENT_TABS §5.3). With no tabs left,
+    // the pre-tabs `file` key goes too, or the pane would reopen that file.
+    private readonly _docTabsSaver = new DocTabsSaver(
+        () => snapshot(this.blockId)?.doc,
+        serializeEditorBuffer,
+        (record) => void this.persistMeta(record ? { [DOC_TABS_META]: record } : { [DOC_TABS_META]: null, [META_LEGACY_FILE]: null })
+    );
 
     /** Set by the view: ask before closing a tab with unsaved changes;
      *  `discard` closes it anyway. Without it, such a close is refused. */
@@ -259,7 +260,7 @@ export class EditorViewModel {
         // no closure over a disposed model survives.
         this._globalHandler = (events: EditorPaneEvent[]) => {
             this._sliceVersion[1]((v) => v + 1);
-            this._scheduleDocTabsSave();
+            this._docTabsSaver.schedule();
             // A tab shown for the first time since a restart, or reopened,
             // reads its file now (one being opened is already reading).
             if (events.some((e) => e.type === "TabActivated" || e.type === "TabOpened" || e.type === "TabsRestored")) {
@@ -482,7 +483,7 @@ export class EditorViewModel {
             this._openAtLine = { path: canonicalizePath(legacyFile), line: openAt };
         }
         if (restored) {
-            this._docTabsWritten = JSON.stringify(meta?.[DOC_TABS_META]);
+            this._docTabsSaver.holds(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
         } else if (typeof legacyFile === "string" && legacyFile) {
             void this.openFile(legacyFile);
@@ -811,13 +812,6 @@ export class EditorViewModel {
         dispatch(this.blockId, { type: "CycleTab", delta, source: "user" });
     }
 
-    /** Move the active tab one place (Ctrl+Shift+PageUp/PageDown). */
-    moveActiveTab(delta: number): void {
-        const tabs = snapshot(this.blockId)?.tabs ?? [];
-        const at = tabs.findIndex((t) => t.id === this.activeIdAtom());
-        if (at >= 0) dispatch(this.blockId, { type: "ReorderTab", tabId: tabs[at].id, toIndex: at + delta, source: "user" });
-    }
-
     /** Read the active tab's file if it hasn't been (a tab restored from
      *  the block, or reopened). */
     private _ensureActiveLoaded(): void {
@@ -831,27 +825,6 @@ export class EditorViewModel {
                 if (hash !== null) this._syncWatch(tab.id, canonical);
             })
             .finally(() => this._loadingPaths.delete(canonical));
-    }
-
-    /** Write the pane's tabs to its block, once changes settle. */
-    private _scheduleDocTabsSave(): void {
-        if (this._docTabsTimer) clearTimeout(this._docTabsTimer);
-        this._docTabsTimer = setTimeout(() => {
-            this._docTabsTimer = null;
-            this._saveDocTabs();
-        }, DOC_TABS_SAVE_DELAY_MS);
-    }
-
-    private _saveDocTabs(): void {
-        const state = snapshot(this.blockId);
-        if (!state) return;
-        const record = state.tabs.length > 0 ? persistDocTabs(state.doc, serializeEditorBuffer) : null;
-        const text = JSON.stringify(record);
-        if (text === this._docTabsWritten) return;
-        this._docTabsWritten = text;
-        // With no tabs left, the pre-tabs `file` key goes too, or the pane
-        // would reopen that file next time.
-        void this.persistMeta(record ? { [DOC_TABS_META]: record } : { [DOC_TABS_META]: null, [META_LEGACY_FILE]: null });
     }
 
     reopenLastClosed(): void {
@@ -1436,11 +1409,7 @@ export class EditorViewModel {
 
     dispose(): void {
         // Tabs changed in the last moments are still written.
-        if (this._docTabsTimer) {
-            clearTimeout(this._docTabsTimer);
-            this._docTabsTimer = null;
-            this._saveDocTabs();
-        }
+        this._docTabsSaver.flush();
         this._disposeFileDrop();
         this._unsubFileChanged();
         this._disposePendingOpenFilesEffect();
