@@ -177,7 +177,7 @@ The library-default tips are still waiting for their per-platform check (§6, §
 - xterm: Alt+click moves the cursor (Option+click on macOS), Shift+click extends a selection, double-click selects a word, triple-click selects a line.
 - CodeMirror (`basicSetup`): mod+click adds a cursor, Alt+drag (Option+drag) makes a block selection, the fold gutter folds code, mod+D selects the next match.
 
-**Library defaults (#NNNN).** They were checked by hand on macOS (Masty@starpower, #4651 comment 6104466530) and Linux (Maricon@charlie, #4651), and seven pass on both:
+**Library defaults (#4654).** They were checked by hand on macOS (Masty@starpower, #4651 comment 6104466530) and Linux (Maricon@charlie, #4651), and seven pass on both:
 - xterm: Alt/Option+click moves the cursor, Shift+click extends the selection, double-click selects a word, triple-click selects a line.
 - CodeMirror: mod+click adds a cursor, Alt/Option+drag makes a block selection, mod+D selects the next match.
 
