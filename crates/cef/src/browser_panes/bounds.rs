@@ -137,7 +137,8 @@ impl LayoutBase {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 static LAYOUT_BASES: LazyLock<Mutex<HashMap<String, LayoutBase>>> = LazyLock::new(Default::default);
 
-/// Remember what `window_label`'s latest batch was laid out against.
+/// Remember what `window_label`'s rects were laid out against; called on the
+/// UI thread as they are applied.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn note_layout_base(window_label: &str, base: LayoutBase) {
     LAYOUT_BASES.lock().insert(window_label.to_string(), base);
@@ -175,6 +176,9 @@ struct Pending {
     /// In first-arrival order; a newer rect for a pane replaces its entry in place.
     rects: Vec<PaneBounds>,
     waiters: Vec<oneshot::Sender<()>>,
+    /// What the newest batch was laid out against; installed with the rects,
+    /// so a window resize in between never reads old rects against a newer base.
+    base: Option<LayoutBase>,
     /// A UI task for this window is posted and hasn't run yet.
     scheduled: bool,
 }
@@ -185,8 +189,14 @@ struct PendingByWindow(HashMap<String, Pending>);
 impl PendingByWindow {
     /// Merge `rects` into `window`'s pending set. Returns the receiver that
     /// fires once they are applied, and whether the caller must post a task.
-    fn enqueue(&mut self, window: &str, rects: Vec<PaneBounds>) -> (oneshot::Receiver<()>, bool) {
+    fn enqueue(
+        &mut self,
+        window: &str,
+        rects: Vec<PaneBounds>,
+        base: Option<LayoutBase>,
+    ) -> (oneshot::Receiver<()>, bool) {
         let p = self.0.entry(window.to_string()).or_default();
+        p.base = base.or(p.base);
         for r in rects {
             match p.rects.iter_mut().find(|e| e.block_id == r.block_id) {
                 Some(e) => *e = r,
@@ -211,11 +221,17 @@ static PENDING: LazyLock<Mutex<PendingByWindow>> = LazyLock::new(Default::defaul
 impl BrowserPaneManager {
     /// Move `window_label`'s panes to `rects` in one UI-thread step. Resolves
     /// when they have moved, or after `APPLY_WAIT`.
-    pub async fn set_rects(&self, state: &Arc<AppState>, window_label: &str, rects: Vec<PaneBounds>) {
+    pub async fn set_rects(
+        &self,
+        state: &Arc<AppState>,
+        window_label: &str,
+        rects: Vec<PaneBounds>,
+        base: Option<LayoutBase>,
+    ) {
         if rects.is_empty() {
             return;
         }
-        let (applied, post) = PENDING.lock().enqueue(window_label, rects);
+        let (applied, post) = PENDING.lock().enqueue(window_label, rects, base);
         if post {
             let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
             if post_task(ThreadId::UI, Some(&mut task)) == 0 {
@@ -241,6 +257,9 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             let pending = PENDING.lock().take(&self.window_label);
+            if let Some(base) = pending.base {
+                note_layout_base(&self.window_label, base);
+            }
             apply(&self.state, &self.window_label, &pending.rects);
             for w in pending.waiters {
                 let _ = w.send(());
@@ -359,22 +378,22 @@ mod tests {
     #[test]
     fn posts_one_task_per_window_until_it_runs() {
         let mut p = PendingByWindow::default();
-        let (_a, post_a) = p.enqueue("main", vec![b("x", 1)]);
-        let (_b, post_b) = p.enqueue("main", vec![b("y", 2)]);
-        let (_c, post_c) = p.enqueue("floating-1", vec![b("z", 3)]);
+        let (_a, post_a) = p.enqueue("main", vec![b("x", 1)], None);
+        let (_b, post_b) = p.enqueue("main", vec![b("y", 2)], None);
+        let (_c, post_c) = p.enqueue("floating-1", vec![b("z", 3)], None);
         assert!(post_a);
         assert!(!post_b);
         assert!(post_c);
         p.take("main");
-        let (_d, post_d) = p.enqueue("main", vec![b("x", 4)]);
+        let (_d, post_d) = p.enqueue("main", vec![b("x", 4)], None);
         assert!(post_d);
     }
 
     #[test]
     fn a_newer_rect_replaces_a_panes_pending_one_in_place() {
         let mut p = PendingByWindow::default();
-        let _ = p.enqueue("main", vec![b("x", 1), b("y", 2)]);
-        let _ = p.enqueue("main", vec![b("x", 9)]);
+        let _ = p.enqueue("main", vec![b("x", 1), b("y", 2)], None);
+        let _ = p.enqueue("main", vec![b("x", 9)], None);
         let taken = p.take("main");
         assert_eq!(taken.rects, vec![b("x", 9), b("y", 2)]);
         assert_eq!(taken.waiters.len(), 2);
@@ -421,10 +440,20 @@ mod tests {
     }
 
     #[test]
+    fn the_newest_batch_s_layout_base_is_installed_with_the_rects() {
+        let mut p = PendingByWindow::default();
+        let newer = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 900, "height": 800 } }));
+        let _ = p.enqueue("main", vec![b("x", 1)], Some(base()));
+        let _ = p.enqueue("main", vec![b("y", 2)], newer);
+        let _ = p.enqueue("main", vec![b("x", 3)], None);
+        assert_eq!(p.take("main").base, newer);
+    }
+
+    #[test]
     fn taking_wakes_every_waiter() {
         let mut p = PendingByWindow::default();
-        let (mut rx1, _) = p.enqueue("main", vec![b("x", 1)]);
-        let (mut rx2, _) = p.enqueue("main", vec![b("y", 2)]);
+        let (mut rx1, _) = p.enqueue("main", vec![b("x", 1)], None);
+        let (mut rx2, _) = p.enqueue("main", vec![b("y", 2)], None);
         for w in p.take("main").waiters {
             w.send(()).unwrap();
         }
