@@ -77,6 +77,18 @@ describe("live redaction", () => {
         expect(later.textContent).toBe("C--Users-demo--agentmux");
     });
 
+    it("redacts a form field's value, typed or set by code, which changes no attribute", async () => {
+        document.body.innerHTML = `<input id="f" value="">`;
+        (0, eval)(liveRedactExpression([{ from: "alice", to: "demo" }]));
+        const f = document.getElementById("f");
+        f.value = "C:/Users/alice/x";
+        f.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(f.value).toBe("C:/Users/demo/x");
+        f.value = "alice again";
+        await new Promise((r) => setTimeout(r, 50));
+        expect(f.value).toBe("demo again");
+    });
+
     it("stops when told to", async () => {
         (0, eval)(liveRedactExpression([{ from: "alice", to: "demo" }]));
         (0, eval)(stopLiveRedactionExpression);

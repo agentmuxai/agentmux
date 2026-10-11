@@ -102,6 +102,10 @@ async function main() {
             const { frames, end } = await cast.stop();
             // The crop is measured at the end, so it fits what the clip ends on.
             const crop = cropSelector ? await resolveClip(session, cropSelector, rec.padding ?? 0) : null;
+            // A crop that was asked for and is gone fails the clip, as in
+            // capture.mjs: the whole window could show more than it should
+            // (Codex on #4670).
+            if (cropSelector && !crop) throw new Error(`crop selector not found at the end: ${cropSelector}`);
             await cursor.hide();
             await stopRedaction();
             const files = encode({ frames, end, crop, out: join(args.out, rec.id), formats: args.formats, width: args.width, fps: args.fps, ffmpeg });

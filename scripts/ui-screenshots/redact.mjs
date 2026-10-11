@@ -121,23 +121,45 @@ export function redactExpression(pairs) {
 
 /** A `Runtime.evaluate` expression that redacts now and then keeps redacting
  *  whatever the page renders, until `stopLiveRedactionExpression`: for a
- *  recording, where text drawn mid-clip must be redacted before it's painted
- *  (a MutationObserver's callback runs before the next paint). */
+ *  recording, where text drawn mid-clip must be redacted before it's painted.
+ *  A MutationObserver covers new or changed nodes and attributes (its callback
+ *  runs before the next paint). A form field's value changes without a
+ *  mutation, so typing is caught by an `input` listener, and a value set by
+ *  code by a sweep of the fields each frame (Codex on #4670). */
 export function liveRedactExpression(pairs) {
     return `(() => {
         const redact = ${redactDocument.toString()};
         const pairs = ${JSON.stringify(pairs)};
-        window.__amLiveRedact?.disconnect();
+        ${stopLiveRedactionBody}
         redact(pairs);
+        const options = { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title", "placeholder", "aria-label", "value"] };
         const observer = new MutationObserver(() => {
             observer.disconnect();
             redact(pairs);
-            observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title", "placeholder", "aria-label", "value"] });
+            observer.observe(document.body, options);
         });
-        observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title", "placeholder", "aria-label", "value"] });
-        window.__amLiveRedact = observer;
+        observer.observe(document.body, options);
+        const escape = (s) => s.replace(/[.*+?^\${}()|[\]\\]/g, "\\$&");
+        const rules = pairs.map((p) => ({ re: new RegExp("(?<![A-Za-z0-9]|\\d\\.)" + escape(p.from) + "(?![A-Za-z0-9]|\\.\\d)", "gi"), to: p.to }));
+        const fixField = (el) => {
+            if (!el || typeof el.value !== "string" || !el.value) return;
+            let v = el.value;
+            for (const r of rules) v = v.replace(r.re, r.to);
+            if (v !== el.value) el.value = v;
+        };
+        const onInput = (e) => fixField(e.target);
+        document.addEventListener("input", onInput, true);
+        let frame = 0;
+        const sweep = () => {
+            document.querySelectorAll("input, textarea").forEach(fixField);
+            frame = requestAnimationFrame(sweep);
+        };
+        frame = requestAnimationFrame(sweep);
+        window.__amLiveRedact = { stop() { observer.disconnect(); document.removeEventListener("input", onInput, true); cancelAnimationFrame(frame); } };
         return true;
     })()`;
 }
 
-export const stopLiveRedactionExpression = `(() => { window.__amLiveRedact?.disconnect(); window.__amLiveRedact = null; })()`;
+const stopLiveRedactionBody = "window.__amLiveRedact?.stop(); window.__amLiveRedact = null;";
+
+export const stopLiveRedactionExpression = `(() => { ${stopLiveRedactionBody} })()`;
