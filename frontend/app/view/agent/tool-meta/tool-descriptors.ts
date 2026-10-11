@@ -95,6 +95,34 @@ const hostPathOf = (p: Record<string, any>): string => {
     }
 };
 
+/** A Grep call: its pattern first, so a narrow row clips the rest, then
+ *  everything that changes what it searches or returns. The pattern alone hid
+ *  the folder, file filter, flags and limit. Defaults (file-list mode, no
+ *  limit) are left out. */
+const grepDetail = (p: Record<string, any>): string => {
+    if (!p.pattern) return "";
+    const flags = [
+        p["-i"] && "-i",
+        p.multiline && "-U",
+        p["-n"] === false && "-N", // line numbers are on by default
+        (p["-C"] ?? p.context) && `-C${p["-C"] ?? p.context}`,
+        p["-A"] && `-A${p["-A"]}`,
+        p["-B"] && `-B${p["-B"]}`,
+    ];
+    return [
+        p.pattern,
+        p.path && `in ${shortPath(String(p.path))}`,
+        p.glob,
+        p.type && `type:${p.type}`,
+        flags.filter(Boolean).join(" "),
+        p.output_mode && p.output_mode !== "files_with_matches" && p.output_mode,
+        p.head_limit && `limit ${p.head_limit}`,
+        p.offset && `offset ${p.offset}`,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+};
+
 /** A globe followed by a query or a host/path can only be a web tool, so the
  *  name is dropped — unless there's no detail, or the row is a bare globe. */
 const webLabel = (name: string, detail: string): string | null => (detail ? null : name);
@@ -140,7 +168,7 @@ export const TOOL_DESCRIPTORS: readonly ToolDescriptor[] = [
     {
         names: ["Grep", "grep"],
         icon: "🔍",
-        detail: (p) => p.pattern || "",
+        detail: grepDetail,
         readFrom: "head",
         pill: (r) => {
             // A structured provider result has `matches`; Claude Code's is
