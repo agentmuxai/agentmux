@@ -47,12 +47,24 @@ pub fn missing_for_agent(
     missing_servers(&refs.effective_mcp_servers(catalog, agent_id, container), reported)
 }
 
-/// Whether a pane runs as a container agent: what the pane says
-/// (`agentMode`, which the picker's runtime override can set differently from
-/// the definition, and which `writeagentconfig` launched it by), else the
-/// definition's own kind.
-pub fn is_container_pane(pane_mode: Option<&str>, definition_type: Option<&str>) -> bool {
-    pane_mode.filter(|m| !m.is_empty()).or(definition_type) == Some("container")
+/// What a pane needs a restart for: [`missing_for_agent`] for a pane running
+/// an agent definition. `definition_type` is that definition's kind, `None`
+/// when `agent_id` names no definition: a quick-launch pane's "agent id" is
+/// its provider's name, and no `.mcp.json` is written for it, so there is
+/// nothing to restart for. `pane_mode` is the pane's own `agentMode`, which
+/// `writeagentconfig` launched it by and the picker's runtime override can
+/// set differently from the definition's.
+pub fn missing_for_pane(
+    refs: &crate::backend::storage::store::Store,
+    catalog: &crate::backend::storage::store::Store,
+    agent_id: &str,
+    pane_mode: Option<&str>,
+    definition_type: Option<&str>,
+    reported: &[crate::backend::mcp_observed::ObservedServer],
+) -> Vec<String> {
+    let Some(definition_type) = definition_type else { return Vec::new() };
+    let container = pane_mode.filter(|m| !m.is_empty()).unwrap_or(definition_type) == "container";
+    missing_for_agent(refs, catalog, agent_id, container, reported)
 }
 
 /// Put server rows into an `mcpServers` map, each under its name. A row
@@ -200,15 +212,23 @@ mod tests {
         assert!(missing_for_agent(&store, &store, "agent-1", true, &before).is_empty());
     }
 
-    /// The pane's own mode wins over the definition's: a host definition
-    /// launched as a container is a container pane, and the reverse.
+    /// A pane is judged as what it was launched as: its own mode wins over
+    /// the definition's, and a pane with no definition (quick launch, which
+    /// writes no `.mcp.json`) has nothing to restart for.
     #[test]
-    fn a_pane_runs_as_what_it_was_launched_as() {
-        assert!(is_container_pane(Some("container"), Some("host")));
-        assert!(!is_container_pane(Some("host"), Some("container")));
-        assert!(is_container_pane(None, Some("container")), "no pane mode: the definition's");
-        assert!(is_container_pane(Some(""), Some("container")));
-        assert!(!is_container_pane(None, None));
+    fn a_pane_is_judged_by_how_it_was_launched() {
+        use crate::backend::storage::{store::Store, McpServerReach};
+        let store = Store::open_in_memory().unwrap();
+        store.mcp_server_upsert_unique_global(&row("git", "{}")).unwrap();
+        store.mcp_server_set_reach("id-git", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
+        let none = [reported("agentmux", "connected")];
+        let missing = |mode: Option<&str>, def: Option<&str>| missing_for_pane(&store, &store, "a", mode, def, &none);
+
+        assert_eq!(missing(None, Some("host")), vec!["git"], "a host agent that started before");
+        assert!(missing(None, None).is_empty(), "quick launch: no definition, no restart can help");
+        assert!(missing(Some("container"), Some("host")).is_empty(), "a host definition launched as a container");
+        assert_eq!(missing(Some("host"), Some("container")), vec!["git"], "the reverse override");
+        assert!(missing(Some(""), Some("container")).is_empty(), "no pane mode: the definition's");
     }
 
     /// What `insert_server_rows` skips is never launched, so never missing:
