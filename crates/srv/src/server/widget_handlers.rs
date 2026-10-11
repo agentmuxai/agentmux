@@ -30,6 +30,15 @@ pub struct WidgetPackagesResult {
     pub publishers: Vec<crate::backend::widget_signature::WidgetPublisherPin>,
 }
 
+/// The widget catalog, checked, with what is installed here
+/// (SPEC_WIDGET_SHARING_2026_10_10.md §4.5).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetCatalogResult {
+    pub url: String,
+    pub items: Vec<crate::backend::widget_catalog::WidgetCatalogItem>,
+}
+
 /// The list, with the publishers this instance has pinned.
 fn packages_result(packages: Vec<WidgetPackageInfo>) -> WidgetPackagesResult {
     WidgetPackagesResult { packages, publishers: svc().map(|s| s.publishers()).unwrap_or_default() }
@@ -123,6 +132,31 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .await
                 .map_err(|e| e.to_string())??;
             tracing::info!(id = %id, "widget package installed (awaiting approval)");
+            let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
+            Ok(WidgetInstallResult { id, packages })
+        }
+    });
+
+    // widgets.catalog: the catalog's widgets, its signature checked against
+    // the key pinned in this AgentMux, each with what is installed here.
+    engine.register_typed("widgets.catalog", |_req: serde_json::Value, _ctx| async move {
+        let url = crate::backend::widget_catalog::DEFAULT_CATALOG_URL.to_string();
+        let entries = crate::backend::widget_catalog::fetch(&url).await?;
+        Ok(WidgetCatalogResult { items: crate::backend::widget_catalog::items(entries, &svc()?.list()), url })
+    });
+
+    // widgets.catalog.install: download a catalog widget, check it against
+    // the (freshly fetched and checked) index, and copy it in. Like any
+    // install, it doesn't run until the user approves it.
+    let st = state.clone();
+    engine.register_typed("widgets.catalog.install", move |req: WidgetIdReq, _ctx| {
+        let st = st.clone();
+        async move {
+            use crate::backend::widget_catalog as wc;
+            let entries = wc::fetch(wc::DEFAULT_CATALOG_URL).await?;
+            let entry = entries.iter().find(|e| e.id == req.id).ok_or(format!("the catalog doesn't list {}", req.id))?;
+            let id = wc::install(&svc()?.widgets_dir, entry).await?;
+            tracing::info!(id = %id, version = %entry.version, "catalog widget installed (awaiting approval)");
             let packages = widget_packages::refresh_off_thread(&st.config_watcher, &st.event_bus, &st.broker).await;
             Ok(WidgetInstallResult { id, packages })
         }

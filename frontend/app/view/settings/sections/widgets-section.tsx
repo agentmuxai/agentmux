@@ -22,6 +22,7 @@ import { agentmuxHome } from "@/app/view/agent/agent-launch-env";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader } from "../settings-controls";
 import { installLabel, WidgetApprovalDetails } from "./widget-approval-details";
+import { CATALOG_LINE, inCatalog, WidgetCatalog } from "./widget-catalog";
 import { describePermission } from "./widget-permissions";
 
 export const WIDGETS_SETTINGS = {
@@ -70,6 +71,11 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
                 <i class={`fa-solid fa-${props.pkg.icon}`} /> {updated() ? `${props.pkg.name} changed` : `Install ${props.pkg.name}?`}
             </div>
             <WidgetApprovalDetails pkg={props.pkg} />
+            <Show when={inCatalog(props.pkg)}>
+                <div class="widget-approval-signature">
+                    <i class="fa-solid fa-store" aria-hidden="true" /> {CATALOG_LINE}
+                </div>
+            </Show>
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}
@@ -174,6 +180,12 @@ export function WidgetsSection(): JSX.Element {
                 <div class="setting-devices-description">
                     Pick a package's widget.json, or a .zip. To write your own, start from a sample in docs/examples/widgets.
                 </div>
+                <WidgetCatalog
+                    onInstalled={(id, packages) => {
+                        setWidgetPackages(packages);
+                        setAsking(id);
+                    }}
+                />
                 <Show when={replacePath()}>
                     {(path) => (
                         <div class="widget-approval">

@@ -1,6 +1,6 @@
 # Sharing widgets: signed packages, widgets in agent bundles, a catalog
 
-**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b (widgets in bundles, §3) in PR #4650; W6c not started.
+**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b (widgets in bundles, §3) in PR #4650; W6c (the catalog, §4): the `agentmuxai/widgets` repository and its signed index are live (https://agentmuxai.github.io/widgets/); AgentMux's side in PR #4655.
 **Date:** 2026-10-10
 **Builds on:** `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (packages §5, the content hash §8.2, approval §8.3)
 
@@ -141,18 +141,26 @@ A public list of sandboxed widgets, browsable in Settings → Widgets → **Brow
 }
 ```
 
-`index.json.sig` is an Ed25519 signature over the index's exact bytes by the catalog key. AgentMux pins the catalog's public key in its source, so a changed index or a different server can't add a widget.
+`index.json.sig` is an Ed25519 signature over the index's exact bytes by the catalog key, base64. AgentMux pins the catalog's public key in its source (`backend/widget_catalog.rs` `CATALOG_KEYS`, a list so a key can be rotated), so a changed index or a different server can't add a widget. Every `zip` must be on the index's own origin, and srv follows no redirects. The private half of the catalog key lives only in the catalog repository's Actions secret `CATALOG_SIGNING_SEED`.
 
 ### 4.4 What CI checks before a widget is listed
 
-- The manifest validates (spec §5.3) with the same rules as srv (the check runs a published validator built from srv's code, so they can't drift).
+The catalog repository's `scripts/build.mjs`, on every pull request and on `main` (no dependencies, Node's own Ed25519):
+
+- The manifest: version 1, an id that is its folder's name, semver, a name, at least one pane whose entry file is in the package.
 - `kind` is `sandboxed`; trusted widgets are never listed.
-- The package is signed (§2), and its key is the one the publisher registered in the repo's `publishers.json` on their first submission. A different key for a known publisher fails CI.
-- The limits (spec §5.1), no remote code (no `http(s)://` in `<script src>` or `import`, which the CSP would block anyway), and permissions a reviewer has read: a new `net:` origin or `agents:send` needs a maintainer's approving review.
+- It is signed (§2), the signature matches its files (the same hash rule as srv and the SDK), and its key is the one the publisher registered in the repository's `publishers.json`. A different key for a known publisher fails.
+- The limits (spec §5.1), no links, and no `<script src>` or `<link href>` to another origin (the CSP would block them anyway).
+- A maintainer reads every submission before it is merged; a new `net:` origin or `agents:send` gets a closer look.
+
+AgentMux checks again on install, as it does for any widget (§4.5): the catalog's checks are its own gate, never the last one.
 
 ### 4.5 Installing from it
 
-srv fetches the index (from the catalog URL in settings, default the official one), checks its signature, and lists it. **Install** has srv download the zip, check `zipSha256`, the package hash and the author's signature against the index, copy it into `~/.agentmux/widgets/<id>/`, and open the approval prompt, which adds "From the AgentMux catalog" and, when the publisher key matches the catalog's, "Publisher verified by the catalog". An installed widget whose catalog entry has a newer version shows **Update** in Settings; an update is a new approval (spec §8.3).
+- `widgets.catalog` (srv) fetches `index.json` and its signature from `https://agentmuxai.github.io/widgets/`, checks the signature, and lists each widget with its publisher's fingerprint and what is installed here (`current` when the installed files are the catalog's).
+- Settings → Widgets → **Browse the catalog** lists them: name, version, author, the fingerprint, and the permissions in the prompt's words, with **Install**, or **Update to <version>** for an installed older one.
+- `widgets.catalog.install` fetches and checks the index again, downloads the widget's zip, and checks the zip's SHA-256, the package's content hash, its kind, and its author's signature against the index (the key must be the entry's `publisherKey`). Only then does it copy the widget in, as `needs_approval`.
+- The approval prompt opens right away in Settings, with one more line when the package is exactly what the catalog lists: "From the AgentMux catalog: its files and its publisher's key are the ones the catalog lists." An update is a new approval (spec §8.3).
 
 ## 5. Phases
 
@@ -160,7 +168,7 @@ srv fetches the index (from the catalog URL in settings, default the official on
 |---|---|---|
 | **W6a: signed packages** | `widget.sig`, the hash rule, verification and the publisher pins in srv; `signature` in `widgets.list` and `WidgetInstall`; the prompt lines and the `key_changed` warning; pinned publishers in Settings; `keygen`/`sign`/`verify` in the npm package, with a shared hash fixture | a signed sample installs with its fingerprint shown; a package re-signed with another key warns; an edited signed package is invalid (tested) |
 | **W6b: widgets in bundles** | the `widgets` component and `widgets/<id>/` entries, read as bytes; preview, commit and export; sandboxed only | a bundle exported with a widget imports on another instance and the widget asks for approval (tested) |
-| **W6c: the catalog** | the catalog repo (or B/C), its CI, the signed index; Browse, Install and Update in Settings | the samples are in the catalog and install from Browse |
+| **W6c: the catalog** | the `agentmuxai/widgets` repository, its CI and Pages site, the signed index, the catalog key pinned in AgentMux; `widgets.catalog` and `widgets.catalog.install`; Browse, Install and Update in Settings | the samples are in the catalog and install from Browse |
 
 ## 6. What this doesn't do
 
