@@ -256,10 +256,11 @@ impl PersistentSubprocessController {
         }
         let process = self.mcp_process_key(generation);
         let now = agentmux_common::time::now_ms_u64();
-        let decision = if let Some(status) =
-            heal::status_from_init(frame).or_else(|| heal::status_from_control_response(frame))
-        {
-            heal::on_status(&self.block_id, &process, status, heal::auto_enabled(), now)
+        let report = heal::status_from_init(frame)
+            .map(|status| (status, None))
+            .or_else(|| heal::status_from_control_response(frame));
+        let decision = if let Some((status, error)) = report {
+            heal::on_status(&self.block_id, &process, status, error, heal::auto_enabled(), now)
         } else if let Some(result) = heal::reconnect_result(frame) {
             heal::on_reconnect(&self.block_id, &process, result, now)
         } else {

@@ -33,6 +33,9 @@ const STATUS_PREFIX: &str = "agentmux-mcp-status-";
 /// Reconnects before the safe profile: one at once, one after [`RETRY_DELAY`].
 const MAX_RECONNECTS: u8 = 2;
 const RETRY_DELAY: Duration = Duration::from_secs(5);
+/// A reconnect the CLI calls a success is checked this long after: Claude
+/// Code answers success for a server that still failed to start.
+const VERIFY_DELAY: Duration = Duration::from_secs(2);
 /// A server still `pending` at `init` is asked about again after this, up to
 /// [`MAX_PENDING_CHECKS`] times; the CLI gives a server 30 s to connect.
 const PENDING_RECHECK: Duration = Duration::from_secs(15);
@@ -72,14 +75,13 @@ impl Status {
     }
 }
 
-/// The `agentmux` entry in a list of `{name, status}` servers.
+/// The `agentmux` entry in a list of `{name, status, …}` servers.
+fn agentmux_entry(servers: &Value) -> Option<&Value> {
+    servers.as_array()?.iter().find(|s| s.get("name").and_then(Value::as_str) == Some(SERVER))
+}
+
 fn agentmux_status(servers: &Value) -> Option<Status> {
-    servers
-        .as_array()?
-        .iter()
-        .find(|s| s.get("name").and_then(Value::as_str) == Some(SERVER))
-        .and_then(|s| s.get("status").and_then(Value::as_str))
-        .map(Status::parse)
+    agentmux_entry(servers)?.get("status").and_then(Value::as_str).map(Status::parse)
 }
 
 /// The `agentmux` server's status in a `system/init` frame; `None` for any
@@ -102,17 +104,21 @@ fn our_response<'a>(frame: &'a Value, prefix: &str) -> Option<&'a Value> {
     Some(resp)
 }
 
-/// The server's status in the answer to our `mcp_status`.
-pub fn status_from_control_response(frame: &Value) -> Option<Status> {
+/// The server's status in the answer to our `mcp_status`, with the error the
+/// CLI keeps for a server that failed (`MCP error -32000: Connection closed`).
+pub fn status_from_control_response(frame: &Value) -> Option<(Status, Option<String>)> {
     let resp = our_response(frame, STATUS_PREFIX)?;
     if resp.get("subtype").and_then(Value::as_str) != Some("success") {
         return None;
     }
-    agentmux_status(resp.get("response")?.get("mcpServers")?)
+    let entry = agentmux_entry(resp.get("response")?.get("mcpServers")?)?;
+    let status = entry.get("status").and_then(Value::as_str).map(Status::parse)?;
+    Some((status, entry.get("error").and_then(Value::as_str).map(str::to_string)))
 }
 
-/// The answer to our `mcp_reconnect`: `Ok` when the server connected, else
-/// the CLI's reason (the server's error, or `Server status: …`).
+/// The answer to our `mcp_reconnect`: the CLI's reason when it says it
+/// failed. `Ok` only means it didn't: the server can still be down, so the
+/// outcome is checked with `mcp_status` ([`VERIFY_DELAY`]).
 pub fn reconnect_result(frame: &Value) -> Option<Result<(), String>> {
     let resp = our_response(frame, RECONNECT_PREFIX)?;
     match resp.get("subtype").and_then(Value::as_str) {
@@ -214,6 +220,8 @@ struct Pane {
     pending_checks: u8,
     status: Option<Status>,
     last_error: Option<String>,
+    /// A reconnect the CLI called a success; the next status says if it was.
+    verifying: bool,
     /// The agent asked (`heal_now`): one more safe-profile restart is allowed.
     asked: bool,
 }
@@ -229,6 +237,7 @@ impl Pane {
             pending_checks: 0,
             status: None,
             last_error: None,
+            verifying: false,
             asked: false,
         }
     }
@@ -258,6 +267,8 @@ impl Pane {
         self.phase = Phase::Healing;
         self.since_ms = now;
         self.reconnects = 1;
+        self.pending_checks = 0;
+        self.verifying = false;
         Decision {
             action: Action::Reconnect { after: Duration::ZERO },
             notice: self.notice("healing", 1, safe_profile),
@@ -308,10 +319,38 @@ impl Heal {
         pane
     }
 
-    fn on_status(&mut self, block_id: &str, process: &str, status: Status, auto: bool, now: u64) -> Decision {
+    fn on_status(
+        &mut self,
+        block_id: &str,
+        process: &str,
+        status: Status,
+        error: Option<String>,
+        auto: bool,
+        now: u64,
+    ) -> Decision {
         let safe = self.safe.contains_key(block_id);
         let pane = self.pane(block_id, process, now);
         pane.status = Some(status.clone());
+        if let Some(e) = error.as_deref().filter(|_| status != Status::Connected) {
+            pane.last_error = Some(truncate(e));
+        }
+        if pane.phase == Phase::Healing && std::mem::take(&mut pane.verifying) {
+            match status {
+                Status::Connected => return pane.recover(safe),
+                Status::Pending if pane.pending_checks < MAX_PENDING_CHECKS => {
+                    pane.pending_checks += 1;
+                    pane.verifying = true;
+                    pane.since_ms = now;
+                    return Decision { action: Action::CheckStatus { after: VERIFY_DELAY }, notice: None };
+                }
+                _ => {
+                    if error.is_none() {
+                        pane.last_error = Some("still not connected after reconnecting".to_string());
+                    }
+                }
+            }
+            return self.reconnect_failed(block_id, now);
+        }
         match status {
             Status::Connected => match pane.phase {
                 Phase::Ok => Decision::none(),
@@ -347,21 +386,32 @@ impl Heal {
     }
 
     fn on_reconnect(&mut self, block_id: &str, process: &str, result: Result<(), String>, now: u64) -> Decision {
-        let safe = self.safe.contains_key(block_id);
         let Some(pane) = self.panes.get_mut(block_id) else {
             return Decision::none();
         };
         if pane.process != process || pane.phase != Phase::Healing {
             return Decision::none();
         }
-        let error = match result {
+        match result {
             Ok(()) => {
-                pane.status = Some(Status::Connected);
-                return pane.recover(safe);
+                pane.verifying = true;
+                pane.since_ms = now;
+                Decision { action: Action::CheckStatus { after: VERIFY_DELAY }, notice: None }
             }
-            Err(e) => e,
+            Err(e) => {
+                pane.last_error = Some(truncate(&e));
+                self.reconnect_failed(block_id, now)
+            }
+        }
+    }
+
+    /// A reconnect didn't bring the server up: the next reconnect, else the
+    /// safe-profile restart, else give up.
+    fn reconnect_failed(&mut self, block_id: &str, now: u64) -> Decision {
+        let safe = self.safe.contains_key(block_id);
+        let Some(pane) = self.panes.get_mut(block_id) else {
+            return Decision::none();
         };
-        pane.last_error = Some(truncate(&error));
         pane.since_ms = now;
         if pane.reconnects < MAX_RECONNECTS {
             pane.reconnects += 1;
@@ -419,10 +469,17 @@ fn heal() -> std::sync::MutexGuard<'static, Heal> {
 }
 
 /// The server's status from a frame of `process` (a `system/init`, or the
-/// answer to our `mcp_status`), and the step that follows. `auto`: the
-/// automatic repair is on ([`auto_enabled`]).
-pub fn on_status(block_id: &str, process: &str, status: Status, auto: bool, now_ms: u64) -> Decision {
-    heal().on_status(block_id, process, status, auto, now_ms)
+/// answer to our `mcp_status`, which also says why it failed), and the step
+/// that follows. `auto`: the automatic repair is on ([`auto_enabled`]).
+pub fn on_status(
+    block_id: &str,
+    process: &str,
+    status: Status,
+    error: Option<String>,
+    auto: bool,
+    now_ms: u64,
+) -> Decision {
+    heal().on_status(block_id, process, status, error, auto, now_ms)
 }
 
 /// The answer to our `mcp_reconnect`, and the step that follows.
@@ -542,26 +599,33 @@ mod tests {
 
         let status = status_request_line();
         let servers = json!({ "mcpServers": [{ "name": "agentmux", "status": "pending" }] });
-        assert_eq!(status_from_control_response(&answer(&status, "success", servers)), Some(Status::Pending));
+        assert_eq!(status_from_control_response(&answer(&status, "success", servers)), Some((Status::Pending, None)));
+        // The shape the real CLI answered for a server that couldn't start.
+        let failed = json!({ "mcpServers": [{ "name": "agentmux", "status": "failed",
+            "error": "MCP error -32000: Connection closed", "config": { "type": "stdio" }, "scope": "dynamic" }] });
+        assert_eq!(
+            status_from_control_response(&answer(&status, "success", failed)),
+            Some((Status::Failed, Some("MCP error -32000: Connection closed".into())))
+        );
         assert_eq!(status_from_control_response(&answer(&line, "success", json!({}))), None, "not a status answer");
     }
 
     #[test]
     fn a_connected_server_needs_nothing() {
         let mut h = Heal::default();
-        assert_eq!(h.on_status("b", "p1", Status::Connected, true, 0), Decision::none());
+        assert_eq!(h.on_status("b", "p1", Status::Connected, None, true, 0), Decision::none());
         assert_eq!(h.snapshot("b").unwrap().phase, Phase::Ok);
     }
 
     #[test]
     fn a_failed_server_is_reconnected_twice_then_restarted_in_the_safe_profile() {
         let mut h = Heal::default();
-        let d = h.on_status("b", "p1", Status::Failed, true, 1000);
+        let d = h.on_status("b", "p1", Status::Failed, None, true, 1000);
         assert_eq!(d.action, Action::Reconnect { after: Duration::ZERO });
         let n = d.notice.unwrap();
         assert_eq!((n.state, n.step, n.episode.as_str()), ("healing", 1, "b-1000"));
 
-        assert_eq!(h.on_status("b", "p1", Status::Failed, true, 1500), Decision::none(), "already reconnecting");
+        assert_eq!(h.on_status("b", "p1", Status::Failed, None, true, 1500), Decision::none(), "already reconnecting");
 
         let d = h.on_reconnect("b", "p1", Err("Connection closed".into()), 2000);
         assert_eq!(d.action, Action::Reconnect { after: RETRY_DELAY });
@@ -573,36 +637,54 @@ mod tests {
         assert!(h.safe.contains_key("b"));
 
         // The replacement process connects: the same episode ends.
-        let d = h.on_status("b", "p2", Status::Connected, true, 20_000);
+        let d = h.on_status("b", "p2", Status::Connected, None, true, 20_000);
         let n = d.notice.unwrap();
         assert_eq!((n.state, n.episode.as_str(), n.safe_profile), ("ok", "b-1000", true));
         assert_eq!(d.action, Action::None);
     }
 
     #[test]
-    fn a_reconnect_that_works_ends_the_episode() {
+    fn a_reconnect_that_works_ends_the_episode_once_the_status_says_so() {
         let mut h = Heal::default();
-        h.on_status("b", "p1", Status::Failed, true, 0);
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
         let d = h.on_reconnect("b", "p1", Ok(()), 100);
+        assert_eq!(d, Decision { action: Action::CheckStatus { after: VERIFY_DELAY }, notice: None });
+        let d = h.on_status("b", "p1", Status::Connected, None, true, 2100);
         assert_eq!(d.notice.map(|n| n.state), Some("ok"));
         assert_eq!(h.snapshot("b").unwrap().status.as_deref(), Some("connected"));
         assert!(!h.safe.contains_key("b"));
     }
 
+    /// Claude Code 2.1.x answers `mcp_reconnect` with success for a server
+    /// that still can't start; the status check catches it.
+    #[test]
+    fn a_reconnect_called_a_success_that_left_the_server_failed_counts_as_failed() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Ok(()), 1);
+        let d = h.on_status("b", "p1", Status::Failed, Some("MCP error -32000: Connection closed".into()), true, 2);
+        assert_eq!(d.action, Action::Reconnect { after: RETRY_DELAY });
+        let n = d.notice.unwrap();
+        assert_eq!((n.step, n.error.as_deref()), (2, Some("MCP error -32000: Connection closed")));
+        // The second one too: on to the safe profile.
+        h.on_reconnect("b", "p1", Ok(()), 3);
+        assert_eq!(h.on_status("b", "p1", Status::Failed, None, true, 4).action, Action::SafeProfileRestart);
+    }
+
     #[test]
     fn a_restart_that_fails_too_gives_up_and_a_later_failure_restarts_no_more() {
         let mut h = Heal::default();
-        h.on_status("b", "p1", Status::Failed, true, 0);
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
         h.on_reconnect("b", "p1", Err("e".into()), 1);
         h.on_reconnect("b", "p1", Err("e".into()), 2);
-        let d = h.on_status("b", "p2", Status::Failed, true, 3);
+        let d = h.on_status("b", "p2", Status::Failed, None, true, 3);
         assert_eq!(d.action, Action::GiveUp);
         assert_eq!(d.notice.map(|n| n.state), Some("gave_up"));
-        assert_eq!(h.on_status("b", "p2", Status::Failed, true, 4), Decision::none(), "told once");
+        assert_eq!(h.on_status("b", "p2", Status::Failed, None, true, 4), Decision::none(), "told once");
 
         // A new process later (the user restarted it), in the safe profile:
         // reconnects, but no second restart.
-        h.on_status("b", "p3", Status::Failed, true, 10);
+        h.on_status("b", "p3", Status::Failed, None, true, 10);
         h.on_reconnect("b", "p3", Err("e".into()), 11);
         assert_eq!(h.on_reconnect("b", "p3", Err("e".into()), 12).action, Action::GiveUp);
     }
@@ -610,7 +692,7 @@ mod tests {
     #[test]
     fn with_the_repair_off_it_only_tells() {
         let mut h = Heal::default();
-        let d = h.on_status("b", "p1", Status::Failed, false, 0);
+        let d = h.on_status("b", "p1", Status::Failed, None, false, 0);
         assert_eq!(d.action, Action::GiveUp);
         assert_eq!(d.notice.map(|n| n.state), Some("gave_up"));
     }
@@ -618,39 +700,40 @@ mod tests {
     #[test]
     fn pending_is_checked_twice_then_counts_as_failed() {
         let mut h = Heal::default();
-        assert_eq!(h.on_status("b", "p1", Status::Pending, true, 0).action, Action::CheckStatus { after: PENDING_RECHECK });
-        assert_eq!(h.on_status("b", "p1", Status::Pending, true, 1).action, Action::CheckStatus { after: PENDING_RECHECK });
-        let d = h.on_status("b", "p1", Status::Pending, true, 2);
+        assert_eq!(h.on_status("b", "p1", Status::Pending, None, true, 0).action, Action::CheckStatus { after: PENDING_RECHECK });
+        assert_eq!(h.on_status("b", "p1", Status::Pending, None, true, 1).action, Action::CheckStatus { after: PENDING_RECHECK });
+        let d = h.on_status("b", "p1", Status::Pending, None, true, 2);
         assert_eq!(d.action, Action::Reconnect { after: Duration::ZERO });
         assert_eq!(d.notice.and_then(|n| n.error).as_deref(), Some("still connecting after 30 s"));
         // Pending that then connects says nothing: no episode was opened.
         let mut h = Heal::default();
-        h.on_status("b", "p1", Status::Pending, true, 0);
-        assert_eq!(h.on_status("b", "p1", Status::Connected, true, 1).notice, None);
+        h.on_status("b", "p1", Status::Pending, None, true, 0);
+        assert_eq!(h.on_status("b", "p1", Status::Connected, None, true, 1).notice, None);
     }
 
     #[test]
     fn answers_for_another_process_or_phase_are_ignored() {
         let mut h = Heal::default();
-        h.on_status("b", "p1", Status::Failed, true, 0);
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
         assert_eq!(h.on_reconnect("b", "p0", Ok(()), 1), Decision::none());
         assert_eq!(h.on_reconnect("other", "p1", Ok(()), 1), Decision::none());
         h.on_reconnect("b", "p1", Ok(()), 2);
-        assert_eq!(h.on_reconnect("b", "p1", Ok(()), 3), Decision::none(), "not reconnecting any more");
+        h.on_status("b", "p1", Status::Connected, None, true, 3);
+        assert_eq!(h.on_reconnect("b", "p1", Ok(()), 4), Decision::none(), "not reconnecting any more");
     }
 
     #[test]
     fn heal_now_starts_over_and_allows_one_more_restart() {
         let mut h = Heal::default();
         assert_eq!(h.heal_now("b", "p1", 0), Err("no_status_yet"));
-        h.on_status("b", "p1", Status::Connected, true, 0);
+        h.on_status("b", "p1", Status::Connected, None, true, 0);
         assert_eq!(h.heal_now("b", "p1", 1), Err("connected"));
 
-        h.on_status("b", "p2", Status::Failed, true, 10);
+        h.on_status("b", "p2", Status::Failed, None, true, 10);
         assert_eq!(h.heal_now("b", "p2", 11), Err("already_healing"));
         h.on_reconnect("b", "p2", Err("e".into()), 12);
         h.on_reconnect("b", "p2", Err("e".into()), 13);
-        let gave_up = h.on_status("b", "p3", Status::Failed, true, 14);
+        let gave_up = h.on_status("b", "p3", Status::Failed, None, true, 14);
         assert_eq!(gave_up.action, Action::GiveUp);
 
         let d = h.heal_now("b", "p3", 20).unwrap();
@@ -662,8 +745,8 @@ mod tests {
     #[test]
     fn a_step_with_no_answer_goes_stale() {
         let mut h = Heal::default();
-        h.on_status("b", "p1", Status::Failed, true, 0);
-        let d = h.on_status("b", "p1", Status::Failed, true, STALE_STEP_MS + 1);
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        let d = h.on_status("b", "p1", Status::Failed, None, true, STALE_STEP_MS + 1);
         assert_eq!(d.action, Action::Reconnect { after: Duration::ZERO });
     }
 
