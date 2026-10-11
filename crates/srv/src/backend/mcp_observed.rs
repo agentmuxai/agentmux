@@ -142,8 +142,10 @@ pub fn record_init(block_id: &str, owner: u64, frame: &Value) -> bool {
     }
 }
 
-/// Spawn `owner` exited: drop its report, not a newer spawn's, and keep
-/// none it sends later. True when there was one to drop.
+/// Spawn `owner` exited: drop its report, or an older spawn's still shown
+/// (a replacement that exits before reporting leaves its predecessor's),
+/// never a newer spawn's; and keep none it sends later. True when there was
+/// one to drop.
 pub fn forget_owned(block_id: &str, owner: u64) -> bool {
     let mut state = observed();
     let ended = state.ended.entry(block_id.to_string()).or_insert(0);
@@ -155,7 +157,7 @@ pub fn forget_owned(block_id: &str, owner: u64) -> bool {
         let cutoff = owners[state.ended.len() - MAX_ENDED];
         state.ended.retain(|_, &mut o| o >= cutoff);
     }
-    if state.reports.get(block_id).is_some_and(|o| o.owner == owner) {
+    if state.reports.get(block_id).is_some_and(|o| o.owner <= owner) {
         state.reports.remove(block_id);
         return true;
     }
@@ -274,6 +276,20 @@ mod tests {
         assert!(!forget_owned(block, 9), "older spawn's exit");
         assert!(all().contains_key(block));
         assert!(forget_owned(block, 10));
+        forget(block);
+    }
+
+    /// A replacement that exits before reporting takes its predecessor's
+    /// report with it; a newer spawn's report stays.
+    #[test]
+    fn an_exit_clears_an_older_spawns_report_but_not_a_newer_ones() {
+        let block = "mcp-observed-test-older";
+        record_init(block, 40, &init_frame());
+        assert!(forget_owned(block, 41), "the replacement exited without reporting");
+        assert!(!all().contains_key(block));
+        record_init(block, 43, &init_frame());
+        assert!(!forget_owned(block, 42), "an older spawn's exit");
+        assert!(all().contains_key(block));
         forget(block);
     }
 
