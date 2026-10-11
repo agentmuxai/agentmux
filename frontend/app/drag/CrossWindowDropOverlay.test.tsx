@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
     listeners: {} as Record<string, (payload: any) => void>,
     label: "win-target",
-    recentlyMerged: false,
     moveBlockToTab: vi.fn(() => Promise.resolve()),
     moveTabToWorkspace: vi.fn(() => Promise.resolve()),
     deleteLayoutModelForTab: vi.fn(),
@@ -29,7 +28,6 @@ vi.mock("@/app/store/services", () => ({
     WorkspaceService: { MoveBlockToTab: h.moveBlockToTab, MoveTabToWorkspace: h.moveTabToWorkspace },
 }));
 vi.mock("@/layout/index", () => ({ deleteLayoutModelForTab: h.deleteLayoutModelForTab }));
-vi.mock("@/app/tab/tabbar-dnd", () => ({ wasTabRecentlyMerged: () => h.recentlyMerged }));
 vi.mock("@/util/logger", () => ({ Logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("./cross-window-drop-overlay.scss", () => ({}));
 
@@ -57,7 +55,6 @@ async function mounted(windowLabel: string) {
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
-    h.recentlyMerged = false;
 });
 
 describe("CrossWindowDropOverlay", () => {
@@ -67,14 +64,11 @@ describe("CrossWindowDropOverlay", () => {
         expect(moveBlockToTab).toHaveBeenCalledWith("ws-target", "blk-1", "tab-source", "tab-target", true);
     });
 
-    it("appends a tab dropped onto this window, unless another path already merged it", async () => {
+    // As in Chrome, a window tab merges only onto a tab strip, through the
+    // strip's own merge; this overlay never moves one.
+    it("never moves a window tab", async () => {
         await mounted("win-target");
         listeners["cross-drag-end"](end({ dragType: "tab", payload: { tabId: "t1" } }));
-        expect(moveTabToWorkspace).toHaveBeenCalledWith("t1", "ws-source", "ws-target");
-
-        moveTabToWorkspace.mockClear();
-        h.recentlyMerged = true;
-        listeners["cross-drag-end"](end({ dragType: "tab", payload: { tabId: "t2" } }));
         expect(moveTabToWorkspace).not.toHaveBeenCalled();
     });
 

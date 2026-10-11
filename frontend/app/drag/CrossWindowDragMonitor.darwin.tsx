@@ -170,7 +170,12 @@ async function handleCrossWindowDragEnd(
     let dragId: string | null = null;
     try {
         dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
-        const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        const hitWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        // A window tab merges only onto another window's tab strip, which
+        // that window's hook handles (tabdrag:merge-direct); released anywhere
+        // else it tears off, as in Chrome. So the window under the cursor
+        // doesn't decide for a tab, only for a pane.
+        const targetWindow = dragType === "tab" ? null : hitWindow;
 
         if (targetWindow && targetWindow !== src) {
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
