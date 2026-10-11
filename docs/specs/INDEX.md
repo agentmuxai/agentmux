@@ -460,6 +460,7 @@ partial list.
 | [`SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10`](SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md) | SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons |
 | [`SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04`](SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md) | SPEC — Tab bar: a blank drag square between the last tab and the widgets |
 | [`SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25`](SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md) | Tab close (X) button — spurious select flash |
+| [`SPEC_TAB_CLOSE_CONFIRM_OFF_BY_DEFAULT_2026_10_10`](SPEC_TAB_CLOSE_CONFIRM_OFF_BY_DEFAULT_2026_10_10.md) | SPEC: Closing a tab asks for confirmation only when the user turns it on |
 | [`SPEC_TAB_COLOR_DESATURATION_2026_08_13`](SPEC_TAB_COLOR_DESATURATION_2026_08_13.md) | Spec: Desaturate tab colors, keep agent pane border colors as-is |
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
 | [`SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16`](SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md) | SPEC: Window-Tab Creation Flashing — Root Cause and an Architecture Cleanup |

@@ -131,8 +131,15 @@
         "tab:preset": {
           "type": "string"
         },
+        "tab:confirmclose": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ask before closing a tab. Off by default: a tab closes at once."
+        },
         "tab:skipcloseconfirm": {
-          "type": "boolean"
+          "type": "boolean",
+          "deprecated": true,
+          "description": "No longer read; closing a tab asks only when tab:confirmclose is true."
         },
         "widget:*": {
           "type": "boolean"

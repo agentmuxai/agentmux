@@ -33,6 +33,7 @@
     // "window:showmenubar":       false,
     // "window:nativetitlebar":    false,
     // "window:confirmclose":      false,
+    // "tab:confirmclose":         false,
     // "window:savelastwindow":    true,
     // "window:keepinactivetabslaidout": true,
     // "window:dimensions":        "",
