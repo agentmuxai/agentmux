@@ -11,13 +11,15 @@
 //
 // Usage:
 //   node scripts/ui-screenshots/capture.mjs [--port N] [--out DIR] [--only id1,id2]
-//       [--suite manual|widgets|chrome|agent] [--sizes small,medium,large|all]
+//       [--suite manual|widgets|chrome|agent|memory] [--sizes small,medium,large|all]
 //       [--redact from=to]... [--no-redact]
 //
 // --suite picks the manifest: `manual` (shots.mjs, the default), `widgets`
 // (widget-shots.mjs, every widget in every size) or `chrome` (chrome-shots.mjs:
 // menus, the status bar and Settings, spec §9) or `agent` (agent-shots.mjs: the
-// agent pane, driven by a scripted Claude Code, spec §10). --sizes limits which of
+// agent pane, driven by a scripted Claude Code, spec §10) or `memory`
+// (memory-shots.mjs: Memory, Connectors and a widget approval, spec §11).
+// --sizes limits which of
 // sizes.mjs's sizes a shot with `sizes: true` is captured in (default: all);
 // see the spec's §8.
 //
@@ -46,7 +48,7 @@ import { checkVerify } from "./verify.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Suite name → manifest module (relative to this directory). */
-const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs" };
+const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs" };
 
 function parseArgs(argv) {
     const args = {
@@ -299,6 +301,16 @@ class CdpSession {
     }
 }
 
+/** Replaces the page's blocking dialogs: confirm() answers Cancel (the safe
+ *  answer to "Discard changes?" and "Delete …?" alike), alert() does nothing,
+ *  prompt() answers nothing. Each is recorded in window.__screenshotDialogs. */
+const NO_DIALOGS = `(() => {
+    const log = (kind, message) => { (window.__screenshotDialogs ||= []).push({ kind, message: String(message ?? "") }); };
+    window.confirm = (m) => { log("confirm", m); return false; };
+    window.alert = (m) => { log("alert", m); };
+    window.prompt = (m) => { log("prompt", m); return null; };
+})()`;
+
 /** Reads width/height straight out of a PNG's IHDR chunk (bytes 16-23,
  *  big-endian uint32 each) — the actual captured pixel dimensions,
  *  independent of any CSS-pixel/device-scale-factor math, and available
@@ -389,6 +401,12 @@ async function main() {
     const session = await CdpSession.connect(target.webSocketDebuggerUrl);
     await session.send("Runtime.enable");
     await session.send("Page.bringToFront").catch(() => {});
+    // A confirm()/alert() blocks the page, and CEF draws it where CDP can't
+    // answer it, so every later command hangs (spec §11.1). In this page, and
+    // any it reloads into, they don't open: confirm answers Cancel.
+    await session.send("Page.enable").catch(() => {});
+    await session.send("Page.addScriptToEvaluateOnNewDocument", { source: NO_DIALOGS }).catch(() => {});
+    await session.evaluate(NO_DIALOGS);
 
     // The names themselves never reach the manifest or the console: only how
     // many pairs there were and how many replacements were made.
