@@ -174,12 +174,17 @@ export function useTabDragAndDrop(
             onDrop: async ({ source, location }) => {
                 // Every window-tab release reaches this monitor, after the
                 // source's onDrop (pragmatic: source, targets, monitors).
-                // A real drop has no dragend yet, so only a cancelled drag
-                // awaits anything here.
+                const escaped = session()?.escaped ?? false;
+                // Windows: a cancelled drag (see `endEffect` above) can only be
+                // told from a release by asking the OS, which takes a round
+                // trip. So everything synchronous below still runs first, and
+                // the payload is cleared before CrossWindowDragMonitor's
+                // dragend can read it as its own release. Only the two steps
+                // that act on the release wait for the answer, and a drop that
+                // isn't a bare dragend waits for nothing.
                 const nativeEffect = endEffect;
                 endEffect = undefined;
-                const escaped =
-                    (session()?.escaped ?? false) || (nativeEffect === "none" && (await endedByEscape(nativeEffect)));
+                const maybeCancelled = nativeEffect === "none";
                 endWindowTabDrag("drop");
 
                 const ip = insertionPoint();
@@ -204,12 +209,15 @@ export function useTabDragAndDrop(
                 // (only the insertion-point preview did), so clearing that
                 // and the cross-window payload is enough to fully restore
                 // the pre-drag state; nothing to undo.
-                if (release === "abort") {
+                const abort = () => {
                     setCurrentDragPayload(null);
                     setInsertionPoint(null);
                     Logger.info("dnd", "tab drag aborted via Escape", {
                         draggedTabId: source.data.tabId,
                     });
+                };
+                if (release === "abort") {
+                    abort();
                     return;
                 }
 
@@ -224,6 +232,10 @@ export function useTabDragAndDrop(
                     // which may fire for the same gesture — sees no payload
                     // and doesn't double-process this tear.
                     setCurrentDragPayload(null);
+                    if (maybeCancelled && (await endedByEscape(nativeEffect))) {
+                        abort();
+                        return;
+                    }
                     tearOffTabAtRelease(draggedTabId, input);
                     setInsertionPoint(null);
                     return;
@@ -236,6 +248,10 @@ export function useTabDragAndDrop(
                 }
 
                 if (willReorder && ip != null) {
+                    if (maybeCancelled && (await endedByEscape(nativeEffect))) {
+                        abort();
+                        return;
+                    }
                     const tabs = tabIds();
                     const wsId = workspace()?.oid;
 
