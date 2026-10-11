@@ -100,7 +100,7 @@ task dev            # CEF host + Vite hot reload
 ### Production Build
 
 ```bash
-task package            # Portable ZIP for the host platform
+task package            # Portable package for the host platform (.7z on Windows)
 task package:linux      # Linux AppImage (writes to ~/Desktop)
 ```
 
@@ -278,7 +278,7 @@ Local build outputs from `task package` on the host platform:
 
 | Platform | Task | Artifact |
 |----------|------|----------|
-| **Windows** | `task package` | `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.zip` |
+| **Windows** | `task package` | `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.7z` |
 | **Linux** | `task package:linux` | `~/Desktop/AgentMux_*_amd64.AppImage` |
 
 Release artifacts (macOS DMG, Windows installer, Linux AppImage) are built by CI workflows in this repo. See [§Releases](#releases).
@@ -368,7 +368,7 @@ See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) 
 | 🍎 macOS Apple Silicon | `AgentMux_*_arm64.dmg` |
 | 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage` |
 | 🪟 Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
-| 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
+| 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.7z` |
 | 🪟 Windows x64 (MSIX / Store) | `AgentMux_*_x64.msix` |
 
 > Downloads require a GitHub account. Click the badge → latest passing run → **Artifacts** at the bottom.
@@ -377,13 +377,13 @@ See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) 
 
 ### Release artifacts
 
-Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. macOS builds are code-signed and notarized. Windows builds produce both an Inno Setup installer and a portable ZIP.
+Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. macOS builds are code-signed and notarized. Windows builds produce both an Inno Setup installer and a portable `.7z` (Windows 11 opens it; Windows 10 needs 7-Zip).
 
 | Platform | Artifact |
 |----------|----------|
 | macOS Apple Silicon | `AgentMux_*_arm64.dmg` |
 | Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
-| Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
+| Windows x64 (portable) | `agentmux-*-x64-portable.7z` |
 | Windows x64 (MSIX / Store) | `AgentMux_*_x64.msix` |
 | Linux x64 (AppImage) | `AgentMux_*_amd64.AppImage` |
 

@@ -4,7 +4,7 @@ name: CI — nightly artifacts (all platforms)
 # Full build → package → upload runnable artifacts for all three platforms.
 # Runs nightly so each morning there's a fresh downloadable build from HEAD.
 #
-# Windows: portable ZIP + Inno Setup installer (windows-latest)
+# Windows: portable .7z + Inno Setup installer (windows-latest)
 # macOS:   signed + notarized DMG arm64 (macos-latest)
 # Linux:   AppImage x86_64 (ubuntu-22.04); patched libcef.so downloaded from
 #          agentmuxai/cef releases via CEF_RUNTIME_TOKEN + cached by CEF tag.

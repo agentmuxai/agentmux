@@ -109,6 +109,13 @@ jobs:
         shell: pwsh
         run: choco install ninja go-task innosetup -y
 
+      # The portable ships as a .7z (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
+      # The runner image has 7-Zip on PATH; checking here fails a changed
+      # image now, not after the whole build.
+      - name: Check 7-Zip (portable archive)
+        shell: bash
+        run: 7z i > /dev/null && echo "7-Zip: $(command -v 7z)"
+
       - uses: Swatinem/rust-cache@v2
 
       # ── Codec-enabled CEF runtime ────────────────────────────────────────
@@ -245,7 +252,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-portable
-          path: ${{ env.OUT }}/agentmux-*-x64-portable.zip
+          path: ${{ env.OUT }}/agentmux-*-x64-portable.7z
           if-no-files-found: error
           retention-days: 7
 
@@ -271,7 +278,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ steps.in.outputs.release_tag }}" \
-            "$OUT"/agentmux-*-x64-portable.zip \
+            "$OUT"/agentmux-*-x64-portable.7z \
             "$OUT"/AgentMux-*-x64-setup.exe \
             "$OUT"/msix/AgentMux_*_x64.msix \
             --repo agentmuxai/agentmux --clobber

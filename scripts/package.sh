@@ -21,7 +21,7 @@
 #   - LABEL    : <version>+g<sha>[.dirty].<stamp> — semver build metadata
 #                (everything after '+' is ignored for precedence, so it can
 #                never collide with or reorder a release). Names the
-#                portable folder + ZIP so builds are unique on disk and
+#                portable folder + .7z so builds are unique on disk and
 #                you can tell them apart at a glance.
 #   - CHANNEL  : local-<slug>-<branch-hash>-<build-id> — the data-dir key.
 #                PER-BUILD: the build-id (hash of the full label) makes each
@@ -58,7 +58,7 @@ SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "nosha")
 
 # Dirty = any unstaged OR staged change in the working tree. Mirrors
 # `git describe --dirty`'s notion; flags a build made from uncommitted
-# changes so a ZIP labeled `.dirty` is never mistaken for a clean artifact.
+# changes so an archive labeled `.dirty` is never mistaken for a clean artifact.
 DIRTY=""
 if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
     DIRTY=".dirty"
@@ -71,7 +71,7 @@ STAMP=$(date -u +%Y%m%dT%H%M%S)
 
 # Append the PID so two package jobs for the same commit started within
 # the SAME wall-clock second still produce distinct labels — and thus
-# distinct folders/ZIPs — instead of overwriting each other. Concurrent
+# distinct folders/archives — instead of overwriting each other. Concurrent
 # builds are the normal multi-agent state this script supports. The PID
 # only goes in the LABEL (folder name, unbounded), not the channel, so it
 # can't push the channel past its length cap. Codex P2 on #1141.
