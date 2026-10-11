@@ -24,7 +24,10 @@
 //! which only grows. A report is kept only over one from an older or the
 //! same spawn, and a spawn's exit clears only its own: so a replaced process,
 //! even one of a replaced controller whose `spawn_generation` restarted,
-//! never writes over or clears a newer process's servers.
+//! never writes over or clears a newer process's servers. A spawn that has
+//! exited records nothing more: its reader can still be running after the
+//! exit is handled (an abort doesn't stop it mid-poll), and a late report
+//! would stay with nothing left to clear it.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -54,9 +57,17 @@ pub struct Observation {
     pub owner: u64,
 }
 
-static OBSERVED: LazyLock<Mutex<HashMap<String, Observation>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+struct State {
+    reports: HashMap<String, Observation>,
+    /// Per pane, the newest spawn that has exited: none of its reports, or
+    /// an older spawn's, is kept any more.
+    ended: HashMap<String, u64>,
+}
 
-fn observed() -> std::sync::MutexGuard<'static, HashMap<String, Observation>> {
+static OBSERVED: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
+
+fn observed() -> std::sync::MutexGuard<'static, State> {
     OBSERVED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -101,16 +112,19 @@ pub fn parse_init(frame: &Value) -> Option<Vec<ObservedServer>> {
 }
 
 /// Keep what spawn `owner` of a pane reported, unless a newer spawn already
-/// reported. True when it changed, so the caller tells the panes
-/// (`mcp:observed`); a resumed turn's init repeats it.
+/// reported or this one has exited. True when it changed, so the caller
+/// tells the panes (`mcp:observed`); a resumed turn's init repeats it.
 pub fn record(block_id: &str, owner: u64, servers: Vec<ObservedServer>, at_ms: u64) -> bool {
-    let mut map = observed();
-    let changed = match map.get(block_id) {
+    let mut state = observed();
+    if state.ended.get(block_id).is_some_and(|&ended| owner <= ended) {
+        return false;
+    }
+    let changed = match state.reports.get(block_id) {
         Some(o) if o.owner > owner => return false,
         Some(o) => o.servers != servers || o.owner != owner,
         None => true,
     };
-    map.insert(block_id.to_string(), Observation { servers, at_ms, owner });
+    state.reports.insert(block_id.to_string(), Observation { servers, at_ms, owner });
     changed
 }
 
@@ -123,12 +137,14 @@ pub fn record_init(block_id: &str, owner: u64, frame: &Value) -> bool {
     }
 }
 
-/// Spawn `owner` exited: drop its report, not a newer spawn's. True when
-/// there was one.
+/// Spawn `owner` exited: drop its report, not a newer spawn's, and keep
+/// none it sends later. True when there was one to drop.
 pub fn forget_owned(block_id: &str, owner: u64) -> bool {
-    let mut map = observed();
-    if map.get(block_id).is_some_and(|o| o.owner == owner) {
-        map.remove(block_id);
+    let mut state = observed();
+    let ended = state.ended.entry(block_id.to_string()).or_insert(0);
+    *ended = (*ended).max(owner);
+    if state.reports.get(block_id).is_some_and(|o| o.owner == owner) {
+        state.reports.remove(block_id);
         return true;
     }
     false
@@ -148,13 +164,15 @@ pub fn publish(broker: Option<&crate::backend::mps::Broker>, block_id: &str) {
 
 /// Every pane's last report, by block id.
 pub fn all() -> HashMap<String, Observation> {
-    observed().clone()
+    observed().reports.clone()
 }
 
 /// Drop a pane's report whoever sent it: its block is gone. True when there
 /// was one.
 pub fn forget(block_id: &str) -> bool {
-    observed().remove(block_id).is_some()
+    let mut state = observed();
+    state.ended.remove(block_id);
+    state.reports.remove(block_id).is_some()
 }
 
 #[cfg(test)]
@@ -235,5 +253,19 @@ mod tests {
         assert!(!forget_owned(block, 9), "older spawn's exit");
         assert!(all().contains_key(block));
         assert!(forget_owned(block, 10));
+        forget(block);
+    }
+
+    /// A reader still running after its process's exit was handled (an
+    /// aborted task finishing its poll) can't bring the servers back; the
+    /// next spawn can.
+    #[test]
+    fn an_exited_spawns_late_report_is_not_kept() {
+        let block = "mcp-observed-test-late";
+        assert!(!forget_owned(block, 20), "exit handled before any report");
+        assert!(!record_init(block, 20, &init_frame()), "the late init");
+        assert!(!all().contains_key(block));
+        assert!(record_init(block, 21, &init_frame()), "the next spawn");
+        forget(block);
     }
 }
