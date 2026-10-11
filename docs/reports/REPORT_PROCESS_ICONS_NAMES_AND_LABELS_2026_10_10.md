@@ -178,7 +178,7 @@ Names, though, are per process on Linux, unlike Windows:
 - `codesign --verify --deep --strict` passes. srv's helper app is signed as `ai.agentmux.srv`, the identifier the login keychain's "Always Allow" is tied to. In a throwaway keychain, an item created by a bare binary signed `ai.agentmux.srv` was read without a prompt by a different build of it in the nested layout, and refused to the same layout signed with another identifier: the item trusts the designated requirement (identifier and team), not the path. So updating to this layout shouldn't bring back a keychain prompt.
 - Tower names srv's row `agentmux-srv` (it was `agentmux-srv-<ver>-darwin.arm64`) and still labels it Server. An agent pane's `PATH` resolves both tools through `tools/bin`.
 - Notarization: a DMG of this layout was accepted by Apple's notary service with no issues.
-- Not yet confirmed: how Activity Monitor shows these processes (it needs eyes on a screen).
+- Activity Monitor (macOS 26.5.2, a packaged build of main at `75fdca23b`, checked by eye on starpower) shows "AgentMux Server", "AgentMux MCP" and "AgentMux Shell Wrapper", each with the AgentMux icon, and "AgentMux Helper (GPU)" and "AgentMux Helper (Renderer)" with it too. An `agentmux-mcp` from a 0.59.16 install (the old layout) on the same machine still shows its file name and a generic icon. `ps` keeps showing the launch path (the `Contents/MacOS` symlink, or the bare name through `tools/bin`); Activity Monitor goes by the bundle.
 
 ## 10. How to verify
 
@@ -193,7 +193,7 @@ Get-ChildItem <portable>\runtime -Recurse -Filter 'agentmux*.exe' | ForEach-Obje
 
 Every line shows `icons=1`, a non-empty description and the same company; then check Task Manager with an agent running.
 
-**macOS:** `plutil -p "AgentMux.app/Contents/Frameworks/AgentMux Helper (GPU).app/Contents/Info.plist" | grep CFBundleIconFile`, then Activity Monitor with the app open. Not measured for this report: no Mac was used.
+**macOS:** `plutil -p "AgentMux.app/Contents/Frameworks/AgentMux Helper (GPU).app/Contents/Info.plist" | grep CFBundleIconFile`, then Activity Monitor with the app open. Measured for #4595 and #4643 on macOS 26.5.2 (§9).
 
 **Linux:** `ps -eo pid,comm | grep -i agentmux` shows the stable names; then the desktop's system monitor. Not measured for this report.
 

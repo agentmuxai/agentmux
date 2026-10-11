@@ -23,8 +23,15 @@
     flex-shrink: 0;
 }
 
+// In a narrow pane the machine picker gives way, not the view tabs, which
+// otherwise shrank to nothing and left no way to switch views.
 .tower-machine {
     max-width: 220px;
+    min-width: 0;
+}
+
+.tower-toolbar > .ui-tabs {
+    flex-shrink: 0;
 }
 
 .tower-toolbar-spacer {
@@ -246,6 +253,13 @@ tr:hover .tower-reveal,
     flex: 1 1 auto;
     min-height: 0;
     gap: var(--space-3);
+
+    // Too narrow for a rail beside the processes (a third of a window, say):
+    // the rail goes above them, so the process table has the pane's width.
+    @container (max-width: 480px) {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
 }
 
 .tower-rail {
@@ -257,8 +271,17 @@ tr:hover .tower-reveal,
     padding-right: var(--space-2);
     min-height: 0;
 
-    @container (max-width: 560px) {
+    @container (max-width: 680px) {
         width: 150px;
+    }
+
+    @container (max-width: 480px) {
+        width: auto;
+        max-height: 30%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        padding-right: 0;
+        padding-bottom: var(--space-1);
     }
 }
 
@@ -301,7 +324,7 @@ tr:hover .tower-reveal,
         grid-area: swatch;
     }
 
-    @container (max-width: 560px) {
+    @container (max-width: 680px) {
         grid-template-areas: "swatch name cpu";
 
         .tower-rail-mem,
@@ -372,6 +395,17 @@ tr:hover .tower-reveal,
     flex: 1 1 auto;
     min-width: 0;
     overflow-y: auto;
+    container: tower-detail / inline-size;
+}
+
+// Beside the rail in a half-width pane the numbers' columns left the Process
+// column so little that tree rows lost their names entirely. The PID goes
+// first (it is in every row's hover text), so the names keep their room.
+@container tower-detail (max-width: 460px) {
+    .tower-table th:last-child,
+    .tower-table td:last-child {
+        display: none;
+    }
 }
 
 .tower-detail-head {
