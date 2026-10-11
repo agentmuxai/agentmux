@@ -57,25 +57,47 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
         Ok(out) => String::from_utf8_lossy(&out).trim_end_matches(['\r', '\n']).to_string(),
         Err(_) => return FsGitStatus::default(),
     };
+    let status = ["--ignored=matching", "--", "."];
+    let out = match safe_status_porcelain(&dir_arg, &status).await {
+        Ok(out) => out,
+        Err(StatusError::Settings(what)) => {
+            return FsGitStatus {
+                in_repo: true,
+                error: Some(format!("{what}, so git markers are off here.")),
+                ..Default::default()
+            };
+        }
+        Err(StatusError::Git(e)) => return FsGitStatus { in_repo: true, error: Some(e), ..Default::default() },
+    };
+    summarize(&parse_porcelain_v2(&out), &prefix)
+}
+
+/// Why [`safe_status_porcelain`] gave no status.
+#[derive(Debug)]
+pub(crate) enum StatusError {
+    /// The repository's settings couldn't be read safely: git status was
+    /// not run at all. The text completes "…, so …".
+    Settings(&'static str),
+    /// git itself failed or timed out, in a sentence.
+    Git(String),
+}
+
+/// `git status --porcelain=v2 -z --branch --untracked-files=normal
+/// --ignore-submodules=all <extra>` in `dir`, with the repository's own
+/// filters blanked (see module docs). Shared by the Files pane and the
+/// agents' work facts (`backend::work_facts`).
+pub(crate) async fn safe_status_porcelain(dir: &str, extra: &[&str]) -> Result<Vec<u8>, StatusError> {
     // The repository's own filters, blanked for this run (see module docs).
     // Fails closed: if the config can't be read, git status doesn't run
-    // (ReAgent on #4223): unblanked filters would run.
-    let Ok(filters) = repo_filters(&dir_arg).await else {
-        return FsGitStatus {
-            in_repo: true,
-            error: Some("Couldn't read this repository's settings, so git markers are off here.".to_string()),
-            ..Default::default()
-        };
+    // (#4223): unblanked filters would run.
+    let Ok(filters) = repo_filters(dir).await else {
+        return Err(StatusError::Settings("Couldn't read this repository's settings"));
     };
     // `-c` splits at the first `=`, so a filter named `x=y` can't be
-    // blanked that way (ReAgent on #4223). Such a name is never needed:
-    // don't run git there at all.
+    // blanked that way (#4223). Such a name is never needed: don't run git
+    // there at all.
     if filters.iter().any(|n| n.contains('=')) {
-        return FsGitStatus {
-            in_repo: true,
-            error: Some("This repository's settings can't be read safely, so git markers are off here.".to_string()),
-            ..Default::default()
-        };
+        return Err(StatusError::Settings("This repository's settings can't be read safely"));
     }
     let mut args: Vec<String> = Vec::new();
     for name in filters {
@@ -87,26 +109,21 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
         args.push(format!("filter.{name}.required=false"));
     }
     args.extend(
-        [
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--branch",
-            "--untracked-files=normal",
-            "--ignored=matching",
-            "--ignore-submodules=all",
-            "--",
-            ".",
-        ]
-        .map(String::from),
+        ["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignore-submodules=all"]
+            .map(String::from),
     );
+    args.extend(extra.iter().map(|s| s.to_string()));
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = match run_git(&dir_arg, &arg_refs).await
-    {
-        Ok(out) => out,
-        Err(e) => return FsGitStatus { in_repo: true, error: Some(e.message()), ..Default::default() },
-    };
-    summarize(&parse_porcelain_v2(&out), &prefix)
+    run_git(dir, &arg_refs).await.map_err(|e| StatusError::Git(e.message()))
+}
+
+/// Run a read-only git command (`rev-parse`, `remote get-url`) in `dir` with
+/// the same safe settings and timeout as the status above: its trimmed
+/// stdout, or `None` on any failure.
+pub(crate) async fn safe_git_line(dir: &str, args: &[&str]) -> Option<String> {
+    let out = run_git(dir, args).await.ok()?;
+    let line = String::from_utf8_lossy(&out).trim_end_matches(['\r', '\n']).to_string();
+    (!line.is_empty()).then_some(line)
 }
 
 /// The names of the filters a repository's own config defines (its

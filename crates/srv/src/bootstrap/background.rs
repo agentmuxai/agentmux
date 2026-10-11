@@ -159,6 +159,14 @@ pub fn spawn_background_subsystems(
         ).await;
     });
 
+    // Keep each agent's repository, branch and uncommitted files fresh for
+    // WhoIsWorkingOn and ListConversations (backend/work_facts/git.rs): git
+    // runs here, never on a request.
+    let work_facts_mstore = Arc::clone(mstore);
+    tokio::spawn(async move {
+        backend::work_facts::git::run_git_refresh_loop(work_facts_mstore).await;
+    });
+
     // Reactive handler (global singleton) + poller
     let reactive_handler = reactive::get_global_handler();
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {

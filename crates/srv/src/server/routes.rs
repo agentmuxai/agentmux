@@ -344,6 +344,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "/api/v1/muxspect/conversations",
             get(muxspect_handlers::handle_muxspect_conversations),
         )
+        // Agents' work facts, and WhoIsWorkingOn over them
+        // (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.1, §3.2). Read-only.
+        .route("/api/v1/work-facts", get(work_facts_handlers::handle_work_facts))
+        .route("/api/v1/work-facts/who", get(work_facts_handlers::handle_who_is_working_on))
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
