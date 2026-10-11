@@ -85,6 +85,18 @@ describe("publish", () => {
         expect(readFileSync(join(chrome, "chrome-window.png"), "utf8")).toBe("old window");
     });
 
+    it("copies neither image when two runs have one of the same name", () => {
+        const byName = new Map([["agent-picker.png", ["/docs/agent-picker.png"]]]);
+        const steps = plan(
+            [
+                { source: __filename, name: "agent-picker.png", machineData: false },
+                { source: __filename, name: "agent-picker.png", machineData: false },
+            ],
+            byName
+        );
+        expect(steps.map((s) => s.action)).toEqual(["ambiguous", "ambiguous"]);
+    });
+
     it("calls a name the docs use twice ambiguous instead of guessing", () => {
         const byName = new Map([["x.png", ["/a/x.png", "/b/x.png"]]]);
         const [step] = plan([{ source: __filename, name: "x.png", machineData: false }], byName);

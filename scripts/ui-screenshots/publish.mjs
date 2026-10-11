@@ -55,7 +55,12 @@ export function filesByName(root) {
  *  `unused` (the docs have none), `ambiguous` (several do), `skipped` (shows
  *  this machine's data, or the run has no such file). */
 export function plan(images, docsByName) {
+    // Two runs with an image of the same name (the manual suite shares ids
+    // with the agent and memory suites): neither is copied (Codex on #4673).
+    const runsWith = new Map();
+    for (const img of images) runsWith.set(img.name, (runsWith.get(img.name) ?? 0) + 1);
     return images.map((img) => {
+        if (runsWith.get(img.name) > 1) return { ...img, action: "ambiguous", targets: [], why: "more than one run has an image of this name" };
         if (img.machineData) return { ...img, action: "skipped", why: "shows this machine's data" };
         if (!existsSync(img.source)) return { ...img, action: "skipped", why: "not in the run" };
         const targets = docsByName.get(img.name) ?? [];
@@ -89,7 +94,7 @@ export function publish({ docs, from, dryRun = false, log = console.log }) {
             if (differs) changed++;
             log(`${differs ? (dryRun ? "would update" : "updated") : "unchanged"}  ${relative(docs, s.target)}`);
         } else if (s.action === "unused") log(`not in the docs  ${s.name}`);
-        else if (s.action === "ambiguous") log(`AMBIGUOUS  ${s.name}: ${s.targets.map((t) => relative(docs, t)).join(", ")}`);
+        else if (s.action === "ambiguous") log(`AMBIGUOUS  ${s.name}: ${s.why ?? s.targets.map((t) => relative(docs, t)).join(", ")}`);
         else log(`skipped  ${s.name} (${s.why})`);
     }
     const count = (a) => steps.filter((s) => s.action === a).length;
