@@ -806,7 +806,7 @@ async fn open_agent_inner(
                 }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
-                meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
+                meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "wand-magic-sparkles" } else { &agent.icon }));
                 meta.insert("agentMode".to_string(), json!(if agent.agent_type.is_empty() { "host" } else { &agent.agent_type }));
                 if !agent.container_image.is_empty() {
                     meta.insert("agent:container_image".to_string(), json!(&agent.container_image));

@@ -132,7 +132,7 @@ const PinnedWidgetFlyout = (props: {
                         onContextMenu={(e) => handleItemContextMenu(e, key)}
                     >
                         <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
-                            <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                            <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })}></i>
                         </span>
                         <span class="action-widget-more-item-label">{widget.label}</span>
                     </div>

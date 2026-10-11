@@ -224,7 +224,7 @@ const TypeAheadModal = (props: TypeAheadModalProps) => {
                             placeholder={props.label}
                         />
                         <InputRightElement>
-                            <i class="fa-regular fa-magnifying-glass"></i>
+                            <i class="fa-solid fa-magnifying-glass"></i>
                         </InputRightElement>
                     </InputGroup>
                     <div

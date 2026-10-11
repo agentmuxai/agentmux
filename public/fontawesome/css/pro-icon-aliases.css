@@ -1,0 +1,13 @@
+/* AgentMux: Font Awesome Pro icon names that earlier versions used, mapped to
+ * the closest Font Awesome Free glyph, so a name already saved in a user's
+ * config (an agent's icon, a widget list, pane metadata) still renders.
+ * The app itself now uses the Free names (on the right). */
+.fa-sparkles{--fa:"\e2ca"}          /* wand-magic-sparkles */
+.fa-bee{--fa:"\e533"}               /* people-group */
+.fa-square-terminal{--fa:"\f120"}   /* terminal */
+.fa-xmark-large{--fa:"\f00d"}       /* xmark */
+.fa-table-rows{--fa:"\f00b"}        /* table-list */
+.fa-browser{--fa:"\f2d0"}           /* window-maximize */
+.fa-backpack{--fa:"\f0f2"}          /* suitcase */
+.fa-lobster{--fa:"\e448"}           /* shrimp */
+.fa-snake{--fa:"\f121"}             /* code */

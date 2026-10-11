@@ -152,7 +152,7 @@ const SearchComponent = (props: SearchProps): JSX.Element => {
 
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: "xmark-large",
+        icon: "xmark",
         title: "Close (Esc)",
         click: () => isOpenAtom._set(false),
     };

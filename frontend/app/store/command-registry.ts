@@ -129,14 +129,14 @@ export function registerDefaultCommands(): void {
         id: "open:terminal",
         label: "Open Terminal",
         category: "Open",
-        icon: "square-terminal",
+        icon: "terminal",
         execute: () => createBlock({ meta: { view: "term", controller: "shell" } }),
     });
     commandRegistry.register({
         id: "open:agent",
         label: "Open Agent",
         category: "Open",
-        icon: "sparkles",
+        icon: "wand-magic-sparkles",
         iconColor: "#cc785c",
         execute: () =>
             createBlock({ meta: { view: "agent", controller: "cmd", cmd: "", "cmd:args": [], "cmd:interactive": true, "cmd:runonstart": false } }),
@@ -166,7 +166,7 @@ export function registerDefaultCommands(): void {
         id: "open:swarm",
         label: "Open Swarm",
         category: "Open",
-        icon: "bee",
+        icon: "people-group",
         iconColor: "#f59e0b",
         execute: () => createBlock({ meta: { view: "swarm" } }),
     });
@@ -211,7 +211,7 @@ export function registerDefaultCommands(): void {
         id: "split:down",
         label: "Split Down",
         category: "Split",
-        icon: "table-rows",
+        icon: "table-list",
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
             if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "after");
@@ -221,7 +221,7 @@ export function registerDefaultCommands(): void {
         id: "split:up",
         label: "Split Up",
         category: "Split",
-        icon: "table-rows",
+        icon: "table-list",
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
             if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "before");

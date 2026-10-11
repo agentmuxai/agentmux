@@ -62,7 +62,7 @@ const HEADER_ICONS: { icon: string; label: string; command?: string }[] = [
     { icon: "fa-window-maximize", label: "Maximize a pane", command: "pane:magnify" },
     { icon: "fa-laptop", label: "Change connection", command: "pane:changeConnection" },
     { icon: "fa-cog", label: "Pane Settings" },
-    { icon: "fa-xmark-large", label: "Close pane", command: "pane:close" },
+    { icon: "fa-xmark", label: "Close pane", command: "pane:close" },
 ];
 
 
@@ -73,10 +73,10 @@ const MORE_TIPS: { icon: string; lead: string; text: string }[] = [
 
 const HELP_LINKS: { icon: string; label: string; href: string }[] = [
     { icon: "fa-brands fa-discord", label: "Join Our Discord", href: "https://discord.com/invite/96erama9Ar" },
-    { icon: "fa-solid fa-sharp fa-sliders", label: "Configuration Options", href: "https://docs.agentmux.ai/config" },
-    { icon: "fa-solid fa-sharp fa-keyboard", label: "All Keybindings", href: "https://docs.agentmux.ai/keybindings" },
-    { icon: "fa-solid fa-sharp fa-book", label: "Full Documentation", href: "https://docs.agentmux.ai" },
-    { icon: "fa-solid fa-sharp fa-bug", label: "Report Bugs & Issues", href: "https://github.com/agentmuxai/agentmux/issues/new" },
+    { icon: "fa-solid fa-sliders", label: "Configuration Options", href: "https://docs.agentmux.ai/config" },
+    { icon: "fa-solid fa-keyboard", label: "All Keybindings", href: "https://docs.agentmux.ai/keybindings" },
+    { icon: "fa-solid fa-book", label: "Full Documentation", href: "https://docs.agentmux.ai" },
+    { icon: "fa-solid fa-bug", label: "Report Bugs & Issues", href: "https://github.com/agentmuxai/agentmux/issues/new" },
 ];
 
 /**
@@ -136,7 +136,7 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
                             {(it) => (
                                 <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                                     <IconBox variant="secondary">
-                                        <i class={`fa-solid fa-sharp ${it.icon} fa-fw`} />
+                                        <i class={`fa-solid ${it.icon} fa-fw`} />
                                     </IconBox>
                                     <Show when={it.command} fallback={<span class="text-[15px]">{it.label}</span>}>
                                         <div class="flex flex-col gap-0.5 flex-1">
@@ -231,7 +231,7 @@ const QuickTips = (props: { filter?: string }): JSX.Element => {
                             {(tip) => (
                                 <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                                     <IconBox variant="secondary">
-                                        <i class={`fa-solid fa-sharp ${tip.icon} fa-fw`} />
+                                        <i class={`fa-solid ${tip.icon} fa-fw`} />
                                     </IconBox>
                                     <span>
                                         <b>{tip.lead}</b> - {tip.text}

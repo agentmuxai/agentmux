@@ -79,7 +79,7 @@ export function MicButton(props: MicButtonProps): JSX.Element {
                 <ToggleIconButton
                     decl={{
                         elemtype: "toggleiconbutton",
-                        icon: isBlocked() ? "regular@microphone-slash" : "regular@microphone",
+                        icon: isBlocked() ? "microphone-slash" : "microphone",
                         title: isBlocked()
                             ? blockedTitle()
                             : (props.paneTitle ?? `Voice input (${shortcutFor("pane:voice")})`),

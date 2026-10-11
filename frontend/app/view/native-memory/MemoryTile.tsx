@@ -77,7 +77,7 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
             onDragEnd={(e) => props.onDragEnd?.(e)}
             {...dataAttrs()}
         >
-            <i class={`memory-file-card-icon fa-sharp fa-solid ${props.icon}`} aria-hidden="true" />
+            <i class={`memory-file-card-icon fa-solid ${props.icon}`} aria-hidden="true" />
             <span class="memory-file-card-info">
                 <span
                     class="memory-file-card-title"
@@ -98,7 +98,7 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
                                 title={badge.title}
                             >
                                 <Show when={badge.icon}>
-                                    <i class={`fa-sharp fa-solid ${badge.icon}`} aria-hidden="true" />{" "}
+                                    <i class={`fa-solid ${badge.icon}`} aria-hidden="true" />{" "}
                                 </Show>
                                 {badge.label}
                             </span>

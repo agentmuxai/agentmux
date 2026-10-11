@@ -19,7 +19,7 @@ export const agentPaneTabManifest: PaneTabManifest = {
     // "forge" was folded into the agent pane in v0.33.197.
     aliases: ["forge"],
     label: "Agent",
-    icon: "sparkles",
+    icon: "wand-magic-sparkles",
     defaultHue: 30,
     capabilities: {
         // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1

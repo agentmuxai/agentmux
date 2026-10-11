@@ -63,7 +63,7 @@ function makeIconClass(icon: string, fw: boolean, opts?: { spin?: boolean; defau
     if (icon.match(/^regular@[a-z0-9-]+$/)) {
         // strip off the "regular@" prefix if it exists
         icon = icon.replace(/^regular@/, "");
-        return clsx(`fa fa-sharp fa-regular fa-${icon}`, fw ? "fa-fw" : null, opts?.spin ? "fa-spin" : null);
+        return clsx(`fa fa-regular fa-${icon}`, fw ? "fa-fw" : null, opts?.spin ? "fa-spin" : null);
     }
     if (icon.match(/^brands@[a-z0-9-]+$/)) {
         // strip off the "brands@" prefix if it exists
