@@ -688,7 +688,9 @@ export function useAgentStream({
                 const node = buildMemoryInjectedNode(raw, { contextWindow: currentContextWindow(), now: Date.now() });
                 if (node && !hasNodeId(node.id)) {
                     addNodeId(node.id);
-                    const replaced = supersededCard(documentNodes(), node);
+                    // A card queued for the next flush counts too: the
+                    // reducer applies a flush's new nodes before its updates.
+                    const replaced = supersededCard([...documentNodes(), ...queue.pendingNewNodes()], node);
                     if (replaced) queue.pushUpdatedNode({ ...node, id: replaced.id });
                     else queue.pushNewNode(node);
                     queue.scheduleFlush();
