@@ -438,8 +438,10 @@ unsafe fn is_on_resize_border(win: *mut std::ffi::c_void, loc_x: f64, loc_y: f64
     #[repr(C)] #[derive(Copy, Clone)] struct NSRect { x: f64, y: f64, w: f64, h: f64 }
     let style: extern "C" fn(*mut c_void, *const c_void) -> usize =
         std::mem::transmute(objc_msgSend as *const c_void);
-    // NSWindowStyleMaskResizable = 8
-    if style(win, sel_registerName(b"styleMask\0".as_ptr() as _)) & 8 == 0 {
+    // Resizable = 8. A full-screen window (FullScreen = 1 << 14) keeps the
+    // resizable bit but has no border to drag.
+    let mask = style(win, sel_registerName(b"styleMask\0".as_ptr() as _));
+    if mask & 8 == 0 || mask & (1 << 14) != 0 {
         return false;
     }
     let frame: extern "C" fn(*mut c_void, *const c_void) -> NSRect =
