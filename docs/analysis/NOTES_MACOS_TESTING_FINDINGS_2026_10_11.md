@@ -90,7 +90,9 @@ The app restarted itself and restored its windows. macOS wrote a crash report (`
 
 **Not known:** what ended Vite. The host load average was 10–17 (other agents compiling and running their own dev builds on this machine) and another agent started its own `task dev` a few minutes before; its Vite uses a different port (the Taskfile picks the port per clone), so a port clash is not the explanation. No Vite error is in the log.
 
-**Workaround:** stop the `task dev` tree by PID and start it again; the second start worked. A health check for the Vite port in `task dev` (or a clear message when it vanishes) would have saved ~5 minutes.
+**It happened again.** The restart also lost its Vite within ~5 minutes (nothing on 5340, `Load error` once a second in the host log, `task dev` and the launcher still alive). The very first run of the same build, started the same way, kept its Vite for ~25 minutes. What differed: from the second run on, another agent's `task dev` (a different clone, building with cargo) was running, and the machine's load average was 10-17. Not proven to be related. Unconfirmed guesses: Vite exiting when its stdin/parent changes, or being stopped under memory pressure.
+
+**Workaround:** stop the `task dev` tree by PID and start it again; the second start rendered, then lost Vite again. A health check for the Vite port in `task dev` (or a clear message when it vanishes) would have saved ~5 minutes.
 
 ---
 
