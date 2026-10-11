@@ -62,9 +62,9 @@ describe("acceptWindowTabsFromOtherWindows", () => {
         expect(claim).toHaveBeenCalledWith("window-pool-2");
     });
 
-    // Codex on #4706: the drag library ends the drag session in its own drop
-    // handler, before this window-level listener sees the drop; an in-window
-    // reorder must still not read as a drop from elsewhere.
+    // The drag library ends the drag session in its own drop handler, before
+    // this window-level listener sees the drop: an in-window reorder must
+    // still not read as a drop from elsewhere (#4706).
     it("leaves this window's own drags alone, through to their drop", () => {
         dispose = acceptWindowTabsFromOtherWindows("main");
         window.dispatchEvent(dragEvent("dragstart"));
