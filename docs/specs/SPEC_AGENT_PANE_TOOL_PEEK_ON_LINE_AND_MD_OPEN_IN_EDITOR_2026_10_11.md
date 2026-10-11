@@ -1,6 +1,6 @@
 # Agent pane: a tool call's hover peek only on its line, and "Open in editor" on Markdown file previews
 
-**Status:** spec, not implemented.
+**Status:** implemented in the PR that adds this spec.
 **Date:** 2026-10-11 | **Version:** main at `cc94d15e0`.
 **Requested by:** repo owner: "in the agent pane, when hovering over tool calls (like bash) we want to display the popover only hovering over the actual tool call line. the expandable result/preview should not show the hover. this is so we can see it but also select it. the hover over the tool preview blocks that. Additionally, on the top right of md file previews, add a button to the top right which opens it in an editor pane (with collapsed tree)."
 **Author:** Loap.
@@ -63,7 +63,6 @@ TabRpcClient.rpcCall("pane.open", {
     split_direction: "right",
     split_reference_block_id: agentBlockId,
     tree_expanded: false,
-    ...(connection ? { connection } : {}),
 }, {});
 ```
 
@@ -71,7 +70,7 @@ TabRpcClient.rpcCall("pane.open", {
 - srv already collapses the tree for a `.md` file when `tree_expanded` is absent (`crates/srv/src/server/app_api/pane.rs` `build_pane_meta`, L229–251). This spec passes `tree_expanded: false` anyway, so the button means the same thing for `.mdx` (which srv's check, `.md` only, misses).
 - Clicking twice opens two editor panes. Reusing an open editor pane on the same file (srv's `reuse_editor_pane`, `pane.rs` L1082–1095) is skipped whenever `tree_expanded` is passed. Focusing an editor that already shows the file, instead of opening another, is a possible follow-up, not part of this change.
 
-**What the button needs from the pane.** Tool renderers get only `node` and a small `ToolRenderContext` (`registry.ts` L30). The button needs the agent pane's block id (for the split) and its `connection` (an SSH agent's file lives on that host). Add both to the pane's render-path contexts in `agent-media.tsx` (`AgentPaneProviders`, which already passes the working directory down the same way, deliberately not as props through the virtualized list). Outside an agent pane (no context), the button is not shown.
+**What the button needs from the pane.** Tool renderers get only `node` and a small `ToolRenderContext` (`registry.ts` L30). The button needs the agent pane's block id (for the split) and its working directory (for a relative path). `AgentPaneProviders` (`agent-media.tsx`) already passes the working directory down the render path as a context, deliberately not as props through the virtualized list. It now also provides both through `agent-open-in-editor.tsx`. An agent runs either on this host or in a container (`agent_type == "container"`); there are no SSH agents. A container agent's paths are inside its container, so its pane provides nothing and shows no button. Outside an agent pane (no context), the button is not shown either.
 
 **Paths.** Read's `file_path` and Write's `file_path` are absolute in practice. A relative one resolves against the pane's working directory, which `AgentPaneProviders` already computes (`cmd:cwd`, else the definition's `working_directory`).
 
@@ -79,12 +78,12 @@ TabRpcClient.rpcCall("pane.open", {
 
 ### 2.3 Tests
 
-- `builtins` renderer tests: a Read and a Write of `notes.md` render the button, and a `.ts` Read doesn't. Clicking it calls `pane.open` with `view: "editor"`, the path, `split_direction: "right"`, the pane's block id, `tree_expanded: false`, and, for an SSH agent, its `connection`. Without the pane context there is no button.
+- `open-in-editor.test.tsx`: a Read and a Write of a `.md` file render the button, and a `.ts` Read doesn't. Clicking it calls `pane.open` with `view: "editor"`, the path (a relative one under the pane's working directory), `split_direction: "right"`, the pane's block id and `tree_expanded: false`. Without the pane context, or for a container agent, there is no button.
 - Live check in a dev build: an agent Reads a `.md` file, expand the tool, click the button. An editor opens to the right on that file with the tree collapsed.
 
 ---
 
 ## 3. Open questions
 
-1. **Container agents.** A container agent's paths are inside its container. Should the button hide there, or open through the container's own file access, if the editor has one? Proposed: hide it unless the pane's connection is local or SSH.
+1. **Container agents (decided).** Hidden: the paths are inside the container, and the editor has no way into it.
 2. **Other previews.** The same button could go on any file preview (a `.ts` Read, too), and on a Markdown link to a local `.md` file in the agent's own text. The owner asked for Markdown previews; these would be follow-ups.
