@@ -37,6 +37,9 @@ pub(super) fn command(
     c.args(args.iter().map(String::as_str));
     c.env("TERM", "xterm-256color");
     c.env("COLORTERM", "truecolor");
+    // Here as well as on every pane's command in lifecycle.rs: it is
+    // idempotent, and askpass's variables are on its keep list.
+    crate::backend::pane_env::sanitize_pty_command(&mut c);
     if let (Some(secret), Some(program)) = (askpass_secret, askpass::program()) {
         let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
         for (k, v) in askpass::ssh_env(secret, &program, &local_url, auth_key) {
