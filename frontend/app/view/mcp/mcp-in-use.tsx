@@ -5,9 +5,9 @@
 // report having, wherever it comes from, with each agent's status
 // (mcp-observed.ts; SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §4).
 
-import { For, onCleanup, Show, type JSX } from "solid-js";
+import { For, Show, type JSX } from "solid-js";
 import "./mcp-in-use.scss";
-import { McpObservedModel, rowSummary, sourceLabel } from "./mcp-observed";
+import { rowSummary, sourceLabel, type McpObservedModel } from "./mcp-observed";
 
 const STATUS_TEXT: Record<string, string> = {
     connected: "connected",
@@ -16,9 +16,8 @@ const STATUS_TEXT: Record<string, string> = {
     pending: "starting",
 };
 
-export function McpInUse(): JSX.Element {
-    const model = new McpObservedModel();
-    onCleanup(() => model.dispose());
+export function McpInUse(props: { model: McpObservedModel }): JSX.Element {
+    const model = props.model;
     return (
         <section class="mcp-in-use" aria-label="MCP servers in use now">
             <h4 class="mcp-in-use-heading">In use now</h4>

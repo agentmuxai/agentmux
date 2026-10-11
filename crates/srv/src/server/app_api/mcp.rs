@@ -574,7 +574,7 @@ fn register_mcp_observed_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .into_iter()
                     .map(|item| item.server.name)
                     .collect();
-                Ok(observed_agents(&mstore, &catalog))
+                Ok(observed_agents(&mstore, &identity_store, &catalog))
             }
         },
     );
@@ -594,6 +594,7 @@ fn observed_source(name: &str, cli_source: String, catalog: &std::collections::H
 
 fn observed_agents(
     mstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     catalog: &std::collections::HashSet<String>,
 ) -> Vec<McpObservedAgent> {
     // Panes whose block is gone: their reports and exit markers go. A block
@@ -606,6 +607,26 @@ fn observed_agents(
         let Some(label) = crate::server::app_api::tower_pane::block_label(mstore, &block_id) else {
             continue;
         };
+        let agent_id = crate::identity::resolver::block_agent_id(mstore, &block_id);
+        let missing = agent_id
+            .as_deref()
+            .map(|id| {
+                let pane_mode = mstore
+                    .get::<crate::backend::obj::Block>(&block_id)
+                    .ok()
+                    .flatten()
+                    .map(|block| crate::backend::obj::meta_get_string(&block.meta, "agentMode", ""));
+                let def = mstore.agent_def_get(id).ok().flatten();
+                crate::backend::mcp_launch::missing_for_pane(
+                    mstore,
+                    identity_store,
+                    id,
+                    pane_mode.as_deref(),
+                    def.as_ref().map(|d| d.agent_type.as_str()),
+                    &observation.servers,
+                )
+            })
+            .unwrap_or_default();
         let servers = observation
             .servers
             .into_iter()
@@ -617,10 +638,11 @@ fn observed_agents(
             })
             .collect();
         agents.push(McpObservedAgent {
-            agent_id: crate::identity::resolver::block_agent_id(mstore, &block_id),
+            agent_id,
             label: label.label,
             at_ms: observation.at_ms,
             servers,
+            missing,
             block_id,
         });
     }
