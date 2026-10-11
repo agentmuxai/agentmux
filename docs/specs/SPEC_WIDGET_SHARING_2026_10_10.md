@@ -1,6 +1,6 @@
 # Sharing widgets: signed packages, widgets in agent bundles, a catalog
 
-**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b (widgets in bundles, §3) in PR #4647; W6c not started.
+**Status:** active — phase W6 of `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` §13. W6a (signed packages, §2) in PR #4645; W6b (widgets in bundles, §3) in PR #4650; W6c not started.
 **Date:** 2026-10-10
 **Builds on:** `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (packages §5, the content hash §8.2, approval §8.3)
 
