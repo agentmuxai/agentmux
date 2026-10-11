@@ -399,11 +399,13 @@ tr:hover .tower-reveal,
 }
 
 // Beside the rail in a half-width pane the numbers' columns left the Process
-// column so little that tree rows lost their names entirely. The PID goes
-// first (it is in every row's hover text), so the names keep their room.
+// column so little that tree rows lost their names entirely. Everything after
+// CPU and Memory goes: the PID (it is in every row's hover text) and "More
+// columns" (CPU time, Peak), with its button, so the names keep their room.
 @container tower-detail (max-width: 460px) {
-    .tower-table th:last-child,
-    .tower-table td:last-child {
+    .tower-table th:nth-child(n + 4),
+    .tower-table td:nth-child(n + 4),
+    .tower-more-columns {
         display: none;
     }
 }

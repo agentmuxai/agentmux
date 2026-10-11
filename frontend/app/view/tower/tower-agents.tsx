@@ -259,6 +259,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                     </Button>
                     <span class="tower-toolbar-spacer" />
                     <Button
+                        class="tower-more-columns"
                         density="compact"
                         tone="quiet"
                         icon="table-columns"
