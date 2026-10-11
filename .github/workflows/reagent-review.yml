@@ -82,7 +82,7 @@ jobs:
       - name: Review
         if: steps.grant.outputs.skip == ''
         env:
-          REVIEWER_IMAGE: ghcr.io/agentmuxai/reagent-reviewer:prod
+          REVIEWER_IMAGE: ghcr.io/agentmuxai/muxreview-reviewer:prod
           GRANT_FILE: ${{ steps.grant.outputs.grant-file }}
           GH_READ_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # --user: the Claude CLI refuses to run as root. HOME=/tmp in the image.
