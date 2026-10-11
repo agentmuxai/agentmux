@@ -668,7 +668,8 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
 
         expect(container.querySelector(".agent-working-row--loading")).toBeTruthy();
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Compacting…");
-        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^\d+s$/);
+        // With no earlier compactions, against the built-in estimate.
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^\d+s \/ ~1m 15s$/);
     });
 
     it("reconnecting takes priority over compacting when both are somehow set", () => {
@@ -1177,12 +1178,22 @@ describe("AgentWorkingRow estimated compaction progress", () => {
         localStorage.clear();
     });
 
-    it("shows only the elapsed counter, with no bar, when there is no history (R3)", () => {
+    it("shows a bar at the built-in estimate when there is no history (R3)", () => {
         const { container } = render(() => (
-            <AgentWorkingRow loading={false} compacting={startedAgo(12_000)} compactionContextTokens={50000} />
+            <AgentWorkingRow loading={false} compacting={startedAgo(15_000)} compactionContextTokens={50000} />
         ));
-        expect(right(container)).toMatch(/^\d+s$/);
-        expect(bar(container)).toBeNull();
+        expect(right(container)).toBe("15s / ~1m 15s");
+        expect(bar(container)?.getAttribute("aria-valuenow")).toBe("20");
+        expect(fill(container)?.style.width).toBe("20%");
+        expect(container.querySelector(".agent-working-row-right")?.getAttribute("title")).toMatch(/usually takes about a minute/);
+    });
+
+    it("keeps the built-in estimate for the whole run when the first sample lands mid-run", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={startedAgo(15_000)} compactionContextTokens={50000} />
+        ));
+        seed(30_000);
+        expect(right(container)).toBe("15s / ~1m 15s");
     });
 
     it("shows elapsed / ~typical and an estimate bar once there is history", () => {
@@ -1195,7 +1206,7 @@ describe("AgentWorkingRow estimated compaction progress", () => {
         expect(bar(container)?.getAttribute("aria-valuenow")).toBe("40");
         expect(bar(container)?.getAttribute("aria-valuetext")).toMatch(/estimated/);
         expect(fill(container)?.style.width).toBe("40%");
-        expect(container.querySelector(".agent-working-row-right")?.getAttribute("title")).toMatch(/Estimate/);
+        expect(container.querySelector(".agent-working-row-right")?.getAttribute("title")).toMatch(/your earlier compactions/);
     });
 
     it("on overshoot says 'longer than usual', goes indeterminate, and never reaches 100% (R2)", () => {

@@ -146,8 +146,8 @@ function median(nums: number[]): number {
 }
 
 /**
- * How long this compaction will probably take, in ms, or null with no
- * history. Median duration (one slow run doesn't move it), scaled by the
+ * How long this compaction will probably take, in ms, from earlier ones, or
+ * null with no history (`compactionEstimate` then uses the default). Median duration (one slow run doesn't move it), scaled by the
  * current context size relative to the samples' but clamped to 0.5x..2x, then
  * kept within 5s..600s.
  */
@@ -160,6 +160,29 @@ export function estimateCompactionMs(samples: readonly CompactionSample[], conte
         scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, contextTokens / typical));
     }
     return Math.round(Math.min(MAX_ESTIMATE_MS, Math.max(MIN_ESTIMATE_MS, base * scale)));
+}
+
+/**
+ * The estimate before this build has timed a compaction: samples live in the
+ * window's storage, which every build channel has its own of. 75s is the
+ * median of 59 real compactions (mostly near a full context; the middle half
+ * took 67s..90s), measured 2026-10-10. Not scaled by context size: there is
+ * no data for a small one.
+ */
+export const DEFAULT_COMPACTION_MS = 75_000;
+
+/**
+ * The estimate the bar uses: from earlier compactions when there are any,
+ * else `DEFAULT_COMPACTION_MS`. `fromHistory` says which, for the tooltip.
+ */
+export function compactionEstimate(
+    samples: readonly CompactionSample[],
+    contextTokens: number | null | undefined
+): { estimateMs: number; fromHistory: boolean } {
+    const fromSamples = estimateCompactionMs(samples, contextTokens);
+    return fromSamples == null
+        ? { estimateMs: DEFAULT_COMPACTION_MS, fromHistory: false }
+        : { estimateMs: fromSamples, fromHistory: true };
 }
 
 /**

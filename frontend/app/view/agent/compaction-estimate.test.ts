@@ -3,8 +3,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    compactionEstimate,
     compactionModelKey,
     compactionProgress,
+    DEFAULT_COMPACTION_MS,
     estimateCompactionMs,
     parseCompactionSample,
     readCompactionSamples,
@@ -113,6 +115,19 @@ describe("estimateCompactionMs", () => {
     it("clamps the result to 5s..600s", () => {
         expect(estimateCompactionMs([sample("a", 1000, 800)], 1000)).toBe(5000);
         expect(estimateCompactionMs([sample("a", 1000, 9_000_000)], 1000)).toBe(600000);
+    });
+});
+
+describe("compactionEstimate", () => {
+    it("is the built-in default before any compaction, whatever the context size", () => {
+        expect(DEFAULT_COMPACTION_MS).toBe(75_000);
+        expect(compactionEstimate([], 50000)).toEqual({ estimateMs: 75_000, fromHistory: false });
+        expect(compactionEstimate([], 950_000)).toEqual({ estimateMs: 75_000, fromHistory: false });
+        expect(compactionEstimate([], null)).toEqual({ estimateMs: 75_000, fromHistory: false });
+    });
+
+    it("uses earlier compactions as soon as there is one", () => {
+        expect(compactionEstimate([sample("a", 50000, 40000)], 50000)).toEqual({ estimateMs: 40000, fromHistory: true });
     });
 });
 

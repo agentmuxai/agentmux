@@ -20,7 +20,7 @@ import { presentStatus, TIMING, type StatusMemory } from "../status/present-stat
 import { AsciiSpinner } from "./AsciiSpinner";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
-import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
+import { compactionEstimate, compactionProgress, readCompactionSamples, samplesForModel } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
 import {
@@ -149,7 +149,8 @@ interface AgentWorkingRowProps {
      *  earlier ones (`compaction-estimate.ts`) scaled by this, and shows an
      *  ESTIMATE bar — Claude Code reports no real compaction progress, so the
      *  bar is labeled as an estimate. Read once when the compaction starts, so
-     *  the estimate doesn't move mid-run. No earlier compactions → no bar. */
+     *  the estimate doesn't move mid-run. No earlier compactions → the built-in
+     *  default (`DEFAULT_COMPACTION_MS`). */
     compactionContextTokens?: number | null;
     /** The pane's model key (`compactionModelKey`), to estimate from that model's past compactions. */
     compactionModel?: string | null;
@@ -318,24 +319,32 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         const r = props.reconnecting;
         return r ? (tick(), Date.now() - r.startedAt) : 0;
     });
-    // Estimated compaction progress (Tier 4). Only while compacting, only with
-    // an estimate, and never while reconnecting (which takes the row over).
+    // Estimated compaction progress (Tier 4). Only while compacting, and never
+    // while reconnecting (which takes the row over). With no earlier
+    // compactions the estimate is the built-in default.
     // The estimate is keyed on `startedAt` and reads the context size untracked,
     // so it is computed once per compaction and stays put while it runs.
     const compactStartedAt = createMemo(() => props.compacting?.startedAt ?? null);
-    const compactionEstimateMs = createMemo(() =>
+    const compactionEstimateFor = createMemo(() =>
         compactStartedAt() == null
             ? null
-            : estimateCompactionMs(
+            : compactionEstimate(
                   samplesForModel(readCompactionSamples(), untrack(() => props.compactionModel)),
                   untrack(() => props.compactionContextTokens)
               )
     );
     const compactionBar = createMemo(() => {
-        const est = compactionEstimateMs();
+        const est = compactionEstimateFor();
         if (!props.compacting || props.reconnecting || !est) return null;
-        return { estimateMs: est, ...compactionProgress(compactingElapsedMs(), est) };
+        return { ...est, ...compactionProgress(compactingElapsedMs(), est.estimateMs) };
     });
+    const compactionTitle = (): string | undefined => {
+        const bar = compactionBar();
+        if (!bar) return undefined;
+        return bar.fromHistory
+            ? "Estimate from your earlier compactions. Claude Code doesn't report compaction progress."
+            : "Estimate: a compaction usually takes about a minute. Claude Code doesn't report compaction progress.";
+    };
 
     createEffect(() => {
         if (!live()) return;
@@ -475,11 +484,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 </span>
                 <span
                     class="agent-working-row-right"
-                    title={
-                        compactionBar()
-                            ? "Estimate from your earlier compactions. Claude Code doesn't report compaction progress."
-                            : undefined
-                    }
+                    title={compactionTitle()}
                 >
                     {rightText()}
                     <Show when={showCancelLogin()}>
