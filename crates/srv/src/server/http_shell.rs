@@ -40,7 +40,7 @@ pub(super) async fn handle_shell_create(
             Ok(a) => a,
             Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
         };
-        let connection = crate::backend::remote::ConnTarget::Ssh(dest.clone()).name();
+        let connection = dest.name();
         if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, &req.cmd).await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
@@ -145,14 +145,13 @@ pub(super) async fn handle_shell_create(
             let secret = askpass::grant(askpass::AskpassGrant {
                 agent_block_id: req.agent_block_id.clone(),
                 agent: ssh_agent.clone(),
-                connection: crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
+                connection: dest.name(),
                 user_pane: false,
             });
             let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
             effective_env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));
             askpass_secret = Some(secret);
-            let control = ssh::control_dir(&crate::backend::base::get_mux_config_dir());
-            let args = ssh::launch_exec(dest, &req.cmd, cwd_there, control.as_deref());
+            let args = ssh::launch_exec(dest, &req.cmd, cwd_there, ssh::shared_control_dir().as_deref());
             Some((ssh_path.to_string_lossy().into_owned(), args))
         }
     };

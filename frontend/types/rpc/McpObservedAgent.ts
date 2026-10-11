@@ -16,4 +16,11 @@ label: string,
 /**
  * When the CLI last reported (epoch ms).
  */
-at_ms: number, servers: Array<McpObservedServer>, };
+at_ms: number, servers: Array<McpObservedServer>, 
+/**
+ * Catalog servers AgentMux would launch this agent with now that it
+ * doesn't report: bound or switched on after it started, so it needs a
+ * restart to get them (`mcp_launch::missing_servers`). Empty when the
+ * pane runs no agent definition.
+ */
+missing: Array<string>, };

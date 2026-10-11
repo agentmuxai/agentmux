@@ -33,6 +33,16 @@ pub struct SshDest {
     pub port: Option<u16>,
 }
 
+impl SshDest {
+    /// The connection name: `destination`, with `:port` when one was given.
+    pub fn name(&self) -> String {
+        match self.port {
+            Some(p) => format!("{}:{p}", self.destination),
+            None => self.destination.clone(),
+        }
+    }
+}
+
 /// Prefix of a WSL connection name.
 pub const WSL_PREFIX: &str = "wsl://";
 
@@ -74,10 +84,7 @@ impl ConnTarget {
         match self {
             ConnTarget::Local => "local".to_string(),
             ConnTarget::Wsl(d) => format!("{WSL_PREFIX}{d}"),
-            ConnTarget::Ssh(s) => match s.port {
-                Some(p) => format!("{}:{p}", s.destination),
-                None => s.destination.clone(),
-            },
+            ConnTarget::Ssh(s) => s.name(),
         }
     }
 

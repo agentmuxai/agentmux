@@ -12,6 +12,7 @@ function fakeQueue(): StreamFlushQueue {
         pushNewNode: vi.fn(),
         pushUpdatedNode: vi.fn(),
         hasPendingNewOrUpdated: vi.fn(() => false),
+        pendingNewNodes: vi.fn(() => []),
         pushToolChunk: vi.fn(),
         pushShellCreate: vi.fn(),
         pushShellChunk: vi.fn(),

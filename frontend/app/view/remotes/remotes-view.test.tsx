@@ -332,4 +332,19 @@ describe("RemotesView", () => {
         expect(labels(remote("db1", { status: { state: "connected", error: "" } }))).toContain("Disconnect");
         expect(labels(remote("Ubuntu", { kind: "wsl", sources: ["wsl"] }))).not.toContain("Sessions…");
     });
+
+    // Connecting is a login under way (ssh at a password prompt): nothing is
+    // up to close yet, and Connect would start a second login.
+    it("offers Connect when down, Disconnect when up, and neither while logging in", async () => {
+        const { model } = await renderWith([]);
+        const labels = (state: string) =>
+            rowMenu(model, remote("db1", { status: { state, error: "" } }))
+                .filter((i) => i.type === "action")
+                .map((i) => i.label);
+        expect(labels("disconnected")).toContain("Connect");
+        expect(labels("error")).toContain("Connect");
+        expect(labels("connected")).toContain("Disconnect");
+        expect(labels("connecting")).not.toContain("Connect");
+        expect(labels("connecting")).not.toContain("Disconnect");
+    });
 });

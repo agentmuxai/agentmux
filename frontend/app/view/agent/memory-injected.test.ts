@@ -222,3 +222,34 @@ describe("history replay of a fallback re-delivery (CD2b)", () => {
         expect(after.nodes[0].id).toBe("memory-injected-fb-9");
     });
 });
+
+describe("a session restarted before its first turn", () => {
+    const card = (session: string, label: string) =>
+        JSON.stringify({
+            type: "system",
+            subtype: "agentmux_memory_injected",
+            id: `memory-injected-${session}-startup-1`,
+            reason: "startup",
+            session_id: session,
+            entries: [{ label, source: "personal", kind: "personal_memory", name: label, size_bytes: 2, tokens: 1 }],
+        });
+    const user = JSON.stringify({ type: "user", message: { role: "user", content: "go on" } });
+    // The pane's own replay form of a reply (`parseHistoryLines.test.ts`).
+    const reply = JSON.stringify({ type: "text", content: "On it." });
+
+    it("shows one card: the later card takes the earlier one's place", () => {
+        // An account switch starts session A; a model change restarts it as B
+        // before any turn; the user's message is B's first.
+        const { nodes } = parseHistoryLines([card("a", "old.md"), user, card("b", "new.md"), reply], "claude-stream-json");
+        const cards = nodes.filter((n) => n.type === "context_delivery");
+        expect(cards).toHaveLength(1);
+        expect(cards[0].id).toBe("memory-injected-a-startup-1");
+        expect(cards[0].type === "context_delivery" && cards[0].items.map((i) => i.name)).toEqual(["new.md"]);
+        expect(nodes[0].type).toBe("context_delivery");
+    });
+
+    it("keeps both cards once the agent answered in between", () => {
+        const { nodes } = parseHistoryLines([card("a", "old.md"), user, reply, card("b", "new.md")], "claude-stream-json");
+        expect(nodes.filter((n) => n.type === "context_delivery")).toHaveLength(2);
+    });
+});

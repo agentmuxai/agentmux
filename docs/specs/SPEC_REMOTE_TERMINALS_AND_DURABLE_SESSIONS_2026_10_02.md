@@ -63,6 +63,8 @@ WSL is a local VM. A WSL terminal is `wsl.exe -d <distro>` in a ConPTY. Its file
   - `conn:helper` (`ask` default, `always`, `never`; nothing reads it yet, §6.2), `term:durable` (§7.1).
 - **Listing.** The typeahead shows `local`, WSL distros, recent connections, connections configured in settings, and `Host` entries from `~/.ssh/config` (patterns without wildcards; `Include` followed one level). Listing is the only thing AgentMux parses ssh config for; connecting is always the system `ssh`.
 - **Status.** One `ConnStatus` per connection, `connecting | connected | disconnected | error`, with the last error, published as an event the existing `ConnStatusOverlay` already renders. `GetAllConnStatus`, `ConnList`, `WslList`, `ConnEnsure`, `ConnConnect` and `ConnDisconnect` get real handlers matching the frontend's existing calls.
+  - **What decides it for SSH** (`remote/link.rs`, #4513). On macOS and Linux each connection name has its own shared connection (`ControlPath` is a hash of the name plus ssh's `%C`, so two aliases for one account never share a login). That shared connection is the truth: `ssh -O check` answers only once the user has logged in. A pane's `ssh` starting is `connecting` (it may be at a password prompt); a watcher asks the shared connection, every 0.5 s while connecting and every 15 s once up, and makes it `connected` once it answers and `disconnected` once it is gone with no pane on it, also when it outlived its last pane (`ControlPersist`) and expired. A command that succeeded over it (Test connection, Connect, a Files pane's helper) is also proof it is up. Where ssh can't share connections (Windows), a running `ssh` counts as connected.
+  - `ConnEnsure` only validates an SSH name (and that `ssh` exists); `ConnConnect` logs in (to a host AgentMux already lists, with ssh's prompts going to the user), the same login as Test connection; `ConnDisconnect` closes the shared connection (`ssh -O exit`), and durable panes on it then wait for the user instead of logging back in.
 
 ## 5. SSH and WSL terminals
 
@@ -78,7 +80,7 @@ Everything downstream is unchanged: the PTY's output goes to the `term` blockfil
 
 ### 5.2 The pane
 
-The block frame shows the connection (the existing connection chip), and its status: a remote pane that lost its connection says so in the pane rather than going quiet. Per-connection theme and font apply. A terminal can be opened on a connection from the typeahead, from a Hangar folder on that connection ("open terminal here"), and from `muxsh` (`muxsh term --conn host`).
+The block frame shows the connection (the existing connection chip), and its status: a remote pane that lost its connection says so in the pane rather than going quiet. A plain SSH pane whose `ssh` exits 255 (no connection, or it dropped: a session on a closed shared connection ends this way too) stays open, with a line under ssh's own reason ("No connection to …: press Enter to try again"), instead of closing as an `exit` does; it does not reconnect on its own, so a host that is down is not retried in a loop. The connection bar over the pane shows only once something went wrong, never while connecting, where it covered ssh's prompts. Per-connection theme and font apply. A terminal can be opened on a connection from the typeahead, from a Hangar folder on that connection ("open terminal here"), and from `muxsh` (`muxsh term --conn host`).
 
 ### 5.3 Authentication
 

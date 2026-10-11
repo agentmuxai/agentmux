@@ -41,6 +41,8 @@ pub fn spawn_background_subsystems(
     // Bridge MPS events to WebSocket clients via EventBus
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
+    // Remote connections' status changes, from wherever a connection is used.
+    backend::remote::link::init(broker.clone());
 
     // Shared filesystem-watcher framework — constructed once, before any
     // consumer, all three of which now build on it (see

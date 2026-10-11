@@ -47,7 +47,7 @@ direct read of the current build/release pipeline and landing-page code
 
 | Platform | Formats produced | Arch | Built by |
 |---|---|---|---|
-| Windows | Portable ZIP, Inno Setup installer (`.exe`), MSIX | x64 only | `build-windows.yml` |
+| Windows | Portable .7z (was ZIP until SPEC_WINDOWS_PORTABLE_7Z_2026_10_11), Inno Setup installer (`.exe`), MSIX | x64 only | `build-windows.yml` |
 | macOS | Signed + notarized `.dmg` | **arm64 (Apple Silicon) only** | `build-macos.yml`, `macos-latest` runner |
 | **Linux** | **AppImage only** | **x86_64 only** | `build-linux.yml`, `ubuntu-22.04` |
 

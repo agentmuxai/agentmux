@@ -68,7 +68,7 @@ import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-qu
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
-import { buildMemoryInjectedNode } from "./memory-injected";
+import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { interceptFrame, type FrameInterceptState, type FrameSink } from "./frame-intercepts";
 import { MemoryDeliveryApi } from "@/app/store/rpc-api/memory-delivery";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
@@ -688,7 +688,11 @@ export function useAgentStream({
                 const node = buildMemoryInjectedNode(raw, { contextWindow: currentContextWindow(), now: Date.now() });
                 if (node && !hasNodeId(node.id)) {
                     addNodeId(node.id);
-                    queue.pushNewNode(node);
+                    // A card queued for the next flush counts too: the
+                    // reducer applies a flush's new nodes before its updates.
+                    const replaced = supersededCard([...documentNodes(), ...queue.pendingNewNodes()], node);
+                    if (replaced) queue.pushUpdatedNode({ ...node, id: replaced.id });
+                    else queue.pushNewNode(node);
                     queue.scheduleFlush();
                 }
             },

@@ -527,8 +527,11 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
         }
         Err((e, false)) => return Err(e),
     };
-    // The helper answered: the host has it (spec §7.1; Remotes shows it).
+    // The helper answered: the host has it (spec §7.1; Remotes shows it), and
+    // the connection is up. A Files pane's overlay showed "Disconnected" over
+    // a listing that had loaded (#4513), since nothing said so.
     super::helper_hosts::remember(&name);
+    super::link::used(&name);
     *s = Some(files.clone());
     Ok(files)
 }

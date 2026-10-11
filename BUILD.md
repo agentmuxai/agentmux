@@ -220,7 +220,7 @@ task package -- --fresh              # no-op — every build is already isolated
 task package -- ~/Desktop/staging    # alternate output dir
 ```
 
-Output: `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.zip`
+Output: `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.7z`. Making the `.7z` needs 7-Zip (`winget install 7zip.7zip`).
 
 `task package` is for **local** builds. It does **not** bump the version and does **not** touch git — the artifact carries an ephemeral build *label* (the part after `+` is semver build metadata, ignored for precedence), not a new release version. Every build bakes a unique per-build channel (`local-<branch>-<hash>-<build-id>`), so each build is its own AgentMux instance with its own data dir and cef-cache — a running instance never blocks the next build, and two builds never collide on disk. Agents and auth are global and carry over across builds; only pane layout and memories start fresh per build. `--fresh` is redundant given per-build isolation and is a no-op. The committed version moves only through `task release` (changesets, below). Full rationale: [docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) and [docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md](./docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md).
 
@@ -291,7 +291,7 @@ gh pr create --title "Feature" --body "Description"
 
 After building, you'll have:
 
-#### Windows (portable ZIP)
+#### Windows (portable .7z)
 
 ```
 ~/Desktop/agentmux-{version}+g{sha}.{stamp}-x64-portable/
@@ -327,7 +327,7 @@ On first launch the AppImage extracts itself to `~/.local/share/agentmux/extract
 | CEF host | ~8 MB | ~17 MB |
 | Backend (agentmux-srv) | ~4 MB | ~4 MB |
 | CEF runtime (libcef + paks) | ~160 MB | ~620 MB |
-| **Portable build** | ~156 MB ZIP | ~220 MB AppImage |
+| **Portable build** | ~127 MiB .7z (LZMA2) | ~220 MB AppImage |
 
 ---
 
@@ -427,7 +427,7 @@ This is handled automatically in the normal build pipeline.
 
 Automated builds run on push to `main`:
 
-- **Windows:** NSIS installer (.exe) + portable ZIP
+- **Windows:** Inno Setup installer (.exe), MSIX, and portable .7z
 - **macOS:** DMG installer (.dmg)
 - **Linux:** DEB package (.deb), AppImage
 
@@ -458,7 +458,7 @@ git push origin main --tags
 
 ### Windows
 
-- Uses **NSIS** for installers
+- Uses **Inno Setup** for the installer (`packaging/windows/agentmux.iss`)
 - CEF bundles its own Chromium runtime — no WebView2 required
 - No CGO / no Zig required (pure Rust)
 
@@ -518,7 +518,7 @@ npm run build:prod
 | **Rebuild Rust backend** | `task build:backend` |
 | **Build host** | `task build:host` |
 | **Bundle runtime** | `task bundle` |
-| **Portable ZIP** | `task package` |
+| **Portable package** (.7z on Windows) | `task package` |
 | **Add changeset** | `task changeset -- patch "description"` |
 | **Run tests** | `npm test` |
 | **Verify versions** | `bump verify` |

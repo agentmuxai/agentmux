@@ -137,6 +137,8 @@ export interface StreamFlushQueue {
     pushUpdatedNode(node: DocumentNode): void;
     /** True if there is at least one queued new or updated node (used to decide whether to call `scheduleFlush()`). */
     hasPendingNewOrUpdated(): boolean;
+    /** The new nodes queued since the last flush, which the document doesn't hold yet. */
+    pendingNewNodes(): readonly DocumentNode[];
     pushToolChunk(toolId: string, chunk: ToolLogChunk): void;
     pushShellCreate(node: ShellNode): void;
     pushShellChunk(shellId: string, chunk: ToolLogChunk): void;
@@ -284,6 +286,7 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
         pushNewNode(node) { pendingNew.push(node); pushDockNodeStatus(model, node); },
         pushUpdatedNode(node) { pendingUpdates.push(node); pushDockNodeStatus(model, node); },
         hasPendingNewOrUpdated() { return pendingNew.length > 0 || pendingUpdates.length > 0; },
+        pendingNewNodes() { return pendingNew; },
         pushToolChunk(toolId, chunk) { pendingChunks.push({ toolId, chunk }); },
         pushShellCreate(node) { pendingShellCreates.push({ node }); },
         pushShellChunk(shellId, chunk) { pendingShellChunks.push({ shellId, chunk }); },

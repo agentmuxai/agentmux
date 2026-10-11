@@ -64,6 +64,7 @@ export function createHidingStreamFlushQueue(real: StreamFlushQueue, isHiding: (
 
         // Always delegate — see module doc comment.
         hasPendingNewOrUpdated: () => real.hasPendingNewOrUpdated(),
+        pendingNewNodes: () => real.pendingNewNodes(),
         scheduleFlush: () => real.scheduleFlush(),
         flushNow: () => real.flushNow(),
         resetAll: () => real.resetAll(),

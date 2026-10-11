@@ -72,7 +72,7 @@ re-runs the check. Dependabot/Renovate PRs and release PRs (which update
 ## Escape hatch: local-only version bumps for build labels
 
 When iterating on a feature, you may want to bump the version locally so
-your build artifacts (e.g. `agentmux-0.33.897-x64-portable.zip`) are
+your build artifacts (e.g. `agentmux-0.33.897-x64-portable.7z`) are
 distinguishable from the previous build on disk for side-by-side comparison.
 That's fine — the changesets pattern only governs what hits a PR's commit
 history, not what you do on your own checkout.

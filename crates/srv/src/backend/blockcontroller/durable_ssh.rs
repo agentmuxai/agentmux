@@ -754,7 +754,7 @@ impl Run {
                     session_over: true,
                 })
             };
-            match self.attach_once(&mut input_rx, &mut leave_rx).await {
+            match self.attach_once(&mut input_rx, &mut leave_rx, noted_drop).await {
                 Ended::Exited(code) => {
                     // A new session's output starts at 0.
                     self.write_offset(0);
@@ -857,34 +857,16 @@ impl Run {
                             .find(|l| login_refused(l))
                             .unwrap_or("")
                             .trim();
-                        self.note(&format!(
-                            "Could not log in to {} ({why}). Press to try again.",
-                            self.conn
-                        ))
-                        .await;
-                        stopped(Done {
-                            code: EXIT_SSH_FAILED,
-                            session_over: false,
-                        });
-                        // Stay until the pane leaves: closing it still ends
-                        // the session (one `end`, best effort, any prompt to
-                        // the user), as for any durable pane. A restart
-                        // replaces this run: its leave sender goes, and this
-                        // returns.
-                        loop {
-                            if leave_rx.changed().await.is_err() {
-                                return None;
-                            }
-                            let how = *leave_rx.borrow();
-                            match how {
-                                Leave::Stay => {}
-                                Leave::Detach => return None,
-                                Leave::End => {
-                                    self.end_remote().await;
-                                    return None;
-                                }
-                            }
-                        }
+                        let line = format!("Could not log in to {} ({why}). Press to try again.", self.conn);
+                        return self.wait_for_user(&line, &mut leave_rx, stopped).await;
+                    }
+                    // The user disconnected this host (Remotes, or the pane's
+                    // connection menu): logging back in on our own would undo
+                    // it, and for a password ask again at once. The session
+                    // stays on the host for the pane's restart to reattach to.
+                    if crate::backend::remote::link::held(&self.conn) {
+                        let line = crate::backend::remote::link::disconnected_note(&self.conn);
+                        return self.wait_for_user(&line, &mut leave_rx, stopped).await;
                     }
                     if attached {
                         attempt = 0;
@@ -917,12 +899,48 @@ impl Run {
         }
     }
 
+    /// Say `line`, show the pane done without ending the session (a restart
+    /// reattaches to it), and stay until the pane leaves: closing it still
+    /// ends the session (one `end`, best effort, any prompt to the user), as
+    /// for any durable pane. A restart replaces this run: its leave sender
+    /// goes, and this returns.
+    async fn wait_for_user(
+        &mut self,
+        line: &str,
+        leave_rx: &mut watch::Receiver<Leave>,
+        stopped: Box<dyn FnOnce(Done) + Send>,
+    ) -> Option<Done> {
+        self.note(line).await;
+        stopped(Done {
+            code: EXIT_SSH_FAILED,
+            session_over: false,
+        });
+        loop {
+            if leave_rx.changed().await.is_err() {
+                return None;
+            }
+            let how = *leave_rx.borrow();
+            match how {
+                Leave::Stay => {}
+                Leave::Detach => return None,
+                Leave::End => {
+                    self.end_remote().await;
+                    return None;
+                }
+            }
+        }
+    }
+
+    /// One `ssh` to the session, until it drops or the pane leaves.
+    /// `reconnecting`: the pane said it lost the session, so it says when it
+    /// has it again.
     async fn attach_once(
         &mut self,
         input_rx: &mut mpsc::UnboundedReceiver<Frame>,
         leave_rx: &mut watch::Receiver<Leave>,
+        reconnecting: bool,
     ) -> Ended {
-        use crate::backend::remote::status;
+        use crate::backend::remote::link;
         let mut expected = self.read_offset();
         let remote = attach_command(&self.session, expected, self.size.0, self.size.1);
         let mut cmd = self.ssh_command(&remote);
@@ -979,13 +997,18 @@ impl Run {
                         match frame {
                             Frame::Hello { created, .. } => {
                                 attached = true;
-                                status::pane_started(self.broker.as_deref(), &self.conn);
+                                // The helper answered: a live login.
+                                link::pane_started(&self.conn, true);
                                 // New panes on this host are durable by default.
                                 crate::backend::remote::helper_hosts::remember(&self.conn);
                                 if created && expected > 0 {
                                     self.note("The previous session on this host is gone (the host restarted or it was ended); this is a new one.").await;
                                     expected = 0;
                                     self.write_offset(0);
+                                } else if reconnecting {
+                                    // "reconnecting…" was the pane's last word
+                                    // until now (#4513).
+                                    self.note(&format!("Reconnected to {}.", self.conn)).await;
                                 }
                             }
                             Frame::Output { offset, data } => match accept(expected, offset, data.len()) {
@@ -1022,7 +1045,7 @@ impl Run {
                         }
                         if let Some(code) = exited {
                             if attached {
-                                status::pane_ended(self.broker.as_deref(), &self.conn, None);
+                                link::pane_ended(&self.conn, None);
                             }
                             let _ = child.kill().await;
                             return Ended::Exited(code);
@@ -1071,7 +1094,7 @@ impl Run {
             }
         };
         if attached {
-            status::pane_ended(self.broker.as_deref(), &self.conn, None);
+            link::pane_ended(&self.conn, None);
         }
         if let Some(how) = ended {
             // The pane left: say how, give ssh a moment to carry it, then go.
@@ -1084,6 +1107,13 @@ impl Run {
             let _ = stdin.shutdown().await;
             let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
             let _ = child.kill().await;
+            // Closed while this ssh was still trying to reach the session
+            // (the host down, a reconnect under way): the End never got
+            // there, and the session would run on with nothing able to
+            // reach it. End it the way a pane closed while disconnected does.
+            if how == Leave::End && !attached {
+                self.end_remote().await;
+            }
             return if ended_here {
                 Ended::EndedHere
             } else {
@@ -1189,11 +1219,9 @@ impl Run {
         self.note(&text).await
     }
 
-    /// A line from AgentMux in the pane, dimmed, on its own line.
+    /// A line from AgentMux in the pane (`pane_note`).
     async fn note(&self, text: &str) {
-        let _ = self
-            .append(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").into_bytes())
-            .await;
+        let _ = self.append(super::pane_note(text)).await;
     }
 }
 
@@ -1290,68 +1318,69 @@ time.sleep(5)
         names.iter().find_map(|n| which::which(n).ok())
     }
 
-    /// The reconnect loop for real: a dropped link reattaches at exactly the
-    /// offset it had reached, nothing is appended twice, and the session's
-    /// own end ends the pane's run.
-    #[tokio::test]
-    async fn a_dropped_link_reattaches_at_its_offset_and_appends_nothing_twice() {
-        let Some(python) = python() else {
-            eprintln!("skipped: no python to stand in for ssh");
-            return;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("fake_ssh.py");
-        std::fs::write(&script, FAKE_SSH).unwrap();
-        let ssh_path = if cfg!(windows) {
-            let cmd = dir.path().join("fake_ssh.cmd");
-            std::fs::write(
-                &cmd,
-                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
-            )
-            .unwrap();
-            cmd
-        } else {
-            let sh = dir.path().join("fake_ssh");
-            std::fs::write(
-                &sh,
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
-                    python.display(),
-                    script.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            sh
-        };
-        std::env::set_var("FAKE_SSH_STATE", dir.path().join("state"));
-        std::env::set_var("FAKE_SSH_LOG", dir.path().join("log"));
+    /// `ssh` for a test: Python running `script` (a fake host), as `name` in
+    /// `dir`. `None`, to skip the test, where there is no Python.
+    fn fake_ssh(dir: &std::path::Path, name: &str, script: &str) -> Option<std::path::PathBuf> {
+        let python = python()?;
+        let script_path = dir.join(format!("{name}.py"));
+        std::fs::write(&script_path, script).unwrap();
+        if cfg!(windows) {
+            let cmd = dir.join(format!("{name}.cmd"));
+            let line = format!("@\"{}\" \"{}\" %*\r\n", python.display(), script_path.display());
+            std::fs::write(&cmd, line).unwrap();
+            return Some(cmd);
+        }
+        let sh = dir.join(name);
+        let line = format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", python.display(), script_path.display());
+        std::fs::write(&sh, line).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        Some(sh)
+    }
 
-        let state = crate::server::tests::test_state();
-        let block = "durable-test-block";
-        let run = Run {
+    /// A durable pane's run for a test: pane `block` on host `conn`, reached
+    /// by `ssh_path`, its session `session`.
+    fn test_run(state: &crate::server::AppState, block: &str, conn: &str, session: &str, ssh_path: std::path::PathBuf) -> Run {
+        Run {
             block_id: block.to_string(),
-            conn: "fakehost".to_string(),
+            conn: conn.to_string(),
             host: HostSsh {
                 dest: SshDest {
-                    destination: "fakehost".to_string(),
+                    destination: conn.to_string(),
                     port: None,
                 },
                 ssh_path,
                 control_dir: None,
                 env: Vec::new(),
             },
-            session: "amx-test".to_string(),
+            session: session.to_string(),
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
             _askpass_grant: None,
             plain: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// The reconnect loop for real: a dropped link reattaches at exactly the
+    /// offset it had reached, nothing is appended twice, and the session's
+    /// own end ends the pane's run.
+    #[tokio::test]
+    async fn a_dropped_link_reattaches_at_its_offset_and_appends_nothing_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh", FAKE_SSH) else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
         };
+        std::env::set_var("FAKE_SSH_STATE", dir.path().join("state"));
+        std::env::set_var("FAKE_SSH_LOG", dir.path().join("log"));
+
+        let state = crate::server::tests::test_state();
+        let block = "durable-test-block";
+        let run = test_run(&state, block, "fakehost", "amx-test", ssh_path);
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let ended = tokio::time::timeout(
@@ -1410,62 +1439,16 @@ sys.exit(0 if remote[1] == 'end' else 255)
     /// running with nothing able to reach it.
     #[tokio::test]
     async fn closing_while_disconnected_still_ends_the_session() {
-        let Some(python) = python() else {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_down", FAKE_SSH_DOWN) else {
             eprintln!("skipped: no python to stand in for ssh");
             return;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("fake_ssh_down.py");
-        std::fs::write(&script, FAKE_SSH_DOWN).unwrap();
-        let ssh_path = if cfg!(windows) {
-            let cmd = dir.path().join("fake_ssh_down.cmd");
-            std::fs::write(
-                &cmd,
-                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
-            )
-            .unwrap();
-            cmd
-        } else {
-            let sh = dir.path().join("fake_ssh_down");
-            std::fs::write(
-                &sh,
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
-                    python.display(),
-                    script.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            sh
         };
         let log = dir.path().join("log2");
         std::env::set_var("FAKE_SSH_LOG2", &log);
 
         let state = crate::server::tests::test_state();
-        let run = Run {
-            block_id: "durable-down-block".to_string(),
-            conn: "downhost".to_string(),
-            host: HostSsh {
-                dest: SshDest {
-                    destination: "downhost".to_string(),
-                    port: None,
-                },
-                ssh_path,
-                control_dir: None,
-                env: Vec::new(),
-            },
-            session: "amx-down".to_string(),
-            size: (80, 24),
-            broker: Some(state.broker.clone()),
-            filestore: Some(state.filestore.clone()),
-            _askpass_grant: None,
-            plain: Arc::new(AtomicBool::new(false)),
-        };
+        let run = test_run(&state, "durable-down-block", "downhost", "amx-down", ssh_path);
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let task = tokio::spawn(run.run(input_rx, leave_rx, Box::new(|_| {})));
@@ -1484,6 +1467,55 @@ sys.exit(0 if remote[1] == 'end' else 255)
             Some("end --session"),
             "the last ssh ends the session: {calls:?}"
         );
+    }
+
+    /// A host slow to answer: attach hangs, as ssh does while its connection
+    /// is being made; `end` answers at once.
+    const FAKE_SSH_SLOW: &str = r#"
+import os, sys, time
+remote = sys.argv[-1].split()
+with open(os.environ['FAKE_SSH_LOG_SLOW'], 'ab') as log:
+    log.write((' '.join(remote[1:3]) + '\n').encode())
+if remote[1] == 'end':
+    sys.exit(0)
+time.sleep(30)
+sys.exit(255)
+"#;
+
+    /// Closed while its ssh is still trying to reach the session (the host
+    /// slow or down, a reconnect under way): the End went down an ssh that
+    /// never reached the session, which ran on. The test above caught this
+    /// only when the close happened to land mid-attach, under load.
+    #[tokio::test]
+    async fn closing_while_still_connecting_ends_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_slow", FAKE_SSH_SLOW) else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
+        };
+        let log = dir.path().join("log_slow");
+        std::env::set_var("FAKE_SSH_LOG_SLOW", &log);
+
+        let state = crate::server::tests::test_state();
+        let run = test_run(&state, "durable-slow-block", "slowhost", "amx-slow", ssh_path);
+        let (_input_tx, input_rx) = mpsc::unbounded_channel();
+        let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let task = tokio::spawn(run.run(input_rx, leave_rx, Box::new(|_| {})));
+        // Close the pane while its first attach is still connecting.
+        let attaching = tokio::time::timeout(Duration::from_secs(10), async {
+            while !std::fs::read_to_string(&log).is_ok_and(|c| c.starts_with("attach")) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+        attaching.await.expect("an attach starts");
+        leave_tx.send(Leave::End).unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(20), task)
+            .await
+            .expect("the run ends")
+            .unwrap();
+        assert_eq!(ended, None, "closed, not the session's own end");
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(calls.lines().collect::<Vec<_>>(), ["attach --session", "end --session"], "{calls:?}");
     }
 
     /// A host without the helper: attach fails with 127 until the helper is
@@ -1528,38 +1560,10 @@ elif ' attach ' in remote:
     /// upload, hash-checked install) and then attaches.
     #[tokio::test]
     async fn a_host_without_the_helper_gets_it_installed_then_attaches() {
-        let Some(python) = python() else {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_fresh", FAKE_SSH_FRESH_HOST) else {
             eprintln!("skipped: no python to stand in for ssh");
             return;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("fake_ssh_fresh.py");
-        std::fs::write(&script, FAKE_SSH_FRESH_HOST).unwrap();
-        let ssh_path = if cfg!(windows) {
-            let cmd = dir.path().join("fake_ssh_fresh.cmd");
-            std::fs::write(
-                &cmd,
-                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
-            )
-            .unwrap();
-            cmd
-        } else {
-            let sh = dir.path().join("fake_ssh_fresh");
-            std::fs::write(
-                &sh,
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
-                    python.display(),
-                    script.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            sh
         };
         std::env::set_var("FAKE_HOST_DIR", dir.path());
         // The user says Install when asked.
@@ -1575,25 +1579,7 @@ elif ' attach ' in remote:
         std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
 
         let state = crate::server::tests::test_state();
-        let run = Run {
-            block_id: "durable-fresh-block".to_string(),
-            conn: "freshhost".to_string(),
-            host: HostSsh {
-                dest: SshDest {
-                    destination: "freshhost".to_string(),
-                    port: None,
-                },
-                ssh_path,
-                control_dir: None,
-                env: Vec::new(),
-            },
-            session: "amx-fresh".to_string(),
-            size: (80, 24),
-            broker: Some(state.broker.clone()),
-            filestore: Some(state.filestore.clone()),
-            _askpass_grant: None,
-            plain: Arc::new(AtomicBool::new(false)),
-        };
+        let run = test_run(&state, "durable-fresh-block", "freshhost", "amx-fresh", ssh_path);
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let ended = tokio::time::timeout(
@@ -1727,63 +1713,18 @@ sys.exit(1)
     /// for the controller to restart the pane (its `plain` flag).
     #[tokio::test]
     async fn a_windows_host_turns_the_pane_into_a_plain_ssh_terminal() {
-        let Some(python) = python() else {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_windows", FAKE_SSH_WINDOWS) else {
             eprintln!("skipped: no python to stand in for ssh");
             return;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("fake_ssh_windows.py");
-        std::fs::write(&script, FAKE_SSH_WINDOWS).unwrap();
-        let ssh_path = if cfg!(windows) {
-            let cmd = dir.path().join("fake_ssh_windows.cmd");
-            std::fs::write(
-                &cmd,
-                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
-            )
-            .unwrap();
-            cmd
-        } else {
-            let sh = dir.path().join("fake_ssh_windows");
-            std::fs::write(
-                &sh,
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
-                    python.display(),
-                    script.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            sh
         };
         std::env::set_var("FAKE_SSH_LOG4", dir.path().join("log"));
 
         let state = crate::server::tests::test_state();
         let block = "durable-windows-block";
         let plain = Arc::new(AtomicBool::new(false));
-        let run = Run {
-            block_id: block.to_string(),
-            conn: "windowshost".to_string(),
-            host: HostSsh {
-                dest: SshDest {
-                    destination: "windowshost".to_string(),
-                    port: None,
-                },
-                ssh_path,
-                control_dir: None,
-                env: Vec::new(),
-            },
-            session: "amx-windows".to_string(),
-            size: (80, 24),
-            broker: Some(state.broker.clone()),
-            filestore: Some(state.filestore.clone()),
-            _askpass_grant: None,
-            plain: plain.clone(),
-        };
+        let mut run = test_run(&state, block, "windowshost", "amx-windows", ssh_path);
+        run.plain = plain.clone();
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let ended = tokio::time::timeout(
@@ -1821,62 +1762,17 @@ sys.exit(1)
 
     #[tokio::test]
     async fn a_windows_host_in_another_language_is_found_by_asking_it() {
-        let Some(python) = python() else {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_windows_de", FAKE_SSH_WINDOWS_DE) else {
             eprintln!("skipped: no python to stand in for ssh");
             return;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("fake_ssh_windows_de.py");
-        std::fs::write(&script, FAKE_SSH_WINDOWS_DE).unwrap();
-        let ssh_path = if cfg!(windows) {
-            let cmd = dir.path().join("fake_ssh_windows_de.cmd");
-            std::fs::write(
-                &cmd,
-                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
-            )
-            .unwrap();
-            cmd
-        } else {
-            let sh = dir.path().join("fake_ssh_windows_de");
-            std::fs::write(
-                &sh,
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
-                    python.display(),
-                    script.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            sh
         };
         std::env::set_var("FAKE_SSH_LOG5", dir.path().join("log"));
 
         let state = crate::server::tests::test_state();
         let plain = Arc::new(AtomicBool::new(false));
-        let run = Run {
-            block_id: "durable-windows-de-block".to_string(),
-            conn: "windowshost-de".to_string(),
-            host: HostSsh {
-                dest: SshDest {
-                    destination: "windowshost-de".to_string(),
-                    port: None,
-                },
-                ssh_path,
-                control_dir: None,
-                env: Vec::new(),
-            },
-            session: "amx-windows-de".to_string(),
-            size: (80, 24),
-            broker: Some(state.broker.clone()),
-            filestore: Some(state.filestore.clone()),
-            _askpass_grant: None,
-            plain: plain.clone(),
-        };
+        let mut run = test_run(&state, "durable-windows-de-block", "windowshost-de", "amx-windows-de", ssh_path);
+        run.plain = plain.clone();
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let ended = tokio::time::timeout(
@@ -1929,62 +1825,16 @@ sys.exit(255)
     /// the pane then still ends the session there.
     #[tokio::test]
     async fn a_refused_login_stops_the_pane_and_keeps_its_session() {
-        let Some(python) = python() else {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_refused", FAKE_SSH_REFUSED) else {
             eprintln!("skipped: no python to stand in for ssh");
             return;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("fake_ssh_refused.py");
-        std::fs::write(&script, FAKE_SSH_REFUSED).unwrap();
-        let ssh_path = if cfg!(windows) {
-            let cmd = dir.path().join("fake_ssh_refused.cmd");
-            std::fs::write(
-                &cmd,
-                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
-            )
-            .unwrap();
-            cmd
-        } else {
-            let sh = dir.path().join("fake_ssh_refused");
-            std::fs::write(
-                &sh,
-                format!(
-                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
-                    python.display(),
-                    script.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            sh
         };
         std::env::set_var("FAKE_SSH_LOG3", dir.path().join("log"));
 
         let state = crate::server::tests::test_state();
         let block = "durable-refused-block";
-        let run = Run {
-            block_id: block.to_string(),
-            conn: "fakehost".to_string(),
-            host: HostSsh {
-                dest: SshDest {
-                    destination: "fakehost".to_string(),
-                    port: None,
-                },
-                ssh_path,
-                control_dir: None,
-                env: Vec::new(),
-            },
-            session: "amx-refused".to_string(),
-            size: (80, 24),
-            broker: Some(state.broker.clone()),
-            filestore: Some(state.filestore.clone()),
-            _askpass_grant: None,
-            plain: Arc::new(AtomicBool::new(false)),
-        };
+        let run = test_run(&state, block, "fakehost", "amx-refused", ssh_path);
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();

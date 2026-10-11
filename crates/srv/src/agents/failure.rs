@@ -525,11 +525,21 @@ fn frame_error_text(frame: &Value) -> String {
     if let Some(res) = frame.get("result").and_then(|v| v.as_str()) {
         return res.to_string();
     }
+    if let Some(err) = first_cli_error(frame) {
+        return err.to_string();
+    }
     frame
         .get("subtype")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string()
+}
+
+/// The first entry of a result frame's `errors` list, where Claude Code puts
+/// its own failures before any turn ("No conversation found with session ID:
+/// …").
+pub(crate) fn first_cli_error(frame: &Value) -> Option<&str> {
+    frame.get("errors")?.as_array()?.iter().find_map(|e| e.as_str().filter(|s| !s.is_empty()))
 }
 
 /// True if a terminal `result` frame represents a failure.

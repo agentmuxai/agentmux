@@ -150,6 +150,7 @@ See also:
 
 | Spec | Summary |
 |---|---|
+| [SPEC_WINDOWS_PORTABLE_7Z_2026_10_11](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | The Windows portable ships as a solid LZMA2 `.7z` instead of a Deflate `.zip` (205 → 127 MiB on 0.59.19): packager, CI upload and release allowlist, download page, docs |
 | [SPEC_MSIX_PACKAGING_2026_05_30](SPEC_MSIX_PACKAGING_2026_05_30.md) | Windows MSIX packaging |
 | [SPEC_MACOS_PACKAGING_2026_05_30](SPEC_MACOS_PACKAGING_2026_05_30.md) | macOS packaging + signing |
 | [SPEC_LOCAL_BUILD_VERSIONING_2026_05_28](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | Local-build version stamps |
@@ -653,6 +654,7 @@ partial list.
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
+| [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |

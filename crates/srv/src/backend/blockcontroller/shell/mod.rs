@@ -32,6 +32,7 @@ mod indexing;
 mod lifecycle;
 mod pty;
 mod spawn_cwd;
+mod ssh_pane;
 pub(crate) mod stamps;
 mod translation;
 

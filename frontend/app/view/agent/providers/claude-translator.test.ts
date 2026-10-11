@@ -477,6 +477,19 @@ describe("ClaudeTranslator", () => {
             expect((events[0] as any).message).toBe("plain string error detail");
         });
 
+        it("surfaces the CLI's errors list when it is the only detail (a stale --resume)", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                subtype: "error_during_execution",
+                num_turns: 0,
+                errors: ["No conversation found with session ID: 4973c054"],
+            });
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).message).toBe("No conversation found with session ID: 4973c054");
+        });
+
         it("prefers result over error.message when both are present", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({
