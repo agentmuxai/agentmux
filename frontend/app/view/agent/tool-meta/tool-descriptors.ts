@@ -104,6 +104,7 @@ const grepDetail = (p: Record<string, any>): string => {
     const flags = [
         p["-i"] && "-i",
         p.multiline && "-U",
+        p["-n"] === false && "-N", // line numbers are on by default
         (p["-C"] ?? p.context) && `-C${p["-C"] ?? p.context}`,
         p["-A"] && `-A${p["-A"]}`,
         p["-B"] && `-B${p["-B"]}`,

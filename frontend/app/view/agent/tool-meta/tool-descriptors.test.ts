@@ -99,8 +99,12 @@ describe("helpers", () => {
         expect(toolDetail("Grep", { pattern: "x", type: "ts", multiline: true, output_mode: "count", offset: 10 })).toBe(
             "x · type:ts · -U · count · offset 10",
         );
-        // The defaults add nothing: file-list mode, no limit, no context.
-        expect(toolDetail("Grep", { pattern: "x", output_mode: "files_with_matches", head_limit: 0, "-C": 0 })).toBe("x");
+        // Line numbers off is not the default, so it shows (#4696).
+        expect(toolDetail("Grep", { pattern: "x", output_mode: "content", "-n": false })).toBe("x · -N · content");
+        // The defaults add nothing: file-list mode, no limit, no context, line numbers on.
+        expect(
+            toolDetail("Grep", { pattern: "x", output_mode: "files_with_matches", head_limit: 0, "-C": 0, "-n": true }),
+        ).toBe("x");
         expect(toolDetail("Grep", { path: "/a" })).toBe("");
     });
 });
