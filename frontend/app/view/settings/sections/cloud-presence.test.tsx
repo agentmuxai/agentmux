@@ -50,6 +50,16 @@ describe("presenceLine", () => {
         ).toBe("The cloud refused this computer's record (revoked). Trying again in 9 min");
     });
 
+    it("says why an install doesn't publish, and when it said goodbye", () => {
+        expect(presenceLine(at("off", { off_reason: "dev_build" }), NOW)).toBe("Off for dev builds");
+        expect(presenceLine(at("off", { off_reason: "setting" }), NOW)).toBe("Off (setting)");
+        expect(presenceLine(at("off", { off_reason: "headless" }), NOW)).toBe("Off for headless installs");
+        expect(presenceLine(at("off", { off_reason: "isolated_home" }), NOW)).toBe("Off for isolated homes");
+        expect(presenceLine(at("off", { off_reason: "test_harness" }), NOW)).toBe("Off under test");
+        expect(presenceLine(at("off"), NOW)).toBe("Off");
+        expect(presenceLine(at("signed_off"), NOW)).toBe("Signed off: your devices show this computer as offline");
+    });
+
     it("says now once a try is due", () => {
         expect(presenceLine(at("retrying", { next_try_ms: NOW - 1_000 }), NOW)).toBe("Retrying now");
     });
@@ -93,6 +103,16 @@ describe("CloudPresence", () => {
         status.mockResolvedValue(at("signed_out"));
         render(() => <CloudPresence />);
         await screen.findByText("Sign in to publish");
+        expect(screen.getByRole("button", { name: "Publish now" })).toBeDisabled();
+    });
+
+    it.each([
+        ["off", { off_reason: "dev_build" as const }, "Off for dev builds"],
+        ["signed_off", {}, "Signed off: your devices show this computer as offline"],
+    ] as const)("can't publish while %s", async (state, extra, line) => {
+        status.mockResolvedValue(at(state, extra));
+        render(() => <CloudPresence />);
+        await screen.findByText(line);
         expect(screen.getByRole("button", { name: "Publish now" })).toBeDisabled();
     });
 

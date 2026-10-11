@@ -22,6 +22,28 @@ pub enum PresenceState {
     Unsupported,
     /// The relay refused the record.
     Rejected,
+    /// This install doesn't publish: see `off_reason`.
+    Off,
+    /// A goodbye was stored (a sign-out): devices show this computer as
+    /// offline until it publishes again.
+    SignedOff,
+}
+
+/// Why an install doesn't publish (`PresenceState::Off`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum PresenceOffReason {
+    /// "Publish this computer to my devices" is turned off.
+    Setting,
+    /// A `task dev` build (a `dev-` channel).
+    DevBuild,
+    /// srv runs headless, with no desktop around it.
+    Headless,
+    /// An isolated home (`AGENTMUX_HOME_OVERRIDE`).
+    IsolatedHome,
+    /// A test harness started this srv.
+    TestHarness,
 }
 
 /// `presence.status`. Times are this computer's clock (unix ms).
@@ -60,6 +82,10 @@ pub struct PresenceStatusResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub note: Option<String>,
+    /// Why nothing is published, while `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub off_reason: Option<PresenceOffReason>,
 }
 
 /// `presence.publish-now`.

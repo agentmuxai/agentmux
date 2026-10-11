@@ -15,9 +15,19 @@
 //! | `retrying` | unreachable, 5xx, 429, any other status | 5 s doubling to 5 min, full jitter; a 429's `Retry-After` |
 //! | `unsupported` | 404, no presence route | about 5 min; at once on a sign-in, a network change, a wake, or a new relay version |
 //! | `rejected` | 400 or 410 | 10 min or more |
+//! | `signed_off` | a goodbye was stored at a sign-out | a sign-in |
+//! | `off` | this install doesn't publish (`super::policy`) | turned on |
 //!
 //! Outside `publishing` a change of the snapshot only marks it dirty: the
-//! next try sends the latest one, no sooner.
+//! next try sends the latest one, no sooner. A 409 means the relay already
+//! has a newer record of this install's, which is as good as storing this
+//! one.
+//!
+//! A goodbye (a v3 record, `gone`) is due when something was published and
+//! the relay takes v2 ([`Machine::farewell`]): an older relay would refuse
+//! v3, so it gets none. Turning publishing off says it here
+//! ([`Action::Goodbye`]); a sign-out and a quit say it from outside, and a
+//! sign-out tells the machine with [`Event::Goodbye`].
 //!
 //! Two refusals get one immediate second try before `rejected`: a record
 //! the relay can't parse is sent again as v1 (an older relay knows no agent
@@ -30,7 +40,7 @@ use std::time::Duration;
 
 use agentmux_common::install_presence::{PRESENCE_VERSION, PRESENCE_VERSION_V1};
 
-use crate::backend::rpc_types::{PresenceState, PresenceStatusResult};
+use crate::backend::rpc_types::{PresenceOffReason, PresenceState, PresenceStatusResult};
 
 /// The relay's `error` for a record it can't parse, which is what a relay
 /// that predates the record's version answers.
@@ -131,6 +141,14 @@ pub(crate) enum Event {
     Woke,
     /// "Publish now": forget the backoff and try at once.
     PublishNow,
+    /// Whether this install publishes: `None` to publish, else why not.
+    Policy { off: Option<PresenceOffReason> },
+    /// The settings changed: the driver reads the policy again and passes
+    /// it on as [`Event::Policy`]; the machine itself ignores this.
+    SettingsChanged,
+    /// A goodbye went out (from [`Action::Goodbye`], or a sign-out); `stored`
+    /// when the relay took it.
+    Goodbye { stored: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +159,22 @@ pub(crate) enum Action {
     Attempt { v: u32 },
     /// Ask the relay its version.
     CheckHealth,
+    /// Send the goodbye, stamped `published_at_ms`, then report
+    /// [`Event::Goodbye`].
+    Goodbye { published_at_ms: u64 },
+}
+
+/// A goodbye is due, stamped on the relay's clock as far as it is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Farewell {
+    offset_ms: i64,
+}
+
+impl Farewell {
+    /// `published_at_ms` for a goodbye sent at `wall_ms`.
+    pub(crate) fn stamp(&self, wall_ms: u64) -> u64 {
+        u64::try_from(wall_ms as i64 + self.offset_ms).unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,6 +220,12 @@ pub(crate) struct Machine {
     version_at_404: Option<String>,
     outage_since_ms: Option<u64>,
     outage_warned: bool,
+    /// Why this install doesn't publish; `None` while it does.
+    off: Option<PresenceOffReason>,
+    /// This machine asked for a goodbye ([`Action::Goodbye`]) whose result
+    /// hasn't come back yet. A sign-out reports [`Event::Goodbye`] too, even
+    /// when none was due, so only this says the result is worth logging.
+    goodbye_sent: bool,
 }
 
 fn ms(d: Duration) -> u64 {
@@ -221,6 +261,8 @@ impl Machine {
             version_at_404: None,
             outage_since_ms: None,
             outage_warned: false,
+            off: None,
+            goodbye_sent: false,
         }
     }
 
@@ -247,7 +289,18 @@ impl Machine {
     /// `published_at_ms` for a record sent at `wall_ms`: on the relay's
     /// clock when an answer has told it, else this computer's.
     pub(crate) fn stamp(&self, wall_ms: u64) -> u64 {
-        u64::try_from(wall_ms as i64 + self.offset_ms.unwrap_or(0)).unwrap_or(0)
+        Farewell { offset_ms: self.offset_ms.unwrap_or(0) }.stamp(wall_ms)
+    }
+
+    /// Whether a goodbye is due if this install went away now: something
+    /// was published, publishing is on and no goodbye has been said since,
+    /// and the relay takes v2 (one that took only v1 would refuse v3).
+    pub(crate) fn farewell(&self, now: &Now) -> Option<Farewell> {
+        let due = self.off.is_none()
+            && self.state != Some(PresenceState::SignedOff)
+            && self.last_ok_wall_ms.is_some()
+            && self.record_version(now) == PRESENCE_VERSION;
+        due.then(|| Farewell { offset_ms: self.offset_ms.unwrap_or(0) })
     }
 
     /// The version a fresh try sends: v1 while this relay is remembered as
@@ -261,7 +314,94 @@ impl Machine {
 
     pub(crate) fn next(&mut self, event: Event, now: Now) -> Step {
         let mut logs = Vec::new();
-        let action = match event {
+        let action = if self.off.is_some() {
+            self.next_while_off(event, &now, &mut logs)
+        } else {
+            self.next_while_on(event, now, &mut logs)
+        };
+        self.warn_long_outage(&now, &mut logs);
+        let due = match self.health_due_ms {
+            Some(h) if self.state == Some(PresenceState::Unsupported) => self.due_ms.min(h),
+            _ => self.due_ms,
+        };
+        Step { action, wait: Duration::from_millis(due.saturating_sub(now.mono_ms)), logs }
+    }
+
+    /// Off: nothing is sent until publishing is turned on again; a goodbye
+    /// in flight when it was turned off lands here.
+    fn next_while_off(&mut self, event: Event, now: &Now, logs: &mut Vec<Log>) -> Action {
+        match event {
+            Event::Policy { off: None } => {
+                self.off = None;
+                self.failures = 0;
+                logs.push(Log { warn: false, text: "publishing is on".into() });
+                self.attempt(None, now)
+            }
+            Event::Policy { off: Some(reason) } => {
+                self.enter_off(reason, now, logs);
+                Action::Wait
+            }
+            Event::Goodbye { stored } => {
+                let reason = self.off.unwrap_or(PresenceOffReason::Setting);
+                if std::mem::take(&mut self.goodbye_sent) {
+                    logs.push(Log { warn: false, text: goodbye_text(stored).into() });
+                }
+                self.enter_off(reason, now, logs);
+                Action::Wait
+            }
+            Event::Changed => {
+                self.dirty = true;
+                Action::Wait
+            }
+            _ => Action::Wait,
+        }
+    }
+
+    /// Stop publishing for `reason`; one log line per new reason.
+    fn enter_off(&mut self, reason: PresenceOffReason, now: &Now, logs: &mut Vec<Log>) {
+        let changed = self.off != Some(reason) || self.state != Some(PresenceState::Off);
+        self.off = Some(reason);
+        self.failures = 0;
+        self.dirty = false;
+        let text = format!("off: {}", off_text(reason));
+        let before = logs.len();
+        self.enter(PresenceState::Off, None, &text, now, logs);
+        if changed && logs.len() == before {
+            logs.push(Log { warn: false, text });
+        }
+        self.due_ms = now.mono_ms + ms(self.config.interval);
+    }
+
+    fn next_while_on(&mut self, event: Event, now: Now, logs: &mut Vec<Log>) -> Action {
+        match event {
+            Event::Policy { off: None } | Event::SettingsChanged => {
+                if self.state.is_none() {
+                    self.attempt(None, &now)
+                } else {
+                    Action::Wait
+                }
+            }
+            Event::Policy { off: Some(reason) } => match self.farewell(&now) {
+                Some(farewell) => {
+                    self.off = Some(reason);
+                    self.goodbye_sent = true;
+                    Action::Goodbye { published_at_ms: farewell.stamp(now.wall_ms) }
+                }
+                None => {
+                    self.enter_off(reason, &now, logs);
+                    Action::Wait
+                }
+            },
+            Event::Goodbye { stored: true } => {
+                self.failures = 0;
+                self.enter(PresenceState::SignedOff, None, goodbye_text(true), &now, logs);
+                self.due_ms = now.mono_ms + ms(self.config.signed_out_recheck);
+                Action::Wait
+            }
+            Event::Goodbye { stored: false } => {
+                self.failures = 0;
+                self.attempt(None, &now)
+            }
             Event::Start => self.attempt(None, &now),
             Event::PublishNow | Event::SignIn => {
                 self.failures = 0;
@@ -292,25 +432,23 @@ impl Machine {
             },
             Event::NoSignIn => {
                 self.failures = 0;
-                self.enter(PresenceState::SignedOut, None, "not signed in to MuxBus, nothing is published", &now, &mut logs);
+                // After a goodbye, "signed off" says more than "signed out".
+                if self.state != Some(PresenceState::SignedOff) {
+                    let text = "not signed in to MuxBus, nothing is published";
+                    self.enter(PresenceState::SignedOut, None, text, &now, logs);
+                }
                 self.due_ms = now.mono_ms + ms(self.config.signed_out_recheck);
                 Action::Wait
             }
             Event::Health { version, relay_date_ms } => {
-                self.observe_date(relay_date_ms, &now, &mut logs);
-                self.on_health(version, &now, &mut logs)
+                self.observe_date(relay_date_ms, &now, logs);
+                self.on_health(version, &now, logs)
             }
             Event::Answer { sent_v, answer, relay_date_ms } => {
-                self.observe_date(relay_date_ms, &now, &mut logs);
-                self.on_answer(sent_v, answer, &now, &mut logs)
+                self.observe_date(relay_date_ms, &now, logs);
+                self.on_answer(sent_v, answer, &now, logs)
             }
-        };
-        self.warn_long_outage(&now, &mut logs);
-        let due = match self.health_due_ms {
-            Some(h) if self.state == Some(PresenceState::Unsupported) => self.due_ms.min(h),
-            _ => self.due_ms,
-        };
-        Step { action, wait: Duration::from_millis(due.saturating_sub(now.mono_ms)), logs }
+        }
     }
 
     /// Send the latest snapshot. `v` is set for a second try of the same
@@ -478,8 +616,9 @@ impl Machine {
     /// The status for `presence.status`; `None` before the first state.
     pub(crate) fn status(&self, now: &Now) -> Option<PresenceStatusResult> {
         let state = self.state?;
-        let next_try_ms = (state != PresenceState::SignedOut)
-            .then(|| now.wall_ms + self.due_ms.saturating_sub(now.mono_ms));
+        let waits_for_nothing =
+            matches!(state, PresenceState::SignedOut | PresenceState::SignedOff | PresenceState::Off);
+        let next_try_ms = (!waits_for_nothing).then(|| now.wall_ms + self.due_ms.saturating_sub(now.mono_ms));
         let mut notes = Vec::new();
         if self.clock_skewed() {
             let off = self.offset_ms.unwrap_or(0).unsigned_abs();
@@ -499,7 +638,26 @@ impl Machine {
             offset_ms: self.offset_ms,
             record_version,
             note: (!notes.is_empty()).then(|| notes.join(". ")),
+            off_reason: if state == PresenceState::Off { self.off } else { None },
         })
+    }
+}
+
+fn goodbye_text(stored: bool) -> &'static str {
+    if stored {
+        "said goodbye: devices show this computer as offline"
+    } else {
+        "the goodbye didn't reach the relay; devices notice in a few minutes"
+    }
+}
+
+fn off_text(reason: PresenceOffReason) -> &'static str {
+    match reason {
+        PresenceOffReason::Setting => "turned off in Settings",
+        PresenceOffReason::DevBuild => "a dev build doesn't publish",
+        PresenceOffReason::Headless => "a headless install doesn't publish",
+        PresenceOffReason::IsolatedHome => "an isolated home doesn't publish",
+        PresenceOffReason::TestHarness => "an install under test doesn't publish",
     }
 }
 
@@ -508,6 +666,8 @@ pub(crate) fn classify(status: u16, error: Option<&str>, retry_after: Option<Dur
     let said = || error.unwrap_or_default().to_string();
     match status {
         200..=299 => Answer::Stored,
+        // Newest wins on the relay: it has a newer record of this install's.
+        409 => Answer::Stored,
         404 => Answer::NoRoute,
         400 if error == Some(MALFORMED_RECORD) => Answer::Malformed,
         // The relay names the field when it refuses the record's time.
@@ -893,6 +1053,7 @@ mod tests {
                 offset_ms: None,
                 record_version: 2,
                 note: None,
+                off_reason: None,
             }
         );
     }
@@ -901,6 +1062,7 @@ mod tests {
     fn statuses_and_errors_are_classified() {
         assert_eq!(classify(200, None, None), Answer::Stored);
         assert_eq!(classify(204, None, None), Answer::Stored);
+        assert_eq!(classify(409, Some("a newer record is stored"), None), Answer::Stored, "newest wins: as good as stored");
         assert_eq!(classify(404, Some("Not Found"), None), Answer::NoRoute);
         assert_eq!(classify(400, Some(MALFORMED_RECORD), None), Answer::Malformed);
         assert_eq!(

@@ -9,6 +9,10 @@
 //! agent's `state` (agentmux-mobile's
 //! SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.1). The desktop
 //! publishes v2; v1 is still built and checked, for the relay's sake.
+//! Version 3 is v2 with an optional top-level `gone`. The desktop sends it
+//! only as the goodbye when it quits, signs out or stops publishing:
+//! `gone: true` and no agent states, which the relay keeps as "offline
+//! since" for a short while instead of a live entry.
 //!
 //! Signed with the install's WAN instance key (the W3-S identity in
 //! [`crate::jekt_sign`]), so the record names the key that signed it and
@@ -34,6 +38,8 @@ const AGENT_SEP: char = '\u{3}';
 pub const PRESENCE_VERSION: u32 = 2;
 /// The first version: no agent `state`.
 pub const PRESENCE_VERSION_V1: u32 = 1;
+/// The goodbye: `gone: true`, no agent `state`.
+pub const PRESENCE_VERSION_GOODBYE: u32 = 3;
 /// The values an agent's `state` may take (the LAN feed's `agent_status`).
 pub const PRESENCE_STATES: [&str; 5] = ["working", "waiting", "idle", "stopped", "error"];
 /// Agents in one record; the rest are left out.
@@ -69,7 +75,16 @@ pub struct InstallPresence {
     pub channels_running: u32,
     pub agents: Vec<PresenceAgent>,
     pub published_at_ms: u64,
+    /// v3 only: the install has gone offline. The desktop sends v3 only as
+    /// a goodbye, so always with this set; the relay also takes a v3
+    /// record without it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub gone: bool,
     pub sig: String,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn has_control_char(s: &str) -> bool {
@@ -139,8 +154,9 @@ impl InstallPresence {
         )
     }
 
-    /// [`Self::sign`] for record version `v` (1 or 2). A v1 record carries
-    /// no states: any given are dropped.
+    /// [`Self::sign`] for record version `v` (1, 2 or 3). A v1 record
+    /// carries no states: any given are dropped. A v3 record is the goodbye:
+    /// `gone` is set and the states are dropped too.
     #[allow(clippy::too_many_arguments)]
     pub fn sign_version(
         v: u32,
@@ -155,8 +171,9 @@ impl InstallPresence {
     ) -> Option<Self> {
         let seed: [u8; 32] = instance_private_key.try_into().ok()?;
         let public_key = ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let gone = v == PRESENCE_VERSION_GOODBYE;
         let agents = agents.into_iter().map(|mut a| {
-            if v == PRESENCE_VERSION_V1 {
+            if v == PRESENCE_VERSION_V1 || gone {
                 a.state = None;
             }
             a
@@ -172,6 +189,7 @@ impl InstallPresence {
             channels_running: channels_running.clamp(1, MAX_CHANNELS_RUNNING),
             agents: canonical_agents(agents),
             published_at_ms,
+            gone,
             sig: String::new(),
         };
         if !record.in_bounds() {
@@ -184,7 +202,9 @@ impl InstallPresence {
     /// The UTF-8 string the signature covers: the fields joined by U+0001,
     /// numbers in decimal, the agents joined by U+0003 (empty when there are
     /// none), in the record's order. In v1 an agent is `name` U+0002 `kind`;
-    /// in v2 `name` U+0002 `kind` U+0002 `state`, `state` empty when absent.
+    /// in v2 and v3 `name` U+0002 `kind` U+0002 `state`, `state` empty when
+    /// absent. v3 adds one more field at the end: U+0001 then `1` when
+    /// `gone`, nothing otherwise.
     pub fn signed_material(&self) -> String {
         let agents = self
             .agents
@@ -199,9 +219,14 @@ impl InstallPresence {
             })
             .collect::<Vec<_>>()
             .join(&AGENT_SEP.to_string());
+        let gone = match (self.v, self.gone) {
+            (PRESENCE_VERSION_GOODBYE, true) => format!("{FIELD_SEP}1"),
+            (PRESENCE_VERSION_GOODBYE, false) => FIELD_SEP.to_string(),
+            _ => String::new(),
+        };
         format!(
             "{PRESENCE_DOMAIN}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}\
-             {}{FIELD_SEP}{}{FIELD_SEP}{agents}{FIELD_SEP}{}",
+             {}{FIELD_SEP}{}{FIELD_SEP}{agents}{FIELD_SEP}{}{gone}",
             self.v,
             self.instance_id,
             self.hostname,
@@ -216,10 +241,13 @@ impl InstallPresence {
     /// The contract's bounds, on every field the signature covers. The
     /// agents must already be in canonical order: the order is signed. A v1
     /// record may not carry a state, which its signature would not cover.
+    /// Only v3 may be `gone`, and a `gone` record carries no state.
     pub fn in_bounds(&self) -> bool {
+        let stateless = || self.agents.iter().all(|a| a.state.is_none());
         let version_ok = match self.v {
-            PRESENCE_VERSION_V1 => self.agents.iter().all(|a| a.state.is_none()),
-            PRESENCE_VERSION => true,
+            PRESENCE_VERSION_V1 => !self.gone && stateless(),
+            PRESENCE_VERSION => !self.gone,
+            PRESENCE_VERSION_GOODBYE => !self.gone || stateless(),
             _ => false,
         };
         version_ok
@@ -375,6 +403,124 @@ mod tests {
         let back: InstallPresence = serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
         assert_eq!(back, record);
         assert!(back.verify());
+    }
+
+    // The v3 (goodbye) vector: the v2 vector's install and agents, as a
+    // goodbye. Shared with the relay's suite like the others.
+    const MATERIAL_V3_HEX: &str = "\
+        616d782d696e7374616c6c2d70726573656e63652d76310133016d7733616d3436773577656578346134667172633361766e\
+        7561016e61726b6f01737461626c650177696e646f777301302e35392e31310133016167656e747802636f6e7461696e6572\
+        02034167656e745902686f7374020343616d70657202686f73740201313739313335323439333338380131";
+    const SIG_V3: &str = "CihvXkUTZu79ykAvxqgN2WOkOw5t+FsYJ5YRF3I94MiHZCsi301grrVNLErajob9g+AEd2J2e2Kt1ulOR5KpCQ==";
+
+    fn vector_v3_record() -> InstallPresence {
+        InstallPresence::sign_version(
+            PRESENCE_VERSION_GOODBYE,
+            &seed(),
+            "narko",
+            "stable",
+            "windows",
+            "0.59.11",
+            3,
+            [agent_in("Camper", "host", "idle"), agent_in("agentx", "container", "working"), agent("AgentY", "host")],
+            1_791_352_493_388,
+        )
+        .expect("the vector is in bounds")
+    }
+
+    #[test]
+    fn the_v3_goodbye_vector_signs_byte_for_byte() {
+        let record = vector_v3_record();
+        assert_eq!(hex(record.signed_material().as_bytes()), MATERIAL_V3_HEX);
+        assert_eq!(record.sig, SIG_V3);
+        assert_eq!(
+            serde_json::to_value(&record).unwrap(),
+            serde_json::json!({
+                "v": 3,
+                "instance_id": "mw3am46w5weex4a4fqrc3avnua",
+                "instance_public_key": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+                "hostname": "narko",
+                "channel": "stable",
+                "os": "windows",
+                "version": "0.59.11",
+                "channels_running": 3,
+                "agents": [
+                    {"name": "agentx", "kind": "container"},
+                    {"name": "AgentY", "kind": "host"},
+                    {"name": "Camper", "kind": "host"},
+                ],
+                "published_at_ms": 1_791_352_493_388u64,
+                "gone": true,
+                "sig": SIG_V3,
+            }),
+            "every state absent, gone set"
+        );
+        assert!(record.verify());
+        let back: InstallPresence = serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(back, record);
+        assert!(back.verify());
+        // v2's layout, states empty, then the flag: 11 fields.
+        let material = record.signed_material();
+        assert!(material.starts_with(&format!("{PRESENCE_DOMAIN}{FIELD_SEP}3{FIELD_SEP}")), "{material:?}");
+        assert!(material.ends_with(&format!("1791352493388{FIELD_SEP}1")), "{material:?}");
+        assert_eq!(material.split(FIELD_SEP).count(), 11);
+    }
+
+    // The same v3 record without `gone`: the last field is empty. Shared
+    // with the relay's suite; the desktop never sends one.
+    const SIG_V3_NOT_GONE: &str =
+        "/CV2c+4Cc7FJvrbhbzh3fhUnSS6388P/mY2fy8m3FDCrgcauiLrssFCkZh6Y5LemxpbP+UDdRi04Pu4iwEUiCw==";
+
+    #[test]
+    fn a_v3_record_without_gone_signs_an_empty_last_field() {
+        let mut record = vector_v3_record();
+        record.gone = false;
+        let material = record.signed_material();
+        assert!(material.ends_with(&format!("1791352493388{FIELD_SEP}")), "{material:?}");
+        assert_eq!(material.split(FIELD_SEP).count(), 11);
+        assert!(!record.verify(), "the goodbye's signature covers gone");
+        record.sig = ed25519_sign_b64(&seed(), &material).unwrap();
+        assert_eq!(record.sig, SIG_V3_NOT_GONE);
+        assert!(record.verify());
+        let wire = serde_json::to_value(&record).unwrap();
+        assert!(wire.get("gone").is_none(), "{wire}");
+        let back: InstallPresence = serde_json::from_value(wire).unwrap();
+        assert!(back.verify());
+        // Without gone, a v3 record may carry states, like v2.
+        let mut stateful = record.clone();
+        stateful.agents[0].state = Some("working".into());
+        assert!(stateful.in_bounds());
+    }
+
+    #[test]
+    fn v1_and_v2_keep_ten_fields() {
+        assert_eq!(vector_record().signed_material().split(FIELD_SEP).count(), 10);
+        assert_eq!(vector_v2_record().signed_material().split(FIELD_SEP).count(), 10);
+    }
+
+    #[test]
+    fn gone_is_signed_and_only_a_v3_record_may_say_it() {
+        let goodbye = vector_v3_record();
+        let tampered: Vec<(&str, Box<dyn Fn(&mut InstallPresence)>)> = vec![
+            ("gone cleared", Box::new(|r| r.gone = false)),
+            ("a state added", Box::new(|r| r.agents[0].state = Some("working".into()))),
+            ("version lowered to 2", Box::new(|r| r.v = 2)),
+        ];
+        for (what, change) in tampered {
+            let mut r = goodbye.clone();
+            change(&mut r);
+            assert!(!r.verify(), "{what} but the goodbye still verifies");
+        }
+        // A live record that claims to be gone is out of bounds.
+        for mut live in [vector_record(), vector_v2_record()] {
+            live.gone = true;
+            assert!(!live.in_bounds() && !live.verify(), "v{} with gone", live.v);
+        }
+        // `gone` is on the wire only in v3; a v1 or v2 record reads it as false.
+        let v2 = serde_json::to_value(vector_v2_record()).unwrap();
+        assert!(v2.get("gone").is_none(), "{v2}");
+        let back: InstallPresence = serde_json::from_value(v2).unwrap();
+        assert!(!back.gone && back.verify());
     }
 
     #[test]

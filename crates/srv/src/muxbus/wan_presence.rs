@@ -25,24 +25,39 @@
 //! request at a time, so an older record never lands after a newer one.
 //! Neither the token nor the signature is ever logged.
 //!
+//! **Goodbye.** On a clean quit ([`goodbye_on_shutdown`]), a sign-out
+//! ([`goodbye_before_sign_out`], then [`signed_out`]) and when publishing is
+//! turned off, one last record (v3, `gone`) tells the relay this computer
+//! went offline, so devices stop listing it as live at once rather than
+//! minutes later. Best effort, at most [`GOODBYE_TIMEOUT`]; a relay that
+//! refuses it (an older one) is not asked again, and nothing waits on it.
+//!
+//! **Who publishes** is [`policy`]: not a dev build, a headless srv, an
+//! isolated home or a test harness, unless forced; never when the setting
+//! is off.
+//!
 //! `presence.status` reads [`status`]; `presence.publish-now` calls
-//! [`publish_now`]; a sign-in or sign-out calls [`sign_in_changed`].
+//! [`publish_now`]; a sign-in calls [`sign_in_changed`]; a change of the
+//! settings calls [`settings_changed`].
 
 mod machine;
+pub(crate) mod policy;
 
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use agentmux_common::install_presence::{InstallPresence, PresenceAgent};
+use agentmux_common::install_presence::{InstallPresence, PresenceAgent, PRESENCE_VERSION_GOODBYE};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::backend::fleet_feed::{FleetFeed, FleetSnapshot};
-use crate::backend::rpc_types::PresenceStatusResult;
+use crate::backend::rpc_types::{PresenceOffReason, PresenceStatusResult};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::wan_identity::{WanIdentityStore, WanInstance};
-use machine::{Action, Answer, Event, Machine, Now};
+use crate::backend::wconfig::ConfigState;
+use machine::{Action, Answer, Event, Farewell, Machine, Now};
 
 /// A change is published once the agents, kinds and channel count have been
 /// quiet this long.
@@ -52,6 +67,9 @@ const DEBOUNCE: Duration = Duration::from_secs(2);
 const STATE_MIN_INTERVAL: Duration = Duration::from_secs(10);
 
 const PUBLISH_TIMEOUT_SECS: u64 = 10;
+
+/// The longest a goodbye may take, so a quit or a sign-out is never held up.
+pub(crate) const GOODBYE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How often the network addresses and the clock are looked at, for a
 /// network change or a wake from sleep.
@@ -118,6 +136,10 @@ fn header_date(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 pub(crate) struct RelayReply {
     pub answer: Answer,
     pub date_ms: Option<u64>,
+    /// The HTTP status, when the relay answered at all. A goodbye needs a
+    /// 2xx: [`Answer::Stored`] also covers a 409, where the relay kept a newer
+    /// record and the goodbye did not take effect.
+    pub status: Option<u16>,
 }
 
 /// `PUT /wan-instances/:instance_id/presence`. A pure HTTP operation, like
@@ -146,6 +168,7 @@ pub(crate) async fn put_presence(
             return RelayReply {
                 answer: Answer::Unavailable { reason: "cloud unreachable".into(), detail: e.to_string() },
                 date_ms: None,
+                status: None,
             }
         }
     };
@@ -163,7 +186,7 @@ pub(crate) async fn put_presence(
         .unwrap_or_else(|| body.clone());
     let error: String = error.chars().take(200).collect();
     let error = (!error.is_empty()).then_some(error);
-    RelayReply { answer: machine::classify(status, error.as_deref(), retry_after), date_ms }
+    RelayReply { answer: machine::classify(status, error.as_deref(), retry_after), date_ms, status: Some(status) }
 }
 
 /// The relay's unauthenticated `GET /api/health`: its version, and its clock.
@@ -187,18 +210,23 @@ pub(crate) async fn relay_health(base_url: &str, http: &reqwest::Client) -> (Opt
     }
 }
 
-/// What a try needs besides the relay: the sign-in and the signed record.
+/// What a try needs besides the relay: the sign-in, the signed record, and
+/// whether to publish at all.
 pub(crate) trait Session: Sync {
     /// The MuxBus access token; `None` when not signed in.
     fn token(&self) -> impl Future<Output = Option<String>> + Send;
     /// The signed record for `snapshot`, or why there is none.
     fn record(&self, snapshot: &FleetSnapshot, v: u32, published_at_ms: u64) -> Result<InstallPresence, String>;
+    /// Why this install doesn't publish now; `None` when it does.
+    fn off(&self) -> Option<PresenceOffReason>;
 }
 
 struct LiveSession {
     wan: Arc<WanIdentityStore>,
     feed: Arc<FleetFeed>,
     id_store: Arc<Store>,
+    config: Arc<ConfigState>,
+    install: policy::Install,
 }
 
 impl Session for LiveSession {
@@ -218,6 +246,29 @@ impl Session for LiveSession {
             .map_err(|e| format!("no instance: {e}"))?;
         build_record(&instance, &self.feed, snapshot, v, published_at_ms).ok_or_else(|| OUT_OF_BOUNDS.to_string())
     }
+
+    fn off(&self) -> Option<PresenceOffReason> {
+        self.install.off_reason(policy::setting_on(&self.config.get_settings()))
+    }
+}
+
+/// Send the goodbye for `snapshot` (v3, `gone`): whether the relay stored
+/// it, which only a 2xx says (a 409 means it kept a newer, live record). Gives up after `timeout`. A relay that refuses v3 (an older one)
+/// gets nothing more: the record is never sent again as v1 or v2.
+pub(crate) async fn send_goodbye<S: Session>(
+    session: &S,
+    http: &reqwest::Client,
+    base_url: &str,
+    snapshot: &FleetSnapshot,
+    published_at_ms: u64,
+    timeout: Duration,
+) -> bool {
+    let say = async {
+        let token = session.token().await?;
+        let record = session.record(snapshot, PRESENCE_VERSION_GOODBYE, published_at_ms).ok()?;
+        Some(matches!(put_presence(base_url, http, &token, &record).await.status, Some(200..=299)))
+    };
+    matches!(tokio::time::timeout(timeout, say).await, Ok(Some(true)))
 }
 
 /// One try: the record for `snapshot` as version `v`, or nothing without a
@@ -248,18 +299,36 @@ fn random_unit() -> f64 {
     u64::from_le_bytes(word) as f64 / (1u64 << 48) as f64
 }
 
+/// What the driver shares with the rest of srv.
+#[derive(Default)]
+pub(crate) struct Shared {
+    /// For `presence.status`.
+    pub status: Mutex<Option<PresenceStatusResult>>,
+    /// Whether a goodbye is due if this install went away now.
+    pub farewell: Mutex<Option<Farewell>>,
+    /// Set while a goodbye from outside the driver is said (and for good
+    /// at a quit): no regular record may land after it.
+    pub hold: AtomicBool,
+}
+
+impl Shared {
+    const fn new() -> Self {
+        Self { status: Mutex::new(None), farewell: Mutex::new(None), hold: AtomicBool::new(false) }
+    }
+}
+
 /// Runs [`Machine`] against the relay: does what each step says, then waits
 /// for the step's wait, a signal ([`Event::SignIn`], [`Event::PublishNow`],
-/// [`Event::NetworkChanged`], [`Event::Woke`]) or a change of the snapshot.
-/// While publishing, a change is debounced as before; otherwise it only
-/// marks the record dirty.
+/// [`Event::NetworkChanged`], [`Event::Woke`], [`Event::SettingsChanged`],
+/// [`Event::Goodbye`]) or a change of the snapshot. While publishing, a
+/// change is debounced as before; otherwise it only marks the record dirty.
 pub(crate) struct Driver<'a, S> {
     pub session: &'a S,
     pub http: &'a reqwest::Client,
     pub base_url: &'a str,
     pub config: &'a machine::Config,
     pub timing: &'a Timing,
-    pub status: &'a Mutex<Option<PresenceStatusResult>>,
+    pub shared: &'a Shared,
 }
 
 impl<S: Session> Driver<'_, S> {
@@ -278,7 +347,10 @@ impl<S: Session> Driver<'_, S> {
         let mut machine = Machine::new(self.config.clone(), self.base_url);
         let mut sent = changes.borrow_and_update().clone();
         let mut sent_at = tokio::time::Instant::now();
-        let mut event = Event::Start;
+        let mut event = match self.session.off() {
+            None => Event::Start,
+            off => Event::Policy { off },
+        };
         loop {
             let at = now();
             let step = machine.next(event, at);
@@ -289,15 +361,26 @@ impl<S: Session> Driver<'_, S> {
                     tracing::info!("wan presence: {}", log.text);
                 }
             }
-            if let (Some(status), Ok(mut slot)) = (machine.status(&at), self.status.lock()) {
+            if let (Some(status), Ok(mut slot)) = (machine.status(&at), self.shared.status.lock()) {
                 *slot = Some(status);
             }
+            if let Ok(mut slot) = self.shared.farewell.lock() {
+                *slot = machine.farewell(&at);
+            }
             event = match step.action {
+                Action::Attempt { .. } if self.shared.hold.load(Ordering::SeqCst) => Event::NoSignIn,
                 Action::Attempt { v } => {
                     sent = changes.borrow_and_update().clone();
                     sent_at = tokio::time::Instant::now();
                     let published_at_ms = machine.stamp(agentmux_common::time::now_ms_u64());
                     attempt(self.session, self.http, self.base_url, &sent, v, published_at_ms).await
+                }
+                Action::Goodbye { published_at_ms } => {
+                    let snapshot = changes.borrow().clone();
+                    let stored =
+                        send_goodbye(self.session, self.http, self.base_url, &snapshot, published_at_ms, GOODBYE_TIMEOUT)
+                            .await;
+                    Event::Goodbye { stored }
                 }
                 Action::CheckHealth => {
                     let (version, relay_date_ms) = relay_health(self.base_url, self.http).await;
@@ -308,7 +391,10 @@ impl<S: Session> Driver<'_, S> {
                     tokio::select! {
                         _ = cancel.cancelled() => return,
                         _ = tokio::time::sleep(step.wait) => Event::Due,
-                        Some(signal) = signals.recv() => signal,
+                        Some(signal) = signals.recv() => match signal {
+                            Event::SettingsChanged => Event::Policy { off: self.session.off() },
+                            signal => signal,
+                        },
                         changed = changes.changed() => {
                             if changed.is_err() {
                                 return;
@@ -326,11 +412,73 @@ impl<S: Session> Driver<'_, S> {
 }
 
 static SIGNALS: OnceLock<mpsc::UnboundedSender<Event>> = OnceLock::new();
-static STATUS: Mutex<Option<PresenceStatusResult>> = Mutex::new(None);
+static SHARED: Shared = Shared::new();
+
+/// The running publisher's session and relay, for a goodbye said from
+/// outside the driver.
+struct Publisher {
+    session: LiveSession,
+    http: reqwest::Client,
+    base_url: String,
+}
+
+static PUBLISHER: OnceLock<Publisher> = OnceLock::new();
 
 /// The publisher's status; `None` until it has one (or without a publisher).
 pub(crate) fn status() -> Option<PresenceStatusResult> {
-    STATUS.lock().ok()?.clone()
+    SHARED.status.lock().ok()?.clone()
+}
+
+/// The settings changed: whether to publish is read again.
+pub(crate) fn settings_changed() {
+    if let Some(tx) = SIGNALS.get() {
+        let _ = tx.send(Event::SettingsChanged);
+    }
+}
+
+/// Hold the publisher and say goodbye if one is due: whether the relay
+/// stored it. At most [`GOODBYE_TIMEOUT`].
+pub(crate) async fn farewell_from(shared: &Shared, say: impl AsyncFnOnce(Farewell) -> bool) -> bool {
+    shared.hold.store(true, Ordering::SeqCst);
+    let due = shared.farewell.lock().ok().and_then(|f| *f);
+    match due {
+        Some(farewell) => say(farewell).await,
+        None => false,
+    }
+}
+
+async fn farewell_now() -> bool {
+    let Some(p) = PUBLISHER.get() else { return false };
+    farewell_from(&SHARED, async |farewell: Farewell| {
+        let snapshot = p.session.feed.snapshot();
+        let at = farewell.stamp(agentmux_common::time::now_ms_u64());
+        send_goodbye(&p.session, &p.http, &p.base_url, &snapshot, at, GOODBYE_TIMEOUT).await
+    })
+    .await
+}
+
+/// A clean quit: say goodbye, at most [`GOODBYE_TIMEOUT`]. Nothing is
+/// published after it.
+pub(crate) async fn goodbye_on_shutdown() {
+    if farewell_now().await {
+        tracing::info!("wan presence: said goodbye, devices show this computer as offline");
+    }
+}
+
+/// A sign-out, before the sign-in is cleared (the goodbye needs it): say
+/// goodbye, at most [`GOODBYE_TIMEOUT`], and publish nothing more until
+/// [`signed_out`]. Whether the relay stored it.
+pub(crate) async fn goodbye_before_sign_out() -> bool {
+    farewell_now().await
+}
+
+/// The sign-in is cleared (or clearing it failed): publishing may go on,
+/// and the status says "signed off" when the goodbye was stored.
+pub(crate) fn signed_out(stored: bool) {
+    SHARED.hold.store(false, Ordering::SeqCst);
+    if let Some(tx) = SIGNALS.get() {
+        let _ = tx.send(Event::Goodbye { stored });
+    }
 }
 
 /// Forget the backoff and try at once. False when no publisher runs.
@@ -346,26 +494,40 @@ pub(crate) fn sign_in_changed() {
 }
 
 /// Start the publisher. No-op without a WAN identity store (nothing to sign
-/// with). Stops with `token` (srv shutdown).
-pub(crate) fn spawn(feed: Arc<FleetFeed>, id_store: Arc<Store>, token: CancellationToken) {
+/// with). `headless` is srv's `--headless` ([`policy`]). Stops with `token`
+/// (srv shutdown).
+pub(crate) fn spawn(
+    feed: Arc<FleetFeed>,
+    id_store: Arc<Store>,
+    config: Arc<ConfigState>,
+    headless: bool,
+    token: CancellationToken,
+) {
     let Some(wan) = crate::backend::storage::wan_identity::global() else { return };
+    let install = policy::Install::from_env(headless);
+    let publisher = Publisher {
+        session: LiveSession { wan, feed, id_store, config, install },
+        http: reqwest::Client::new(),
+        base_url: crate::muxbus::relay::rest_base_url(),
+    };
+    if PUBLISHER.set(publisher).is_err() {
+        return;
+    }
     let (tx, rx) = mpsc::unbounded_channel();
     if SIGNALS.set(tx.clone()).is_err() {
         return;
     }
     tokio::spawn(watch_network_and_sleep(tx, token.clone()));
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        let base_url = crate::muxbus::relay::rest_base_url();
-        let changes = feed.subscribe();
-        let session = LiveSession { wan, feed, id_store };
+        let Some(p) = PUBLISHER.get() else { return };
+        let changes = p.session.feed.subscribe();
         let driver = Driver {
-            session: &session,
-            http: &http,
-            base_url: &base_url,
+            session: &p.session,
+            http: &p.http,
+            base_url: &p.base_url,
             config: &machine::LIVE,
             timing: &LIVE_TIMING,
-            status: &STATUS,
+            shared: &SHARED,
         };
         driver.run(changes, rx, &token).await;
     });

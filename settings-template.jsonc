@@ -147,6 +147,13 @@
     // this off is invisible even if you have it on.
     // "network:lan_discovery":     false,
 
+    // -- Cloud --
+    // Publish this computer to my devices: while signed in to MuxBus Cloud,
+    // your signed-in devices can list this computer from anywhere. Turning
+    // it off also tells them it went offline. Dev builds, headless installs
+    // and isolated homes never publish.
+    // "cloud:publishpresence":     true,
+
     // -- Agents --
     // Tell an agent, in a short [AgentMux] note, when it edits a file another
     // agent on this computer is also changing, so it can message them first.

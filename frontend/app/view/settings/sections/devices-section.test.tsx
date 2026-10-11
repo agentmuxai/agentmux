@@ -121,4 +121,21 @@ describe("DevicesSection", () => {
         const toggle = await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" });
         expect(toggle).toHaveAttribute("aria-checked", "false");
     });
+
+    it("offers Publish this computer to my devices, on when the setting is absent", async () => {
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Publish this computer to my devices" });
+        expect(toggle).toHaveAttribute("aria-checked", "true");
+        fireEvent.click(toggle);
+        expect(setConfig).toHaveBeenCalledWith({}, { "cloud:publishpresence": false });
+    });
+
+    it("reads Publish this computer off when the setting is false", async () => {
+        settings = { "cloud:publishpresence": false };
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Publish this computer to my devices" });
+        expect(toggle).toHaveAttribute("aria-checked", "false");
+    });
 });

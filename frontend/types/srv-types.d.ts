@@ -1189,6 +1189,7 @@ declare global {
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
+        "cloud:publishpresence"?: boolean;
         "voice:enabled"?: boolean;
         "voice:engine"?: string;
         "voice:groqApiKey"?: string;

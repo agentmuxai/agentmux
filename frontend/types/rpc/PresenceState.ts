@@ -3,4 +3,4 @@
 /**
  * Where the publisher stands.
  */
-export type PresenceState = "signed_out" | "publishing" | "retrying" | "unsupported" | "rejected";
+export type PresenceState = "signed_out" | "publishing" | "retrying" | "unsupported" | "rejected" | "off" | "signed_off";

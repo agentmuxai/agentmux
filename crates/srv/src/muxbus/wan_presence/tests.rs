@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The record, the HTTP side, and the driver against a fake relay. The
-//! state machine's own rules are tested in `machine.rs`.
+//! state machine's own rules are tested in `machine.rs`, apart from the
+//! goodbye, off and newest-wins rules, which are tested here.
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 
@@ -11,6 +12,7 @@ use super::*;
 use crate::backend::agent_state::{AgentState, AgentStatus};
 use crate::backend::fleet_feed::FleetObservation;
 use crate::backend::rpc_types::PresenceState;
+use agentmux_common::install_presence::PRESENCE_VERSION;
 
 /// (instance id from the path, Authorization header, body) per PUT.
 type Seen = Vec<(String, Option<String>, serde_json::Value)>;
@@ -26,6 +28,9 @@ struct FakeRelay {
     skew_ms: AtomicI64,
     /// Refuse anything but v1 as malformed, like a relay that predates v2.
     v1_only: AtomicBool,
+    /// Refuse v3 as malformed, like a relay that predates the goodbye.
+    no_v3: AtomicBool,
+
     /// Refuse a record further than this from the relay's clock; 0: any.
     clock_window_ms: AtomicU64,
     seen: Mutex<Seen>,
@@ -46,6 +51,11 @@ impl FakeRelay {
         self.seen.lock().unwrap().len()
     }
 
+    /// The bodies of the PUTs so far.
+    fn bodies(&self) -> Vec<serde_json::Value> {
+        self.seen.lock().unwrap().iter().map(|(_, _, b)| b.clone()).collect()
+    }
+
     fn put(&self, body: &serde_json::Value) -> (axum::http::StatusCode, serde_json::Value) {
         use axum::http::StatusCode;
         let forced = self.put_status.load(Ordering::SeqCst);
@@ -54,6 +64,9 @@ impl FakeRelay {
             return (status, serde_json::json!({ "error": status.canonical_reason() }));
         }
         if self.v1_only.load(Ordering::SeqCst) && body["v"] != 1 {
+            return (StatusCode::BAD_REQUEST, serde_json::json!({ "error": MALFORMED_RECORD }));
+        }
+        if self.no_v3.load(Ordering::SeqCst) && body["v"] == 3 {
             return (StatusCode::BAD_REQUEST, serde_json::json!({ "error": MALFORMED_RECORD }));
         }
         let window = self.clock_window_ms.load(Ordering::SeqCst);
@@ -146,13 +159,14 @@ struct TestSession {
     token: Option<String>,
     instance: WanInstance,
     feed: Arc<FleetFeed>,
+    off: Mutex<Option<PresenceOffReason>>,
     _dir: tempfile::TempDir,
 }
 
 impl TestSession {
     fn new(token: Option<&str>) -> Self {
         let (dir, instance) = instance();
-        Self { token: token.map(str::to_string), instance, feed: Arc::new(feed()), _dir: dir }
+        Self { token: token.map(str::to_string), instance, feed: Arc::new(feed()), off: Mutex::new(None), _dir: dir }
     }
 }
 
@@ -163,6 +177,10 @@ impl Session for TestSession {
 
     fn record(&self, snapshot: &FleetSnapshot, v: u32, published_at_ms: u64) -> Result<InstallPresence, String> {
         build_record(&self.instance, &self.feed, snapshot, v, published_at_ms).ok_or_else(|| OUT_OF_BOUNDS.to_string())
+    }
+
+    fn off(&self) -> Option<PresenceOffReason> {
+        *self.off.lock().unwrap()
     }
 }
 
@@ -415,7 +433,8 @@ fn quick() -> Config {
 }
 
 struct Running {
-    status: Arc<Mutex<Option<PresenceStatusResult>>>,
+    shared: Arc<Shared>,
+    session: Arc<TestSession>,
     signals: mpsc::UnboundedSender<Event>,
     feed: Arc<FleetFeed>,
     _stop: tokio_util::sync::DropGuard,
@@ -423,7 +442,7 @@ struct Running {
 
 impl Running {
     fn status(&self) -> Option<PresenceStatusResult> {
-        self.status.lock().unwrap().clone()
+        self.shared.status.lock().unwrap().clone()
     }
 
     /// Wait (up to 5 s) for the status to satisfy `ok`.
@@ -446,26 +465,30 @@ impl Running {
 }
 
 fn drive(url: &str, token: Option<&str>) -> Running {
-    let session = TestSession::new(token);
+    drive_with(url, TestSession::new(token))
+}
+
+fn drive_with(url: &str, session: TestSession) -> Running {
+    let session = Arc::new(session);
     let feed = session.feed.clone();
-    let status = Arc::new(Mutex::new(None));
+    let shared = Arc::new(Shared::default());
     let (signals, rx) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
-    let (url, slot, stop) = (url.to_string(), status.clone(), cancel.clone());
+    let (url, slot, stop, own) = (url.to_string(), shared.clone(), cancel.clone(), session.clone());
     tokio::spawn(async move {
         let http = reqwest::Client::new();
         let config = quick();
         let driver = Driver {
-            session: &session,
+            session: own.as_ref(),
             http: &http,
             base_url: &url,
             config: &config,
             timing: &TEST_TIMING,
-            status: &slot,
+            shared: &slot,
         };
-        driver.run(session.feed.subscribe(), rx, &stop).await;
+        driver.run(own.feed.subscribe(), rx, &stop).await;
     });
-    Running { status, signals, feed, _stop: cancel.drop_guard() }
+    Running { shared, session, signals, feed, _stop: cancel.drop_guard() }
 }
 
 #[tokio::test]
@@ -580,4 +603,374 @@ async fn without_a_publisher_publish_now_says_so() {
     // No `spawn` in tests: nothing listens.
     assert!(!publish_now());
     sign_in_changed();
+}
+
+// ── Goodbye, off and newest wins: the machine ────────────────────────────────
+
+mod rules {
+    use super::super::machine::{classify, Action, Answer, Event, Machine, Now, LIVE};
+    use super::*;
+    use crate::backend::rpc_types::PresenceOffReason as Off;
+
+    const S: u64 = 1000;
+    const MIN: u64 = 60 * S;
+    const WALL: u64 = 1_791_000_000_000;
+
+    fn at(mono_ms: u64) -> Now {
+        Now { mono_ms, wall_ms: WALL + mono_ms, rand: 0.5 }
+    }
+
+    fn answer(sent_v: u32, answer: Answer) -> Event {
+        Event::Answer { sent_v, answer, relay_date_ms: None }
+    }
+
+    fn unreachable() -> Event {
+        answer(2, Answer::Unavailable { reason: "cloud unreachable".into(), detail: String::new() })
+    }
+
+    fn machine() -> Machine {
+        Machine::new(LIVE, "https://relay.test")
+    }
+
+    /// A machine that has stored a record at mono 0.
+    fn published() -> Machine {
+        let mut m = machine();
+        m.next(Event::Start, at(0));
+        m.next(answer(2, Answer::Stored), at(0));
+        m
+    }
+
+    fn state(m: &Machine, now: u64) -> PresenceState {
+        m.status(&at(now)).unwrap().state
+    }
+
+    #[test]
+    fn a_409_is_as_good_as_stored() {
+        let mut m = machine();
+        m.next(Event::Start, at(0));
+        let conflict = classify(409, Some("a newer record is stored"), None);
+        let step = m.next(answer(2, conflict), at(0));
+        let status = m.status(&at(0)).unwrap();
+        assert_eq!(status.state, PresenceState::Publishing);
+        assert_eq!(status.last_error, None, "no error state");
+        assert_eq!(status.last_ok_ms, Some(WALL));
+        assert_eq!((step.action, step.wait), (Action::Wait, Duration::from_secs(60)), "no backoff");
+    }
+
+    #[test]
+    fn a_goodbye_is_due_only_after_something_was_published() {
+        let mut m = machine();
+        assert_eq!(m.farewell(&at(0)), None);
+        m.next(Event::Start, at(0));
+        m.next(unreachable(), at(0));
+        assert_eq!(m.farewell(&at(0)), None, "nothing to take back");
+        m.next(answer(2, Answer::Stored), at(S));
+        assert!(m.farewell(&at(S)).is_some());
+        m.next(unreachable(), at(2 * S));
+        assert!(m.farewell(&at(2 * S)).is_some(), "the relay may still list the last record");
+    }
+
+    #[test]
+    fn a_goodbye_is_stamped_on_the_relays_clock() {
+        let mut m = machine();
+        m.next(Event::Start, at(0));
+        let relay = WALL - 15 * MIN;
+        m.next(Event::Answer { sent_v: 2, answer: Answer::Stored, relay_date_ms: Some(relay) }, at(0));
+        assert_eq!(m.farewell(&at(0)).unwrap().stamp(WALL + 5 * S), relay + 5 * S);
+    }
+
+    #[test]
+    fn a_relay_that_took_only_v1_gets_no_goodbye() {
+        let mut m = machine();
+        m.next(Event::Start, at(0));
+        assert_eq!(m.next(answer(2, Answer::Malformed), at(0)).action, Action::Attempt { v: 1 });
+        m.next(answer(1, Answer::Stored), at(0));
+        assert_eq!(state(&m, 0), PresenceState::Publishing);
+        assert_eq!(m.farewell(&at(0)), None, "it would refuse v3");
+        assert_eq!(m.next(Event::Policy { off: Some(Off::Setting) }, at(S)).action, Action::Wait);
+        assert_eq!(state(&m, S), PresenceState::Off);
+    }
+
+    #[test]
+    fn turning_off_says_goodbye_then_stays_off_until_turned_on() {
+        let mut m = published();
+        let step = m.next(Event::Policy { off: Some(Off::Setting) }, at(S));
+        assert_eq!(step.action, Action::Goodbye { published_at_ms: WALL + S });
+        let step = m.next(Event::Goodbye { stored: true }, at(2 * S));
+        assert_eq!(step.action, Action::Wait);
+        let texts: Vec<_> = step.logs.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, vec!["said goodbye: devices show this computer as offline", "off: turned off in Settings"]);
+        let status = m.status(&at(2 * S)).unwrap();
+        assert_eq!((status.state, status.off_reason, status.next_try_ms), (PresenceState::Off, Some(Off::Setting), None));
+        assert_eq!(m.farewell(&at(2 * S)), None, "said already");
+        for event in [
+            Event::Due,
+            Event::Changed,
+            Event::SignIn,
+            Event::PublishNow,
+            Event::NetworkChanged,
+            Event::Woke,
+            Event::SettingsChanged,
+            Event::Start,
+        ] {
+            assert_eq!(m.next(event.clone(), at(3 * S)).action, Action::Wait, "{event:?}");
+            assert_eq!(state(&m, 3 * S), PresenceState::Off, "{event:?}");
+        }
+        let step = m.next(Event::Policy { off: None }, at(4 * S));
+        assert_eq!(step.action, Action::Attempt { v: 2 }, "turned on: at once");
+        m.next(answer(2, Answer::Stored), at(4 * S));
+        assert_eq!(m.status(&at(4 * S)).unwrap().off_reason, None);
+    }
+
+    #[test]
+    fn a_goodbye_the_relay_did_not_take_still_turns_off() {
+        let mut m = published();
+        m.next(Event::Policy { off: Some(Off::Setting) }, at(S));
+        let step = m.next(Event::Goodbye { stored: false }, at(2 * S));
+        assert!(step.logs[0].text.contains("didn't reach the relay"), "{:?}", step.logs);
+        assert_eq!(state(&m, 2 * S), PresenceState::Off);
+    }
+
+    #[test]
+    fn off_from_the_start_sends_nothing_and_logs_each_reason_once() {
+        let mut m = machine();
+        let step = m.next(Event::Policy { off: Some(Off::DevBuild) }, at(0));
+        assert_eq!(step.action, Action::Wait);
+        assert_eq!(step.logs.len(), 1);
+        assert_eq!(step.logs[0].text, "off: a dev build doesn't publish");
+        assert_eq!(m.status(&at(0)).unwrap().off_reason, Some(Off::DevBuild));
+        assert!(m.next(Event::Policy { off: Some(Off::DevBuild) }, at(S)).logs.is_empty(), "the same reason");
+        let step = m.next(Event::Policy { off: Some(Off::Setting) }, at(2 * S));
+        assert_eq!(step.logs.len(), 1, "a new reason");
+        assert_eq!(m.status(&at(2 * S)).unwrap().off_reason, Some(Off::Setting));
+    }
+
+    #[test]
+    fn turning_off_before_anything_was_published_needs_no_goodbye() {
+        let mut m = machine();
+        m.next(Event::Start, at(0));
+        m.next(unreachable(), at(0));
+        assert_eq!(m.next(Event::Policy { off: Some(Off::Setting) }, at(S)).action, Action::Wait);
+        assert_eq!(state(&m, S), PresenceState::Off);
+    }
+
+    #[test]
+    fn an_unchanged_policy_changes_nothing() {
+        let mut m = published();
+        let step = m.next(Event::Policy { off: None }, at(10 * S));
+        assert_eq!((step.action, step.wait), (Action::Wait, Duration::from_secs(50)));
+        assert_eq!(m.next(Event::SettingsChanged, at(10 * S)).action, Action::Wait);
+        assert_eq!(state(&m, 10 * S), PresenceState::Publishing);
+    }
+
+    #[test]
+    fn a_sign_out_goodbye_shows_signed_off_until_a_sign_in() {
+        let mut m = published();
+        let step = m.next(Event::Goodbye { stored: true }, at(S));
+        assert_eq!(step.logs[0].text, "said goodbye: devices show this computer as offline");
+        let status = m.status(&at(S)).unwrap();
+        assert_eq!((status.state, status.next_try_ms), (PresenceState::SignedOff, None));
+        assert_eq!(m.farewell(&at(S)), None);
+        // The local recheck finds no sign-in: still signed off, no new line.
+        assert_eq!(m.next(Event::Due, at(61 * S)).action, Action::Attempt { v: 2 });
+        assert!(m.next(Event::NoSignIn, at(61 * S)).logs.is_empty());
+        assert_eq!(state(&m, 61 * S), PresenceState::SignedOff);
+        assert_eq!(m.next(Event::Woke, at(62 * S)).action, Action::Wait);
+        assert_eq!(m.next(Event::SignIn, at(70 * S)).action, Action::Attempt { v: 2 });
+        m.next(answer(2, Answer::Stored), at(70 * S));
+        assert_eq!(state(&m, 70 * S), PresenceState::Publishing);
+        assert!(m.farewell(&at(70 * S)).is_some(), "a goodbye is due again");
+    }
+
+    #[test]
+    fn a_sign_out_while_off_logs_no_goodbye_result() {
+        let mut m = machine();
+        m.next(Event::Policy { off: Some(Off::DevBuild) }, at(0));
+        let step = m.next(Event::Goodbye { stored: false }, at(S));
+        assert!(
+            step.logs.iter().all(|l| !l.text.contains("goodbye")),
+            "no goodbye was due, so none is reported: {:?}",
+            step.logs
+        );
+    }
+
+    #[test]
+    fn a_sign_out_without_a_goodbye_is_signed_out() {
+        let mut m = published();
+        assert_eq!(m.next(Event::Goodbye { stored: false }, at(S)).action, Action::Attempt { v: 2 });
+        m.next(Event::NoSignIn, at(S));
+        assert_eq!(state(&m, S), PresenceState::SignedOut);
+    }
+}
+
+// ── Goodbye, off and newest wins: against a relay ───────────────────────────
+
+#[tokio::test]
+async fn the_goodbye_is_a_signed_v3_record_with_every_state_absent() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    let session = TestSession::new(Some("tok"));
+    let snapshot = session.feed.snapshot();
+    let stored = send_goodbye(&session, &reqwest::Client::new(), &stub.url, &snapshot, 42, GOODBYE_TIMEOUT).await;
+    assert!(stored);
+    let seen = stub.relay.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    let (path_id, auth, body) = &seen[0];
+    assert_eq!(auth.as_deref(), Some("Bearer tok"));
+    assert_eq!(body["v"], 3);
+    assert_eq!(body["gone"], true);
+    let agents = body["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 2, "the agents are still listed: {body}");
+    assert!(agents.iter().all(|a| a.get("state").is_none()), "every state absent: {body}");
+    let record: InstallPresence = serde_json::from_value(body.clone()).unwrap();
+    assert!(record.gone);
+    assert_eq!(&record.instance_id, path_id);
+    assert_eq!(record.published_at_ms, 42);
+    assert!(record.verify(), "the goodbye passes the relay's check");
+}
+
+#[tokio::test]
+async fn a_relay_that_refuses_v3_gets_no_goodbye_in_another_version() {
+    let stub = fake_relay(FakeRelay { no_v3: AtomicBool::new(true), ..Default::default() }).await;
+    let session = TestSession::new(Some("tok"));
+    let snapshot = session.feed.snapshot();
+    assert!(!send_goodbye(&session, &reqwest::Client::new(), &stub.url, &snapshot, 1, GOODBYE_TIMEOUT).await);
+    let versions: Vec<_> = stub.relay.bodies().iter().map(|b| b["v"].clone()).collect();
+    assert_eq!(versions, vec![serde_json::json!(3)], "never again as v2 or v1, which would say the opposite");
+}
+
+/// A 409 is as good as stored for an ordinary record, but for a goodbye it
+/// means the relay kept a newer, live record: devices still see this computer.
+#[tokio::test]
+async fn a_goodbye_answered_409_is_not_stored() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    stub.relay.put_status.store(409, std::sync::atomic::Ordering::SeqCst);
+    let session = TestSession::new(Some("tok"));
+    let snapshot = session.feed.snapshot();
+    assert!(!send_goodbye(&session, &reqwest::Client::new(), &stub.url, &snapshot, 1, GOODBYE_TIMEOUT).await);
+    assert_eq!(stub.relay.puts(), 1);
+}
+
+#[tokio::test]
+async fn signed_out_there_is_no_goodbye() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    let session = TestSession::new(None);
+    let snapshot = session.feed.snapshot();
+    assert!(!send_goodbye(&session, &reqwest::Client::new(), &stub.url, &snapshot, 1, GOODBYE_TIMEOUT).await);
+    assert_eq!(stub.relay.puts(), 0);
+}
+
+#[tokio::test]
+async fn a_hung_relay_holds_a_goodbye_no_longer_than_two_seconds() {
+    // Accepts the connection and never answers.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let hold = tokio::spawn(async move {
+        let mut open = Vec::new();
+        while let Ok((conn, _)) = listener.accept().await {
+            open.push(conn);
+        }
+    });
+    let session = TestSession::new(Some("tok"));
+    let snapshot = session.feed.snapshot();
+    let started = std::time::Instant::now();
+    assert!(!send_goodbye(&session, &reqwest::Client::new(), &url, &snapshot, 1, GOODBYE_TIMEOUT).await);
+    let took = started.elapsed();
+    hold.abort();
+    assert_eq!(GOODBYE_TIMEOUT, Duration::from_secs(2));
+    assert!(took >= Duration::from_millis(1900) && took < Duration::from_millis(2900), "{took:?}");
+}
+
+#[tokio::test]
+async fn a_409_from_the_relay_is_published_not_retried() {
+    let stub = fake_relay(relay_answering(409)).await;
+    let run = drive(&stub.url, Some("tok"));
+    let status = run.until_state(PresenceState::Publishing).await;
+    assert_eq!(status.last_error, None);
+    assert!(status.last_ok_ms.is_some());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(stub.relay.puts(), 1, "no retry: the next publish is a minute away");
+    assert_eq!(run.status().unwrap().state, PresenceState::Publishing);
+}
+
+#[tokio::test]
+async fn an_install_off_by_default_sends_nothing_until_turned_on() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    let session = TestSession::new(Some("tok"));
+    *session.off.lock().unwrap() = Some(PresenceOffReason::DevBuild);
+    let run = drive_with(&stub.url, session);
+    let status = run.until_state(PresenceState::Off).await;
+    assert_eq!((status.off_reason, status.next_try_ms), (Some(PresenceOffReason::DevBuild), None));
+    observe(&run.feed, &["a"], &[]);
+    for signal in [Event::PublishNow, Event::SignIn, Event::Woke] {
+        run.signals.send(signal).unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(stub.relay.puts(), 0);
+    assert_eq!(stub.relay.health_checks.load(Ordering::SeqCst), 0);
+    // The override (or the setting) turns it on: published at once.
+    *run.session.off.lock().unwrap() = None;
+    run.signals.send(Event::SettingsChanged).unwrap();
+    run.until_state(PresenceState::Publishing).await;
+    assert_eq!(stub.relay.bodies()[0]["v"], PRESENCE_VERSION);
+}
+
+#[tokio::test]
+async fn turning_the_setting_off_says_goodbye_and_stops() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    let run = drive(&stub.url, Some("tok"));
+    run.until_state(PresenceState::Publishing).await;
+    assert!(run.shared.farewell.lock().unwrap().is_some(), "a goodbye is due");
+    *run.session.off.lock().unwrap() = Some(PresenceOffReason::Setting);
+    run.signals.send(Event::SettingsChanged).unwrap();
+    let status = run.until_state(PresenceState::Off).await;
+    assert_eq!(status.off_reason, Some(PresenceOffReason::Setting));
+    let bodies = stub.relay.bodies();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!((bodies[1]["v"].clone(), bodies[1]["gone"].clone()), (serde_json::json!(3), serde_json::json!(true)));
+    assert!(serde_json::from_value::<InstallPresence>(bodies[1].clone()).unwrap().verify());
+    assert!(run.shared.farewell.lock().unwrap().is_none(), "no second goodbye at a quit");
+    observe(&run.feed, &["a", "b"], &[]);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(stub.relay.puts(), 2, "nothing after the goodbye");
+}
+
+#[tokio::test]
+async fn a_sign_out_says_goodbye_holds_the_publisher_and_shows_signed_off() {
+    let stub = fake_relay(FakeRelay::default()).await;
+    let run = drive(&stub.url, Some("tok"));
+    run.until_state(PresenceState::Publishing).await;
+    // What `goodbye_before_sign_out` does, against this driver.
+    let http = reqwest::Client::new();
+    let said = farewell_from(&run.shared, async |farewell: Farewell| {
+        let at = farewell.stamp(agentmux_common::time::now_ms_u64());
+        send_goodbye(run.session.as_ref(), &http, &stub.url, &run.feed.snapshot(), at, GOODBYE_TIMEOUT).await
+    })
+    .await;
+    assert!(said);
+    // Until the sign-in is cleared, nothing more goes out.
+    run.signals.send(Event::PublishNow).unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let versions: Vec<_> = stub.relay.bodies().iter().map(|b| b["v"].clone()).collect();
+    assert_eq!(versions, vec![serde_json::json!(2), serde_json::json!(3)], "the goodbye is the last record");
+    // What `signed_out` does.
+    run.shared.hold.store(false, Ordering::SeqCst);
+    run.signals.send(Event::Goodbye { stored: true }).unwrap();
+    let status = run.until_state(PresenceState::SignedOff).await;
+    assert_eq!(status.next_try_ms, None);
+}
+
+#[tokio::test]
+async fn nothing_published_means_no_goodbye_but_still_a_hold() {
+    let shared = Shared::default();
+    let said = farewell_from(&shared, async |_: Farewell| -> bool { panic!("no goodbye is due") }).await;
+    assert!(!said);
+    assert!(shared.hold.load(Ordering::SeqCst), "nothing may be published after a sign-out begins");
+}
+
+#[tokio::test]
+async fn without_a_publisher_goodbyes_are_no_ops() {
+    goodbye_on_shutdown().await;
+    assert!(!goodbye_before_sign_out().await);
+    signed_out(false);
+    settings_changed();
 }

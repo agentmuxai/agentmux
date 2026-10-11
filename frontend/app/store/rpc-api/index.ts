@@ -241,7 +241,7 @@ export type {
     NativeMemoryRevertResult,
     NativeMemoryVersionMeta,
 } from "./native-memory";
-export type { PresenceState, PresenceStatusResult } from "./presence";
+export type { PresenceOffReason, PresenceState, PresenceStatusResult } from "./presence";
 export type {
     ReactiveAgentRegistration,
     ReactiveMismatchSummary,
