@@ -286,7 +286,9 @@ Things learned while building it, which any new shot should respect:
   with a hit test at its centre.
 - The top bar renders measuring copies of its icons. Click only an element a
   hit test at its centre reaches.
-- The pane `+` and right-click menus are native menus, outside the page.
+- ~~The pane `+` and right-click menus are native menus, outside the page.~~
+  Wrong (corrected in §9.3): both are DOM menus in the page and can be
+  captured like any other element.
 - Closing a tab with panes asks "Close tab?"; the dialog blocks every click
   after it until answered.
 - A Browser pane's web page is a separate page target, and its content is a
@@ -327,3 +329,89 @@ shot is `"review"`: a person checks each image before it is published.
 3. `node scripts/ui-screenshots/capture.mjs --port <port> --suite widgets --out <dir>`.
 4. Review every image (and `manifest.json`'s `containsWorkspaceData`) before
    copying any into a public repository.
+
+## 9. Verify, redaction and the chrome shots (2026-10-10)
+
+Part 2 of `docs/reports/REPORT_DOCS_SCREENSHOT_COVERAGE_PLAN_2026_10_10.md`:
+the window's chrome, its menus and Settings, captured for the docs. It needs
+two things the runner didn't have: a check that `prep` reached what the shot
+is of (§7's `verify` follow-up), and a way to keep the capturing machine's
+own names out of the image.
+
+### 9.1 `verify`
+
+A shot may declare `verify` (`verify.mjs`), checked after `prep` and
+`settleMs`, before anything is captured:
+
+- a CSS selector: an element matching it must be on screen, by a hit test at
+  its centre (§8.2: being in the DOM with a size isn't enough);
+- an array of selectors, all of which must be on screen;
+- a function `(session) => true | string`, the string being why it failed.
+
+A failed `verify` fails the attempt like any other error, so `retries` and
+`cleanup` apply. A click that opened the wrong thing is now a failed shot
+instead of a wrong image.
+
+### 9.2 Redaction
+
+An isolated data folder (§8.3) keeps the machine's agents, accounts and
+memory out of a shot, but not the machine itself: the status bar shows the
+hostname, an empty tab shows `user@host`, and paths show the user name.
+Before each capture, after the pointer is parked, the runner rewrites those
+in the page (`redact.mjs`): the OS user name becomes `demo`, the hostname
+`demo-host` and each of the machine's own IPv4 addresses (the host panel shows
+its LAN address) `192.0.2.10`, from the range reserved for documentation. Each
+is replaced as a whole word (an address not inside a longer one) and ignoring
+case, in every text node and in
+`title`, `placeholder`, `aria-label` and form-field values. It runs before the
+crop is measured, since a shorter name changes the text's width.
+
+- `--redact from=to` adds a pair (checked first); `--no-redact` turns it off.
+  Names shorter than three characters aren't replaced. A capture instance's
+  data folder and channel name show in the host and instance panels; pass
+  them as pairs (e.g. `--redact <data folder>=C:\Users\demo\.agentmux`).
+- It's display-only: nothing is saved, and the next render puts the real text
+  back. It can't reach text drawn into a canvas, so a terminal's contents
+  still need a prompt that names neither (§8.3's demo environment).
+- `manifest.json`'s `redaction` records how many names were redacted and how
+  many replacements were made, never the names.
+
+Redaction is a second net, not a replacement for reviewing each image (§8.4).
+
+### 9.3 Menus are in the page
+
+§8.2 said the pane `+` and right-click menus were native. They aren't: a
+right-click goes `ContextMenuModel.showContextMenu` → `getApi().showContextMenu`
+→ `jsContextMenuApi()`, which draws a `.menu` overlay in the page, and the
+pane `+` picker (`pane-tab-picker.ts`) uses the same path. Both are captured
+with a selector like the hamburger menu. A submenu opens on hover
+(`CdpSession.hoverText`); a shot of a menu with its submenu crops to both by
+giving `selector` as an array (the box around each selector's first match).
+A submenu, and the top bar's More list, close when the pointer leaves them,
+and the runner parks the pointer off the page before each capture: such a
+shot sets `keepPointer: true` so the pointer stays where `prep` put it. The
+first chrome run captured both without it, and `verify` still passed, since
+they closed between the check and the capture.
+
+### 9.4 The chrome suite
+
+`--suite chrome` (`chrome-shots.mjs`) holds Part 2's shots: the window and
+top bar, the More list, the hamburger menu and its Theme, Opacity and Layouts
+submenus, the command palette (empty and filtered), a pane's `+` and
+right-click menus and its Pane Color submenu, a maximized pane, the status
+bar and each panel it opens (backend, CPU cores, disks, host, token usage,
+instance), every Settings tab and a Settings search. Every shot lays the page
+out at the medium size, starts with nothing open, and closes what it opened
+afterwards; a cleanup that leaves an overlay open fails the run (§8.2). The
+Settings shots each open Settings in a new window tab and maximize it, as the
+widget suite does.
+
+Run it as §8.4, with `--suite chrome` and a `--redact` pair for the capture
+instance's data folder and for its channel name (a local build's channel names
+its branch). The first published set (2026-10-10) was taken this way at
+1280×800; every image was reviewed before it went into agentmux-docs.
+
+What really is outside the page: a Browser pane's web content, OS file
+dialogs, OS notifications, the tray, the macOS menu bar, the pre-splash
+window, and the separate approval windows (SSH, credentials, memory adoption).
+The report's Appendix B lists them and how each might be captured.

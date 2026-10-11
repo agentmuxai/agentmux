@@ -93,7 +93,7 @@ const BLOCK_IDS = `[...document.querySelectorAll('.pane-stack [data-blockid]')].
  *  actually reach, or null. A hit test, not just "has a size": the top bar
  *  renders measuring copies of its icons that have a size but sit under, or
  *  away from, the real buttons. */
-const visibleCenter = (selector) => `(() => {
+export const visibleCenter = (selector) => `(() => {
     for (const el of document.querySelectorAll(${JSON.stringify(selector)})) {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
@@ -159,7 +159,7 @@ async function nthAsId(session, spec) {
  *  the page, the hidden ones under the visible tab, so being in the DOM with a
  *  size doesn't mean being seen. (Park the pointer first: the tooltip of the
  *  widget icon just clicked can cover part of the pane.) */
-const paneVisible = (paneSelector) => `(() => {
+export const paneVisible = (paneSelector) => `(() => {
     const p = document.querySelector(${JSON.stringify(paneSelector)});
     if (!p) return false;
     const r = p.getBoundingClientRect();
@@ -174,7 +174,7 @@ const TAB_IDS = `[...document.querySelectorAll('.tab[data-tab-id]')].map(t => t.
  *  app asks, and checks the tab is gone. Only ever a tab this suite created:
  *  closing "the active tab" could close the instance's own tab if the new one
  *  never became active (Codex on #4471). */
-async function closeTab(session, tabId) {
+export async function closeTab(session, tabId) {
     const tab = `.tab[data-tab-id="${tabId}"]`;
     if (!(await session.evaluate(`!!document.querySelector(${JSON.stringify(tab)})`))) return;
     // A wide viewport keeps the tab's close button clear of the window buttons.
@@ -198,7 +198,7 @@ async function closeTab(session, tabId) {
 }
 
 /** The block ids of the panes on screen (centre hit test, as paneVisible). */
-const VISIBLE_BLOCK_IDS = `[...document.querySelectorAll('.pane-stack')].filter((p) => {
+export const VISIBLE_BLOCK_IDS = `[...document.querySelectorAll('.pane-stack')].filter((p) => {
     const r = p.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return false;
     const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
@@ -212,7 +212,7 @@ const VISIBLE_BLOCK_IDS = `[...document.querySelectorAll('.pane-stack')].filter(
  *  panes for the widget's (Codex on #4471). Records the created tab's id in
  *  `state.tabId` as soon as it appears, even if this then times out, so the
  *  shot's cleanup closes that tab and no other. */
-async function openNewTab(session, state) {
+export async function openNewTab(session, state) {
     const tabsBefore = new Set(await session.evaluate(TAB_IDS));
     await session.clickSelector(".hamburger-btn");
     await session.wait(300);

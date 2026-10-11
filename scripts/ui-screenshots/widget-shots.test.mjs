@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { demoPathProblem, demoWidgets } from "./demo-env.mjs";
 import { SIZES, parseSizes, shotFilename } from "./sizes.mjs";
 import { EXCLUDE, shots, widgetEntries } from "./widget-shots.mjs";
+import { SETTINGS_TABS, shots as chromeShots } from "./chrome-shots.mjs";
 
 describe("sizes", () => {
     it("defaults to every size and rejects unknown names", () => {
@@ -111,5 +112,21 @@ describe("demo project path", () => {
         expect(demoPathProblem("C:/Users/alice/demo/acme-web", machine)).toMatch(/home folder/);
         expect(demoPathProblem("c:/users/ALICE", machine)).toMatch(/home folder/);
         expect(demoPathProblem("D:/alice-shots/acme-web", machine)).toMatch(/user name/);
+    });
+});
+
+describe("chrome suite", () => {
+    it("has unique ids, and a shot for every Settings tab", () => {
+        const ids = chromeShots.map((s) => s.id);
+        expect(new Set(ids).size).toBe(ids.length);
+        for (const [, key] of SETTINGS_TABS) expect(ids).toContain(`settings-${key}`);
+    });
+
+    it("checks that whatever a shot opens is on screen, and cleans up after every shot", () => {
+        for (const s of chromeShots) {
+            expect(typeof s.cleanup, s.id).toBe("function");
+            // Only shots of what's always there (the window, the bars) skip verify.
+            if (!s.verify) expect(["chrome-window", "chrome-top-bar", "chrome-status-bar"]).toContain(s.id);
+        }
     });
 });
