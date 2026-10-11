@@ -233,8 +233,6 @@ mod tests {
         assert!(missing(Some(""), Some("container")).is_empty(), "no pane mode: the definition's");
     }
 
-    /// What `insert_server_rows` skips is never launched, so never missing:
-    /// the two stay in step.
     /// An agent's private server isn't a catalog row, even when a catalog
     /// server of the same name exists: it is never listed, so the pane can't
     /// show it under that row.
@@ -247,6 +245,8 @@ mod tests {
         assert!(missing_servers(&[private], &[]).is_empty());
     }
 
+    /// What `insert_server_rows` skips is never launched, so never missing:
+    /// the two stay in step.
     #[test]
     fn a_server_that_is_never_launched_is_never_missing() {
         let rows = [row("git", "{}"), row("agentmux", "{}"), row("broken", "{not json")];
