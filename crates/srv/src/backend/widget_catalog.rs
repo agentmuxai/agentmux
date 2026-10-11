@@ -134,16 +134,25 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
+/// `url`'s body, at most `max` bytes: refused as soon as it declares or
+/// reaches more, never held in memory whole first.
 async fn get(url: &str, max: usize) -> Result<Vec<u8>, String> {
-    let resp = client()?.get(url).send().await.map_err(|e| format!("can't reach the catalog: {e}"))?;
+    let too_big = || format!("{url} is over the {} KB it may be", max / 1024);
+    let mut resp = client()?.get(url).send().await.map_err(|e| format!("can't reach the catalog: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("the catalog answered {} for {url}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("the catalog: {e}"))?;
-    if bytes.len() > max {
-        return Err(format!("{url} is over {} MB", max / (1024 * 1024)));
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        return Err(too_big());
     }
-    Ok(bytes.to_vec())
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("the catalog: {e}"))? {
+        if body.len() + chunk.len() > max {
+            return Err(too_big());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// The catalog at `url`, checked.

@@ -71,6 +71,20 @@ describe("WidgetCatalog", () => {
         expect(install.mock.calls[0][1]).toEqual({ id: "agentmux.notes" });
     });
 
+    it("names an installed widget's state as it is", async () => {
+        catalog.mockResolvedValue({
+            url: "u",
+            items: [
+                item({ current: true, installed_version: "1.1.0", installed_state: "needs_approval" }),
+                item({ entry: { ...item().entry, id: "agentmux.off", name: "Off" }, current: true, installed_version: "1.1.0", installed_state: "disabled" }),
+            ],
+        });
+        render(() => <WidgetCatalog onInstalled={() => {}} />);
+        fireEvent.click(screen.getByText("Browse the catalog"));
+        expect(await screen.findByText("Installed, waiting for your approval")).toBeInTheDocument();
+        expect(screen.getByText("Installed, turned off")).toBeInTheDocument();
+    });
+
     it("offers an update for an older installed version", async () => {
         catalog.mockResolvedValue({ url: "u", items: [item({ installed_version: "1.0.0", installed_state: "approved" })] });
         render(() => <WidgetCatalog onInstalled={() => {}} />);

@@ -11,11 +11,20 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
-import type { WidgetCatalogItem, WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
+import type { WidgetCatalogItem, WidgetPackageInfo, WidgetState } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { describePermission } from "./widget-permissions";
 
 const [items, setItems] = createSignal<WidgetCatalogItem[]>([]);
+
+/** What an installed catalog widget is now. */
+const INSTALLED_TEXT: Record<WidgetState, string> = {
+    approved: "Installed",
+    needs_approval: "Installed, waiting for your approval",
+    changed: "Installed, waiting for your approval",
+    disabled: "Installed, turned off",
+    invalid: "Installed, can't be loaded",
+};
 
 /** Is `pkg` exactly what the catalog lists: its files, signed by the
  *  publisher key the catalog lists? For the prompt's catalog line. */
@@ -94,10 +103,10 @@ export function WidgetCatalog(props: { onInstalled: (id: string, packages: Widge
                                             <i class={`fa-solid fa-${/^[a-z0-9-]{1,60}$/.test(i.entry.icon ?? "") ? i.entry.icon : "puzzle-piece"}`} />
                                             <span class="widget-row-name">{i.entry.name}</span>
                                             <span class="widget-row-version">{i.entry.version}</span>
-                                            <Show when={i.current}>
-                                                <span class="widget-row-state state-approved">
-                                                    {i.installed_state === "approved" ? "Installed" : "Installed, waiting for your approval"}
-                                                </span>
+                                            <Show when={i.current && i.installed_state}>
+                                                {(state) => (
+                                                    <span class={`widget-row-state state-${state()}`}>{INSTALLED_TEXT[state()]}</span>
+                                                )}
                                             </Show>
                                         </div>
                                         <Show when={i.entry.description}>
