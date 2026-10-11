@@ -13,6 +13,7 @@ import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { endedByEscape } from "./native-cancel";
+import { acceptWindowTabsFromOtherWindows, maybeDroppedInAnotherWindow } from "./foreign-drop";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
@@ -81,7 +82,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             const dropY = e.screenY;
 
             await sleep(50);
-            await handleCrossWindowDragEnd(payload, windowLabelRef, dropX, dropY);
+            await handleCrossWindowDragEnd(payload, windowLabelRef, dropX, dropY, maybeDroppedInAnotherWindow(dropEffect));
         };
 
         // Suppress the "operation not allowed" cursor during a cross-window
@@ -103,9 +104,11 @@ function CrossWindowDragMonitor(): JSX.Element {
         };
 
         const stopDragOver = onWindowDrag({ kinds: ["tile", "window-tab", "pane-tab"], over: handleDragOver });
+        const stopAccepting = acceptWindowTabsFromOtherWindows(windowLabelRef ?? "main");
         document.addEventListener("dragend", handleDragEnd);
         onCleanup(() => {
             stopDragOver();
+            stopAccepting();
             document.removeEventListener("dragend", handleDragEnd);
         });
     });
@@ -118,6 +121,7 @@ async function handleCrossWindowDragEnd(
     sourceWindow: string | null,
     dropX: number,
     dropY: number,
+    maybeElsewhere = false,
 ) {
     // `get_cursor_point` is a Windows-only host command (GetCursorPos); on
     // Linux it returns 0,0. Use the DOM drop coordinates (top-left origin,
@@ -167,7 +171,13 @@ async function handleCrossWindowDragEnd(
     let dragId: string | null = null;
     try {
         dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
-        const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        let targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        // The window it was dropped on claims the drop from its own `drop`
+        // (foreign-drop.ts), which can land just after this dragend.
+        if (!targetWindow && maybeElsewhere) {
+            await sleep(150);
+            targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        }
 
         if (targetWindow && targetWindow !== src) {
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);

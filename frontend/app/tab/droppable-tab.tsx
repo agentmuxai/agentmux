@@ -10,6 +10,7 @@ import type { JSX } from "solid-js";
 import clsx from "clsx";
 import { Tab } from "./tab";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
+import { WINDOW_TAB_MIME } from "@/app/drag/foreign-drop";
 import {
     GAP_PX,
     startWindowTabDrag,
@@ -104,6 +105,10 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 tabIndex: props.tabIndex,
                 type: tabItemType,
             }),
+            // The marker another window recognises a dropped window tab by
+            // (foreign-drop.ts). Not on a lone tab: it carries no
+            // cross-window payload, so nothing would act on the drop.
+            getInitialDataForExternal: () => (isLoneTabDrag() ? {} : { [WINDOW_TAB_MIME]: props.tabId }),
             onGenerateDragPreview: ({ location, source }) => {
                 // Capture grab offset here (rather than onDragStart)
                 // because pragmatic-dnd's DragLocation is on this event;

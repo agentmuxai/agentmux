@@ -24,6 +24,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/drag/drag-session.test.ts",
     "frontend/app/drag/file-drop-actions.test.ts",
     "frontend/app/drag/file-drop.test.ts",
+    "frontend/app/drag/foreign-drop.test.ts",
     "frontend/app/drag/native-cancel.test.ts",
     "frontend/app/drag/pane-tab-tearoff.test.ts",
     "frontend/app/drag/tearoff-snapshot.test.ts",
