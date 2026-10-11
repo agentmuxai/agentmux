@@ -86,6 +86,77 @@ describe("createRefitScheduler", () => {
         expect(ran).toEqual(["live", "cols", "other"]);
     });
 
+    // A fake clock with frames every 16.7 ms; a job advances it by what it costs.
+    const timedClock = () => {
+        const c = clock();
+        let t = 0;
+        return {
+            ...c,
+            now: () => t,
+            spend: (ms: number) => {
+                t += ms;
+            },
+            frame: () => {
+                t = (Math.floor(t / 16.7) + 1) * 16.7;
+                c.frame();
+            },
+        };
+    };
+
+    it("still runs the per-frame limit when refits are cheap", () => {
+        const c = timedClock();
+        const s = createRefitScheduler(2, c.request, c.now);
+        let ran = 0;
+        const job = () => {
+            ran++;
+            c.spend(1);
+        };
+        const keys = Array.from({ length: 6 }, () => ({}));
+        keys.forEach((k) => s.schedule(k, job));
+        expect(ran).toBe(2);
+        c.frame();
+        expect(ran).toBe(4);
+        c.frame();
+        expect(ran).toBe(6);
+    });
+
+    it("runs at most one costly refit a frame, and about one every other frame", () => {
+        const c = timedClock();
+        const s = createRefitScheduler(2, c.request, c.now);
+        const perFrame: number[] = [];
+        let ran = 0;
+        const job = () => {
+            ran++;
+            c.spend(7.5);
+        };
+        const keys = Array.from({ length: 8 }, () => ({}));
+        keys.forEach((k) => s.schedule(k, job));
+        perFrame.push(ran);
+        for (let i = 0; i < 40 && ran < keys.length; i++) {
+            const before = ran;
+            c.frame();
+            perFrame.push(ran - before);
+        }
+        expect(Math.max(...perFrame)).toBe(1);
+        expect(ran).toBe(keys.length);
+        // 8 refits of 7.5 ms at a quarter of the time take ~14 frames, not 4.
+        expect(perFrame.length).toBeGreaterThan(12);
+        expect(perFrame.length).toBeLessThan(18);
+    });
+
+    it("lets credit build up only to a limit while idle", () => {
+        const c = timedClock();
+        const s = createRefitScheduler(2, c.request, c.now);
+        c.spend(10_000);
+        let ran = 0;
+        const job = () => {
+            ran++;
+            c.spend(7.5);
+        };
+        [{}, {}, {}].forEach((k) => s.schedule(k, job));
+        expect(ran).toBe(1);
+    });
+
     it("drops a cancelled job", () => {
         const c = clock();
         const s = createRefitScheduler(1, c.request);
