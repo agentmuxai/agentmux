@@ -18,6 +18,11 @@
 //! Only names, statuses and counts: the frame carries no server config, so
 //! nothing secret passes through here. The health of the `agentmux` entry
 //! and its repair are `mcp_health`'s; this only records.
+//!
+//! Callers record and forget while holding the controller's lock, after
+//! checking their process is still the current one (`spawn_generation`): a
+//! replaced process's reader or waiter must not write over or clear the
+//! new one's servers. This module's own lock is only ever taken inside it.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -99,28 +104,18 @@ pub fn record(block_id: &str, servers: Vec<ObservedServer>, at_ms: u64) -> bool 
     changed
 }
 
-/// Record an init frame and, if anything changed, publish `mcp:observed`.
-pub fn observe_init(block_id: &str, frame: &Value, broker: Option<&crate::backend::mps::Broker>) {
-    let Some(servers) = parse_init(frame) else { return };
-    if record(block_id, servers, agentmux_common::time::now_ms_u64()) {
-        if let Some(broker) = broker {
-            publish(broker, block_id);
-        }
+/// Record an init frame's servers. True when they changed: the caller then
+/// publishes (`publish`), after letting go of its own lock.
+pub fn record_init(block_id: &str, frame: &Value) -> bool {
+    match parse_init(frame) {
+        Some(servers) => record(block_id, servers, agentmux_common::time::now_ms_u64()),
+        None => false,
     }
 }
 
-/// A pane's CLI exited: its servers are gone. Publishes `mcp:observed` when
-/// there was a report to drop.
-pub fn process_ended(block_id: &str, broker: Option<&crate::backend::mps::Broker>) {
-    if observed().remove(block_id).is_none() {
-        return;
-    }
-    if let Some(broker) = broker {
-        publish(broker, block_id);
-    }
-}
-
-fn publish(broker: &crate::backend::mps::Broker, block_id: &str) {
+/// Tell the panes a report changed or went (`mcp:observed`).
+pub fn publish(broker: Option<&crate::backend::mps::Broker>, block_id: &str) {
+    let Some(broker) = broker else { return };
     broker.publish(crate::backend::mps::MuxEvent {
         event: "mcp:observed".to_string(),
         scopes: vec![],
@@ -135,9 +130,10 @@ pub fn all() -> HashMap<String, Observation> {
     observed().clone()
 }
 
-/// Drop a pane's report (its block is gone), quietly.
-pub fn forget(block_id: &str) {
-    observed().remove(block_id);
+/// Drop a pane's report: its CLI exited, or its block is gone. True when
+/// there was one.
+pub fn forget(block_id: &str) -> bool {
+    observed().remove(block_id).is_some()
 }
 
 #[cfg(test)]
@@ -198,11 +194,12 @@ mod tests {
     }
 
     #[test]
-    fn a_process_that_ended_has_no_servers() {
+    fn an_init_frame_is_recorded_once_and_forgotten_once() {
         let block = "mcp-observed-test-ended";
-        record(block, parse_init(&init_frame()).unwrap(), 1);
-        process_ended(block, None);
-        assert!(!all().contains_key(block));
-        process_ended(block, None);
+        assert!(record_init(block, &init_frame()));
+        assert!(!record_init(block, &init_frame()), "the same report again");
+        assert!(!record_init(block, &json!({"type": "system"})), "not an init frame");
+        assert!(forget(block));
+        assert!(!forget(block), "nothing left to forget");
     }
 }

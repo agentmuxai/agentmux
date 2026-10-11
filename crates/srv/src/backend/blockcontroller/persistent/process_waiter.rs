@@ -136,6 +136,7 @@ impl PersistentSubprocessController {
                 // the original 500ms bound already accepted, just at
                 // a bound wide enough not to fire under normal load.
                 settle_reader_tasks(&block_id_wait, stderr_reader_handle, stdout_reader_handle, "process exit").await;
+                forget_mcp_servers(&inner_wait, my_generation_wait, broker_wait.as_deref(), &block_id_wait);
 
                 // Wait (briefly, bounded) for the drain to finish
                 // appending whatever message it's currently
@@ -550,6 +551,7 @@ impl PersistentSubprocessController {
                 // appear permanently alive if a descendant process
                 // ever holds the stdout descriptor open.
                 settle_reader_tasks(&block_id_wait, stderr_reader_handle, stdout_reader_handle, "kill").await;
+                forget_mcp_servers(&inner_wait, my_generation_wait, broker_wait.as_deref(), &block_id_wait);
 
                 let mut inner = inner_wait.lock().unwrap();
                 // reagentx P1 (round 6 on PR #2373, extended round 8):
@@ -769,6 +771,26 @@ impl PersistentSubprocessController {
 /// Wait for the process's reader tasks once it has ended (stderr up to 500ms,
 /// stdout up to 10s), aborting any that overruns. `after` names how the process
 /// ended ("process exit" or "kill") in the warning.
+/// The CLI is gone, so its MCP servers are too (`backend::mcp_observed`),
+/// unless a new process already replaced it and reports its own. Here, not
+/// at the reader's end of input: a reader can be aborted unfinished
+/// (`settle_reader_tasks`), and a descendant holding stdout open keeps it
+/// from ending at all.
+fn forget_mcp_servers(
+    inner: &std::sync::Mutex<PersistentInner>,
+    my_generation: u64,
+    broker: Option<&mps::Broker>,
+    block_id: &str,
+) {
+    let forgot = {
+        let inner = inner.lock().unwrap();
+        inner.spawn_generation == my_generation && crate::backend::mcp_observed::forget(block_id)
+    };
+    if forgot {
+        crate::backend::mcp_observed::publish(broker, block_id);
+    }
+}
+
 async fn settle_reader_tasks(
     block_id: &str,
     stderr_reader_handle: Option<tokio::task::JoinHandle<()>>,
