@@ -63,7 +63,7 @@ export const TIPS: TipRow[] = [
         id: "pane:numbers",
         area: "Panes",
         gesture: "hold:ctrl+shift",
-        label: "Number every pane, for {key:ctrl+shift+1}–9",
+        label: "Number every pane, for {key:ctrl+shift+1} to {key:ctrl+shift+9}",
         source: { file: "frontend/app/store/keymodel-dispatch.ts", anchor: "export function registerControlShiftTracking" },
     },
     {
