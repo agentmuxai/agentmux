@@ -523,3 +523,59 @@ Settings → Widgets with the sample widget's approval prompt. Each opens its
 pane from the hamburger menu in a window tab of its own, maximized at
 1100×760, and closes the tab afterwards. Run it after the agent suite, which
 creates `api-tests`.
+
+## 12. Recordings (2026-10-11)
+
+Part 7 of the screenshot plan, started early: short clips of an operation
+(GIF, and WebP or MP4 on request), declared and rerun like shots, so a
+changed UI is re-recorded with one command.
+
+### 12.1 How a clip is made
+
+`record.mjs` is the recording counterpart of `capture.mjs` and shares its
+CDP session (`lib/session.mjs`, moved out of `capture.mjs`), the page-dialog
+guard (§11.1) and redaction. A clip in `recordings.mjs` is
+`{ id, title, description, viewport?, prep, run, cleanup }`: `prep` sets up
+what the clip starts from and returns the selector to crop to, and isn't
+recorded; `run` is recorded; `cleanup` puts things back. The suite may export
+`setup`, run once first (the recordings suite reuses the agent suite's, §10.3).
+
+- **Frames** come from `Page.startScreencast`, each with the time it was
+  painted. A still page sends no frames, so a pause keeps its length: each
+  frame is shown until the next one was painted (`lib/recorder.mjs`,
+  `concatList`).
+- **A drawn cursor.** Input sent over CDP moves no real pointer, so a clip
+  would show things happening by themselves. The recorder draws an arrow into
+  the page that glides to each point it clicks, with a ripple on the click,
+  and removes it afterwards (`Cursor`).
+- **Redaction throughout.** Redacting once before a clip misses what the clip
+  brings up: the first Stash recording showed a memory folder path with the OS
+  user name in it. During a clip a MutationObserver redacts whatever the page
+  renders, before it's painted (`liveRedactExpression`). A capture instance's
+  folder also appears in derived forms (Claude's sanitized
+  `C--Users-<user>--...-<workspace>-capture-home` project path), so pass the
+  workspace's name as a `--redact` pair too.
+- **Encoding** is ffmpeg (`--ffmpeg`, `$FFMPEG`, or `PATH`): the clip is
+  resampled to `--fps` (15), cropped to the selector measured at the end,
+  scaled to `--width` (800), and made into a GIF with one palette for the
+  whole clip (`palettegen stats_mode=diff`, with `paletteuse` dithering only
+  the rectangles that change). `--formats gif,webp,mp4` adds an animated WebP
+  or an H.264 MP4.
+
+### 12.2 Running it
+
+As §8.4, then:
+
+    AGENTMUX_HOME_OVERRIDE=<capture home> node scripts/ui-screenshots/record.mjs \
+        --port <port> --ffmpeg <path> [--only stash-tour] [--formats gif,mp4] \
+        --redact "<data folder>=C:\Users\demo\.agentmux" --redact "<workspace>=demo"
+
+The first clip, `stash-tour`, opens a fresh agent's Stash and goes through its
+seven tabs: about 20 s, a ~270 KB GIF and a ~120 KB MP4 at 800 px wide.
+Review a clip frame by frame before publishing (an ffmpeg contact sheet does
+it: `-vf fps=0.5,scale=400:-2,tile=3x4`), as with a screenshot.
+
+In agentmux-docs a GIF goes in `src/assets/` like a screenshot: Astro's image
+pipeline keeps the animation and serves it as an animated WebP, smaller than
+the GIF (checked: the 267 KB `stash-tour.gif` became a 176 KB, 133-frame
+WebP).

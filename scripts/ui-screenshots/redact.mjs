@@ -118,3 +118,26 @@ export function redactDocument(pairs, doc = document) {
 export function redactExpression(pairs) {
     return `(${redactDocument.toString()})(${JSON.stringify(pairs)})`;
 }
+
+/** A `Runtime.evaluate` expression that redacts now and then keeps redacting
+ *  whatever the page renders, until `stopLiveRedactionExpression`: for a
+ *  recording, where text drawn mid-clip must be redacted before it's painted
+ *  (a MutationObserver's callback runs before the next paint). */
+export function liveRedactExpression(pairs) {
+    return `(() => {
+        const redact = ${redactDocument.toString()};
+        const pairs = ${JSON.stringify(pairs)};
+        window.__amLiveRedact?.disconnect();
+        redact(pairs);
+        const observer = new MutationObserver(() => {
+            observer.disconnect();
+            redact(pairs);
+            observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title", "placeholder", "aria-label", "value"] });
+        });
+        observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title", "placeholder", "aria-label", "value"] });
+        window.__amLiveRedact = observer;
+        return true;
+    })()`;
+}
+
+export const stopLiveRedactionExpression = `(() => { window.__amLiveRedact?.disconnect(); window.__amLiveRedact = null; })()`;
