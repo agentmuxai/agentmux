@@ -42,6 +42,7 @@ pub(crate) mod work_queue;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
+mod work_facts_handlers;
 pub(crate) mod native_memory_handlers;
 pub(crate) mod memory_delivery_handlers;
 mod notify_handlers;
