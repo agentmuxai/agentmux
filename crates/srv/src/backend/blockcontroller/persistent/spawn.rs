@@ -686,6 +686,14 @@ impl PersistentSubprocessController {
             let mut stdin = stdin;
             let mut continuation = continuation;
             while let Some(msg) = msg_rx.recv().await {
+                // The user has spoken: no pick-up note. AgentMux's own hidden
+                // memory re-delivery doesn't count, even when the packet
+                // rides on it (#4707).
+                if record_pending.load(std::sync::atomic::Ordering::Acquire)
+                    && crate::backend::continued_note::is_user_message(&msg)
+                {
+                    record_pending.store(false, std::sync::atomic::Ordering::Release);
+                }
                 // Only this write carries the packet; the pane's record keeps
                 // the message as typed. Control responses pass through.
                 let msg = match continuation
@@ -694,7 +702,6 @@ impl PersistentSubprocessController {
                 {
                     Some(with_packet) => {
                         continuation = None;
-                        record_pending.store(false, std::sync::atomic::Ordering::Release);
                         with_packet
                     }
                     None => msg,

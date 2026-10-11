@@ -92,6 +92,28 @@ impl Notes {
     }
 }
 
+/// Whether a stdin line is a message the user sent: a `type: user` frame
+/// that isn't AgentMux's hidden memory re-delivery (`<system-reminder>` +
+/// the reinjection signature). Control responses and hidden turns don't
+/// cancel the note.
+pub(crate) fn is_user_message(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    if v.get("type").and_then(serde_json::Value::as_str) != Some("user") {
+        return false;
+    }
+    let first_text = match v.get("message").and_then(|m| m.get("content")) {
+        Some(serde_json::Value::String(s)) => s.as_str(),
+        Some(serde_json::Value::Array(blocks)) => blocks
+            .iter()
+            .find_map(|b| b.get("text").and_then(serde_json::Value::as_str))
+            .unwrap_or(""),
+        _ => "",
+    };
+    !crate::ambient::digest::is_hidden_reinjection_text(first_text)
+}
+
 /// Schedules the note for a session spawned at `spawned_ms` carrying `record`.
 /// `record_pending` turns false when the record goes out with the user's first
 /// message: by then the user has spoken, and the note is dropped.
@@ -164,6 +186,25 @@ mod tests {
         new.store(false, Ordering::Release);
         assert!(!n.take_show("b", 2, 3_000));
         assert!(!n.take_show("b", 1, 3_000), "the old flag (still true) can't publish either");
+    }
+
+    #[test]
+    fn only_a_message_the_user_sent_cancels_the_note() {
+        let user = |content: serde_json::Value| {
+            serde_json::json!({"type": "user", "message": {"role": "user", "content": content}}).to_string()
+        };
+        assert!(is_user_message(&user(serde_json::json!("fix the login bug"))));
+        assert!(is_user_message(&user(serde_json::json!([{"type": "text", "text": "fix it"}]))));
+        let hidden = format!(
+            "<system-reminder>
+{} AgentMux could not resume this agent's prior session.
+</system-reminder>
+",
+            crate::backend::memory_delivery::REINJECTION_SIGNATURE
+        );
+        assert!(!is_user_message(&user(serde_json::json!(hidden))), "the hidden memory re-delivery");
+        assert!(!is_user_message(r#"{"type":"control_response","response":{}}"#));
+        assert!(!is_user_message("not json"));
     }
 
     #[test]
