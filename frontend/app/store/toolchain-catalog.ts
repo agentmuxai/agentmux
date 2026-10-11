@@ -197,7 +197,7 @@ export const CORE_TOOLS: CoreTool[] = [
         cliCommand: "python3",
         cliCommandByPlatform: { windows: "python" },
         label: "Python",
-        icon: "snake",
+        icon: "code",
         brandIcon: "python",
         minVersion: "3.10",
         description: "Required runtime for ComfyUI, JupyterLab, MLflow, and other AI tools.",

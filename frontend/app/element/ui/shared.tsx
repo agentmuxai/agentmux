@@ -29,7 +29,7 @@ export function toneClass(tone: UiTone | undefined): string {
 
 /** A Font Awesome icon by bare name (`"plus"`), decorative only. */
 export function UiIcon(props: { name: string; spin?: boolean }): JSX.Element {
-    return <i class={clsx("fa-sharp fa-solid", `fa-${props.name}`, props.spin && "fa-spin")} aria-hidden="true" />;
+    return <i class={clsx("fa-solid", `fa-${props.name}`, props.spin && "fa-spin")} aria-hidden="true" />;
 }
 
 /**

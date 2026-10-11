@@ -388,7 +388,7 @@ const MenuRows = (props: MenuRowsProps): JSX.Element => {
                             <span class="menu-item-shortcut">{item.shortcut}</span>
                         </Show>
                         <Show when={item.subItems}>
-                            <i class="fa-sharp fa-solid fa-chevron-right" />
+                            <i class="fa-solid fa-chevron-right" />
                         </Show>
                     </div>
                 );

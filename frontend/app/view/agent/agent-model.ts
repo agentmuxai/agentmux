@@ -219,7 +219,7 @@ export class AgentViewModel {
                     // "for parity," which was exactly the confusion between
                     // the two surfaces this fixes). See
                     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
-                    icon: "backpack",
+                    icon: "suitcase",
                     title: "Stash",
                     active: stashActive,
                 },

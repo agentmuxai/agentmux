@@ -333,7 +333,7 @@ mod tests {
                 "window:transparent": true
             },
             "mimetypes": {
-                "text/rust": {"icon": "rust", "color": "#dea584"}
+                "text/rust": {"icon": "brands@rust", "color": "#dea584"}
             },
             "termthemes": {
                 "dracula": {

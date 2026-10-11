@@ -21,6 +21,10 @@ The shipped binaries include or link against, among others:
 - xterm.js — MIT
 - Monaco Editor — MIT
 - SolidJS — MIT
+- [Font Awesome Free](https://fontawesome.com) 6.7.2 — icons CC BY 4.0, fonts
+  SIL OFL 1.1, CSS MIT. Copyright Fonticons, Inc. Shipped as web fonts in
+  `public/fontawesome/` (licence: `public/fontawesome/LICENSE.txt`). The
+  `custom-icons` font there holds Wave Terminal's own glyphs (Apache 2.0).
 
 **Rust backend**
 

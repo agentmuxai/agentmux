@@ -292,7 +292,7 @@ mod agent_zoom_mirror_tests {
         let mut def: AgentDefinition = serde_json::from_value(serde_json::json!({
             "id": id,
             "name": id,
-            "icon": "sparkles",
+            "icon": "wand-magic-sparkles",
             "provider": "claude",
             "description": "",
             "created_at": 1,

@@ -180,7 +180,7 @@ const MoreDropdown = ({
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
                                 <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
-                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })}></i>
                                 </span>
                                 <span class="action-widget-more-item-label">{widget.label}</span>
                             </div>
@@ -214,10 +214,10 @@ const MoreDropdown = ({
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
                                 <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
-                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })}></i>
                                 </span>
                                 <span class="action-widget-more-item-label">{widget.label}</span>
-                                <i class="fa-sharp fa-solid fa-chevron-right action-widget-more-item-chevron" />
+                                <i class="fa-solid fa-chevron-right action-widget-more-item-chevron" />
                             </div>
                             <Show when={visibleParentSubMenus()[key]}>
                                 <PinnedWidgetFlyout

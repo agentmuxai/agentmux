@@ -162,7 +162,7 @@ class TermViewModel {
                         } else {
                             rtn.push({
                                 elemtype: "iconbutton",
-                                icon: "xmark-large",
+                                icon: "xmark",
                                 iconColor: "var(--error-color)",
                                 title: "Exit Code: " + fullShellProcStatus?.shellprocexitcode,
                                 noAction: true,

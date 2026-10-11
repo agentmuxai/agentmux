@@ -289,7 +289,7 @@ function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
                         class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-foreground"
                         onClick={() => model.goBack()}
                     >
-                        <i class="fa-sharp fa-solid fa-chevron-left" />
+                        <i class="fa-solid fa-chevron-left" />
                         <span>{parent().label}</span>
                     </div>
                 )}
@@ -315,9 +315,9 @@ function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
                             style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
                         >
                             <div class="relative" style={{ color: widgetEntryColor(widget, "identity") }}>
-                                <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })} />
+                                <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })} />
                                 <Show when={model.isParentWidget(widget)}>
-                                    <i class="fa-sharp fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />
+                                    <i class="fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />
                                 </Show>
                             </div>
                             <Show when={gridLayout().showLabel && !isBlank(widget.label)}>

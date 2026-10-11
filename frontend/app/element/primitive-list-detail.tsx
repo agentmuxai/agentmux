@@ -37,7 +37,7 @@ export function PrimitiveListDetail(props: {
                         class="primitive-list-detail-back-btn"
                         onClick={() => props.onBack()}
                     >
-                        <i class="fa-sharp fa-solid fa-chevron-left" aria-hidden="true" />
+                        <i class="fa-solid fa-chevron-left" aria-hidden="true" />
                         <span>{props.backLabel}</span>
                     </button>
                     <div class="primitive-list-detail-detail-body">{props.detail}</div>

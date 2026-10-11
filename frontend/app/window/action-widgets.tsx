@@ -71,13 +71,13 @@ const ActionWidget = (props: {
             divOnClick={props.onClick ?? (() => handleWidgetSelect(props.widget))}
         >
             <div class="widget-icon text-sm" style={widgetIconStyle(props.widget)}>
-                <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "browser" })}></i>
+                <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "window-maximize" })}></i>
             </div>
             <Show when={!props.iconOnly && !isBlank(props.widget.label)}>
                 <div class="text-xs whitespace-nowrap">{props.widget.label}</div>
             </Show>
             <Show when={(props.widget.children?.length ?? 0) > 0}>
-                <i class="fa-sharp fa-solid fa-chevron-down action-widget-parent-chevron" />
+                <i class="fa-solid fa-chevron-down action-widget-parent-chevron" />
             </Show>
         </Tooltip>
     </div>

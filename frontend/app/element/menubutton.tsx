@@ -18,7 +18,7 @@ const MenuButton = (props: MenuButtonProps): JSX.Element => {
                     title={props.title}
                 >
                     <div>{props.text}</div>
-                    <i class="fa-sharp fa-solid fa-angle-down" />
+                    <i class="fa-solid fa-angle-down" />
                 </Button>
             </FlyoutMenu>
         </div>
