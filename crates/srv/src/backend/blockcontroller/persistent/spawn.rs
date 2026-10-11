@@ -395,6 +395,20 @@ impl PersistentSubprocessController {
             );
             self.emit_fresh_outcome_now(String::new(), continuation.is_some());
         }
+        // True until the record goes out with the first message: until then the
+        // user hasn't spoken, and the pane gets a pick-up note once the new
+        // session's card is written (`continued_note`).
+        let record_pending = Arc::new(std::sync::atomic::AtomicBool::new(continuation.is_some()));
+        if let (Some(packet), Some(mstore), Some(broker)) = (&continuation, &self.mstore, &self.broker) {
+            crate::backend::continued_note::schedule(
+                mstore.clone(),
+                broker.clone(),
+                self.block_id.clone(),
+                packet.clone(),
+                record_pending.clone(),
+                agentmux_common::time::now_ms(),
+            );
+        }
 
         let pid = child.id().unwrap_or(0);
 
@@ -680,6 +694,7 @@ impl PersistentSubprocessController {
                 {
                     Some(with_packet) => {
                         continuation = None;
+                        record_pending.store(false, std::sync::atomic::Ordering::Release);
                         with_packet
                     }
                     None => msg,

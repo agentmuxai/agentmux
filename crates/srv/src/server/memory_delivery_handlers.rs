@@ -310,6 +310,13 @@ pub(crate) struct AckRequest {
     part: usize,
 }
 
+/// Whether `block_id`'s new-session card went out for a delivery composed
+/// after `since_ms`: what the continued-session note waits for
+/// (`backend::continued_note`).
+pub(crate) fn startup_card_written_since(block_id: &str, since_ms: i64) -> bool {
+    state_lock().completed.get(&(block_id.to_string(), Reason::Startup)).is_some_and(|at| *at > since_ms)
+}
+
 /// `POST /api/v1/agent/memory/session-start/part`
 pub(crate) async fn handle_session_start_part(
     State(state): State<AppState>,
