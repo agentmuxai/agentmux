@@ -187,7 +187,7 @@ Two notes:
 - **Code folding fails on every platform.** The gutter is hidden on purpose (`editor-view.scss`, #1427, "no folding UI"), and CodeMirror's fold key Ctrl+Shift+[ is the app's `tab:prev`. So there's no folding tip; whether folding comes back is an owner decision.
 - **⌘D in the editor on macOS** selects the next match instead of running `split:right`. On Windows and Linux there's no conflict, since Split right is Ctrl+Shift+D.
 
-**Windows hand check (#NNNN), 2026-10-10.** AgentA@Area54 drove a dev build with real OS input (mouse and keys sent through Windows itself, not CDP), with the window in front.
+**Windows hand check (#4660), 2026-10-10.** AgentA@Area54 drove a dev build with real OS input (mouse and keys sent through Windows itself, not CDP), with the window in front.
 - **Library defaults: all seven pass,** so they now show on every platform.
   - xterm: double-click selects a word, triple-click a line, Shift+click extends the selection, and Alt+click moves the cursor on the prompt line.
   - CodeMirror: Ctrl+click adds a cursor, Alt+drag makes a three-line block selection, and Ctrl+D selects the next match (no split).
