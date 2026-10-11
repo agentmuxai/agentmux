@@ -58,6 +58,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
+use super::super::failure::first_cli_error;
 use super::super::types::{AgentEvent, AgentTurn, CompactionTrigger, TokenCounts};
 use super::Translator;
 
@@ -302,6 +303,7 @@ fn handle_result(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEve
         let message = frame
             .get("result")
             .and_then(|v| v.as_str())
+            .or_else(|| first_cli_error(frame))
             .map(|s| s.to_string())
             .unwrap_or_else(|| match api_error_status {
                 Some(code) if code > 0 => format!("API error {code}"),
@@ -969,6 +971,21 @@ mod tests {
             AgentEvent::Error { message } => {
                 assert_eq!(message, "Agent encountered an error")
             }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_is_error_with_only_an_errors_list_shows_its_first_entry() {
+        let mut t = ClaudeTranslator::new();
+        let events = t.translate(json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "errors": ["No conversation found with session ID: s1"],
+        }));
+        match &events[1] {
+            AgentEvent::Error { message } => assert_eq!(message, "No conversation found with session ID: s1"),
             other => panic!("expected Error, got {other:?}"),
         }
     }

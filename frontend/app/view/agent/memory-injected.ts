@@ -20,7 +20,7 @@
  */
 
 import { FALLBACK_CONTEXT_WINDOW, memorySizeBand } from "./memory-reinjection";
-import type { ContextDeliveryNode, ContextItem } from "./types";
+import type { ContextDeliveryNode, ContextItem, DocumentNode } from "./types";
 
 export const MEMORY_INJECTED_SUBTYPE = "agentmux_memory_injected";
 
@@ -98,6 +98,36 @@ function startupFields(x: RawFrame): Partial<ContextItem> {
         ...(typeof x.count === "number" ? { count: x.count } : {}),
         ...(contains.length > 0 ? { contains } : {}),
     };
+}
+
+/** Nodes that aren't the agent's own work: a card followed only by these went
+ *  to a session that never answered. */
+const NOT_AGENT_WORK: ReadonlySet<DocumentNode["type"]> = new Set<DocumentNode["type"]>([
+    "user_message",
+    "jekt_message",
+    "session_outcome",
+    "agent_error",
+    "cli_notice",
+    "day_divider",
+    "history_link",
+    "resume_preflight",
+]);
+
+/**
+ * The earlier card a session-start `card` takes the place of: the last card,
+ * when the agent has done nothing since. That session was restarted before its
+ * first turn (a model change, an account switch), so what it was given never
+ * reached the conversation, and a second card would repeat the first. The
+ * caller gives `card` that card's id and place, live and on replay alike.
+ */
+export function supersededCard(nodes: readonly DocumentNode[], card: ContextDeliveryNode): ContextDeliveryNode | undefined {
+    if (card.reason !== "startup") return undefined;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+        const node = nodes[i];
+        if (node.type === "context_delivery") return node.id === card.id ? undefined : node;
+        if (!NOT_AGENT_WORK.has(node.type)) return undefined;
+    }
+    return undefined;
 }
 
 /**

@@ -77,6 +77,16 @@ describe("StreamFlushQueue.flushNow", () => {
         expect(flush.command.newNodes.map((n: DocumentNode) => n.id)).toEqual(["n1"]);
     });
 
+    it("lists the new nodes queued until they are flushed", () => {
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+
+        q.pushNewNode(textNode("n1"));
+        expect(q.pendingNewNodes().map((n) => n.id)).toEqual(["n1"]);
+        q.flushNow();
+        expect(q.pendingNewNodes()).toEqual([]);
+    });
+
     it("the armed RAF does not double-dispatch after flushNow", () => {
         const { model, dispatched } = makeModel();
         const q = createStreamFlushQueue(model);

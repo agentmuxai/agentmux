@@ -326,7 +326,8 @@ pub(crate) struct Head {
 /// candidate, as before the gate existed. A head equal to the poisoned id
 /// allows too: that head is known dead, so the chain has nothing better to
 /// offer than the candidate. The identity check refuses only when both
-/// sides are known and differ.
+/// sides are known and differ. A head recorded under the spawn's own config
+/// dir whose file isn't there is refused too: the provider never wrote it.
 ///
 /// `size_here(sid)`: the size of the session's file under the spawn's
 /// config dir and cwd, `None` when it isn't there. `resumable_at(config_dir,
@@ -356,6 +357,14 @@ pub(crate) fn resume_gate(
         if resumable_at(from, &head.session_id) {
             return ResumeGate::Relocate { head: head.session_id.clone(), from_config_dir: from.to_string() };
         }
+    }
+    // Recorded under this very config dir, yet its file isn't here: Claude
+    // never wrote it (a session is saved with its first turn, and this one was
+    // restarted before it had one), or it was deleted since. `--resume` can
+    // only fail, and the user would see the CLI's error; start fresh with the
+    // record instead.
+    if head.config_dir.as_deref().is_some_and(|dir| same_dir(dir, input.config_dir)) {
+        return refuse();
     }
     // The head is out of reach and can't be relocated. As the candidate, it
     // goes on to `--resume` as before the gate: the CLI's rejection and the
@@ -568,6 +577,16 @@ mod tests {
     fn an_unreachable_head_as_the_candidate_is_left_to_the_retry_path() {
         let h = head("s2", None);
         assert_eq!(gate("s2", Some(&h), None, None, &[], &[]), ResumeGate::Allow);
+    }
+
+    /// A fresh session restarted before its first turn (a model change right
+    /// after an account switch): recorded under the spawn's own config dir,
+    /// never written there. Resuming it could only fail.
+    #[test]
+    fn a_head_never_written_under_the_spawns_own_dir_is_not_resumed() {
+        let h = Head { config_dir: Some("c:\\cfg\\new\\".into()), provider: "claude".into(), ..head("s2", Some("k1")) };
+        assert_eq!(gate("s2", Some(&h), Some("k1"), None, &[], &[]), ResumeGate::Refuse { head: "s2".into() });
+        assert_eq!(gate("s2", Some(&h), Some("k1"), None, &["s2"], &[]), ResumeGate::Allow, "written: resumed");
     }
 
     #[test]
