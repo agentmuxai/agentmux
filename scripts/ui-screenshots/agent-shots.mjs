@@ -22,9 +22,8 @@
 // stops the agent, and deletes it.
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { installFakeClaude } from "./install-fake-claude.mjs";
+import { join } from "node:path";
+import { homeProblem, installFakeClaude } from "./install-fake-claude.mjs";
 import { closeTab, openNewTab, visibleCenter } from "./widget-shots.mjs";
 
 /** The agent pane at a size that reads well in a docs column. */
@@ -51,8 +50,8 @@ const RUNTIME_SELECT = '[data-testid="create-from-template-runtime-select"]';
 function captureHome() {
     const home = process.env.AGENTMUX_HOME_OVERRIDE;
     if (!home) throw new Error("set AGENTMUX_HOME_OVERRIDE to the capture instance's data folder");
-    const norm = (p) => resolve(p).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    if (norm(home) === norm(join(homedir(), ".agentmux"))) throw new Error("AGENTMUX_HOME_OVERRIDE is this machine's own ~/.agentmux");
+    const problem = homeProblem(home);
+    if (problem) throw new Error(`AGENTMUX_HOME_OVERRIDE: ${problem}`);
     return home;
 }
 

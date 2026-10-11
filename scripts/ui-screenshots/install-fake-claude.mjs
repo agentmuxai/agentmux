@@ -15,7 +15,7 @@
 // --home that is the real ~/.agentmux: the stand-in must never replace the
 // machine's own Claude Code.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,9 +51,19 @@ export function posixShim() {
     return ['#!/bin/sh', `exec node "$(dirname "$0")/../${PACKAGE_DIR}/cli.mjs" "$@"`, ""].join("\n");
 }
 
-/** Why `home` mustn't be used, or null: it's the machine's own data folder. */
+/** Why `home` mustn't be used, or null: it's the machine's own data folder,
+ *  by its path or through a symlink or junction. Paths that exist are
+ *  resolved first, so an alias of the real folder is refused too (Codex on
+ *  #4667). */
 export function homeProblem(home, realHome = join(homedir(), ".agentmux")) {
-    const norm = (p) => resolve(p).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const real = (p) => {
+        try {
+            return realpathSync.native(p);
+        } catch {
+            return resolve(p);
+        }
+    };
+    const norm = (p) => real(p).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     return norm(home) === norm(realHome) ? "it is this machine's own ~/.agentmux" : null;
 }
 

@@ -6,7 +6,7 @@
 // installer. The stand-in runs as a real process here, as srv runs it.
 
 import { spawn, spawnSync } from "node:child_process";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -120,6 +120,17 @@ describe("install-fake-claude", () => {
         expect(homeProblem("/home/alice/.agentmux", "/home/alice/.agentmux")).toMatch(/own/);
         expect(homeProblem("/home/alice/.agentmux/", "/home/alice/.agentmux")).toMatch(/own/);
         expect(homeProblem("/tmp/capture-home", "/home/alice/.agentmux")).toBeNull();
+    });
+
+    it("refuses an alias of the machine's own data folder (a symlink or junction)", () => {
+        const dir = mkdtempSync(join(tmpdir(), "fake-claude-home-"));
+        const realHome = join(dir, ".agentmux");
+        mkdirSync(realHome);
+        const alias = join(dir, "capture-home");
+        // A junction needs no privileges on Windows; elsewhere it's a symlink.
+        symlinkSync(realHome, alias, "junction");
+        expect(homeProblem(alias, realHome)).toMatch(/own/);
+        expect(homeProblem(join(dir, "other"), realHome)).toBeNull();
     });
 });
 
