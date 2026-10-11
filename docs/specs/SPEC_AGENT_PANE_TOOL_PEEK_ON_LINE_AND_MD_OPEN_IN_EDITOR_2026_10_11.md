@@ -2,7 +2,7 @@
 
 **Status:** implemented (#4680).
 **Date:** 2026-10-11 | **Version:** main at `cc94d15e0`.
-**Requested by:** repo owner: "in the agent pane, when hovering over tool calls (like bash) we want to display the popover only hovering over the actual tool call line. the expandable result/preview should not show the hover. this is so we can see it but also select it. the hover over the tool preview blocks that. Additionally, on the top right of md file previews, add a button to the top right which opens it in an editor pane (with collapsed tree)."
+**Requested by:** repo owner: "in the agent pane, when hovering over tool calls (like bash) we want to display the popover only hovering over the actual tool call line. the expandable result/preview should not show the hover. this is so we can see it but also select it. the hover over the tool preview blocks that. Additionally, on the top right of md file previews, add a button to the top right which opens it in an editor pane (with collapsed tree)." Then: "if an editor is open and not minimized in the same window tab, then open the doc in another document tab in the same editor pane tab. If the editor is not on the same window tab, or is minimized or not shown, open a new editor pane", and "a button for all tools (md previews and normal, so that md's have 2 buttons, and normal have 1) … an extend/shorten button, that makes the preview 3x the height (or revert back to original preview height)."
 **Author:** Loap.
 **Related:** `SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md` §1.3 (which widened the tool peek to the whole row), `frontend/app/view/agent/hooks/useNodePeek.ts`, `frontend/app/view/agent/components/PeekOverlay.tsx`.
 
@@ -52,9 +52,12 @@ Nothing in the agent pane opens a file in an editor today. Markdown links go to 
 
 ### 2.2 Change
 
-**The button.** On a Markdown file preview (Read or Write of a path `isMarkdownPath` accepts), add an icon button at the right end of `.agent-tool-file-path-row` (`margin-left: auto`). It uses the `file-pen` icon (or the editor's own icon), with the label and tooltip "Open in editor". Its style follows `.agent-tool-read-open`. Edit's diff gets no button: it shows a change, not the file.
+**The button.** On a Markdown file preview (a Read or Write that `FilePreview` renders as Markdown: `markdownPreviewPath()` in `builtins.tsx`), an icon button ("Open in editor", the editor's `file-lines` icon) sits in the preview's top-right actions, beside §3's height toggle. Edit's diff gets no button: it shows a change, not the file.
 
-**What it opens.** An editor pane on that file, split to the right of the agent pane, with the file tree collapsed:
+**Where it opens.** In the editor the agent's tab is showing, if there is one; otherwise in a new editor pane:
+
+- **An editor shown in the agent's own window tab** (the active member of its pane stack, not minimized, and not hidden because another pane is magnified), on the same host: the file opens there as another document tab.
+- **Otherwise** (no editor in this tab, or only one that is minimized, behind another pane tab, or hidden by a magnified pane): a new editor pane split right of the agent pane, with its file tree collapsed.
 
 ```ts
 TabRpcClient.rpcCall("pane.open", {
@@ -62,13 +65,13 @@ TabRpcClient.rpcCall("pane.open", {
     file: absolutePath,
     split_direction: "right",
     split_reference_block_id: agentBlockId,
-    tree_expanded: false,
+    reuse_editor_pane: true,
 }, {});
 ```
 
-- `pane.open` is what the editor's own "Open to the side" uses (`editor-model.ts` L1258–1269), and `openInPane` in `frontend/app/view/files/files-open.ts` (L48–68) wraps it for the Files pane.
-- srv already collapses the tree for a `.md` file when `tree_expanded` is absent (`crates/srv/src/server/app_api/pane.rs` `build_pane_meta`, L229–251). This spec passes `tree_expanded: false` anyway, so the button means the same thing for `.mdx` (which srv's check, `.md` only, misses).
-- Clicking twice opens two editor panes. Reusing an open editor pane on the same file (srv's `reuse_editor_pane`, `pane.rs` L1082–1095) is skipped whenever `tree_expanded` is passed. Focusing an editor that already shows the file, instead of opening another, is a possible follow-up, not part of this change.
+- srv already had the reuse half: `reuse_editor_pane` (the agents' `OpenEditor` uses it) finds an editor in the caller's tab and queues the file into it (`editor:pending_open_files`), which the editor opens as a new document tab (`maybe_reuse_editor_pane`, `pane.rs`). What it lacked was "shown": `find_editor_block` took the first editor block in the tab. It now considers only the blocks the tab's layout shows (`shown_block_ids` in `app_api/mod.rs`: each leaf's active member, skipping effectively minimized nodes, and every leaf but the magnified one while one is magnified). That applies to `OpenEditor`'s reuse too: a file pushed into an editor the user can't see would look like nothing happened.
+- No `tree_expanded` in the request: srv skips reuse whenever one is given (a reused pane can't take a new tree state). A new pane still gets a collapsed tree: srv defaults `editor:tree_expanded` to false for a Markdown file (`build_pane_meta`), now for `.mdx` as well as `.md`.
+- An editor that has just been created and not yet placed by the frontend isn't in the layout yet, so a second click within that moment opens a second pane. Accepted.
 
 **What the button needs from the pane.** Tool renderers get only `node` and a small `ToolRenderContext` (`registry.ts` L30). The button needs the agent pane's block id (for the split) and its working directory (for a relative path). `AgentPaneProviders` (`agent-media.tsx`) already passes the working directory down the render path as a context, deliberately not as props through the virtualized list. It now also provides both through `agent-open-in-editor.tsx`. An agent runs either on this host or in a container (`agent_type == "container"`); there are no SSH agents. A container agent's paths are inside its container, so its pane provides nothing and shows no button. Outside an agent pane (no context), the button is not shown either.
 
@@ -78,12 +81,22 @@ TabRpcClient.rpcCall("pane.open", {
 
 ### 2.3 Tests
 
-- `open-in-editor.test.tsx`: a Read and a Write of a `.md` file render the button, and a `.ts` Read doesn't. Clicking it calls `pane.open` with `view: "editor"`, the path (a relative one under the pane's working directory), `split_direction: "right"`, the pane's block id and `tree_expanded: false`. Without the pane context, or for a container agent, there is no button.
-- Live check in a dev build: an agent Reads a `.md` file, expand the tool, click the button. An editor opens to the right on that file with the tree collapsed.
+- `open-in-editor.test.tsx`: a Read and a Write of a `.md` file show the button in the preview's actions, and a `.ts` Read doesn't. Clicking it calls `pane.open` with `view: "editor"`, the path (a relative one under the pane's working directory), `split_direction: "right"`, the pane's block id and `reuse_editor_pane: true`. Without the pane context, or for a container agent, there is no button.
+- `pane_open_reducer_tests.rs`: `shown_block_ids` (shown, minimized, behind another pane tab, magnified elsewhere); the existing reuse tests now place the editor in the tab's layout first, as the frontend would.
+- Live check in a dev build: with no editor in the tab, the button opens one to the right, tree collapsed. With one shown, the file opens there as a new document tab. With it minimized, a new pane opens.
 
 ---
 
-## 3. Open questions
+## 3. A taller preview, on every tool
+
+A tool's preview is capped at a third of half the window height (`$transcript-preview-max-height`, `.agent-tool-panel`), and longer output scrolls inside it. Every tool's preview now has a toggle in its top-right actions: "Taller preview" (`expand` icon) sets `.agent-tool-panel--tall`, three times the cap, and "Shorter preview" (`compress`) sets it back. A Markdown file preview therefore has two buttons (Open in editor and the toggle), every other preview one.
+
+- The actions (`.agent-tool-panel-actions`) sit absolutely positioned at the panel's top-right, on the panel's own shade, clear of the log's scrollbar. They're quiet (reduced opacity) until the pointer is on the preview, like a user message's pin button. The panel became `position: relative` for them; nothing else in it was absolutely positioned.
+- The state is the tool block's own (`ToolBlock`, a signal): not saved, and back to normal if the block is unmounted (scrolled far out of the virtualized list). The class is only set while the panel is shown, so a collapsed tool's `--hidden` height of 0 still wins.
+
+Tests: every tool's preview has the toggle and a Markdown one has both buttons; the toggle sets and clears `--tall` and swaps its label (`open-in-editor.test.tsx`).
+
+## 4. Open questions
 
 1. **Container agents (decided).** Hidden: the paths are inside the container, and the editor has no way into it.
 2. **Other previews.** The same button could go on any file preview (a `.ts` Read, too), and on a Markdown link to a local `.md` file in the agent's own text. The owner asked for Markdown previews; these would be follow-ups.

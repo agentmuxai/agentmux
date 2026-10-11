@@ -236,7 +236,8 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("view".to_string(), json!("editor"));
             meta.insert("file".to_string(), json!(file));
 
-            let is_markdown = file.to_ascii_lowercase().ends_with(".md");
+            let lower = file.to_ascii_lowercase();
+            let is_markdown = lower.ends_with(".md") || lower.ends_with(".mdx");
 
             // Tree state: explicit caller value wins; for markdown default to
             // collapsed so the rendered preview gets full horizontal width.

@@ -45,7 +45,14 @@ export function resolveAgentPath(path: string, baseDir: string): string {
     return baseDir.replace(/[\\/]+$/, "") + sep + path;
 }
 
-/** An editor pane on `path`, split right of the agent pane, its file tree collapsed. */
+/**
+ * `path` in the editor the agent's tab shows, as another document tab, or,
+ * when the tab shows none (none open, minimized, behind another pane tab,
+ * or another pane magnified), in a new editor pane split right of the agent
+ * pane. srv decides which (`find_editor_block`); a new pane's file tree is
+ * collapsed, srv's default for a Markdown file. No `tree_expanded`: srv
+ * doesn't reuse a pane when one is given.
+ */
 export async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {
     await TabRpcClient.rpcCall(
         "pane.open",
@@ -54,13 +61,13 @@ export async function openInEditorBeside(files: AgentPaneFiles, path: string): P
             file: resolveAgentPath(path, files.baseDir),
             split_direction: "right",
             split_reference_block_id: files.blockId,
-            tree_expanded: false,
+            reuse_editor_pane: true,
         },
         {}
     );
 }
 
-/** The button, for a file preview's header row; nothing outside a host agent's pane. */
+/** The button, for a Markdown preview's top-right actions; nothing outside a host agent's pane. */
 export function OpenInEditorButton(props: { path: string }): JSX.Element {
     const files = useAgentPaneFiles();
     return (
@@ -72,7 +79,7 @@ export function OpenInEditorButton(props: { path: string }): JSX.Element {
                     label="Open in editor"
                     density="compact"
                     onClick={(e: MouseEvent) => {
-                        // The row sits in the tool's panel; a click here isn't a click on the tool.
+                        // Inside the tool's panel: a click here isn't a click on the tool.
                         e.stopPropagation();
                         openInEditorBeside(f(), props.path).catch((err) =>
                             console.warn("[agent] couldn't open the file in an editor", err)

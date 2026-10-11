@@ -39,6 +39,7 @@
  *   reset on the next render cycle.
  */
 
+import { IconButton } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
@@ -46,6 +47,7 @@ import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, untrack, type JSX } from "solid-js";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
+import { OpenInEditorButton } from "../agent-open-in-editor";
 import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
@@ -53,6 +55,7 @@ import { PeekMetaRow } from "./PeekMetaRow";
 import { ShellTokens } from "./shell-highlight/ShellCommand";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
+import { markdownPreviewPath } from "./tool-renderers/builtins";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descriptors";
 import { rowDisclosure } from "../virtualization/disclosure";
@@ -231,6 +234,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // mid-read.
     const [userHolding, setUserHolding] = createSignal(false);
     const expanded = () => disclosure().open || userHolding();
+    // The preview at three times its usual height, toggled from its top-right
+    // actions (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §3).
+    const [tall, setTall] = createSignal(false);
     // The panel's body (full tool output: diffs, file previews, Bash output,
     // all highlighted with shiki) mounts the first time the panel opens and
     // then stays — never unmounted on collapse, so the collapse transition
@@ -584,6 +590,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     class={clsx("agent-tool-panel", {
                         "agent-tool-panel--hidden": panelMode() === "hidden",
                         "agent-tool-panel--flow": panelMode() === "flow",
+                        "agent-tool-panel--tall": tall() && panelMode() === "flow",
                     })}
                     // Codex P2 on #988: with the always-rendered markup, the
                     // collapsed panel was visually hidden via max-height /
@@ -597,6 +604,22 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     onClick={(e) => e.stopPropagation()}
                 >
                     <Show when={bodyMounted()}>
+                        <div class="agent-tool-panel-actions">
+                            <Show when={markdownPreviewPath(props.node)}>
+                                {(path) => <OpenInEditorButton path={path()} />}
+                            </Show>
+                            <IconButton
+                                class="agent-tool-panel-height"
+                                icon={tall() ? "compress" : "expand"}
+                                label={tall() ? "Shorter preview" : "Taller preview"}
+                                density="compact"
+                                aria-pressed={tall()}
+                                onClick={(e: MouseEvent) => {
+                                    e.stopPropagation();
+                                    setTall(!tall());
+                                }}
+                            />
+                        </div>
                         <Show
                             when={!props.node.resultUnloaded}
                             fallback={

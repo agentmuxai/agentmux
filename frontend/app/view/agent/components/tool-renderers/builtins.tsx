@@ -14,7 +14,6 @@ import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
-import { OpenInEditorButton } from "../../agent-open-in-editor";
 import { codeDoc, markdownBodyText } from "../../preview-text/docs";
 import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
@@ -140,6 +139,22 @@ export function readFactsLine(node: ToolNode): string | null {
     return parts.join(" · ");
 }
 
+/**
+ * The file a Read or Write shows as rendered Markdown (what `renderRead` and
+ * `renderWrite` hand `FilePreview`), for the preview's "Open in editor"
+ * button (ToolBlock); undefined when it shows no Markdown.
+ */
+export function markdownPreviewPath(node: ToolNode): string | undefined {
+    const path: string = (node.params as any)?.file_path ?? "";
+    if (!isMarkdownPath(path)) return undefined;
+    if (node.tool === "Write") return (node.params as any)?.content ? path : undefined;
+    if (node.tool === "Read") {
+        const raw: string | undefined = (node.result as any)?.content;
+        return !readFactsLine(node) && raw ? path : undefined;
+    }
+    return undefined;
+}
+
 function renderRead(node: ToolNode): JSX.Element {
     const filePath = (node.params as any).file_path ?? "";
     const raw: string | undefined = (node.result as any)?.content;
@@ -162,9 +177,6 @@ function renderRead(node: ToolNode): JSX.Element {
                     <span class="agent-tool-read-range">{formatFileRangeLong(range!)}</span>
                 </Show>
                 <span class="agent-tool-file-path">{filePath}</span>
-                <Show when={doc && isMarkdownPath(filePath)}>
-                    <OpenInEditorButton path={filePath} />
-                </Show>
             </div>
             <Show when={facts}>
                 <div class="agent-tool-read-facts">
@@ -236,9 +248,6 @@ function renderWrite(node: ToolNode): JSX.Element {
                 <span class="agent-tool-file-path">{filePath}</span>
                 <Show when={bytes != null}>
                     <span class="agent-tool-write-bytes">{formatBytes(bytes!)}</span>
-                </Show>
-                <Show when={doc && isMarkdownPath(filePath)}>
-                    <OpenInEditorButton path={filePath} />
                 </Show>
             </div>
             <Show when={doc} fallback={<div class="agent-tool-write-info">No content written.</div>}>

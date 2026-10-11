@@ -582,6 +582,8 @@ $transcript-preview-max-height: calc(50vh / 3);
             // shade is what the user actually sees for every tool type.
             background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
             border-radius: 0;
+            // The containing block for `.agent-tool-panel-actions`.
+            position: relative;
             // Zero padding — the inset lives on the children
             // (.agent-tool-overlay-header / .agent-tool-overlay-log) so the
             // log's scrollbars sit flush at THIS surface's edges. A
@@ -656,6 +658,35 @@ $transcript-preview-max-height: calc(50vh / 3);
             &--flow {
                 // (No overrides.)
             }
+
+            // Three times as tall, from the preview's own toggle; only ever
+            // set on a shown panel (ToolBlock), so `--hidden`'s 0 still wins.
+            // SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §3.
+            &--tall {
+                max-height: calc(#{$transcript-preview-max-height} * 3);
+            }
+        }
+
+        // A preview's own actions at its top-right corner: taller/shorter on
+        // every tool, and "Open in editor" too on a Markdown file. Over the
+        // content, so they sit on the panel's own shade, quiet until the
+        // pointer is on the preview (like a user message's pin button).
+        .agent-tool-panel-actions {
+            position: absolute;
+            top: var(--space-0-5);
+            // Clear of the log's scrollbar.
+            right: var(--space-3);
+            z-index: 1;
+            display: flex;
+            gap: var(--space-0-5);
+            background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
+            opacity: 0.55;
+            transition: opacity 100ms ease-out;
+        }
+
+        .agent-tool-panel:hover > .agent-tool-panel-actions,
+        .agent-tool-panel-actions:focus-within {
+            opacity: 1;
         }
 
         .agent-tool-loading {
@@ -2146,21 +2177,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--secondary-text-color);
         font-family: var(--font-mono);
     }
-}
-
-// "Open in editor" on a Markdown file preview (agent-open-in-editor.tsx), at
-// the right end of Read's or Write's path row. The flex item is the button's
-// tooltip anchor.
-.agent-tool-file-path-row > .ui-tooltip-anchor:has(> .agent-tool-open-in-editor) {
-    margin-left: auto;
-    align-self: center;
-    flex-shrink: 0;
-}
-
-// After Write's byte count, which already takes the free space (its own
-// `margin-left: auto`): the button sits right beside it, not mid-row.
-.agent-tool-file-path-row > .agent-tool-write-bytes + .ui-tooltip-anchor:has(> .agent-tool-open-in-editor) {
-    margin-left: 0;
 }
 
 // Write tool file-path row with byte count badge (ToolOverlayLog renderWrite).

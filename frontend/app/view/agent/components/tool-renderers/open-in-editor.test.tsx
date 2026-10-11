@@ -62,10 +62,12 @@ const inPane = (node: ToolNode, wrap?: (block: () => JSX.Element) => JSX.Element
     });
 
 const button = (container: HTMLElement) =>
-    container.querySelector(".agent-tool-file-path-row [aria-label='Open in editor']") as HTMLElement | null;
+    container.querySelector(".agent-tool-panel-actions [aria-label='Open in editor']") as HTMLElement | null;
+const heightToggle = (container: HTMLElement) =>
+    container.querySelector(".agent-tool-panel-actions .agent-tool-panel-height") as HTMLElement | null;
 
 describe("Open in editor on a Markdown file preview", () => {
-    it("a Read of a .md file opens it in an editor to the right, its tree collapsed", () => {
+    it("a Read of a .md file opens it in the tab's editor, or a new one to the right", () => {
         const { container } = inPane(read("C:/repo/docs/notes.md"));
         const b = button(container);
         expect(b).not.toBeNull();
@@ -77,7 +79,10 @@ describe("Open in editor on a Markdown file preview", () => {
                 file: "C:/repo/docs/notes.md",
                 split_direction: "right",
                 split_reference_block_id: "agent-1",
-                tree_expanded: false,
+                // srv puts it in the editor the tab shows, if any; a new pane's
+                // tree is collapsed by srv's Markdown default, and an explicit
+                // tree_expanded would stop the reuse.
+                reuse_editor_pane: true,
             },
             {}
         );
@@ -115,6 +120,42 @@ describe("Open in editor on a Markdown file preview", () => {
         expect(button(pane("container").container)).toBeNull();
         cleanup();
         expect(button(pane("host").container)).not.toBeNull();
+    });
+});
+
+describe("Taller / shorter preview", () => {
+    const bash: ToolNode = {
+        type: "tool",
+        id: "b1",
+        tool: "Bash",
+        toolName: "Bash",
+        params: { command: "ls" },
+        result: { stdout: "a\nb\nc", stderr: "", exitCode: 0 },
+        status: "success",
+        collapsed: false,
+        summary: "",
+    };
+
+    it("every tool's preview has it; a Markdown preview has Open in editor beside it", () => {
+        const plain = inPane(bash);
+        expect(heightToggle(plain.container)).not.toBeNull();
+        expect(button(plain.container)).toBeNull();
+        cleanup();
+        const md = inPane(read("C:/repo/docs/notes.md"));
+        expect(heightToggle(md.container)).not.toBeNull();
+        expect(button(md.container)).not.toBeNull();
+    });
+
+    it("makes the preview three times as tall, and back", () => {
+        const { container } = inPane(bash);
+        const panel = container.querySelector(".agent-tool-panel")!;
+        const toggle = heightToggle(container)!;
+        expect(toggle.getAttribute("aria-label")).toBe("Taller preview");
+        fireEvent.click(toggle);
+        expect(panel.classList.contains("agent-tool-panel--tall")).toBe(true);
+        expect(heightToggle(container)!.getAttribute("aria-label")).toBe("Shorter preview");
+        fireEvent.click(heightToggle(container)!);
+        expect(panel.classList.contains("agent-tool-panel--tall")).toBe(false);
     });
 });
 
