@@ -51,8 +51,24 @@ jobs:
     # Job-level: a run the `if:` skips must not occupy the group. A synchronize
     # mid-review doesn't cancel the review in flight; the reviewer handles a
     # stale head and doesn't post duplicates.
+    #
+    # GitHub keeps one PENDING run per group and cancels an older pending run
+    # for a newer one, whatever `cancel-in-progress` says (that only protects a
+    # run already running). So a push's review, still queued, was replaced by
+    # a description edit or a comment that arrived a second later, neither of
+    # which reviews the diff, and the new head went unreviewed with no failure
+    # to point at. Only runs that review the diff share the first group:
+    #   text: a title/body edit with no base change, which only scans the text
+    #   talk: a comment that doesn't mention the reviewer (a reply, if any)
+    #   diff: everything else (opened, synchronize, reopened, a base change, a
+    #         mention such as "review again"), which reviews the current head,
+    #         so one replacing another loses nothing.
     concurrency:
-      group: reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: >-
+        reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{
+          (github.event_name == 'pull_request_target' && github.event.action == 'edited' && !github.event.changes.base) && 'text' ||
+          (github.event_name == 'issue_comment' && !(contains(github.event.comment.body, '@reagentx-workflow') || contains(github.event.comment.body, '@muxreview'))) && 'talk' ||
+          'diff' }}
       cancel-in-progress: false
     permissions:
       id-token: write    # OIDC token for the actions broker
