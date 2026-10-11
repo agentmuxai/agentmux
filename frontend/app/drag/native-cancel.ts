@@ -18,8 +18,8 @@
  */
 
 import { getApi } from "@/store/global";
-import { isWindows } from "@/util/platformutil";
 import { Logger } from "@/util/logger";
+import { isWindows } from "@/util/platformutil";
 
 /** The decision, apart from the OS query: no drop effect, button still down. */
 export function isCancelledDragEnd(dropEffect: string | undefined, buttonStillDown: boolean): boolean {
