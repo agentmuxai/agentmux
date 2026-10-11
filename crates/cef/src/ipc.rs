@@ -541,6 +541,10 @@ async fn route_command(
             // One batch per window per frame from the page's pane-rect-batcher;
             // answers once the panes have moved (browser_panes::bounds).
             let (window_label, rects) = crate::browser_panes::bounds::parse_set_rects_args(args)?;
+            #[cfg(target_os = "macos")]
+            if let Some(base) = crate::browser_panes::bounds::LayoutBase::parse(args) {
+                crate::browser_panes::bounds::note_layout_base(&window_label, base);
+            }
             state.browser_panes.set_rects(state, &window_label, rects).await;
             Ok(serde_json::json!(true))
         }

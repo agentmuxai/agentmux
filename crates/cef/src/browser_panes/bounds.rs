@@ -84,6 +84,91 @@ pub(crate) fn parse_set_rects_args(args: &serde_json::Value) -> Result<(String, 
     Ok((window_label, out))
 }
 
+/// What the page laid a batch out against, in the rects' physical pixels: its
+/// viewport and the tile layout holding the panes.
+///
+/// The page learns a window's new size a frame or more after the window has
+/// it, and a pane only moves once the page has laid out and sent its rect,
+/// so during a drag the pane's content trails the page's chrome around it.
+/// On macOS the host moves shown panes as soon as the window's size changes
+/// (`follow_window_resize`), stretching the page's last rects by the change:
+/// the tile layout keeps its insets from the window's edges and every pane
+/// scales with it. The page's own rect for the new size replaces the guess.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) struct LayoutBase {
+    viewport: (i32, i32),
+    /// x, y, width, height of the tile layout; the whole viewport if unknown.
+    layout: (i32, i32, i32, i32),
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl LayoutBase {
+    /// `{ viewport: { width, height }, layout?: { x, y, width, height } }` from a batch.
+    pub(crate) fn parse(args: &serde_json::Value) -> Option<Self> {
+        let int = |v: &serde_json::Value, k: &str| v.get(k).and_then(|n| n.as_i64()).map(|n| n as i32);
+        let vp = args.get("viewport")?;
+        let viewport = (int(vp, "width")?, int(vp, "height")?);
+        if viewport.0 <= 0 || viewport.1 <= 0 {
+            return None;
+        }
+        let layout = args
+            .get("layout")
+            .and_then(|l| Some((int(l, "x")?, int(l, "y")?, int(l, "width")?, int(l, "height")?)))
+            .filter(|l| l.2 > 0 && l.3 > 0)
+            .unwrap_or((0, 0, viewport.0, viewport.1));
+        Some(Self { viewport, layout })
+    }
+
+    /// Where `rect`, laid out against this base, goes in a viewport of
+    /// `width` x `height`.
+    pub(crate) fn predict(&self, rect: &Rect, width: i32, height: i32) -> Rect {
+        let (lx, ly, lw, lh) = self.layout;
+        let sx = (lw + width - self.viewport.0).max(1) as f64 / lw as f64;
+        let sy = (lh + height - self.viewport.1).max(1) as f64 / lh as f64;
+        let map = |v: i32, origin: i32, s: f64| origin + ((v - origin) as f64 * s).round() as i32;
+        let (x, y) = (map(rect.x, lx, sx), map(rect.y, ly, sy));
+        let right = map(rect.x + rect.width, lx, sx);
+        let bottom = map(rect.y + rect.height, ly, sy);
+        Rect { x, y, width: (right - x).max(1), height: (bottom - y).max(1) }
+    }
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+static LAYOUT_BASES: LazyLock<Mutex<HashMap<String, LayoutBase>>> = LazyLock::new(Default::default);
+
+/// Remember what `window_label`'s latest batch was laid out against.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn note_layout_base(window_label: &str, base: LayoutBase) {
+    LAYOUT_BASES.lock().insert(window_label.to_string(), base);
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn layout_base(window_label: &str) -> Option<LayoutBase> {
+    LAYOUT_BASES.lock().get(window_label).copied()
+}
+
+/// The window's size changed: move its shown panes to where the page will
+/// put them, without waiting for it. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
+    let Some(base) = layout_base(window_label) else { return };
+    let panes: Vec<(String, cef::OverlayController)> = state
+        .browser_pane_overlays
+        .lock()
+        .iter()
+        .filter(|(_, (w, _))| w == window_label)
+        .map(|(label, (_, c))| (label.clone(), c.clone()))
+        .collect();
+    for (label, controller) in panes {
+        let Some((x, y, width, height)) = state.browser_pane_physical_rects.lock().get(&label).copied() else {
+            continue;
+        };
+        let wnum = state.browser_pane_overlay_wnums.try_lock().and_then(|m| m.get(&label).copied()).unwrap_or(0);
+        crate::ui_tasks::move_shown_pane_overlay(&controller, wnum, &Rect { x, y, width, height }, Some(&base));
+    }
+}
+
 /// A window's rects waiting for the UI thread, and who is waiting on them.
 #[derive(Default)]
 struct Pending {
@@ -293,6 +378,46 @@ mod tests {
         let taken = p.take("main");
         assert_eq!(taken.rects, vec![b("x", 9), b("y", 2)]);
         assert_eq!(taken.waiters.len(), 2);
+    }
+
+    fn t(r: Rect) -> (i32, i32, i32, i32) {
+        (r.x, r.y, r.width, r.height)
+    }
+
+    fn base() -> LayoutBase {
+        // A 1000x800 page whose tile layout leaves a 70 px top bar and a 50 px status bar.
+        LayoutBase::parse(&serde_json::json!({
+            "viewport": { "width": 1000, "height": 800 },
+            "layout": { "x": 0, "y": 70, "width": 1000, "height": 680 },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_same_size_keeps_a_rect() {
+        let r = Rect { x: 500, y: 100, width: 500, height: 300 };
+        assert_eq!(t(base().predict(&r, 1000, 800)), t(r));
+    }
+
+    #[test]
+    fn a_right_edge_pane_follows_the_window_and_scales_with_the_layout() {
+        let r = Rect { x: 500, y: 100, width: 500, height: 300 };
+        assert_eq!(t(base().predict(&r, 800, 800)), (400, 100, 400, 300));
+    }
+
+    #[test]
+    fn the_top_and_bottom_bars_keep_their_size() {
+        // The pane fills the layout; 136 px less height all comes out of it.
+        let r = Rect { x: 0, y: 70, width: 1000, height: 680 };
+        assert_eq!(t(base().predict(&r, 1000, 664)), (0, 70, 1000, 544));
+    }
+
+    #[test]
+    fn a_batch_without_a_layout_scales_with_the_viewport() {
+        let b = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 1000, "height": 800 } })).unwrap();
+        let r = Rect { x: 500, y: 0, width: 500, height: 800 };
+        assert_eq!(t(b.predict(&r, 1200, 800)), (600, 0, 600, 800));
+        assert!(LayoutBase::parse(&serde_json::json!({})).is_none());
     }
 
     #[test]
