@@ -41,7 +41,13 @@ agentmux-cef  (a UI task)
 
 The app restarted itself and restored its windows. macOS wrote a crash report (`~/Library/Logs/DiagnosticReports/agentmux-cef-2026-10-11-074649.ips`; a copy was kept in the agent workspace).
 
-**Reproduced:** once, by accident. Not yet reproduced on purpose. **A plain-`main` repro build is being set up for the owner to reproduce it themselves.**
+**Reproduced:** twice, both times by accident.
+
+**Second occurrence, 2026-10-11 22:22:06 UTC (15:22 local), on a plain `main` dev build** (the merged #4615, #4657, #4658 and #4688; not #4690, so the macOS pane changes of #4690 are not involved). The build had been left idle with Tab 2 holding one browser pane (`example.com`). Another agent's scripted mouse drags, aimed at a different window that sat under it at the same position, landed in this window's tab strip and tore Tab 2 off. Same crash, same stack (`CefWidgetImpl::AddAssociatedProfile` from `CefBrowserViewImpl::AddedToWidget` from `CefOverlayViewHost::Init` from `CefWindowView::AddOverlayView`), a second macOS crash report of the same shape.
+
+Host log, 22:22:05.7 to 06.5 UTC: a pool window was created and promoted for the torn-off tab (`tear_off_pool_promote`), the page there registered its backend window, then `BrowserPaneCreateRequested` for the same block id with a new label (`...-2`, window `window-pool-3ba64...`) at 06.464, `browser_view_create succeeded` at 06.464, `[on-after-created] registering browser via reducer` for the new pane at 06.521, and the `FATAL ... observer_list.h:371 Observers can only be added once!` at 06.5315, ~11 ms after the new pane's browser was created. The pane for the old window (`...-1`) was still being closed (`on_before_close: no backend window ID registered ... after 5 retries`).
+
+So in both occurrences the crash comes right after the pane for the same block is created in a window a tab was just torn off into, while the pane's old copy in the source window is still closing. Not yet known: whether the shared `pane jar` profile of the old pane and the new one is the object added twice, or whether the new window already holds a pane. Evidence kept in the agent workspace: both macOS crash reports, the host-log sequence and the fatal stack.
 
 **Known / not known:**
 - The crash is inside CEF's Views code while our `add_overlay_view` call attaches a pane's `BrowserView` to a window. The assertion says the same associated-profile observer was added to the widget twice, so the view or its profile was attached to that widget already.
