@@ -10,13 +10,16 @@
 //! (docs/reports/REPORT_AGENT_MCP_DOWN_THROUGH_SHELL_PREFIX_2026_10_11.md).
 //!
 //! No test harness: this binary is also the "MCP server" (an echo of stdin),
-//! and the harness would print its own lines on stdout in that role.
+//! and the harness would print its own lines on stdout in that role. It
+//! speaks just enough of cargo-nextest's custom-harness protocol for CI to
+//! list and run it (https://nexte.st/docs/design/custom-test-harnesses/).
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 const CHILD_ENV: &str = "BASHWRAP_TEST_ECHO_CHILD";
 const REQUEST: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n";
+const TEST_NAME: &str = "a_one_word_program_runs_through_the_prefix_with_clean_stdio";
 
 fn main() {
     if std::env::var_os(CHILD_ENV).is_some() {
@@ -24,6 +27,25 @@ fn main() {
         std::io::stdin().read_to_end(&mut input).unwrap();
         std::io::stdout().write_all(&input).unwrap();
         std::process::exit(7);
+    }
+
+    // `--list --format terse` names the test (and no ignored ones); a run may
+    // name the test to run, as a filter.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--list") {
+        if !args.iter().any(|a| a == "--ignored") {
+            println!("{TEST_NAME}: test");
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--ignored") {
+        return;
+    }
+    if let Some(filter) = args.iter().find(|a| !a.starts_with('-')) {
+        let exact = args.iter().any(|a| a == "--exact");
+        if (exact && filter != TEST_NAME) || !TEST_NAME.contains(filter.as_str()) {
+            return;
+        }
     }
 
     let me = std::env::current_exe().unwrap();
