@@ -15,6 +15,7 @@ import { getLayoutModelForStaticTab } from "@/layout/index";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { Logger } from "@/util/logger";
+import { endedByEscape } from "./native-cancel";
 import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -68,7 +69,10 @@ function CrossWindowDragMonitor(): JSX.Element {
             // this check, an escaped drag could still spawn a tear-off window
             // or merge via this path even though tab-reorder.ts's onDrop
             // correctly no-ops for the plain in-window case.
-            if (dragSession?.escaped) {
+            // The page doesn't see Escape during the OS drag, so also ask the
+            // drag's end (native-cancel.ts); the effect is read before the await.
+            const dropEffect = e.dataTransfer?.dropEffect;
+            if (dragSession?.escaped || (await endedByEscape(dropEffect))) {
                 Logger.info("dnd:cross", "cross-window drag aborted via Escape");
                 return;
             }
