@@ -19,7 +19,7 @@
 // the others; the summary lists what failed.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { publish } from "./publish.mjs";
@@ -61,7 +61,14 @@ export function commands(args) {
 
 function main() {
     const args = parseArgs(process.argv.slice(2));
-    if (!process.env.AGENTMUX_HOME_OVERRIDE && args.suites.some((s) => s === "agent" || s === "memory")) {
+    // No default port: a refresh clicks through whatever instance it reaches,
+    // and a dev build opens CDP on its own.
+    if (!args.port) {
+        console.error("pass --port: the capture instance's CDP port (never your own instance's)");
+        process.exit(2);
+    }
+    // The recordings use the agent suite's setup too (Codex on #4673).
+    if (!process.env.AGENTMUX_HOME_OVERRIDE && (args.recordings || args.suites.some((s) => s === "agent" || s === "memory"))) {
         console.error("set AGENTMUX_HOME_OVERRIDE to the capture instance's data folder (the agent suite installs its scripted Claude Code there)");
         process.exit(2);
     }
@@ -74,8 +81,12 @@ function main() {
     const results = [];
     for (const [label, script, scriptArgs] of commands(args)) {
         console.log(`\n=== ${label} ===`);
+        const dir = scriptArgs[scriptArgs.indexOf("--out") + 1];
+        // An --out reused from an earlier run: drop that run's manifest, so a
+        // suite that crashes now can't publish the old images (Codex on #4673).
+        rmSync(join(dir, "manifest.json"), { force: true });
         const r = spawnSync(process.execPath, [join(here, script), ...scriptArgs], { stdio: "inherit", env: process.env });
-        results.push({ label, ok: r.status === 0, dir: scriptArgs[scriptArgs.indexOf("--out") + 1] });
+        results.push({ label, ok: r.status === 0, dir });
     }
     console.log("\n=== summary ===");
     for (const r of results) console.log(`${r.ok ? "ok    " : "FAILED"}  ${r.label}`);
