@@ -1,5 +1,41 @@
 # AgentMux Version History
 
+## 0.59.20 — 2026-10-11
+
+- Your devices see this computer go offline at once when you quit AgentMux, sign out of MuxBus Cloud or turn off the new "Publish this computer to my devices" setting. Dev builds, headless installs and isolated homes no longer publish, and Settings says why.
+- Tower: the selected agent's CPU and memory over the last 10 minutes, as two small charts with a tooltip under the pointer
+- feat(macos): srv, mcp and bashwrap show in Activity Monitor with the AgentMux icon, each in its own helper app
+- Tower: in a narrow pane, a process's executable name is cut short instead of running into the CPU column.
+- Agent bundles can carry widgets: importing a bundle offers the sandboxed widgets it holds, each with who signed it and what it may do, and each asks for your approval before it runs. bundle.export can include installed widgets.
+- docs: the keyboard shortcuts page lists the hidden mouse and gesture tips, from the same table as the Help pane
+- When an agent starts editing a file another agent is also changing, it gets a short note naming them.
+- feat(help): Help lists the terminal's and editor's built-in gestures (Alt+click, word/line select, multi-cursor, block select, next match) on macOS and Linux
+- Settings → Widgets can browse the AgentMux widget catalog and install or update its sandboxed widgets. AgentMux checks the catalog's signature and each widget's files and author before asking for your approval.
+- The compaction progress bar now shows on the first compaction too, starting from a typical 75 seconds, and is drawn in the agent pane's colour like the status text.
+- Agents can say what they are working on with ClaimWork (a file, folder, branch or topic, with a note); other agents see the claim in WhoIsWorkingOn and get a note when they edit a file inside it. ReleaseWork releases it, and claims lapse on their own.
+- Files: middle-clicking a folder opens it in a new tab on Windows too (Chromium's autoscroll swallowed the click), and the Help pane's terminal and editor gesture tips now show on Windows
+- Legal notices corrected: LEGAL.md no longer claims a California registration or an AgentMux trademark, the copyright line no longer says "All rights reserved" next to the open-source licence, CONTRIBUTING.md no longer mentions a contributor agreement that doesn't exist, and the company name reads "AgentMux Corp." in the About box and Windows file properties.
+- Closing a tab no longer asks for confirmation by default. To be asked, turn on Settings → Window & Panes → Confirm before closing a tab.
+- Screenshot tooling: a chrome suite (menus, status bar panels, every Settings tab), a verify check per shot, and redaction of the machine's names and addresses before capture
+- Source files derived from Wave Terminal carry Command Line Inc.'s copyright notice again, alongside AgentMux's, as the Apache License 2.0 requires.
+- AgentMux now uses the free Font Awesome icon set (open licences), in place of the Pro icon fonts it had inherited without a licence. A few icons look slightly different; icon names saved in your config keep working.
+- Restore Command Line Inc. copyright notices in 16 more source files that came from Wave Terminal and were later moved
+- Screenshot tooling: an agent suite driven by a scripted stand-in for Claude Code, so agent-pane screenshots come from a real session with no account, model or network
+- ACKNOWLEDGEMENTS credits CodeMirror, the editor AgentMux actually ships, instead of Monaco
+- Screenshot tooling: a memory suite (Memory, Connectors, widget approval) with seeded demo data, and page dialogs no longer hang a capture run
+- Screenshot tooling: record.mjs records short GIF/MP4 clips of the UI, declared and rerun like shots, with a drawn cursor and redaction throughout
+- Agents started on v0.59.19 have their AgentMux tools again: the Bash wrapper now starts MCP servers that Claude Code launches through it, instead of refusing them.
+- Every AgentMux package now includes the licence texts of the third-party software it contains (THIRD_PARTY_NOTICES.txt), with AgentMux's own LICENSE and NOTICE, in the app's frontend/licenses folder
+- Screenshot tooling: refresh.mjs retakes every docs screenshot and recording in one run, and publish.mjs copies them over the images agentmux-docs already uses
+- Tower: in a half- or third-width pane the Agents view keeps process names readable (the rail moves above or narrows, the PID column gives way), and the Agents/Processes switch no longer disappears.
+- When an agent's AgentMux tools (its MCP server) don't connect, AgentMux now notices, reconnects them, and if that fails restarts the agent once without the shell prefix; the pane shows each step, the agent is told if it gives up, and `agentmux-mcp doctor` explains why from the agent's shell.
+- Screenshot tooling: a Swarm screenshot and clip of an agent at work, from the scripted Claude Code
+- Connectors → MCP servers: each catalog server says who gets it (bound agents, or All agents) and whether container agents get it too, and agents launched from the picker now get the catalog servers that reach them. A catalog server no longer reaches every agent opened by AgentMux just by being in the catalog; switch on All agents for that.
+- Cloud messaging: an AgentMux install now pulls messages and renews agent leases for all its agents in one request instead of one per agent, so relay traffic no longer grows with every open agent. Older relays are still asked one agent at a time.
+- Agent pane: a tool call's hover popover now opens only on the tool's own line, so its expanded output can be read and selected; a Markdown file preview gets an "Open in editor" button that opens the file beside the agent, file tree collapsed.
+- Tower: memory figures fit their column in a narrow pane, More columns sizes every column and styles its headers like the rest, and the toolbar wraps instead of cutting the machine picker short.
+- The muxreview review workflow pulls its reviewer image under the muxreview name.
+
 ## 0.59.19 — 2026-10-10
 
 - The agent pane's Working row no longer types the same line out again every second: each new line, including a turn's first, types out once and stays until something new replaces it. The pulsing dot beside it is now a small ASCII spinner in the pane's color. It also no longer shows a false "Rate limited — retrying" whenever Claude Code reports normal usage. The session goal is no longer added, faded, after the current step; it shows on its own when nothing more specific is happening.
