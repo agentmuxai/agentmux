@@ -41,6 +41,27 @@ pub struct WorkClaim {
     pub expires_at: i64,
 }
 
+/// The table, created on every open of the identity store
+/// (`Store::open_identity_store`). A new table with no ALTER, so the store's
+/// schema version is deliberately not bumped: this runs on every open anyway,
+/// and a bump would make every older installed build refuse the shared store.
+pub(crate) const SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS db_work_claims (
+        id            TEXT PRIMARY KEY,
+        agent         TEXT NOT NULL,
+        agent_uid     TEXT NOT NULL DEFAULT '',
+        channel       TEXT NOT NULL DEFAULT '',
+        repo          TEXT,
+        path          TEXT,
+        absolute_path TEXT,
+        branch        TEXT,
+        topic         TEXT,
+        note          TEXT NOT NULL DEFAULT '',
+        created_at    INTEGER NOT NULL,
+        expires_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ids_work_claims_expires ON db_work_claims(expires_at);";
+
 const COLS: &str =
     "id, agent, agent_uid, channel, repo, path, absolute_path, branch, topic, note, created_at, expires_at";
 
