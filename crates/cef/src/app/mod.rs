@@ -186,6 +186,9 @@ wrap_window_delegate! {
                 {
                     let nsview = window.window_handle() as *mut std::ffi::c_void;
                     if !nsview.is_null() {
+                        // A window created hidden (a pool window) has no
+                        // number yet; `macos_refresh_window_numbers` reads it
+                        // when a tab drag starts.
                         if let Some(number) = unsafe { macos_window_number(nsview) } {
                             crate::commands::tear_off_hook::macos_register_window_number(
                                 number,
@@ -440,14 +443,38 @@ wrap_browser_view_delegate! {
     }
 }
 
+/// Re-read every registered window's number into the tear-off hook's
+/// windowNumber → label map, replacing it. Must run on the CEF UI thread
+/// (`ui_tasks::post_refresh_macos_window_numbers`). A window hidden when it
+/// was created, as every pool window is until it is promoted, had no number
+/// for `on_window_created` to cache, so without this a release over a
+/// torn-off window found no AgentMux window there and never redocked.
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_refresh_window_numbers(state: &crate::state::AppState) {
+    let mut numbers = std::collections::HashMap::new();
+    for (label, window) in state.windows.lock().iter() {
+        let nsview = window.window_handle() as *mut std::ffi::c_void;
+        if nsview.is_null() {
+            continue;
+        }
+        if let Some(number) = unsafe { macos_window_number(nsview) } {
+            numbers.insert(number, label.clone());
+        }
+    }
+    tracing::debug!(
+        target: "dnd:tabdrag:macos",
+        windows = numbers.len(),
+        "[dnd:tabdrag:macos] window numbers refreshed"
+    );
+    crate::commands::tear_off_hook::macos_replace_window_numbers(numbers);
+}
+
 /// macOS tab-redock (SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24): read
-/// `[[nsview window] windowNumber]`. Called only from `on_window_created`,
-/// on the CEF UI thread — safe, one-time read whose result is cached in
-/// `tear_off_hook`'s windowNumber→label map for the CGEventTap hook
-/// thread to consult read-only (that thread must never touch AppKit
-/// directly — see that module's doc comment). Returns `None` if the
-/// NSWindow isn't resolvable (defensive; shouldn't happen for a just-
-/// created top-level window).
+/// `[[nsview window] windowNumber]`, on the CEF UI thread (the CGEventTap
+/// hook thread must never touch AppKit; it only reads the cached map).
+/// `None` if the NSWindow isn't resolvable, or if it has no number yet: a
+/// window that has never been shown has none (0), and every such window
+/// would otherwise share that key.
 #[cfg(target_os = "macos")]
 unsafe fn macos_window_number(nsview: *mut std::ffi::c_void) -> Option<i64> {
     use std::ffi::c_void;
@@ -469,7 +496,8 @@ unsafe fn macos_window_number(nsview: *mut std::ffi::c_void) -> Option<i64> {
     // architectures this app targets).
     let get_window_number: extern "C" fn(Id, Sel) -> i64 =
         std::mem::transmute(objc_msgSend as *const c_void);
-    Some(get_window_number(nswindow, sel_window_number))
+    let number = get_window_number(nswindow, sel_window_number);
+    (number > 0).then_some(number)
 }
 
 /// macOS: ensure a non-frameless CEF Views window (the DevTools popup) shows the

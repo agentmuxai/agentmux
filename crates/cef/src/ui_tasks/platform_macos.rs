@@ -486,6 +486,26 @@ pub(crate) fn post_make_pane_overlay_key(block_id: &str) {
     cef::post_task(cef::ThreadId::UI, Some(&mut task));
 }
 
+#[cfg(target_os = "macos")]
+mod window_number_tasks {
+    use cef::*;
+    use std::sync::Arc;
+    wrap_task! {
+        pub struct RefreshWindowNumbersTask { state: Arc<crate::state::AppState> }
+        impl Task {
+            fn execute(&self) { crate::app::macos_refresh_window_numbers(&self.state); }
+        }
+    }
+}
+
+/// Re-read every window's number for the tab-redock hit test
+/// (`app::macos_refresh_window_numbers`), from any thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn post_refresh_macos_window_numbers(state: &std::sync::Arc<crate::state::AppState>) {
+    let mut task = window_number_tasks::RefreshWindowNumbersTask::new(state.clone());
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+
 /// Swizzled `RenderWidgetHostViewCocoa::shouldIgnoreMouseEvent:` — always returns NO.
 ///
 /// Chromium's implementation returns YES when `[self.window isMainWindow]` and
