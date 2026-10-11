@@ -7,7 +7,9 @@
 //! When MUXBUS_TOKEN is present, the subscriber:
 //!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
-//!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
+//!   3. On each signal, pulls pending injections for every locally-registered
+//!      agent: one POST /reactive/pending-batch for all of them, or one
+//!      GET /reactive/pending/:id per agent on a relay without the batch route.
 //!   4. Claims all pending injections via REST POST /reactive/ack (atomic
 //!      pending->delivered transition server-side) *before* delivering — only
 //!      ids this call actually won the claim on get delivered via
@@ -36,6 +38,9 @@ use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 use crate::broker::RefreshErrorKind;
 use crate::muxbus::delivery_status;
+
+mod delivery;
+use delivery::{claim_and_deliver, PendingResp};
 
 // The relay's WebSocket endpoint has its own domain, and the handshake is at
 // the domain root: no path suffix. The relay side is designed in the private
@@ -288,7 +293,10 @@ async fn run_loop(
     agents: Arc<Mutex<HashSet<String>>>,
     mut ctrl_rx: mpsc::UnboundedReceiver<CtrlMsg>,
 ) {
-    let http = reqwest::Client::new();
+    let http = reqwest::Client::builder()
+        .user_agent(super::relay::USER_AGENT)
+        .build()
+        .unwrap_or_default();
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
     // Register this credential with the global broker scheduler once, up
@@ -712,6 +720,20 @@ async fn connect_and_run(
                     registered.retain(|a| !orphans.contains(a));
                 }
                 let subscribed = &agents;
+                // One request renews every held lease that is due
+                // (`renew_held_batch`); anything it leaves out, and every
+                // agent on a relay without the batch route, goes one by one.
+                let shared = shared_token_now(mstore, token).await;
+                let batched = super::wan_lease::renew_held_batch(base, &registered, &shared, http, |a| {
+                    subscribed.lock().unwrap().iter().any(|s| s.eq_ignore_ascii_case(a))
+                })
+                .await;
+                for (agent_id, outcome) in &batched {
+                    if let super::wan_lease::Outcome::HeldElsewhere(where_) = outcome {
+                        crate::backend::agent_admission::fence_agent_named(agent_id, where_);
+                    }
+                }
+                registered.retain(|a| !batched.contains_key(&a.trim().to_lowercase()));
                 futures_util::future::join_all(registered.iter().map(|agent_id| async move {
                     let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
                     let agent_token = match per_agent {
@@ -891,12 +913,20 @@ async fn handle_server_msg(
             // join_all bounds the wall-clock cost to the slowest single
             // agent's chain regardless of N. reagentx P1 (round 4) on
             // PR #2342.
-            let outcomes = futures_util::future::join_all(
-                registered
-                    .iter()
-                    .map(|agent_id| sync_agent_reactive(base, agent_id, token, http, mstore, handler)),
-            )
-            .await;
+            // One request pulls for every agent (`sync_agents_batched`); a
+            // relay without the batch route, or a single agent, is pulled one
+            // agent at a time as before.
+            let outcomes = match sync_agents_batched(base, &registered, token, http, mstore, handler).await {
+                Some(outcomes) => outcomes,
+                None => {
+                    futures_util::future::join_all(
+                        registered
+                            .iter()
+                            .map(|agent_id| sync_agent_reactive(base, agent_id, token, http, mstore, handler)),
+                    )
+                    .await
+                }
+            };
 
             if outcomes
                 .iter()
@@ -1011,64 +1041,6 @@ async fn sync_agent_reactive(
     mstore: &Arc<Store>,
     handler: &'static crate::backend::reactive::handler::ReactiveHandler,
 ) -> AgentSyncOutcome {
-    #[derive(Deserialize)]
-    struct PendingResp {
-        injections: Vec<PendingInj>,
-        // What the relay dropped undelivered since the last pull. Absent
-        // from an older relay: nothing to report.
-        #[serde(default)]
-        expired: Vec<delivery_status::notes::ExpiredItem>,
-    }
-    #[derive(Deserialize)]
-    struct PendingInj {
-        id: String,
-        source_agent: Option<String>,
-        message: String,
-        priority: Option<String>,
-        // When the relay received it (RFC 3339), for marking a late delivery.
-        #[serde(default)]
-        created_at: Option<String>,
-        // Present only for messages signed by an AgentMux-operated WAN
-        // sender (currently just the GitHub review-notification consumer,
-        // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
-        // All four travel together; verification is attempted only when
-        // every one of them deserializes present (see below).
-        #[serde(default)]
-        reagent_sig: Option<String>,
-        #[serde(default)]
-        reagent_key_id: Option<String>,
-        #[serde(default)]
-        reagent_msg_id: Option<String>,
-        #[serde(default)]
-        reagent_ts_secs: Option<i64>,
-        // W3-S carried tuple + the cloud's same-account answer
-        // (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1). Absent from an
-        // older cloud and on unsigned rows; verified by `wan_verify` below.
-        #[serde(default)]
-        wan_sig: Option<String>,
-        #[serde(default)]
-        wan_msg_id: Option<String>,
-        #[serde(default)]
-        wan_ts_secs: Option<i64>,
-        #[serde(default)]
-        wan_source_agent: Option<String>,
-        #[serde(default)]
-        wan_target_agent: Option<String>,
-        #[serde(default)]
-        wan_source_host: Option<String>,
-        #[serde(default)]
-        wan_source_channel: Option<String>,
-        #[serde(default)]
-        wan_key_fp: Option<String>,
-        #[serde(default)]
-        sender_same_account: Option<bool>,
-    }
-    #[derive(Deserialize)]
-    struct AckResp {
-        acknowledged: Vec<String>,
-        delivered_at: String,
-    }
-
     // Prefer a credential bound to exactly this agent_id over the shared
     // account-level token — see agent_credentials.rs. Falls back to `token`
     // (today's self-declared behavior) whenever this agent isn't
@@ -1172,350 +1144,122 @@ async fn sync_agent_reactive(
         };
     };
 
-    if body.injections.is_empty() {
-        delivery_status::fetched(agent_id, 0, &body.expired);
-        return AgentSyncOutcome::Ok;
+    claim_and_deliver(base, agent_id, token, http, mstore, handler, body, agent_token, using_per_agent).await
+}
+
+/// Every agent in `registered` pulled in one request
+/// (`POST /reactive/pending-batch`) instead of one
+/// `GET /reactive/pending/:agent` each, then claimed and delivered exactly as
+/// [`sync_agent_reactive`] does, for each agent with messages. The relay
+/// answers each agent as its single route would; this is what keeps an
+/// install's relay traffic from growing with every open agent.
+///
+/// `None` when the batch isn't used: fewer than two agents (one pull either
+/// way), or a relay without the route. The caller then pulls one agent at a
+/// time, as before. An agent the batch couldn't answer (a failed request, an
+/// entry missing) is pulled on its own here.
+async fn sync_agents_batched(
+    base: &str,
+    registered: &[String],
+    token: &str,
+    http: &reqwest::Client,
+    mstore: &Arc<Store>,
+    handler: &'static crate::backend::reactive::handler::ReactiveHandler,
+) -> Option<Vec<AgentSyncOutcome>> {
+    if registered.len() < 2 || super::relay::batch_routes_missing(base) {
+        return None;
     }
+    let shared = shared_token_now(mstore, token).await;
 
-    // Claim BEFORE delivering, not after: this is what prevents
-    // double-delivery when the same agent_id is concurrently registered by
-    // another AgentMux channel on this host (an intentionally-supported
-    // "two seats" workflow — see
-    // docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md).
-    // /reactive/ack now performs an atomic pending->delivered transition
-    // server-side; only injection ids that come back in `acknowledged` were
-    // actually won by this call and get delivered locally below. A
-    // previous version of this code delivered first and only acked
-    // successes afterward, which let two concurrent pollers both deliver
-    // the same injection.
-    let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
-    let ack_url = format!("{}/reactive/ack", base);
-    let claimed: AckResp = loop {
-        // For telling a 409 from before a Take over apart (note_not_holder_since).
-        let claim_resp_started = std::time::Instant::now();
-        let claim_resp = match http
-            .post(&ack_url)
-            .header("Authorization", format!("Bearer {}", agent_token))
-            .header("X-Agent-ID", agent_id)
-            .header("X-Agent-Instance", super::wan_lease::instance_id())
-            .json(&serde_json::json!({ "injection_ids": all_ids }))
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: claim request failed");
-                delivery_status::pull_failed(agent_id, "couldn't claim messages from the relay");
-                return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
-            }
-        };
-
-        if is_credential_rejected(claim_resp.status()) {
-            if using_per_agent {
-                // Same reasoning as the /reactive/pending branch above:
-                // invalidate and retry THIS claim immediately with the
-                // shared token, rather than reconnecting the whole session
-                // or leaving this agent's already-fetched pending
-                // injections unclaimed until an unrelated broadcast fires.
-                if claim_resp.status() == reqwest::StatusCode::FORBIDDEN {
-                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, mstore);
-                } else {
-                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, mstore);
-                }
-                tracing::warn!(
-                    agent_id = %agent_id,
-                    status = %claim_resp.status(),
-                    "cloud_subscriber: per-agent credential rejected on claim — invalidated, retrying with shared token",
-                );
-                agent_token = shared_token_now(mstore, token).await;
-                using_per_agent = false;
-                continue;
-            }
-            return shared_token_rejection_outcome(claim_resp.status(), agent_id);
-        }
-        if claim_resp.status() == reqwest::StatusCode::CONFLICT {
-            // The relay's lease fence on acks (the lease changed hands between
-            // this pull and this claim): same handling as a 409 on the pull —
-            // claim nothing, and fence the local holder (ReAgent P1 on #3746).
-            let body = claim_resp.json::<serde_json::Value>().await.unwrap_or_default();
-            if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &body, claim_resp_started) {
+    // The lease first, as for a single pull: claimed or renewed (no request
+    // while a renewal is fresh), and no pull for an agent another instance
+    // holds (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.5).
+    let leases = futures_util::future::join_all(registered.iter().map(|agent_id| {
+        let shared = &shared;
+        async move { super::wan_lease::ensure(base, agent_id, shared, http, || is_subscribed(agent_id)).await }
+    }))
+    .await;
+    let mut pull: Vec<&String> = Vec::new();
+    for (agent_id, lease) in registered.iter().zip(leases) {
+        match lease {
+            super::wan_lease::Outcome::HeldElsewhere(where_) => {
                 crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
             }
-            return AgentSyncOutcome::Ok;
-        }
-        if !claim_resp.status().is_success() {
-            tracing::warn!(
-                status = %claim_resp.status(),
-                agent_id = %agent_id,
-                "cloud_subscriber: claim request non-2xx"
-            );
-            delivery_status::pull_failed(agent_id, format!("the relay answered {} to a message claim", claim_resp.status().as_u16()));
-            return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
-        }
-
-        break match claim_resp.json().await {
-            Ok(b) => b,
-            Err(e) => {
-                // The server processed the claim (status was 2xx) before this
-                // body failed to parse — some subset of `all_ids` may now be
-                // flipped to "delivered" server-side with no local delivery
-                // and no way for us to release them, since we don't know
-                // which ids succeeded or their delivered_at stamp (required
-                // by /reactive/release). We deliberately do NOT guess (e.g.
-                // via /reactive/status) and release whatever looks delivered:
-                // some of `all_ids` may have been legitimately claimed and
-                // delivered by a *different* concurrent poller (another
-                // channel/seat racing for the same agent_id), and blindly
-                // releasing those would reintroduce the exact duplicate-
-                // delivery bug this change exists to fix. Logging every
-                // affected id loudly is the safe tradeoff: rare silent
-                // message loss here, never a resurrected duplicate.
-                tracing::error!(
-                    agent_id = %agent_id,
-                    injection_ids = ?all_ids,
-                    error = %e,
-                    "cloud_subscriber: parse claim response failed — these injections may be claimed server-side with no local delivery and cannot be safely auto-recovered"
-                );
-                return AgentSyncOutcome::Ok;
-            }
-        };
-    };
-
-    let delivered_at = claimed.delivered_at;
-    let claimed_ids: std::collections::HashSet<String> = claimed.acknowledged.into_iter().collect();
-    let mut delivered_count = 0usize;
-
-    for inj in &body.injections {
-        if !claimed_ids.contains(&inj.id) {
-            // Another concurrent poller (this account's other channel/seat)
-            // already won this claim — expected under the "two seats"
-            // workflow, not an error.
-            continue;
-        }
-
-        // Verify a reagent-signed WAN message (see PendingInj's doc comment)
-        // before delivery. Only attempted when every one of the four
-        // signing fields is present — a partial set (e.g. a sig but no
-        // key_id) is treated the same as "not signed," not "signed but
-        // broken," since a legitimate sender always sends all four
-        // together. TRUST is unaffected either way (WAN stays
-        // unconditionally TRUST=network-claimed). TIER is only FORCED to
-        // sensitive when `reagent_verified` is `Some(false)` — a signature
-        // present but which failed to cryptographically verify (see
-        // InjectionRequest::reagent_verified,
-        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md); as of that
-        // narrowing. `verify_trusted_reagent_jekt` yields `Some(true)` only
-        // under the trusted production key; a signature under any other
-        // registered key is `Some(false)`. `req.reagent_key_id` below must still be carried
-        // through from `inj` so the marker's `SIG=` label and the SIG=verified
-        // rule-1b exception render correctly (reagentx P0 on PR #2576 — it
-        // wasn't, so relaxation silently never activated for
-        // the desktop app's WS delivery path despite `reagent_verified`
-        // being computed correctly).
-        //
-        // Anti-replay (reagentx P1 on PR #2570): a captured, validly-signed
-        // (reagent_sig, reagent_key_id, reagent_msg_id, reagent_ts_secs,
-        // message) tuple could otherwise be resubmitted under a brand-new
-        // injection `id` indefinitely and still render SIG=verified — same
-        // class of gap host-tier's `verify_jekt_signature` closed with
-        // `JEKT_SIG_MAX_AGE_SECS`. `REAGENT_SIG_MAX_AGE_SECS` is wider
-        // (600s vs. 300s) because this is real network delivery, not a
-        // same-machine call — matches the review notifications' own
-        // delivery window, so a message
-        // that's still legitimately within its own staleness budget never
-        // spuriously fails signature freshness on top of that.
-        let reagent_verified = match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
-            (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => {
-                Some(
-                    reagent_sig_is_fresh(ts_secs, now_unix_secs())
-                        && agentmux_common::jekt_sign::verify_trusted_reagent_jekt(
-                            key_id,
-                            msg_id,
-                            inj.source_agent.as_deref().unwrap_or(""),
-                            agent_id,
-                            ts_secs,
-                            &inj.message,
-                            sig,
-                        ),
-                )
-            }
-            _ => None,
-        };
-
-        // W3-S (§2.3): a same-account agent's WAN signature, verified here —
-        // before transcript-request resolution, and against the POLLED
-        // agent, never a row field. Every "couldn't check" is `None` and the
-        // message is delivered as today; only an active failure is
-        // `Some(false)`.
-        let wan_row = crate::muxbus::wan_verify::CarriedRow {
-            wan_sig: inj.wan_sig.clone(),
-            wan_msg_id: inj.wan_msg_id.clone(),
-            wan_ts_secs: inj.wan_ts_secs,
-            wan_source_agent: inj.wan_source_agent.clone(),
-            wan_target_agent: inj.wan_target_agent.clone(),
-            wan_source_host: inj.wan_source_host.clone(),
-            wan_source_channel: inj.wan_source_channel.clone(),
-            wan_key_fp: inj.wan_key_fp.clone(),
-            sender_same_account: inj.sender_same_account,
-        };
-        let wan_store = crate::backend::storage::wan_identity::global();
-        let wan_verdict = match (&wan_store, &inj.wan_sig) {
-            (Some(wan), Some(_)) => match wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()) {
-                Ok(own) => {
-                    let base_url = crate::muxbus::relay::rest_base_url();
-                    let dir_token = shared_token_now(mstore, token).await;
-                    let dir = crate::muxbus::wan_verify::Directory {
-                        base_url: &base_url,
-                        http,
-                        token: &dir_token,
-                        budget: &crate::muxbus::wan_verify::GLOBAL_BUDGET,
-                    };
-                    crate::muxbus::wan_verify::verify(
-                        wan,
-                        &own.instance_id,
-                        agent_id,
-                        inj.source_agent.as_deref().unwrap_or(""),
-                        &wan_row,
-                        &inj.message,
-                        now_unix_secs(),
-                        &dir,
-                    )
-                    .await
-                }
-                Err(e) => crate::muxbus::wan_verify::WanVerdict::unchecked("wan_no_local_instance", e.to_string()),
-            },
-            (None, Some(_)) => crate::muxbus::wan_verify::WanVerdict::unchecked("wan_no_local_store", "no wan.db attached"),
-            (_, None) => crate::muxbus::wan_verify::WanVerdict::default(),
-        };
-        // Every "couldn't check" renders exactly like an unsigned message
-        // (`TRUST=network-claimed`), so say which one happened at a level
-        // that is actually recorded. One line per WAN jekt.
-        if inj.wan_sig.is_some() {
-            let (verified, reason, detail) =
-                (wan_verdict.verified, wan_verdict.reason.unwrap_or(""), wan_verdict.detail.as_deref().unwrap_or(""));
-            if verified == Some(false) {
-                tracing::warn!(injection_id = %inj.id, source = ?inj.source_agent, reason, "wan verify: signature FAILED");
-            } else if !detail.is_empty() {
-                // A check that couldn't run for a known cause (directory
-                // refused or unreachable, no local store): the one line that
-                // reports it, at `warn` — `wan_verify::get_json` no longer
-                // logs each attempt.
-                tracing::warn!(
-                    injection_id = %inj.id,
-                    source = ?inj.source_agent,
-                    verified = ?verified,
-                    reason,
-                    detail,
-                    same_account = ?inj.sender_same_account,
-                    "wan verify: outcome"
-                );
-            } else {
-                tracing::info!(
-                    injection_id = %inj.id,
-                    source = ?inj.source_agent,
-                    verified = ?verified,
-                    reason,
-                    same_account = ?inj.sender_same_account,
-                    "wan verify: outcome"
-                );
-            }
-        } else if inj.reagent_sig.is_none() {
-            tracing::info!(injection_id = %inj.id, source = ?inj.source_agent, "wan verify: arrived without a WAN signature");
-        }
-
-        let mut req = InjectionRequest {
-            target_agent: agent_id.to_string(),
-            message: inj.message.clone(),
-            source_agent: inj.source_agent.clone(),
-            request_id: Some(inj.id.clone()),
-            priority: inj.priority.clone(),
-            jekt_tier: None,       // auto-detected from keywords
-            delivery_tier: Some("wan".to_string()),
-            forward_hops: 0,
-            reagent_verified,
-            reagent_key_id: inj.reagent_key_id.clone(),
-            wan_verified: wan_verdict.verified,
-            wan_instance: wan_verdict.instance.clone(),
-            wan_reason: wan_verdict.reason.map(str::to_string),
-            wan_detail: wan_verdict.detail.clone(),
-            ..Default::default()
-        };
-        // Phase C (muxspect Phase B/C conversation visibility,
-        // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md): this WAN
-        // delivery path calls `Handler::inject_message` directly and never
-        // goes through `server/reactive.rs::handle_reactive_inject`/HTTP at
-        // all — without also resolving these two fields HERE, a
-        // WAN-delivered `transcript_request` would silently skip both the
-        // forced-TIER=sensitive rule and the escalate-forcing rule
-        // entirely, not just get a weaker version of them.
-        crate::server::reactive::resolve_transcript_request_tier_fields(mstore, &mut req);
-        // Marked only after every check above has read the message as sent.
-        let created_ms = inj.created_at.as_deref().and_then(delivery_status::notes::parse_created_at);
-        let late = delivery_status::notes::delayed_prefix(created_ms, now_ms());
-        if !late.is_empty() {
-            req.message = format!("{late}{}", req.message);
-        }
-        let delivery = handler.inject_message(req);
-        tracing::debug!(
-            injection_id = %inj.id,
-            agent_id = %agent_id,
-            success = delivery.success,
-            "cloud_subscriber: delivered injection"
-        );
-
-        // W3-S §2.5: only now, after it landed, is this signature "seen" —
-        // a release-and-redeliver after a failed delivery must not read as
-        // a replay.
-        if delivery.success {
-            delivered_count += 1;
-            if let Some(wan) = &wan_store {
-                crate::muxbus::wan_verify::record_delivered(wan, &wan_verdict, &wan_row, now_unix_secs());
-            }
-        }
-
-        if !delivery.success {
-            // We hold the claim but local delivery failed (e.g. agent not
-            // ready) — release it back to pending so it's retried, instead
-            // of silently dropping it now that claiming already marked it
-            // "delivered".
-            let release_url = format!("{}/reactive/release", base);
-            match http
-                .post(&release_url)
-                .header("Authorization", format!("Bearer {}", agent_token))
-                .header("X-Agent-ID", agent_id)
-                .json(&serde_json::json!({
-                    "injection_id": inj.id,
-                    "delivered_at": delivered_at,
-                }))
-                .send()
-                .await
-            {
-                Ok(r) if r.status().is_success() => {}
-                Ok(r) => {
-                    // Claim is stranded as "delivered" with no local
-                    // delivery and no retry until this is visible — log
-                    // loudly rather than discarding silently.
-                    tracing::warn!(
-                        injection_id = %inj.id,
-                        agent_id = %agent_id,
-                        status = %r.status(),
-                        "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        injection_id = %inj.id,
-                        agent_id = %agent_id,
-                        error = %e,
-                        "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
-                    );
-                }
-            }
+            _ => pull.push(agent_id),
         }
     }
 
-    delivery_status::fetched(agent_id, delivered_count, &body.expired);
-    AgentSyncOutcome::Ok
+    let mut answers = serde_json::Map::new();
+    let started = std::time::Instant::now();
+    for chunk in pull.chunks(super::relay::MAX_BATCH_AGENTS) {
+        let resp = http
+            .post(format!("{base}/reactive/pending-batch"))
+            .header("Authorization", format!("Bearer {shared}"))
+            .header("X-Agent-Instance", super::wan_lease::instance_id())
+            .json(&serde_json::json!({ "agent_ids": chunk }))
+            .send()
+            .await;
+        match resp {
+            Ok(r) if matches!(r.status().as_u16(), 404 | 405) && answers.is_empty() => {
+                super::relay::note_batch_routes_missing(base);
+                return None;
+            }
+            Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+                Ok(v) => {
+                    if let Some(results) = v.get("results").and_then(|r| r.as_object()) {
+                        answers.extend(results.clone());
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "cloud_subscriber: parse batch pull failed"),
+            },
+            Ok(r) => tracing::warn!(status = %r.status(), "cloud_subscriber: batch pull non-2xx; pulling those agents one by one"),
+            Err(e) => tracing::warn!(error = %e, "cloud_subscriber: batch pull failed; pulling those agents one by one"),
+        }
+    }
+
+    let outcomes = futures_util::future::join_all(pull.into_iter().map(|agent_id| {
+        let entry = answers.get(&agent_id.trim().to_lowercase()).cloned();
+        let shared = &shared;
+        async move {
+            let Some(entry) = entry else {
+                return sync_agent_reactive(base, agent_id, token, http, mstore, handler).await;
+            };
+            match entry.get("error").and_then(|e| e.as_str()) {
+                Some("not_holder") => {
+                    // The relay's lease fence, as a 409 on a single pull.
+                    if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &entry, started) {
+                        crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+                    }
+                    AgentSyncOutcome::Ok
+                }
+                Some(_) => {
+                    delivery_status::pull_failed(agent_id, "the relay couldn't read this agent's messages just now");
+                    AgentSyncOutcome::Ok
+                }
+                None => match serde_json::from_value::<PendingResp>(entry) {
+                    Ok(body) if body.injections.is_empty() => {
+                        delivery_status::fetched(agent_id, 0, &body.expired);
+                        AgentSyncOutcome::Ok
+                    }
+                    Ok(body) => {
+                        // Claimed with the agent's own credential when it has
+                        // one, as a single pull would be.
+                        let own = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
+                        let using_per_agent = own.is_some();
+                        let agent_token = own.unwrap_or_else(|| shared.clone());
+                        claim_and_deliver(base, agent_id, token, http, mstore, handler, body, agent_token, using_per_agent).await
+                    }
+                    Err(e) => {
+                        tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: parse pending failed");
+                        delivery_status::pull_failed(agent_id, "the relay's message list couldn't be read");
+                        AgentSyncOutcome::Ok
+                    }
+                },
+            }
+        }
+    }))
+    .await;
+    Some(outcomes)
 }
 
 /// The shared account token for an HTTP call made during a connection: loaded
@@ -2217,6 +1961,97 @@ mod tests {
             ["POST /agents/lease", pending.as_str(), "POST /reactive/ack"],
             "nothing delivered, so nothing released"
         );
+    }
+
+    // ── One pull for every agent (POST /reactive/pending-batch) ──────────
+
+    /// Run one `InjectAvailable` pull of `agents` through the batch path.
+    async fn sync_batched(base: &str, agents: &[String]) -> Option<usize> {
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let handler = crate::backend::reactive::handler::get_global_handler();
+        super::sync_agents_batched(base, agents, "test-token", &reqwest::Client::new(), &mstore, handler)
+            .await
+            .map(|outcomes| outcomes.len())
+    }
+
+    #[tokio::test]
+    async fn one_request_pulls_for_every_agent_and_only_agents_with_messages_are_claimed() {
+        let [a, b, c, d] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        let (_tmp, _held, rx) = hold_locally(&b);
+        let results = serde_json::json!({ "results": {
+            a.clone(): { "agent_id": a.clone(), "injections": [{ "id": "inj-1", "message": "hello" }], "count": 1, "expired": [] },
+            b.clone(): not_holder(),
+            c.clone(): { "agent_id": c.clone(), "injections": [], "count": 0, "expired": [] },
+            // d is missing from the answer: pulled on its own.
+        }});
+        let pd = format!("GET /reactive/pending/{d}");
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            ("POST /reactive/pending-batch".into(), 200, results),
+            ("POST /reactive/ack".into(), 200, serde_json::json!({ "acknowledged": [], "delivered_at": "2026-10-11T00:00:00Z" })),
+            (pd.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+
+        let agents = vec![a.clone(), b.clone(), c.clone(), d.clone()];
+        assert_eq!(sync_batched(&base, &agents).await, Some(4));
+
+        assert_fenced(&b, &rx);
+        let seen = seen.lock().unwrap();
+        let count = |line: &str| seen.iter().filter(|s| *s == line).count();
+        assert_eq!(count("POST /reactive/pending-batch"), 1, "{seen:?}");
+        assert_eq!(count("POST /reactive/ack"), 1, "only {a} had messages: {seen:?}");
+        assert_eq!(count(&pd), 1, "{d}, missing from the answer, pulled on its own: {seen:?}");
+        assert!(
+            !seen.iter().any(|s| s.starts_with("GET /reactive/pending/") && *s != pd),
+            "no single pull for the agents the batch answered: {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_entry_is_a_failed_pull_for_that_agent_only() {
+        let [a, b] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        let results = serde_json::json!({ "results": {
+            a.clone(): { "error": "unavailable" },
+            b.clone(): { "agent_id": b.clone(), "injections": [], "count": 0, "expired": [] },
+        }});
+        let (base, seen) = fake_relay(vec![lease_granted(), ("POST /reactive/pending-batch".into(), 200, results)]).await;
+
+        assert_eq!(sync_batched(&base, &[a.clone(), b.clone()]).await, Some(2));
+        assert!(
+            !seen.lock().unwrap().iter().any(|s| s.starts_with("GET /reactive/pending/")),
+            "retried on the next pull, not at once"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_relay_without_the_batch_route_is_pulled_one_agent_at_a_time() {
+        let [a, b] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        let (pa, pb) = (format!("GET /reactive/pending/{a}"), format!("GET /reactive/pending/{b}"));
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            (pa.clone(), 200, serde_json::json!({ "injections": [] })),
+            (pb.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+        let agents = Arc::new(Mutex::new(HashSet::from([a.clone(), b.clone()])));
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+
+        assert!(!catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await);
+        assert!(crate::muxbus::relay::batch_routes_missing(&base));
+        assert!(!catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await);
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.iter().filter(|s| *s == "POST /reactive/pending-batch").count(), 1, "asked once, then remembered: {seen:?}");
+        assert_eq!(seen.iter().filter(|s| **s == pa || **s == pb).count(), 4, "both agents, both times: {seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_single_agent_is_pulled_with_the_single_route() {
+        let a = format!("agent-{}", uuid::Uuid::new_v4());
+        let (base, seen) = fake_relay(vec![lease_granted()]).await;
+        assert_eq!(sync_batched(&base, &[a]).await, None);
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     // ── Catch-up pull: a message must not wait for an unrelated wake ──────
