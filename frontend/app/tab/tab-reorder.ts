@@ -17,6 +17,7 @@ import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { markEscaped, onSessionEnded, session } from "@/app/drag/drag-session";
 import { onWindowDrag } from "@/app/drag/window-drag-events";
+import { endedByEscape } from "@/app/drag/native-cancel";
 import { endTileDrag } from "@/layout/lib/tile-drag";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { WorkspaceService } from "../store/services";
@@ -142,8 +143,24 @@ export function useTabDragAndDrop(
         window.addEventListener("keydown", onDragEscape, true);
         onCleanup(() => window.removeEventListener("keydown", onDragEscape, true));
 
+        // Windows: the page never sees Escape during a drag (native-cancel.ts),
+        // so a cancelled drag arrives as a bare dragend with no drop effect.
+        // Note its effect here; `onDrop` below, which a cancel reaches through
+        // pragmatic's own dragend, asks whether the button was still down.
+        let endEffect: string | undefined;
+        if (isWindows()) {
+            const onDragEnd = (e: DragEvent) => {
+                endEffect = e.dataTransfer?.dropEffect;
+            };
+            window.addEventListener("dragend", onDragEnd, true);
+            onCleanup(() => window.removeEventListener("dragend", onDragEnd, true));
+        }
+
         const cleanup = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tabItemType,
+            onDragStart: () => {
+                endEffect = undefined;
+            },
 
             // Always compute insertion point from cursor position — drives the gap animation on all tabs
             onDrag: ({ location }) => {
@@ -154,10 +171,15 @@ export function useTabDragAndDrop(
                 setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
             },
 
-            onDrop: ({ source, location }) => {
+            onDrop: async ({ source, location }) => {
                 // Every window-tab release reaches this monitor, after the
                 // source's onDrop (pragmatic: source, targets, monitors).
-                const escaped = session()?.escaped ?? false;
+                // A real drop has no dragend yet, so only a cancelled drag
+                // awaits anything here.
+                const nativeEffect = endEffect;
+                endEffect = undefined;
+                const escaped =
+                    (session()?.escaped ?? false) || (nativeEffect === "none" && (await endedByEscape(nativeEffect)));
                 endWindowTabDrag("drop");
 
                 const ip = insertionPoint();

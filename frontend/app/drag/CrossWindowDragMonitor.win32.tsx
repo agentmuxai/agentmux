@@ -33,6 +33,7 @@ import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
+import { endedByEscape } from "./native-cancel";
 import { paneDragCandidate, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
@@ -179,7 +180,10 @@ function CrossWindowDragMonitor(): JSX.Element {
 
             // Escape was pressed during this drag — abort here too, same
             // reasoning as checkAndFireFallback above (reagent PR #2310 P1).
-            if (dragSession?.escaped) {
+            // On Windows the page never sees the key, so ask the drag's end
+            // (native-cancel.ts); the effect is read before the await.
+            const dropEffect = e.dataTransfer?.dropEffect;
+            if (dragSession?.escaped || (await endedByEscape(dropEffect))) {
                 getApi().releaseDragCapture().catch(() => {});
                 Logger.info("dnd:cross", "cross-window drag aborted via Escape");
                 return;
