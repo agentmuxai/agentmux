@@ -580,6 +580,18 @@ pipeline keeps the animation and serves it as an animated WebP, smaller than
 the GIF (checked: the 267 KB `stash-tour.gif` became a 176 KB, 133-frame
 WebP).
 
+### 12.3 Swarm (Part 5)
+
+The scripted Claude Code also makes Swarm show a real agent at work. The agent
+suite's `swarm-agent-working` shot and the `swarm-follows-agent` clip create
+the agent with `createAgent(..., { maximized: false })`, which restores the
+agent's pane after it settles, so the new tab's Sysinfo and Swarm panes are on
+screen, and capture the whole window at 1280×800. The clip types its message a
+character at a time and records Swarm turning the agent from idle to working,
+then showing the subagent task and the file read while the reply streams. The
+agent suite's setup also links the picker agents to the demo account each run
+(an agent loses its link when its account is deleted).
+
 ## 13. One-command refresh (2026-10-11)
 
 Part 8 of the screenshot plan: when the UI changes, retaking the docs' images
