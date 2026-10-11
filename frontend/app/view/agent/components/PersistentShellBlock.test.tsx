@@ -27,9 +27,11 @@ const node: ShellNode = {
     log: { chunks: [], open: false },
 };
 
+// The summary line peeks; the expanded output doesn't
+// (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §1).
 const hover = (container: HTMLElement) => {
-    const root = container.querySelector(".agent-shell-block") as HTMLElement;
-    fireEvent.mouseEnter(root);
+    const line = container.querySelector(".agent-shell-summary") as HTMLElement;
+    fireEvent.mouseEnter(line);
     vi.advanceTimersByTime(100);
 };
 
@@ -76,7 +78,7 @@ describe("PersistentShellBlock — peek tooltip", () => {
             ));
             hover(container);
             expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-            fireEvent.mouseLeave(container.querySelector(".agent-shell-block") as HTMLElement);
+            fireEvent.mouseLeave(container.querySelector(".agent-shell-summary") as HTMLElement);
             expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
         } finally {
             vi.useRealTimers();

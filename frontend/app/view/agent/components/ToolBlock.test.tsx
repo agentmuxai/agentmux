@@ -296,15 +296,35 @@ describe("ToolBlock — panel mode", () => {
         // file's doc comment), so it lives in `document.body`, not `container`.
         // A real 50ms enter-delay gates its DOM presence (mirrors
         // UserMessageBlock.tsx's "Session context" hover-to-peek), so these
-        // tests use fake timers and advance past it. Fires on `.agent-tool-block`
-        // (the whole row), not the narrower name span — the peek anchor was
-        // widened to the whole row per SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25
-        // ("always fires when hovering anywhere over the row").
+        // tests use fake timers and advance past it. Fires on `.agent-tool-summary`
+        // (the tool call's whole line, not the narrower name span), and not on
+        // its expanded output:
+        // SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §1.
         const hoverToolName = (container: HTMLElement) => {
-            const row = container.querySelector(".agent-tool-block") as HTMLElement;
+            const row = container.querySelector(".agent-tool-summary") as HTMLElement;
             fireEvent.mouseEnter(row);
             vi.advanceTimersByTime(100);
         };
+
+        it("expanded: hovering the output shows no peek, so it can be read and selected", () => {
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />);
+                fireEvent.mouseEnter(container.querySelector(".agent-tool-block")!);
+                fireEvent.mouseEnter(container.querySelector(".agent-tool-panel")!);
+                vi.advanceTimersByTime(100);
+                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+                // The line itself still peeks, expanded or not.
+                hoverToolName(container);
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                // Moving down into the output closes it.
+                fireEvent.mouseLeave(container.querySelector(".agent-tool-summary")!);
+                vi.advanceTimersByTime(500);
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
 
         it("collapsed: hovering the name shows the bare command, not the decorated summary", () => {
             vi.useFakeTimers();
@@ -556,7 +576,11 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
                 ));
                 const row = container.querySelector(".agent-tool-block") as HTMLElement;
-                fireEvent.mouseEnter(row); // cursor arrives while still running (panel auto-expanded)
+                const line = container.querySelector(".agent-tool-summary") as HTMLElement;
+                // Cursor arrives on the line while still running (panel auto-expanded):
+                // it enters the block (userHolding) and the line (the peek).
+                fireEvent.mouseEnter(row);
+                fireEvent.mouseEnter(line);
                 vi.advanceTimersByTime(100);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("Bash ls");
@@ -569,8 +593,10 @@ describe("ToolBlock — panel mode", () => {
 
                 // A genuine fresh hover (leave, then re-enter) after the row
                 // has actually collapsed shows it too.
+                fireEvent.mouseLeave(line);
                 fireEvent.mouseLeave(row);
                 fireEvent.mouseEnter(row);
+                fireEvent.mouseEnter(line);
                 vi.advanceTimersByTime(100);
                 expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("Bash ls");
             } finally {
@@ -863,7 +889,7 @@ describe("ToolBlock — header row", () => {
         vi.useFakeTimers();
         try {
             const { container } = render(() => <ToolBlock node={search} pinned={false} onTogglePin={() => {}} />);
-            fireEvent.mouseEnter(container.querySelector(".agent-tool-block")!);
+            fireEvent.mouseEnter(container.querySelector(".agent-tool-summary")!);
             vi.advanceTimersByTime(100);
             const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
             expect(tip?.textContent).toBe("WebSearch solid docs");

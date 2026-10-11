@@ -139,6 +139,22 @@ export function readFactsLine(node: ToolNode): string | null {
     return parts.join(" · ");
 }
 
+/**
+ * The file a Read or Write shows as rendered Markdown (what `renderRead` and
+ * `renderWrite` hand `FilePreview`), for the preview's "Open in editor"
+ * button (ToolBlock); undefined when it shows no Markdown.
+ */
+export function markdownPreviewPath(node: ToolNode): string | undefined {
+    const path: string = (node.params as any)?.file_path ?? "";
+    if (!isMarkdownPath(path)) return undefined;
+    if (node.tool === "Write") return (node.params as any)?.content ? path : undefined;
+    if (node.tool === "Read") {
+        const raw: string | undefined = (node.result as any)?.content;
+        return !readFactsLine(node) && raw ? path : undefined;
+    }
+    return undefined;
+}
+
 function renderRead(node: ToolNode): JSX.Element {
     const filePath = (node.params as any).file_path ?? "";
     const raw: string | undefined = (node.result as any)?.content;

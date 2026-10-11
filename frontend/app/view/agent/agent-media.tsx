@@ -17,6 +17,7 @@
 import type { MarkdownMediaOpts } from "@/app/element/markdown-media";
 import { createContext, useContext, type Accessor, type JSX } from "solid-js";
 import { AgentDormancyProvider } from "./agent-dormancy";
+import { AgentPaneFilesProvider, type AgentPaneFiles } from "./agent-open-in-editor";
 import { ToolResultLoaderProvider, type ToolResultLoader } from "./tool-result-loader";
 
 /** Outside an agent pane: no inline media. */
@@ -32,28 +33,45 @@ export function useAgentMedia(): Accessor<MarkdownMediaOpts | undefined> {
 }
 
 /**
- * The agent pane's render-path contexts in one place: dormancy, and the
+ * The agent pane's render-path contexts in one place: dormancy, the
  * working directory its own messages resolve images against — the actual
  * launch cwd (`cmd:cwd`) first, as the stash drawer does, else the
- * definition's `working_directory`.
+ * definition's `working_directory` — and, for a host agent, what "Open in
+ * editor" needs (`agent-open-in-editor.tsx`).
  */
 export function AgentPaneProviders(props: {
     dormant: Accessor<boolean>;
-    block: Accessor<{ meta?: Record<string, unknown> } | null | undefined>;
-    agent: Accessor<{ working_directory?: string } | null | undefined>;
+    /** The pane's block: its `oid` is where "Open in editor" splits from. */
+    block: Accessor<{ oid?: string; meta?: Record<string, unknown> } | null | undefined>;
+    agent: Accessor<{ working_directory?: string; agent_type?: string } | null | undefined>;
     /** Reads an unloaded tool result back (tool-result-loader.tsx). */
     loadToolResult?: ToolResultLoader;
     children: JSX.Element;
 }): JSX.Element {
     const baseDir = (): string => (props.block()?.meta?.["cmd:cwd"] as string) || props.agent()?.working_directory || "";
+    // Only for an agent known to run on this host: a container agent's paths
+    // are inside its container. The pane's own `agentMode` says which at once;
+    // its definition, which may still be loading (or gone), only when known.
+    const onHost = (): boolean => {
+        const mode = props.block()?.meta?.["agentMode"];
+        if (mode === "host" || mode === "container") return mode === "host";
+        const type = props.agent()?.agent_type;
+        return type != null && type !== "container";
+    };
+    const files = (): AgentPaneFiles | undefined => {
+        const blockId = props.block()?.oid;
+        return blockId && onHost() ? { blockId, baseDir: baseDir() } : undefined;
+    };
     return (
         <AgentDormancyProvider dormant={props.dormant}>
             <AgentMediaProvider baseDir={baseDir}>
-                {props.loadToolResult ? (
-                    <ToolResultLoaderProvider load={props.loadToolResult}>{props.children}</ToolResultLoaderProvider>
-                ) : (
-                    props.children
-                )}
+                <AgentPaneFilesProvider files={files}>
+                    {props.loadToolResult ? (
+                        <ToolResultLoaderProvider load={props.loadToolResult}>{props.children}</ToolResultLoaderProvider>
+                    ) : (
+                        props.children
+                    )}
+                </AgentPaneFilesProvider>
             </AgentMediaProvider>
         </AgentDormancyProvider>
     );
