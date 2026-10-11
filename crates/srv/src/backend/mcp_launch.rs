@@ -41,14 +41,18 @@ pub fn missing_for_agent(
     refs: &crate::backend::storage::store::Store,
     catalog: &crate::backend::storage::store::Store,
     agent_id: &str,
+    container: bool,
     reported: &[crate::backend::mcp_observed::ObservedServer],
 ) -> Vec<String> {
-    let container = refs
-        .agent_def_get(agent_id)
-        .ok()
-        .flatten()
-        .is_some_and(|def| def.agent_type == "container");
     missing_servers(&refs.effective_mcp_servers(catalog, agent_id, container), reported)
+}
+
+/// Whether a pane runs as a container agent: what the pane says
+/// (`agentMode`, which the picker's runtime override can set differently from
+/// the definition, and which `writeagentconfig` launched it by), else the
+/// definition's own kind.
+pub fn is_container_pane(pane_mode: Option<&str>, definition_type: Option<&str>) -> bool {
+    pane_mode.filter(|m| !m.is_empty()).or(definition_type) == Some("container")
 }
 
 /// Put server rows into an `mcpServers` map, each under its name. A row
@@ -185,12 +189,26 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.mcp_server_upsert_unique_global(&row("git", r#"{"command":"uvx"}"#)).unwrap();
         let before = [reported("agentmux", "connected")];
-        assert!(missing_for_agent(&store, &store, "agent-1", &before).is_empty(), "not switched on yet");
+        assert!(missing_for_agent(&store, &store, "agent-1", false, &before).is_empty(), "not switched on yet");
 
         store.mcp_server_set_reach("id-git", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
-        assert_eq!(missing_for_agent(&store, &store, "agent-1", &before), vec!["git"]);
+        assert_eq!(missing_for_agent(&store, &store, "agent-1", false, &before), vec!["git"]);
         let after = [reported("agentmux", "connected"), reported("git", "connected")];
-        assert!(missing_for_agent(&store, &store, "agent-1", &after).is_empty());
+        assert!(missing_for_agent(&store, &store, "agent-1", false, &after).is_empty());
+        // A container pane never got it (not switched on for containers), so
+        // isn't told to restart for it.
+        assert!(missing_for_agent(&store, &store, "agent-1", true, &before).is_empty());
+    }
+
+    /// The pane's own mode wins over the definition's: a host definition
+    /// launched as a container is a container pane, and the reverse.
+    #[test]
+    fn a_pane_runs_as_what_it_was_launched_as() {
+        assert!(is_container_pane(Some("container"), Some("host")));
+        assert!(!is_container_pane(Some("host"), Some("container")));
+        assert!(is_container_pane(None, Some("container")), "no pane mode: the definition's");
+        assert!(is_container_pane(Some(""), Some("container")));
+        assert!(!is_container_pane(None, None));
     }
 
     /// What `insert_server_rows` skips is never launched, so never missing:

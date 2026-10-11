@@ -610,7 +610,19 @@ fn observed_agents(
         let agent_id = crate::identity::resolver::block_agent_id(mstore, &block_id);
         let missing = agent_id
             .as_deref()
-            .map(|id| crate::backend::mcp_launch::missing_for_agent(mstore, identity_store, id, &observation.servers))
+            .map(|id| {
+                let pane_mode = mstore
+                    .get::<crate::backend::obj::Block>(&block_id)
+                    .ok()
+                    .flatten()
+                    .map(|block| crate::backend::obj::meta_get_string(&block.meta, "agentMode", ""));
+                let def = mstore.agent_def_get(id).ok().flatten();
+                let container = crate::backend::mcp_launch::is_container_pane(
+                    pane_mode.as_deref(),
+                    def.as_ref().map(|d| d.agent_type.as_str()),
+                );
+                crate::backend::mcp_launch::missing_for_agent(mstore, identity_store, id, container, &observation.servers)
+            })
             .unwrap_or_default();
         let servers = observation
             .servers
