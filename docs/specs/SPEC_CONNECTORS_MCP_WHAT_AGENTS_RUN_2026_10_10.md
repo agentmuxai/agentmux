@@ -1,8 +1,8 @@
 # SPEC: Connectors → MCP servers shows what agents run
 
 **Date:** 2026-10-10
-**Status:** active. Phase 0 (one launch path, explicit reach) ships with this
-spec; Phases 1–3 are next.
+**Status:** active. Phase 0 (one launch path, explicit reach) is PR #4677;
+Phases 1–3 (observed servers, showing them, other providers) are next.
 **Author:** QTest@narko
 **Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
 (the investigation and history). File references are as of `main` at
