@@ -333,24 +333,7 @@ pub fn build_mcp_config_from_refs(
     }
 
     // Layer 3: ref rows (own + global) overlay the blob.
-    for server in servers {
-        if server.name == "agentmux" {
-            continue; // synthetic entry wins; user cannot override the key
-        }
-        match serde_json::from_str::<Value>(&server.config) {
-            Ok(cfg) => {
-                mcp_servers.insert(server.name.clone(), cfg);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    id = %server.id,
-                    name = %server.name,
-                    error = %e,
-                    "agent_config: invalid JSON in mcp_server.config; skipping entry"
-                );
-            }
-        }
-    }
+    crate::backend::mcp_launch::insert_server_rows(&mut mcp_servers, servers);
 
     let result = json!({ "mcpServers": Value::Object(mcp_servers) });
     match serde_json::to_string_pretty(&result) {

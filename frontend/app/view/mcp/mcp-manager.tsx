@@ -12,13 +12,13 @@
 import { onCleanup, For, Show, type JSX } from "solid-js";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { McpCatalogModel } from "./mcp-model";
+import { McpCatalogModel, reachLabel } from "./mcp-model";
 import { McpCatalogPicker } from "./McpCatalogPicker";
 import { findPreloadEntryByName } from "./mcp-preload-catalog";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import "../agent/components/AgentPrimitiveModal.scss";
 import "./mcp-status-pill.scss";
-import { Button } from "@/app/element/ui";
+import { Button, Field, Switch } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 const STATUS_LABEL: Record<McpCapabilityStatus, string> = {
@@ -94,9 +94,7 @@ export const McpManager = (): JSX.Element => {
                             onClick={() => model.handleSelect(server)}
                         >
                             <span class="agent-primitive-modal-list-item-name">{server.name}</span>
-                            <span class="agent-primitive-modal-list-item-badge">
-                                {server.bound_count} {server.bound_count === 1 ? "agent" : "agents"}
-                            </span>
+                            <span class="agent-primitive-modal-list-item-badge">{reachLabel(server)}</span>
                         </button>
                     )}
                 </For>
@@ -124,8 +122,38 @@ export const McpManager = (): JSX.Element => {
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{server().name}</h3>
                                         <p class="agent-primitive-modal-global-note">
-                                            Used by {server().bound_count} {server().bound_count === 1 ? "agent" : "agents"}
+                                            {server().all_agents
+                                                ? "Every agent gets it"
+                                                : `Bound to ${reachLabel(server())}`}
                                         </p>
+                                        <Field
+                                            label="All agents"
+                                            description="Every agent gets it at launch, not only the ones it is bound to."
+                                        >
+                                            <Switch
+                                                checked={server().all_agents}
+                                                onChange={(on) =>
+                                                    void model.setReach(server().id, {
+                                                        all_agents: on,
+                                                        in_containers: server().in_containers,
+                                                    })
+                                                }
+                                            />
+                                        </Field>
+                                        <Field
+                                            label="Containers too"
+                                            description="Container agents get it as well. Leave off for a server that runs a program on this computer."
+                                        >
+                                            <Switch
+                                                checked={server().in_containers}
+                                                onChange={(on) =>
+                                                    void model.setReach(server().id, {
+                                                        all_agents: server().all_agents,
+                                                        in_containers: on,
+                                                    })
+                                                }
+                                            />
+                                        </Field>
                                         {/* Keyed specifically on id (a stable primitive, unlike the
                                             outer non-keyed Show's `server` object, which is a fresh
                                             reference on every refresh()) — remounts McpStatusPill, and

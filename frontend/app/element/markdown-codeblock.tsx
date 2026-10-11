@@ -67,7 +67,7 @@ const CodeBlock = ({ children, onClickExecute }: CodeBlockProps) => {
                     <IconButton
                         decl={{
                             elemtype: "iconbutton",
-                            icon: "regular@square-terminal",
+                            icon: "terminal",
                             click: handleExecute,
                         }}
                     />

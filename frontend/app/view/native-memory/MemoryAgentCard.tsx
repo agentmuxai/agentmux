@@ -87,7 +87,7 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
                     classList={{ "memory-agent-card-count--error": props.count.kind === "error" }}
                 >
                     <Show when={props.count.kind === "error"}>
-                        <i class="fa-sharp fa-solid fa-triangle-exclamation" aria-hidden="true" />{" "}
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true" />{" "}
                     </Show>
                     {memoryCountLabel(props.count)}
                 </span>

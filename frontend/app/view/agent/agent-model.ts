@@ -1,4 +1,5 @@
-// Copyright 2024-2026, AgentMux Corp.
+// Copyright 2024, Command Line Inc.
+// Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -218,7 +219,7 @@ export class AgentViewModel {
                     // "for parity," which was exactly the confusion between
                     // the two surfaces this fixes). See
                     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
-                    icon: "backpack",
+                    icon: "suitcase",
                     title: "Stash",
                     active: stashActive,
                 },

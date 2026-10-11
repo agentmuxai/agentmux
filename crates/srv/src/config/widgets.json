@@ -2,7 +2,7 @@
     "defwidget@agent": {
         "display:order": 1,
         "display:pinned": true,
-        "icon": "sparkles",
+        "icon": "wand-magic-sparkles",
         "label": "Agent",
         "description": "Unified AI agent with streaming output and tool execution",
         "blockdef": {
@@ -19,7 +19,7 @@
     "defwidget@swarm": {
         "display:order": 2,
         "display:pinned": true,
-        "icon": "bee",
+        "icon": "people-group",
         "label": "Swarm",
         "description": "Multi-agent orchestration",
         "blockdef": {
@@ -69,7 +69,7 @@
     "defwidget@terminal": {
         "display:order": 6,
         "display:pinned": true,
-        "icon": "square-terminal",
+        "icon": "terminal",
         "label": "Terminal",
         "blockdef": {
             "meta": {

@@ -19,8 +19,17 @@ The shipped binaries include or link against, among others:
 
 - Chromium Embedded Framework (CEF) — BSD-3-Clause
 - xterm.js — MIT
-- Monaco Editor — MIT
+- CodeMirror 6 — MIT
 - SolidJS — MIT
+- [Font Awesome Free](https://fontawesome.com) 6.7.2 — icons CC BY 4.0, fonts
+  SIL OFL 1.1, CSS MIT. Copyright Fonticons, Inc. Shipped as web fonts in
+  `public/fontawesome/` (licence: `public/fontawesome/LICENSE.txt`). The
+  `custom-icons` font there holds Wave Terminal's own glyphs (Apache 2.0).
+- Fonts: Hack Nerd Font Mono (Hack: MIT and Bitstream Vera licence; Nerd
+  Fonts: OFL 1.1 and MIT), Inter (SIL OFL 1.1), and DejaVu Sans Mono glyphs in
+  the launcher's splash screen (Bitstream Vera licence)
+- Windows packages also include jq (MIT, with Oniguruma, BSD-2-Clause) and
+  ripgrep (MIT or Unlicense)
 
 **Rust backend**
 
@@ -32,28 +41,19 @@ The shipped binaries include or link against, among others:
 - Vite, Vitest, Prettier, ESLint, Stylelint — MIT / various permissive
 - [Task](https://taskfile.dev) — MIT
 
-The complete dependency list with versions and licenses is in:
-
-- `package.json` + `package-lock.json` (JS/TS)
-- `Cargo.toml` + `Cargo.lock` (Rust)
-
-To regenerate a full license report:
-
-```bash
-# Rust
-cargo install cargo-about
-cargo about generate about.hbs > licenses-rust.html
-
-# JS
-npx license-checker --summary
-```
+Every AgentMux package carries the full list, with each component's licence
+text, in `THIRD_PARTY_NOTICES.txt` in the app's `frontend/licenses/` folder,
+next to AgentMux's own `LICENSE.txt` and `NOTICE.txt`. The build generates it
+(`scripts/third-party-notices.mjs`) from what it actually ships: the
+JavaScript packages in the bundle, the Rust crates in the programs, and the
+fonts and tools in `licenses/bundled/`. A production build writes it to
+`dist/frontend/licenses/`.
 
 ## License Compliance
 
 If you redistribute AgentMux, you must comply with the Apache License 2.0
-(see [LICENSE](./LICENSE)) and preserve [NOTICE](./NOTICE). Third-party
-licenses for bundled binaries are included in the installer/zip in
-`licenses/` (when present).
+(see [LICENSE](./LICENSE)), preserve [NOTICE](./NOTICE), and keep the
+third-party notices described above with every copy.
 
 ## Reporting Attribution Issues
 

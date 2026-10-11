@@ -448,6 +448,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // way `FleetBulkStop`'s calls are today.
         .route("/api/v1/agent/pane/close", post(app_api::pane::handle_close_pane))
         .route("/api/v1/agent/self/quit", post(app_api::pane::handle_quit_self))
+        // `agentmux-mcp doctor`, from the agent's shell: its own pane by token.
+        .route("/api/v1/agent/self/mcp-health", post(app_api::mcp_health::handle_mcp_health))
+        .route("/api/v1/agent/self/mcp-heal", post(app_api::mcp_health::handle_mcp_heal))
         // The outcome of a shutdown waiting on the user's override (§6.5):
         // the MCP tools poll it after their 202.
         // axum 0.7: a path parameter is `:name`; `{name}` would be a literal.

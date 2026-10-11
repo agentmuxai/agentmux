@@ -1,6 +1,6 @@
 # Report: dragging document tabs between panes (Editor to Editor, Media to Media)
 
-**Status:** active. Phases 1 to 3 are built: drag to reorder, Media ↔ Media and Editor ↔ Editor within a window. Phase 4 (layout space, Move to new pane, across windows) is not.
+**Status:** active. Phases 1 to 4 are built within a window: drag to reorder, Media ↔ Media, Editor ↔ Editor, and a tab into a new pane (dropped near a pane's edge, or **Move to New Pane**). Moving a tab to another window is not.
 **Date:** 2026-10-09 · **Author:** agent2
 **Trigger:** the repo owner: *"we want to implement dnd for document panes. Editor and Media each have document panes, but they each are not compatible with eachother. we want to implement dnd so a user can drag a doc pane from editor to another, or from one media to another, i believe it is already DRY and we want to keep it that way."*
 **Written against:** `main` @ `4afd8c527`. **Builds on:** `SPEC_DOCUMENT_TABS_2026_10_02.md` (this is its Phase 5, §5.8 and §4.1), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (the pane-tab drag this reuses), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (the drag session).
@@ -128,7 +128,7 @@ With §3.1 and `moveDocTo`, passing `onReorder` to both strips gives drag-to-reo
 | 1 | §3.1 drag kind in `PaneTabStrip` (no change for pane tabs), §3.2 `moveDocTo`, and drag-to-reorder in both strips (§3.5) | Low. Pane-tab tests guard the shared path. |
 | 2 | §3.2 detach/attach, §3.3 registry and drop zone, **Media ↔ Media** | Low. The payload is self-contained. |
 | 3 | **Editor ↔ Editor** with §3.4's live hand-off and rules | Medium: dirty buffers, watches, connections. A live check of move-dirty, then save in the target; move a scratch buffer; move to an Editor with that file open; local ↔ remote refused. |
-| 4 (later) | Drop on empty layout space, or **Move to new pane** from a tab menu: the receiving pane is created first, then `take` runs once its host registers. Cross-window via the `serialize` form, as `SPEC_DOCUMENT_TABS` §5.8 foresees. | Needs a tab menu, which doesn't exist yet. Cross-window touches the per-platform `CrossWindowDragMonitor`s. |
+| 4 | A tab into a new pane: dropped near a pane's edge, or **Move to new pane** from a tab menu. The receiving pane is created first, then `take` runs once its host registers. Cross-window via the `serialize` form, as `SPEC_DOCUMENT_TABS` §5.8 foresees. | **Built within a window** (`doc-tabs/doc-tab-new-pane.ts`): a pane's tile takes a document tab within a fifth of its edge (the band in which a dragged pane goes beside another), shows the half where the new pane goes, and splits off a pane made as a split of the tab's own pane makes it (`splitBlockDefFor`); a right-click on a tab offers **Move to New Pane** (to the right) and **Close Tab**. A move refused once the pane exists removes it again. Not built: across windows, which touches the per-platform `CrossWindowDragMonitor`s. |
 
 Tests, per phase: reducer cases in `doc-tabs.test.ts` (`moveDocTo` group bounds; `detachDoc` not on the reopen list; `attachDoc` key de-duplication and preview promotion); `PaneTabStrip` with `docDrag` registering a document tag and no tear-off; registry owner-checks; per-type host tests, including the Editor's carried text, dirty mark and encoding, and its refusals.
 

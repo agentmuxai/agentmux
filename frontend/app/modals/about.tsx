@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -56,7 +57,7 @@ const AboutModal = ({ close }: ModalCloseProps) => {
                             rel="noopener"
                             class="inline-flex items-center px-4 py-2 rounded border border-border hover:bg-hoverbg transition-colors duration-200"
                         >
-                            <i class="fa-sharp fa-light fa-globe mr-2"></i>Website
+                            <i class="fa-solid fa-globe mr-2"></i>Website
                         </a>
                         <a
                             href="https://github.com/agentmuxai/agentmux/blob/main/ACKNOWLEDGEMENTS.md"
@@ -64,7 +65,7 @@ const AboutModal = ({ close }: ModalCloseProps) => {
                             rel="noopener"
                             class="inline-flex items-center px-4 py-2 rounded border border-border hover:bg-hoverbg transition-colors duration-200"
                         >
-                            <i class="fa-sharp fa-light fa-heart mr-2"></i>Acknowledgements
+                            <i class="fa-regular fa-heart mr-2"></i>Acknowledgements
                         </a>
                     </div>
                     <div class="items-center gap-4 self-stretch w-full text-center">

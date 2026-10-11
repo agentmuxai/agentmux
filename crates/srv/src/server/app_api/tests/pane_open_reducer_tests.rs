@@ -689,6 +689,68 @@ async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
 /// An Editor pane already open in the caller's own tab → reused (file
 /// appended to META_PENDING_OPEN_FILES for the pane to drain) instead of
 /// spawning a second Editor pane.
+/// Puts `blocks` into the tab's layout as side-by-side panes on screen, as
+/// the frontend does once it has placed them: editor reuse only considers an
+/// editor the tab shows (`find_editor_block`).
+async fn show_panes(state: &AppState, tab_id: &str, blocks: &[&String]) {
+    let children = blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| agentmux_common::LayoutNode {
+            id: format!("pane-{i}"),
+            data: Some(agentmux_common::LayoutNodeData { block_id: (*b).clone(), ..Default::default() }),
+            ..Default::default()
+        })
+        .collect();
+    dispatch_apply(
+        state,
+        Command::LayoutSetTree {
+            tab_id: tab_id.to_string(),
+            new_tree: Some(agentmux_common::LayoutNode { id: "root".into(), children, ..Default::default() }),
+            correlation_id: String::new(),
+            slices: None,
+        },
+    )
+    .await;
+}
+
+/// An editor the user can't see isn't reused: a minimized one, one behind
+/// another pane tab in its stack, or any pane while another is magnified
+/// (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §2.2).
+#[test]
+fn only_shown_panes_count_as_shown() {
+    use crate::server::app_api::shown_block_ids;
+    let leaf = |id: &str, block: &str| agentmux_common::LayoutNode {
+        id: id.into(),
+        data: Some(agentmux_common::LayoutNodeData { block_id: block.into(), ..Default::default() }),
+        ..Default::default()
+    };
+    let layout = |root: agentmux_common::LayoutNode, magnified: &str| crate::backend::obj::LayoutState {
+        rootnode: Some(root),
+        magnifiednodeid: magnified.into(),
+        ..Default::default()
+    };
+    let row = |children: Vec<agentmux_common::LayoutNode>| agentmux_common::LayoutNode {
+        id: "root".into(),
+        children,
+        ..Default::default()
+    };
+
+    assert_eq!(shown_block_ids(&layout(row(vec![leaf("a", "agent"), leaf("e", "editor")]), "")), vec!["agent", "editor"]);
+
+    let mut minimized = leaf("e", "editor");
+    minimized.extra.insert("minimized".into(), serde_json::json!(true));
+    assert_eq!(shown_block_ids(&layout(row(vec![leaf("a", "agent"), minimized]), "")), vec!["agent"]);
+
+    // A stack shows its active member only.
+    let mut stacked = leaf("s", "term");
+    stacked.data.as_mut().unwrap().block_stack = vec!["editor".into(), "term".into()];
+    stacked.data.as_mut().unwrap().active_block_id = "term".into();
+    assert_eq!(shown_block_ids(&layout(row(vec![leaf("a", "agent"), stacked]), "")), vec!["agent", "term"]);
+
+    assert_eq!(shown_block_ids(&layout(row(vec![leaf("a", "agent"), leaf("e", "editor")]), "a")), vec!["agent"]);
+}
+
 #[tokio::test]
 async fn open_editor_reuses_existing_pane_in_callers_tab() {
     let state = test_state();
@@ -732,6 +794,7 @@ async fn open_editor_reuses_existing_pane_in_callers_tab() {
     .await
     .expect("open_pane first editor");
     assert!(first_editor.created);
+    show_panes(&state, &tab_id, &[&caller.block_id, &first_editor.block_id]).await;
 
     // A second OpenEditor call from the caller, same tab, different file
     // — must reuse the existing Editor pane, not create a second one.
@@ -783,6 +846,7 @@ async fn open_editor_reuses_only_an_editor_on_the_same_connection() {
     })
     .await
     .expect("open_pane host editor");
+    show_panes(&state, &tab_id, &[&caller.block_id, &on_host.block_id]).await;
 
     // A local file: a new Editor, not the host's.
     let local = open_pane(
@@ -849,6 +913,7 @@ async fn open_editor_reuse_queues_multiple_pending_files() {
     )
     .await
     .expect("open_pane first editor");
+    show_panes(&state, &tab_id, &[&caller.block_id, &first_editor.block_id]).await;
 
     // Three back-to-back reuse calls, none of which drain the queue
     // (no frontend attached in this test) — all three must still be

@@ -104,6 +104,17 @@ pub struct CommandMcpCatalogUpsertData {
     pub config: String,
 }
 
+/// `mcp.catalog.set_reach` — window-scoped. Who a catalog server reaches
+/// beyond its binds: `all_agents` gives it to every agent, `in_containers`
+/// to container agents too. `mcp.catalog.upsert` leaves both as they are.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandMcpCatalogSetReachData {
+    pub id: String,
+    pub all_agents: bool,
+    pub in_containers: bool,
+}
+
 /// Result of `mcp.delete` and `mcp.catalog.delete`. Both were inline
 /// `json!({ "deleted": .. })`. False means no row with that id existed — the
 /// delete is idempotent, so this is "was something removed", not an error.

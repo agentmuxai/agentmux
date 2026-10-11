@@ -402,7 +402,7 @@ mod tests {
         let mut agent: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
             "id": "rt-agent",
             "name": "rt-agent",
-            "icon": "sparkles",
+            "icon": "wand-magic-sparkles",
             "provider": "claude",
             "description": "",
             "created_at": 1,

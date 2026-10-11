@@ -10,6 +10,12 @@ license = "Apache-2.0"
 name = "agentmux-bashwrap"
 path = "src/main.rs"
 
+# Its own binary is the stdio server it starts, so libtest's output would
+# land in the stream under test (the file's doc comment).
+[[test]]
+name = "prefix_runs_mcp_servers"
+harness = false
+
 [dependencies]
 agentmux-common = { path = "../common" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }

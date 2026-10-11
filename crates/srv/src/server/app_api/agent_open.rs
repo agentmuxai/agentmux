@@ -806,7 +806,7 @@ async fn open_agent_inner(
                 }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
-                meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
+                meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "wand-magic-sparkles" } else { &agent.icon }));
                 meta.insert("agentMode".to_string(), json!(if agent.agent_type.is_empty() { "host" } else { &agent.agent_type }));
                 if !agent.container_image.is_empty() {
                     meta.insert("agent:container_image".to_string(), json!(&agent.container_image));
@@ -1140,14 +1140,14 @@ pub(super) fn write_agent_config_files(
         &agent.provider,
     );
 
-    // v1 MCP: same rule. Globals + synthetic "agentmux" are always emitted; the
+    // v1 MCP: "agentmux" plus the agent's effective servers. The
     // legacy blob's user servers are merged in ONLY when the agent has no own
     // ref-bound servers (so a global server never wipes a legacy-only agent's
     // .mcp.json). When the agent has own refs, those are authoritative.
     // A bundle carries no MCP servers
-    // (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1), so these are
-    // the agent's own and the global ones only.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id);
+    // (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1), so bundles
+    // add none.
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id, agent.agent_type == "container");
     let has_own_mcp_refs = visible_mcp.iter().any(|server| !server.is_global);
     if !visible_mcp.is_empty() {
         let blob_for_merge = if has_own_mcp_refs {

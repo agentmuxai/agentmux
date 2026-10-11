@@ -14,11 +14,27 @@
     @include drop.drop-target-hover;
 }
 
+// The strip's row. The shared .pane-tab-strip is shrink-to-fit (no dead
+// space after a few tabs), so its own border would span only the tabs and
+// the "+": the row carries one full-width line instead, and the strip's own
+// goes (two would double the line under the tabs). A pane may put an element
+// before the tabs (the Editor's file tree toggle).
 .doc-tab-strip {
     display: flex;
     flex-shrink: 0;
+    align-items: stretch;
     min-width: 0;
+    min-height: 28px;
     border-bottom: 1px solid var(--border-color);
+
+    > .pane-tab-strip {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+    .pane-tab-strip {
+        border-bottom: none;
+    }
 
     .doc-tab--preview .pane-tab-label {
         font-style: italic;
@@ -29,4 +45,38 @@
     .doc-tab--no-icon .pane-tab-icon {
         display: none;
     }
+}
+
+// A document tab hovering near a pane's edge (doc-tab-new-pane.ts
+// `registerDocTabSplitTarget`): the half of the pane where the new pane goes,
+// drawn as the layout's own placeholder for a pane being moved there.
+.tile-node.doc-tab-split--left,
+.tile-node.doc-tab-split--right,
+.tile-node.doc-tab-split--up,
+.tile-node.doc-tab-split--down {
+    &::after {
+        content: "";
+        position: absolute;
+        z-index: var(--zindex-layout-placeholder-container);
+        background-color: var(--drop-target-bg);
+        border: 1px solid var(--drop-zone-armed-border);
+        box-sizing: border-box;
+        pointer-events: none;
+    }
+}
+
+.tile-node.doc-tab-split--left::after {
+    inset: 0 50% 0 0;
+}
+
+.tile-node.doc-tab-split--right::after {
+    inset: 0 0 0 50%;
+}
+
+.tile-node.doc-tab-split--up::after {
+    inset: 0 0 50% 0;
+}
+
+.tile-node.doc-tab-split--down::after {
+    inset: 50% 0 0 0;
 }

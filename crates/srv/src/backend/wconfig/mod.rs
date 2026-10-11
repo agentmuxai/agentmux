@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -332,7 +333,7 @@ mod tests {
                 "window:transparent": true
             },
             "mimetypes": {
-                "text/rust": {"icon": "rust", "color": "#dea584"}
+                "text/rust": {"icon": "brands@rust", "color": "#dea584"}
             },
             "termthemes": {
                 "dracula": {

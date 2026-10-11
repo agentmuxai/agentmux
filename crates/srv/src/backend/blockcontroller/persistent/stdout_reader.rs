@@ -138,6 +138,10 @@ impl PersistentSubprocessController {
                                 super::status::publish_runtime_event(&inner_read, broker, &block_id_read);
                             }
                         }
+                        // The answer to a self-heal `mcp_status`/`mcp_reconnect`.
+                        if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                            ctrl.observe_mcp_frame(&parsed, my_generation_read);
+                        }
                         Self::handle_control_frame(kind, &parsed, &block_id_read, &inner_read);
                         // OS notification: the agent is now blocked on the
                         // user — known here even with no pane mounted
@@ -177,6 +181,13 @@ impl PersistentSubprocessController {
                         if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
                             ctrl.cli_started_pass();
                         }
+                    }
+                }
+                // Whether its `agentmux` MCP server connected, from the same
+                // frame: one that didn't is repaired (`backend::mcp_health`).
+                if parsed.get("subtype").and_then(|v| v.as_str()) == Some("init") {
+                    if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                        ctrl.observe_mcp_frame(&parsed, my_generation_read);
                     }
                 }
                 // The CLI version this agent now runs, from Claude's own

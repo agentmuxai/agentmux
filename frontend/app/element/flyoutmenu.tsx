@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -387,7 +388,7 @@ const MenuRows = (props: MenuRowsProps): JSX.Element => {
                             <span class="menu-item-shortcut">{item.shortcut}</span>
                         </Show>
                         <Show when={item.subItems}>
-                            <i class="fa-sharp fa-solid fa-chevron-right" />
+                            <i class="fa-solid fa-chevron-right" />
                         </Show>
                     </div>
                 );

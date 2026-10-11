@@ -173,3 +173,62 @@ describe("a failed compaction", () => {
         expect(notices[0]).toMatchObject({ kind: "compaction_failed" });
     });
 });
+
+// The MCP self-heal's row (crates/srv/src/backend/mcp_health.rs, notice_frame).
+const mcpHealth = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "system",
+    subtype: "agentmux_mcp_health",
+    provider: "claude",
+    episode: "block-1-1000",
+    state,
+    step: 0,
+    error: null,
+    safe_profile: false,
+    timestamp: TS,
+    ...extra,
+});
+
+describe("the MCP self-heal row", () => {
+    it("reads each state, with one id for the whole episode", () => {
+        const healing = parseCliNoticeFrame(mcpHealth("healing", { step: 2, error: "Connection closed" }), 0);
+        const ok = parseCliNoticeFrame(mcpHealth("ok", { safe_profile: true }), 0);
+        expect(healing).toMatchObject({ kind: "mcp_health", mcpState: "healing", step: 2, error: "Connection closed" });
+        expect(ok).toMatchObject({ kind: "mcp_health", mcpState: "ok", safeProfile: true });
+        expect(healing?.id).toBe("mcp-health-block-1-1000");
+        expect(ok?.id).toBe(healing?.id);
+    });
+
+    it("ignores a frame without an episode or with an unknown state", () => {
+        expect(parseCliNoticeFrame(mcpHealth("healing", { episode: "" }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(mcpHealth("exploded"), 0)).toBeNull();
+    });
+
+    it("says what is happening, and how bad it is", () => {
+        const text = (frame: Record<string, unknown>) => cliNoticeText(parseCliNoticeFrame(frame, 0)!);
+        expect(text(mcpHealth("healing", { step: 1, error: "Connection closed" }))).toEqual({
+            label: "AgentMux tools didn't connect. Reconnecting (try 1 of 2)…",
+            detail: "Connection closed",
+            tone: "warn",
+        });
+        expect(text(mcpHealth("restarting")).tone).toBe("warn");
+        expect(text(mcpHealth("ok"))).toEqual({ label: "AgentMux tools are connected again", detail: null, tone: "info" });
+        expect(text(mcpHealth("ok", { safe_profile: true })).detail).toBe(
+            "Running without the shell prefix until AgentMux restarts"
+        );
+        expect(text(mcpHealth("gave_up", { error: "Connection closed" }))).toEqual({
+            label: "AgentMux tools aren't connected, and AgentMux couldn't repair them",
+            detail: "Connection closed. The agent was told to run `agentmux-mcp doctor`.",
+            tone: "error",
+        });
+    });
+
+    it("is one row on replay, ending in the episode's last state", () => {
+        const lines = [mcpHealth("healing", { step: 1 }), mcpHealth("restarting"), mcpHealth("ok")].map((f) =>
+            JSON.stringify(f)
+        );
+        const notices = parseHistoryLines(lines, "claude-stream-json").nodes.filter(
+            (n): n is CliNoticeNode => n.type === "cli_notice"
+        );
+        expect(notices.map((n) => n.mcpState)).toEqual(["ok"]);
+    });
+});

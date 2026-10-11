@@ -56,6 +56,7 @@ import {
     Placeholder,
 } from "./tilelayout-shared";
 import { tileItemType } from "@/app/drag/drag-types";
+import { registerDocTabSplitTarget } from "@/app/doc-tabs/doc-tab-new-pane";
 
 export interface TileLayoutProps {
     /**
@@ -406,6 +407,12 @@ export function createTileLayout(platform: TileLayoutPlatform) {
         // The header may mount after the tile (block content loads behind a Show
         // gate), and a Show gate replaces it later on. The registrar rebinds when
         // the tile's DOM actually changes (tile-drag-registrar.ts, spec §5.7).
+        // A document tab dropped near this pane's edge opens in a new pane
+        // beside it (doc-tab-new-pane.ts).
+        onMount(() => {
+            if (tileNodeRef) onCleanup(registerDocTabSplitTarget(tileNodeRef, () => props.node.data?.blockId));
+        });
+
         onMount(() => {
             if (!tileNodeRef) return;
             // Query the actual live header from the DOM rather than relying on dragHandleRef.

@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Editor's document tabs as drag targets: moving a tab within its strip,
- * and between Editor panes. Kept out of `editor-model.ts`, which is at its
- * size cap; it acts on the pane's store and on the model's per-tab maps.
+ * The Editor's document tabs on the shared surfaces: `editorDocTabs` is the
+ * pane's store as a `DocTabsModel` (the strip, the keys, moves), and
+ * `editorDocTabHost` its move host, with what a moved Editor tab carries.
+ * Kept out of `editor-model.ts`, which is at its size cap; it acts on the
+ * pane's store and on the model's per-tab maps.
+ * docs/specs/PLAN_EDITOR_ON_SHARED_DOC_TABS_2026_10_10.md,
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md §3.4.
  *
  * A tab's payload (`EditorBuffer`) holds its path, language and scratch
@@ -18,8 +21,9 @@
 
 import { historyField } from "@codemirror/commands";
 import type { EditorState } from "@codemirror/state";
-import { ALREADY_OPEN_THERE, type DocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
-import type { DocTab } from "@/app/doc-tabs/doc-tabs";
+import { docTabsHost, type DocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
+import { emptyDocTabs, type DocTab } from "@/app/doc-tabs/doc-tabs";
+import type { DocTabsModel } from "@/app/doc-tabs/doc-tabs-controller";
 import { canonicalizePath, dispatch, snapshot, type EditorBuffer } from "@/app/store/editor-pane-state-store";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 
@@ -108,36 +112,75 @@ function liveStateOf(model: EditorViewModel, tab: DocTab<EditorBuffer>): EditorL
     return live;
 }
 
+/**
+ * The Editor pane's tabs as a `DocTabsModel`: each action is the store's
+ * command, so the dirty-close confirmation, its events and the audit ring
+ * stay the Editor's.
+ */
+export function editorDocTabs(model: EditorViewModel): DocTabsModel<EditorBuffer> {
+    const blockId = model.blockId;
+    const doc = () => {
+        model.sliceVersionAtom();
+        return snapshot(blockId)?.doc ?? emptyDocTabs<EditorBuffer>();
+    };
+    const tabOf = (id: string) => doc().tabs.find((t) => t.id === id);
+    return {
+        tabs: () => doc().tabs,
+        activeId: () => doc().activeId,
+        showStrip: () => doc().tabs.length > 0,
+        activate: (id) => model.switchTab(id),
+        // A tab with unsaved changes asks first (`closeTab`): nothing to refuse.
+        close: (id) => {
+            model.closeTab(id);
+            return true;
+        },
+        promote: (id) => void dispatch(blockId, { type: "PinTab", tabId: id, source: "user" }),
+        cycle: (delta) => model.cycleTab(delta),
+        move: (id, delta) => {
+            const at = doc().tabs.findIndex((t) => t.id === id);
+            if (at >= 0) dispatch(blockId, { type: "ReorderTab", tabId: id, toIndex: at + delta, source: "user" });
+        },
+        moveTo: (id, targetId, position) => moveEditorTabTo(blockId, id, targetId, position),
+        reopen: () => {
+            const before = snapshot(blockId)?.doc;
+            model.reopenLastClosed();
+            return snapshot(blockId)?.doc !== before;
+        },
+        // No scratch buffers in an editor on a host (they are local files).
+        canAddNew: () => !model.connection(),
+        newDocument: () => {
+            void model.openScratch(false);
+            return true;
+        },
+        detach: (id) => {
+            const tab = tabOf(id);
+            if (!tab) return null;
+            // TabClosed (from DetachTab) releases the model's and the view's
+            // state for it.
+            dispatch(blockId, { type: "DetachTab", tabId: id, source: "user" });
+            return tab;
+        },
+        attach: (tab, at) => void dispatch(blockId, { type: "AttachTab", tab, at, source: "user" }),
+    };
+}
+
 /** An Editor pane's host (doc-tab-hosts.ts): tabs move between Editors on
  *  the same computer, with their unsaved text and undo history. */
 export function editorDocTabHost(model: EditorViewModel): DocTabHost {
-    const blockId = model.blockId;
-    const tabOf = (tabId: string) => snapshot(blockId)?.doc.tabs.find((t) => t.id === tabId);
-    return {
-        docType: "editor",
+    return docTabsHost(editorDocTabs(model), "editor", {
         scope: () => model.connection(),
-        peek: (tabId) => tabOf(tabId) ?? null,
         refuseGive: (tab) => (saving.get(model)?.has(tab.id) ? "It is still being saved. Try again in a moment." : null),
-        refuseTake: (tab) => (snapshot(blockId)?.doc.tabs.some((t) => t.key === tab.key) ? ALREADY_OPEN_THERE : null),
-        give: (tabId) => {
-            const tab = tabOf(tabId);
-            if (!tab) return null;
-            const live = liveStateOf(model, tab);
-            // TabClosed (from DetachTab) releases the model's and the view's
-            // state for it, once the live state above has been taken.
-            dispatch(blockId, { type: "DetachTab", tabId, source: "user" });
-            return { docType: "editor", tab, live };
-        },
-        take: (transfer, at) => {
-            const live = (transfer.live ?? {}) as EditorLiveState;
-            let tab = transfer.tab as DocTab<EditorBuffer>;
+        liveOf: (tab) => liveStateOf(model, tab),
+        arriving: (arriving, moved) => {
+            const live = (moved ?? {}) as EditorLiveState;
+            let tab = arriving;
             // Arriving without its text (a clean tab, or one not read yet):
             // read here, fresh, rather than show an empty or stale buffer.
             if (tab.payload.contentLoaded && live.content === undefined) {
                 tab = { ...tab, payload: { ...tab.payload, contentLoaded: false, contentHash: "" } };
             }
             // In place before the tab arrives, so its first render has them.
-            // (Its file isn't open here: refuseTake saw to that.)
+            // (Its file is not open here: the host refuses that.)
             if (live.content !== undefined) model._contentByTab.set(tab.id, live.content);
             if (live.encoding) model._encodingByTab.set(tab.id, live.encoding);
             if (live.mode) {
@@ -145,16 +188,19 @@ export function editorDocTabHost(model: EditorViewModel): DocTabHost {
                 model._tabModesVersion[1]((v) => v + 1);
             }
             if (live.editorState !== undefined) {
-                let moved = movedStates.get(model);
-                if (!moved) movedStates.set(model, (moved = new Map()));
-                moved.set(tab.id, live.editorState);
+                let movedIn = movedStates.get(model);
+                if (!movedIn) movedStates.set(model, (movedIn = new Map()));
+                movedIn.set(tab.id, live.editorState);
             }
-            dispatch(blockId, { type: "AttachTab", tab, at, source: "user" });
-            // A read tab watches its file from here now (DetachTab stopped the
-            // source's watch); one not read yet is watched when it is.
+            return tab;
+        },
+        // A read tab watches its file from here now (DetachTab stopped the
+        // source's watch); one not read yet is watched when it is.
+        arrived: (tab, moved) => {
+            const live = (moved ?? {}) as EditorLiveState;
             if (tab.payload.contentLoaded && live.content !== undefined) {
                 model._syncWatch(tab.id, canonicalizePath(tab.payload.filePath));
             }
         },
-    };
+    });
 }

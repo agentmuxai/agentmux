@@ -22,7 +22,8 @@ const VIEWS = [
 ];
 
 const OLD_ICONS: Record<string, string> = {
-    term: "terminal", agent: "sparkles", browser: "globe", sysinfo: "chart-line", editor: "file-lines",
+    // agent: "sparkles" was a Font Awesome Pro icon; its Free equivalent since the switch to Free.
+    term: "terminal", agent: "wand-magic-sparkles", browser: "globe", sysinfo: "chart-line", editor: "file-lines",
     help: "circle-question", swarm: "diagram-project", drone: "diagram-project", media: "photo-film",
 };
 const OLD_LABELS: Record<string, string> = {

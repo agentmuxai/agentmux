@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -249,7 +250,13 @@ declare global {
     /** `mcp.catalog.list`'s response shape: an McpServer plus how many
      *  agents currently bind it — the Armory catalog's "used by N agents"
      *  count (#1960 gap #2). */
-    type McpServerCatalogItem = McpServer & { bound_count: number };
+    type McpServerCatalogItem = McpServer & {
+        bound_count: number;
+        /** Reaches every agent, not only the bound ones (`mcp.catalog.set_reach`). */
+        all_agents: boolean;
+        /** Container agents get it too. */
+        in_containers: boolean;
+    };
 
     /** `skill.catalog.list`'s response shape — see McpServerCatalogItem. */
     type SkillCatalogItem = Skill & { bound_count: number };
@@ -1148,7 +1155,7 @@ declare global {
         "blockheader:showblockids"?: boolean;
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
-        "tab:skipcloseconfirm"?: boolean;
+        "tab:confirmclose"?: boolean;
         "splash:disabled"?: boolean;
         "app:runinbackground"?: boolean;
         "app:showtray"?: boolean;
@@ -1241,6 +1248,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "agent:mcpselfheal"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:livefeed"?: boolean;

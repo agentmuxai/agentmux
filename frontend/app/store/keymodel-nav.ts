@@ -23,7 +23,7 @@ function getStaticTabBlockCount(): number {
 
 export function simpleCloseStaticTab() {
     // Route through TabBar's requestClose so the close-confirmation modal
-    // (and the tab:skipcloseconfirm setting) is honoured on keyboard close
+    // (and the tab:confirmclose setting) is honoured on keyboard close
     // the same way it is on the X-button path. The last-tab guard and the
     // WorkspaceService.CloseTab + deleteLayoutModelForTab calls all live
     // inside handleClose, which requestClose delegates to. (reagent P2 #1636.)

@@ -55,7 +55,7 @@ const RAIL: TabItem<SettingsSection>[] = [
     { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
     { id: "window",     label: SETTINGS_SECTION_LABELS.window,     icon: "table-cells" },
     { id: "browser",    label: SETTINGS_SECTION_LABELS.browser,    icon: "globe" },
-    { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "square-terminal" },
+    { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "terminal" },
     { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
     { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
     { id: "recording",  label: SETTINGS_SECTION_LABELS.recording,  icon: "microphone" },

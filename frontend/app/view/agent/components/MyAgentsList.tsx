@@ -1154,7 +1154,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         }}
                                         data-testid="agent-my-agents-menu-toggle"
                                     >
-                                        <i class="fa-sharp fa-solid fa-chevron-down" aria-hidden="true" />
+                                        <i class="fa-solid fa-chevron-down" aria-hidden="true" />
                                     </button>
 
                                     {/* The menu and the Rename / Duplicate panels float in
@@ -1178,21 +1178,21 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     class="agent-row-menu-item"
                                                     onClick={() => handleRenameOpen(row)}
                                                 >
-                                                    <i class="fa-sharp fa-solid fa-pen" aria-hidden="true" /> Rename
+                                                    <i class="fa-solid fa-pen" aria-hidden="true" /> Rename
                                                 </button>
                                                 <button
                                                     type="button"
                                                     class="agent-row-menu-item"
                                                     onClick={() => handleDuplicate(row)}
                                                 >
-                                                    <i class="fa-sharp fa-solid fa-clone" aria-hidden="true" /> Duplicate
+                                                    <i class="fa-solid fa-clone" aria-hidden="true" /> Duplicate
                                                 </button>
                                                 <button
                                                     type="button"
                                                     class="agent-row-menu-item"
                                                     onClick={() => handleViewHistory(row)}
                                                 >
-                                                    <i class="fa-sharp fa-solid fa-clock-rotate-left" aria-hidden="true" />{" "}
+                                                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" />{" "}
                                                     View History
                                                 </button>
                                                 <button
@@ -1201,7 +1201,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     onClick={() => handleDeleteOpen(row)}
                                                     data-testid="agent-my-agents-delete"
                                                 >
-                                                    <i class="fa-sharp fa-solid fa-trash-can" aria-hidden="true" /> Delete
+                                                    <i class="fa-solid fa-trash-can" aria-hidden="true" /> Delete
                                                 </button>
                                             </div>
                                         </AnchoredPopover>

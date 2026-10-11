@@ -16,6 +16,7 @@
 
 .tower-toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-2);
@@ -23,8 +24,16 @@
     flex-shrink: 0;
 }
 
+// In a narrow pane the machine picker gives way, not the view tabs, which
+// otherwise shrank to nothing and left no way to switch views; below its
+// minimum the toolbar wraps instead of cutting "This computer" to "Tl".
 .tower-machine {
     max-width: 220px;
+    min-width: 120px;
+}
+
+.tower-toolbar > .ui-tabs {
+    flex-shrink: 0;
 }
 
 .tower-toolbar-spacer {
@@ -122,12 +131,18 @@
         background: var(--main-bg-color);
         z-index: 1;
 
+        // CPU and Memory; then the PID, last in every table. With the Agents
+        // view's More columns the 4th is CPU time and the 5th Peak (a memory
+        // figure), so the PID is 6th: each column is sized, or the spare width
+        // went to Peak and the PID as well as the Process names.
         &:nth-child(2),
-        &:nth-child(3) {
+        &:nth-child(3),
+        &:nth-child(5) {
             width: 92px;
         }
 
-        &:nth-child(4) {
+        &:nth-child(4),
+        &:nth-child(6) {
             width: 84px;
         }
     }
@@ -148,8 +163,11 @@
         white-space: nowrap;
     }
 
-    th.tower-num .tower-sort {
-        margin-left: auto;
+    // A number column's header sits over the right-aligned numbers. The sort
+    // button fills its cell, so it's the button's content that goes right.
+    th.tower-num .tower-sort,
+    th.tower-num .tower-th-label {
+        justify-content: flex-end;
     }
 }
 
@@ -167,6 +185,23 @@
 }
 
 .tower-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+// What follows a process's name (its executable, the tool call it runs):
+// it takes only the room the name leaves, cut short in a narrow pane, so it
+// neither runs into the CPU column nor cuts the name.
+.tower-name-tail {
+    display: flex;
+    flex: 1 1 0;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.tower-exe {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -229,6 +264,13 @@ tr:hover .tower-reveal,
     flex: 1 1 auto;
     min-height: 0;
     gap: var(--space-3);
+
+    // Too narrow for a rail beside the processes (a third of a window, say):
+    // the rail goes above them, so the process table has the pane's width.
+    @container (max-width: 480px) {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
 }
 
 .tower-rail {
@@ -240,8 +282,17 @@ tr:hover .tower-reveal,
     padding-right: var(--space-2);
     min-height: 0;
 
-    @container (max-width: 560px) {
+    @container (max-width: 680px) {
         width: 150px;
+    }
+
+    @container (max-width: 480px) {
+        width: auto;
+        max-height: 30%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        padding-right: 0;
+        padding-bottom: var(--space-1);
     }
 }
 
@@ -284,7 +335,7 @@ tr:hover .tower-reveal,
         grid-area: swatch;
     }
 
-    @container (max-width: 560px) {
+    @container (max-width: 680px) {
         grid-template-areas: "swatch name cpu";
 
         .tower-rail-mem,
@@ -355,6 +406,19 @@ tr:hover .tower-reveal,
     flex: 1 1 auto;
     min-width: 0;
     overflow-y: auto;
+    container: tower-detail / inline-size;
+}
+
+// Beside the rail in a half-width pane the numbers' columns left the Process
+// column so little that tree rows lost their names entirely. Everything after
+// CPU and Memory goes: the PID (it is in every row's hover text) and "More
+// columns" (CPU time, Peak), with its button, so the names keep their room.
+@container tower-detail (max-width: 460px) {
+    .tower-table th:nth-child(n + 4),
+    .tower-table td:nth-child(n + 4),
+    .tower-more-columns {
+        display: none;
+    }
 }
 
 .tower-detail-head {
@@ -439,4 +503,123 @@ tr:hover .tower-reveal,
     white-space: nowrap;
     color: var(--secondary-text-color);
     font-style: italic;
+}
+
+// ── The selected entry's last 10 minutes: CPU and memory side by side, two
+// charts on their own scales, each one line over a faint area. ──
+
+.tower-history {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+
+    @container (max-width: 560px) {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.tower-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.tower-chart-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-size: 0.92em;
+}
+
+.tower-chart-label {
+    font-weight: 500;
+}
+
+.tower-chart-plot {
+    position: relative;
+    height: 48px;
+    border-bottom: 1px solid var(--border-color);
+
+    svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+    }
+}
+
+.tower-chart-area {
+    opacity: 0.15;
+}
+
+.tower-chart-line {
+    fill: none;
+    stroke-width: 2px;
+    stroke-linejoin: round;
+}
+
+.tower-chart-crosshair {
+    stroke: var(--secondary-text-color);
+    stroke-width: 1px;
+}
+
+.tower-chart-tip {
+    position: absolute;
+    top: 0;
+    transform: translate(-50%, -100%);
+    padding: 1px 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    font-size: 0.85em;
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.tower-chart-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8em;
+}
+
+// A narrow pane: the number columns give the names room. A memory figure
+// ("259.6 MB") needs about 70 px with the cell's padding; at 64 it was cut
+// and the table overflowed its pane.
+.tower-view .tower-table th {
+    @container (max-width: 640px) {
+        &:nth-child(2) {
+            width: 64px;
+        }
+
+        &:nth-child(3),
+        &:nth-child(5) {
+            width: 76px;
+        }
+
+        &:nth-child(4),
+        &:nth-child(6) {
+            width: 56px;
+        }
+    }
+}
+
+// A header that doesn't sort (More columns' CPU time and Peak), set like the
+// sorting ones' compact buttons rather than in the table's own font.
+.tower-th-label {
+    display: flex;
+    align-items: center;
+    min-height: var(--ui-height);
+    padding: var(--ui-pad-y) var(--ui-pad-x);
+    font-size: var(--ui-font-size);
+    font-weight: var(--ui-font-weight);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+}
+
+// How long ago an exited process went: short, and never wrapped under its
+// name (the row is dimmed, its tooltip says "exited").
+.tower-exited-ago {
+    flex-shrink: 0;
+    white-space: nowrap;
 }

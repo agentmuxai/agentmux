@@ -112,7 +112,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         >
             <div class="command-palette-container" onKeyDown={handleKeyDown}>
                 <div class="command-palette-input-row">
-                    <i class="fa-sharp fa-solid fa-magnifying-glass command-palette-search-icon" />
+                    <i class="fa-solid fa-magnifying-glass command-palette-search-icon" />
                     <input
                         ref={inputRef}
                         class="command-palette-input"
@@ -138,7 +138,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                             >
                                 {cmd.icon && (
                                     <i
-                                        class={`fa-sharp fa-solid fa-${cmd.icon} command-palette-item-icon`}
+                                        class={`fa-solid fa-${cmd.icon} command-palette-item-icon`}
                                         style={cmd.iconColor ? { color: cmd.iconColor } : {}}
                                     />
                                 )}

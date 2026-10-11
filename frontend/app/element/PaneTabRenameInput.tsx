@@ -6,7 +6,8 @@
  * every `PaneTabStrip` consumer that wires double-click-to-rename (agent
  * fork tabs, terminal tabs). Swapped in via `PaneTabStrip`'s existing
  * `renderLabel` prop, same mechanism the editor's Save-As path input
- * already uses (`frontend/app/view/editor/editor-tab-strip.tsx`).
+ * already uses (`frontend/app/view/editor/editor-save-as-input.tsx`, through
+ * DocTabStrip's `renderLabel`).
  *
  * Commit-on-blur (unlike Save-As's cancel-on-blur — Save-As is "type a new
  * path," rename is "edit existing text," so blur here matches the

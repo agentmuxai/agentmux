@@ -10,10 +10,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mcpCatalogListMock = vi.fn().mockResolvedValue([]);
 const listAgentDefinitionsMock = vi.fn().mockResolvedValue([]);
+const setReachMock = vi.fn().mockResolvedValue({ all_agents: true, in_containers: false });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         McpCatalogListCommand: (...args: unknown[]) => mcpCatalogListMock(...args),
         ListAgentDefinitionsCommand: (...args: unknown[]) => listAgentDefinitionsMock(...args),
+        McpCatalogSetReachCommand: (...args: unknown[]) => setReachMock(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -27,7 +29,7 @@ vi.mock("@/app/store/mps", () => ({
     }),
 }));
 
-import { McpCatalogModel } from "./mcp-model";
+import { McpCatalogModel, reachLabel } from "./mcp-model";
 
 beforeEach(() => {
     mcpCatalogListMock.mockClear();
@@ -68,5 +70,51 @@ describe("McpCatalogModel — reactive updates", () => {
         model.dispose();
 
         expect(mpsHub.handlers.has("mcp:changed")).toBe(false);
+    });
+});
+
+describe("McpCatalogModel — reach", () => {
+    test("setReach sends both switches and reloads the list", async () => {
+        const model = new McpCatalogModel();
+        await Promise.resolve();
+        mcpCatalogListMock.mockClear();
+        setReachMock.mockClear();
+
+        await model.setReach("srv-1", { all_agents: true, in_containers: false });
+
+        expect(setReachMock).toHaveBeenCalledWith({}, { id: "srv-1", all_agents: true, in_containers: false });
+        expect(mcpCatalogListMock).toHaveBeenCalledTimes(1);
+        expect(model.errorAtom()).toBeNull();
+    });
+
+    test("a failed save says so", async () => {
+        const model = new McpCatalogModel();
+        setReachMock.mockRejectedValueOnce(new Error("FORBIDDEN"));
+
+        await model.setReach("srv-1", { all_agents: false, in_containers: true });
+
+        expect(model.errorAtom()).toContain("FORBIDDEN");
+    });
+});
+
+describe("reachLabel", () => {
+    const item = (over: Partial<McpServerCatalogItem>): McpServerCatalogItem => ({
+        id: "s",
+        name: "git",
+        transport: "stdio",
+        config: "{}",
+        is_global: true,
+        created_at: 1,
+        updated_at: 1,
+        bound_count: 0,
+        all_agents: false,
+        in_containers: false,
+        ...over,
+    });
+
+    test("says who gets a catalog server", () => {
+        expect(reachLabel(item({ all_agents: true, bound_count: 2 }))).toBe("All agents");
+        expect(reachLabel(item({ bound_count: 1 }))).toBe("1 agent");
+        expect(reachLabel(item({ bound_count: 0 }))).toBe("0 agents");
     });
 });

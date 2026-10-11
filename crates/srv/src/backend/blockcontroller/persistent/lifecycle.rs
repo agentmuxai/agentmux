@@ -242,3 +242,137 @@ impl PersistentSubprocessController {
         true
     }
 }
+
+/// The MCP self-heal's steps for this pane (`backend::mcp_health` decides
+/// them; docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md).
+impl PersistentSubprocessController {
+    /// A frame from process `generation`: the `agentmux` MCP server's status
+    /// (`system/init`, our `mcp_status`) or a reconnect's outcome. Anything
+    /// else, or a frame from a replaced process, is ignored.
+    pub(super) fn observe_mcp_frame(&self, frame: &serde_json::Value, generation: u64) {
+        use crate::backend::mcp_health as heal;
+        if self.inner.lock().unwrap().spawn_generation != generation {
+            return;
+        }
+        let process = self.mcp_process_key(generation);
+        let now = agentmux_common::time::now_ms_u64();
+        let report = heal::status_from_init(frame)
+            .map(|status| (status, None))
+            .or_else(|| heal::status_from_control_response(frame));
+        let decision = if let Some((status, error)) = report {
+            heal::on_status(&self.block_id, &process, status, error, heal::auto_enabled(), now)
+        } else if let Some(result) = heal::reconnect_result(frame) {
+            heal::on_reconnect(&self.block_id, &process, result, now)
+        } else {
+            return;
+        };
+        self.carry_out_mcp_step(decision, generation);
+    }
+
+    /// `agentmux-mcp doctor --heal`: start the repair over now. `Err` says why
+    /// nothing started (`mcp_health::heal_now`).
+    pub(crate) fn mcp_heal_now(&self) -> Result<(), &'static str> {
+        let generation = self.inner.lock().unwrap().spawn_generation;
+        let now = agentmux_common::time::now_ms_u64();
+        let decision = crate::backend::mcp_health::heal_now(&self.block_id, &self.mcp_process_key(generation), now)?;
+        self.carry_out_mcp_step(decision, generation);
+        Ok(())
+    }
+
+    /// One CLI process of this controller: a replacement controller restarts
+    /// its generations, so the generation alone could name an older process.
+    fn mcp_process_key(&self, generation: u64) -> String {
+        format!("{:p}-{generation}", Arc::as_ptr(&self.inner))
+    }
+
+    fn carry_out_mcp_step(&self, decision: crate::backend::mcp_health::Decision, generation: u64) {
+        use crate::backend::mcp_health::{self as heal, Action};
+        if let Some(notice) = &decision.notice {
+            self.show_mcp_notice(notice);
+        }
+        match decision.action {
+            Action::None => {}
+            Action::Reconnect { after } => self.send_mcp_request(heal::reconnect_request_line(), after, generation),
+            Action::CheckStatus { after } => self.send_mcp_request(heal::status_request_line(), after, generation),
+            Action::SafeProfileRestart => self.restart_now_or_after_turn(),
+            Action::GiveUp => self.tell_agent_mcp_is_down(),
+        }
+    }
+
+    /// Write a control request to process `generation`, after `after`; not if
+    /// it has been replaced by then.
+    fn send_mcp_request(&self, line: String, after: std::time::Duration, generation: u64) {
+        let inner = Arc::clone(&self.inner);
+        let send = move || {
+            if inner.lock().unwrap().spawn_generation == generation {
+                Self::push_stdin(&inner, line);
+            }
+        };
+        if after.is_zero() {
+            send();
+        } else if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move {
+                tokio::time::sleep(after).await;
+                send();
+            });
+        }
+    }
+
+    /// Restart the CLI (the same session) with the config now in force, which
+    /// for a pane in the safe profile means without the shell prefix: at once
+    /// when idle, else when the turn ends, through the deferred runtime-config
+    /// restart (`turn_boundary_locked`, `respawn_after_config_restart`). The
+    /// turn check and the flag share one acquisition, as in
+    /// [`Self::request_restart_when_idle`].
+    fn restart_now_or_after_turn(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.stdin_tx.is_none() || inner.stop_pending {
+            return;
+        }
+        if self.health_monitor.is_active_turn() {
+            inner.restart_when_idle = true;
+            drop(inner);
+            self.publish_status();
+            return;
+        }
+        inner.restart_pending = true;
+        inner.config_restart_generation = Some(inner.spawn_generation);
+        drop(inner);
+        tracing::info!(block_id = %self.block_id, "MCP self-heal: restarting the agent in the safe profile");
+        self.stop_for_config_restart();
+    }
+
+    fn show_mcp_notice(&self, notice: &crate::backend::mcp_health::Notice) {
+        tracing::info!(block_id = %self.block_id, state = notice.state, step = notice.step, error = ?notice.error, "MCP self-heal");
+        let (Some(broker), Some(filestore), Some(mstore)) = (&self.broker, &self.filestore, &self.mstore) else {
+            return;
+        };
+        let (broker, filestore, mstore) = (Arc::clone(broker), Arc::clone(filestore), Arc::clone(mstore));
+        let (block_id, frame) = (self.block_id.clone(), crate::backend::mcp_health::notice_frame(notice));
+        let append = move || crate::backend::cli_notice::append_to_pane(&broker, &filestore, &mstore, &block_id, &frame);
+        match tokio::runtime::Handle::try_current() {
+            Ok(rt) => drop(rt.spawn_blocking(append)),
+            Err(_) => append(),
+        }
+    }
+
+    /// The `[AgentMux]` note that AgentMux gave up, so the agent tells the
+    /// operator and knows its tools are gone. By UID when the pane has one.
+    fn tell_agent_mcp_is_down(&self) {
+        let error = crate::backend::mcp_health::snapshot(&self.block_id).and_then(|s| s.last_error);
+        let text = crate::backend::mcp_health::give_up_note(error.as_deref());
+        let handler = crate::backend::reactive::get_global_handler();
+        let Some(target) = handler
+            .list_agents()
+            .into_iter()
+            .find(|r| r.block_id == self.block_id)
+            .map(|r| r.uid.unwrap_or(r.agent_id))
+        else {
+            tracing::info!(block_id = %self.block_id, "MCP self-heal: no registered agent to tell");
+            return;
+        };
+        if let Err(e) = handler.deliver_system_note(&target, &text) {
+            tracing::info!(block_id = %self.block_id, error = %e, "MCP self-heal note not delivered");
+        }
+    }
+}

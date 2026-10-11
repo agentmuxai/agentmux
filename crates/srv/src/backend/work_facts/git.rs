@@ -204,6 +204,53 @@ pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
     }
 }
 
+/// A branch name taken from a command, safe to hand git: no option, range or
+/// whitespace.
+fn plain_branch(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('-') && !name.contains("..") && !name.contains(char::is_whitespace)
+}
+
+/// The first of `candidates` that names a commit in `root`.
+async fn first_ref(root: &str, candidates: &[String]) -> Option<String> {
+    for c in candidates {
+        if safe_git_line(root, &["rev-parse", "--verify", "--quiet", &format!("{c}^{{commit}}")]).await.is_some() {
+            return Some(c.clone());
+        }
+    }
+    None
+}
+
+/// The branch's `gh-merge-base` setting (gh's base for a PR from it), if set.
+pub async fn merge_base_setting(root: &str, branch: &str) -> Option<String> {
+    if !plain_branch(branch) {
+        return None;
+    }
+    safe_git_line(root, &["config", "--get", &format!("branch.{branch}.gh-merge-base")]).await.filter(|b| plain_branch(b))
+}
+
+/// The files a PR from `head` into `base` changes in `root`: `git diff
+/// --name-only base...head`, the base being `origin/<base>` (or a local
+/// `<base>`), else the default branch (`origin/HEAD`, `origin/main`,
+/// `origin/master`), and the head a local branch, else `origin/<head>`. Empty
+/// when either can't be found, on the base itself, or when git can't say in
+/// [`PROBE_TIMEOUT`]. A diff of two commits: no working-tree filter runs.
+pub async fn branch_files(root: &str, base: Option<&str>, head: &str) -> Vec<String> {
+    if !plain_branch(head) || base.is_some_and(|b| !plain_branch(b)) {
+        return Vec::new();
+    }
+    let files = async {
+        let bases: Vec<String> = match base {
+            Some(b) => vec![format!("origin/{b}"), b.to_string()],
+            None => ["origin/HEAD", "origin/main", "origin/master"].iter().map(|s| s.to_string()).collect(),
+        };
+        let base = first_ref(root, &bases).await?;
+        let head = first_ref(root, &[format!("refs/heads/{head}"), format!("origin/{head}")]).await?;
+        let out = safe_git_line(root, &["diff", "--name-only", &format!("{base}...{head}")]).await?;
+        Some(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect::<Vec<_>>())
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, files).await.ok().flatten().unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +374,42 @@ mod tests {
         assert_eq!(c.get("hung", "/hung"), None, "abandoned");
         assert!(!c.needs_probe("hung", "/hung", 2_001), "and not retried until it is due again");
         assert_eq!(c.get("fresh", "/fresh"), Some(facts_for("/fresh")));
+    }
+
+    #[tokio::test]
+    async fn a_branch_lists_the_files_it_changes_since_the_default_branch() {
+        let tmp = std::env::temp_dir().join(format!("wf-branch-files-{}-{}", std::process::id(), agentmux_common::time::now_ms()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        git(&tmp, &["init", "-q", "-b", "main"]);
+        git(&tmp, &["config", "user.email", "t@t"]);
+        git(&tmp, &["config", "user.name", "t"]);
+        std::fs::write(tmp.join("base.rs"), "a").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "base"]);
+        git(&tmp, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let root = tmp.to_string_lossy().to_string();
+        assert!(branch_files(&root, None, "main").await.is_empty(), "the default branch itself: nothing");
+        git(&tmp, &["checkout", "-q", "-b", "agent/x"]);
+        std::fs::create_dir_all(tmp.join("src")).unwrap();
+        std::fs::write(tmp.join("src/new.rs"), "b").unwrap();
+        std::fs::write(tmp.join("base.rs"), "changed").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "work"]);
+        let both = vec!["base.rs".to_string(), "src/new.rs".to_string()];
+        assert_eq!(branch_files(&root, None, "agent/x").await, both);
+        // A PR for another head, from wherever HEAD is.
+        git(&tmp, &["checkout", "-q", "main"]);
+        assert_eq!(branch_files(&root, None, "agent/x").await, both, "--head, not the checked-out branch");
+        // A stacked PR: based on agent/x, it changes only its own commit.
+        git(&tmp, &["checkout", "-q", "-b", "agent/y", "agent/x"]);
+        std::fs::write(tmp.join("y.rs"), "y").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "stacked"]);
+        assert_eq!(branch_files(&root, Some("agent/x"), "agent/y").await, vec!["y.rs".to_string()]);
+        git(&tmp, &["config", "branch.agent/y.gh-merge-base", "agent/x"]);
+        assert_eq!(merge_base_setting(&root, "agent/y").await.as_deref(), Some("agent/x"));
+        assert!(branch_files(&root, None, "no/such/branch").await.is_empty(), "a head that can't be found");
+        assert!(branch_files(&root, None, "--output=x").await.is_empty(), "never a flag");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

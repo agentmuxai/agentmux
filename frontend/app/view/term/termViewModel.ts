@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -161,7 +162,7 @@ class TermViewModel {
                         } else {
                             rtn.push({
                                 elemtype: "iconbutton",
-                                icon: "xmark-large",
+                                icon: "xmark",
                                 iconColor: "var(--error-color)",
                                 title: "Exit Code: " + fullShellProcStatus?.shellprocexitcode,
                                 noAction: true,

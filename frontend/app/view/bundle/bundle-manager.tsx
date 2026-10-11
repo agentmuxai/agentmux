@@ -37,7 +37,7 @@ interface BundleManagerBodyProps {
  *  requiring a trip to the docs. */
 const FieldHelp = (props: { text: string }): JSX.Element => (
     <Tooltip content={props.text} placement="right">
-        <i class="fa-sharp fa-solid fa-circle-info bundle-view-field-help" aria-hidden="true" />
+        <i class="fa-solid fa-circle-info bundle-view-field-help" aria-hidden="true" />
     </Tooltip>
 );
 

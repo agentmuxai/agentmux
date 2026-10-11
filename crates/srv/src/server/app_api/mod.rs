@@ -53,6 +53,8 @@ pub(crate) mod pane;
 // `dev_server::handle_register_dev_server` directly, same pattern as
 // `pane`'s `handle_close_pane` just above.
 pub(crate) mod dev_server;
+// pub(crate): `agentmux-mcp doctor`'s routes, in `routes.rs`.
+pub(crate) mod mcp_health;
 // pub(crate): the viewer feed reads transcripts through `read_range`.
 pub(crate) mod blockfile;
 pub(crate) mod session;
@@ -262,17 +264,22 @@ pub(super) fn resolve_tab_id_for_block(mstore: &Store, block_id: &str) -> Result
     Err(format!("resolve_tab_id_for_block: block {block_id} not found in any tab"))
 }
 
-/// Find an existing Editor-view block in a tab on `connection` (its meta
-/// `connection`; absent and `local` are this computer), if any. Direct
-/// sibling of `find_agent_block` above, checking `meta.view == "editor"`
-/// instead of `meta.agentId`. An editor on another connection is never it:
-/// its reads and saves go there (remote terminals spec §6.3).
+/// Find an Editor-view block the tab shows ([`shown_block_ids`]: in front
+/// of its stack, not minimized, not hidden behind a magnified pane) on
+/// `connection` (its meta `connection`; absent and `local` are this
+/// computer), if any. Direct sibling of `find_agent_block` above, checking
+/// `meta.view == "editor"` instead of `meta.agentId`. An editor on another
+/// connection is never it: its reads and saves go there (remote terminals
+/// spec §6.3).
 pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str) -> Result<Option<Block>, String> {
     let tab: Tab = mstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
+    let Ok(layout) = mstore.must_get::<obj::LayoutState>(&tab.layoutstate) else {
+        return Ok(None);
+    };
 
-    for block_id in &tab.blockids {
-        if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
+    for block_id in shown_block_ids(&layout) {
+        if let Ok(Some(block)) = mstore.get::<Block>(&block_id) {
             if obj::meta_get_string(&block.meta, "view", "") == "editor"
                 && same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection)
             {
@@ -281,6 +288,35 @@ pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str) 
         }
     }
     Ok(None)
+}
+
+/// The blocks a tab's layout shows: each pane's active member (the tab
+/// in front of its stack), leaving out minimized panes, and every pane
+/// but the magnified one while one is magnified. A file pushed into an
+/// editor the user can't see would look like nothing happened
+/// (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §2.2).
+pub(super) fn shown_block_ids(layout: &obj::LayoutState) -> Vec<String> {
+    fn walk(node: &agentmux_common::LayoutNode, magnified: &str, out: &mut Vec<String>) {
+        if crate::backend::layout::is_effectively_minimized(node) {
+            return;
+        }
+        if node.children.is_empty() {
+            if let Some(data) = &node.data {
+                if !data.block_id.is_empty() && (magnified.is_empty() || magnified == node.id) {
+                    out.push(data.block_id.clone());
+                }
+            }
+            return;
+        }
+        for child in &node.children {
+            walk(child, magnified, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(root) = &layout.rootnode {
+        walk(root, &layout.magnifiednodeid, &mut out);
+    }
+    out
 }
 
 /// Whether two panes' connections are one: absent and `local` are this

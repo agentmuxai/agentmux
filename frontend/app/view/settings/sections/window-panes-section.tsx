@@ -32,12 +32,12 @@ export const WINDOW_SETTINGS = {
         section: "window",
         keywords: ["pane jump", "pane numbers", "quick switch", "app:showoverlayblocknums"],
     },
-    skipTabCloseConfirm: {
-        id: "window.skip_tab_close_confirm",
-        label: "Skip tab close confirmation",
-        description: "Don't prompt for confirmation when closing a tab",
+    confirmTabClose: {
+        id: "window.confirm_tab_close",
+        label: "Confirm before closing a tab",
+        description: "Ask before closing a tab, instead of closing it at once",
         section: "window",
-        keywords: ["close tab prompt", "confirm close", "tab:skipcloseconfirm"],
+        keywords: ["close tab prompt", "confirm close", "tab:confirmclose"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -85,13 +85,13 @@ export function WindowPanesSection(): JSX.Element {
                 }
             />
             <SettingRow
-                id={WINDOW_SETTINGS.skipTabCloseConfirm.id}
-                label={WINDOW_SETTINGS.skipTabCloseConfirm.label}
-                description={WINDOW_SETTINGS.skipTabCloseConfirm.description}
+                id={WINDOW_SETTINGS.confirmTabClose.id}
+                label={WINDOW_SETTINGS.confirmTabClose.label}
+                description={WINDOW_SETTINGS.confirmTabClose.description}
                 control={
                     <ToggleControl
-                        checked={!!(s()["tab:skipcloseconfirm"] as boolean)}
-                        onChange={(v) => set("tab:skipcloseconfirm", v)}
+                        checked={(s()["tab:confirmclose"] ?? false) as boolean}
+                        onChange={(v) => set("tab:confirmclose", v)}
                     />
                 }
             />

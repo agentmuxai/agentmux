@@ -52,6 +52,40 @@ pub(crate) fn rest_base_url() -> String {
         .unwrap_or_else(|| crate::muxbus::cloud_subscriber::MUXBUS_REST_URL.to_string())
 }
 
+/// What the desktop's relay calls send as `User-Agent`, so the relay can tell
+/// app versions apart (reqwest sends none of its own).
+pub(crate) const USER_AGENT: &str = concat!("agentmux/", env!("CARGO_PKG_VERSION"));
+
+/// The most agents one batch request may name (the relay's own limit).
+pub(crate) const MAX_BATCH_AGENTS: usize = 50;
+
+/// How long to stop asking a relay that answered 404 to a batch route
+/// (`/reactive/pending-batch`, `/agents/lease/renew-batch`): it predates them.
+const BATCH_ROUTES_RETRY: std::time::Duration = std::time::Duration::from_secs(600);
+
+static BATCH_ROUTES_MISSING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Whether the relay at `base` recently answered 404 to a batch route. Its
+/// callers then ask per agent, as before the batch routes existed. Keyed by
+/// relay, so a relay without them never switches them off for another.
+pub(crate) fn batch_routes_missing(base: &str) -> bool {
+    BATCH_ROUTES_MISSING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(base)
+        .is_some_and(|until| *until > std::time::Instant::now())
+}
+
+/// Note a 404 from the relay at `base` to a batch route.
+pub(crate) fn note_batch_routes_missing(base: &str) {
+    tracing::info!("relay has no batch routes yet: asking per agent for now");
+    BATCH_ROUTES_MISSING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(base.to_string(), std::time::Instant::now() + BATCH_ROUTES_RETRY);
+}
+
 /// The W3-S carried tuple (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.1):
 /// the sender's WAN signature and the exact values it signed, so a receiver
 /// can re-check it. Field names are the cloud's; an old cloud silently

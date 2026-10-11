@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -151,7 +152,7 @@ const SearchComponent = (props: SearchProps): JSX.Element => {
 
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: "xmark-large",
+        icon: "xmark",
         title: "Close (Esc)",
         click: () => isOpenAtom._set(false),
     };

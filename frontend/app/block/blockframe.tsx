@@ -1,3 +1,4 @@
+// Copyright 2025, Command Line Inc.
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -373,7 +374,7 @@ function EndIcons(props: {
 
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: "xmark-large",
+        icon: "xmark",
         title: "Close",
         click: props.nodeModel.onClose,
     };
@@ -804,7 +805,7 @@ function BlockFrame_Header(
                         onClick={() => clipboardWriteText(props.error.message + "\n" + props.error.stack)}
                     >
                         <i
-                            class="fa-sharp fa-solid fa-triangle-exclamation"
+                            class="fa-solid fa-triangle-exclamation"
                             title={"Error Rendering View Header: " + props.error.message}
                         />
                     </div>
@@ -983,7 +984,7 @@ function ConnStatusOverlay({
                                     when={width() && width() < 350}
                                     fallback="Reconnect"
                                 >
-                                    <i class="fa-sharp fa-solid fa-rotate-right"></i>
+                                    <i class="fa-solid fa-rotate-right"></i>
                                 </Show>
                             </Button>
                         </div>

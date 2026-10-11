@@ -1,4 +1,5 @@
-// Copyright 2024-2026, AgentMux Corp.
+// Copyright 2024, Command Line Inc.
+// Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 /**
@@ -38,6 +39,7 @@
  *   reset on the next render cycle.
  */
 
+import { IconButton } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
@@ -45,6 +47,7 @@ import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, untrack, type JSX } from "solid-js";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
+import { OpenInEditorButton } from "../agent-open-in-editor";
 import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
@@ -52,6 +55,7 @@ import { PeekMetaRow } from "./PeekMetaRow";
 import { ShellTokens } from "./shell-highlight/ShellCommand";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
+import { markdownPreviewPath } from "./tool-renderers/builtins";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descriptors";
 import { rowDisclosure } from "../virtualization/disclosure";
@@ -230,6 +234,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // mid-read.
     const [userHolding, setUserHolding] = createSignal(false);
     const expanded = () => disclosure().open || userHolding();
+    // The preview at three times its usual height, toggled from its top-right
+    // actions (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §3).
+    const [tall, setTall] = createSignal(false);
     // The panel's body (full tool output: diffs, file previews, Bash output,
     // all highlighted with shiki) mounts the first time the panel opens and
     // then stays — never unmounted on collapse, so the collapse transition
@@ -401,7 +408,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             fallback={<AnsweredQuestionMessage node={props.node} cancelled={isCancelledQuestion()} />}
         >
             <div
-                ref={setPeekRowEl}
                 class={clsx("agent-tool-block", {
                     collapsed: !expanded(),
                     expanded: expanded(),
@@ -421,22 +427,25 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 // names CSS needs to target one specific open-ended tool without touching the
                 // shared "other" styling every other unrecognized tool also falls back to.
                 data-tool-name={props.node.toolName?.toLowerCase()}
-                // Peek-hover fires from anywhere in the row (not just the tool-name
-                // text) per SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25 —
-                // merged with the pre-existing userHolding handlers below rather
-                // than adding a second listener pair, since SolidJS only keeps the
-                // last onMouseEnter/onMouseLeave assigned to a given element.
+                // Hold an open, pin-toggled (panel) tool while the mouse is anywhere in it.
                 onMouseEnter={() => {
-                    // Hold an open, pin-toggled (panel) tool while the mouse is in it.
                     if (disclosure().open && disclosure().toggle === "pin") setUserHolding(true);
-                    handlePeekEnter();
                 }}
-                onMouseLeave={() => {
-                    setUserHolding(false);
-                    handlePeekLeave();
-                }}
+                onMouseLeave={() => setUserHolding(false)}
             >
-                <div class="agent-tool-summary" onClick={onHeaderClick}>
+                {/* The peek belongs to the tool call's line, anywhere on it, but
+                    not to its expanded output: a peek over the output covered
+                    the text being read or selected
+                    (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §1).
+                    The anchor moves with the handlers, so the panel is placed
+                    against, and bridged from, the line. */}
+                <div
+                    ref={setPeekRowEl}
+                    class="agent-tool-summary"
+                    onClick={onHeaderClick}
+                    onMouseEnter={handlePeekEnter}
+                    onMouseLeave={handlePeekLeave}
+                >
                     <span class="agent-tool-status-icon">{statusIcon()}</span>
                     <span class="agent-tool-name-peek-anchor">
                         <Show
@@ -581,6 +590,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     class={clsx("agent-tool-panel", {
                         "agent-tool-panel--hidden": panelMode() === "hidden",
                         "agent-tool-panel--flow": panelMode() === "flow",
+                        "agent-tool-panel--tall": tall() && panelMode() === "flow",
                     })}
                     // Codex P2 on #988: with the always-rendered markup, the
                     // collapsed panel was visually hidden via max-height /
@@ -594,6 +604,22 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     onClick={(e) => e.stopPropagation()}
                 >
                     <Show when={bodyMounted()}>
+                        <div class="agent-tool-panel-actions">
+                            <Show when={markdownPreviewPath(props.node)}>
+                                {(path) => <OpenInEditorButton path={path()} />}
+                            </Show>
+                            <IconButton
+                                class="agent-tool-panel-height"
+                                icon={tall() ? "compress" : "expand"}
+                                label={tall() ? "Shorter preview" : "Taller preview"}
+                                density="compact"
+                                // The label says the state; no aria-pressed on top.
+                                onClick={(e: MouseEvent) => {
+                                    e.stopPropagation();
+                                    setTall(!tall());
+                                }}
+                            />
+                        </div>
                         <Show
                             when={!props.node.resultUnloaded}
                             fallback={

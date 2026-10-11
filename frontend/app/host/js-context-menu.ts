@@ -207,7 +207,7 @@ export function showJsContextMenu(
                 row.style.position = "relative";
 
                 const arrow = document.createElement("i");
-                arrow.className = "fa-sharp fa-solid fa-chevron-right";
+                arrow.className = "fa-solid fa-chevron-right";
                 row.appendChild(arrow);
 
                 const sub = document.createElement("div");

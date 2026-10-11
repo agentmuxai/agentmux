@@ -33,6 +33,7 @@
     // "window:showmenubar":       false,
     // "window:nativetitlebar":    false,
     // "window:confirmclose":      false,
+    // "tab:confirmclose":         false,
     // "window:savelastwindow":    true,
     // "window:keepinactivetabslaidout": true,
     // "window:dimensions":        "",
@@ -158,6 +159,10 @@
     // Tell an agent, in a short [AgentMux] note, when it edits a file another
     // agent on this computer is also changing, so it can message them first.
     // "agent:overlapnotes":        true,
+
+    // When an agent's AgentMux tools (its MCP server) don't connect, reconnect
+    // them, then restart the agent once without the shell prefix.
+    // "agent:mcpselfheal":         true,
 
     // -- Other --
     // "widget:icononly":           false,
