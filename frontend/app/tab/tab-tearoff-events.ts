@@ -20,6 +20,7 @@ import {
 } from "./tabbar-dnd";
 import { Logger } from "@/util/logger";
 import { markEscaped } from "@/app/drag/drag-session";
+import { acceptWindowTabsFromOtherWindows, type WindowTabDragData } from "@/app/drag/foreign-drop";
 
 /**
  * Phase 4 — listen for the host's tear-off events. Each AgentMux
@@ -88,6 +89,68 @@ export function useTabTearOffEvents(
         const dpr = () => (isWindows() ? Math.max(1, window.devicePixelRatio || 1) : 1);
         const physicalToClientX = (px: number) => px / dpr() - window.screenX;
         const physicalToClientY = (py: number) => py / dpr() - window.screenY;
+
+        /**
+         * Move a window tab from another window into this one: at `clientX`
+         * when it's over the strip; elsewhere in the window it's appended,
+         * or ignored when `stripOnly` (a hook's release over the content area
+         * is the cross-drag pipeline's to append). A window's last tab is
+         * restored here and its emptied window closed; the main window's last
+         * tab never moves (SPEC §4.3).
+         */
+        const mergeTabFromAnotherWindow = (
+            payload: WindowTabDragData,
+            clientX: number,
+            clientY: number,
+            stripOnly: boolean,
+            via: string,
+        ) => {
+            setInsertionPoint(null);
+            fireAndForget(async () => {
+                try {
+                    const ownWsId = workspace()?.oid;
+                    if (!ownWsId) {
+                        Logger.warn("dnd", `${via} — no own workspace, skipping`, payload);
+                        return;
+                    }
+                    if (payload.fromWsId === ownWsId) return; // a same-workspace "move" would reorder-to-end
+                    const stripRect = tabBarScrollRef()?.getBoundingClientRect();
+                    const overStrip = !!stripRect && clientY >= stripRect.top && clientY <= stripRect.bottom;
+                    if (!overStrip && stripOnly) {
+                        Logger.info("dnd", `${via} — cursor not over strip, ignoring`, payload);
+                        return;
+                    }
+                    const insertIdx = overStrip
+                        ? insertionPointToIndex(computeInsertionPoint(clientX), tabIds())
+                        : tabIds().length;
+                    if (payload.isLastTab && payload.sourceWindowLabel === "main") {
+                        Logger.info("dnd", `${via} — declining last tab of main window`, payload);
+                        return;
+                    }
+                    // Mark BEFORE the awaits — CrossWindowDropOverlay's
+                    // cross-drag-end for the same gesture arrives while these
+                    // RPCs are in flight, and the mark is what makes it a no-op.
+                    markTabMerged(payload.tabId);
+                    if (payload.isLastTab) {
+                        await WorkspaceService.RestoreTornOffTab(payload.tabId, payload.fromWsId, ownWsId, insertIdx);
+                        await getApi().closeWindowByLabel(payload.sourceWindowLabel);
+                    } else {
+                        await WorkspaceService.MoveTabToWorkspace(payload.tabId, payload.fromWsId, ownWsId, insertIdx);
+                    }
+                    setBouncingTabId(payload.tabId);
+                    setTimeout(() => setBouncingTabId(null), 400);
+                    Logger.info("dnd", `${via} complete`, {
+                        tabId: payload.tabId,
+                        fromWsId: payload.fromWsId,
+                        ownWsId,
+                        insertIdx,
+                        isLastTab: payload.isLastTab,
+                    });
+                } catch (e) {
+                    Logger.error("dnd", `${via} failed`, { error: String(e), payload });
+                }
+            });
+        };
         fireAndForget(async () => {
             const listenEvent: AppApi["listen"] = (event, callback) => getApi().listen(event, callback);
             if (!mounted) return;
@@ -221,97 +284,27 @@ export function useTabTearOffEvents(
             );
 
             trackOrDispose(
-                await listenEvent<{
-                    tabId: string;
-                    fromWsId: string;
-                    sourceWindowLabel: string;
-                    isLastTab: boolean;
-                    cursorX: number;
-                    cursorY: number;
-                }>("tabdrag:merge-direct", (payload) => {
-                    setInsertionPoint(null);
-                    fireAndForget(async () => {
-                        try {
-                            const ownWsId = workspace()?.oid;
-                            if (!ownWsId) {
-                                Logger.warn("dnd", "tabdrag:merge-direct — no own workspace, skipping", payload);
-                                return;
-                            }
-                            if (payload.fromWsId === ownWsId) {
-                                // Shouldn't happen (hook excludes the source
-                                // window), but a same-workspace "move" would
-                                // reorder-to-end; bail defensively.
-                                return;
-                            }
-                            // Strip-area hit test, same as tearoff:merge:
-                            // releasing over this window's CONTENT area is
-                            // not a header drop. The legacy cross-drag
-                            // pipeline (CrossWindowDropOverlay) still handles that
-                            // case as an append-merge, unchanged.
-                            const stripRect = tabBarScrollRef()?.getBoundingClientRect();
-                            const clientX = physicalToClientX(payload.cursorX);
-                            const clientY = physicalToClientY(payload.cursorY);
-                            if (
-                                !stripRect ||
-                                clientY < stripRect.top ||
-                                clientY > stripRect.bottom
-                            ) {
-                                Logger.info("dnd", "tabdrag:merge-direct — cursor not over strip, ignoring", payload);
-                                return;
-                            }
-                            const insertIdx = insertionPointToIndex(
-                                computeInsertionPoint(clientX),
-                                tabIds(),
-                            );
-                            // Never close the main window (SPEC §4.3): a
-                            // 1-tab main's last tab stays put rather than
-                            // feeding the last-window quit sequence.
-                            if (payload.isLastTab && payload.sourceWindowLabel === "main") {
-                                Logger.info(
-                                    "dnd",
-                                    "tabdrag:merge-direct — declining last tab of main window",
-                                    payload,
-                                );
-                                return;
-                            }
-                            // Mark BEFORE the awaits — CrossWindowDropOverlay's
-                            // cross-drag-end for the same gesture arrives
-                            // while these RPCs are in flight, and the mark
-                            // is what makes it a no-op.
-                            markTabMerged(payload.tabId);
-                            if (payload.isLastTab) {
-                                await WorkspaceService.RestoreTornOffTab(
-                                    payload.tabId,
-                                    payload.fromWsId,
-                                    ownWsId,
-                                    insertIdx,
-                                );
-                                await getApi().closeWindowByLabel(payload.sourceWindowLabel);
-                            } else {
-                                await WorkspaceService.MoveTabToWorkspace(
-                                    payload.tabId,
-                                    payload.fromWsId,
-                                    ownWsId,
-                                    insertIdx,
-                                );
-                            }
-                            setBouncingTabId(payload.tabId);
-                            setTimeout(() => setBouncingTabId(null), 400);
-                            Logger.info("dnd", "tabdrag:merge-direct complete", {
-                                tabId: payload.tabId,
-                                fromWsId: payload.fromWsId,
-                                ownWsId,
-                                insertIdx,
-                                isLastTab: payload.isLastTab,
-                            });
-                        } catch (e) {
-                            Logger.error("dnd", "tabdrag:merge-direct failed", {
-                                error: String(e),
-                                payload,
-                            });
-                        }
-                    });
-                }),
+                await listenEvent<WindowTabDragData & { cursorX: number; cursorY: number }>(
+                    "tabdrag:merge-direct",
+                    (payload) =>
+                        mergeTabFromAnotherWindow(
+                            payload,
+                            physicalToClientX(payload.cursorX),
+                            physicalToClientY(payload.cursorY),
+                            true,
+                            "tabdrag:merge-direct",
+                        ),
+                ),
+            );
+
+            // Linux has no hook: the window the tab is dropped on merges it
+            // from its own DOM drop (foreign-drop.ts), anywhere in the window.
+            const ownLabel = await getApi().getWindowLabel();
+            if (!mounted) return;
+            trackOrDispose(
+                acceptWindowTabsFromOtherWindows(ownLabel, (data, e) =>
+                    mergeTabFromAnotherWindow(data, e.clientX, e.clientY, false, "cross-window drop"),
+                ),
             );
 
             // Phase 5 — cancel-back. Source window receives this on

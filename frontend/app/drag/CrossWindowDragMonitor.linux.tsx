@@ -13,7 +13,7 @@ import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { endedByEscape } from "./native-cancel";
-import { acceptWindowTabsFromOtherWindows, maybeDroppedInAnotherWindow } from "./foreign-drop";
+import { maybeDroppedInAnotherWindow } from "./foreign-drop";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
@@ -104,11 +104,9 @@ function CrossWindowDragMonitor(): JSX.Element {
         };
 
         const stopDragOver = onWindowDrag({ kinds: ["tile", "window-tab", "pane-tab"], over: handleDragOver });
-        const stopAccepting = acceptWindowTabsFromOtherWindows(windowLabelRef ?? "main");
         document.addEventListener("dragend", handleDragEnd);
         onCleanup(() => {
             stopDragOver();
-            stopAccepting();
             document.removeEventListener("dragend", handleDragEnd);
         });
     });

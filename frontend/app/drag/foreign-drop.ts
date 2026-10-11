@@ -7,26 +7,51 @@
  * The host can't tell which window a release landed on: native Wayland gives
  * no client its windows' screen positions, and off Windows there's no window
  * hit test at all. The window the tab was dropped on can, though: it gets the
- * drop. So the dragged tab carries a marker ({@link WINDOW_TAB_MIME}), a
- * window that sees it from another window accepts the drop, and on `drop`
- * tells the host it took it (`claim_cross_drag_target`). The source's
- * cross-window drag-end then asks the host for the target, as it always did,
- * and the existing cross-window pipeline moves the tab.
+ * drop. So the dragged tab carries its details ({@link WINDOW_TAB_MIME}), and a
+ * window that sees them from another window accepts the drop and merges the
+ * tab itself, the same way the Windows and macOS hooks' `tabdrag:merge-direct`
+ * does (a window's last tab restores into it and closes the emptied window).
  *
- * The source has to hand the release to that path rather than tear the tab
- * off itself. It can't know for sure that another window took it: on X11 a
- * release over the desktop also ends with drop effect "move". So it defers
- * whenever the drag ended with "move" and no `drop` in its own window
- * ({@link maybeDroppedInAnotherWindow}); the cross-window path tears off if
- * no window claims the drop.
+ * The source must not also act on the release. It can't know for sure that
+ * another window took it: on X11 a release over the desktop also ends with
+ * drop effect "move". So it defers whenever the drag ended with "move" and no
+ * `drop` in its own window ({@link maybeDroppedInAnotherWindow}), and its
+ * cross-window drag-end asks the host for the target. The window that merged
+ * the tab has claimed the drop (`claim_cross_drag_target`), so the host names
+ * it; with no claim the source tears off. A lone tab has no such drag-end, so
+ * nothing claims it.
  */
 
 import { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { isLinux } from "@/util/platformutil";
 
-/** The marker a dragged window tab carries, so another window can tell it from other drags. */
+/** The type a dragged window tab's details travel under, so another window can tell it from other drags. */
 export const WINDOW_TAB_MIME = "application/x-agentmux-window-tab";
+
+/** What another window needs to merge a dropped window tab. */
+export interface WindowTabDragData {
+    tabId: string;
+    fromWsId: string;
+    sourceWindowLabel: string;
+    /** The source window's only tab: merging it closes that window. */
+    isLastTab: boolean;
+}
+
+/** A window tab's details as drag data, for `getInitialDataForExternal`. */
+export function windowTabDragData(data: WindowTabDragData): Record<string, string> {
+    return { [WINDOW_TAB_MIME]: JSON.stringify(data) };
+}
+
+function parseWindowTabDragData(raw: string | undefined): WindowTabDragData | null {
+    try {
+        const d = JSON.parse(raw ?? "");
+        const ok = typeof d?.tabId === "string" && typeof d?.fromWsId === "string" && typeof d?.sourceWindowLabel === "string";
+        return ok ? { tabId: d.tabId, fromWsId: d.fromWsId, sourceWindowLabel: d.sourceWindowLabel, isLastTab: d.isLastTab === true } : null;
+    } catch {
+        return null;
+    }
+}
 
 /** Whether this window saw a `drop` during the current drag (a drag that
  *  started here resets it). */
@@ -61,10 +86,14 @@ function isWindowTabFromElsewhere(e: DragEvent): boolean {
 }
 
 /**
- * Linux: accept window tabs dragged in from other windows, and claim each one
- * dropped here with the host. Returns the disposer.
+ * Linux: accept window tabs dragged in from other windows. Each one dropped
+ * here goes to `merge`, and is claimed with the host so its source doesn't
+ * also tear it off. Returns the disposer.
  */
-export function acceptWindowTabsFromOtherWindows(windowLabel: string): () => void {
+export function acceptWindowTabsFromOtherWindows(
+    windowLabel: string,
+    merge: (data: WindowTabDragData, e: DragEvent) => void,
+): () => void {
     if (!isLinux()) return () => {};
     const onDragOver = (e: DragEvent) => {
         if (!isWindowTabFromElsewhere(e)) return;
@@ -74,10 +103,18 @@ export function acceptWindowTabsFromOtherWindows(windowLabel: string): () => voi
     const onDrop = (e: DragEvent) => {
         if (!isWindowTabFromElsewhere(e)) return;
         e.preventDefault();
-        Logger.info("dnd:cross", "window tab dropped here from another window; claiming the drop", { windowLabel });
-        getApi()
-            .claimCrossDragTarget?.(windowLabel)
-            .catch((err) => Logger.warn("dnd:cross", "claim_cross_drag_target failed", { error: String(err) }));
+        const data = parseWindowTabDragData(e.dataTransfer?.getData(WINDOW_TAB_MIME));
+        if (!data) {
+            Logger.warn("dnd:cross", "window tab dropped from another window without readable details", { windowLabel });
+            return;
+        }
+        Logger.info("dnd:cross", "window tab dropped here from another window", { windowLabel, tabId: data.tabId, isLastTab: data.isLastTab });
+        if (!data.isLastTab) {
+            getApi()
+                .claimCrossDragTarget?.(windowLabel)
+                .catch((err) => Logger.warn("dnd:cross", "claim_cross_drag_target failed", { error: String(err) }));
+        }
+        merge(data, e);
     };
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("drop", onDrop);
