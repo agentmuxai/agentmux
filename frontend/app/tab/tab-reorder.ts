@@ -143,18 +143,17 @@ export function useTabDragAndDrop(
         window.addEventListener("keydown", onDragEscape, true);
         onCleanup(() => window.removeEventListener("keydown", onDragEscape, true));
 
-        // Windows: the page never sees Escape during a drag (native-cancel.ts),
-        // so a cancelled drag arrives as a bare dragend with no drop effect.
-        // Note its effect here; `onDrop` below, which a cancel reaches through
-        // pragmatic's own dragend, asks whether the button was still down.
+        // The page often doesn't see Escape during the OS drag
+        // (native-cancel.ts), so a cancelled drag arrives as a bare dragend
+        // with no drop effect. Note its effect here; `onDrop` below, which a
+        // cancel reaches through pragmatic's own dragend, asks whether the
+        // button was still down.
         let endEffect: string | undefined;
-        if (isWindows()) {
-            const onDragEnd = (e: DragEvent) => {
-                endEffect = e.dataTransfer?.dropEffect;
-            };
-            window.addEventListener("dragend", onDragEnd, true);
-            onCleanup(() => window.removeEventListener("dragend", onDragEnd, true));
-        }
+        const onDragEnd = (e: DragEvent) => {
+            endEffect = e.dataTransfer?.dropEffect;
+        };
+        window.addEventListener("dragend", onDragEnd, true);
+        onCleanup(() => window.removeEventListener("dragend", onDragEnd, true));
 
         const cleanup = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tabItemType,
@@ -175,7 +174,7 @@ export function useTabDragAndDrop(
                 // Every window-tab release reaches this monitor, after the
                 // source's onDrop (pragmatic: source, targets, monitors).
                 const escaped = session()?.escaped ?? false;
-                // Windows: a cancelled drag (see `endEffect` above) can only be
+                // A cancelled drag (see `endEffect` above) can only be
                 // told from a release by asking the OS, which takes a round
                 // trip. So everything synchronous below still runs first, and
                 // the payload is cleared before CrossWindowDragMonitor's

@@ -12,6 +12,7 @@ import { atoms, getApi } from "@/store/global";
 import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
+import { endedByEscape } from "./native-cancel";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
@@ -60,12 +61,11 @@ function CrossWindowDragMonitor(): JSX.Element {
             if (!payload) return;
 
             // Escape was pressed during this drag — abort here too, same
-            // reasoning as the darwin variant (reagent PR #2310 P1). Linux
-            // doesn't have a native-hook-driven escape signal yet (that's
-            // macOS-only so far), but the DOM keydown fallback in
-            // tab-reorder.ts still sets this flag, so honoring it here costs
-            // nothing and closes the same gap if/when it applies.
-            if (dragSession?.escaped) {
+            // reasoning as the darwin variant (reagent PR #2310 P1).
+            // The page doesn't see Escape during the OS drag, so also ask the
+            // drag's end (native-cancel.ts); the effect is read before the await.
+            const dropEffect = e.dataTransfer?.dropEffect;
+            if (dragSession?.escaped || (await endedByEscape(dropEffect))) {
                 Logger.info("dnd:cross", "cross-window drag aborted via Escape");
                 return;
             }

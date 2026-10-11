@@ -242,6 +242,34 @@ pub fn get_mouse_button_state() -> Result<serde_json::Value, String> {
         let state = unsafe { GetAsyncKeyState(0x01) }; // VK_LBUTTON
         return Ok(serde_json::json!((state as u16 & 0x8000) != 0));
     }
+    #[cfg(target_os = "macos")]
+    {
+        // No permission needed, unlike an event tap.
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGEventSourceButtonState(state_id: i32, button: u32) -> bool;
+        }
+        const COMBINED_SESSION_STATE: i32 = 0; // kCGEventSourceStateCombinedSessionState
+        const LEFT_BUTTON: u32 = 0; // kCGMouseButtonLeft
+        let down = unsafe { CGEventSourceButtonState(COMBINED_SESSION_STATE, LEFT_BUTTON) };
+        return Ok(serde_json::json!(down));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // X11 (or XWayland): the pointer's button mask on the root window. A
+        // session without an X server answers with an error, which the page
+        // treats as a release.
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::{ConnectionExt as _, KeyButMask};
+        let (conn, screen) = x11rb::connect(None).map_err(|e| format!("X11 connect: {e}"))?;
+        let root = conn.setup().roots[screen].root;
+        let reply = conn
+            .query_pointer(root)
+            .map_err(|e| format!("X11 query_pointer: {e}"))?
+            .reply()
+            .map_err(|e| format!("X11 query_pointer reply: {e}"))?;
+        return Ok(serde_json::json!(reply.mask.contains(KeyButMask::BUTTON1)));
+    }
     #[allow(unreachable_code)]
     Ok(serde_json::json!(false))
 }
