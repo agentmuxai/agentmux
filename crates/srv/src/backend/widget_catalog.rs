@@ -26,9 +26,13 @@ use super::widget_signature as sig;
 pub const DEFAULT_CATALOG_URL: &str = "https://agentmuxai.github.io/widgets/index.json";
 
 /// The catalog keys AgentMux trusts (base64 Ed25519 public keys). The
-/// private half lives only in the catalog repository's CI. More than one,
-/// for a rotation.
-pub const CATALOG_KEYS: &[&str] = &[];
+/// private half lives only in the catalog repository's CI
+/// (`agentmuxai/widgets`, secret `CATALOG_SIGNING_SEED`). More than one, for
+/// a rotation.
+pub const CATALOG_KEYS: &[&str] = &[
+    // 2026-10-11, the first catalog key.
+    "iFz5TLnwIg/oApX6WVrjmdVT6HDl133MeaWlQpA+MjE=",
+];
 
 const MAX_INDEX_BYTES: usize = 5 * 1024 * 1024;
 const CATALOG_VERSION: u32 = 1;
