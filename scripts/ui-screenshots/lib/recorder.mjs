@@ -152,6 +152,9 @@ export function concatList(frames, end, endHoldS = 0) {
     return lines.join("\n") + "\n";
 }
 
+/** Rounds the width and height down to even numbers (for H.264). */
+export const EVEN_DIMENSIONS = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+
 /** The ffmpeg filter for `crop` (CSS pixels of the frame), scaled to `width`. */
 export function filterFor({ crop, width, fps }) {
     const parts = [`fps=${fps}`];
@@ -180,7 +183,9 @@ export function encode({ frames, end, crop, out, formats = ["gif"], width = 800,
             } else if (fmt === "webp") {
                 args = [...input, "-vf", base, "-c:v", "libwebp_anim", "-lossless", "0", "-q:v", "80", "-loop", "0", file];
             } else if (fmt === "mp4") {
-                args = [...input, "-vf", `${base},format=yuv420p`, "-c:v", "libx264", "-crf", "24", "-preset", "slow", "-movflags", "+faststart", file];
+                // H.264 in yuv420p needs even dimensions; an odd --width or crop
+                // is rounded down a pixel (Codex on #4670).
+                args = [...input, "-vf", `${base},${EVEN_DIMENSIONS},format=yuv420p`, "-c:v", "libx264", "-crf", "24", "-preset", "slow", "-movflags", "+faststart", file];
             } else {
                 throw new Error(`unknown format "${fmt}" (gif, webp, mp4)`);
             }
