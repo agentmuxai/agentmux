@@ -49,6 +49,19 @@ export function liveRefit(proposed: GridSize, current: GridSize, bufferLines: nu
  */
 export const LIVE_REFITS_PER_FRAME = 2;
 
+/**
+ * Refits may use this share of the time that passes. What a refit costs
+ * depends on the GPU: on a Mac one took ~4.5–7.5 ms, nearly all of it waiting,
+ * so two a frame left the page drawing half its frames during a drag
+ * (ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md §6.1). Each refit spends its
+ * measured time from a credit that grows by this share of the elapsed time,
+ * and a refit starts only while the credit is positive: cheap refits still
+ * run `LIVE_REFITS_PER_FRAME` a frame, costly ones about one every other frame.
+ */
+export const LIVE_REFIT_TIME_SHARE = 0.25;
+/** The most credit that builds up while nothing refits: about one frame's share at 60 Hz. */
+export const LIVE_REFIT_MAX_CREDIT_MS = 4;
+
 export interface RefitScheduler {
     /** Run `job` this frame if the frame has room, otherwise on a later frame. One job per key. */
     schedule(key: object, job: () => void): void;
@@ -58,17 +71,21 @@ export interface RefitScheduler {
 
 /**
  * Spreads terminal refits over frames: up to `perFrame` run in the frame
- * they're asked for, the rest wait for the next frames in arrival order. A
- * waiting job is replaced by a newer one for the same key, keeping its place,
- * and runs then, so it measures the size of that frame.
+ * they're asked for while their time credit lasts (`LIVE_REFIT_TIME_SHARE`),
+ * the rest wait for the next frames in arrival order. A waiting job is
+ * replaced by a newer one for the same key, keeping its place, and runs then,
+ * so it measures the size of that frame.
  */
 export function createRefitScheduler(
     perFrame: number,
-    requestFrame: (cb: () => void) => void = (cb) => requestAnimationFrame(cb)
+    requestFrame: (cb: () => void) => void = (cb) => requestAnimationFrame(cb),
+    now: () => number = () => performance.now()
 ): RefitScheduler {
     const waiting = new Map<object, () => void>();
     let ranThisFrame = 0;
     let frameRequested = false;
+    let credit = LIVE_REFIT_MAX_CREDIT_MS;
+    let creditAt = now();
 
     const onFrame = () => {
         frameRequested = false;
@@ -86,12 +103,20 @@ export function createRefitScheduler(
     let draining = false;
     const drain = () => {
         draining = true;
+        const t = now();
+        credit = Math.min(LIVE_REFIT_MAX_CREDIT_MS, credit + (t - creditAt) * LIVE_REFIT_TIME_SHARE);
+        creditAt = t;
         try {
             for (const [key, job] of waiting) {
-                if (ranThisFrame >= perFrame) break;
+                if (ranThisFrame >= perFrame || credit <= 0) break;
                 waiting.delete(key);
                 ranThisFrame++;
-                job();
+                const started = now();
+                try {
+                    job();
+                } finally {
+                    credit -= now() - started;
+                }
             }
         } finally {
             draining = false;
