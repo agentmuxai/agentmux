@@ -176,3 +176,13 @@ The questions as asked:
 The library-default tips are still waiting for their per-platform check (§6, §7, D3). Candidates:
 - xterm: Alt+click moves the cursor (Option+click on macOS), Shift+click extends a selection, double-click selects a word, triple-click selects a line.
 - CodeMirror (`basicSetup`): mod+click adds a cursor, Alt+drag (Option+drag) makes a block selection, the fold gutter folds code, mod+D selects the next match.
+
+**Library defaults (#4654).** They were checked by hand on macOS (Masty@starpower, #4651 comment 6104466530) and Linux (Maricon@charlie, #4651), and seven pass on both:
+- xterm: Alt/Option+click moves the cursor, Shift+click extends the selection, double-click selects a word, triple-click selects a line.
+- CodeMirror: mod+click adds a cursor, Alt/Option+drag makes a block selection, mod+D selects the next match.
+
+They join the table for macOS and Linux; Windows follows once it's checked there.
+
+Two notes:
+- **Code folding fails on every platform.** The gutter is hidden on purpose (`editor-view.scss`, #1427, "no folding UI"), and CodeMirror's fold key Ctrl+Shift+[ is the app's `tab:prev`. So there's no folding tip; whether folding comes back is an owner decision.
+- **⌘D in the editor on macOS** selects the next match instead of running `split:right`. On Windows and Linux there's no conflict, since Split right is Ctrl+Shift+D.
