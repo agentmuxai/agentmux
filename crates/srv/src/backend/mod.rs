@@ -21,6 +21,7 @@ pub mod user_widgets;
 pub mod user_attention;
 pub mod widget_access;
 pub mod widget_net;
+pub mod widget_catalog;
 pub mod widget_packages;
 pub mod widget_signature;
 pub mod widget_requests;

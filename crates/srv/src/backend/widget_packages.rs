@@ -1230,7 +1230,7 @@ fn copy_tree(from: &Path, to: &Path, budget: &mut Budget) -> Result<(), String> 
     Ok(())
 }
 
-fn unzip(zip_path: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn unzip(zip_path: &Path, to: &Path) -> Result<(), String> {
     let file = std::fs::File::open(zip_path).map_err(|e| format!("can't open {}: {e}", zip_path.display()))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("not a zip file: {e}"))?;
     if archive.len() > MAX_PACKAGE_FILES {

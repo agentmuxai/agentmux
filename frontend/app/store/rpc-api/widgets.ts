@@ -7,6 +7,7 @@
 // the host can carry that answer (AppApi `approvals.decideWidget`).
 
 import { RpcClient } from "../rpc-client";
+import type { WidgetCatalogResult } from "@/types/rpc/WidgetCatalogResult";
 import type { WidgetInstallResult } from "@/types/rpc/WidgetInstallResult";
 import type { WidgetCallResult } from "@/types/rpc/WidgetCallResult";
 import type { WidgetPackagesResult } from "@/types/rpc/WidgetPackagesResult";
@@ -26,7 +27,20 @@ export type { WidgetPublisherPin } from "@/types/rpc/WidgetPublisherPin";
 export type { WidgetSignatureInfo } from "@/types/rpc/WidgetSignatureInfo";
 export type { WidgetStatusItemInfo } from "@/types/rpc/WidgetStatusItemInfo";
 
+export type { WidgetCatalogEntry } from "@/types/rpc/WidgetCatalogEntry";
+export type { WidgetCatalogItem } from "@/types/rpc/WidgetCatalogItem";
+export type { WidgetCatalogResult } from "@/types/rpc/WidgetCatalogResult";
+
 export const WidgetsApi = {
+    /** The widget catalog, checked, with what is installed here
+     *  (SPEC_WIDGET_SHARING_2026_10_10.md §4.5). */
+    WidgetsCatalogCommand(client: RpcClient, opts?: RpcOpts): Promise<WidgetCatalogResult> {
+        return client.rpcCall("widgets.catalog", {}, opts);
+    },
+    /** Download, check and copy in a catalog widget; it then waits for approval. */
+    WidgetsCatalogInstallCommand(client: RpcClient, data: { id: string }, opts?: RpcOpts): Promise<WidgetInstallResult> {
+        return client.rpcCall("widgets.catalog.install", data, opts);
+    },
     /** Every installed widget package and its state. */
     WidgetsListCommand(client: RpcClient, opts?: RpcOpts): Promise<WidgetPackagesResult> {
         return client.rpcCall("widgets.list", {}, opts);
