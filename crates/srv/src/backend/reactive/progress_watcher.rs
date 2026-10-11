@@ -107,10 +107,12 @@ fn is_shell_tool(name: &str) -> bool {
 }
 
 /// Whether a shell command opens a PR: `gh-agent pr create` or `gh pr create`,
-/// anywhere in it (`cd x && gh-agent pr create --title …`), the program
-/// named by its path or with `.cmd`/`.exe` too.
+/// anywhere in it (`cd x && gh-agent pr create --title …`, or inside a quoted
+/// shell call like Codex's `pwsh -Command 'gh-agent pr create …'`), the
+/// program named by its path or with `.cmd`/`.exe` too.
 fn is_pr_create(command: &str) -> bool {
-    let words: Vec<&str> = command.split_whitespace().collect();
+    let words: Vec<&str> =
+        command.split_whitespace().map(|w| w.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')' | ';'))).collect();
     words.windows(3).any(|w| {
         let program = w[0].rsplit(['/', '\\']).next().unwrap_or(w[0]);
         let program = program.trim_end_matches(".cmd").trim_end_matches(".exe");
@@ -281,6 +283,17 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
         // line, so ordering within the line is not a concern.
         for id in tool_result_ids(&v) {
             state.open.retain(|(open_id, _)| *open_id != id);
+        }
+
+        // Codex reports a shell command as an `item.started` event of type
+        // `command_execution`, not a `tool_use`.
+        if v.get("type").and_then(|t| t.as_str()) == Some("item.started") {
+            let item = v.get("item");
+            let is_command = item.and_then(|i| i.get("type")).and_then(|t| t.as_str()) == Some("command_execution");
+            let command = item.and_then(|i| i.get("command")).and_then(|c| c.as_str());
+            if is_command && command.is_some_and(is_pr_create) && live_now_ms.is_some() && state.new_prs < MAX_NEW_PRS {
+                state.new_prs += 1;
+            }
         }
 
         for frame in tool_frames(&v) {
@@ -1251,6 +1264,18 @@ mod tests {
         assert!(!is_pr_create("echo gh pr list; grep create"));
         assert!(!is_pr_create("git commit -m 'gh-agent pr: create'"));
         assert!(is_shell_tool("Bash") && is_shell_tool("mcp__agentmux__Shell") && !is_shell_tool("Edit"));
+        assert!(is_pr_create("pwsh.exe -NoProfile -Command 'gh-agent pr create -t x'"));
+    }
+
+    /// Codex's shell commands are `item.started` events, as its 0.154.0
+    /// fixture records them (frontend/test/fixtures/providers/codex/0.154.0/command.jsonl).
+    #[test]
+    fn a_codex_pr_create_is_handed_to_the_overlap_note() {
+        let started = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"pwsh.exe -NoProfile -Command 'gh-agent pr create -t x'","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#;
+        let completed = started.replace("item.started", "item.completed");
+        let mut st = BlockState::default();
+        apply_lines(&mut st, &[started, completed.as_str()], Some(1_000));
+        assert_eq!(st.new_prs, 1, "the start counts, its completion doesn't");
     }
 
     #[test]

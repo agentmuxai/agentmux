@@ -16,6 +16,10 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 const CACHE_TTL: Duration = Duration::from_secs(120);
+/// `gh pr list --limit` is a cap on results, not a page size: high enough
+/// for every open PR of any repository here.
+const LIST_LIMIT: &str = "1000";
+const PR_FIELDS: &str = "number,title,headRefName,files,author";
 const GH_TIMEOUT: Duration = Duration::from_secs(20);
 /// Files named in one match's detail; the rest are counted.
 const FILES_NAMED: usize = 3;
@@ -49,32 +53,45 @@ pub(super) fn title_author(title: &str) -> Option<(String, String)> {
 pub(super) fn parse_pr_list(text: &str) -> Result<Vec<OpenPr>, String> {
     let list: Value = serde_json::from_str(text.trim()).map_err(|e| format!("gh-agent printed something other than JSON: {e}"))?;
     let items = list.as_array().ok_or("gh-agent printed something other than a list")?;
-    Ok(items
-        .iter()
-        .filter_map(|p| {
-            let title = p.get("title")?.as_str()?.to_string();
-            let (agent, host) = match title_author(&title) {
-                Some((agent, host)) => (agent, Some(host)),
-                None => {
-                    let login = p.pointer("/author/login").and_then(Value::as_str).unwrap_or("unknown");
-                    (login.to_string(), None)
-                }
-            };
-            let files = p
-                .get("files")
-                .and_then(Value::as_array)
-                .map(|fs| fs.iter().filter_map(|f| f.get("path")?.as_str().map(str::to_string)).collect())
-                .unwrap_or_default();
-            Some(OpenPr {
-                number: p.get("number")?.as_u64()?,
-                branch: p.get("headRefName").and_then(Value::as_str).unwrap_or_default().to_string(),
-                title,
-                files,
-                agent,
-                host,
-            })
-        })
-        .collect())
+    Ok(items.iter().filter_map(parse_pr).collect())
+}
+
+/// One PR of `gh`'s JSON.
+fn parse_pr(p: &Value) -> Option<OpenPr> {
+    let title = p.get("title")?.as_str()?.to_string();
+    let (agent, host) = match title_author(&title) {
+        Some((agent, host)) => (agent, Some(host)),
+        None => {
+            let login = p.pointer("/author/login").and_then(Value::as_str).unwrap_or("unknown");
+            (login.to_string(), None)
+        }
+    };
+    let files = p
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|fs| fs.iter().filter_map(|f| f.get("path")?.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    Some(OpenPr {
+        number: p.get("number")?.as_u64()?,
+        branch: p.get("headRefName").and_then(Value::as_str).unwrap_or_default().to_string(),
+        title,
+        files,
+        agent,
+        host,
+    })
+}
+
+/// PR `number` of `repo` read on its own (`gh pr view`), when it is open:
+/// for a PR asked about by number that the list didn't hold.
+pub(super) async fn open_pr(repo: &str, number: u64) -> Result<Option<OpenPr>, String> {
+    let (repo, n) = (repo.to_string(), number.to_string());
+    let text = tokio::task::spawn_blocking(move || {
+        run_gh_agent(&["pr", "view", &n, "--repo", &repo, "--json", &format!("{PR_FIELDS},state")])
+    })
+    .await
+    .map_err(|e| format!("gh-agent: {e}"))??;
+    let pr: Value = serde_json::from_str(text.trim()).map_err(|e| format!("gh-agent printed something other than JSON: {e}"))?;
+    Ok(if pr.get("state").and_then(Value::as_str) == Some("OPEN") { parse_pr(&pr) } else { None })
 }
 
 /// Repository → when its PRs were read, and them.
@@ -93,7 +110,9 @@ pub(super) async fn open_prs(repo: &str) -> Result<Vec<OpenPr>, String> {
         }
     }
     let repo_arg = repo.to_string();
-    let text = tokio::task::spawn_blocking(move || run_gh_agent(&repo_arg))
+    let text = tokio::task::spawn_blocking(move || {
+        run_gh_agent(&["pr", "list", "--repo", &repo_arg, "--state", "open", "--limit", LIST_LIMIT, "--json", PR_FIELDS])
+    })
         .await
         .map_err(|e| format!("gh-agent: {e}"))??;
     let prs = parse_pr_list(&text)?;
@@ -101,12 +120,12 @@ pub(super) async fn open_prs(repo: &str) -> Result<Vec<OpenPr>, String> {
     Ok(prs)
 }
 
-/// `gh-agent pr list` for `repo`, killed after [`GH_TIMEOUT`].
-fn run_gh_agent(repo: &str) -> Result<String, String> {
+/// `gh-agent <args>`'s output, killed after [`GH_TIMEOUT`].
+fn run_gh_agent(args: &[&str]) -> Result<String, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(GH_AGENT);
-    cmd.args(["pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "number,title,headRefName,files,author"])
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -145,7 +164,7 @@ fn run_gh_agent(repo: &str) -> Result<String, String> {
     if !status.success() {
         // Its own status lines start with `gh-agent:`; the error is the rest.
         let why = err.lines().filter(|l| !l.starts_with("gh-agent:")).collect::<Vec<_>>().join(" ");
-        return Err(format!("gh-agent pr list failed: {}", why.trim()));
+        return Err(format!("gh-agent {} failed: {}", args.iter().take(2).copied().collect::<Vec<_>>().join(" "), why.trim()));
     }
     Ok(out)
 }

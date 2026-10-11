@@ -48,7 +48,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             // A PR's URL names its repository: ask about that one.
             if let Some(url_repo) = pr_repo {
                 match arg(arguments, "repo") {
-                    Some(r) if !r.trim_end_matches(".git").to_ascii_lowercase().ends_with(&url_repo.to_ascii_lowercase()) => {
+                    Some(r) if normalize_repo(r) != normalize_repo(&url_repo) => {
                         anyhow::bail!("pr is a PR of {url_repo}, but repo is {r}: pass one or the other");
                     }
                     Some(_) => {}
@@ -117,6 +117,17 @@ fn pr_ref(v: &Value) -> Option<(Option<String>, u64)> {
     Some((Some(format!("{owner}/{repo}")), number(&digits)?))
 }
 
+/// `owner/repo`, lowercased, from `owner/repo`, a remote URL
+/// (`https://github.com/o/r.git`) or an ssh remote (`git@github.com:o/r`).
+fn normalize_repo(repo: &str) -> String {
+    let s = repo.trim().trim_end_matches('/').trim_end_matches(".git").replace(':', "/");
+    let mut parts = s.rsplit('/').filter(|p| !p.is_empty());
+    match (parts.next(), parts.next()) {
+        (Some(name), Some(owner)) => format!("{owner}/{name}").to_ascii_lowercase(),
+        _ => s.to_ascii_lowercase(),
+    }
+}
+
 /// Files of the asked PR whose local facts are fetched, at most.
 const PR_FILES_CHECKED: usize = 10;
 
@@ -137,13 +148,24 @@ where
         }
         return;
     };
-    let prs = match open_prs::open_prs(&repo).await {
+    let mut prs = match open_prs::open_prs(&repo).await {
         Ok(prs) => prs,
         Err(e) => {
             body["pr_error"] = json!(e);
             return;
         }
     };
+    // An asked PR the list didn't hold (opened since it was cached): read it.
+    if let Some(n) = pr.filter(|n| !prs.iter().any(|p| p.number == *n)) {
+        match open_prs::open_pr(&repo, n).await {
+            Ok(Some(p)) => prs.push(p),
+            Ok(None) => {}
+            Err(e) => {
+                body["pr_error"] = json!(e);
+                return;
+            }
+        }
+    }
     let host = open_prs::this_host();
     let path = body.pointer("/asked/path").and_then(Value::as_str).map(str::to_string);
     let asked = open_prs::Asked {
@@ -243,6 +265,14 @@ mod tests {
         assert_eq!(url("https://github.com/o/r/issues/12"), None);
         assert_eq!(url("main"), None);
         assert_eq!(pr_ref(&json!(0)), None);
+    }
+
+    #[test]
+    fn repositories_are_compared_whole_not_by_suffix() {
+        assert_eq!(normalize_repo("Foo/Bar"), "foo/bar");
+        assert_eq!(normalize_repo("https://github.com/foo/bar.git"), "foo/bar");
+        assert_eq!(normalize_repo("git@github.com:foo/bar"), "foo/bar");
+        assert_ne!(normalize_repo("notfoo/bar"), normalize_repo("foo/bar"));
     }
 
     #[test]
