@@ -233,6 +233,7 @@ partial list.
 | [`SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15`](SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md) | SPEC: Agent-Pane Reducer State Persistence |
 | [`SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18`](SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) | SPEC: Keep-alive for agent tabs in the pane tab strip |
 | [`SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10`](SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md) | SPEC: Agent pane tab strip floats over the conversation, doesn't reserve a row |
+| [`SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11`](SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md) | Agent pane: a tool call's hover peek only on its line, and "Open in editor" on Markdown file previews |
 | [`SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24`](SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md) | Spec: Agent Pane Zone Reorder + Enriched "Worked" Footer |
 | [`SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17`](SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) | SPEC: Filter/search box atop the AgentPicker |
 | [`SPEC_AGENT_PICKER_TWO_TIER_2026_05_24`](SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md) | SPEC: Two-tier agent picker — "My Agents" + "Templates" |

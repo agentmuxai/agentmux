@@ -2157,6 +2157,12 @@ $transcript-preview-max-height: calc(50vh / 3);
     flex-shrink: 0;
 }
 
+// After Write's byte count, which already takes the free space (its own
+// `margin-left: auto`): the button sits right beside it, not mid-row.
+.agent-tool-file-path-row > .agent-tool-write-bytes + .ui-tooltip-anchor:has(> .agent-tool-open-in-editor) {
+    margin-left: 0;
+}
+
 // Write tool file-path row with byte count badge (ToolOverlayLog renderWrite).
 .agent-tool-write {
     .agent-tool-file-path-row {
