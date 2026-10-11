@@ -82,17 +82,15 @@ The app restarted itself and restored its windows. macOS wrote a crash report (`
 
 ---
 
-## F6. A dev window sat on its startup splash because its Vite server disappeared (cause unknown)
+## F6. A dev window sat on its startup splash because its Vite server exited
 
-**Seen:** 2026-10-11 ~13:24 local, `task dev` of `main` on a fresh branch (data dir `agento-tearoff-repro`), started detached with `nohup`. Vite came up (`ready in 2665 ms` on port 5340), the app window opened, and the page loaded, but the UI never rendered: `#main` had no children after 190 s, 250 resources loaded, none pending, nothing in the page's console.
+**Seen:** 2026-10-11 ~13:24 local, `task dev` of `main` on a fresh branch (data dir `agento-tearoff-repro`), started detached from an agent shell with `nohup ... < /dev/null`. Vite came up (`ready in 2665 ms` on port 5340), the app window opened and the page loaded, but the UI never rendered: `#main` had no children after 190 s, 250 resources loaded, none pending, nothing in the page's console. Reloading failed with `ERR_CONNECTION_REFUSED` on `localhost:5340` for every module: nothing was listening. The `task dev` process and its launcher were still alive, so the app had no code server and `task dev` neither noticed nor restarted it. The host log then showed `Load error` once a second.
 
-**Then:** reloading the page failed with `ERR_CONNECTION_REFUSED` on `localhost:5340` for every module. Nothing was listening on 5340; the `task dev` process and its launcher were still alive, so the app had no code server and `task dev` did not notice or restart it.
+**Repeated:** three restarts, same result each time, 45 s to ~5 minutes after the window opened. A first run of the same build, started as an ordinary background job of the agent shell, kept its Vite for ~25 minutes.
 
-**Not known:** what ended Vite. The host load average was 10–17 (other agents compiling and running their own dev builds on this machine) and another agent started its own `task dev` a few minutes before; its Vite uses a different port (the Taskfile picks the port per clone), so a port clash is not the explanation. No Vite error is in the log.
+**Cause (confirmed by the fix):** Vite shuts down when its stdin closes (it skips this only when `CI=true`). `nohup task dev < /dev/null` gives Vite a closed stdin; an ordinary background job keeps it open. Starting `task dev` with its stdin held open, `tail -f /dev/null | nohup task dev > log 2>&1 &`, kept Vite up for more than 3 minutes and the UI rendered. Other agents' dev builds on the machine were not the cause (an early suspicion, since another agent's `task dev` was running each time).
 
-**It happened again.** The restart also lost its Vite within ~5 minutes (nothing on 5340, `Load error` once a second in the host log, `task dev` and the launcher still alive). The very first run of the same build, started the same way, kept its Vite for ~25 minutes. What differed: from the second run on, another agent's `task dev` (a different clone, building with cargo) was running, and the machine's load average was 10-17. Not proven to be related. Unconfirmed guesses: Vite exiting when its stdin/parent changes, or being stopped under memory pressure.
-
-**Workaround:** stop the `task dev` tree by PID and start it again; the second start rendered, then lost Vite again. A health check for the Vite port in `task dev` (or a clear message when it vanishes) would have saved ~5 minutes.
+**Gap in `task dev`:** it does not notice that its own Vite has gone, and the window shows a splash or a reload loop with no explanation. A health check on the Vite port, or `CI=true` for Vite, would have saved ~40 minutes.
 
 ---
 
