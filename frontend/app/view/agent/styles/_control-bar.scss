@@ -191,7 +191,9 @@
             // ESTIMATE, held at 95% by the logic; once the run overshoots,
             // `.is-over` swaps it for an indeterminate sweep so the bar never
             // reads as "stuck at the end". (The row is `position: relative`
-            // for it — set with the row's other declarations above.)
+            // for it — set with the row's other declarations above.) The
+            // status text's color, like the spinner: the pane's identity
+            // color, falling back to the theme accent; the track is a tint of it.
             .agent-working-row-progress {
                 position: absolute;
                 left: 0;
@@ -200,13 +202,13 @@
                 height: 2px;
                 overflow: hidden;
                 pointer-events: none;
-                background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+                background: color-mix(in srgb, var(--block-identity-color, var(--accent-color)) 15%, transparent);
             }
 
             .agent-working-row-progress-fill {
                 display: block;
                 height: 100%;
-                background: var(--accent-color);
+                background: var(--block-identity-color, var(--accent-color));
                 transition: width 1s linear;
             }
 

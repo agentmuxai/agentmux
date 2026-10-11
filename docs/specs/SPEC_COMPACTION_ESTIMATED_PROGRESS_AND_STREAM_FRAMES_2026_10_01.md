@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is not built and needs D2.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is not built and needs D2. Amended 2026-10-10 (§5a): a built-in first estimate, and the bar in the pane's colour.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
@@ -53,9 +53,9 @@ The unit tests use camelCase fixtures, copied from the transcript (the old spec'
 
 ## 4. Requirements
 
-- **R1:** while a compaction runs, the working row shows an *estimated* progress bar and the typical duration ("usually ~30 s"), only when there is data for an estimate.
+- **R1:** while a compaction runs, the working row shows an *estimated* progress bar and the typical duration ("usually ~30 s"). (Until 2026-10-10: only when there was data for an estimate; see §5a.)
 - **R2:** it never presents the estimate as real progress: it is labeled as an estimate, never reaches 100% on its own, and switches to a plain "longer than usual" state when the run overshoots.
-- **R3:** with no samples, nothing changes from today (the "Compacting… Ns" elapsed counter).
+- **R3:** ~~with no samples, nothing changes from today (the "Compacting… Ns" elapsed counter).~~ Superseded 2026-10-10 (§5a): with no samples the bar uses a built-in 75 s estimate.
 - **R4:** the estimate is stable for the whole compaction (it does not move as new samples arrive mid-run).
 - **R5:** it does not change what the existing compaction consumers do (§3): no reducer, translator or node-id change.
 
@@ -67,7 +67,7 @@ The unit tests use camelCase fixtures, copied from the transcript (the old spec'
 - Validated on read (JSON, shape, finite positive numbers); anything else is dropped. Storage that is unavailable or throws behaves as "no samples".
 
 **Estimate.** `estimateCompactionMs(samples, contextTokens)`:
-1. No samples → `null` (R3).
+1. No samples → `null`; the caller (`compactionEstimate`) then uses `DEFAULT_COMPACTION_MS` (§5a).
 2. `base` = median of the sample durations (robust to one slow outlier).
 3. With a known `contextTokens` and sample `preTokens`, scale by the context size, clamped so a single odd size can't swing it: `base × clamp(contextTokens / median(preTokens), 0.5, 2)`.
 4. Clamp the result to `[5 s, 600 s]`.
@@ -79,7 +79,26 @@ The caller computes it once when `compacting` starts (R4), from `state.lastConte
 - a thin bar under the row, fill `min(elapsed / estimate, 0.95)`, `role="progressbar"` with `aria-valuetext` saying "estimated, about N%";
 - tooltip (on the right-hand text): "Estimate from your earlier compactions. Claude Code doesn't report compaction progress.";
 - once elapsed exceeds the estimate: the fill stops at 95% and turns indeterminate, right side `42s · longer than usual` (R2).
-With no estimate, exactly today's row.
+With no estimate, exactly today's row. (Superseded by §5a: there is always an estimate.)
+
+### 5a. Amendment 2026-10-10: a first estimate, and the pane's colour
+
+The operator: compacting takes about a minute every time, so the first compaction in a build (which had no
+samples, so no bar: samples live in the window's storage, one per build channel) should show a bar too, with later
+ones building on real timings; and the bar should be the colour of the status text above it.
+
+- **First estimate.** `compactionEstimate(samples, contextTokens)` returns `estimateCompactionMs`'s value when there
+  are samples and `DEFAULT_COMPACTION_MS` (75 s) when there are none, with `fromHistory` saying which. The default
+  is not scaled by context size. 75 s is the median of the 59 compactions in this machine's Claude transcripts from
+  the 21 days before 2026-10-10 (p25 67 s, p75 90 s, nearly all near a full 1M-token context); 60 s would have
+  overshot on about 9 in 10. As soon as one compaction finishes, its sample replaces the default, and everything
+  above applies unchanged (R4 included: a sample landing mid-run does not move the default).
+- **Tooltip:** with samples, the text above; on the default, "Estimate: a compaction usually takes about a minute.
+  Claude Code doesn't report compaction progress."
+- **Colour.** The fill was `--accent-color`, but the status text and spinner are the pane's identity colour
+  (`var(--block-identity-color, var(--accent-color))`, SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02). The fill
+  now uses the same, and the track is a 15 % tint of it instead of grey.
+- Report: `docs/reports/REPORT_COMPACTION_BAR_DEFAULT_AND_COLOR_2026_10_10.md`.
 
 ## 6. Status frames (decision D2) — failure notice built (§10); the rest not built
 
@@ -87,7 +106,7 @@ The `status` frames in §2 could give (a) a **hook-independent start** (the `Pre
 - they go through `useAgentStream`'s stdout path and the reducer's `CompactionStarted` race guards (`pendingCompactionPing`, `lastCompactionBoundaryAt`), the same machinery §3 says is unproven live;
 - a status frame has no `trigger`, and a re-read of an old frame could set a stale `compacting` state;
 - (showing a failure turned out not to need a new node type: §10 adds a third kind to `CliNoticeNode`.)
-It should be designed together with the §3 fix. Seeding the sample store from transcript history (so a first compaction already has an estimate) is also left out; the store fills as compactions happen.
+It should be designed together with the §3 fix. Seeding the sample store from transcript history is also left out; the store fills as compactions happen, and the first compaction uses the built-in estimate (§5a).
 
 ## 7. Tests
 
