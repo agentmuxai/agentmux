@@ -159,9 +159,9 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Open it in the system browser | on a URL in a terminal | click | click |
 | Open it (a path with :line opens VS Code at that line), or show it in the file manager | on a file path in a terminal | click | click |
 | Copy them into the terminal's folder | files onto a terminal | drop | drop |
-| Move the cursor there (the terminal sends the shell arrow keys) | on the prompt line | ⌥ + click | Alt + click (Linux only) |
-| Extend the selection to there | in a terminal | ⇧ + click | Shift + click (Linux only) |
-| Select a word / a whole line | in a terminal | double-click or triple-click | double-click or triple-click (Linux only) |
+| Move the cursor there (the terminal sends the shell arrow keys) | on the prompt line | ⌥ + click | Alt + click |
+| Extend the selection to there | in a terminal | ⇧ + click | Shift + click |
+| Select a word / a whole line | in a terminal | double-click or triple-click | double-click or triple-click |
 | Find in a terminal (⌃F / Ctrl+F there goes to the shell) |  | — | Ctrl + Shift + F |
 
 ### Editor
@@ -169,9 +169,9 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | What it does | Where | macOS | Windows / Linux |
 |---|---|---|---|
 | A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
-| Add another cursor | in an editor | ⌘ + click | Ctrl + click (Linux only) |
-| Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag (Linux only) |
-| Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D (Linux only) |
+| Add another cursor | in an editor | ⌘ + click | Ctrl + click |
+| Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
+| Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
 
 ### Files
 

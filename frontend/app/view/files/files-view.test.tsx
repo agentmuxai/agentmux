@@ -1178,6 +1178,22 @@ describe("the Files pane: pane tabs", () => {
         expect(tabs.opened).toHaveLength(3);
     });
 
+    it("stops middle-click autoscroll over a folder, so its auxclick arrives on Windows", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const press = (name: string) => {
+            const e = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 1 });
+            v.row(name).dispatchEvent(e);
+            return e.defaultPrevented;
+        };
+        expect(press("src")).toBe(true);
+        // Over a file, and for the left button, the press is left alone.
+        expect(press("b.txt")).toBe(false);
+        const left = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 });
+        v.row("src").dispatchEvent(left);
+        expect(left.defaultPrevented).toBe(false);
+    });
+
     it("Ctrl+W on the pane's only tab says so instead of closing the pane", async () => {
         tabs.closeResult = false;
         const v = mount();

@@ -403,6 +403,15 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         );
     };
 
+    /** The folder row or tile under an event's target, if it is one. */
+    const folderAt = (target: EventTarget | null): FsEntry | undefined => {
+        if (!(target instanceof Element)) return undefined;
+        const el = target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
+        const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
+        const entry = name ? byName().get(name) : undefined;
+        return entry?.is_dir ? entry : undefined;
+    };
+
     const askDeletePermanently = (list: FsEntry[]): void => {
         if (list.length === 0) return;
         const what = list.length === 1 ? `"${list[0].name}"` : `${list.length} items`;
@@ -977,13 +986,17 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropRow(null);
                     }}
                     onContextMenu={onListContextMenu}
+                    // On Windows, a middle press over the scrolling list starts
+                    // Chromium's autoscroll, and no auxclick follows. Over a
+                    // folder, stop that so the click below arrives.
+                    onMouseDown={(e) => {
+                        if (e.button === 1 && folderAt(e.target)) e.preventDefault();
+                    }}
                     onAuxClick={(e) => {
                         // Middle-click a folder: open it in a new tab.
-                        if (e.button !== 1 || !(e.target instanceof Element)) return;
-                        const el = e.target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
-                        const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
-                        const entry = name ? byName().get(name) : undefined;
-                        if (entry?.is_dir) {
+                        if (e.button !== 1) return;
+                        const entry = folderAt(e.target);
+                        if (entry) {
                             e.preventDefault();
                             openInNewTab(model.pathOf(entry.name));
                         }

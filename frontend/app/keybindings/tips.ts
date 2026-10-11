@@ -193,15 +193,14 @@ export const TIPS: TipRow[] = [
         label: "Copy them into the terminal's folder",
         source: { file: "frontend/app/view/term/term.tsx", anchor: "No working directory for this terminal" },
     },
-    // Library defaults (xterm), checked by hand on macOS and Linux (#4651);
-    // Windows joins once checked there (spec D3).
+    // Library defaults (xterm), checked by hand on macOS and Linux (#4651)
+    // and Windows (spec §10).
     {
         id: "term:altClick",
         area: "Terminal",
         gesture: "alt+click",
         where: "on the prompt line",
         label: "Move the cursor there (the terminal sends the shell arrow keys)",
-        os: ["darwin", "linux"],
         source: { file: "frontend/app/view/term/termwrap.ts", anchor: "this.terminal = new Terminal({" },
     },
     {
@@ -210,7 +209,6 @@ export const TIPS: TipRow[] = [
         gesture: "shift+click",
         where: "in a terminal",
         label: "Extend the selection to there",
-        os: ["darwin", "linux"],
         source: { file: "frontend/app/view/term/termwrap.ts", anchor: "this.terminal = new Terminal({" },
     },
     {
@@ -219,7 +217,6 @@ export const TIPS: TipRow[] = [
         gesture: "dblclick / tripleclick",
         where: "in a terminal",
         label: "Select a word / a whole line",
-        os: ["darwin", "linux"],
         source: { file: "frontend/app/view/term/termwrap.ts", anchor: "this.terminal = new Terminal({" },
     },
     {
@@ -241,16 +238,15 @@ export const TIPS: TipRow[] = [
         source: { file: "frontend/app/view/editor/file-tree.tsx", anchor: "onDblClick={handleDblClick}" },
     },
 
-    // Library defaults (CodeMirror basicSetup), checked by hand on macOS and
-    // Linux (#4651); Windows joins once checked there. Not code folding: the
-    // gutter is hidden on purpose (editor-view.scss, #1427).
+    // Library defaults (CodeMirror basicSetup), checked by hand on macOS,
+    // Linux (#4651) and Windows (spec §10). Not code folding: the gutter is
+    // hidden on purpose (editor-view.scss, #1427).
     {
         id: "editor:multiCursor",
         area: "Editor",
         gesture: "mod+click",
         where: "in an editor",
         label: "Add another cursor",
-        os: ["darwin", "linux"],
         source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
     },
     {
@@ -259,7 +255,6 @@ export const TIPS: TipRow[] = [
         gesture: "alt+drag",
         where: "in an editor",
         label: "Make a column (block) selection",
-        os: ["darwin", "linux"],
         source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
     },
     {
@@ -268,7 +263,6 @@ export const TIPS: TipRow[] = [
         gesture: "mod+key:D",
         where: "in an editor",
         label: "Select the next match of the selected text",
-        os: ["darwin", "linux"],
         source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "basicSetup," },
     },
 
