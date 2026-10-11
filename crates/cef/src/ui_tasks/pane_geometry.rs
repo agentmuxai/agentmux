@@ -72,9 +72,23 @@ wrap_task! {
                 return;
             };
 
+            // A retry or the 50 ms reaffirm runs later than the resize that
+            // posted it, and the pane may have moved since (a shown pane moves
+            // in `move_shown_pane_overlay`, not here) or been hidden. Apply its
+            // latest rect, so a reaffirm never puts a stale frame back, and
+            // don't bring back a pane that is hidden now.
+            let (x, y, width, height) = match self.retry {
+                0 => (self.x, self.y, self.width, self.height),
+                _ => match self.state.browser_pane_physical_rects.lock().get(&self.label).copied() {
+                    Some((_, _, w, h)) if w <= 0 || h <= 0 => return,
+                    Some(latest) => latest,
+                    None => (self.x, self.y, self.width, self.height),
+                },
+            };
+
             // CEF Views sizing — no-ops on macOS, functional on Linux.
-            controller.set_size(Some(&Size { width: self.width, height: self.height }));
-            controller.set_position(Some(&Point { x: self.x, y: self.y }));
+            controller.set_size(Some(&Size { width, height }));
+            controller.set_position(Some(&Point { x, y }));
             // Skip window.layout() on macOS: it schedules a deferred CEF Views layout
             // pass that calls NativeWidgetMac::SetBoundsRect(0,0,0,0) AFTER our ObjC
             // setFrame, resetting the overlay to off-screen and re-engaging its event
@@ -87,7 +101,7 @@ wrap_task! {
             let b = controller.bounds();
             tracing::info!(
                 label = %self.label,
-                req_w = self.width, req_h = self.height,
+                req_w = width, req_h = height,
                 got_x = b.x, got_y = b.y, got_w = b.width, got_h = b.height,
                 retry = self.retry,
                 "[browser-pane] views: SetPaneBoundsViewsTask: CEF bounds (macos)"
@@ -202,7 +216,7 @@ wrap_task! {
                     let is_main = get_bool(win, sel_is_main);
                     let is_key  = get_bool(win, sel_is_key);
                     let fr      = get_frame(win, sel_frame);
-                    tracing::info!(
+                    tracing::debug!(
                         i, win_count, class = cls, retry = self.retry,
                         x = fr.origin.x, y = fr.origin.y, w = fr.size.w, h = fr.size.h,
                         is_main, is_key, wn, want_wnum = self.overlay_wnum,
@@ -253,7 +267,7 @@ wrap_task! {
                         );
                         post_set_pane_bounds_views(
                             &self.state, &self.label, &self.window_label,
-                            self.x, self.y, self.width, self.height,
+                            x, y, width, height,
                             self.retry + 1, self.overlay_wnum,
                         );
                     } else {
@@ -283,10 +297,10 @@ wrap_task! {
                     if s > 0.0 { s } else { 1.0 }
                 } else { 1.0 };
 
-                let pane_x = self.x as f64 / scale;
-                let pane_y = self.y as f64 / scale;
-                let pane_w = self.width  as f64 / scale;
-                let pane_h = self.height as f64 / scale;
+                let pane_x = x as f64 / scale;
+                let pane_y = y as f64 / scale;
+                let pane_w = width  as f64 / scale;
+                let pane_h = height as f64 / scale;
                 let screen_x = main_frame.origin.x + pane_x;
                 let screen_y = main_frame.origin.y + main_frame.size.h - pane_y - pane_h;
 
@@ -330,7 +344,7 @@ wrap_task! {
                     pane_x, pane_y, pane_w, pane_h, screen_x, screen_y,
                     main_x = main_frame.origin.x, main_y = main_frame.origin.y,
                     main_w = main_frame.size.w, main_h = main_frame.size.h,
-                    req_w = self.width, req_h = self.height,
+                    req_w = width, req_h = height,
                     got_x = new_fr.origin.x, got_y = new_fr.origin.y,
                     got_w = new_fr.size.w, got_h = new_fr.size.h,
                     ov_level, main_level,
@@ -821,7 +835,7 @@ wrap_task! {
                     self.state.clone(),
                     self.label.clone(),
                     self.window_label.clone(),
-                    self.x, self.y, self.width, self.height,
+                    x, y, width, height,
                     1, // retry=1: skip set_visible(1), just reaffirm frame
                     self.overlay_wnum,
                 );
@@ -829,6 +843,86 @@ wrap_task! {
             }
         }
     }
+}
+
+/// Move a pane overlay that is already showing to `rect` (physical pixels in
+/// its window's client area), without the show, window scan and repair of
+/// `SetPaneBoundsViewsTask`: one `setFrame:display:` on the overlay NSWindow
+/// and the matching `set_bounds`, which keeps CEF's Views layout from putting
+/// the old frame back. Returns false, having changed nothing, when the pane
+/// is hidden or its NSWindow can't be found; the caller then posts the full
+/// task. UI thread only.
+#[cfg(target_os = "macos")]
+pub fn move_shown_pane_overlay(controller: &OverlayController, overlay_wnum: isize, rect: &Rect) -> bool {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+    #[repr(C)] #[derive(Copy, Clone)] struct NSPoint { x: f64, y: f64 }
+    #[repr(C)] #[derive(Copy, Clone)] struct NSSize  { w: f64, h: f64 }
+    #[repr(C)] #[derive(Copy, Clone)] struct NSRect  { origin: NSPoint, size: NSSize }
+
+    if overlay_wnum <= 0 || rect.width <= 0 || rect.height <= 0 || controller.is_visible() == 0 {
+        return false;
+    }
+    unsafe {
+        let get_id: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+        let win_by_num: extern "C" fn(Id, Sel, isize) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_f64: extern "C" fn(Id, Sel) -> f64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_frame: extern "C" fn(Id, Sel) -> NSRect = std::mem::transmute(objc_msgSend as *const c_void);
+        let set_frame_d: extern "C" fn(Id, Sel, NSRect, u8) = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let ns_app = get_id(
+            objc_getClass(b"NSApplication\0".as_ptr() as _),
+            sel_registerName(b"sharedApplication\0".as_ptr() as _),
+        );
+        if ns_app.is_null() {
+            return false;
+        }
+        let overlay = win_by_num(ns_app, sel_registerName(b"windowWithWindowNumber:\0".as_ptr() as _), overlay_wnum);
+        if overlay.is_null() {
+            return false;
+        }
+        // The overlay is a child NSWindow of the window holding the pane.
+        let parent = get_id(overlay, sel_registerName(b"parentWindow\0".as_ptr() as _));
+        if parent.is_null() {
+            return false;
+        }
+        let scale = match get_f64(parent, sel_registerName(b"backingScaleFactor\0".as_ptr() as _)) {
+            s if s > 0.0 => s,
+            _ => 1.0,
+        };
+        let sel_frame = sel_registerName(b"frame\0".as_ptr() as _);
+        let parent_frame = get_frame(parent, sel_frame);
+        let (pane_x, pane_y) = (rect.x as f64 / scale, rect.y as f64 / scale);
+        let (pane_w, pane_h) = (rect.width as f64 / scale, rect.height as f64 / scale);
+        let target = NSRect {
+            origin: NSPoint {
+                x: parent_frame.origin.x + pane_x,
+                y: parent_frame.origin.y + parent_frame.size.h - pane_y - pane_h,
+            },
+            size: NSSize { w: pane_w, h: pane_h },
+        };
+        let current = get_frame(overlay, sel_frame);
+        let same = (current.origin.x - target.origin.x).abs() < 0.5
+            && (current.origin.y - target.origin.y).abs() < 0.5
+            && (current.size.w - target.size.w).abs() < 0.5
+            && (current.size.h - target.size.h).abs() < 0.5;
+        if !same {
+            set_frame_d(overlay, sel_registerName(b"setFrame:display:\0".as_ptr() as _), target, 1u8);
+        }
+        controller.set_bounds(Some(&Rect {
+            x: pane_x as i32,
+            y: pane_y as i32,
+            width: pane_w as i32,
+            height: pane_h as i32,
+        }));
+    }
+    true
 }
 
 #[cfg(not(target_os = "windows"))]
