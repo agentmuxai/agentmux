@@ -70,16 +70,21 @@ struct CallMessage<'a> {
 }
 
 /// The script, when this process was started as the CLI's shell prefix:
-/// exactly one argument, which is neither a subcommand nor a flag. The CLI's
-/// script always has spaces in it (`source … && eval '…'`), which a
-/// subcommand never does.
+/// exactly one argument, which is neither a subcommand nor a flag.
+///
+/// The CLI puts the prefix in front of more than Bash calls: hook commands,
+/// and every stdio MCP server, whose command and arguments it joins into
+/// that one argument. So a lone word is a prefix call too: the `agentmux`
+/// MCP server arrives as just `agentmux-mcp`, and refusing it as an unknown
+/// subcommand left agents without their AgentMux tools
+/// (docs/reports/REPORT_AGENT_MCP_DOWN_THROUGH_SHELL_PREFIX_2026_10_11.md).
 pub fn prefix_script(args: &[OsString]) -> Option<String> {
     if args.len() != 2 {
         return None;
     }
     let script = args[1].to_str()?;
     let looks_like_cli_arg = script.starts_with('-') || SUBCOMMANDS.contains(&script);
-    (!looks_like_cli_arg && script.contains(char::is_whitespace)).then(|| script.to_string())
+    (!looks_like_cli_arg && !script.trim().is_empty()).then(|| script.to_string())
 }
 
 /// Whether this process runs under a CLI whose shell prefix is AgentMux's
@@ -225,21 +230,19 @@ fn sweep_other_sessions(root: &Path, keep: &Path) {
 }
 
 /// Claim the record of the call this script runs: the newest one for the
-/// session whose command is `command`; failing that (no command, or no
-/// match), the session's only record. Newest, because the hook records a
-/// call just before the CLI runs it, while a call the CLI never ran (a deny
-/// rule, a refused prompt) leaves an older record behind that a retry of
-/// the same command must not take. A claim renames the record away, so two
+/// session whose command is `command`; failing that, the session's only
+/// record. Newest, because the hook records a call just before the CLI runs
+/// it, while a call the CLI never ran (a deny rule, a refused prompt) leaves
+/// an older record behind that a retry of the same command must not take. A claim renames the record away, so two
 /// prefix processes never claim the same call. `None` when there is nothing
-/// to claim: the script then runs unlinked.
-pub fn claim(session_id: &str, command: Option<&str>) -> Option<CallRecord> {
+/// to claim: the script then runs unlinked. Only a Bash call's script, one
+/// with a command in its `eval`, ever claims (`run`).
+pub fn claim(session_id: &str, command: &str) -> Option<CallRecord> {
     let dir = session_dir(session_id)?;
     let mut records = read_records(&dir);
     records.sort_by_key(|(_, r)| std::cmp::Reverse(r.created_ms));
-    let matching: Vec<&(PathBuf, CallRecord)> = match command {
-        Some(cmd) => records.iter().filter(|(_, r)| r.command == cmd).collect(),
-        None => Vec::new(),
-    };
+    let matching: Vec<&(PathBuf, CallRecord)> =
+        records.iter().filter(|(_, r)| r.command == command).collect();
     let candidates: Vec<&(PathBuf, CallRecord)> = if !matching.is_empty() {
         matching
     } else if records.len() == 1 {
@@ -294,23 +297,24 @@ fn read_records(dir: &Path) -> Vec<(PathBuf, CallRecord)> {
 /// were no prefix: no live output, nothing else changed.
 /// docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.2, §2.3.
 pub async fn run(script: String) -> Result<i32> {
-    let extracted = extract_command(&script);
+    // Only a Bash call's script has the CLI's `eval`. Anything else is a hook
+    // or an MCP server, which runs as it is and never takes a Bash call's
+    // record: in the PTY, a hook's answer or a server's JSON-RPC would be
+    // garbled, and the call it took would lose its live output.
+    let Some((command, range)) = extract_command(&script) else {
+        tracing::info!(target: "bashwrap", "prefix: not a Bash call; running it as it is");
+        return run_passthrough(&script);
+    };
     let session = std::env::var(SESSION_ID_ENV).ok().filter(|s| !s.is_empty());
-    let record = session
-        .as_deref()
-        .and_then(|s| claim(s, extracted.as_ref().map(|(cmd, _)| cmd.as_str())));
+    let record = session.as_deref().and_then(|s| claim(s, &command));
     let Some(record) = record else {
-        tracing::info!(target: "bashwrap", session = ?session, extracted = extracted.is_some(), "prefix: no call to link; running the script as plain bash");
+        tracing::info!(target: "bashwrap", session = ?session, "prefix: no call to link; running the script as plain bash");
         return run_plain(&script);
     };
     // The tee rewrite works on the model's command, so it is applied to the
     // command inside the script's `eval` and the script rebuilt around it.
-    // Without the command (the CLI's format changed) the script runs as is.
-    let script = match &extracted {
-        Some((command, range)) => match crate::hook::tee_redirect_rewrite(command) {
-            Some(teed) => replace_command(&script, range.clone(), &teed),
-            None => script,
-        },
+    let script = match crate::hook::tee_redirect_rewrite(&command) {
+        Some(teed) => replace_command(&script, range, &teed),
         None => script,
     };
     // Not awaited before the command starts: a slow srv must not hold it up.
@@ -337,6 +341,45 @@ async fn report_call(tool_id: String, description: String) {
     let msg = CallMessage { op: "call", tool_id: &tool_id, pid: std::process::id(), description: &description, timestamp: now_ms() };
     if let Err(e) = client.publish_chunk(block_id.as_deref(), &msg).await {
         tracing::warn!(target: "bashwrap", tool_id, error = %e, "call report failed");
+    }
+}
+
+/// Run a hook command or an MCP server's command line on this process's own
+/// stdio, untouched: an MCP server speaks JSON-RPC on it, so one added byte
+/// breaks it. A lone word is a program, started directly (no shell to
+/// mangle a Windows path, nothing to locate first); anything else is a
+/// command line, which the CLI joined unquoted, so bash runs it.
+fn run_passthrough(script: &str) -> Result<i32> {
+    let script = script.trim();
+    if script.contains(char::is_whitespace) {
+        return run_plain(script);
+    }
+    run_program(script)
+}
+
+/// Become the program, so the CLI's signals and pid reach it. Returns only
+/// when it can't be started.
+#[cfg(unix)]
+fn run_program(program: &str) -> Result<i32> {
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new(program).exec();
+    eprintln!("agentmux-bashwrap: cannot run {program}: {err}");
+    Ok(127)
+}
+
+/// Run the program and wait for it. The block's Job Object ends it with the
+/// agent, and it sees stdin close when the CLI closes its end.
+#[cfg(windows)]
+fn run_program(program: &str) -> Result<i32> {
+    let mut cmd = std::process::Command::new(program);
+    // A console program, like bash.exe in `run_plain`.
+    cmd.no_window();
+    match cmd.status() {
+        Ok(status) => Ok(status.code().unwrap_or(1)),
+        Err(e) => {
+            eprintln!("agentmux-bashwrap: cannot run {program}: {e}");
+            Ok(127)
+        }
     }
 }
 
@@ -390,10 +433,35 @@ mod tests {
             vec!["bw", "--help"],
             vec!["bw"],
             vec!["bw", "exec", "--tool-id=x"],
-            vec!["bw", "nospaces"],
+            vec!["bw", "  "],
         ] {
             assert_eq!(prefix_script(&os(&args)), None, "{args:?}");
         }
+    }
+
+    /// The CLI also prefixes hooks and stdio MCP servers, joining a server's
+    /// command and arguments into one argument; `agentmux-mcp` arrives alone.
+    #[test]
+    fn hooks_and_mcp_servers_are_prefix_calls_too() {
+        for script in ["agentmux-mcp", r"C:\tools\server.exe", "npx -y @scope/server", "agentmux-bashwrap hook"] {
+            assert_eq!(prefix_script(&os(&["bw", script])).as_deref(), Some(script));
+        }
+    }
+
+    /// A hook or an MCP server started while a Bash call waits must not take
+    /// that call's record: it would run in the PTY, and the call would lose
+    /// its live output.
+    #[test]
+    fn a_script_without_the_clis_eval_never_claims_a_call() {
+        with_calls_dir(|| {
+            register("s", &new_record("toolu_1", "cargo build", false)).unwrap();
+            std::env::set_var(SESSION_ID_ENV, "s");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let code = rt.block_on(run("agentmux-no-such-program-4f1c".to_string())).unwrap();
+            std::env::remove_var(SESSION_ID_ENV);
+            assert_eq!(code, 127, "a program that can't be started exits like a shell's");
+            assert_eq!(claim("s", "cargo build").unwrap().tool_use_id, "toolu_1", "the call is still waiting");
+        });
     }
 
     #[test]
@@ -449,13 +517,13 @@ mod tests {
             register("s1", &new_record("toolu_a", "cargo build", false)).unwrap();
             register("s1", &new_record("toolu_b", "npm test", true)).unwrap();
             register("s1", &new_record("toolu_c", "ls", false)).unwrap();
-            let got = claim("s1", Some("npm test")).unwrap();
+            let got = claim("s1", "npm test").unwrap();
             assert_eq!((got.tool_use_id.as_str(), got.run_in_background), ("toolu_b", true));
-            assert_eq!(claim("s1", Some("npm test")), None, "claimed once: two others left, neither matches");
-            assert_eq!(claim("s1", Some("cargo build")).unwrap().tool_use_id, "toolu_a");
+            assert_eq!(claim("s1", "npm test"), None, "claimed once: two others left, neither matches");
+            assert_eq!(claim("s1", "cargo build").unwrap().tool_use_id, "toolu_a");
             // One record left: a command that doesn't match exactly (the CLI
             // may tidy it) still gets the session's only waiting call.
-            assert_eq!(claim("s1", Some("ls ")).unwrap().tool_use_id, "toolu_c");
+            assert_eq!(claim("s1", "ls ").unwrap().tool_use_id, "toolu_c");
         });
     }
 
@@ -468,7 +536,7 @@ mod tests {
             denied.created_ms -= 10_000;
             register("s", &denied).unwrap();
             register("s", &new_record("toolu_retry", "make", true)).unwrap();
-            let got = claim("s", Some("make")).unwrap();
+            let got = claim("s", "make").unwrap();
             assert_eq!((got.tool_use_id.as_str(), got.run_in_background), ("toolu_retry", true));
         });
     }
@@ -477,11 +545,11 @@ mod tests {
     fn without_a_match_only_a_lone_record_is_claimed() {
         with_calls_dir(|| {
             register("s", &new_record("toolu_1", "a", false)).unwrap();
-            assert_eq!(claim("s", None).unwrap().tool_use_id, "toolu_1");
+            assert_eq!(claim("s", "no match").unwrap().tool_use_id, "toolu_1");
             register("s", &new_record("toolu_2", "b", false)).unwrap();
             register("s", &new_record("toolu_3", "c", false)).unwrap();
-            assert_eq!(claim("s", Some("zzz")), None, "two candidates: ambiguous");
-            assert_eq!(claim("other-session", Some("b")), None, "another session's records are never claimed");
+            assert_eq!(claim("s", "zzz"), None, "two candidates: ambiguous");
+            assert_eq!(claim("other-session", "b"), None, "another session's records are never claimed");
         });
     }
 
@@ -491,13 +559,13 @@ mod tests {
             register("s", &new_record("toolu_1", "a", false)).unwrap();
             register("s", &new_record("toolu_2", "b", false)).unwrap();
             let dir = session_dir("s").unwrap();
-            claim("s", Some("a")).unwrap();
+            claim("s", "a").unwrap();
             assert!(dir.is_dir(), "a call still waits in it");
-            claim("s", Some("b")).unwrap();
+            claim("s", "b").unwrap();
             assert!(!dir.exists());
             // The next call makes it again.
             register("s", &new_record("toolu_3", "c", false)).unwrap();
-            assert_eq!(claim("s", Some("c")).unwrap().tool_use_id, "toolu_3");
+            assert_eq!(claim("s", "c").unwrap().tool_use_id, "toolu_3");
         });
     }
 
@@ -515,8 +583,8 @@ mod tests {
             register("current", &new_record("toolu_now", "z", false)).unwrap();
             assert!(!session_dir("ended").unwrap().exists());
             assert!(!session_dir("empty").unwrap().exists());
-            assert_eq!(claim("live", Some("y")).unwrap().tool_use_id, "toolu_live");
-            assert_eq!(claim("current", Some("z")).unwrap().tool_use_id, "toolu_now");
+            assert_eq!(claim("live", "y").unwrap().tool_use_id, "toolu_live");
+            assert_eq!(claim("current", "z").unwrap().tool_use_id, "toolu_now");
         });
     }
 
@@ -526,7 +594,7 @@ mod tests {
             let mut old = new_record("toolu_old", "x", false);
             old.created_ms -= RECORD_MAX_AGE.as_millis() as u64 + 1;
             register("s", &old).unwrap();
-            assert_eq!(claim("s", Some("x")), None);
+            assert_eq!(claim("s", "x"), None);
             assert!(read_records(&session_dir("s").unwrap()).is_empty());
         });
     }
