@@ -43,7 +43,7 @@ struct Notes {
     /// block → (this spawn's token, its "record not yet sent" flag). A newer
     /// spawn replaces the entry, so an older spawn's task stands down: its
     /// flag belongs to a process that is gone, and the user may already have
-    /// typed into the new one (codex P2 on #4707).
+    /// typed into the new one (#4707).
     current: HashMap<String, (u64, Arc<AtomicBool>)>,
     /// block → when its last note was shown.
     shown: HashMap<String, i64>,
