@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-10
 **Status:** active. Phase 0 (one launch path, explicit reach) shipped in
-PR #4677. Phase 1 (observed servers) is PR #4683. Phases 2–3 (showing them,
-other providers) are next.
+PR #4677. Phase 1 (observed servers) is PR #4683. Phase 2a (In use now) is
+PR #4685; Phase 2b and Phase 3 (other providers) are next.
 **Author:** QTest@narko
 **Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
 (the investigation and history). File references are as of `main` at
@@ -146,15 +146,24 @@ says it has, from every source.
 
 ## 4. Phase 2: show it
 
-Connectors → MCP servers lists every observed server, grouped by source:
-AgentMux catalog, built in (`agentmux`), and the agent's account or project
-(claude.ai connectors, account config, plugins, a project's own `.mcp.json`
-entries).
-- Each row shows which agents report it and its status per agent. Agents a
-  catalog server is meant to reach but which don't report it show as "not
-  connected".
-- Non-catalog rows are read-only and say where they come from.
-- The agent pane's startup card uses the observed list when there is one.
+**Shipped (2a).** Connectors → MCP servers opens with **In use now**, above
+the catalog (`mcp-in-use.tsx`, `mcp-observed.ts`). It has one row per server
+any running agent reports, and refreshes on `mcp:observed` and `mcp:changed`.
+- **Order.** AgentMux's own first (built in, catalog), then claude.ai
+  connectors, account config, project, local, added at launch, managed.
+- **Each row** gives the server's source in words and a summary ("2 agents,
+  1 not connected"). Under it is each reporting agent with a status dot:
+  connected, failed, needs sign-in, starting.
+- **A server two agents get from different sources** is one row per source.
+- **The rows are read-only.** The catalog below stays the place to change a
+  catalog server.
+- **Empty state.** With no report since srv started, the list says so.
+
+**Next (2b).**
+- **Bound but not connected.** Agents a catalog server is meant to reach but
+  which don't report it, shown as "not connected" on its catalog row. This
+  needs the reach rule (§2.1) evaluated per running agent.
+- **The agent pane's startup card** uses the observed list when there is one.
 
 ## 5. Phase 3: every provider; discovery
 

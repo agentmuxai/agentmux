@@ -154,6 +154,9 @@ export const WpsEvent = {
     LanInstancesHealth: "laninstances:health",
     LspMessage: "lsp:message",
     McpChanged: "mcp:changed",
+    // The MCP servers a running agent's CLI reports changed
+    // (crates/srv/src/backend/mcp_observed.rs).
+    McpObserved: "mcp:observed",
     MemoriesChanged: "memories:changed",
     OpenFloatingPane: "openfloatingpane",
     ProcessBrokerTrackedBlocksChanged: "processbroker:tracked-blocks-changed",

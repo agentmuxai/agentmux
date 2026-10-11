@@ -14,6 +14,7 @@ import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { McpCatalogModel, reachLabel } from "./mcp-model";
 import { McpCatalogPicker } from "./McpCatalogPicker";
+import { McpInUse } from "./mcp-in-use";
 import { findPreloadEntryByName } from "./mcp-preload-catalog";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import "../agent/components/AgentPrimitiveModal.scss";
@@ -82,6 +83,7 @@ export const McpManager = (): JSX.Element => {
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
+            <McpInUse />
             <Show
                 when={model.serversAtom().length > 0}
                 fallback={<div class="agent-primitive-modal-list-empty">No MCP servers yet</div>}
