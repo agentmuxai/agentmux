@@ -128,15 +128,19 @@ export async function setup(session) {
         return out.join(", ");
     })()`);
     console.log(`  ${done || "demo data already there"}`);
-    const installed = await session.evaluate(`(async () => {
-        try {
-            await RpcApi.WidgetsInstallCommand(TabRpcClient, { path: ${JSON.stringify(SAMPLE_WIDGET)}, replace: true });
-            return "widget: installed, waiting for approval";
-        } catch (e) {
-            return "widget: " + e.message;
-        }
+    // A copy approved before keeps its approval through a reinstall, and then
+    // has no Approve button: uninstall it (which drops the approval) first.
+    // An install that fails fails setup (Codex on #4669).
+    const state = await session.evaluate(`(async () => {
+        const id = ${JSON.stringify(SAMPLE_WIDGET_ID)};
+        const before = await RpcApi.WidgetsListCommand(TabRpcClient);
+        if (before.packages.some((p) => p.id === id)) await RpcApi.WidgetsUninstallCommand(TabRpcClient, { id });
+        await RpcApi.WidgetsInstallCommand(TabRpcClient, { path: ${JSON.stringify(SAMPLE_WIDGET)}, replace: true });
+        const after = await RpcApi.WidgetsListCommand(TabRpcClient);
+        return after.packages.find((p) => p.id === id)?.state ?? "missing";
     })()`);
-    console.log(`  ${installed}`);
+    if (state !== "needs_approval") throw new Error(`the sample widget is "${state}" after installing, not waiting for approval`);
+    console.log("  widget: installed, waiting for approval");
 }
 
 /** The visible pane holding `selector`, as a selector by block id, or null. */
