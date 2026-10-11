@@ -297,13 +297,17 @@ fn is_loopback_url(url: &str) -> bool {
 /// asking: one per `local_url`, loopback only (as the cross-channel fleet
 /// forwarder requires), never this instance, and not a stale one, whose rows
 /// are dimmed and show no state.
+///
+/// Each instance is asked with its freshest entry's key: an instance that
+/// restarted on the same URL has a new per-launch key, while its older entries
+/// keep the old one until they are rewritten or age out (Codex P2 on #4703).
 pub fn channel_status_targets(
     entries: &[AgentEntry],
     own_channel: &str,
     own_url: &str,
     now_ms: u64,
 ) -> Vec<ChannelStatusTarget> {
-    let mut by_url: BTreeMap<&str, ChannelStatusTarget> = BTreeMap::new();
+    let mut by_url: BTreeMap<&str, &AgentEntry> = BTreeMap::new();
     for e in entries {
         if e.channel.is_empty()
             || e.channel == own_channel
@@ -313,15 +317,19 @@ pub fn channel_status_targets(
         {
             continue;
         }
-        by_url
-            .entry(&e.local_url)
-            .or_insert_with(|| ChannelStatusTarget {
-                channel: e.channel.clone(),
-                local_url: e.local_url.clone(),
-                auth_key: e.auth_key.clone(),
-            });
+        let slot = by_url.entry(&e.local_url).or_insert(e);
+        if e.updated_at > slot.updated_at {
+            *slot = e;
+        }
     }
-    by_url.into_values().collect()
+    by_url
+        .into_values()
+        .map(|e| ChannelStatusTarget {
+            channel: e.channel.clone(),
+            local_url: e.local_url.clone(),
+            auth_key: e.auth_key.clone(),
+        })
+        .collect()
 }
 
 /// Asks each target's `agent-names` route, concurrently, for its agents'
@@ -846,6 +854,29 @@ mod tests {
             "one per instance; not stale, not off-machine, not this instance"
         );
         assert_eq!(targets[0].auth_key, "secret");
+    }
+
+    /// Codex P2 on #4703: an instance that restarted on the same URL has a new
+    /// key, and its older entries keep the old one for a while. Whatever order
+    /// the registry lists them in, the freshest entry's key is used.
+    #[test]
+    fn a_restarted_instance_is_asked_with_its_newest_key() {
+        let at = |name: &str, age_ms: u64, key: &str| {
+            let mut e = entry(name, "dev", age_ms);
+            e.local_url = "http://127.0.0.1:29702".to_string();
+            e.auth_key = key.to_string();
+            e
+        };
+        let entries = [
+            at("Korp", 30_000, "old-key"),
+            at("Loap", 1_000, "new-key"),
+            at("Opaz", 20_000, "old-key"),
+        ];
+        for order in [entries.to_vec(), entries.iter().rev().cloned().collect()] {
+            let targets = channel_status_targets(&order, "stable", "", NOW);
+            assert_eq!(targets.len(), 1);
+            assert_eq!(targets[0].auth_key, "new-key");
+        }
     }
 
     /// One-shot HTTP server answering any request with `body`, and the request it
