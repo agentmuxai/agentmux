@@ -270,15 +270,28 @@ async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, p
         "channel": crate::backend::reactive::registry::local_channel_id(),
         "version": env!("CARGO_PKG_VERSION"),
     });
-    let resp = http
+    post(base, path, token, http, Some(agent_id), &body).await
+}
+
+/// POST `body` to `path`, with `X-Agent-ID: agent_id` when there is one;
+/// `(status, json body)` or `None` on transport error.
+async fn post(
+    base: &str,
+    path: &str,
+    token: &str,
+    http: &reqwest::Client,
+    agent_id: Option<&str>,
+    body: &serde_json::Value,
+) -> Option<(u16, serde_json::Value)> {
+    let mut req = http
         .post(format!("{base}{path}"))
         .header("Authorization", format!("Bearer {token}"))
-        .header("X-Agent-ID", agent_id)
-        .json(&body)
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await;
-    match resp {
+        .json(body)
+        .timeout(Duration::from_secs(10));
+    if let Some(agent_id) = agent_id {
+        req = req.header("X-Agent-ID", agent_id);
+    }
+    match req.send().await {
         Ok(r) => {
             let status = r.status().as_u16();
             let json = r.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
@@ -289,6 +302,80 @@ async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, p
             None
         }
     }
+}
+
+/// Renew, in one request (`POST /agents/lease/renew-batch`), the lease of
+/// every agent in `agents` this instance holds and is due to renew, instead
+/// of one request per agent every [`RENEW_EVERY`]. Returns each renewed
+/// agent's outcome, keyed by its lowercased name. An agent it leaves out (not
+/// held, not due, fewer than two due, a relay without the route, a failed
+/// request, an `unavailable` answer) is the caller's to [`ensure`] on its own,
+/// exactly as before.
+pub(crate) async fn renew_held_batch(
+    base: &str,
+    agents: &[String],
+    token: &str,
+    http: &reqwest::Client,
+    still_subscribed: impl Fn(&str) -> bool,
+) -> HashMap<String, Outcome> {
+    let mut outcomes = HashMap::new();
+    let lease_tier_off = UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now());
+    if lease_tier_off || super::relay::batch_routes_missing(base) {
+        return outcomes;
+    }
+    let mut due: Vec<String> = {
+        let state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+        agents
+            .iter()
+            .map(|a| key(a))
+            .filter(|k| {
+                state
+                    .get(k)
+                    .is_some_and(|e| e.held && e.last_ok.is_none_or(|at| at.elapsed() >= RENEW_EVERY))
+            })
+            .collect()
+    };
+    due.sort();
+    due.dedup();
+    if due.len() < 2 {
+        return outcomes;
+    }
+    // Every agent's op lock, taken in name order so two batches can't
+    // deadlock, and held across the request as `ensure` holds its own: a
+    // Take over or release for one of them waits, then sees the result.
+    let locks: Vec<_> = due.iter().map(|a| op_lock(a)).collect();
+    let mut _guards = Vec::with_capacity(locks.len());
+    for lock in &locks {
+        _guards.push(lock.lock().await);
+    }
+    due.retain(|a| still_subscribed(a));
+    for chunk in due.chunks(super::relay::MAX_BATCH_AGENTS) {
+        let body = serde_json::json!({ "instance": instance_id(), "agent_ids": chunk });
+        let results = match post(base, "/agents/lease/renew-batch", token, http, None, &body).await {
+            Some((404, _)) | Some((405, _)) => {
+                super::relay::note_batch_routes_missing(base);
+                return outcomes;
+            }
+            Some((200..=299, body)) => body.get("results").cloned().unwrap_or_default(),
+            _ => continue,
+        };
+        for agent in chunk {
+            let Some(entry) = results.get(agent.as_str()) else { continue };
+            let outcome = if entry.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+                Outcome::Held
+            } else if entry.get("error").and_then(serde_json::Value::as_str) != Some("not_holder") {
+                continue; // `unavailable`: renewed on its own instead
+            } else if entry.get("held_by").is_some_and(serde_json::Value::is_null) {
+                // Nobody holds it any more: claim again, as `ensure` does.
+                claim_outcome(call(base, agent, token, http, "/agents/lease").await)
+            } else {
+                Outcome::HeldElsewhere(entry.get("held_by").map(describe_holder).unwrap_or_default())
+            };
+            record(agent, &outcome);
+            outcomes.insert(agent.clone(), outcome);
+        }
+    }
+    outcomes
 }
 
 /// Release `agent_id`'s lease (best effort) and forget it — unless
@@ -768,6 +855,99 @@ mod tests {
         assert_eq!(held_elsewhere(&agent).as_deref(), Some("computer desk"), "keyed case-insensitively, like the relay");
         record(&agent, &Outcome::Held);
         assert!(held_elsewhere(&agent).is_none());
+    }
+
+    /// A relay stub recording `"METHOD /path"` of every request; `renew-batch`
+    /// answers `results`, the claim route grants.
+    async fn batch_stub(
+        renew_batch: (u16, serde_json::Value),
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+            let (log, renew_batch) = (log.clone(), renew_batch.clone());
+            async move {
+                let line = format!("{} {}", req.method(), req.uri().path());
+                log.lock().unwrap().push(line.clone());
+                let (status, body) = match line.as_str() {
+                    "POST /agents/lease/renew-batch" => renew_batch,
+                    "POST /agents/lease" => (200, serde_json::json!({ "ok": true, "epoch": 2 })),
+                    _ => (404, serde_json::Value::Null),
+                };
+                (axum::http::StatusCode::from_u16(status).unwrap(), axum::Json(body))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, seen)
+    }
+
+    /// Held, with its renewal due now.
+    fn held_and_due(agent: &str) {
+        STATE.lock().unwrap().insert(key(agent), Entry { held: true, ..Default::default() });
+    }
+
+    #[tokio::test]
+    async fn one_request_renews_every_held_lease_that_is_due() {
+        let [a, b, c, d] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        for agent in [&a, &b, &c, &d] {
+            held_and_due(agent);
+        }
+        let results = serde_json::json!({ "results": {
+            a.clone(): { "ok": true, "epoch": 1, "ttl_ms": 60000 },
+            b.clone(): { "ok": false, "error": "not_holder", "held_by": { "host": "desk", "channel": "stable" } },
+            c.clone(): { "ok": false, "error": "not_holder", "held_by": null },
+            d.clone(): { "ok": false, "error": "unavailable" },
+        }});
+        let (base, seen) = batch_stub((200, results)).await;
+        let agents = vec![a.to_uppercase(), b.clone(), c.clone(), d.clone()];
+
+        let got = renew_held_batch(&base, &agents, "tok", &reqwest::Client::new(), |_| true).await;
+
+        assert_eq!(got.get(&a), Some(&Outcome::Held), "keyed by the lowercased name");
+        assert_eq!(got.get(&b), Some(&Outcome::HeldElsewhere("computer desk, channel stable".into())));
+        assert_eq!(got.get(&c), Some(&Outcome::Held), "nobody held it: claimed again");
+        assert_eq!(got.get(&d), None, "unavailable: left to `ensure` on its own");
+        assert_eq!(*seen.lock().unwrap(), ["POST /agents/lease/renew-batch", "POST /agents/lease"]);
+        assert_eq!(held_elsewhere(&b).as_deref(), Some("computer desk, channel stable"));
+        assert!(is_held(&a) && is_held(&c));
+    }
+
+    #[tokio::test]
+    async fn a_relay_without_the_batch_route_is_left_to_renew_one_by_one() {
+        let [a, b] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        held_and_due(&a);
+        held_and_due(&b);
+        let (base, seen) = batch_stub((404, serde_json::Value::Null)).await;
+        let agents = vec![a.clone(), b.clone()];
+
+        assert!(renew_held_batch(&base, &agents, "tok", &reqwest::Client::new(), |_| true).await.is_empty());
+        assert!(super::super::relay::batch_routes_missing(&base));
+        assert!(
+            UNSUPPORTED_UNTIL.lock().unwrap().is_none_or(|t| t <= Instant::now()),
+            "a missing batch route is not a missing lease tier"
+        );
+        // Remembered: the next tick doesn't ask again.
+        assert!(renew_held_batch(&base, &agents, "tok", &reqwest::Client::new(), |_| true).await.is_empty());
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_batch_skips_a_single_due_agent_and_agents_no_longer_subscribed() {
+        let [a, b, fresh] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        held_and_due(&a);
+        held_and_due(&b);
+        record(&fresh, &Outcome::Held); // renewed just now: not due
+        let (base, seen) = batch_stub((200, serde_json::json!({ "results": {} }))).await;
+
+        let one_due = vec![a.clone(), fresh.clone()];
+        assert!(renew_held_batch(&base, &one_due, "tok", &reqwest::Client::new(), |_| true).await.is_empty());
+        assert!(seen.lock().unwrap().is_empty(), "one due agent: the single route costs the same");
+
+        let both = vec![a.clone(), b.clone()];
+        renew_held_batch(&base, &both, "tok", &reqwest::Client::new(), |agent| agent == a).await;
+        assert_eq!(*seen.lock().unwrap(), ["POST /agents/lease/renew-batch"], "asked, but only for {a}");
     }
 
     #[test]

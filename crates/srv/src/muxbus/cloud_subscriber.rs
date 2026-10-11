@@ -7,7 +7,9 @@
 //! When MUXBUS_TOKEN is present, the subscriber:
 //!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
-//!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
+//!   3. On each signal, pulls pending injections for every locally-registered
+//!      agent: one POST /reactive/pending-batch for all of them, or one
+//!      GET /reactive/pending/:id per agent on a relay without the batch route.
 //!   4. Claims all pending injections via REST POST /reactive/ack (atomic
 //!      pending->delivered transition server-side) *before* delivering — only
 //!      ids this call actually won the claim on get delivered via
@@ -288,7 +290,10 @@ async fn run_loop(
     agents: Arc<Mutex<HashSet<String>>>,
     mut ctrl_rx: mpsc::UnboundedReceiver<CtrlMsg>,
 ) {
-    let http = reqwest::Client::new();
+    let http = reqwest::Client::builder()
+        .user_agent(super::relay::USER_AGENT)
+        .build()
+        .unwrap_or_default();
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
     // Register this credential with the global broker scheduler once, up
@@ -712,6 +717,20 @@ async fn connect_and_run(
                     registered.retain(|a| !orphans.contains(a));
                 }
                 let subscribed = &agents;
+                // One request renews every held lease that is due
+                // (`renew_held_batch`); anything it leaves out, and every
+                // agent on a relay without the batch route, goes one by one.
+                let shared = shared_token_now(mstore, token).await;
+                let batched = super::wan_lease::renew_held_batch(base, &registered, &shared, http, |a| {
+                    subscribed.lock().unwrap().iter().any(|s| s.eq_ignore_ascii_case(a))
+                })
+                .await;
+                for (agent_id, outcome) in &batched {
+                    if let super::wan_lease::Outcome::HeldElsewhere(where_) = outcome {
+                        crate::backend::agent_admission::fence_agent_named(agent_id, where_);
+                    }
+                }
+                registered.retain(|a| !batched.contains_key(&a.trim().to_lowercase()));
                 futures_util::future::join_all(registered.iter().map(|agent_id| async move {
                     let per_agent = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
                     let agent_token = match per_agent {
@@ -891,12 +910,20 @@ async fn handle_server_msg(
             // join_all bounds the wall-clock cost to the slowest single
             // agent's chain regardless of N. reagentx P1 (round 4) on
             // PR #2342.
-            let outcomes = futures_util::future::join_all(
-                registered
-                    .iter()
-                    .map(|agent_id| sync_agent_reactive(base, agent_id, token, http, mstore, handler)),
-            )
-            .await;
+            // One request pulls for every agent (`sync_agents_batched`); a
+            // relay without the batch route, or a single agent, is pulled one
+            // agent at a time as before.
+            let outcomes = match sync_agents_batched(base, &registered, token, http, mstore, handler).await {
+                Some(outcomes) => outcomes,
+                None => {
+                    futures_util::future::join_all(
+                        registered
+                            .iter()
+                            .map(|agent_id| sync_agent_reactive(base, agent_id, token, http, mstore, handler)),
+                    )
+                    .await
+                }
+            };
 
             if outcomes
                 .iter()
@@ -987,6 +1014,65 @@ fn shared_token_rejection_outcome(status: reqwest::StatusCode, agent_id: &str) -
     AgentSyncOutcome::ReconnectSharedTokenExpired
 }
 
+/// One agent's answer to a pending pull, single or batched.
+#[derive(Deserialize)]
+struct PendingResp {
+    injections: Vec<PendingInj>,
+    // What the relay dropped undelivered since the last pull. Absent
+    // from an older relay: nothing to report.
+    #[serde(default)]
+    expired: Vec<delivery_status::notes::ExpiredItem>,
+}
+#[derive(Deserialize)]
+struct PendingInj {
+    id: String,
+    source_agent: Option<String>,
+    message: String,
+    priority: Option<String>,
+    // When the relay received it (RFC 3339), for marking a late delivery.
+    #[serde(default)]
+    created_at: Option<String>,
+    // Present only for messages signed by an AgentMux-operated WAN
+    // sender (currently just the GitHub review-notification consumer,
+    // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
+    // All four travel together; verification is attempted only when
+    // every one of them deserializes present (see below).
+    #[serde(default)]
+    reagent_sig: Option<String>,
+    #[serde(default)]
+    reagent_key_id: Option<String>,
+    #[serde(default)]
+    reagent_msg_id: Option<String>,
+    #[serde(default)]
+    reagent_ts_secs: Option<i64>,
+    // W3-S carried tuple + the cloud's same-account answer
+    // (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1). Absent from an
+    // older cloud and on unsigned rows; verified by `wan_verify` below.
+    #[serde(default)]
+    wan_sig: Option<String>,
+    #[serde(default)]
+    wan_msg_id: Option<String>,
+    #[serde(default)]
+    wan_ts_secs: Option<i64>,
+    #[serde(default)]
+    wan_source_agent: Option<String>,
+    #[serde(default)]
+    wan_target_agent: Option<String>,
+    #[serde(default)]
+    wan_source_host: Option<String>,
+    #[serde(default)]
+    wan_source_channel: Option<String>,
+    #[serde(default)]
+    wan_key_fp: Option<String>,
+    #[serde(default)]
+    sender_same_account: Option<bool>,
+}
+#[derive(Deserialize)]
+struct AckResp {
+    acknowledged: Vec<String>,
+    delivered_at: String,
+}
+
 /// One registered agent's full pending-fetch → claim → deliver cycle for an
 /// `InjectAvailable` broadcast. Extracted from the loop body it used to be
 /// so `handle_server_msg` can run every agent's sync concurrently via
@@ -1011,64 +1097,6 @@ async fn sync_agent_reactive(
     mstore: &Arc<Store>,
     handler: &'static crate::backend::reactive::handler::ReactiveHandler,
 ) -> AgentSyncOutcome {
-    #[derive(Deserialize)]
-    struct PendingResp {
-        injections: Vec<PendingInj>,
-        // What the relay dropped undelivered since the last pull. Absent
-        // from an older relay: nothing to report.
-        #[serde(default)]
-        expired: Vec<delivery_status::notes::ExpiredItem>,
-    }
-    #[derive(Deserialize)]
-    struct PendingInj {
-        id: String,
-        source_agent: Option<String>,
-        message: String,
-        priority: Option<String>,
-        // When the relay received it (RFC 3339), for marking a late delivery.
-        #[serde(default)]
-        created_at: Option<String>,
-        // Present only for messages signed by an AgentMux-operated WAN
-        // sender (currently just the GitHub review-notification consumer,
-        // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
-        // All four travel together; verification is attempted only when
-        // every one of them deserializes present (see below).
-        #[serde(default)]
-        reagent_sig: Option<String>,
-        #[serde(default)]
-        reagent_key_id: Option<String>,
-        #[serde(default)]
-        reagent_msg_id: Option<String>,
-        #[serde(default)]
-        reagent_ts_secs: Option<i64>,
-        // W3-S carried tuple + the cloud's same-account answer
-        // (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1). Absent from an
-        // older cloud and on unsigned rows; verified by `wan_verify` below.
-        #[serde(default)]
-        wan_sig: Option<String>,
-        #[serde(default)]
-        wan_msg_id: Option<String>,
-        #[serde(default)]
-        wan_ts_secs: Option<i64>,
-        #[serde(default)]
-        wan_source_agent: Option<String>,
-        #[serde(default)]
-        wan_target_agent: Option<String>,
-        #[serde(default)]
-        wan_source_host: Option<String>,
-        #[serde(default)]
-        wan_source_channel: Option<String>,
-        #[serde(default)]
-        wan_key_fp: Option<String>,
-        #[serde(default)]
-        sender_same_account: Option<bool>,
-    }
-    #[derive(Deserialize)]
-    struct AckResp {
-        acknowledged: Vec<String>,
-        delivered_at: String,
-    }
-
     // Prefer a credential bound to exactly this agent_id over the shared
     // account-level token — see agent_credentials.rs. Falls back to `token`
     // (today's self-declared behavior) whenever this agent isn't
@@ -1172,6 +1200,26 @@ async fn sync_agent_reactive(
         };
     };
 
+    claim_and_deliver(base, agent_id, token, http, mstore, handler, body, agent_token, using_per_agent).await
+}
+
+/// Claim `body`'s injections for `agent_id` and deliver the ones this call
+/// won: the second half of [`sync_agent_reactive`], shared with
+/// [`sync_agents_batched`]. `agent_token` is the credential the pull used
+/// (`using_per_agent` when it is the agent's own), retried with the shared
+/// token on a rejection exactly as the pull is.
+#[allow(clippy::too_many_arguments)]
+async fn claim_and_deliver(
+    base: &str,
+    agent_id: &str,
+    token: &str,
+    http: &reqwest::Client,
+    mstore: &Arc<Store>,
+    handler: &'static crate::backend::reactive::handler::ReactiveHandler,
+    body: PendingResp,
+    mut agent_token: String,
+    mut using_per_agent: bool,
+) -> AgentSyncOutcome {
     if body.injections.is_empty() {
         delivery_status::fetched(agent_id, 0, &body.expired);
         return AgentSyncOutcome::Ok;
@@ -1516,6 +1564,121 @@ async fn sync_agent_reactive(
 
     delivery_status::fetched(agent_id, delivered_count, &body.expired);
     AgentSyncOutcome::Ok
+}
+
+/// Every agent in `registered` pulled in one request
+/// (`POST /reactive/pending-batch`) instead of one
+/// `GET /reactive/pending/:agent` each, then claimed and delivered exactly as
+/// [`sync_agent_reactive`] does, for each agent with messages. The relay
+/// answers each agent as its single route would; this is what keeps an
+/// install's relay traffic from growing with every open agent.
+///
+/// `None` when the batch isn't used: fewer than two agents (one pull either
+/// way), or a relay without the route. The caller then pulls one agent at a
+/// time, as before. An agent the batch couldn't answer (a failed request, an
+/// entry missing) is pulled on its own here.
+async fn sync_agents_batched(
+    base: &str,
+    registered: &[String],
+    token: &str,
+    http: &reqwest::Client,
+    mstore: &Arc<Store>,
+    handler: &'static crate::backend::reactive::handler::ReactiveHandler,
+) -> Option<Vec<AgentSyncOutcome>> {
+    if registered.len() < 2 || super::relay::batch_routes_missing(base) {
+        return None;
+    }
+    let shared = shared_token_now(mstore, token).await;
+
+    // The lease first, as for a single pull: claimed or renewed (no request
+    // while a renewal is fresh), and no pull for an agent another instance
+    // holds (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.5).
+    let leases = futures_util::future::join_all(registered.iter().map(|agent_id| {
+        let shared = &shared;
+        async move { super::wan_lease::ensure(base, agent_id, shared, http, || is_subscribed(agent_id)).await }
+    }))
+    .await;
+    let mut pull: Vec<&String> = Vec::new();
+    for (agent_id, lease) in registered.iter().zip(leases) {
+        match lease {
+            super::wan_lease::Outcome::HeldElsewhere(where_) => {
+                crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+            }
+            _ => pull.push(agent_id),
+        }
+    }
+
+    let mut answers = serde_json::Map::new();
+    let started = std::time::Instant::now();
+    for chunk in pull.chunks(super::relay::MAX_BATCH_AGENTS) {
+        let resp = http
+            .post(format!("{base}/reactive/pending-batch"))
+            .header("Authorization", format!("Bearer {shared}"))
+            .header("X-Agent-Instance", super::wan_lease::instance_id())
+            .json(&serde_json::json!({ "agent_ids": chunk }))
+            .send()
+            .await;
+        match resp {
+            Ok(r) if matches!(r.status().as_u16(), 404 | 405) && answers.is_empty() => {
+                super::relay::note_batch_routes_missing(base);
+                return None;
+            }
+            Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+                Ok(v) => {
+                    if let Some(results) = v.get("results").and_then(|r| r.as_object()) {
+                        answers.extend(results.clone());
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "cloud_subscriber: parse batch pull failed"),
+            },
+            Ok(r) => tracing::warn!(status = %r.status(), "cloud_subscriber: batch pull non-2xx; pulling those agents one by one"),
+            Err(e) => tracing::warn!(error = %e, "cloud_subscriber: batch pull failed; pulling those agents one by one"),
+        }
+    }
+
+    let outcomes = futures_util::future::join_all(pull.into_iter().map(|agent_id| {
+        let entry = answers.get(&agent_id.trim().to_lowercase()).cloned();
+        let shared = &shared;
+        async move {
+            let Some(entry) = entry else {
+                return sync_agent_reactive(base, agent_id, token, http, mstore, handler).await;
+            };
+            match entry.get("error").and_then(|e| e.as_str()) {
+                Some("not_holder") => {
+                    // The relay's lease fence, as a 409 on a single pull.
+                    if let Some(where_) = super::wan_lease::note_not_holder_since(agent_id, &entry, started) {
+                        crate::backend::agent_admission::fence_agent_named(agent_id, &where_);
+                    }
+                    AgentSyncOutcome::Ok
+                }
+                Some(_) => {
+                    delivery_status::pull_failed(agent_id, "the relay couldn't read this agent's messages just now");
+                    AgentSyncOutcome::Ok
+                }
+                None => match serde_json::from_value::<PendingResp>(entry) {
+                    Ok(body) if body.injections.is_empty() => {
+                        delivery_status::fetched(agent_id, 0, &body.expired);
+                        AgentSyncOutcome::Ok
+                    }
+                    Ok(body) => {
+                        // Claimed with the agent's own credential when it has
+                        // one, as a single pull would be.
+                        let own = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
+                        let using_per_agent = own.is_some();
+                        let agent_token = own.unwrap_or_else(|| shared.clone());
+                        claim_and_deliver(base, agent_id, token, http, mstore, handler, body, agent_token, using_per_agent).await
+                    }
+                    Err(e) => {
+                        tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: parse pending failed");
+                        delivery_status::pull_failed(agent_id, "the relay's message list couldn't be read");
+                        AgentSyncOutcome::Ok
+                    }
+                },
+            }
+        }
+    }))
+    .await;
+    Some(outcomes)
 }
 
 /// The shared account token for an HTTP call made during a connection: loaded
@@ -2217,6 +2380,97 @@ mod tests {
             ["POST /agents/lease", pending.as_str(), "POST /reactive/ack"],
             "nothing delivered, so nothing released"
         );
+    }
+
+    // ── One pull for every agent (POST /reactive/pending-batch) ──────────
+
+    /// Run one `InjectAvailable` pull of `agents` through the batch path.
+    async fn sync_batched(base: &str, agents: &[String]) -> Option<usize> {
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let handler = crate::backend::reactive::handler::get_global_handler();
+        super::sync_agents_batched(base, agents, "test-token", &reqwest::Client::new(), &mstore, handler)
+            .await
+            .map(|outcomes| outcomes.len())
+    }
+
+    #[tokio::test]
+    async fn one_request_pulls_for_every_agent_and_only_agents_with_messages_are_claimed() {
+        let [a, b, c, d] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        let (_tmp, _held, rx) = hold_locally(&b);
+        let results = serde_json::json!({ "results": {
+            a.clone(): { "agent_id": a.clone(), "injections": [{ "id": "inj-1", "message": "hello" }], "count": 1, "expired": [] },
+            b.clone(): not_holder(),
+            c.clone(): { "agent_id": c.clone(), "injections": [], "count": 0, "expired": [] },
+            // d is missing from the answer: pulled on its own.
+        }});
+        let pd = format!("GET /reactive/pending/{d}");
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            ("POST /reactive/pending-batch".into(), 200, results),
+            ("POST /reactive/ack".into(), 200, serde_json::json!({ "acknowledged": [], "delivered_at": "2026-10-11T00:00:00Z" })),
+            (pd.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+
+        let agents = vec![a.clone(), b.clone(), c.clone(), d.clone()];
+        assert_eq!(sync_batched(&base, &agents).await, Some(4));
+
+        assert_fenced(&b, &rx);
+        let seen = seen.lock().unwrap();
+        let count = |line: &str| seen.iter().filter(|s| *s == line).count();
+        assert_eq!(count("POST /reactive/pending-batch"), 1, "{seen:?}");
+        assert_eq!(count("POST /reactive/ack"), 1, "only {a} had messages: {seen:?}");
+        assert_eq!(count(&pd), 1, "{d}, missing from the answer, pulled on its own: {seen:?}");
+        assert!(
+            !seen.iter().any(|s| s.starts_with("GET /reactive/pending/") && *s != pd),
+            "no single pull for the agents the batch answered: {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_entry_is_a_failed_pull_for_that_agent_only() {
+        let [a, b] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        let results = serde_json::json!({ "results": {
+            a.clone(): { "error": "unavailable" },
+            b.clone(): { "agent_id": b.clone(), "injections": [], "count": 0, "expired": [] },
+        }});
+        let (base, seen) = fake_relay(vec![lease_granted(), ("POST /reactive/pending-batch".into(), 200, results)]).await;
+
+        assert_eq!(sync_batched(&base, &[a.clone(), b.clone()]).await, Some(2));
+        assert!(
+            !seen.lock().unwrap().iter().any(|s| s.starts_with("GET /reactive/pending/")),
+            "retried on the next pull, not at once"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_relay_without_the_batch_route_is_pulled_one_agent_at_a_time() {
+        let [a, b] = std::array::from_fn(|_| format!("agent-{}", uuid::Uuid::new_v4()));
+        let (pa, pb) = (format!("GET /reactive/pending/{a}"), format!("GET /reactive/pending/{b}"));
+        let (base, seen) = fake_relay(vec![
+            lease_granted(),
+            (pa.clone(), 200, serde_json::json!({ "injections": [] })),
+            (pb.clone(), 200, serde_json::json!({ "injections": [] })),
+        ])
+        .await;
+        let agents = Arc::new(Mutex::new(HashSet::from([a.clone(), b.clone()])));
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+
+        assert!(!catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await);
+        assert!(crate::muxbus::relay::batch_routes_missing(&base));
+        assert!(!catch_up(&base, "test-token", &reqwest::Client::new(), &agents, &mstore).await);
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.iter().filter(|s| *s == "POST /reactive/pending-batch").count(), 1, "asked once, then remembered: {seen:?}");
+        assert_eq!(seen.iter().filter(|s| **s == pa || **s == pb).count(), 4, "both agents, both times: {seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_single_agent_is_pulled_with_the_single_route() {
+        let a = format!("agent-{}", uuid::Uuid::new_v4());
+        let (base, seen) = fake_relay(vec![lease_granted()]).await;
+        assert_eq!(sync_batched(&base, &[a]).await, None);
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     // ── Catch-up pull: a message must not wait for an unrelated wake ──────
