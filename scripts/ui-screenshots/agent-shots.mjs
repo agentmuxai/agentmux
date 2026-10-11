@@ -188,9 +188,10 @@ async function openCreateForm(session) {
 }
 
 /** Creates agent `name` from the Claude Code template, on this computer, and
- *  waits for it to launch; returns its pane, maximized. `settled` false skips
- *  waiting for a signed-in, idle agent (for an agent that can't start). */
-export async function createAgent(session, name, { settled = true } = {}) {
+ *  waits for it to launch; returns its pane, maximized unless `maximized` is
+ *  false (for a shot of the whole tab). `settled` false skips waiting for a
+ *  signed-in, idle agent (for an agent that can't start). */
+export async function createAgent(session, name, { settled = true, maximized = true } = {}) {
     const pane = await openCreateForm(session);
     await session.clickSelector(`${pane} .agent-new-bundle-modal-input`);
     await session.typeText(name);
@@ -250,7 +251,18 @@ export async function createAgent(session, name, { settled = true } = {}) {
         await send(session, agentPane, "/clear");
         await session.wait(800);
     }
+    if (!maximized) await restore(session, agentPane);
     return agentPane;
+}
+
+/** Restores a maximized `pane`, so the rest of its tab shows again. */
+export async function restore(session, pane) {
+    const narrower = `(() => { const r = document.querySelector(${JSON.stringify(pane)})?.getBoundingClientRect(); return !!r && r.width < window.innerWidth * 0.9; })()`;
+    for (let attempt = 0; attempt < 2 && !(await session.evaluate(narrower)); attempt++) {
+        await session.clickSelector(`${pane} .block-frame-magnify[title="Restore"]`);
+        for (let i = 0; i < 12 && !(await session.evaluate(narrower)); i++) await session.wait(250);
+    }
+    if (!(await session.evaluate(narrower))) throw new Error("the pane didn't restore");
 }
 
 export async function send(session, pane, text) {
@@ -294,6 +306,13 @@ export async function setup(session) {
     // agents deleted before.
     await deleteAgent(session, SHOT_AGENT);
     for (const name of PICKER_AGENTS) await deleteOrphanBundles(session, name);
+    // The picker agents use the demo account (an agent loses its link when
+    // its account is deleted); linking again is harmless.
+    await session.evaluate(`(async () => {
+        for (const d of await ${agentsNamed(PICKER_AGENTS)}) {
+            await RpcApi.LinkAgentIdentityCommand(TabRpcClient, { agent_id: d.id, account_id: ${JSON.stringify(DEMO_ACCOUNT.id)}, provider: "claude" });
+        }
+    })()`);
     // My Agents lists the agents that have had a session started by the
     // picker; each picker agent that hasn't is created afresh and says hello.
     const listed = await session.evaluate(`(async () => {
@@ -327,7 +346,7 @@ function agentShot(def) {
         settleMs: 600,
         ...def,
         prep: async (session) => {
-            await session.setViewport(VIEWPORT);
+            await session.setViewport(def.viewport ?? VIEWPORT);
             await session.pressKey("Escape");
             tab.tabId = null;
             await openNewTab(session, tab);
@@ -351,8 +370,10 @@ function conversationShot(def) {
         ...def,
         inTab: async (session) => {
             await deleteAgent(session, SHOT_AGENT);
-            const pane = await createAgent(session, SHOT_AGENT, { settled: def.settled ?? true });
-            return (await def.inPane(session, pane)) ?? pane;
+            const pane = await createAgent(session, SHOT_AGENT, { settled: def.settled ?? true, maximized: def.maximized ?? true });
+            // inPane may return a crop; null means the whole window.
+            const crop = await def.inPane(session, pane);
+            return crop === undefined ? pane : crop;
         },
         after: async (session) => {
             // The agent stops when its tab closes; give srv a moment.
@@ -427,6 +448,22 @@ export const shots = [
         },
         // The working row, labelled with what the agent is doing.
         verify: ".agent-working-row--loading",
+    }),
+    conversationShot({
+        id: "swarm-agent-working",
+        title: "Swarm following an agent",
+        description: "The whole window: an agent mid-turn on the left, and Swarm showing it working, with its current step.",
+        viewport: { width: 1280, height: 800, scale: 1 },
+        maximized: false,
+        inPane: async (session, pane) => {
+            await send(session, pane, MESSAGES.total);
+            await waitFor(session, paneText(pane, "To show the total in the header"), "the reply to stream", 30000);
+            // The whole window, Swarm included.
+            return null;
+        },
+        verify: async (session) =>
+            (await session.evaluate(`[...document.querySelectorAll(".swarm-view")].some((v) => v.getBoundingClientRect().width > 0 && v.innerText.includes(${JSON.stringify(SHOT_AGENT)}))`)) ||
+            "Swarm doesn't show the agent",
     }),
     conversationShot({
         id: "agent-question",
