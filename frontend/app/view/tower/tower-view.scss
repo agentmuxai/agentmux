@@ -173,6 +173,23 @@
     min-width: 0;
 }
 
+// What follows a process's name (its executable, the tool call it runs):
+// it takes only the room the name leaves, cut short in a narrow pane, so it
+// neither runs into the CPU column nor cuts the name.
+.tower-name-tail {
+    display: flex;
+    flex: 1 1 0;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.tower-exe {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
 .tower-task-row .tower-label {
     font-weight: 500;
 }

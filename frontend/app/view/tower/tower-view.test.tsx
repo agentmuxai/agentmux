@@ -314,7 +314,7 @@ describe("Tower", () => {
         renderTower();
         fireEvent.click(await screen.findByTestId("tower-rail-agentmux"));
         const srv = screen.getByText("Server").closest("tr")!;
-        expect(within(srv).getByText("agentmux-srv.exe")).toHaveClass("tower-muted");
+        expect(within(srv).getByText("agentmux-srv.exe")).toHaveClass("tower-muted", "tower-exe");
     });
 
     it("a process that exited in the last minute stays in the tree, dimmed, with what it used", async () => {
@@ -349,6 +349,8 @@ describe("Tower", () => {
         const cc = screen.getByText("cc.exe").closest("tr")!;
         expect(cc).toHaveClass("tower-process-row--exited");
         expect(within(cc).getByText("exited 4 s ago")).toBeInTheDocument();
+        // Right after the name, not at the far edge of the name cell.
+        expect(within(cc).getByText("exited 4 s ago").parentElement).toHaveClass("tower-name-tail");
         // It isn't counted as running.
         expect(within(screen.getByTestId("tower-rail-block-a")).getByText("50%")).toBeInTheDocument();
 
@@ -396,6 +398,23 @@ describe("Tower", () => {
         // Same row element, updated in place (not rebuilt every refresh).
         expect(screen.getByText("node.exe").closest("tr")).toBe(node);
         expect(within(node).getByText("25%")).toBeInTheDocument();
+    });
+
+    it("a label that arrives on a later sample shows on the row already there", async () => {
+        vi.useFakeTimers();
+        sample.mockImplementation(() => {
+            const first = snapshot();
+            delete first.tasks[1].processes[0].detail;
+            return Promise.resolve(first);
+        });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        fireEvent.click(screen.getByTestId("tower-rail-agentmux"));
+        expect(screen.getByText("agentmux-srv.exe")).toBeInTheDocument();
+        expect(screen.queryByText("Server")).toBeNull();
+        sample.mockImplementation(() => Promise.resolve(snapshot()));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(screen.getByText("Server")).toBeInTheDocument();
     });
 
     it("reveals an agent's pane, and offers no pane for AgentMux itself", async () => {
