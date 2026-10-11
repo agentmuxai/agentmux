@@ -308,7 +308,7 @@ Two guards keep the trigger honest:
 - **Worked verb:** `Worked on AgentX's jekt`, `Worked on github-consumer's notice`, `Worked on a scheduled run` or `Worked on a finished task`. A user turn keeps plain `Worked`.
 - **Secondary:** what joined the turn, by kind, for example `+1 jekt  ·  +2 your messages`, with `+N more` past the listed ones.
 
-**Transcript.** A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`. The live stream and history replay both feed it, and the node id is the task's own, so the line survives a remount or reopen and is never duplicated. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
+**Transcript.** ~~A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`.~~ **Removed 2026-10-11.** Claude Code sends a `task_notification` for every Bash call, foreground ones too, and the live stream never parses the user's own message (it is an echo), so the line also landed on the user's next turn, naming their last command. The operator judged the line not needed, and it is gone from the live stream and from replay (`docs/retro/RETRO_AGENT_PANE_SEND_FLASH_AND_WOKE_UP_LINE_2026_10_11.md`). The Working row and the Worked line still name a task trigger: they come from srv, which sees every input. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
 
 ### 5.5 As built (phase 2b: attention follows need)
 

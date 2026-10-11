@@ -56,7 +56,6 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
 import { contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
-import { createTaskWakeDetector } from "./task-wake";
 import { createTestProgressTracker } from "./status/test-progress";
 import { createThinkingHeadlineTracker } from "./status/thinking-headline";
 import { compactionModelKey, parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
@@ -321,9 +320,6 @@ export function useAgentStream({
     let awaitingCompactionSize: ContextCompactedNode | null = null;
     // Fed every line in stream order: true for a new CLI session's `init`.
     const isNewSession = createSessionStartDetector();
-    // A pass the CLI starts for a finished background task (task-wake.ts):
-    // the same detector parseHistoryLines uses, so live and replay agree.
-    const detectTaskWake = createTaskWakeDetector();
     // The live status's "Thinking: …" (status/thinking-headline.ts).
     const readThinkingHeadline = createThinkingHeadlineTracker();
     // Only Claude Code's stream carries per-call usage in the shape the meter
@@ -606,7 +602,6 @@ export function useAgentStream({
             get compactionSummaries() {
                 return compactionSummaries;
             },
-            detectTaskWake,
         };
         const frameSink: FrameSink = {
             node: (node, update) => {

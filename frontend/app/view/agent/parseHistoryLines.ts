@@ -10,7 +10,6 @@
  */
 
 import { contextCompactedNodeId } from "./compact-boundary";
-import { createTaskWakeDetector } from "./task-wake";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { interceptFrame, type FrameSink } from "./frame-intercepts";
 import { createTranslator } from "./providers/translator-factory";
@@ -124,9 +123,6 @@ export class HistoryParser {
     /** Pairs each compact_boundary with Claude Code's summary frame after it.
      *  A field, not a local: the two can straddle a history page. */
     readonly compactionSummaries = new CompactionSummaryTracker();
-    // A pass the CLI starts for a finished background task (task-wake.ts):
-    // the same detector the live stream uses, so live and replay agree.
-    readonly detectTaskWake = createTaskWakeDetector();
     /** Ordered, deduped by id. Same-id events replace in place. */
     readonly nodes: DocumentNode[] = [];
     // Same-id events update IN PLACE rather than first-wins.

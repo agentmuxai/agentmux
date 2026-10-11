@@ -20,7 +20,8 @@
     cursor: default;
     white-space: nowrap;
     border-radius: 0;
-    opacity: 0.7;
+    // The same resting opacity as the left section's stats (.system-stats).
+    opacity: 0.6;
     transition: background 80ms ease, opacity 80ms ease;
 
     &:hover {
@@ -43,13 +44,16 @@
         }
     }
 
+    // Set like the left section's readouts (.stat-mono and .stat-disk-arrow
+    // in StatusBar.scss), so the counts read as one more stat.
     .token-usage-indicator-counts {
-        font-family: var(--font-mono);
-        font-size: 10px;
+        font-family: var(--font-sans);
+        font-size: 11px;
+        letter-spacing: -0.02em;
     }
 
     .token-usage-indicator-arrow {
-        opacity: 0.55;
+        opacity: 0.5;
         margin-right: 1px;
     }
 }
