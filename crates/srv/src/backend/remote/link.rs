@@ -59,24 +59,14 @@ fn shared() -> bool {
 /// durable pane's helper answered); otherwise it is connecting until the
 /// shared connection answers.
 pub fn pane_started(connection: &str, logged_in: bool) {
-    release(connection);
-    let shared = shared();
-    status::pane_started(broker(), connection, logged_in || !shared);
-    if shared {
-        watch(connection);
-    }
+    started(connection, logged_in, shared());
 }
 
 /// A pane's process on `connection` ended; `error` when it had no connection
-/// or lost it. A connection the user disconnected ended because they asked:
-/// not an error.
+/// or lost it.
 pub fn pane_ended(connection: &str, error: Option<&str>) {
-    let error = if held(connection) { None } else { error };
     let shared = shared();
-    status::pane_ended(broker(), connection, error, !shared);
-    if shared {
-        watch(connection);
-    }
+    ended(connection, error, !shared, shared);
 }
 
 /// Log in over `connection` (`attempt`: a command over it), holding the
@@ -87,33 +77,61 @@ pub async fn login<T>(
     connection: &str,
     attempt: impl Future<Output = Result<T, String>>,
 ) -> Result<T, String> {
-    pane_started(connection, false);
+    let shared = shared();
+    started(connection, false, shared);
     let result = attempt.await;
-    match &result {
-        Ok(_) => {
-            // Up now: said before the end below, which would otherwise find
-            // the connection still connecting and leave it to the watcher.
-            if shared() {
-                status::set(broker(), connection, state::CONNECTED, None);
-            }
-            pane_ended(connection, None);
-        }
-        Err(message) => pane_ended(connection, Some(message)),
-    }
+    login_ended(connection, result.as_ref().map(|_| ()).map_err(String::as_str), shared);
     result
 }
 
-/// Something used `connection` successfully (a command over the shared
-/// connection, such as a Files pane's helper starting): it is up, and its
-/// status follows it from here. Nothing to say where ssh doesn't share
-/// connections: nothing stays up after the command.
+/// Something used `connection` successfully (a command over it, such as a
+/// Files pane's helper starting): it is up, and where ssh shares connections
+/// its status follows the shared connection from here.
 pub fn used(connection: &str) {
-    if !shared() {
-        return;
+    used_with(connection, shared());
+}
+
+// The steps, with whether ssh shares connections given (`shared`): where it
+// doesn't (Windows) there is nothing to ask, and a running `ssh` or a login
+// that worked is the best news there is.
+
+fn started(connection: &str, logged_in: bool, shared: bool) {
+    release(connection);
+    status::pane_started(broker(), connection, logged_in || !shared);
+    if shared {
+        watch(connection);
     }
+}
+
+/// `settle`: a clean last end leaves the connection disconnected, rather than
+/// to the watcher. A connection the user disconnected ended because they
+/// asked: not an error.
+fn ended(connection: &str, error: Option<&str>, settle: bool, shared: bool) {
+    let error = if held(connection) { None } else { error };
+    status::pane_ended(broker(), connection, error, settle);
+    if shared {
+        watch(connection);
+    }
+}
+
+/// A login's own end: connected if it worked (said first, and never settled
+/// by its end, since it is the news), the failure if it didn't.
+fn login_ended(connection: &str, outcome: Result<(), &str>, shared: bool) {
+    match outcome {
+        Ok(()) => {
+            status::set(broker(), connection, state::CONNECTED, None);
+            ended(connection, None, false, shared);
+        }
+        Err(message) => ended(connection, Some(message), !shared, shared),
+    }
+}
+
+fn used_with(connection: &str, shared: bool) {
     release(connection);
     status::set(broker(), connection, state::CONNECTED, None);
-    watch(connection);
+    if shared {
+        watch(connection);
+    }
 }
 
 /// The user's Disconnect: close `connection`'s shared connection (every
@@ -302,6 +320,27 @@ mod tests {
     fn no_answer_changes_nothing() {
         assert_eq!(step(None, Some((state::CONNECTED, 1)), false), s(None, Some(WHILE_UP)));
         assert_eq!(step(None, Some((state::CONNECTING, 1)), false), s(None, Some(WHILE_CONNECTING)));
+    }
+
+    /// Where ssh can't share connections (Windows) nothing stays up after a
+    /// login, and a login that worked is the best there is: the host showed
+    /// disconnected after a successful Connect, Reconnect or Test connection,
+    /// and the bar came back over a Files pane (review of #4710).
+    #[test]
+    fn a_login_that_worked_leaves_the_host_connected_without_sharing() {
+        for shared in [false, true] {
+            let name = if shared { "test-link-login-shared" } else { "test-link-login-unshared" };
+            started(name, false, shared);
+            login_ended(name, Ok(()), shared);
+            let s = status::get(name).unwrap();
+            assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 0), "shared: {shared}");
+            started(name, false, shared);
+            login_ended(name, Err("Permission denied"), shared);
+            assert_eq!(status::get(name).unwrap().status, state::ERROR, "shared: {shared}");
+        }
+        let name = "test-link-used-unshared";
+        used_with(name, false);
+        assert_eq!(status::get(name).map(|s| s.status), Some(state::CONNECTED.to_string()));
     }
 
     /// A connection the user disconnected ends its panes because they asked:
