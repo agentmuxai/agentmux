@@ -152,7 +152,7 @@ These are shared development machines with several agents on each. A build or an
 - `analyse.mjs` turns those into medians, IQRs and bootstrap CIs, and into the tables for the report and the proposed /sources text.
 - App definitions (`apps/*.json`), one per app and platform: how to install, launch and quit it, and which process is its root.
 
-The stale `scripts/benchmarks/measure-performance.{ps1,sh}` (Tauri-era, a dead binary path, one process only) is removed in the same PR, so there is one way to measure.
+The stale `scripts/benchmarks/measure-performance.{ps1,sh}` (Tauri-era, a dead binary path, one process only) is removed in the PR that adds this harness (not #4712, which ships only `memtree`), so there is one way to measure.
 
 ## 7. Best practices this follows
 
