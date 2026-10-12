@@ -46,15 +46,27 @@ pub fn reclaim_stale_srv_lock(data_dir: &Path) {
         ));
         return;
     };
-    let Some(command) = process_command(pid) else {
+    // `comm` is the executable as one field (a full path on macOS, which can
+    // hold spaces: `/Volumes/AgentMux 3/...`; the first 15 characters of the
+    // name on Linux). Only its file name ever goes into the log: another
+    // process' arguments and environment can hold secrets.
+    let Some(comm) = ps_field(pid, "comm=", false) else {
         crate::log(&format!("stale-srv: lock names pid {pid}, which isn't running; leaving it"));
         return;
     };
-    if !command.contains("agentmux-srv") {
-        crate::log(&format!("stale-srv: lock names pid {pid}, which isn't agentmux-srv ({command}); leaving it"));
+    let exe_name = Path::new(&comm)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !exe_name.starts_with("agentmux-srv") {
+        crate::log(&format!("stale-srv: lock names pid {pid} ({exe_name}), which isn't agentmux-srv; leaving it"));
         return;
     }
-    if command.contains("--headless") || command.contains("AGENTMUX_HEADLESS=1") {
+    let headless_env = ps_field(pid, "command=", true)
+        .is_some_and(|with_env| with_env.split_whitespace().any(|w| w == "AGENTMUX_HEADLESS=1" || w == "AGENTMUX_HEADLESS=true"));
+    let headless_arg = ps_field(pid, "command=", false)
+        .is_some_and(|args| args.split_whitespace().any(|a| a == "--headless"));
+    if headless_arg || headless_env {
         crate::log(&format!("stale-srv: pid {pid} is a headless srv using this data dir; leaving it"));
         return;
     }
@@ -105,11 +117,13 @@ fn wait_for_free(lock_path: &Path, within: Duration) -> bool {
     lock_is_free(lock_path)
 }
 
-/// The process' command line with its environment (`ps eww`), or `None` if it
-/// isn't running.
-fn process_command(pid: i32) -> Option<String> {
+/// One `ps` field for `pid` (`ww`: untruncated; `with_env`: append the
+/// process' environment, `ps e`), or `None` if it isn't running. Never log
+/// the result: it can hold another process' secrets.
+fn ps_field(pid: i32, field: &str, with_env: bool) -> Option<String> {
+    let flags = if with_env { "eww" } else { "ww" };
     let out = std::process::Command::new("/bin/ps")
-        .args(["eww", "-o", "command=", "-p", &pid.to_string()])
+        .args([flags, "-o", field, "-p", &pid.to_string()])
         .output()
         .ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
