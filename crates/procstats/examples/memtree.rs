@@ -25,6 +25,8 @@
 // processes more than once; the run ends with `footprint`'s own total over the
 // same processes, which counts each once.
 
+#[cfg(target_os = "linux")]
+use agentmux_procstats::is_running;
 use agentmux_procstats::{base_name, command_line_of, snapshot, ProcInfo, ProcKey, MEMORY_METRIC};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -113,11 +115,19 @@ fn parse_args() -> Result<Args, String> {
 }
 
 /// Linux: proportional and unique set size, from smaps_rollup. Bytes.
+/// `None` unless `key`'s process held its PID both before and after the
+/// read, so a PID reused in between never lends the successor's figures.
 #[cfg(target_os = "linux")]
-fn pss_uss(pid: u32) -> (Option<u64>, Option<u64>) {
-    let Ok(text) = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")) else {
+fn pss_uss(key: ProcKey) -> (Option<u64>, Option<u64>) {
+    if !is_running(key) {
+        return (None, None);
+    }
+    let Ok(text) = std::fs::read_to_string(format!("/proc/{}/smaps_rollup", key.pid)) else {
         return (None, None);
     };
+    if !is_running(key) {
+        return (None, None);
+    }
     let field = |name: &str| -> Option<u64> {
         text.lines()
             .find(|l| l.starts_with(name))
@@ -133,7 +143,7 @@ fn pss_uss(pid: u32) -> (Option<u64>, Option<u64>) {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn pss_uss(_pid: u32) -> (Option<u64>, Option<u64>) {
+fn pss_uss(_key: ProcKey) -> (Option<u64>, Option<u64>) {
     (None, None)
 }
 
@@ -403,7 +413,7 @@ fn main() {
             if pane {
                 in_pane.insert(p.key());
             }
-            let (pss, uss) = pss_uss(p.pid);
+            let (pss, uss) = pss_uss(p.key());
             // Cached once read; an unreadable command line is retried. On
             // Linux, a process the zygote forked keeps the zygote's
             // `--type=zygote` command line, so it is labelled by its parent.
@@ -482,6 +492,25 @@ fn main() {
     if app_series.is_empty() {
         std::process::exit(1);
     }
+    // Fewer samples than asked (the app quit, or snapshots failed) is a
+    // truncated window: mark it in the raw data, say so, and exit non-zero
+    // after the summary, so nothing takes it for a complete run.
+    let incomplete = app_series.len() < args.samples;
+    if incomplete {
+        if let Some(f) = json.as_mut() {
+            if let Err(e) = writeln!(
+                f,
+                "{{\"incomplete\":{{\"collected\":{},\"requested\":{}}}}}",
+                app_series.len(),
+                args.samples
+            )
+            .and_then(|_| f.flush())
+            {
+                eprintln!("memtree: writing the .jsonl: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     println!("Last sample, per process (MB; private = {MEMORY_METRIC}):");
     println!(
@@ -531,6 +560,14 @@ fn main() {
         println!("{line}");
     }
     footprint_cross_check(&last_rows, json.as_mut());
+    if incomplete {
+        eprintln!(
+            "memtree: INCOMPLETE run, {} of {} samples; don't use it as a full window",
+            app_series.len(),
+            args.samples
+        );
+        std::process::exit(3);
+    }
 }
 
 /// macOS: `footprint`'s own total over the app processes of the last
