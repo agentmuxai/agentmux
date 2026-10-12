@@ -429,7 +429,7 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
         return serde_json::Value::Null;
     }
     if status == "wave-ready" && label == "main" {
-        crate::commands::window_pool::on_main_window_ready(state);
+        crate::commands::startup_pools::on_main_window_ready(state);
     }
     *state.window_init_status.lock() = status.to_string();
     // Capture HWND once the window is fully shown (CEF Views returns NULL at

@@ -645,7 +645,7 @@ impl AgentMuxHandler {
         //   queue insertion waits for the frontend's renderer-ready IPC
         //   so emit_event_to_window doesn't race the listener install.
         if label == "main" {
-            crate::commands::window_pool::defer_startup_pools(&self.state);
+            crate::commands::startup_pools::defer_startup_pools(&self.state);
 
             // SPEC_PILLAR1_STEP4 Phase 2 fix — "main" registering here is
             // our proof CEF's UI-thread message loop is actually pumping
