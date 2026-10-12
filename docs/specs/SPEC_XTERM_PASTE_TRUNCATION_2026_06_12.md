@@ -63,7 +63,7 @@ are dropped — silently truncating the paste.
 
 ### Secondary bottleneck: xterm bracket-paste mode disabled by default
 
-**[`frontend/app/view/term/term.tsx:160-162`](../../frontend/app/view/term/term.tsx#L160-L162)**
+**[`frontend/app/view/term/term.tsx:160-162`](../../frontend/app/view/term/term.tsx)**
 ```typescript
 const termAllowBPM = termBPMAtom() ?? false;
 // ...
@@ -258,5 +258,5 @@ frontend/app/view/term/term.tsx                      (Fix 3)
 - xterm.js `Clipboard.ts` paste(): `node_modules/@xterm/xterm/src/browser/Clipboard.ts:51-56`
 - `SHELL_INPUT_CH_SIZE`: `agentmux-srv/src/backend/blockcontroller/shell.rs:44`
 - `send_input()` drop site: `agentmux-srv/src/backend/blockcontroller/shell.rs:565-589`
-- Bracketed paste mode: [`frontend/app/view/term/term.tsx:160-162`](../../frontend/app/view/term/term.tsx#L160-L162)
+- Bracketed paste mode: [`frontend/app/view/term/term.tsx:160-162`](../../frontend/app/view/term/term.tsx)
 - Related upstream Claude Code issue: `anthropics/claude-code#59622`

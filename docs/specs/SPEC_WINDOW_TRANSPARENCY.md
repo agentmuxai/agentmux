@@ -21,11 +21,11 @@ This spec covers the Tauri-level and platform-specific changes needed to make th
 
 | Setting | Type | Default | Location |
 |---------|------|---------|----------|
-| `window:transparent` | boolean | `false` | [`schema/settings.json:164`](../../schema/settings.json#L164) |
-| `window:blur` | boolean | `false` | [`schema/settings.json:167`](../../schema/settings.json#L167) |
-| `window:opacity` | number (0-1) | `0.8` | [`schema/settings.json:170`](../../schema/settings.json#L170) |
-| `window:bgcolor` | string | `#222222` | [`schema/settings.json:173`](../../schema/settings.json#L173) |
-| `term:transparency` | number (0-1) | `0.5` | [`schema/settings.json:95`](../../schema/settings.json#L95) (per-block) |
+| `window:transparent` | boolean | `false` | [`schema/settings.json:164`](../../schema/settings.json) |
+| `window:blur` | boolean | `false` | [`schema/settings.json:167`](../../schema/settings.json) |
+| `window:opacity` | number (0-1) | `0.8` | [`schema/settings.json:170`](../../schema/settings.json) |
+| `window:bgcolor` | string | `#222222` | [`schema/settings.json:173`](../../schema/settings.json) |
+| `term:transparency` | number (0-1) | `0.5` | [`schema/settings.json:95`](../../schema/settings.json) (per-block) |
 
 ### Frontend CSS handling (already works)
 

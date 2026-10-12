@@ -173,7 +173,7 @@ the two apart.
   misidentify which `ESC[6n` it's answering.
 - **What actually drives the *repeated* respawns in a pure human-only
   repro** (no agent visibly touching the pane). `TermResyncHandler`
-  ([`frontend/app/view/term/term.tsx:36-79`](../../frontend/app/view/term/term.tsx#L36-L79)) only calls `resyncController` on
+  ([`frontend/app/view/term/term.tsx:36-79`](../../frontend/app/view/term/term.tsx)) only calls `resyncController` on
   a `connStatus` transition or a backend-restart detection — for a plain
   local terminal, `connStatus` doesn't change on process exit (the
   handler's own comment says as much), so it alone doesn't explain a loop.

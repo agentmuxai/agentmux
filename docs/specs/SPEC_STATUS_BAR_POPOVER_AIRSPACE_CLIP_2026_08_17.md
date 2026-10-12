@@ -30,7 +30,7 @@ paint order at all.
 The app already has a working, reusable fix for exactly this, used by
 **every other** status-bar popover:
 
-- `usePaneOverlay(() => rootRef)` ([`frontend/app/platform/pane-overlay.ts:265-316`](../../frontend/app/platform/pane-overlay.ts#L265-L316))
+- `usePaneOverlay(() => rootRef)` ([`frontend/app/platform/pane-overlay.ts:265-316`](../../frontend/app/platform/pane-overlay.ts))
   — call once per popover root; it measures the element's
   `getBoundingClientRect()` on mount/resize/reposition and dispatches the
   rect into the shared overlay-clip map, which flushes to the

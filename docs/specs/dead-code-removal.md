@@ -98,7 +98,7 @@ These were audited and confirmed in use:
 
 | Item | Location | Used by |
 |------|----------|---------|
-| `register_backend_window` | `agentmux-cef/src/commands/window.rs:363` | [`frontend/util/cef-api.ts:401`](../../frontend/util/cef-api.ts#L401) — called during window init to populate `window_id_map` for shell cleanup in `on_before_close` |
+| `register_backend_window` | `agentmux-cef/src/commands/window.rs:363` | [`frontend/util/cef-api.ts:401`](../../frontend/util/cef-api.ts) — called during window init to populate `window_id_map` for shell cleanup in `on_before_close` |
 | `providers/claude-translator.ts` | [`frontend/app/view/agent/providers/`](../../frontend/app/view/agent/providers) | `translator-factory.ts` |
 | `providers/codex-translator.ts` | same | `translator-factory.ts` |
 | `providers/gemini-translator.ts` | same | `translator-factory.ts` |

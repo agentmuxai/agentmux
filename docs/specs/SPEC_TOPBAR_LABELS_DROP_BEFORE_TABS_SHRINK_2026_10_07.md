@@ -39,7 +39,7 @@ setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
 ```
 
 A tab's real resting width is its `--tab-natural-width`: its measured label width, floored at `TAB_STANDARD_WIDTH` =
-232 px and capped at 260 px ([`frontend/app/tab/tab-measure.ts:23-53`](../../frontend/app/tab/tab-measure.ts#L23-L53), `tabbar.scss:61-73`). Tabs are
+232 px and capped at 260 px ([`frontend/app/tab/tab-measure.ts:23-53`](../../frontend/app/tab/tab-measure.ts), `tabbar.scss:61-73`). Tabs are
 `flex: 0 1 var(--tab-natural-width)`, so they start shrinking as soon as the tab bar is narrower than their natural
 total. The label trigger waits until each tab would be under 100 px. Between those two points (about 132 px per tab)
 the tabs shrink while the labels are still shown. The comment at line 22-24 says this was deliberate ("labels drop

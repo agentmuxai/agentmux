@@ -16,7 +16,7 @@ The original Phase E.4 spec framed E.4.B as urgent for perf reasons:
 
 **The forensic pass invalidated both halves:**
 
-1. **Not 60Hz.** Frontend resizes call `treeReducer(SetPendingAction)` locally, then `persistToBackend()` debounces 100ms ([`frontend/layout/lib/layoutPersistence.ts:261–279`](../../frontend/layout/lib/layoutPersistence.ts#L261-L279)). One drag gesture produces ~1 backend update, not 60.
+1. **Not 60Hz.** Frontend resizes call `treeReducer(SetPendingAction)` locally, then `persistToBackend()` debounces 100ms ([`frontend/layout/lib/layoutPersistence.ts:261–279`](../../frontend/layout/lib/layoutPersistence.ts)). One drag gesture produces ~1 backend update, not 60.
 2. **Nodes already have UUIDs.** `service.rs:2305` and `dnd.rs` both `Uuid::new_v4()` when building tree nodes; the JSON shape preserves them. Path representation isn't blocked on schema work — by-ID addressing is already the natural fit.
 
 **Consequence for the plan:** E.4.B is **not** an urgent perf project. It's a correctness/architecture project. That changes the right framing from "fix this hot path" to "decide whether the audit + invariants + multi-window-sync benefits are worth the migration cost." The cost is real; the perf benefit is small.
@@ -89,7 +89,7 @@ Idempotent. Single SQL UPDATE. Schema columns already exist.
 
 ## The 15 frontend operations to port
 
-[`frontend/layout/lib/types.ts:65–82`](../../frontend/layout/lib/types.ts#L65-L82) defines the action surface. Each becomes a candidate srv command:
+[`frontend/layout/lib/types.ts:65–82`](../../frontend/layout/lib/types.ts) defines the action surface. Each becomes a candidate srv command:
 
 | Frontend action | Mutation shape | E.4.B command target |
 |---|---|---|

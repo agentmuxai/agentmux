@@ -34,7 +34,7 @@ ToolBlock (collapsed row) → ToolBlockOverlay → ToolOverlayLog
 
 This registry ([`frontend/app/view/agent/components/tool-renderers/registry.ts`](../../frontend/app/view/agent/components/tool-renderers/registry.ts)) is the codebase's established per-tool-name customization point — `registerToolRenderer({ priority, label, match, render })`, matched by `byName`/`byNamePrefix`/`byShape`, highest `priority` wins. This spec extends existing registrations; it does not need a new mechanism.
 
-`ToolNode` ([`frontend/app/view/agent/types.ts:225-237`](../../frontend/app/view/agent/types.ts#L225-L237)) carries two separate name fields:
+`ToolNode` ([`frontend/app/view/agent/types.ts:225-237`](../../frontend/app/view/agent/types.ts)) carries two separate name fields:
 - `tool`: a closed coarse kind — `"Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Other"`. `stream-parser.ts`'s `normalizeToolName` (`stream-parser.ts:738-745`) maps anything not in that 8-name list — including `WebSearch`/`web_search` — to `"Other"`.
 - `toolName?: string`: the raw provider tool name (`"WebSearch"`, `"web_search"`, `"mcp__..."`, etc.), preserved specifically so the renderer registry (and, per its own doc comment, anything else that needs the real name) doesn't have to go through the lossy coarse kind.
 
@@ -44,7 +44,7 @@ This registry ([`frontend/app/view/agent/components/tool-renderers/registry.ts`]
 
 ### 2.1 Snippet and title are clamped with no expand affordance
 
-[`frontend/app/view/agent/styles/_document-nodes.scss:1435-1453`](../../frontend/app/view/agent/styles/_document-nodes.scss#L1435-L1453):
+[`frontend/app/view/agent/styles/_document-nodes.scss:1435-1453`](../../frontend/app/view/agent/styles/_document-nodes.scss):
 ```scss
 .agent-search-card-title {
     overflow: hidden;
@@ -68,7 +68,7 @@ This was a deliberate choice in the prior spec (`SPEC_WEBSEARCH_RICH_VIEW_2026_0
 
 ### 2.2 The WebSearch/WebFetch identity-color CSS rule is dead
 
-[`frontend/app/view/agent/components/ToolBlock.tsx:368`](../../frontend/app/view/agent/components/ToolBlock.tsx#L368):
+[`frontend/app/view/agent/components/ToolBlock.tsx:368`](../../frontend/app/view/agent/components/ToolBlock.tsx):
 ```tsx
 data-tool={props.node.tool.toLowerCase()}
 ```

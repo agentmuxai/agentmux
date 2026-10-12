@@ -120,7 +120,7 @@ Nothing in the new-agent flow imports `settings-controls.tsx`.
 | CSS variables used but defined nowhere (with fallbacks) | 20, e.g. `--panel-bg-alt` ×19, `--tertiary-text-color` ×20, `--highlight-bg` ×9 |
 | Uses of the existing `focus-ring` mixin (`mixins.scss:420`) | 0 |
 
-`SPEC_DESIGN_SYSTEM_2026_04_23.md` added the spacing, type, radius, shadow and motion tokens. It added no components, so every view kept writing its own button. Stylelint is configured, but it **doesn't run in CI** ([`scripts/check-no-transition-all.sh:22`](../../scripts/check-no-transition-all.sh#L22) says so), and it has no rules for spacing, font size or corner radius. That's how `settings.scss` ships 4px corners and hex fallbacks without a failure.
+`SPEC_DESIGN_SYSTEM_2026_04_23.md` added the spacing, type, radius, shadow and motion tokens. It added no components, so every view kept writing its own button. Stylelint is configured, but it **doesn't run in CI** ([`scripts/check-no-transition-all.sh:22`](../../scripts/check-no-transition-all.sh) says so), and it has no rules for spacing, font size or corner radius. That's how `settings.scss` ships 4px corners and hex fallbacks without a failure.
 
 ---
 
@@ -431,7 +431,7 @@ The operator approved going ahead on these recommendations on 2026-10-05. Each c
 - [`frontend/app/theme.scss`](../../frontend/app/theme.scss) (`:71` accent, `:295-308` button colours, `:316-441` spacing, type, radius, shadow, motion and cursor tokens)
 - [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx), `settings-controls.tsx`, `settings.scss`
 - [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx), `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
-- [`frontend/app/view/agent/styles/_composer-strip.scss:328-433`](../../frontend/app/view/agent/styles/_composer-strip.scss#L328-L433) (Shell, Compact)
+- [`frontend/app/view/agent/styles/_composer-strip.scss:328-433`](../../frontend/app/view/agent/styles/_composer-strip.scss) (Shell, Compact)
 - `frontend/app/view/agent/components/AgentStashModal.tsx/.scss`, `styles/_stash-drawer.scss`
 - [`frontend/app/view/section-pane/`](../../frontend/app/view/section-pane), [`frontend/app/view/warden/`](../../frontend/app/view/warden)
 - [`frontend/app/tab/tab-close-confirm-modal.tsx`](../../frontend/app/tab/tab-close-confirm-modal.tsx)

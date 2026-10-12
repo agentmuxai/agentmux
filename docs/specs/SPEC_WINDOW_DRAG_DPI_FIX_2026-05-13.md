@@ -28,7 +28,7 @@ A **latent unit mismatch** in the original fix, masked by Win10's default 100% s
 
 ### The math, broken
 
-In [`frontend/app/hook/useWindowDrag.win32.ts:123-124`](../../frontend/app/hook/useWindowDrag.win32.ts#L123-L124):
+In [`frontend/app/hook/useWindowDrag.win32.ts:123-124`](../../frontend/app/hook/useWindowDrag.win32.ts):
 
 ```ts
 const tx = initWinX + (e.screenX - clickScreenX);   // physical + CSS = mismatched units

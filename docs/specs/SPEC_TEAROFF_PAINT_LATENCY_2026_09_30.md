@@ -55,7 +55,7 @@ Steps 1–5 cost ~30–40 ms together in the measurements; small, but all in ser
 
 ### 2.2 The floater's bootstrap (floater renderer)
 
-The pools pre-load only the bundle, CSS, fonts and the promote listener ([`frontend/app/init/pool.ts:84-86`](../../frontend/app/init/pool.ts#L84-L86), `:143-145`). **No app state is pre-loaded.** After promotion, in series (`app-init.ts`):
+The pools pre-load only the bundle, CSS, fonts and the promote listener ([`frontend/app/init/pool.ts:84-86`](../../frontend/app/init/pool.ts), `:143-145`). **No app state is pre-loaded.** After promotion, in series (`app-init.ts`):
 
 - `initHostNewWindow`: `GetClientData` (`:476`), `CreateWindow` (`:492`), `GetWorkspace` (`:525`).
 - `initMux` (`:1089`): `loadConnStatus` (`:1117`), re-fetches client/window/tab that the previous step just fetched (`:1138`), workspace + layout (`:1153`), `GetFullConfig` (`:1178`), widget import + `LoadWidgets` (`:1188-1189`), `render(App)` (`:1196`).
@@ -72,7 +72,7 @@ None of the four services is needed to paint the pane.
 
 ### 2.4 The reveal gate and the splash
 
-The gate lifts once there are ≥80 ms without a long task, capped at 800 ms (`frontend/app/store/tab-reveal.ts:106,112`), then the splash fades over 200 ms ([`frontend/app/init/startup-splash.ts:18`](../../frontend/app/init/startup-splash.ts#L18)). Until then `body` is `visibility:hidden; opacity:0` (`app-init.ts:658-660`) under the brain (`index.html:20-34`). For a floater the gate protects against a piecemeal mount, which is worth keeping, but the settle only starts after §2.3, and the fade adds 200 ms of animation on top of content that is already there.
+The gate lifts once there are ≥80 ms without a long task, capped at 800 ms (`frontend/app/store/tab-reveal.ts:106,112`), then the splash fades over 200 ms ([`frontend/app/init/startup-splash.ts:18`](../../frontend/app/init/startup-splash.ts)). Until then `body` is `visibility:hidden; opacity:0` (`app-init.ts:658-660`) under the brain (`index.html:20-34`). For a floater the gate protects against a piecemeal mount, which is worth keeping, but the settle only starts after §2.3, and the fade adds 200 ms of animation on top of content that is already there.
 
 ### 2.5 The pane itself is rebuilt, not moved
 

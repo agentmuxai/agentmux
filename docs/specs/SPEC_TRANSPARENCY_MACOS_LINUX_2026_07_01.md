@@ -50,7 +50,7 @@ window itself can fade, every Track 2 improvement is purely additive.
 |---|---|
 | `set_window_transparency` effect body is `#[cfg(target_os = "windows")]`; macOS/Linux discard args | `agentmux-cef/src/commands/window/transparency.rs:35-61` |
 | `set_window_opacity` (per-window slider) side-effect loop likewise Windows-only | `transparency.rs:132` |
-| `window:blur` argument is sent by the frontend but read by **no** platform (April-era DWM Mica/Acrylic code no longer exists on main) | [`frontend/util/cef-api.ts:430-433`](../../frontend/util/cef-api.ts#L430-L433); grep of agentmux-cef/src |
+| `window:blur` argument is sent by the frontend but read by **no** platform (April-era DWM Mica/Acrylic code no longer exists on main) | [`frontend/util/cef-api.ts:430-433`](../../frontend/util/cef-api.ts); grep of agentmux-cef/src |
 | Global `CefSettings.background_color = 0x00000000` unconditionally (arms the fork cascade) | `agentmux-cef/src/lib.rs:810` |
 | Main window `BrowserSettings.background_color` = `0x00000000` iff `window:transparent` | `app.rs:1036` |
 | Secondary windows/floaters (mac/linux path) = `0x00000000` unconditionally since #1313 | `ui_tasks.rs:1870` |
@@ -131,7 +131,7 @@ issue #1335 (macOS, diagnosed + locally proven, patches lost since):
 3. **Promoted layers rasterize opaque** — the open research question. With #1+#2 applied
    locally on macOS (June 10), the window ROOT composited transparent (hamburger menu
    see-through — first real macOS transparency), but the `transform`-tiled panes stayed
-   opaque. Every pane is transform-positioned ([`frontend/layout/lib/utils.ts:78`](../../frontend/layout/lib/utils.ts#L78)) → every
+   opaque. Every pane is transform-positioned ([`frontend/layout/lib/utils.ts:78`](../../frontend/layout/lib/utils.ts)) → every
    pane is its own compositing layer. Candidates ranked in #1335:
    a. `SetContentBackgroundColor(SK_ColorTRANSPARENT)` in the cascade observer (Electron
       parity — Electron sets it alongside `SetBackgroundColor`; RWHV prefers
@@ -331,7 +331,7 @@ rebuild loop is local):
    observe pane interiors. (#1335 candidate 1 — "small, targeted, research-backed".)
 2. **De-promotion diagnostic (no rebuild):** in DevTools on a transparency-armed build,
    rewrite the tile layout's pane `transform: translate(x,y)` to `top/left` positioning
-   ([`frontend/layout/lib/utils.ts:78`](../../frontend/layout/lib/utils.ts#L78) produces the transform). If pane interiors go
+   ([`frontend/layout/lib/utils.ts:78`](../../frontend/layout/lib/utils.ts) produces the transform). If pane interiors go
    transparent → promotion confirmed as the trigger; evaluate a real layout-mode switch
    (perf risk: layout thrash on drag/resize; terminal canvases may re-promote anyway).
 3. **If both fail:** instrument `cc` tile rasterization (the session-2/3 diagnostic patches

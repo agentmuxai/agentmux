@@ -57,7 +57,7 @@ Most of the plumbing is there; the gaps are coverage and metric quality.
 | Process-tree walk | `blockcontroller/process_tree.rs` | Parent links only, so `setsid`/daemonized children drop out. Capped at `MAX_PIDS_PER_BLOCK = 64`. Pass 1 refreshes **every** process on the machine each tick. |
 | Per-agent containment | `backend/process_tracker/` (`windows.rs` Job Object per block, `cgroup_linux.rs` cgroup v2 per agent, `scan.rs` env-tag scan on macOS) | Used for teardown and the drawer list, not metrics. `TrackedProcess` has no CPU field; Windows `started_at_ms` is always 0. |
 | Process list RPCs | `server/app_api/agent_io.rs` (`agent.process-list`, `agent.tracked-blocks`) | Snapshot only, memory only. |
-| Event lanes | `backend/eventbus.rs:308`, `websocket.rs:347-360`, [`frontend/app/store/mps.ts:181`](../../frontend/app/store/mps.ts#L181) | Ready to reuse: the background lane keeps telemetry from delaying terminal input. |
+| Event lanes | `backend/eventbus.rs:308`, `websocket.rs:347-360`, [`frontend/app/store/mps.ts:181`](../../frontend/app/store/mps.ts) | Ready to reuse: the background lane keeps telemetry from delaying terminal input. |
 
 Metric quality today: `blockstats.mem` is sysinfo's `memory()`, which is
 working set on Windows and RSS on macOS/Linux. Neither matches what the OS's

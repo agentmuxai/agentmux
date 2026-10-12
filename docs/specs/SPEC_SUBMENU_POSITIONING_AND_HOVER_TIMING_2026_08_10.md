@@ -50,10 +50,10 @@ and close-intent uniformly — see §5.
 
 | | **Implementation A — `SubMenu`** | **Implementation B — `showJsContextMenu` submenu block** |
 |---|---|---|
-| File | [`frontend/app/element/flyoutmenu.tsx:376-515`](../../frontend/app/element/flyoutmenu.tsx#L376-L515) | [`frontend/util/cef-api.ts:223-273`](../../frontend/util/cef-api.ts#L223-L273) |
+| File | [`frontend/app/element/flyoutmenu.tsx:376-515`](../../frontend/app/element/flyoutmenu.tsx) | [`frontend/util/cef-api.ts:223-273`](../../frontend/util/cef-api.ts) |
 | Render model | SolidJS component, reactive signal | Vanilla DOM, imperative |
 | Used by | Hamburger menu's Theme/Opacity submenus (`hamburger-menu.tsx:98,103`), `MenuButton` (block-header menu button) | Every native right-click menu with a nested submenu: pane-header "Pane Color" (`blockframe.tsx:43-73`), pane-body "Replace With…" (`pane-actions.ts`), terminal Themes/Font Size/Zoom/Transparency (`termSettingsMenu.ts`), sysinfo "Plot Type" (`sysinfo-model.ts`), Armory "Bind to Agent" (`bind-to-agent-menu.ts`, `SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md`) |
-| Position primitive | `computeMenuPosition()` — [`frontend/app/util/menu-position.ts:228`](../../frontend/app/util/menu-position.ts#L228) (shared by both) | same `computeMenuPosition()` |
+| Position primitive | `computeMenuPosition()` — [`frontend/app/util/menu-position.ts:228`](../../frontend/app/util/menu-position.ts) (shared by both) | same `computeMenuPosition()` |
 | Position lifecycle | `registerSubMenu` ref → `requestAnimationFrame` → `autoUpdate()` (floating-ui) re-runs `computeMenuPosition` on scroll/resize | one-shot: `mouseenter` → `computeMenuPosition().then(...)`, no `autoUpdate` (acceptable — a native right-click menu doesn't need to track scroll) |
 | **Visible before positioned?** | **Yes — the bug.** Initial signal value `"position:fixed;left:0px;top:0px"` (line 384) has no `visibility` property; the `<div>` renders with that style immediately on mount, fully opaque, at the viewport's top-left, until the RAF-gated `computeMenuPosition().then(setSubStyle(...))` chain resolves. | **No.** `sub.style.visibility = "hidden"` is set *before* `computeMenuPosition()` is called (line 253) and only cleared after `.then()` resolves (line 267) — explicitly commented as "avoids a one-frame flash at the cursor." |
 | Open delay | 0ms (synchronous `onMouseEnter`) | 0ms (synchronous `mouseenter`) |
@@ -127,7 +127,7 @@ timing has been looked at.
 
 The codebase already has an established, tested pattern for hover-intent
 *elsewhere* — worth mirroring rather than inventing new conventions:
-- [`frontend/app/view/agent/components/UserMessageBlock.tsx:92-131`](../../frontend/app/view/agent/components/UserMessageBlock.tsx#L92-L131) —
+- [`frontend/app/view/agent/components/UserMessageBlock.tsx:92-131`](../../frontend/app/view/agent/components/UserMessageBlock.tsx) —
   `mouseenter` → 150ms delay → expand; `mouseleave` cancels the pending
   timer. Covered by `UserMessageBlock.test.tsx:189`.
 - [`frontend/app/element/tooltip.tsx`](../../frontend/app/element/tooltip.tsx) — enter/leave delay handling for
@@ -423,9 +423,9 @@ Removed once Phase 3 ships (the rewrite makes the old code paths moot).
 - [`docs/specs/SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md`](SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md) — the (stale, never-actioned) visual-chrome unification; orthogonal to this spec.
 - [`docs/specs/SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md`](SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md) — most recent net-new submenu caller (Implementation B).
 - [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) (Implementation A)
-- [`frontend/util/cef-api.ts:150-314`](../../frontend/util/cef-api.ts#L150-L314) (Implementation B)
+- [`frontend/util/cef-api.ts:150-314`](../../frontend/util/cef-api.ts) (Implementation B)
 - [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) (shared positioning primitive, unchanged by this spec)
-- [`frontend/app/view/agent/components/UserMessageBlock.tsx:92-131`](../../frontend/app/view/agent/components/UserMessageBlock.tsx#L92-L131) — existing hover-delay prior art in this codebase
+- [`frontend/app/view/agent/components/UserMessageBlock.tsx:92-131`](../../frontend/app/view/agent/components/UserMessageBlock.tsx) — existing hover-delay prior art in this codebase
 - [`frontend/app/element/tooltip.tsx`](../../frontend/app/element/tooltip.tsx) — existing hover-delay prior art in this codebase
 
 ---

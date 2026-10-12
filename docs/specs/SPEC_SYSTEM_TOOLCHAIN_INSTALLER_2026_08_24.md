@@ -388,7 +388,7 @@ too — this isn't a new restriction, just not pretending otherwise).
   `ToolchainInstallSystemToolCommand` / `ToolchainResolveInstallCommandCommand`.
 - [`frontend/app/view/agent/components/AgentPrereqModal.tsx`](../../frontend/app/view/agent/components/AgentPrereqModal.tsx) — per-row
   Install button + consent panel.
-- [`frontend/app/view/toolchain/toolchain-view.tsx:286-299`](../../frontend/app/view/toolchain/toolchain-view.tsx#L286-L299) — the existing
+- [`frontend/app/view/toolchain/toolchain-view.tsx:286-299`](../../frontend/app/view/toolchain/toolchain-view.tsx) — the existing
   "Install ↗" button gains the conditional real-execution path described
   in §3.5; the copy-command fallback is untouched.
 - `frontend/app/view/agent/providers/toolchain-catalog.ts` — add missing

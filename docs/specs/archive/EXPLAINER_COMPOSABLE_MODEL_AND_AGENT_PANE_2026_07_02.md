@@ -49,14 +49,14 @@ So: Armory = manage the whole catalog; Agent pane icon = "open THIS agent's setu
 
 ## 4. The agent pane icon — today vs. the decision
 
-**Today** the agent pane's title bar renders **two** icon buttons ([`frontend/app/view/agent/agent-model.ts:141`](../../../frontend/app/view/agent/agent-model.ts#L141), `endIconButtons`):
+**Today** the agent pane's title bar renders **two** icon buttons ([`frontend/app/view/agent/agent-model.ts:141`](../../../frontend/app/view/agent/agent-model.ts), `endIconButtons`):
 
 | Icon (today) | Title (today) | Opens | Primitive |
 |--------------|---------------|-------|-----------|
 | `brain` | "Agent memory" | Memory modal | **Memory** |
 | `id-card` | "Agent identity" | Identity modal (`IdentityTab = "accounts" \| "assignments"`) | **Account** |
 
-That second modal is *already* account management — its tabs are literally **Accounts** and **Assignments** ([`frontend/app/view/identity/identity-model.ts:22`](../../../frontend/app/view/identity/identity-model.ts#L22)). It's only *labeled* "identity."
+That second modal is *already* account management — its tabs are literally **Accounts** and **Assignments** ([`frontend/app/view/identity/identity-model.ts:22`](../../../frontend/app/view/identity/identity-model.ts)). It's only *labeled* "identity."
 
 ### DECISION (product owner, 2026-07-02): consolidate to a **single icon**
 

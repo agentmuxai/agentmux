@@ -36,7 +36,7 @@ The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhe
 
 | | Detail |
 |---|---|
-| File | [`frontend/util/cef-api.ts:125-246`](../../frontend/util/cef-api.ts#L125-L246) (renderer), [`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts) (model) |
+| File | [`frontend/util/cef-api.ts:125-246`](../../frontend/util/cef-api.ts) (renderer), [`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts) (model) |
 | Style | **Inline styles** in `Object.assign(el.style, {...})` calls — not themable, not classed |
 | Theming | Partial CSS-var refs with hard-coded fallbacks (`var(--main-bg-color, #222)`, `var(--accent-color, #335)`) |
 | Item shape | `ContextMenuItem` = `{ label?, type?: "separator" \| "normal" \| "submenu" \| "checkbox" \| "radio", submenu?, click?, checked?, visible?, enabled?, sublabel? }` |
@@ -51,7 +51,7 @@ The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhe
 
 | | Detail |
 |---|---|
-| File | [`frontend/app/tab/tab.tsx:31-103`](../../frontend/app/tab/tab.tsx#L31-L103), `tab.scss:234-320` |
+| File | [`frontend/app/tab/tab.tsx:31-103`](../../frontend/app/tab/tab.tsx), `tab.scss:234-320` |
 | Style | Bespoke SCSS, different radius (6px), shadow (`0 4px 16px rgba(0,0,0,0.5)`), padding (`var(--space-2)`) |
 | Item shape | Fixed layout — color swatches grid + Clear + Rename + Close. No `MenuItem` abstraction. |
 | Submenus | N/A |

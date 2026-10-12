@@ -21,7 +21,7 @@ This spec covers: (1) whether that data is actually obtainable on Windows/macOS/
   `sysinfo` WPS event (`EVENT_SYS_INFO`, `sysinfo.rs:220-230`).
 - Sampling runs on a `tokio::time::interval` loop, default 1s, configurable 0.2–2.0s via
   `telemetry:interval` (`wconfig/types.rs:195-196`, clamped in `sysinfo.rs:26,154-160`).
-- Frontend: [`frontend/app/statusbar/SystemStats.tsx:93-115`](../../frontend/app/statusbar/SystemStats.tsx#L93-L115) subscribes to the `sysinfo` event and
+- Frontend: [`frontend/app/statusbar/SystemStats.tsx:93-115`](../../frontend/app/statusbar/SystemStats.tsx) subscribes to the `sysinfo` event and
   renders the `↑/↓` readout (`SystemStats.tsx:178-187`). No per-host or per-process breakdown
   exists anywhere in the frontend or backend.
 - The `sysinfo` crate (v0.34, the only network-facing dependency in the workspace) exposes

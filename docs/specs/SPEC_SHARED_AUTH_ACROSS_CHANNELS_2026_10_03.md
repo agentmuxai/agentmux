@@ -15,7 +15,7 @@
 
 ### 2.1 What a channel is, and who gets isolated
 
-A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The rule (`isolated_auth_reason()`, [`crates/common/src/data_paths.rs:787-801`](../../crates/common/src/data_paths.rs#L787-L801)):
+A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The rule (`isolated_auth_reason()`, [`crates/common/src/data_paths.rs:787-801`](../../crates/common/src/data_paths.rs)):
 
 | Channel | Auth |
 |---|---|
@@ -25,7 +25,7 @@ A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The
 | no override, any other channel | **isolated** (the 2026-08-06 default) |
 
 - **Releases bake `stable`** (`RELEASE_CHANNEL=stable` in the Windows, macOS and Linux build workflows). An installed release already shares auth.
-- **Every `task package` build makes a new channel**: `local-<branch>-<branch-hash>-<8 hex of the build label>` ([`scripts/package.sh:102-103`](../../scripts/package.sh#L102-L103); the same in `package-macos.sh` and `package-linux.sh`). The portable on the owner's Desktop (`agentmux-0.59.4+g0528545b5.…-x64-portable`, a label in the name) is one of these, so **each new build starts logged out**.
+- **Every `task package` build makes a new channel**: `local-<branch>-<branch-hash>-<8 hex of the build label>` ([`scripts/package.sh:102-103`](../../scripts/package.sh); the same in `package-macos.sh` and `package-linux.sh`). The portable on the owner's Desktop (`agentmux-0.59.4+g0528545b5.…-x64-portable`, a label in the name) is one of these, so **each new build starts logged out**.
 - **`task dev` uses `dev-<branch>-<clone>`**, stable across rebuilds of one branch and clone, so the re-login there is per new branch or clone.
 - `~/.agentmux/channels/` holds **46 per-channel identity stores** today, nearly all `local-main-b28b7a-*`. Nothing prunes them: the pruner spec is still Draft and no pruner code exists.
 

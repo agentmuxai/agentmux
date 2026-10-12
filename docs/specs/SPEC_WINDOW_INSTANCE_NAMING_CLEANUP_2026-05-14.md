@@ -173,7 +173,7 @@ Mention in CHANGELOG / VERSION_HISTORY because consumers in non-frontend repos t
 
 Touches:
 - `frontend/types/custom.d.ts:130,139`
-- [`frontend/util/cef-api.ts:428`](../../frontend/util/cef-api.ts#L428)
+- [`frontend/util/cef-api.ts:428`](../../frontend/util/cef-api.ts)
 - `agentmux-cef/src/...` (Rust handlers — find via `grep -rn "getInstanceNumber\|listWindowInstances" agentmux-cef/`)
 - `agentmux-launcher/src/...` if the launcher exposes these names
 

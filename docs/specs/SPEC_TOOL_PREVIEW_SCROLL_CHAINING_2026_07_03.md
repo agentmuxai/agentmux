@@ -34,8 +34,8 @@ behavior — standard on the modern web (chat apps, code review tools, IDE panel
 
 | Element | File | Has `overscroll-behavior`? | Has scroll-boundary JS? |
 |---|---|---|---|
-| Outer pane `.agent-document` | [`frontend/app/view/agent/styles/_document.scss:8-32`](../../frontend/app/view/agent/styles/_document.scss#L8-L32) | **No** | `onScroll` exists (`AgentDocumentVirtualList.tsx:696`) but it's for stick-to-bottom/pagination/tool-collapse, not chaining |
-| Primary tool scroller `.agent-tool-overlay-log` | [`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-39`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss#L34-L39) | **Yes** — `overscroll-behavior: contain` already set | `onScroll` for stick-to-bottom only (`ToolOverlayLog.tsx:99-103`) |
+| Outer pane `.agent-document` | [`frontend/app/view/agent/styles/_document.scss:8-32`](../../frontend/app/view/agent/styles/_document.scss) | **No** | `onScroll` exists (`AgentDocumentVirtualList.tsx:696`) but it's for stick-to-bottom/pagination/tool-collapse, not chaining |
+| Primary tool scroller `.agent-tool-overlay-log` | [`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-39`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | **Yes** — `overscroll-behavior: contain` already set | `onScroll` for stick-to-bottom only (`ToolOverlayLog.tsx:99-103`) |
 | ~10 secondary nested boxes (diff/read/search/compact-json/fetch previews) | [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) (lines ~376, 635, 919, 1118, 1172, 1229, 1243, 1285, ~1475, 1544) | **No** | No |
 | `.agent-recent-sessions` (unrelated picker) | `_recent-sessions.scss:65-68` | Yes, `contain` | — |
 
@@ -108,7 +108,7 @@ vertical-only) to every currently-uncontained nested scroll box in
 - `.agent-fetch-content` (~line 1475)
 
 Also add it to the **outer pane**, `.agent-document`
-([`frontend/app/view/agent/styles/_document.scss:8-32`](../../frontend/app/view/agent/styles/_document.scss#L8-L32)) and its wrapper
+([`frontend/app/view/agent/styles/_document.scss:8-32`](../../frontend/app/view/agent/styles/_document.scss)) and its wrapper
 `.pane-region--stream` (`PaneRegions.scss:18-25`). This isn't strictly required for the
 inner-preview-to-outer-pane handoff (the *inner* box's `contain` is what stops the chain
 from leaving the inner box), but it stops the chain from leaving `.agent-document` itself

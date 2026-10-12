@@ -4,8 +4,8 @@
 **Date:** 2026-08-31
 **Author:** agent3
 **Related:**
-- [`frontend/app/view/term/termwrap.ts:137`](../../frontend/app/view/term/termwrap.ts#L137) (`new Terminal({...})` construction)
-- [`frontend/app/view/term/termwrap.ts:206-210`](../../frontend/app/view/term/termwrap.ts#L206-L210) (`attachCustomWheelEventHandler` — macOS momentum-scroll debounce + Ctrl+Wheel passthrough)
+- [`frontend/app/view/term/termwrap.ts:137`](../../frontend/app/view/term/termwrap.ts) (`new Terminal({...})` construction)
+- [`frontend/app/view/term/termwrap.ts:206-210`](../../frontend/app/view/term/termwrap.ts) (`attachCustomWheelEventHandler` — macOS momentum-scroll debounce + Ctrl+Wheel passthrough)
 - [`frontend/app/view/settings/sections/terminal-section.tsx`](../../frontend/app/view/settings/sections/terminal-section.tsx) (Terminal settings UI section)
 - `agentmux-srv/src/backend/wconfig/types.rs` (`SettingsType`, Rust-side settings struct)
 - [`schema/settings.json`](../../schema/settings.json), `frontend/types/gotypes.d.ts`, `settings-template.jsonc` (settings schema/type/template, hand-maintained in parallel per existing convention)

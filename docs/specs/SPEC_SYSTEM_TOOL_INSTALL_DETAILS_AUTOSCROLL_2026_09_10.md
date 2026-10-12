@@ -63,9 +63,9 @@ dump in `error-display.ts` (also static). `SystemToolInstallInline` is
 shared by **every** *system-tool* install screen in the app — its only two
 callers are:
 
-- [`frontend/app/view/toolchain/toolchain-view.tsx:349`](../../frontend/app/view/toolchain/toolchain-view.tsx#L349) — the Toolchain
+- [`frontend/app/view/toolchain/toolchain-view.tsx:349`](../../frontend/app/view/toolchain/toolchain-view.tsx) — the Toolchain
   modal's core-tools list (where this was reported, installing Node).
-- [`frontend/app/view/agent/components/AgentPrereqModal.tsx:178`](../../frontend/app/view/agent/components/AgentPrereqModal.tsx#L178) — the
+- [`frontend/app/view/agent/components/AgentPrereqModal.tsx:178`](../../frontend/app/view/agent/components/AgentPrereqModal.tsx) — the
   agent-launch-time missing-prereq blocker.
 
 Neither caller has its own log/Details rendering — both just mount

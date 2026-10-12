@@ -22,8 +22,8 @@ The top-bar widget menu renders a visually inconsistent row of icons:
 The hex values are hardcoded in `agentmux-srv/src/config/widgets.json`
 and applied as inline `style={{ color: widget.color }}` at:
 
-- [`frontend/app/window/action-widgets.tsx:117`](../../frontend/app/window/action-widgets.tsx#L117) — pinned widget bar
-- [`frontend/app/window/action-widgets.tsx:192`](../../frontend/app/window/action-widgets.tsx#L192) — More dropdown
+- [`frontend/app/window/action-widgets.tsx:117`](../../frontend/app/window/action-widgets.tsx) — pinned widget bar
+- [`frontend/app/window/action-widgets.tsx:192`](../../frontend/app/window/action-widgets.tsx) — More dropdown
 
 These hardcoded hex values:
 

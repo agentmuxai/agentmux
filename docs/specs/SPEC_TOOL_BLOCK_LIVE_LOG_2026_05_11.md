@@ -14,10 +14,10 @@ Two surfaces overlap on the same tool row and neither does what the user expects
 | Surface | File | Content | State |
 |---|---|---|---|
 | **`NodeHoverStrip`** floats over every document row | `frontend/app/view/agent/components/NodeHoverStrip.tsx` | Buttons: bookmark, expand/collapse, open-in-pane, open-in-window, new-agent-from-here | Three of the five are **stubs** logging `console.warn` ("not yet implemented") |
-| **`ToolBlock` portal overlay** (`agent-tool-content--portal`) | [`frontend/app/view/agent/components/ToolBlock.tsx:336-348`](../../frontend/app/view/agent/components/ToolBlock.tsx#L336-L348) | Per-kind tool content: `BashOutputViewer`, `DiffViewer`, `CompactResult`, etc. | Only renders when pinned (click). Hover doesn't show this content. |
+| **`ToolBlock` portal overlay** (`agent-tool-content--portal`) | [`frontend/app/view/agent/components/ToolBlock.tsx:336-348`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Per-kind tool content: `BashOutputViewer`, `DiffViewer`, `CompactResult`, etc. | Only renders when pinned (click). Hover doesn't show this content. |
 
 For Bash specifically:
-- The stream parser delivers a single `tool_result` event when the command completes ([`frontend/app/view/agent/stream-parser.ts:207`](../../frontend/app/view/agent/stream-parser.ts#L207)).
+- The stream parser delivers a single `tool_result` event when the command completes ([`frontend/app/view/agent/stream-parser.ts:207`](../../frontend/app/view/agent/stream-parser.ts)).
 - `BashResult = { stdout, stderr, exitCode }` lands whole on `ToolNode.result`.
 - `BashOutputViewer` renders it as a static `<pre>` once.
 

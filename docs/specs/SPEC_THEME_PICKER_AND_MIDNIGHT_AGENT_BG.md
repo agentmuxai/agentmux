@@ -15,10 +15,10 @@
 | Theme files | `frontend/app/themes/{default,midnight,high-contrast,monokai,nord,dracula,catppuccin,tokyo-night,gruvbox}.scss` | Each declares a `[data-theme="<name>"]` block of CSS custom properties (`--main-bg-color`, `--main-text-color`, etc.) |
 | Theme barrel | [`frontend/app/themes/index.scss`](../../frontend/app/themes/index.scss) | Imports all theme files |
 | Theme selector | [`frontend/app/app.tsx`](../../frontend/app/app.tsx) lines 150-156 in `AppSettingsUpdater` | Reads `window:theme`, calls `document.documentElement.setAttribute("data-theme", theme)` when not `"default"`; removes the attribute for `"default"` |
-| Persistence | `~/.agentmux-<version>/config/settings.json`, key `window:theme` | Already a string in the enum at [`schema/settings.json:221-225`](../../schema/settings.json#L221-L225) |
+| Persistence | `~/.agentmux-<version>/config/settings.json`, key `window:theme` | Already a string in the enum at [`schema/settings.json:221-225`](../../schema/settings.json) |
 | RPC write | `RpcApi.SetConfigCommand(TabRpcClient, { "window:theme": value })` | Used by the Opacity submenu today (`menu-builder.ts:114-117`) |
 | Menu builder | `frontend/app/menu/{base-menus.ts, menu-builder.ts}` | `MenuBuilder.submenu(label, builder)` + radio items with `checked` is exactly the Opacity pattern we'll copy |
-| Hamburger trigger | [`frontend/app/window/window-header.tsx:27-30`](../../frontend/app/window/window-header.tsx#L27-L30) calls `createTabBarMenu(fullConfig())` | Right-click on window header → `ContextMenuModel.showContextMenu()` |
+| Hamburger trigger | [`frontend/app/window/window-header.tsx:27-30`](../../frontend/app/window/window-header.tsx) calls `createTabBarMenu(fullConfig())` | Right-click on window header → `ContextMenuModel.showContextMenu()` |
 
 The implementation is genuinely additive — no new state, no new RPC, no new infrastructure.
 
@@ -137,7 +137,7 @@ Why both `.agent-view` and `.agent-view .agent-document`:
 
 ### Hover-strip background
 
-`NodeHoverStrip` currently uses `background: var(--main-bg-color)` (see [`frontend/app/view/agent/styles/_document.scss:53`](../../frontend/app/view/agent/styles/_document.scss#L53)). Under midnight that would read deep navy and produce a visible color mismatch when the strip floats over a pure-black pane.
+`NodeHoverStrip` currently uses `background: var(--main-bg-color)` (see [`frontend/app/view/agent/styles/_document.scss:53`](../../frontend/app/view/agent/styles/_document.scss)). Under midnight that would read deep navy and produce a visible color mismatch when the strip floats over a pure-black pane.
 
 Fix at the same scope:
 

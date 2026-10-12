@@ -35,7 +35,7 @@ All of the building blocks already exist:
 | Modal state | [`frontend/app/store/modalmodel.ts`](../../frontend/app/store/modalmodel.ts) | `modalsModel.pushModal(displayName, props)` / `popModal()` |
 | Modal registry | `frontend/app/modals/modalregistry.tsx` | Add `SettingsModal` here |
 | Modal styling | `frontend/app/element/modal-v2.scss` | Uses theme tokens (`--z-modal`, `--shadow-modal`, etc.) |
-| Read settings | [`frontend/app/store/global.ts:86-88`](../../frontend/app/store/global.ts#L86-L88) — `settingsAtom`, `getSettingsKeyAtom(key)` | Already reactive |
+| Read settings | [`frontend/app/store/global.ts:86-88`](../../frontend/app/store/global.ts) — `settingsAtom`, `getSettingsKeyAtom(key)` | Already reactive |
 | **Write settings (unused)** | `frontend/app/store/rpc-api.ts` — `RpcApi.SetConfigCommand(client, data, opts)` | Wraps `setconfig` RPC; called only by `tabbar.tsx:610` today for `window:theme` |
 | JSON Schema | [`schema/settings.json`](../../schema/settings.json) | Per-key types |
 | Rust schema | `agentmux-srv/src/backend/wconfig/types.rs` | Authoritative defaults |
@@ -131,7 +131,7 @@ await RpcApi.SetConfigCommand(TabRpcClient, draftSettings);
 // frontend re-fetches via existing flow.
 ```
 
-Open question: `SetConfigCommand` may currently expect a *full* `SettingsType` or a *patch*. The tabbar usage at [`frontend/app/tab/tabbar.tsx:610`](../../frontend/app/tab/tabbar.tsx#L610) sends a single-key object — confirm before implementation whether the backend merges patches or replaces wholesale. **If wholesale**, the modal must send the full merged settings on save; **if patch**, the modal can send the delta.
+Open question: `SetConfigCommand` may currently expect a *full* `SettingsType` or a *patch*. The tabbar usage at [`frontend/app/tab/tabbar.tsx:610`](../../frontend/app/tab/tabbar.tsx) sends a single-key object — confirm before implementation whether the backend merges patches or replaces wholesale. **If wholesale**, the modal must send the full merged settings on save; **if patch**, the modal can send the delta.
 
 ### 2.3 External edits
 

@@ -40,8 +40,8 @@ Three real precedents, all converging on the same answer:
   alternate search terms (`NSPreferencePane`'s search-keywords mechanism), which the
   lexical index then matches literally.
 - **This repo's own closest precedents already do the "cheap" half of this pattern**:
-  the command palette ([`frontend/app/modals/command-palette.tsx:33-43`](../../frontend/app/modals/command-palette.tsx#L33-L43), pre-refactor)
-  and the agent-picker filter ([`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`](../../frontend/app/view/agent/components/MyAgentsList.tsx#L817-L825),
+  the command palette ([`frontend/app/modals/command-palette.tsx:33-43`](../../frontend/app/modals/command-palette.tsx), pre-refactor)
+  and the agent-picker filter ([`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`](../../frontend/app/view/agent/components/MyAgentsList.tsx),
   pre-refactor) both did a hand-rolled `.toLowerCase().includes(q)` substring match —
   no fuzzy library, no synonyms. That's fine for short, predictable strings (command
   labels, agent names); it under-delivers for a ~59-item settings corpus with jargon-y
@@ -247,7 +247,7 @@ first.
 
 ## 4. Consumer 2: Command palette (migrated)
 
-[`frontend/app/modals/command-palette.tsx:33-43`](../../frontend/app/modals/command-palette.tsx#L33-L43)'s `filtered` memo currently does:
+[`frontend/app/modals/command-palette.tsx:33-43`](../../frontend/app/modals/command-palette.tsx)'s `filtered` memo currently does:
 
 ```ts
 return all.filter(
@@ -280,7 +280,7 @@ const filtered = createMemo(() => {
 
 ## 5. Consumer 3: Agent picker filter bar (migrated)
 
-[`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`](../../frontend/app/view/agent/components/MyAgentsList.tsx#L817-L825)'s `filteredRows` memo
+[`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`](../../frontend/app/view/agent/components/MyAgentsList.tsx)'s `filteredRows` memo
 currently does:
 
 ```ts

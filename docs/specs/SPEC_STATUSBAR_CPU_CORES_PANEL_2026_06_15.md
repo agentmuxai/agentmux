@@ -53,7 +53,7 @@ The panel extracts the aggregate `cpu` and every key matching `^cpu:\d+$`.
 | Concern | Location |
 |---|---|
 | Status bar container | [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) (left section renders `BackendStatus → SystemStats → GpuStatus`) |
-| CPU readout (target) | [`frontend/app/statusbar/SystemStats.tsx:73-80`](../../frontend/app/statusbar/SystemStats.tsx#L73-L80) — static `<span class="stat-mono stat-cpu">CPU {n}%</span>` |
+| CPU readout (target) | [`frontend/app/statusbar/SystemStats.tsx:73-80`](../../frontend/app/statusbar/SystemStats.tsx) — static `<span class="stat-mono stat-cpu">CPU {n}%</span>` |
 | sysinfo subscription | `SystemStats.tsx:48-66` — `waveEventSubscribe({ eventType: "sysinfo", scope: "local" })` |
 | Color thresholds | `SystemStats.tsx:32-36` — `cpuColor()`: >95% error, >80% warning |
 | **Popover pattern to mirror** | `TokenUsageIndicator.tsx` (button + open state + outside-click/Esc) → `TokenBreakdownPopover.tsx` (`usePaneOverlay`, `computeMenuPosition` placement `top-end`, `autoUpdate`, `assertMenuInPaintableArea`) |

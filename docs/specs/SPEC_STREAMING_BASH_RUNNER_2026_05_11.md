@@ -606,5 +606,5 @@ Strongest perf + UX path. **Out of scope for this spec.** Requires losing OAuth-
 - Claude CLI spawn args: `agentmux-srv/src/backend/providers.rs:100-107`
 - Subprocess output → WPS pattern (mirror this): `agentmux-srv/src/backend/blockcontroller/subprocess.rs:442-561`
 - ToolBlock rendering (replaced in PR α): [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)
-- DocumentRow tool node wiring: [`frontend/app/view/agent/virtualization/DocumentRow.tsx:232-238`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx#L232-L238)
+- DocumentRow tool node wiring: [`frontend/app/view/agent/virtualization/DocumentRow.tsx:232-238`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx)
 - Reducer-stack master status (this lands as a Slice item): `reference_master_reducer_status.md`

@@ -136,7 +136,7 @@ The takeaway: `props.tabWidth` is dead-code plumbing still wired through `Tab` p
 
 ### 3.4 Editor tab strip — the reference
 
-[`frontend/app/view/editor/editor-view.scss:247-340`](../../frontend/app/view/editor/editor-view.scss#L247-L340) + `editor-tab-strip.tsx`:
+[`frontend/app/view/editor/editor-view.scss:247-340`](../../frontend/app/view/editor/editor-view.scss) + `editor-tab-strip.tsx`:
 
 ```scss
 .editor-tab-strip {
@@ -390,7 +390,7 @@ Single PR, one commit:
 - [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) — tab strip CSS (the `flex-shrink: 0` site we're replacing)
 - [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) — DnD wrapper (no change)
 - `frontend/app/view/editor/editor-tab-strip.tsx` — reference editor tab strip
-- [`frontend/app/view/editor/editor-view.scss:247-340`](../../frontend/app/view/editor/editor-view.scss#L247-L340) — reference CSS contract
+- [`frontend/app/view/editor/editor-view.scss:247-340`](../../frontend/app/view/editor/editor-view.scss) — reference CSS contract
 - [`docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`](SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md) — separator architecture + sizing history
 - [`docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`](../retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md) — why the old width-animation was removed (avoid repeating that mistake)
 - [`docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md`](../retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md) — sub-pixel + `--zoomfactor` interactions

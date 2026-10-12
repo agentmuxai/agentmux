@@ -171,11 +171,11 @@ Not throwaway — the **seed**. `terminalText`→`TerminalOutput` is precisely a
 ---
 
 ## 11. Key file references
-- [`frontend/app/view/agent/types.ts:213`](../../frontend/app/view/agent/types.ts#L213) — closed `ToolNode.tool` enum (add `toolName`)
-- [`frontend/app/view/agent/types.ts:602`](../../frontend/app/view/agent/types.ts#L602) — `TOOL_ICONS` (second tool-keyed dispatch)
-- [`frontend/app/view/agent/stream-parser.ts:504-508`](../../frontend/app/view/agent/stream-parser.ts#L504-L508) — `normalizeToolName` (where the raw name is dropped)
+- [`frontend/app/view/agent/types.ts:213`](../../frontend/app/view/agent/types.ts) — closed `ToolNode.tool` enum (add `toolName`)
+- [`frontend/app/view/agent/types.ts:602`](../../frontend/app/view/agent/types.ts) — `TOOL_ICONS` (second tool-keyed dispatch)
+- [`frontend/app/view/agent/stream-parser.ts:504-508`](../../frontend/app/view/agent/stream-parser.ts) — `normalizeToolName` (where the raw name is dropped)
 - `frontend/app/view/agent/stream-parser.ts:311,463` — AskUserQuestion special-case + icon pick
-- [`frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx#L233-L312) — `renderToolResultBody` switch (becomes the registry lookup)
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — `renderToolResultBody` switch (becomes the registry lookup)
 - [`frontend/app/view/agent/components/CompactResult.tsx`](../../frontend/app/view/agent/components/CompactResult.tsx) — JSON/terminal fallback (becomes the chain's tail)
 - [`frontend/app/view/agent/components/TerminalOutput.tsx`](../../frontend/app/view/agent/components/TerminalOutput.tsx) + `terminal-text.ts` — the seed (#1511)
 - provider translators (`claude-/codex-/acp-/gemini-/kimi-translator.ts`) — carry raw tool name; the (A) normalization site

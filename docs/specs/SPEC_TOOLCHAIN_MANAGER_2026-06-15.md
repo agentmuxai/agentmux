@@ -170,7 +170,7 @@ Each phase is a separate PR through the AgentO → reagent → squash flow.
 - `agentmux-srv/src/main.rs:229` — fallback enrichment for direct-launch.
 - `agentmux-srv/src/server/install_handlers.rs` / `cli_handlers.rs` — `toolchain.status` handler (reuse `resolve_tool_path`, `get_cli_version`, `is_safe_cli_command`).
 - `frontend/app/store/rpc-api.ts` — `ToolchainStatusCommand`.
-- [`frontend/app/window/hamburger-menu.tsx:107`](../../frontend/app/window/hamburger-menu.tsx#L107) — menu item.
+- [`frontend/app/window/hamburger-menu.tsx:107`](../../frontend/app/window/hamburger-menu.tsx) — menu item.
 - `frontend/app/view/.../ToolchainModal.tsx` — new modal (reuse `Modal`, `install_chunk` pattern from `AgentInstallModal.tsx`).
 - `frontend/app/view/agent/providers/toolchain-catalog.ts` — new core-tools catalog.
 

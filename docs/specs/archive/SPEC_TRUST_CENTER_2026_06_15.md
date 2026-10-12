@@ -59,10 +59,10 @@ Memory (db_memory_bundles)                     ← THE "memory"
 ```
 
 Sources:
-- `IdentityAccount` + `SecretRef` (TS): [`frontend/app/view/identity/identity-model.ts:18-61`](../../../frontend/app/view/identity/identity-model.ts#L18-L61)
+- `IdentityAccount` + `SecretRef` (TS): [`frontend/app/view/identity/identity-model.ts:18-61`](../../../frontend/app/view/identity/identity-model.ts)
 - `IdentityBundle` / `IdentityBinding` (TS): `frontend/types/gotypes.d.ts:304-319`
 - Rust storage: `agentmux-srv/src/backend/storage/identities.rs:71-127`, `memory_bundles.rs:20-50`
-- Composition (startup payload): [`frontend/app/view/agent/startup/buildStartupPayload.ts:129-150`](../../../frontend/app/view/agent/startup/buildStartupPayload.ts#L129-L150)
+- Composition (startup payload): [`frontend/app/view/agent/startup/buildStartupPayload.ts:129-150`](../../../frontend/app/view/agent/startup/buildStartupPayload.ts)
 - Existing entry point (to absorb): hamburger **"Identity & Memory"** → `bundle-manager-modal.tsx` (singleton modal)
 
 ### Two distinct "account-like" concepts (do NOT merge)
@@ -406,5 +406,5 @@ Per account row, show **which identity bundles bind it**. Query the existing `db
 - Startup composition: [`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../../frontend/app/view/agent/startup/buildStartupPayload.ts)
 - Hamburger menu: [`frontend/app/window/hamburger-menu.tsx`](../../../frontend/app/window/hamburger-menu.tsx)
 - Singleton modal pattern (to mirror): `frontend/app/modals/bundle-manager-modal.tsx`
-- Block registry: [`frontend/app/block/block.tsx:47-61`](../../../frontend/app/block/block.tsx#L47-L61)
+- Block registry: [`frontend/app/block/block.tsx:47-61`](../../../frontend/app/block/block.tsx)
 - Prior specs: [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](../SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md), [`docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`](SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md)

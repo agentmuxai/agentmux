@@ -65,7 +65,7 @@ Each submenu item shows:
 
 ### API
 
-The `replaceBlock()` function already exists in [`frontend/app/store/global.ts:590`](../../frontend/app/store/global.ts#L590):
+The `replaceBlock()` function already exists in [`frontend/app/store/global.ts:590`](../../frontend/app/store/global.ts):
 
 ```typescript
 export async function replaceBlock(

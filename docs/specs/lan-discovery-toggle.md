@@ -27,7 +27,7 @@ Today the feature is gated behind a settings.json edit:
   (`agentmux-srv/src/backend/wconfig/types.rs:206-207`)
 - The HostPopover already detects the disabled state and shows the literal text
   `Enable via "network:lan_discovery": true`
-  ([`frontend/app/statusbar/HostPopover.tsx:144`](../../frontend/app/statusbar/HostPopover.tsx#L144))
+  ([`frontend/app/statusbar/HostPopover.tsx:144`](../../frontend/app/statusbar/HostPopover.tsx))
 - mDNS daemon is started **once at boot** (`agentmux-srv/src/main.rs:601-620`).
   Changing the setting requires a restart today.
 
@@ -53,7 +53,7 @@ firewall popup is the **expected consequence**, not a surprise.
 
 ## Where it lives
 
-The HostPopover is the rightmost item in the status bar ([`frontend/app/statusbar/StatusBar.tsx:61-65`](../../frontend/app/statusbar/StatusBar.tsx#L61-L65)).
+The HostPopover is the rightmost item in the status bar ([`frontend/app/statusbar/StatusBar.tsx:61-65`](../../frontend/app/statusbar/StatusBar.tsx)).
 Clicking the hostname opens a popover that already has a **Network** section
 between Instance/Host info and Ports.
 
@@ -236,9 +236,9 @@ const LanDiscoveryToggle = (): JSX.Element => {
 ```
 
 `RpcApi.SetConfigCommand(TabRpcClient, {...})` is the established settings-write
-path used elsewhere (e.g. [`frontend/app/menu/base-menus.ts:71`](../../frontend/app/menu/base-menus.ts#L71),
-[`frontend/app/window/action-widgets.tsx:85`](../../frontend/app/window/action-widgets.tsx#L85),
-[`frontend/app/tab/tabbar.tsx:614`](../../frontend/app/tab/tabbar.tsx#L614)). It wraps the `setconfig` RPC defined in
+path used elsewhere (e.g. [`frontend/app/menu/base-menus.ts:71`](../../frontend/app/menu/base-menus.ts),
+[`frontend/app/window/action-widgets.tsx:85`](../../frontend/app/window/action-widgets.tsx),
+[`frontend/app/tab/tabbar.tsx:614`](../../frontend/app/tab/tabbar.tsx)). It wraps the `setconfig` RPC defined in
 `frontend/app/store/rpc-api.ts:396`.
 
 ### State sync

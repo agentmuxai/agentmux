@@ -358,10 +358,10 @@ applies it all-or-nothing per entry.
 
 ## 12. Sources
 
-- Code read for this spec: [`frontend/layout/lib/TileLayout.win32.tsx:492-532`](../../frontend/layout/lib/TileLayout.win32.tsx#L492-L532),
-  [`frontend/layout/lib/layoutResize.ts:17-142`](../../frontend/layout/lib/layoutResize.ts#L17-L142), [`frontend/layout/lib/layoutGeometry.ts:414-447`](../../frontend/layout/lib/layoutGeometry.ts#L414-L447),
-  [`frontend/layout/lib/layoutTree.ts:431-453`](../../frontend/layout/lib/layoutTree.ts#L431-L453), `frontend/layout/lib/types.ts:72,179-272`,
-  [`frontend/app/tab/tab-reorder.ts:381`](../../frontend/app/tab/tab-reorder.ts#L381).
+- Code read for this spec: [`frontend/layout/lib/TileLayout.win32.tsx:492-532`](../../frontend/layout/lib/TileLayout.win32.tsx),
+  [`frontend/layout/lib/layoutResize.ts:17-142`](../../frontend/layout/lib/layoutResize.ts), [`frontend/layout/lib/layoutGeometry.ts:414-447`](../../frontend/layout/lib/layoutGeometry.ts),
+  [`frontend/layout/lib/layoutTree.ts:431-453`](../../frontend/layout/lib/layoutTree.ts), `frontend/layout/lib/types.ts:72,179-272`,
+  [`frontend/app/tab/tab-reorder.ts:381`](../../frontend/app/tab/tab-reorder.ts).
 - [`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) (existing,
   related — cross-referenced in §2 and §7).
 - External prior-art sources listed inline in §3.

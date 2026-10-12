@@ -22,7 +22,7 @@
 
 ## 1. Problem
 
-[`scripts/cef-build/verify-cef-runtime-windows.sh:50`](../../scripts/cef-build/verify-cef-runtime-windows.sh#L50):
+[`scripts/cef-build/verify-cef-runtime-windows.sh:50`](../../scripts/cef-build/verify-cef-runtime-windows.sh):
 
 ```bash
 actual="$(sha256sum "$libcef" | cut -d' ' -f1)"

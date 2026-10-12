@@ -32,7 +32,7 @@ Both have the same root: **user-input messages are a single rendering class toda
 
 ### 1. Render site
 
-[`frontend/app/view/agent/virtualization/DocumentRow.tsx:249-261`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx#L249-L261)
+[`frontend/app/view/agent/virtualization/DocumentRow.tsx:249-261`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx)
 
 ```tsx
 <Show when={props.node() && props.node().type === "user_message"}>
@@ -54,7 +54,7 @@ The collapse state today is driven by a separate `collapsedNodes` set on the doc
 
 ### 2. SCSS
 
-[`frontend/app/view/agent/styles/_document-nodes.scss:598-624`](../../frontend/app/view/agent/styles/_document-nodes.scss#L598-L624)
+[`frontend/app/view/agent/styles/_document-nodes.scss:598-624`](../../frontend/app/view/agent/styles/_document-nodes.scss)
 
 ```scss
 .agent-user-message {
@@ -81,11 +81,11 @@ The collapse state today is driven by a separate `collapsedNodes` set on the doc
 
 ### 3. Startup payload
 
-[`frontend/app/view/agent/agent-view.tsx:497-539`](../../frontend/app/view/agent/agent-view.tsx#L497-L539) (`onReadyFn`) builds a Markdown payload via `buildStartupPayload()` ([`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts)) and sends it via `handleSendMessage(payload)`. The payload always begins with the literal heading **`# Session Context`** as line 1 (see `buildStartupPayload.ts:46-119`). On the wire it's an ordinary `user_message` event; the stream-parser stores it as `type: "user_message"` with no distinguishing metadata.
+[`frontend/app/view/agent/agent-view.tsx:497-539`](../../frontend/app/view/agent/agent-view.tsx) (`onReadyFn`) builds a Markdown payload via `buildStartupPayload()` ([`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts)) and sends it via `handleSendMessage(payload)`. The payload always begins with the literal heading **`# Session Context`** as line 1 (see `buildStartupPayload.ts:46-119`). On the wire it's an ordinary `user_message` event; the stream-parser stores it as `type: "user_message"` with no distinguishing metadata.
 
 ### 4. Tool-block hover-expand pattern (reference)
 
-[`frontend/app/view/agent/components/ToolBlock.tsx:42-156`](../../frontend/app/view/agent/components/ToolBlock.tsx#L42-L156) + `_document-nodes.scss:96-159`:
+[`frontend/app/view/agent/components/ToolBlock.tsx:42-156`](../../frontend/app/view/agent/components/ToolBlock.tsx) + `_document-nodes.scss:96-159`:
 
 - `hovering` signal, `HOVER_ENTER_DELAY_MS = 150`.
 - `pinned` prop (parent-managed) and `onTogglePin` callback.

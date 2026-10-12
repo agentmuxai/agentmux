@@ -129,7 +129,7 @@ The authoritative window-instance state lives in a reducer (the launcher's `stat
 via `list_window_instances`). Renderers must RECONCILE against it when they detect they've fallen
 behind, instead of trusting a lossy incremental stream forever.
 
-1. Wire a real `onVersionGap` for the launcher `PerSourceTracker` ([`frontend/util/launcher-events.ts:49-56`](../../frontend/util/launcher-events.ts#L49-L56);
+1. Wire a real `onVersionGap` for the launcher `PerSourceTracker` ([`frontend/util/launcher-events.ts:49-56`](../../frontend/util/launcher-events.ts);
    the hook exists at `event-buffer.ts:103`, fired at `:246`).
 2. In the callback: re-pull `getApi().listWindowInstances()` → `reconcileKnownEntriesFromSnapshot(snapshot)`
    (`launcher-event-reducer.ts:146`). The `ReconcileFromSnapshot` arm already does the wholesale

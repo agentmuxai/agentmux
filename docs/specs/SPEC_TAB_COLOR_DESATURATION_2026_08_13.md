@@ -16,7 +16,7 @@ Green/Teal/Cyan) where the raw average dropped below WCAG AA. See the
 ## Problem
 
 The tab color picker (right-click a tab → color) assigns colors from the
-`TAB_COLORS` array in [`frontend/app/tab/tab.tsx:20-35`](../../frontend/app/tab/tab.tsx#L20-L35) — 14 stock
+`TAB_COLORS` array in [`frontend/app/tab/tab.tsx:20-35`](../../frontend/app/tab/tab.tsx) — 14 stock
 Tailwind-500 hues, ~26° apart on the hue wheel, applied as a solid
 `background: var(--tab-color)` fill on the tab (`tab.scss:141-159`). At
 full Tailwind-500 saturation (81-95%) these read as neon/fluorescent,
@@ -28,10 +28,10 @@ stay exactly as they are.
 
 ## Why this isn't a one-line palette edit
 
-`TAB_COLORS` is not tab-exclusive. [`frontend/app/view/agent/agent-color.ts:18-20`](../../frontend/app/view/agent/agent-color.ts#L18-L20)
+`TAB_COLORS` is not tab-exclusive. [`frontend/app/view/agent/agent-color.ts:18-20`](../../frontend/app/view/agent/agent-color.ts)
 reuses the same array as `AGENT_COLOR_PALETTE`, which auto-assigns agent
 pane **border** colors (`frame:bordercolor` / `frame:activebordercolor` in
-[`frontend/app/block/blockframe.tsx:704-750`](../../frontend/app/block/blockframe.tsx#L704-L750), dimmed via `dimAgentColor` for
+[`frontend/app/block/blockframe.tsx:704-750`](../../frontend/app/block/blockframe.tsx), dimmed via `dimAgentColor` for
 unfocused panes). A separate 12-hue vivid palette
 (`hueToActiveBorder(hue) = hsl(hue, 65%, 52%)` in
 [`frontend/app/block/pane-color-menu.ts`](../../frontend/app/block/pane-color-menu.ts)) also drives pane border color when

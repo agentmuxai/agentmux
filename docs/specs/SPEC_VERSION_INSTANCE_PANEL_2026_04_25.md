@@ -13,7 +13,7 @@ codebase. Two are fortunate (less work), one is scope-trimming:
    `agentmux-cef/src/commands/window.rs:324-348`, complete with
    `SetForegroundWindow` already imported. §5.1 is no-op.
 2. **`token-usage` store is global / session-scoped, NOT
-   per-window** ([`frontend/app/store/token-usage.ts:14`](../../frontend/app/store/token-usage.ts#L14)). The V1
+   per-window** ([`frontend/app/store/token-usage.ts:14`](../../frontend/app/store/token-usage.ts)). The V1
    ships **without** per-window token totals in the window list
    to avoid blocking on a token-usage refactor. The row format
    simplifies to `Window N · focused-agent · started-at`. A

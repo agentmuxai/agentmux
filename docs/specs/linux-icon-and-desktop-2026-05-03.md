@@ -187,7 +187,7 @@ GNOME Shell reads the icon cache lazily. After `gtk-update-icon-cache` runs, **a
 
 `CLAUDE.md` memory asserts it's `"agentmux"`. The repo has no `set_app_id` / `set_class` call in `agentmux-cef/src/`. CEF on Linux/Ozone defaults to the basename of `argv[0]`, which is `agentmux-cef`, **not** `agentmux`. So either:
 
-- (a) The launcher renames/symlinks the binary to `agentmux` before exec (need to check [`scripts/linux-apprun.sh:41`](../../scripts/linux-apprun.sh#L41) — it execs `usr/bin/agentmux`, suggesting the AppImage stage does install the binary as `agentmux`, not `agentmux-cef`), **or**
+- (a) The launcher renames/symlinks the binary to `agentmux` before exec (need to check [`scripts/linux-apprun.sh:41`](../../scripts/linux-apprun.sh) — it execs `usr/bin/agentmux`, suggesting the AppImage stage does install the binary as `agentmux`, not `agentmux-cef`), **or**
 - (b) The Wayland app_id is actually `agentmux-cef` and `CLAUDE.md` memory is wrong (or describes the AppImage path only), **or**
 - (c) CEF passes a `--class=agentmux` switch internally for some reason.
 

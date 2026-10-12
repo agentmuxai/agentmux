@@ -223,7 +223,7 @@ F1 needs **no frontend work** (reuses the chunk pipeline). F2 needs **no backend
 ## 9. Key file references
 - `agentmux-bashwrap/src/hook.rs` — command rewrite (F1 insertion point + `tee_redirect_rewrite`)
 - `agentmux-bashwrap/src/bash_wrap.rs` — exec/PTY capture, `strip_ansi`, model blob
-- [`frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx#L233-L312) — `renderToolResultBody` switch
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — `renderToolResultBody` switch
 - [`frontend/app/view/agent/components/CompactResult.tsx`](../../frontend/app/view/agent/components/CompactResult.tsx) — summary + terminal/JSON branch (F2)
 - [`frontend/app/view/agent/components/TerminalOutput.tsx`](../../frontend/app/view/agent/components/TerminalOutput.tsx) — terminal renderer (F2)
 - [`frontend/app/view/agent/components/terminal-text.ts`](../../frontend/app/view/agent/components/terminal-text.ts) — result→terminal-string helper (F2)

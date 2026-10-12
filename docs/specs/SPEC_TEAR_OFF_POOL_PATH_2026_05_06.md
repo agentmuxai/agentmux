@@ -121,8 +121,8 @@ For this PR, the manual smoke is the validating signal. Add it to [`docs/specs/S
 
 - `agentmux-cef/src/commands/drag.rs:304-340` — `tear_off_pool_promote` host handler
 - `agentmux-cef/src/commands/drag.rs:342-426` — `open_window_at_position` (cold path)
-- [`frontend/app/tab/tabbar.tsx:600-710`](../../frontend/app/tab/tabbar.tsx#L600-L710) — reference implementation (try-pool-first)
+- [`frontend/app/tab/tabbar.tsx:600-710`](../../frontend/app/tab/tabbar.tsx) — reference implementation (try-pool-first)
 - `frontend/app/drag/CrossWindowDragMonitor.win32.tsx:237,242` — current cold-path-only call sites
-- [`frontend/util/cef-api.ts:589-594`](../../frontend/util/cef-api.ts#L589-L594) — `openWindowAtPosition` + `tearOffPoolPromote` IPC bindings
+- [`frontend/util/cef-api.ts:589-594`](../../frontend/util/cef-api.ts) — `openWindowAtPosition` + `tearOffPoolPromote` IPC bindings
 - `agentmux-cef/src/client/mod.rs:1089` — `on_render_process_terminated` recovery handler
 - v0.33.647 portable smoke trace — `~/.agentmux/versions/0.33.647/logs/agentmux-host-v0.33.647.log.2026-05-06`

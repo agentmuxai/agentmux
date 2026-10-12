@@ -43,7 +43,7 @@ clicks on the per-tab "✕" button are affected.
 
 ### 2.1 The click event is not stopped from bubbling past the close button
 
-[`frontend/app/tab/tab.tsx:251-267`](../../frontend/app/tab/tab.tsx#L251-L267) renders each tab as:
+[`frontend/app/tab/tab.tsx:251-267`](../../frontend/app/tab/tab.tsx) renders each tab as:
 
 ```tsx
 <div class={clsx("tab", { active: props.active, ... })}
@@ -106,7 +106,7 @@ calls fired back-to-back on the client.** The close flow
 
 - `WorkspaceService.CloseTab(wsId, tabId)` — from step 1 above.
 - `WorkspaceService.SetActiveTab(wsId, tabId)` — from step 2's bubbled
-  `onSelect` (via `setActiveTab` in [`frontend/app/store/tab-actions.ts:66-112`](../../frontend/app/store/tab-actions.ts#L66-L112)).
+  `onSelect` (via `setActiveTab` in [`frontend/app/store/tab-actions.ts:66-112`](../../frontend/app/store/tab-actions.ts)).
 
 Whichever HTTP request the backend happens to service first decides what
 the user sees, because the reducer (`agentmux-srv/src/reducer/tab.rs`)

@@ -37,7 +37,7 @@ this spec is untangling.
 
 ## 1. The confirmed root cause
 
-`createTab()` ([`frontend/app/store/tab-actions.ts:20-55`](../../frontend/app/store/tab-actions.ts#L20-L55)) holds the
+`createTab()` ([`frontend/app/store/tab-actions.ts:20-55`](../../frontend/app/store/tab-actions.ts)) holds the
 reveal gate through **two** sequential async steps on purpose — the
 `CreateTab` RPC, then `applyTabPreset()` (creates the tab's default
 agent/sysinfo/swarm panes) — and only calls `scheduleRevealLift()` once
@@ -58,13 +58,13 @@ It's undermined by two facts, both verified directly against the code
    dispatches a **separate `Command::SetActiveTab`** to the reducer,
    right there, before the RPC even returns to the client. So
    `ws.activetabid` flips to the new tab's id, and the frontend's
-   `tabId()` signal ([`frontend/app/workspace/workspace.tsx:18`](../../frontend/app/workspace/workspace.tsx#L18)) updates
+   `tabId()` signal ([`frontend/app/workspace/workspace.tsx:18`](../../frontend/app/workspace/workspace.tsx)) updates
    to match, **the moment `CreateTab` resolves** — well before
    `applyTabPreset` even starts.
 
 2. **`applyTabPreset` is guaranteed to take longer than the reveal
    gate's 80ms settle window, entirely in `await`s with no long tasks.**
-   `waitForLayoutModel()` ([`frontend/app/tab/tab-presets.ts:91-102`](../../frontend/app/tab/tab-presets.ts#L91-L102))
+   `waitForLayoutModel()` ([`frontend/app/tab/tab-presets.ts:91-102`](../../frontend/app/tab/tab-presets.ts))
    opens with `await new Promise((r) => setTimeout(r, 30))` in a polling
    loop, by design ("poll briefly for the layout model to be ready
    rather than racing against the [object] queue") — then walks the

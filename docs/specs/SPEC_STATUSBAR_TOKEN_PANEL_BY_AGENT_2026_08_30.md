@@ -34,7 +34,7 @@ Two things make "by agent" more than a regroup:
    visual distinction, which is confusing and gets worse once real agent
    rows are also broken out individually.
 
-Separately, `SessionStats` ([`frontend/app/view/agent/types.ts:545`](../../frontend/app/view/agent/types.ts#L545)) already
+Separately, `SessionStats` ([`frontend/app/view/agent/types.ts:545`](../../frontend/app/view/agent/types.ts)) already
 carries `cost_usd`, `duration_ms`, and `num_turns` **per pane**, accumulated
 cumulatively in `AgentPaneState.sessionTotals`
 (`SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md`) — and none of it reaches

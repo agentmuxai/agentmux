@@ -35,10 +35,10 @@ concern is real, but it belongs on the PTY resize, not on the on-screen grid.
   `WM_SIZE`/`WasResized` handling of our own, no off-screen rendering, and no
   host-side debounce.
 - The tile layout reflows every frame: `useOnResize(displayContainerRef,
-  onContainerResize)` ([`frontend/layout/lib/layoutModelHooks.ts:69`](../../frontend/layout/lib/layoutModelHooks.ts#L69)) passes no
+  onContainerResize)` ([`frontend/layout/lib/layoutModelHooks.ts:69`](../../frontend/layout/lib/layoutModelHooks.ts)) passes no
   debounce, so `updateTree()` runs on every ResizeObserver tick. This was fixed
   in #1735.
-- `createStopContainerResizing` ([`frontend/layout/lib/layoutResize.ts:275`](../../frontend/layout/lib/layoutResize.ts#L275),
+- `createStopContainerResizing` ([`frontend/layout/lib/layoutResize.ts:275`](../../frontend/layout/lib/layoutResize.ts),
   `debounce(30)`) only delays switching animations back on. It never delays
   content.
 
@@ -46,10 +46,10 @@ concern is real, but it belongs on the PTY resize, not on the on-screen grid.
 
 | # | Where | Delay | What is held back | Visible mid-drag |
 |---|---|---|---|---|
-| D1 | [`frontend/app/view/term/termwrap.ts:132`](../../frontend/app/view/term/termwrap.ts#L132) `handleResize_debounced = debounce(50, …)`, called by the ResizeObserver at `term.tsx:213-216` | 50 ms, **trailing** | xterm grid refit (`customFit` → `terminal.resize`) **and** the PTY size (`sendTermSize`) | **Yes, the main symptom.** The grid is frozen for the whole drag. |
-| D2 | [`frontend/app/view/agent/components/AgentShellSubblock.tsx:703-708`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx#L703-L708) (same `handleResize_debounced`) | 50 ms, trailing | Agent Shell drawer terminal refit | Same as D1, inside the drawer |
-| D3 | [`frontend/app/view/sysinfo/sysinfo-plot.tsx:38-60`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx#L38-L60) `setTimeout(…, 150)` after the first event | 150 ms, trailing | Chart re-render at the new size | Chart stays at its old size, clipped or with blank space |
-| D4 | [`frontend/app/view/agent/hooks/usePtyWidth.ts:55`](../../frontend/app/view/agent/hooks/usePtyWidth.ts#L55) `DEBOUNCE_MS = 150` | 150 ms, trailing | PTY column count sent to the backend only | **No repaint effect.** New CLI output wraps at the old width until settle. |
+| D1 | [`frontend/app/view/term/termwrap.ts:132`](../../frontend/app/view/term/termwrap.ts) `handleResize_debounced = debounce(50, …)`, called by the ResizeObserver at `term.tsx:213-216` | 50 ms, **trailing** | xterm grid refit (`customFit` → `terminal.resize`) **and** the PTY size (`sendTermSize`) | **Yes, the main symptom.** The grid is frozen for the whole drag. |
+| D2 | [`frontend/app/view/agent/components/AgentShellSubblock.tsx:703-708`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) (same `handleResize_debounced`) | 50 ms, trailing | Agent Shell drawer terminal refit | Same as D1, inside the drawer |
+| D3 | [`frontend/app/view/sysinfo/sysinfo-plot.tsx:38-60`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx) `setTimeout(…, 150)` after the first event | 150 ms, trailing | Chart re-render at the new size | Chart stays at its old size, clipped or with blank space |
+| D4 | [`frontend/app/view/agent/hooks/usePtyWidth.ts:55`](../../frontend/app/view/agent/hooks/usePtyWidth.ts) `DEBOUNCE_MS = 150` | 150 ms, trailing | PTY column count sent to the backend only | **No repaint effect.** New CLI output wraps at the old width until settle. |
 
 **Why a trailing debounce freezes rather than just delays.** throttle-debounce
 v5's `debounce(delay, cb)` defaults to `atBegin: false`: the callback runs
@@ -82,7 +82,7 @@ bug #1735 found and removed for the tile layout ("updateTree() only ran once —
   growing the window, black edges filling in can read as "slow paint".
   Follow-up F3.
 - **Dead CSS:** `.tile-node.resizing { backdrop-filter: blur(8px) }`
-  ([`frontend/layout/lib/tilelayout.scss:92-95`](../../frontend/layout/lib/tilelayout.scss#L92-L95)) is never applied, since nothing
+  ([`frontend/layout/lib/tilelayout.scss:92-95`](../../frontend/layout/lib/tilelayout.scss)) is never applied, since nothing
   sets the class. Remove it (§4.4).
 
 ## 3. Why each delay was introduced

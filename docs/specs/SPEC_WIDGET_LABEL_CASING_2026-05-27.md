@@ -30,7 +30,7 @@ Every user-visible widget/pane label is Title Case (`Agent`, `Browser`, `Editor`
 | 4 | User-facing docs — references to the bar labels in prose | `agentmux-docs/src/content/docs/{first-agent,quickstart,pane-types}.md` | "click the **agent** icon" | "click the **Agent** icon" |
 | 5 | Repo README — feature-list prose | `agentmux/README.md:31` | "alongside terminals, editor, browser, and system metrics" | "alongside **Terminal**, **Editor**, **Browser**, and **Sysinfo** panes" (or leave as common-noun list — see §Open Questions) |
 
-Surface (1) is the dominant fix — every widget-bar button reads `widget.label` directly ([`frontend/app/window/action-widgets.tsx:123`](../../frontend/app/window/action-widgets.tsx#L123), `:197`).
+Surface (1) is the dominant fix — every widget-bar button reads `widget.label` directly ([`frontend/app/window/action-widgets.tsx:123`](../../frontend/app/window/action-widgets.tsx), `:197`).
 
 Surface (2) is the safety net: a few code paths (`block.tsx:113`, `blockframe.tsx:260,271`) call `blockViewToName()` and currently get the raw lowercase id back for `agent`, `browser`, `editor`, `sysinfo`, `warden`.
 
