@@ -135,29 +135,49 @@ fn role(p: &ProcInfo) -> String {
         .unwrap_or_else(|| "main".into())
 }
 
+/// Sums over a set of processes. A field is `None` when no process in the
+/// set had it (the OS doesn't provide it), so the raw data never shows an
+/// unmeasured metric as 0. `unmeasured` counts processes the OS wouldn't
+/// measure at all (another user's, on macOS), which the sums leave out.
 #[derive(Default, Clone, Copy)]
 struct Totals {
-    private: u64,
-    resident: u64,
-    commit: u64,
-    pss: u64,
-    uss: u64,
+    private: Option<u64>,
+    resident: Option<u64>,
+    commit: Option<u64>,
+    pss: Option<u64>,
+    uss: Option<u64>,
     procs: usize,
+    unmeasured: usize,
+}
+
+fn add_to(total: &mut Option<u64>, v: Option<u64>) {
+    if let Some(v) = v {
+        *total = Some(total.unwrap_or(0) + v);
+    }
 }
 
 impl Totals {
     fn add(&mut self, r: &Row) {
-        self.private += r.private.unwrap_or(0);
-        self.resident += r.resident.unwrap_or(0);
-        self.commit += r.commit.unwrap_or(0);
-        self.pss += r.pss.unwrap_or(0);
-        self.uss += r.uss.unwrap_or(0);
+        add_to(&mut self.private, r.private);
+        add_to(&mut self.resident, r.resident);
+        add_to(&mut self.commit, r.commit);
+        add_to(&mut self.pss, r.pss);
+        add_to(&mut self.uss, r.uss);
         self.procs += 1;
+        if r.private.is_none() {
+            self.unmeasured += 1;
+        }
     }
     fn json(&self) -> String {
         format!(
-            "{{\"procs\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{}}}",
-            self.procs, self.private, self.resident, self.commit, self.pss, self.uss
+            "{{\"procs\":{},\"unmeasured\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{}}}",
+            self.procs,
+            self.unmeasured,
+            opt(self.private),
+            opt(self.resident),
+            opt(self.commit),
+            opt(self.pss),
+            opt(self.uss)
         )
     }
 }
@@ -333,7 +353,9 @@ fn main() {
                     )
                 })
                 .collect();
-            let _ = writeln!(
+            // The .jsonl is the run's raw data: a failed write ends the run
+            // rather than leaving a summary over a missing or cut-short file.
+            if let Err(e) = writeln!(
                 f,
                 "{{\"ts_ms\":{ts},\"os\":\"{}\",\"metric\":\"{}\",\"root\":{root_pid},\"app\":{},\"child\":{},\"procs\":[{}]}}",
                 std::env::consts::OS,
@@ -341,7 +363,12 @@ fn main() {
                 app.json(),
                 child.json(),
                 procs.join(",")
-            );
+            )
+            .and_then(|_| f.flush())
+            {
+                eprintln!("\nmemtree: writing {}: {e}", args.json.as_deref().unwrap_or("?"));
+                std::process::exit(1);
+            }
         }
         app_series.push(app);
         child_series.push(child);
@@ -350,7 +377,7 @@ fn main() {
             "\rsample {}/{}  app private {} MB",
             i + 1,
             args.samples,
-            mb(app.private)
+            mb(app.private.unwrap_or(0))
         );
     }
     eprintln!();
@@ -383,26 +410,32 @@ fn main() {
         "Totals over {} samples (MB): median [min, max]",
         app_series.len()
     );
-    // Commit is Windows-only and PSS/USS Linux-only: leave out what this OS lacks.
-    let has_commit = last_rows.iter().any(|r| r.commit.is_some());
-    let has_pss = last_rows.iter().any(|r| r.pss.is_some());
+    // A metric this OS doesn't provide (commit off Windows, PSS/USS off
+    // Linux) has no samples and is left out.
     for (label, series) in [("app", &app_series), ("child", &child_series)] {
-        let stat = |f: fn(&Totals) -> u64| {
-            let v: Vec<u64> = series.iter().map(f).collect();
-            let (lo, hi) = (*v.iter().min().unwrap_or(&0), *v.iter().max().unwrap_or(&0));
-            format!("{} [{}, {}]", mb(median(v)), mb(lo), mb(hi))
+        let stat = |name: &str, f: fn(&Totals) -> Option<u64>| {
+            let v: Vec<u64> = series.iter().filter_map(f).collect();
+            let (Some(&lo), Some(&hi)) = (v.iter().min(), v.iter().max()) else {
+                return String::new();
+            };
+            format!("  {name} {} [{}, {}]", mb(median(v)), mb(lo), mb(hi))
         };
-        let mut line = format!(
-            "  {label:<5} procs {:>3}  private {}  resident {}",
-            series.last().map(|t| t.procs).unwrap_or(0),
-            stat(|t| t.private),
-            stat(|t| t.resident),
-        );
-        if has_commit {
-            line += &format!("  commit {}", stat(|t| t.commit));
+        let last = series.last().copied().unwrap_or_default();
+        let mut line = format!("  {label:<5} procs {:>3}", last.procs);
+        for (name, f) in [
+            (
+                "private",
+                (|t: &Totals| t.private) as fn(&Totals) -> Option<u64>,
+            ),
+            ("resident", |t| t.resident),
+            ("commit", |t| t.commit),
+            ("pss", |t| t.pss),
+            ("uss", |t| t.uss),
+        ] {
+            line += &stat(name, f);
         }
-        if has_pss {
-            line += &format!("  pss {}  uss {}", stat(|t| t.pss), stat(|t| t.uss));
+        if last.unmeasured > 0 {
+            line += &format!("  ({} not measurable, left out)", last.unmeasured);
         }
         println!("{line}");
     }
