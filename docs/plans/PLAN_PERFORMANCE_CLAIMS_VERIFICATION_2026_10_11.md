@@ -1,7 +1,7 @@
 # Verifying the performance numbers on agentmux.ai, on all three platforms
 
 **Date:** 2026-10-11
-**Status:** draft — awaiting the owner's answers in §9 before Phase 1
+**Status:** active. Shipped in #4712: this plan and its first tool, `crates/procstats/examples/memtree.rs`, a memory-only probe used for a pilot on all three platforms. Still to do: the owner's answers in §9, the full harness (§6), and Phases 1–6.
 **Author:** Agent4@narko, at the operator's request
 **Scope:** every number on the live [agentmux.ai/compare](https://agentmux.ai/compare) and [agentmux.ai/sources](https://agentmux.ai/sources) pages: AgentMux's own, and the competitors'.
 **Runs with:** [SPEC_CROSS_PLATFORM_TESTING_PROTOCOL_2026_10_11.md](../specs/SPEC_CROSS_PLATFORM_TESTING_PROTOCOL_2026_10_11.md) (one lead, one tester per platform).
