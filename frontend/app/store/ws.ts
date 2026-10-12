@@ -13,6 +13,10 @@ const WarnWebSocketSendSize = 1024 * 1024; // 1MB
 const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
 const reconnectHandlers: (() => void)[] = [];
 const StableConnTime = 2000;
+// Gap between queued `blockinput` chunks when the queue drains after a
+// reconnect. Mirrors PASTE_CHUNK_DELAY_MS in block-input-sender.ts (not
+// imported: that module imports this one).
+const QueuedInputPaceMs = 5;
 
 function addWSReconnectHandler(handler: () => void) {
     reconnectHandlers.push(handler);
@@ -30,6 +34,8 @@ class WSControl {
     opening: boolean = false;
     reconnectTimes: number = 0;
     msgQueue: any[] = [];
+    msgQueueTimer: ReturnType<typeof setTimeout> = null;
+    inReconnectHandlers: boolean = false;
     tabId: string;
     messageCallback: WSEventCallback;
     watchSessionId: string = null;
@@ -164,24 +170,42 @@ class WSControl {
             this.reconnectTimes = 0;
             dlog("clear reconnect times");
         }, StableConnTime);
-        for (let handler of reconnectHandlers) {
-            handler();
+        // What the reconnect handlers send (re-subscriptions above all) goes
+        // out straight away, ahead of anything queued while disconnected, so
+        // the new connection is subscribed before queued input or RPCs run.
+        this.inReconnectHandlers = true;
+        try {
+            for (let handler of reconnectHandlers) {
+                handler();
+            }
+        } finally {
+            this.inReconnectHandlers = false;
         }
         this.runMsgQueue();
     }
 
+    /// Send what was queued while the socket wasn't open, in order. Control
+    /// messages (event subscriptions, RPCs) go out at once; after each queued
+    /// `blockinput` chunk the drain waits `QueuedInputPaceMs`, the pacing a
+    /// paste interrupted by a reconnect would have had. It used to send one
+    /// message per 100 ms whatever it was: startup queues about 16 messages,
+    /// so an RPC behind them, `GetFullConfig` in `initMux`, waited 1.3-1.8 s on
+    /// launches where the socket wasn't open yet.
     runMsgQueue() {
-        if (!this.open) {
+        if (this.msgQueueTimer != null) {
             return;
         }
-        if (this.msgQueue.length == 0) {
-            return;
+        while (this.open && this.msgQueue.length > 0) {
+            const msg = this.msgQueue.shift();
+            this.sendMessage(msg);
+            if (msg.wscommand == "blockinput" && this.msgQueue.length > 0) {
+                this.msgQueueTimer = setTimeout(() => {
+                    this.msgQueueTimer = null;
+                    this.runMsgQueue();
+                }, QueuedInputPaceMs);
+                return;
+            }
         }
-        const msg = this.msgQueue.shift();
-        this.sendMessage(msg);
-        setTimeout(() => {
-            this.runMsgQueue();
-        }, 100);
     }
 
     onmessage(event: MessageEvent) {
@@ -233,7 +257,9 @@ class WSControl {
     }
 
     pushMessage(data: WSCommandType) {
-        if (!this.open) {
+        // Behind a queue that is still draining, so order is kept; except
+        // from the reconnect handlers, which go first (see onopen).
+        if (!this.open || (this.msgQueue.length > 0 && !this.inReconnectHandlers)) {
             this.msgQueue.push(data);
             return;
         }
