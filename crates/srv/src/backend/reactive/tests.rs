@@ -4384,3 +4384,21 @@ fn test_system_note_falls_back_to_keystrokes_for_a_terminal_agent() {
     let typed = typed.lock().unwrap();
     assert_eq!(typed[1], b"[AgentMux] hi\r".to_vec());
 }
+
+/// An unsigned display-name target routes by its route name on every tier,
+/// including the forwarding ones; a signed one keeps the target its
+/// signature binds; an `@` address isn't turned into a local name.
+#[test]
+fn test_route_unsigned_target() {
+    let mut unsigned = InjectionRequest { target_agent: "Loap #3".to_string(), ..Default::default() };
+    unsigned.route_unsigned_target();
+    assert_eq!(unsigned.target_agent, "Loap-3");
+    let mut signed =
+        InjectionRequest { target_agent: "Loap #3".to_string(), jekt_sig: Some("sig".to_string()), ..Default::default() };
+    assert!(signed.is_signed());
+    signed.route_unsigned_target();
+    assert_eq!(signed.target_agent, "Loap #3");
+    let mut address = InjectionRequest { target_agent: "agent2@narko".to_string(), ..Default::default() };
+    address.route_unsigned_target();
+    assert_eq!(address.target_agent, "agent2@narko");
+}

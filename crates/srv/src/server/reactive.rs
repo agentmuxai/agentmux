@@ -826,6 +826,7 @@ pub(crate) async fn deliver(
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
+    req.route_unsigned_target();
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());

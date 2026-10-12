@@ -254,6 +254,20 @@ impl OutgoingJektSignatures {
     }
 }
 
+/// The request for a jekt to `target_agent`, signed: every send path builds
+/// it here. The target is its route name first (`agent_route_name`: a fork's
+/// "Loap #3" is "Loap-3"), because the signatures bind the target: every hop
+/// routes by the route name, and normalizing a signed request at a hop would
+/// break its signature. A blank target is left blank.
+pub(crate) fn signed_jekt(source_agent: Option<String>, target_agent: &str, message: &str) -> InjectRequest {
+    let target = if target_agent.trim().is_empty() {
+        target_agent.to_string()
+    } else {
+        agentmux_common::slug::agent_route_name(target_agent)
+    };
+    sign_outgoing_jekt(source_agent.as_deref(), &target, message).into_request(target, message.to_string(), source_agent)
+}
+
 pub(crate) fn sign_outgoing_jekt(
     source_agent: Option<&str>,
     target_agent: &str,
@@ -373,4 +387,18 @@ pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::Ui
         "",
     );
     Ok(agentmux_common::api_types::UiAutomationAuth { agent_id, ts_secs, sig })
+}
+
+#[cfg(test)]
+mod signed_jekt_tests {
+    use super::signed_jekt;
+
+    /// The target is signed and sent as its route name, so every hop routes
+    /// by the name the fork registered under; an `@` address is left alone.
+    #[test]
+    fn a_display_name_target_is_sent_as_its_route_name() {
+        assert_eq!(signed_jekt(None, "Loap #3", "hi").target_agent, "Loap-3");
+        assert_eq!(signed_jekt(None, "agent2", "hi").target_agent, "agent2");
+        assert_eq!(signed_jekt(None, "agent2@narko", "hi").target_agent, "agent2@narko");
+    }
 }
