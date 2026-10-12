@@ -273,13 +273,23 @@ pub fn acquire_data_dir_lock(data_dir: &Path) -> Result<(), String> {
         return Ok(());
     }
     let lock_path = data_dir.join(SRV_DATA_LOCK_FILE);
-    let lock = MuxLock::acquire_at(&lock_path).map_err(|_| {
+    let mut lock = MuxLock::acquire_at(&lock_path).map_err(|_| {
         format!(
             "another agentmux-srv is already using {} (lock {})",
             data_dir.display(),
             lock_path.display()
         )
     })?;
+    // Record who holds it, so a launcher that finds the lock held by an srv
+    // its own launcher left behind can stop that srv instead of failing to
+    // start (crates/launcher/src/stale_srv.rs). Best effort: the lock itself
+    // is the flock, not the contents.
+    {
+        use std::io::{Seek, Write};
+        let _ = lock.file.set_len(0);
+        let _ = lock.file.seek(std::io::SeekFrom::Start(0));
+        let _ = write!(lock.file, "{}", std::process::id());
+    }
     held.push((data_dir.to_path_buf(), lock));
     Ok(())
 }
