@@ -46,9 +46,11 @@ pub use layout_types::{
     StackMovePosition,
 };
 pub use runtime_mode::{is_dev_build_exe, is_dev_self, RuntimeMode};
+#[cfg(unix)]
+pub use toolchain_path::refresh_login_path_cache;
 pub use toolchain_path::{
-    enrich_current_process_path, looks_like_launchd_default, resolve_login_path, EnrichedPath,
-    PathSource,
+    enrich_current_process_path, enrich_current_process_path_cached, looks_like_launchd_default,
+    resolve_login_path, EnrichOutcome, EnrichedPath, PathSource,
 };
 
 /// The HTTP header that carries srv's instance auth key, on every route and

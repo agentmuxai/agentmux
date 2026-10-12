@@ -124,22 +124,54 @@ pub fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     guard
 }
 
-/// Step 1b: Direct-launch PATH fallback. The host enriches the srv's PATH when it
-/// spawns it (sidecar.rs), so in normal operation this is a cheap no-op.
-/// It only does work when the srv is launched directly with a stripped
-/// launchd PATH (some dev paths), so installs/CLIs still resolve node/npm.
-/// See SPEC_TOOLCHAIN_MANAGER_2026-06-15 §3.1.
+/// How long after boot the cached login-shell PATH is re-checked. Long enough
+/// that the shell spawn (1-2 s of CPU with oh-my-zsh/conda/nvm) doesn't compete
+/// with the window loading.
+#[cfg(unix)]
+const LOGIN_PATH_REFRESH_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Step 1b: PATH enrichment for a GUI launch. Every Finder/Dock launch gets
+/// launchd's stripped PATH (the launcher spawns srv with it), so this runs on
+/// every macOS launch, not only on dev paths, and it runs before ESTART: the
+/// window can't start until it is done. An interactive login shell costs 1-2 s,
+/// so the result is cached in the shared dir and reused while the shell's
+/// startup files are unchanged, then re-checked in the background. See
+/// SPEC_TOOLCHAIN_MANAGER_2026-06-15 §3.1.
 pub fn enrich_path() {
-    let path_source = agentmux_common::enrich_current_process_path();
-    if path_source != agentmux_common::PathSource::Inherited {
-        // Record the source for the Toolchain modal (the host sets this when it
-        // spawns the srv; on a direct launch we set it here after enriching).
-        std::env::set_var("AGENTMUX_PATH_SOURCE", path_source.as_str());
-        tracing::info!(
-            source = path_source.as_str(),
-            "Enriched srv PATH on direct launch (stripped PATH detected)"
-        );
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    let cache_file = std::env::var_os("AGENTMUX_SHARED_DIR")
+        .map(|d| std::path::PathBuf::from(d).join("cache").join("login-path.json"));
+    let outcome = agentmux_common::enrich_current_process_path_cached(cache_file.as_deref());
+    if outcome.source == agentmux_common::PathSource::Inherited {
+        return;
     }
+    // Record the source for the Toolchain modal (the host sets this when it
+    // spawns the srv; on a direct launch we set it here after enriching).
+    std::env::set_var("AGENTMUX_PATH_SOURCE", outcome.source.as_str());
+    tracing::info!(
+        source = outcome.source.as_str(),
+        cached = outcome.from_cache,
+        "Enriched srv PATH on direct launch (stripped PATH detected)"
+    );
+
+    #[cfg(unix)]
+    if let (true, Some(cache_file)) = (outcome.from_cache, cache_file) {
+        std::thread::spawn(move || {
+            std::thread::sleep(LOGIN_PATH_REFRESH_DELAY);
+            let current = std::env::var("PATH").unwrap_or_default();
+            if let Some(fresh) =
+                agentmux_common::refresh_login_path_cache(&cache_file, &inherited, &current)
+            {
+                // A file the fingerprint can't see changed (a sourced plugin,
+                // nvm's default alias). Use the fresh value from now on; agents
+                // spawned before this point keep the PATH they started with.
+                std::env::set_var("PATH", &fresh);
+                tracing::info!("login-shell PATH changed since the cached copy; applied the fresh one");
+            }
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = inherited;
 }
 
 #[cfg(test)]
