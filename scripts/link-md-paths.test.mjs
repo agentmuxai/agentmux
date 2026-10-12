@@ -102,6 +102,12 @@ describe("linkPaths", () => {
     expect(changes).toHaveLength(0);
     expect(text).toBe(md);
   });
+  it("leaves YAML frontmatter alone", () => {
+    const md = "---\ndescription: see `Cargo.toml`\n---\n\nBody `Cargo.toml`.\n";
+    expect(linkPaths(md, "README.md").text).toBe(
+      "---\ndescription: see `Cargo.toml`\n---\n\nBody [`Cargo.toml`](Cargo.toml).\n",
+    );
+  });
   it("is idempotent", () => {
     const once = linkPaths("`crates/srv/src/main.rs`\n", "README.md").text;
     expect(linkPaths(once, "README.md").changes).toHaveLength(0);

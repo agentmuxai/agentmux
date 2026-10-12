@@ -92,10 +92,14 @@ export function resolveTarget(value, mdFile, tracked) {
 /** Rewrite one Markdown text. Returns { text, changes: [{ line, value, target }] }. */
 export function linkPaths(text, mdFile, tracked) {
   const tree = unified().use(remarkParse).use(remarkGfm).parse(text);
+  // YAML frontmatter (skills' SKILL.md) is metadata, not prose; remark without
+  // a frontmatter plugin parses it as text, so keep edits out of it.
+  const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text);
+  const bodyStart = fm ? fm[0].length : 0;
   const edits = [];
   const walk = (node) => {
     if (SKIP_ANCESTORS.has(node.type)) return;
-    if (node.type === "inlineCode" && node.position) {
+    if (node.type === "inlineCode" && node.position && node.position.start.offset >= bodyStart) {
       const target = resolveTarget(node.value, mdFile, tracked);
       if (target) {
         edits.push({
