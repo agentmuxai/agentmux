@@ -431,6 +431,22 @@ unsafe extern "C" fn should_handle_reopen(
     0 // NO — handled
 }
 
+/// `-(NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender`
+/// — type encoding `Q@:@`. AppKit asks this on every Quit Apple Event (Dock →
+/// Quit, logout, System Settings' "Quit & Reopen" after a permission grant).
+/// Without it AppKit `exit()`ed the launcher on the spot, skipping the
+/// supervisor's teardown of the host and srv. Hand the quit to that teardown
+/// instead: SIGTERM ourselves (the supervisor's signal arm stops the host,
+/// quiesces srv and exits the process) and reply `NSTerminateLater`, so AppKit
+/// doesn't exit first. If the supervisor hasn't installed its handlers yet
+/// (very early in startup), SIGTERM's default action ends the process as
+/// before, and srv exits on its own when its parent is gone.
+unsafe extern "C" fn should_terminate(_self: id, _cmd: SEL, _app: id) -> usize {
+    crate::log("quit-hook: AppKit asked to terminate; handing off to the supervisor's SIGTERM teardown");
+    libc::kill(libc::getpid(), libc::SIGTERM);
+    2 // NSTerminateLater
+}
+
 /// Install `applicationShouldHandleReopen:hasVisibleWindows:` on the splash's
 /// `NSApplication`. The launcher's splash NSApp has no delegate, so we install a
 /// dedicated one; if one ever exists we add/override the method onto its class
@@ -452,6 +468,9 @@ unsafe fn install_reopen_handler() {
     let imp: unsafe extern "C" fn(id, SEL, id, u8) -> u8 = should_handle_reopen;
     let sel_reopen = sel(b"applicationShouldHandleReopen:hasVisibleWindows:\0");
     let types = b"c@:@c\0".as_ptr() as *const c_char;
+    let quit_imp: unsafe extern "C" fn(id, SEL, id) -> usize = should_terminate;
+    let sel_quit = sel(b"applicationShouldTerminate:\0");
+    let quit_types = b"Q@:@\0".as_ptr() as *const c_char;
 
     let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
     if app.is_null() {
@@ -466,6 +485,7 @@ unsafe fn install_reopen_handler() {
             let superclass = objc_getClass(b"NSObject\0".as_ptr() as *const c_char);
             dcls = objc_allocateClassPair(superclass, name.as_ptr() as *const c_char, 0);
             class_addMethod(dcls, sel_reopen, imp as usize, types);
+            class_addMethod(dcls, sel_quit, quit_imp as usize, quit_types);
             objc_registerClassPair(dcls);
         }
         // alloc/init returns a +1-retained object we deliberately never release —
@@ -473,7 +493,7 @@ unsafe fn install_reopen_handler() {
         // valid for the process lifetime.
         let delegate = send(send(dcls as id, sel(b"alloc\0")), sel(b"init\0"));
         send_void_id(app, sel(b"setDelegate:\0"), delegate);
-        crate::log("reopen-hook: installed dedicated launcher reopen delegate");
+        crate::log("reopen-hook: installed dedicated launcher reopen delegate (with quit-hook)");
     } else {
         // class_addMethod adds an override on THIS class only when the selector
         // isn't already implemented directly; otherwise replace its own IMP.
@@ -487,6 +507,13 @@ unsafe fn install_reopen_handler() {
                 crate::log("reopen-hook: swizzled applicationShouldHandleReopen on existing launcher delegate");
             }
         }
+        if class_addMethod(cls, sel_quit, quit_imp as usize, quit_types) == 0 {
+            let m = class_getInstanceMethod(cls, sel_quit);
+            if !m.is_null() {
+                method_setImplementation(m, quit_imp as *const std::ffi::c_void);
+            }
+        }
+        crate::log("quit-hook: installed applicationShouldTerminate on existing launcher delegate");
     }
 }
 
