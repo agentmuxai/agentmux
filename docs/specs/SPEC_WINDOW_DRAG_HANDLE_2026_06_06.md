@@ -88,7 +88,7 @@ export function WindowDragHandle(): JSX.Element {
 
 ### 5.2 Tab bar insertion
 
-`frontend/app/tab/tabbar.tsx` — inside the `<Show when={!isMacOS()}>` block,
+[`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — inside the `<Show when={!isMacOS()}>` block,
 after `<HamburgerMenu />`:
 
 ```tsx
@@ -154,5 +154,5 @@ no changes to the hook. The native move loop fires exactly as it does for
 | File | Change |
 |---|---|
 | `frontend/app/window/WindowDragHandle.tsx` | New component |
-| `frontend/app/tab/tabbar.tsx` | Insert `<WindowDragHandle />` after `<HamburgerMenu />` |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | Insert `<WindowDragHandle />` after `<HamburgerMenu />` |
 | `frontend/app/styles/tabbar.css` (or equivalent) | `.window-drag-handle` styles |

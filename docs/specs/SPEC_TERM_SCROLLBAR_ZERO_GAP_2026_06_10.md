@@ -4,7 +4,7 @@
 **Author:** AgentX
 **Date:** 2026-06-10
 **Related:** PR #1330 (`agentx/fix-xterm-dead-space`), PR #1328 (scrollbar pointer cursor)
-**Files:** `frontend/app/view/term/term.scss`, `frontend/app/view/term/termwrap.ts`, `frontend/app/view/term/termutil.ts`, `frontend/app/view/term/termViewModel.ts`, `frontend/app/block/blockframe.tsx`
+**Files:** [`frontend/app/view/term/term.scss`](../../frontend/app/view/term/term.scss), [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts), [`frontend/app/view/term/termutil.ts`](../../frontend/app/view/term/termutil.ts), [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts), [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)
 
 ---
 

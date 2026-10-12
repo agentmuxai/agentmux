@@ -4,11 +4,11 @@
 **Status:** Draft, ready to implement (replaces all prior tab-gap
             patches)
 **Owner:** AgentA
-**Touches:** `frontend/app/tab/tabbar.tsx`,
-             `frontend/app/tab/tab.tsx`,
-             `frontend/app/tab/droppable-tab.tsx`,
-             `frontend/app/tab/tab.scss`,
-             `frontend/app/tab/tabbar.scss`
+**Touches:** [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx),
+             [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx),
+             [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx),
+             [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss),
+             [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss)
 **Supersedes:** `SPEC_TAB_GAPS_AND_NAMING_2026_04_25.md`,
              `RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`
 **Why:** Three rounds of patching the existing AgentMux tab-bar

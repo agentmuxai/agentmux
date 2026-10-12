@@ -1,8 +1,8 @@
 # App API — Implementation Status
 
 **Date:** 2026-04-11
-**Spec:** `docs/specs/app-api-extension.md`
-**Retro:** `docs/analysis/persistent-process-retro-2026-04-10.md`
+**Spec:** [`docs/specs/app-api-extension.md`](app-api-extension.md)
+**Retro:** [`docs/analysis/persistent-process-retro-2026-04-10.md`](../analysis/persistent-process-retro-2026-04-10.md)
 
 ---
 
@@ -104,9 +104,9 @@ Other slash commands (`/cost`, `/compact`, etc.) pass through to the CLI which h
 | `agentmux-srv/src/backend/providers.rs` | ~270 | Static provider registry (claude, codex, gemini) with 7 unit tests |
 | `agentmux-srv/src/backend/agent_config.rs` | ~330 | Config file builder (CLAUDE.md, .mcp.json, skills) with 9 unit tests |
 | `agentmux-srv/src/server/app_api.rs` | ~530 | All 6 command handlers |
-| `docs/specs/app-api-extension.md` | ~280 | Full API spec (Tiers 1-5) |
-| `docs/specs/app-api-status.md` | this file | Implementation status |
-| `docs/analysis/persistent-process-retro-2026-04-10.md` | ~150 | Debug retro (11 issues found and fixed) |
+| [`docs/specs/app-api-extension.md`](app-api-extension.md) | ~280 | Full API spec (Tiers 1-5) |
+| [`docs/specs/app-api-status.md`](app-api-status.md) | this file | Implementation status |
+| [`docs/analysis/persistent-process-retro-2026-04-10.md`](../analysis/persistent-process-retro-2026-04-10.md) | ~150 | Debug retro (11 issues found and fixed) |
 
 ## Files Modified
 

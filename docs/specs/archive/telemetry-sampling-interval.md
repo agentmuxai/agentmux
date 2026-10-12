@@ -44,7 +44,7 @@ Example in settings.json:
 
 4. **`gotypes.d.ts`** — Add `"telemetry:interval"?: number` to `SettingsType`.
 
-5. **`schema/settings.json`** — Add `"telemetry:interval": { "type": "number" }`.
+5. **[`schema/settings.json`](../../../schema/settings.json)** — Add `"telemetry:interval": { "type": "number" }`.
 
 6. **`platform.rs`** (settings template) — Add commented-out default:
    ```
@@ -77,5 +77,5 @@ The sysinfo view (`sysinfo.tsx`) uses gap detection at 2000ms (line 174: `if (ti
 | `agentmuxsrv-rs/src/backend/sysinfo.rs` | Read interval from config, use sleep-based loop |
 | `agentmuxsrv-rs/src/main.rs` | Pass AppState to sysinfo loop |
 | `frontend/types/gotypes.d.ts` | Add type |
-| `schema/settings.json` | Add schema entry |
+| [`schema/settings.json`](../../../schema/settings.json) | Add schema entry |
 | `src-tauri/src/commands/platform.rs` | Add to settings template |

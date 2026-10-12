@@ -228,10 +228,10 @@ primitive co-exists with the old ones until the last caller moves).
 
 ## 13. References
 
-- `docs/specs/SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md` — modal-v2's origin; its
+- [`docs/specs/SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md`](SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md) — modal-v2's origin; its
   unfinished §6 v1-retirement is completed here.
-- `docs/specs/launch-modal-rearchitecture-2026-05-01.md` — TabModalLayer.
-- `docs/specs/SPEC_MODAL_TRANSITIONS_2026_05_18.md` — the animation model to port.
-- `docs/specs/SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL_2026_05_21.md` — Features
+- [`docs/specs/launch-modal-rearchitecture-2026-05-01.md`](launch-modal-rearchitecture-2026-05-01.md) — TabModalLayer.
+- [`docs/specs/SPEC_MODAL_TRANSITIONS_2026_05_18.md`](SPEC_MODAL_TRANSITIONS_2026_05_18.md) — the animation model to port.
+- [`docs/specs/SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL_2026_05_21.md`](SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL_2026_05_21.md) — Features
   B/C fold into §9; Feature A (launch-modal Continue-default) is independent
   content work, unaffected.

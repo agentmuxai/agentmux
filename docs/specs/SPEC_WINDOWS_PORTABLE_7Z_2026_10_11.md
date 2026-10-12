@@ -9,7 +9,7 @@ The Windows portable is the one download still compressed with Deflate.
 Built from the same folder, the `.zip` is 194.1 MiB and the Inno Setup
 installer (LZMA2, solid) is 140.2 MiB (the #4207 measurement). An LZMA or zstd
 `.zip` is not an option: Windows 10 Explorer can't open one, so it would look
-like a normal zip and fail. `docs/specs/cef-size-reduction.md` already
+like a normal zip and fail. [`docs/specs/cef-size-reduction.md`](cef-size-reduction.md) already
 recommended `.7z` for Windows.
 
 Measured on the 0.59.19 portable (`e3a741d`, 370 files, 474.6 MiB unpacked),
@@ -61,7 +61,7 @@ Compressing took about 4½ minutes with the 32-bit standalone `7zr.exe`; the
   `| Version | Date | ZIP`. The header is not renamed (feature PRs don't edit
   `VERSION_HISTORY.md`), so the regex stays, and the column now holds the
   archive's size. The row is only written by release builds.
-- Comments in `scripts/package.sh` that say "ZIP" are updated.
+- Comments in [`scripts/package.sh`](../../scripts/package.sh) that say "ZIP" are updated.
 
 ### 3.2 CI: `.github/workflows/build-windows.yml`
 
@@ -104,10 +104,10 @@ page never points at a missing asset.
 
 ### 3.5 Developer tooling
 
-- `scripts/check-toolchain.sh` (Windows): report whether 7-Zip is found, the
+- [`scripts/check-toolchain.sh`](../../scripts/check-toolchain.sh) (Windows): report whether 7-Zip is found, the
   same way `package-portable.sh` looks for it. Missing is a note ("needed for
   `task package`"), not a failure, because `task dev` doesn't need it.
-- `scripts/bootstrap.ps1` doesn't install it: winget's 7-Zip doesn't land on
+- [`scripts/bootstrap.ps1`](../../scripts/bootstrap.ps1) doesn't install it: winget's 7-Zip doesn't land on
   `PATH`, and only packaging needs it.
 
 ### 3.6 Docs
@@ -116,13 +116,13 @@ page never points at a missing asset.
   tables, and "a portable ZIP".
 - `BUILD.md`: the portable output and size lines, the artifact table, and the
   stale NSIS mention (the installer is Inno Setup).
-- `.changesets/README.md`: the example file name.
-- `docs/specs/app-update-check.md`: the unimplemented portable update flow
+- [`.changesets/README.md`](../../.changesets/README.md): the example file name.
+- [`docs/specs/app-update-check.md`](app-update-check.md): the unimplemented portable update flow
   names a `.zip` asset; it becomes the `.7z`.
-- `docs/linux.md` and `SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md`:
+- [`docs/linux.md`](../linux.md) and `SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md`:
   "Windows portable ZIP" comparisons.
-- Historical analyses and retros (`docs/analysis/portable-zip-ci-vs-local.md`,
-  `docs/retro/2026-04-12-portable-size-audit.md`, …) stay as written.
+- Historical analyses and retros ([`docs/analysis/portable-zip-ci-vs-local.md`](../analysis/portable-zip-ci-vs-local.md),
+  [`docs/retro/2026-04-12-portable-size-audit.md`](../retro/2026-04-12-portable-size-audit.md), …) stay as written.
 
 ### 3.7 Unchanged
 

@@ -19,7 +19,7 @@ Nothing is actually wrong. The shutdown completes successfully.
 
 ## 2. Where it comes from
 
-`frontend/app/app.tsx:414-422` (was `:406-413` when first written):
+[`frontend/app/app.tsx:414-422`](../../frontend/app/app.tsx#L414-L422) (was `:406-413` when first written):
 
 ```tsx
 <Show
@@ -145,7 +145,7 @@ the guard.
 ## 8. The exact trigger path (why the record dies before the window)
 
 `muxWindow` is not stored state. It is a live view of the object store:
-`frontend/app/store/window-identity.ts:28` returns
+[`frontend/app/store/window-identity.ts:28`](../../frontend/app/store/window-identity.ts#L28) returns
 `MOS.getObjectValue(makeORef("window", windowId()))`. When a delete update arrives,
 `mos.ts:315` sets that value to `null`. So the page goes into "never loaded" as
 soon as srv deletes and publishes the window's record.
@@ -192,7 +192,7 @@ for an open window. The fix in §9 covers that case too.
   itself says "was not loaded", and after a successful load that is simply false.
 - **Option 3 (grace period)** is still rejected, for the reason §5 gives.
 
-**Change**, all in `frontend/app/app.tsx`, around the `<Show>` at `:414`:
+**Change**, all in [`frontend/app/app.tsx`](../../frontend/app/app.tsx), around the `<Show>` at `:414`:
 
 1. `const [loaded, setLoaded] = createSignal(false)`, plus an effect that sets it
    once `client() != null && windowData() != null` has been true. It never resets:
@@ -262,7 +262,7 @@ issue.
 
 ## 12. Implemented and verified (2026-09-26)
 
-As §9 describes: `appShellState` in `frontend/app/app-shell-state.ts` (table-tested
+As §9 describes: `appShellState` in [`frontend/app/app-shell-state.ts`](../../frontend/app/app-shell-state.ts) (table-tested
 per §10 in `app-shell-state.test.ts`), and a never-resetting `loadedOnce` latch
 in `app.tsx`. The fallback keeps `<AppBackground />` and renders the error text
 only in the `invalid` state.

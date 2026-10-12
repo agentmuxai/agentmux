@@ -43,16 +43,16 @@ Two separate faults:
 
 | # | Finding | Where |
 |---|---|---|
-| 1 | `fleet.broadcast` calls `ReactiveHandler::inject_message` per target with `source_agent: None`. Its module doc says this is deliberate: "self-declared, same trust tier as the Slack/Discord bridges". | `crates/srv/src/server/app_api/fleet.rs` (module doc, `fleet_broadcast_impl`) |
-| 2 | `FROM` is `source_agent.unwrap_or("unknown")`; `TRUST` is `self-declared` whenever no key was checked. There is no label for the human operator. | `crates/srv/src/backend/reactive/sanitize.rs` (`wrap_jekt_message`, ~L377 and ~L393) |
-| 3 | The composer sends the user's own turn through `COMMAND_AGENT_INPUT`, which calls `run_agent_turn(&deps, block, message, message_id, TurnRegistration::Register, origin, attachments)`. `origin` is a parameter: the handler passes `TurnOrigin::User` (or `System` for a hidden reinjection), so any other caller picks its own. | `crates/srv/src/server/agent_handlers/input.rs` (~L1409-L1450) |
-| 4 | `TurnOrigin` already has `User`, `Automated` (its doc lists "a jekt, cron, nudge, **broadcast**, loop") and `System`. Only `User` can authorize an agent's self-quit. | `crates/srv/src/backend/blockcontroller/health.rs` |
-| 5 | The frontend already parses a header out of a delivered turn and renders it specially (`parseJektTagFields` → `JektBubble`). A second header type fits the same mechanism. | `frontend/app/view/agent/stream-parser.ts`, `components/JektBubble.tsx` |
+| 1 | `fleet.broadcast` calls `ReactiveHandler::inject_message` per target with `source_agent: None`. Its module doc says this is deliberate: "self-declared, same trust tier as the Slack/Discord bridges". | [`crates/srv/src/server/app_api/fleet.rs`](../../crates/srv/src/server/app_api/fleet.rs) (module doc, `fleet_broadcast_impl`) |
+| 2 | `FROM` is `source_agent.unwrap_or("unknown")`; `TRUST` is `self-declared` whenever no key was checked. There is no label for the human operator. | [`crates/srv/src/backend/reactive/sanitize.rs`](../../crates/srv/src/backend/reactive/sanitize.rs) (`wrap_jekt_message`, ~L377 and ~L393) |
+| 3 | The composer sends the user's own turn through `COMMAND_AGENT_INPUT`, which calls `run_agent_turn(&deps, block, message, message_id, TurnRegistration::Register, origin, attachments)`. `origin` is a parameter: the handler passes `TurnOrigin::User` (or `System` for a hidden reinjection), so any other caller picks its own. | [`crates/srv/src/server/agent_handlers/input.rs`](../../crates/srv/src/server/agent_handlers/input.rs) (~L1409-L1450) |
+| 4 | `TurnOrigin` already has `User`, `Automated` (its doc lists "a jekt, cron, nudge, **broadcast**, loop") and `System`. Only `User` can authorize an agent's self-quit. | [`crates/srv/src/backend/blockcontroller/health.rs`](../../crates/srv/src/backend/blockcontroller/health.rs) |
+| 5 | The frontend already parses a header out of a delivered turn and renders it specially (`parseJektTagFields` → `JektBubble`). A second header type fits the same mechanism. | [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts), `components/JektBubble.tsx` |
 | 6 | A jekt body cannot forge a jekt header: `neutralize_markers` rewrites `[JEKT:`, `[/JEKT]` and lookalikes (case, spacing, zero-width characters). It knows nothing about other headers. | `sanitize.rs` (`neutralize_markers`, `match_delimiter`) |
-| 7 | `AGENTMUX_AUTH_KEY` and `AGENTMUX_LOCAL_URL` are on the allowlist of variables that reach every pane. The code calls this "the largest residual coupling". So a process in an agent pane can open the same WebSocket the UI uses and call `fleet.broadcast` itself. | `crates/srv/src/backend/pane_env.rs` (`PANE_ENV_KEEP`) |
-| 8 | The identity spec already concluded that at the same-user boundary "a request that omits its token cannot be told apart from the UI", and put an Operator key out of scope until the host is hardened. The WebSocket upgrade is always `Caller::Unattributed`. | spec §6.5.1, §6.5.7; `crates/srv/src/server/caller.rs` |
+| 7 | `AGENTMUX_AUTH_KEY` and `AGENTMUX_LOCAL_URL` are on the allowlist of variables that reach every pane. The code calls this "the largest residual coupling". So a process in an agent pane can open the same WebSocket the UI uses and call `fleet.broadcast` itself. | [`crates/srv/src/backend/pane_env.rs`](../../crates/srv/src/backend/pane_env.rs) (`PANE_ENV_KEEP`) |
+| 8 | The identity spec already concluded that at the same-user boundary "a request that omits its token cannot be told apart from the UI", and put an Operator key out of scope until the host is hardened. The WebSocket upgrade is always `Caller::Unattributed`. | spec §6.5.1, §6.5.7; [`crates/srv/src/server/caller.rs`](../../crates/srv/src/server/caller.rs) |
 | 9 | Broadcast sends in chunks of 10 with a 1.1 s pause, only because `inject_message` has a 10-per-second rate limiter. The user-turn path has no such limiter. | `fleet.rs` (`BROADCAST_CHUNK_*`) |
-| 10 | The agent-initiated broadcast (`FleetBroadcast` MCP tool) loops the signed single-target `SendMessage`, one signed jekt per target. That is a real agent sender and is correct as it is. | `fleet.rs` module doc; `crates/mcp/src/tools/fleet.rs` |
+| 10 | The agent-initiated broadcast (`FleetBroadcast` MCP tool) loops the signed single-target `SendMessage`, one signed jekt per target. That is a real agent sender and is correct as it is. | `fleet.rs` module doc; [`crates/mcp/src/tools/fleet.rs`](../../crates/mcp/src/tools/fleet.rs) |
 
 ### 2.1 Why "verified" cannot be a cryptographic claim for the UI today
 
@@ -207,7 +207,7 @@ capability, not just a label. See open question 2, which the owner has not answe
 | P1 | `broadcast_header()` in `reactive/sanitize.rs`, beside `wrap_jekt_message`; extend `neutralize_markers` to `[BROADCAST:`. Tests first. | `backend/reactive/sanitize.rs`, `tests.rs` |
 | P2 | `fleet_broadcast_impl` calls `run_agent_turn` with `BROADCAST_TURN_ORIGIN` (= `Automated`); drop the chunk pause; keep `FleetActionResult`; audit `MSGID`. | `server/app_api/fleet.rs` |
 | P3 | Frontend: parse the header, render the chip. Parser and render tests. | `stream-parser.ts`, `types.ts`, new `BroadcastChip`, `JektBubble.tsx` untouched |
-| P4 | Agent guidance: the operator-config seed entry and the `CLAUDE.md` jekt section (owner-approved). | `operator-config-seed.json`, `CLAUDE.md`, `docs/` |
+| P4 | Agent guidance: the operator-config seed entry and the `CLAUDE.md` jekt section (owner-approved). | `operator-config-seed.json`, `CLAUDE.md`, [`docs/`](..) |
 
 ## 6. Open questions for the owner
 
@@ -226,7 +226,7 @@ capability, not just a label. See open question 2, which the owner has not answe
    **Answered 2026-10-06: keep it blocked.** Checked in the code: `UIClick` is a real CDP mouse
    event (`Input.dispatchMouseEvent`, so `isTrusted` and indistinguishable from a human click),
    but it is scoped to the caller's own pane plus shared chrome (`__amq_allowed_for` in
-   `crates/cef/src/browser_api/scripts/query.js`). Swarm is its own pane (`view: "swarm"`), so an
+   [`crates/cef/src/browser_api/scripts/query.js`](../../crates/cef/src/browser_api/scripts/query.js)). Swarm is its own pane (`view: "swarm"`), so an
    agent cannot reach its Broadcast button. The owner chose to keep it that way: agents broadcast
    through `FleetBroadcast`, signed jekts labelled with the sending agent.
 

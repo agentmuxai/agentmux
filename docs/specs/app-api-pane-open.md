@@ -173,7 +173,7 @@ lifecycle).
    - applies placement via the existing split/tab layout APIs.
 3. Expose the same handler over CEF IPC for in-process callers, and
    (Tier 3) over the HTTP REST surface when it lands.
-4. Update `docs/specs/app-api-status.md` with implementation status.
+4. Update [`docs/specs/app-api-status.md`](app-api-status.md) with implementation status.
 
 ## Discoverability for agents
 
@@ -206,5 +206,5 @@ example. Without discoverability, no agent will know to call it.
   App API handler
 - `frontend/app/store/wshrpc` CEF IPC surface (if we also expose this
   in-process)
-- `docs/specs/app-api-extension.md` — cross-reference
-- `docs/specs/app-api-status.md` — add status row
+- [`docs/specs/app-api-extension.md`](app-api-extension.md) — cross-reference
+- [`docs/specs/app-api-status.md`](app-api-status.md) — add status row

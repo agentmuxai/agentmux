@@ -107,7 +107,7 @@ Smoking the Part-1 fix surfaced a DISTINCT bug: with 3 windows open, one window 
 Root cause: `windowCountAtom = state.instances.length` is reconstructed **independently in every
 renderer** from a VERSIONED but LOSSY launcher event stream (`window.__agentmux_launcher_event(json)`;
 host side `agentmux-cef/src/launcher_event_bridge.rs`). The frontend consumer
-(`frontend/util/event-buffer.ts`, `PerSourceTracker.deliver`) detects two conditions:
+([`frontend/util/event-buffer.ts`](../../frontend/util/event-buffer.ts), `PerSourceTracker.deliver`) detects two conditions:
 - **gap (missed events):** `event-buffer.ts:243-247` → the default `onVersionGap` handler
   (`event-buffer.ts:162-168`) **only `console.warn`s** ("version gap: expected X, got Y"), then
   advances `lastVersion` and accepts the new event — **the skipped events are gone forever**.
@@ -129,7 +129,7 @@ The authoritative window-instance state lives in a reducer (the launcher's `stat
 via `list_window_instances`). Renderers must RECONCILE against it when they detect they've fallen
 behind, instead of trusting a lossy incremental stream forever.
 
-1. Wire a real `onVersionGap` for the launcher `PerSourceTracker` (`frontend/util/launcher-events.ts:49-56`;
+1. Wire a real `onVersionGap` for the launcher `PerSourceTracker` ([`frontend/util/launcher-events.ts:49-56`](../../frontend/util/launcher-events.ts#L49-L56);
    the hook exists at `event-buffer.ts:103`, fired at `:246`).
 2. In the callback: re-pull `getApi().listWindowInstances()` → `reconcileKnownEntriesFromSnapshot(snapshot)`
    (`launcher-event-reducer.ts:146`). The `ReconcileFromSnapshot` arm already does the wholesale

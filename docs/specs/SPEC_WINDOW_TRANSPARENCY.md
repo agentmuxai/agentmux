@@ -21,11 +21,11 @@ This spec covers the Tauri-level and platform-specific changes needed to make th
 
 | Setting | Type | Default | Location |
 |---------|------|---------|----------|
-| `window:transparent` | boolean | `false` | `schema/settings.json:164` |
-| `window:blur` | boolean | `false` | `schema/settings.json:167` |
-| `window:opacity` | number (0-1) | `0.8` | `schema/settings.json:170` |
-| `window:bgcolor` | string | `#222222` | `schema/settings.json:173` |
-| `term:transparency` | number (0-1) | `0.5` | `schema/settings.json:95` (per-block) |
+| `window:transparent` | boolean | `false` | [`schema/settings.json:164`](../../schema/settings.json#L164) |
+| `window:blur` | boolean | `false` | [`schema/settings.json:167`](../../schema/settings.json#L167) |
+| `window:opacity` | number (0-1) | `0.8` | [`schema/settings.json:170`](../../schema/settings.json#L170) |
+| `window:bgcolor` | string | `#222222` | [`schema/settings.json:173`](../../schema/settings.json#L173) |
+| `term:transparency` | number (0-1) | `0.5` | [`schema/settings.json:95`](../../schema/settings.json#L95) (per-block) |
 
 ### Frontend CSS handling (already works)
 
@@ -288,13 +288,13 @@ Settings are hot-reloaded by the backend config watcher -- no restart required.
 | `src-tauri/tauri.conf.json` | 1 | Set `transparent: true`, `backgroundColor: "#00000000"` |
 | `frontend/index.html` | 1 | Transparent startup background |
 | `frontend/wave.ts` | 1 | Apply solid bg for non-transparent users on init |
-| `frontend/app/app.scss` | 1 | Audit intermediate elements for opaque backgrounds |
+| [`frontend/app/app.scss`](../../frontend/app/app.scss) | 1 | Audit intermediate elements for opaque backgrounds |
 | `src-tauri/Cargo.toml` | 2 | Add `window-vibrancy` dependency |
 | `src-tauri/src/commands/window.rs` | 2 | New `set_window_transparency` command |
 | `src-tauri/src/lib.rs` | 2 | Register new command |
 | `frontend/util/tauri-api.ts` | 2 | Add `setWindowTransparency` bridge |
-| `frontend/types/custom.d.ts` | 2 | Add type declaration |
-| `frontend/app/app.tsx` | 2 | Call Tauri command from `AppSettingsUpdater` |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | 2 | Add type declaration |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) | 2 | Call Tauri command from `AppSettingsUpdater` |
 
 ---
 

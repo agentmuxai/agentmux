@@ -15,11 +15,11 @@ Each pane-tab type (widget: Terminal, Agent, Browser, Files, ...) gets a default
 4. **Settings** gets an area where the user sets the color for each widget (§3.5).
 5. The design is DRY. Other DRY opportunities found along the way are listed in §4.2.
 
-**How this spec reads "the widget at the top" (§8 D1):** the widget's button in the top bar (`ActionWidget`, `frontend/app/window/action-widgets.tsx`). The Terminal button gets a subtle tint of the Terminal color. It changes the moment that color changes, whether from Settings or from a pane's color menu ("Use for all Terminal panes", §3.7). The pane's own header already tints with its color today (`headerTint`) and keeps doing so. With this change it also tints for panes that only have a default color.
+**How this spec reads "the widget at the top" (§8 D1):** the widget's button in the top bar (`ActionWidget`, [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx)). The Terminal button gets a subtle tint of the Terminal color. It changes the moment that color changes, whether from Settings or from a pane's color menu ("Use for all Terminal panes", §3.7). The pane's own header already tints with its color today (`headerTint`) and keeps doing so. With this change it also tints for panes that only have a default color.
 
 ## 2. How colors work today
 
-The facts this design builds on. Paths are under `frontend/app/` unless noted.
+The facts this design builds on. Paths are under [`frontend/app/`](../../frontend/app) unless noted.
 
 - **One color model already exists.** Every pane color comes from one *identity hue*, normalised in OKLCH: `identityOklchHue` and `paneRoleColor(hue, hex, isLight, role)` in `block/pane-color-scheme.ts`. `PANE_COLOR_TOKENS` holds fixed lightness and chroma per role (`identity`, `border`, `pill`, `pillActive`, `headerTint`) and per theme. This is the result of `SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md` and the OKLCH rules in `REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md` §6 P7. It has two inputs:
   - block meta `frame:hue` (0–360), written by the Pane Color menu (`buildPaneColorSubmenu` in `block/blockframe.tsx`, palette `PANE_HUE_OPTIONS` in `block/pane-color-menu.ts`, 12 hues 30° apart);
@@ -27,8 +27,8 @@ The facts this design builds on. Paths are under `frontend/app/` unless noted.
 - **Every reader goes through role wrappers that read those two meta keys.** `computeBlockColorBg`, `computeBlockTabPillBg`, `computeBlockTabPillActiveBg`, `computeBlockIdentityColor`, `computeBlockActiveBorderColor` and `computeFocusRingBorderColor` in `block/blockframe.tsx` each repeat the same two reads. They feed the header, the old focus ring (`BlockMask`), the terminal border (`--block-agent-color`), the pane ring (`--pane-ring-color`, `element/PaneChrome.tsx`), the pills (`--pane-tab-*`, `element/PaneTabStrip.tsx`), the header tail and the Swarm rows (`view/swarm/swarm-row-colors.ts`).
 - **With no color**, every wrapper returns `undefined` and its caller falls back to a neutral value (`computeNonAgentHeaderBg`, `--accent-color` and `--border-color` for the ring, `computeBlockTabPillNeutralBg` for pills).
 - **The widget-type registry** is `PaneTabManifest` (`block/pane-tab-registry.ts`): `view`, `aliases`, `label`, `icon`, `capabilities`, ... Built-in views register in `block/block-registry.ts`; third-party widgets register through `block/widget-loader.ts`. It is the one table keyed by widget type.
-- **Top-bar buttons** come from the `widgets` config (`crates/srv/src/config/widgets.json`). Each entry opens `blockdef.meta.view`. Some entries carry a `color` hex (agent `#cc785c`, swarm `#f59e0b`, ...). The top bar does not render it: icons are monochrome via `--widget-icon-color`, per `SPEC_WIDGET_ICON_COLORS_2026-05-26.md`. Only the Launcher grid uses it.
-- **Settings** rows are declared per section (`view/settings/sections/*.tsx`, search index `settings-index.ts`). Values are written with `set(key, value)` (`SetConfigCommand`) and read reactively with `getSettingsKeyAtom(key)` (`store/block-atom-cache.ts`). A map-valued setting already exists (`cmd:env`). Backend: `SettingsType` in `crates/srv/src/backend/wconfig/types.rs`; schema `schema/settings.json`.
+- **Top-bar buttons** come from the `widgets` config ([`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json)). Each entry opens `blockdef.meta.view`. Some entries carry a `color` hex (agent `#cc785c`, swarm `#f59e0b`, ...). The top bar does not render it: icons are monochrome via `--widget-icon-color`, per `SPEC_WIDGET_ICON_COLORS_2026-05-26.md`. Only the Launcher grid uses it.
+- **Settings** rows are declared per section (`view/settings/sections/*.tsx`, search index `settings-index.ts`). Values are written with `set(key, value)` (`SetConfigCommand`) and read reactively with `getSettingsKeyAtom(key)` (`store/block-atom-cache.ts`). A map-valued setting already exists (`cmd:env`). Backend: `SettingsType` in [`crates/srv/src/backend/wconfig/types.rs`](../../crates/srv/src/backend/wconfig/types.rs); schema [`schema/settings.json`](../../schema/settings.json).
 
 ## 3. Design
 
@@ -116,7 +116,7 @@ A manifest without `defaultHue` (a third-party widget that declares none) gets *
 - A number (0–360) overrides the built-in default (tier 3).
 - `null` means "no color for this widget": the user switched the default off, and the pane falls back to neutral. This is different from "not set", which falls through to tier 4.
 - Removing a key returns that widget to its built-in default.
-- Backend: no new field. `SettingsType`'s flattened `extra` map already carries keys it doesn't name (as `window:theme` is), and `merge_settings_to_disk` writes them. A top-level `null` deletes the key there; the `null`s inside the map are kept. Typed in `frontend/types/srv-types.d.ts` and `schema/settings.json` (an object of `number | null` in 0–360), with a commented line in `settings-template.jsonc` so it is written in place.
+- Backend: no new field. `SettingsType`'s flattened `extra` map already carries keys it doesn't name (as `window:theme` is), and `merge_settings_to_disk` writes them. A top-level `null` deletes the key there; the `null`s inside the map are kept. Typed in [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts) and [`schema/settings.json`](../../schema/settings.json) (an object of `number | null` in 0–360), with a commented line in `settings-template.jsonc` so it is written in place.
 - One writer, `setWidgetHue(view, hue)` in `pane-color-menu.ts`: a hue sets the key, `null` writes None, `undefined` removes it. When the last key goes it deletes the setting.
 - Hue, not hex, on purpose: it is what `frame:hue` already stores and what the OKLCH tokens consume, so a custom color gets the same per-theme normalisation as a preset (best-practices report P7).
 
@@ -188,13 +188,13 @@ Rule: **only tiers 1 and 2 count as identities in the tail rule.**
 | # | Duplication | Where | Suggested fix |
 |---|---|---|---|
 | A | Five palettes for "pick a color" | `PANE_HUE_OPTIONS` (pane-color-menu.ts), `AGENT_COLOR_PALETTE` (view/agent/agent-color.ts), `TAB_COLORS` (tab/tab.tsx), `REMOTE_COLORS` (view/remotes/remotes-sections.ts), widget `color` (widgets.json) | One `color-palettes.ts` naming each palette and its purpose. Remote and agent colors could adopt the 12-hue set and the OKLCH normalisation; window tabs stay desaturated by design (`SPEC_TAB_COLOR_DESATURATION_2026_08_13.md`). |
-| B | Agent palette kept by hand in two languages | `agent-color.ts` and `crates/srv/src/backend/agent_color.rs` | Generate one from the other, or a test that compares them. |
+| B | Agent palette kept by hand in two languages | `agent-color.ts` and [`crates/srv/src/backend/agent_color.rs`](../../crates/srv/src/backend/agent_color.rs) | Generate one from the other, or a test that compares them. |
 | C | Agent color assigned at launch in two places, each with its own pick/dim | frontend `launchAgentDefinition` (view/agent/agent-model.ts), backend `register_agent_open` (crates/srv/src/server/app_api/agent_open.rs) | Backend only; the frontend asks or reads it. |
 | D | Three copies of color math | `hslToHex` (pane-color-menu.ts), `hslToRgb`/`hexToRgb` (pane-color-scheme.ts), `parseCssColor`/`hslToRgb` (block/autotitle.ts) | One `color-math.ts`. |
 | E | Five hex validators | `isValidAgentColor` (agent-color.ts), `validColor` (store/remote-display.ts), `ICON_COLOR_RE` (element/pane-tab-model.tsx), `colorRegex` (block/blockutil.tsx), the `hexToRgb` regex | One `isHexColor` in `color-math.ts`. |
 | F | View → label and icon defined in several places, and they disagree | manifests; `widgets.json` (term `square-terminal` vs `terminal`, editor `file-code` vs `file-lines`, swarm `bee` vs `diagram-project`); `store/command-registry.ts` "open:*" commands hard-code icon and `iconColor`; per-model `viewIcon` (agent-model.ts, sysinfo-model.ts, media-pane.tsx); `widget-loader.ts` fallbacks | The manifest is the source; widgets.json, commands and models read it. Decide each disagreeing icon once. |
 | G | Two border paths for one color | `BlockMask` + `--block-agent-color` (blockframe.tsx, block.scss) and `PaneChrome` `--pane-ring-color` | Remove the old `BlockMask` ring where hoisted chrome always draws the ring. |
-| H | `frame:hue` missing from `MetaType` | `frontend/types/srv-types.d.ts` | Add it; drop the casts. Small enough to do in this work's first PR. |
+| H | `frame:hue` missing from `MetaType` | [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts) | Add it; drop the casts. Small enough to do in this work's first PR. |
 | I | Settings defaults scattered | every read site supplies its own `?? default`; the Rust side uses `Option`; the template has comments | A frontend `SETTINGS_DEFAULTS` table read by `getSettingsKeyAtom`. `widgetHueFor()` follows that pattern for its own key. |
 
 ## 5. Files
@@ -207,7 +207,7 @@ Rule: **only tiers 1 and 2 count as identities in the tail rule.**
 | Menu | `block/blockframe.tsx` `buildPaneColorSubmenu` (§3.7), `block/pane-color-menu.ts` (`setWidgetHue`, `applyHueToAllPanes`) |
 | Top bar | `window/action-widgets.tsx`, `window/action-widgets.scss`, `view/launcher/launcher.tsx` |
 | Settings | `view/settings/sections/appearance-section.tsx` (search entry), `view/settings/sections/widget-colors.tsx`, `settings-controls.tsx` (`HueSwatchRow`) |
-| Config | `crates/srv/src/backend/wconfig/types.rs`, `frontend/types/srv-types.d.ts`, `schema/settings.json`, `settings-template.jsonc`, `crates/srv/src/config/widgets.json` (built-in `color` removed) |
+| Config | [`crates/srv/src/backend/wconfig/types.rs`](../../crates/srv/src/backend/wconfig/types.rs), [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts), [`schema/settings.json`](../../schema/settings.json), `settings-template.jsonc`, [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) (built-in `color` removed) |
 | Theme check | `isLightThemeActive()` in `block/pane-identity.ts` |
 
 ## 6. Tests

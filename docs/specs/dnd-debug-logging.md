@@ -215,9 +215,9 @@ Is "pre-seed state" logged?
 |------|------|--------|-------|
 | 1 | `blockcontroller/shell.rs` | Add info logs at pre-seed, seed-skip, store-write, broadcast | Already partially done |
 | 2 | `blockcontroller/mod.rs` | Log wstore/event_bus presence at resync_controller entry; log short-circuit | 5 min |
-| 3 | `frontend/app/view/term/term.tsx` | Add `useEffect` logging on isDragOver | 5 min |
+| 3 | [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | Add `useEffect` logging on isDragOver | 5 min |
 | 4 | `frontend/app/store/wos.ts` | Log incoming waveobj:update events | Find the handler first |
-| 5 | `frontend/app/view/term/termwrap.ts` | Log ControllerResyncCommand sends | 2 min |
+| 5 | [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | Log ControllerResyncCommand sends | 2 min |
 
 Once we have all 5 logs active, a single "open terminal, drag file" test will tell
 us exactly which step in the chain is failing.

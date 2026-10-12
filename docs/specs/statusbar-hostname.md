@@ -72,8 +72,8 @@ In typical usage the right section shows just: `hostname` + `version`.
 
 | File | Change |
 |------|--------|
-| `frontend/app/statusbar/StatusBar.tsx` | Add hostname display element |
-| `frontend/app/statusbar/StatusBar.scss` | Add `.status-hostname` styles |
+| [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) | Add hostname display element |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | Add `.status-hostname` styles |
 
 ## Not in Scope
 

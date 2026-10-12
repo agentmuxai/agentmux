@@ -266,7 +266,7 @@ There is no production user base. The single dev machine running this code can b
 - Delete `agentmux-cef/src/sidecar.rs::spawn_backend` and any other dead fallback code.
 - Update CLAUDE.md sections referencing the old layout.
 - Update README.md and BUILD.md with the new locations.
-- Add a one-shot cleanup script `scripts/wipe-old-data-dirs.sh` for the dev machine (lists what would be deleted; requires `--yes` to actually rm).
+- Add a one-shot cleanup script [`scripts/wipe-old-data-dirs.sh`](../../../scripts/wipe-old-data-dirs.sh) for the dev machine (lists what would be deleted; requires `--yes` to actually rm).
 
 **Estimated:** ~1 day.
 

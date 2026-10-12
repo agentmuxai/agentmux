@@ -17,14 +17,14 @@ Docker are intentionally excluded from the executable-install catalog
 (script-based install / interactive GUI installer — different risk
 profile, not requested); their existing link+copy-command rows are
 unchanged. — #2790
-**Related:** `docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md` (shipped
+**Related:** [`docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md`](SPEC_TOOLCHAIN_MANAGER_2026-06-15.md) (shipped
 P0-P1: PATH enrichment + read-only Toolchain modal; **this spec implements
 its deferred P3** — "one-click brew install… P3 add-on, not yet shipped" —
-generalized to Windows/Linux, not brew-only), `docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md`
+generalized to Windows/Linux, not brew-only), [`docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md`](SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md)
 (the reactive `AgentPrereqModal` blocker this spec also wires into),
-`docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md` (the `install.start`
+[`docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) (the `install.start`
 streamed-install machinery this spec reuses),
-`docs/specs/SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
+[`docs/specs/SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`](SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md)
 (extends the same catalog to Python/uv + widget tools — same pattern,
 this spec's design should stay compatible with it).
 
@@ -386,9 +386,9 @@ too — this isn't a new restriction, just not pretending otherwise).
   this machine" logic).
 - `frontend/app/store/rpc-api.ts` (or a dedicated `toolchain-rpc.ts`) —
   `ToolchainInstallSystemToolCommand` / `ToolchainResolveInstallCommandCommand`.
-- `frontend/app/view/agent/components/AgentPrereqModal.tsx` — per-row
+- [`frontend/app/view/agent/components/AgentPrereqModal.tsx`](../../frontend/app/view/agent/components/AgentPrereqModal.tsx) — per-row
   Install button + consent panel.
-- `frontend/app/view/toolchain/toolchain-view.tsx:286-299` — the existing
+- [`frontend/app/view/toolchain/toolchain-view.tsx:286-299`](../../frontend/app/view/toolchain/toolchain-view.tsx#L286-L299) — the existing
   "Install ↗" button gains the conditional real-execution path described
   in §3.5; the copy-command fallback is untouched.
 - `frontend/app/view/agent/providers/toolchain-catalog.ts` — add missing

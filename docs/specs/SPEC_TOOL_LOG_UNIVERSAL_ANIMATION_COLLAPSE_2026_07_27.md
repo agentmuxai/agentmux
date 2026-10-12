@@ -61,7 +61,7 @@ narrower sub-case:
 
 ### 2. Frontend: `frontend/app/view/agent/components/output-cap.ts` (lines 155–202)
 
-`docs/specs/SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md` added
+[`docs/specs/SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md`](SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md) added
 `collapseSpinnerChunks`, consumed by both `ToolOverlayLog.tsx:375`
 (`ChunkList`, the tool-call preview) and `PersistentShellBlock.tsx:96` (the
 persistent-shell-node panel) — this is shared logic across both surfaces.
@@ -280,10 +280,10 @@ noted in Background).
 ## Files to change
 
 - `agentmux-bashwrap/src/bash_wrap.rs` — A1 (flush-boundary hold-and-merge), A2 (CSI-as-overwrite in `collapse_cr`)
-- `frontend/app/view/agent/components/output-cap.ts` — B (`looksLikeRedraw` / `normalizeForCompare`, generalize `collapseSpinnerChunks`)
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx` — consumes the generalized collapse (no logic change expected, same call site)
-- `frontend/app/view/agent/components/PersistentShellBlock.tsx` — same collapse, same call site
-- `docs/specs/SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md` — cross-reference this spec as the generalization; leave as historical record of the initial narrower fix rather than rewriting it
+- [`frontend/app/view/agent/components/output-cap.ts`](../../frontend/app/view/agent/components/output-cap.ts) — B (`looksLikeRedraw` / `normalizeForCompare`, generalize `collapseSpinnerChunks`)
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — consumes the generalized collapse (no logic change expected, same call site)
+- [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx) — same collapse, same call site
+- [`docs/specs/SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md`](SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md) — cross-reference this spec as the generalization; leave as historical record of the initial narrower fix rather than rewriting it
 
 ---
 

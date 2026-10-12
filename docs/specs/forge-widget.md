@@ -178,9 +178,9 @@ frontend/app/view/forge/
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/block.tsx` | Add `BlockRegistry.set("forge", ForgeViewModel)` |
+| [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) | Add `BlockRegistry.set("forge", ForgeViewModel)` |
 | `agentmuxsrv-rs/src/config/widgets.json` | Add `defwidget@forge` entry |
-| `frontend/app/view/agent/agent-view.tsx` | Replace mock `getProviderList()` with `useForgeAgents()` hook |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Replace mock `getProviderList()` with `useForgeAgents()` hook |
 | `agentmuxsrv-rs/src/backend/storage/migrations.rs` | Add `db_forge_agents` table |
 | `agentmuxsrv-rs/src/backend/rpc_types.rs` | Add 4 new command constants + data structs |
 | `agentmuxsrv-rs/src/server/websocket.rs` | Register 4 new handlers |

@@ -1,13 +1,13 @@
 # Spec: Status-Bar Token Usage Indicator + Per-Service Breakdown
 
 **Date:** 2026-04-24
-**Status:** implemented — #549 (2026-04-24), the PR this doc was added in. `TokenUsageIndicator.tsx`, `TokenBreakdownPopover.tsx` and `SystemStats.tsx` are live in `frontend/app/statusbar/`, with §4.3 cited inline. Its by-agent successor is `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (#2849), which regroups this panel rather than replacing it. §3's non-goals are unchanged.
+**Status:** implemented — #549 (2026-04-24), the PR this doc was added in. `TokenUsageIndicator.tsx`, `TokenBreakdownPopover.tsx` and `SystemStats.tsx` are live in [`frontend/app/statusbar/`](../../frontend/app/statusbar), with §4.3 cited inline. Its by-agent successor is `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (#2849), which regroups this panel rather than replacing it. §3's non-goals are unchanged.
 **Owner:** AgentA
-**Touches:** `frontend/app/statusbar/StatusBar.tsx` (+ SCSS),
-             new `frontend/app/statusbar/TokenUsageIndicator.tsx`,
-             new `frontend/app/statusbar/TokenBreakdownPopover.tsx`,
+**Touches:** [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) (+ SCSS),
+             new [`frontend/app/statusbar/TokenUsageIndicator.tsx`](../../frontend/app/statusbar/TokenUsageIndicator.tsx),
+             new [`frontend/app/statusbar/TokenBreakdownPopover.tsx`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx),
              a new token-aggregation store (see §5.1 — location TBD
-             during impl, proposal: `frontend/app/store/token-usage.ts`)
+             during impl, proposal: [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts))
 
 ---
 
@@ -209,7 +209,7 @@ first row doesn't shrink visually when the second row appears.
 
 ### 5.1 Client-side aggregation store
 
-Create `frontend/app/store/token-usage.ts` (or equivalent). It
+Create [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) (or equivalent). It
 exports a Solid store shaped roughly:
 
 ```ts
@@ -263,7 +263,7 @@ version-number readout.
 
 ### 5.5 Styling
 
-New SCSS partial `frontend/app/statusbar/_token-usage.scss`
+New SCSS partial [`frontend/app/statusbar/_token-usage.scss`](../../frontend/app/statusbar/_token-usage.scss)
 (follows the Phase 5 split pattern). BEM classes:
 `.token-usage-indicator`, `.token-usage-breakdown`,
 `.token-usage-breakdown-row`, `.token-usage-breakdown-total`,
@@ -316,15 +316,15 @@ hover/focus, `--error-color` for destructive-reset button).
 
 ## 8. Cross-references
 
-- `frontend/app/statusbar/StatusBar.tsx` + `StatusBar.scss` —
+- [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) + `StatusBar.scss` —
   target for the new indicator.
 - `frontend/app/view/agent/hooks/useAgentStream.ts` (per Explorer
   report) — where `TurnTokens` becomes final per turn; hook the
   store's `recordTurn` here.
-- `frontend/app/view/agent/components/AgentFooter.tsx` —
+- [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) —
   `formatTokenCount` / `tokenText` — reuse for consistent glyph
   style across the per-pane and global indicators.
-- `frontend/app/platform/pane-overlay.ts` — `usePaneOverlay` for
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) — `usePaneOverlay` for
   airspace (same pattern as modal-v2, MoreDropdown).
 - `SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md` —
   companion spec for per-pane token rendering.

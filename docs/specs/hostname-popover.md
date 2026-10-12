@@ -111,12 +111,12 @@ Status bar (new):
 
 ### Frontend Changes
 
-**New file:** `frontend/app/statusbar/HostPopover.tsx`
+**New file:** [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx)
 - Popover component (same pattern as BackendStatus popover)
 - Click hostname → toggle popover
 - Outside click → close
 
-**Modified:** `frontend/app/statusbar/StatusBar.tsx`
+**Modified:** [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx)
 - Replace plain hostname `<span>` with `<HostPopover>`
 - Remove `<LanStatus />` from status bar left (absorbed into popover)
 

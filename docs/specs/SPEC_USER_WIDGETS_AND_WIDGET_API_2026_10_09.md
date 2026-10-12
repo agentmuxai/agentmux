@@ -3,7 +3,7 @@
 **Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 (commands and status bar items, §6.8) in PR #4638; W6 (sharing) is specified in `SPEC_WIDGET_SHARING_2026_10_10.md`, with W6a (signed packages) in PR #4645.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
-**Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
+**Supersedes, for widgets:** `web-widget.md`, the plugin tiers in [`docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`](../analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md), and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
 
 ## 1. Goal
 
@@ -15,12 +15,12 @@ User widgets already work, for a trusted author. Pane Tab contract v1, Phase 6 (
 
 | Piece | Where | Today |
 |---|---|---|
-| The contract | `frontend/app/block/pane-tab-registry.ts` (`PaneTabManifest` :138, `registerPaneTab` :178) | One registry for every pane type, built-in or not: `apiVersion: 1`, `view`, `label`, `icon`, `defaultHue`, `capabilities`, `create(ctx)` returning a `PaneTabInstance` (`component`, `liveTitle`, `headerActions`, `contextMenu`, `dispose`, …) |
+| The contract | [`frontend/app/block/pane-tab-registry.ts`](../../frontend/app/block/pane-tab-registry.ts) (`PaneTabManifest` :138, `registerPaneTab` :178) | One registry for every pane type, built-in or not: `apiVersion: 1`, `view`, `label`, `icon`, `defaultHue`, `capabilities`, `create(ctx)` returning a `PaneTabInstance` (`component`, `liveTitle`, `headerActions`, `contextMenu`, `dispose`, …) |
 | What a widget gets | `PaneTabHostContext` (`pane-tab-registry.ts:76`, built in `pane-tab-host.tsx:22`) | `blockId`, reactive `meta`, `setMeta(patch)`, `isFocused`, `visibility` |
-| Where a user declares one | the user's `widgets.json`, next to `settings.json` (`crates/srv/src/backend/user_widgets.rs`) | Merged over the built-ins (new key adds, same key replaces), hot-reloaded, a parse error keeps the last good set. An entry with `"module": "<path>"` and `blockdef.meta.view: "ext:<name>"` is a user widget |
-| How it loads | `frontend/app/block/widget-loader.ts` | Reads the module through the `readeditorfile` RPC, points its `solid-js` imports at the app's own Solid, imports it from a blob URL, validates the default export |
+| Where a user declares one | the user's `widgets.json`, next to `settings.json` ([`crates/srv/src/backend/user_widgets.rs`](../../crates/srv/src/backend/user_widgets.rs)) | Merged over the built-ins (new key adds, same key replaces), hot-reloaded, a parse error keeps the last good set. An entry with `"module": "<path>"` and `blockdef.meta.view: "ext:<name>"` is a user widget |
+| How it loads | [`frontend/app/block/widget-loader.ts`](../../frontend/app/block/widget-loader.ts) | Reads the module through the `readeditorfile` RPC, points its `solid-js` imports at the app's own Solid, imports it from a blob URL, validates the default export |
 | Containment | `BlockErrorBoundary`, a caught `create` | A throwing widget shows an error pane, not a broken app |
-| Sample | `docs/examples/widgets/hello/index.js` | Copy to `~/.agentmux/widgets/hello/`, add the `ext@hello` entry |
+| Sample | [`docs/examples/widgets/hello/index.js`](../examples/widgets/hello/index.js) | Copy to `~/.agentmux/widgets/hello/`, add the `ext@hello` entry |
 | Opening one programmatically | `pane.open` with `meta` (`rpc_types/block.rs:715`) | Generic: any view, including `ext:`, opens with the meta given |
 
 **Decided (repo owner, 2026-09-24):** v1 loads trusted, locally installed ES modules only, with no sandbox; "a future marketplace or remote-loading story would revisit it." This spec is that revisit.
@@ -272,11 +272,11 @@ Commands run only on a user's click: the palette or a status item. They aren't k
 
 A pane of the widget changes how an item looks with `ui.setStatusItem`: the call sets the whole look, any field left out shows the manifest's, and a call with only the `id` puts the manifest's look back. `text` is 1–40 characters of plain text, `tooltip` at most 120, `icon` a Font Awesome name, `tone` colours it, `hidden: true` takes it out. An id the manifest doesn't declare is `not_found`. A look lasts while the pane that set it is open, in that window; when it closes, the manifest's look returns. A widget runs only while one of its panes is open (§12), so an item with no pane open shows the manifest's look.
 
-The status bar itself is a registry (`frontend/app/statusbar/status-bar-registry.ts`): AgentMux's own items and widgets' are entries with a side and an order, so a new item, built-in or not, is one registration.
+The status bar itself is a registry ([`frontend/app/statusbar/status-bar-registry.ts`](../../frontend/app/statusbar/status-bar-registry.ts)): AgentMux's own items and widgets' are entries with a side and an order, so a new item, built-in or not, is one registration.
 
 ## 7. The SDK, `@agentmuxai/widget-sdk`
 
-One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it; a widget built with a bundler either imports the same URL and marks it external, or installs `@agentmuxai/widget-sdk` from npm and bundles a copy. The npm package is published from CI (`.github/workflows/publish-widget-sdk.yml`, on a `widget-sdk-v<version>` tag) through npm trusted publishing, with no stored token; the name was reserved with a code-free 0.0.0, as for muxcode.
+One ES module with TypeScript types, no dependencies, about 5 KB. Served by srv at `/agentmux/widget-sdk/v1.js`, so a widget with no build step can `import` it; a widget built with a bundler either imports the same URL and marks it external, or installs `@agentmuxai/widget-sdk` from npm and bundles a copy. The npm package is published from CI ([`.github/workflows/publish-widget-sdk.yml`](../../.github/workflows/publish-widget-sdk.yml), on a `widget-sdk-v<version>` tag) through npm trusted publishing, with no stored token; the name was reserved with a code-free 0.0.0, as for muxcode.
 
 ```js
 import { connect } from "/agentmux/widget-sdk/v1.js";
@@ -306,7 +306,7 @@ The SDK's `.d.ts` is the typed form of §6; its tests are the protocol conforman
 
 ### 7.1 Starter files
 
-In `docs/examples/widgets/`, each a complete package that installs from its folder:
+In [`docs/examples/widgets/`](../examples/widgets), each a complete package that installs from its folder:
 
 | Sample | Shows | Kind, permissions |
 |---|---|---|
@@ -317,7 +317,7 @@ In `docs/examples/widgets/`, each a complete package that installs from its fold
 | `react-vite/` | The same as `hello-sandboxed`, built with React and Vite (`npm run build` writes the package) | sandboxed, none |
 | `hello/` | The v1 trusted Solid module, now with a `widget.json` | trusted |
 
-A README in `docs/examples/widgets/` is the quickstart: copy a sample, change its `id`, install from folder, edit, reload.
+A README in [`docs/examples/widgets/`](../examples/widgets) is the quickstart: copy a sample, change its `id`, install from folder, edit, reload.
 
 ## 8. Installing and approval
 

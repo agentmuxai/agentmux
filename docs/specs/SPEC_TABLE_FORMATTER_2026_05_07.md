@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-07  
 **Status:** Draft  
-**Area:** `frontend/app/element/`
+**Area:** [`frontend/app/element/`](../../frontend/app/element)
 
 ---
 

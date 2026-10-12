@@ -9,7 +9,7 @@ Update to `implemented` once it merges.
 ## 0. Motivation
 
 The terminal pane's live CPU%/memory badge (`BlockStatsBadge`,
-`frontend/app/element/blockstats.tsx`) is meant to sit flush against the
+[`frontend/app/element/blockstats.tsx`](../../frontend/app/element/blockstats.tsx)) is meant to sit flush against the
 top-right corner of the pane. In practice it renders offset well below the
 top — floating inside the terminal's own content area rather than hugging the
 corner. Separately, there was no way to turn the badge off if a user doesn't
@@ -20,7 +20,7 @@ This spec covers both: the offset fix (§1–2) and the new Settings toggle
 
 ## 1. Root cause
 
-`.block-stats-badge` (`frontend/app/element/blockstats.scss`) is positioned:
+`.block-stats-badge` ([`frontend/app/element/blockstats.scss`](../../frontend/app/element/blockstats.scss)) is positioned:
 
 ```scss
 .block-stats-badge {
@@ -31,9 +31,9 @@ This spec covers both: the offset fix (§1–2) and the new Settings toggle
 }
 ```
 
-`--header-height` is a fixed `33px` (`frontend/app/theme.scss`), and the
+`--header-height` is a fixed `33px` ([`frontend/app/theme.scss`](../../frontend/app/theme.scss)), and the
 badge is rendered as the last child of `.block-frame-default-inner`
-(`frontend/app/block/blockframe.tsx`), whose first child is normally the
+([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)), whose first child is normally the
 pane's own inline header row — so reserving 33px + 4px of top offset is
 correct *when that header row is actually there*.
 
@@ -42,7 +42,7 @@ whenever the ViewModel's `noHeader` reads true — which is exactly the case
 for terminal (and agent) panes today: `TermViewModel.noHeader` returns
 `this.nodeModel.paneChromeHoisted === true`, meaning
 `pane-leaf-chrome.tsx` rendered the *real* header **above** this component
-instead (`frontend/app/view/term/termViewModel.ts`, comment: "Terminal now
+instead ([`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts), comment: "Terminal now
 renders through the ONE shared chrome like every other widget type").
 
 When the header is hoisted out, `.block-frame-default-inner` no longer
@@ -85,7 +85,7 @@ export function BlockStatsBadge(props: { blockId: string; noHeader?: boolean }) 
 `.block-stats-badge` is a genuine DOM child of `.block-frame-default-inner`
 only — `ConnStatusOverlay` and `.block-mask` are siblings at the
 `.block-frame-default` level, not descendants, so this fix can't affect
-them. Verified via `docs/specs/README.md`-style code tracing (exact JSX
+them. Verified via [`docs/specs/README.md`](README.md)-style code tracing (exact JSX
 nesting in `blockframe.tsx`, exact selector nesting in `block.scss`) rather
 than a live screenshot — this session had no capturable GUI window
 available (`DiscoverWindows` returned none), so the positioning claim is
@@ -111,15 +111,15 @@ settings.json untouched), since this key is consumed only by the frontend
 render path and never read by Rust code.
 
 Touched:
-- `frontend/types/srv-types.d.ts` — added `"term:showstatsbadge"?: boolean;`
+- [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts) — added `"term:showstatsbadge"?: boolean;`
   to the hand-maintained `SettingsType` (this file predates ts-rs codegen
   removal; see its own header comment).
-- `schema/settings.json` — added the matching schema entry (`type:
+- [`schema/settings.json`](../../schema/settings.json) — added the matching schema entry (`type:
   "boolean"`, `default: true`, description).
-- `frontend/app/view/settings/sections/terminal-section.tsx` — new
+- [`frontend/app/view/settings/sections/terminal-section.tsx`](../../frontend/app/view/settings/sections/terminal-section.tsx) — new
   `ToggleControl` row, "Show CPU/mem badge", placed alongside the other
   terminal display toggles.
-- `frontend/app/block/blockframe.tsx` — new `showStatsBadge` memo:
+- [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) — new `showStatsBadge` memo:
   ```tsx
   const showStatsBadge = createMemo(
       () => blockData()?.meta?.view !== "term" || getSettingsKeyAtom("term:showstatsbadge")() !== false,

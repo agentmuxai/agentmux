@@ -3,7 +3,7 @@
 > **Archived 2026-07-12.** Historical — the rename shipped exactly as specced (PR #1917). Consolidated tracking: issue #2024.
 
 **Date:** 2026-07-02
-**Decision:** Name is **Armory** (chosen over Loadout). See `docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md` for the rationale.
+**Decision:** Name is **Armory** (chosen over Loadout). See [`docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md`](SPEC_TRUST_CENTER_RENAME_2026_07_02.md) for the rationale.
 **Type:** User-facing rename + view-key migration. Behavior-preserving.
 **Precedent to follow:** the earlier Drone pane rename — same shape (renamed a first-class pane, migrated the persisted `view` key via a block-dispatch shim, renamed the widget). Mirror that approach.
 
@@ -21,7 +21,7 @@ The four tab labels stay: **Accounts / Identities / Brain / Presets.** Only the 
 
 Existing user panes persist `meta.view: "trust"` in the block store. Do NOT rewrite block metadata in SQLite; redirect at the view-dispatch layer, exactly like `forge`/`workflows`.
 
-**`frontend/app/block/block.tsx`** (`makeViewModel`, ~line 48):
+**[`frontend/app/block/block.tsx`](../../../frontend/app/block/block.tsx)** (`makeViewModel`, ~line 48):
 ```ts
 let effectiveView = blockView;
 if (effectiveView === "forge") effectiveView = "agent";
@@ -36,9 +36,9 @@ Add a comment mirroring the existing Drone-rename note. This makes every persist
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/block-registry.ts` (line 20, 42) | `import { TrustViewModel } from "@/app/view/trust/trust"` → `ArmoryViewModel from "@/app/view/armory/armory"`; `blockViewRegistry.set("trust", …)` → `.set("armory", ArmoryViewModel)` |
-| `frontend/app/store/command-registry.ts` (~line 375) | `openOrFocusPaneByView("trust")` → `openOrFocusPaneByView("armory")` (and rename the command id/title if it says "Trust Center") |
-| `frontend/app/window/hamburger-menu.tsx` (~line 65) | label `"Trust Center"` → `"Armory"`; `openOrFocusPaneByView("trust")` → `"armory"`. Consider a new icon (see §F) |
+| [`frontend/app/block/block-registry.ts`](../../../frontend/app/block/block-registry.ts) (line 20, 42) | `import { TrustViewModel } from "@/app/view/trust/trust"` → `ArmoryViewModel from "@/app/view/armory/armory"`; `blockViewRegistry.set("trust", …)` → `.set("armory", ArmoryViewModel)` |
+| [`frontend/app/store/command-registry.ts`](../../../frontend/app/store/command-registry.ts) (~line 375) | `openOrFocusPaneByView("trust")` → `openOrFocusPaneByView("armory")` (and rename the command id/title if it says "Trust Center") |
+| [`frontend/app/window/hamburger-menu.tsx`](../../../frontend/app/window/hamburger-menu.tsx) (~line 65) | label `"Trust Center"` → `"Armory"`; `openOrFocusPaneByView("trust")` → `"armory"`. Consider a new icon (see §F) |
 
 ---
 
@@ -56,7 +56,7 @@ Add a comment mirroring the existing Drone-rename note. This makes every persist
 
 ## D. File + symbol renames (frontend view layer)
 
-Rename the directory `frontend/app/view/trust/` → `frontend/app/view/armory/`:
+Rename the directory `frontend/app/view/trust/` → [`frontend/app/view/armory/`](../../../frontend/app/view/armory):
 
 | Old | New |
 |-----|-----|
@@ -82,8 +82,8 @@ Use `git mv` so history follows, then update all importers (block-registry.ts is
 
 | File | String |
 |------|--------|
-| `frontend/app/view/agent/failure/failure-accessory.ts` (~line 104, 128) | `"Trust Center → Accounts"` → `"Armory → Accounts"`; `"Trust Center (switch / upgrade)"` → `"Armory (switch / upgrade)"`; comment `/** Open Trust Center → Accounts. */` → Armory |
-| `frontend/app/view/agent/failure/failure-accessory.test.ts` (~line 84, 110, 112) | Update the expected label strings to match (test asserts on them) |
+| [`frontend/app/view/agent/failure/failure-accessory.ts`](../../../frontend/app/view/agent/failure/failure-accessory.ts) (~line 104, 128) | `"Trust Center → Accounts"` → `"Armory → Accounts"`; `"Trust Center (switch / upgrade)"` → `"Armory (switch / upgrade)"`; comment `/** Open Trust Center → Accounts. */` → Armory |
+| [`frontend/app/view/agent/failure/failure-accessory.test.ts`](../../../frontend/app/view/agent/failure/failure-accessory.test.ts) (~line 84, 110, 112) | Update the expected label strings to match (test asserts on them) |
 | Handler name `on.trustCenter` (failure-accessory + useAgentFailure.ts) | Optional: rename to `on.armory` for consistency (internal; rename both sides together) |
 
 Run `npx vitest run failure-accessory` after — it asserts on these exact labels.
@@ -117,7 +117,7 @@ Grep to enumerate: `grep -rn "Trust Center" frontend agentmux-srv --include=*.ts
 - DB tables: `db_identity_accounts`, `db_identity_bundles`, `db_identity_bindings`, `db_memory_bundles` — unchanged.
 - Rust identity modules (`agentmux-srv/src/identity/*`, `storage/identities.rs`) — the "Trust Center" mentions there are in comments only; sweep them per §G if desired, but no logic/identifier changes.
 
-Rationale: zero user benefit, migration cost, and would churn the rpc-contract baseline. The rpc-contract test (`test/contract/rpc-contract.test.ts`) keys on the wire command names — leaving RPC names alone means **no contract-test churn**.
+Rationale: zero user benefit, migration cost, and would churn the rpc-contract baseline. The rpc-contract test ([`test/contract/rpc-contract.test.ts`](../../../test/contract/rpc-contract.test.ts)) keys on the wire command names — leaving RPC names alone means **no contract-test churn**.
 
 ---
 

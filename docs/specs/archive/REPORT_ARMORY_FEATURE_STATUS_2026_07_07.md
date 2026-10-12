@@ -13,7 +13,7 @@
 
 Armory is the rename of the old **Trust Center** nav tab, expanded to be the catalog surface for three previously-inline primitives — MCP servers, Skills, and Presets (renamed **Bundle**) — pulled out of per-agent inline config into standalone, shareable, globally-bindable records. Two overlapping efforts landed in the same window (2026-07-02 → 07-04):
 
-1. **Trust Center → Armory rename** (UI + docs) — `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`
+1. **Trust Center → Armory rename** (UI + docs) — [`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`](SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md)
 2. **Preset → Bundle rename** (App API + UI) — `specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`
 3. **MCP/Skills as first-class primitives** — `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`, executed as a **7-PR plan (A1–A7)** that only ever existed as prose inside PR descriptions, never promoted to a tracked doc until #1960 (see below).
 
@@ -45,7 +45,7 @@ I re-verified each of the six gaps directly against current `origin/main` source
 | # | Gap | Issue says | Actual state on main (verified) |
 |---|---|---|---|
 | 1 | "Bound to me" indicator on catalog rows / agent modal Bind-Unbind toggle | In progress | **Fixed** by #1962 — `mcp_server_list`/`skill_list` now return `bound_to_agent: bool` (`agentmux-srv/src/backend/storage/mcp_servers.rs`, `skills.rs`); `AgentMcpModal.tsx`/`AgentSkillsModal.tsx` render a real stateful toggle + badge. Issue text is stale. |
-| 2 | "Used by N agents" count on Armory catalog rows (required by spec §8) | Not implemented | **Confirmed still missing.** No `used by`/`usedBy`/`agent_count` string or field anywhere in `frontend/app/view/mcp/mcp-manager.tsx`, `mcp-model.ts`, `frontend/app/view/skill/skill-manager.tsx`, or `skill-model.ts`. |
+| 2 | "Used by N agents" count on Armory catalog rows (required by spec §8) | Not implemented | **Confirmed still missing.** No `used by`/`usedBy`/`agent_count` string or field anywhere in [`frontend/app/view/mcp/mcp-manager.tsx`](../../../frontend/app/view/mcp/mcp-manager.tsx), `mcp-model.ts`, [`frontend/app/view/skill/skill-manager.tsx`](../../../frontend/app/view/skill/skill-manager.tsx), or `skill-model.ts`. |
 | 3 | No bind-to-agent action from the catalog itself (only from the per-agent modal) | Not implemented | **Confirmed.** `mcp-manager.tsx`/`skill-manager.tsx` are pure CRUD (list/create/edit/delete/toggle-global); no bind affordance. |
 | 4 | No deep-linking between agent config view and the catalog | Not implemented | **Confirmed still missing** — required by spec §8 ("deep-linked from an agent's config view... pick existing or create new"), not present in either modal or the catalog view. |
 | 5 | Bundle-level grouping (Briefs/Bundle refs) | Unbuilt, intentionally out of scope for now | Confirmed unbuilt; this one is explicitly deferred (spec §9 non-goal for v1), not a regression. |

@@ -88,10 +88,10 @@ older callers are unaffected.
 | `agentmux-srv/src/backend/reactive/tests.rs` | fixture update |
 | `agentmux-srv/src/server/reactive.rs` | `echo_jekt_to_sender` + wire into 3 success paths |
 | `agentmux-srv/src/server/websocket.rs` | echo in `bus:inject` (direct + messagebus fallback) |
-| `frontend/app/view/agent/useAgentStream.ts` | `agentName` opt → `setAgentId` |
-| `frontend/app/view/agent/parseHistoryLines.ts` | `agentName` param → `setAgentId` |
-| `frontend/app/view/agent/hooks/useHistoryPagination.ts` | thread `agentName` accessor |
-| `frontend/app/view/agent/agent-view.tsx` | pass `block.meta.agentName` to both hooks |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | `agentName` opt → `setAgentId` |
+| [`frontend/app/view/agent/parseHistoryLines.ts`](../../frontend/app/view/agent/parseHistoryLines.ts) | `agentName` param → `setAgentId` |
+| [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts) | thread `agentName` accessor |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | pass `block.meta.agentName` to both hooks |
 
 ## 4. Testing
 

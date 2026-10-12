@@ -48,7 +48,7 @@ Schema gated by `agentmux-srv/src/storage/schema.rs` migrations. Every version m
 `~/.agentmux/agents/<name>-<suffix>/`:
 
 - Working directory (one per named agent).
-- Contains the CLI's project state: `.claude/`, repo checkouts, conversation transcripts, etc.
+- Contains the CLI's project state: [`.claude/`](../../.claude), repo checkouts, conversation transcripts, etc.
 - Created by `allocate_agent_workdir` (`agentmux-srv/src/spawn/workdir.rs`).
 - Filename collisions resolved by `-2`, `-3` suffixes; the registered name is the slugified user-typed name.
 
@@ -430,7 +430,7 @@ No new perf probes — file IO at this scale is negligible compared to broker pu
 
 ### Replay (frontend)
 
-- New fixture in `frontend/test/fixtures/agent-sessions/`: a launch-modal-open event sequence with the dropdown populated from the broker's `named_agent_registry_loaded` event.
+- New fixture in [`frontend/test/fixtures/agent-sessions/`](../../frontend/test/fixtures/agent-sessions): a launch-modal-open event sequence with the dropdown populated from the broker's `named_agent_registry_loaded` event.
 - Replay verifies the dropdown order matches the sort contract.
 
 ### Manual smoke

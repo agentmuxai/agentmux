@@ -59,19 +59,19 @@ The singleton + `registerPane(handle)` pattern in `useVoiceInput.ts` already sup
 
 | File | Purpose | Source |
 |---|---|---|
-| `frontend/types/speech.d.ts` | Web Speech API type declarations | PR #741 (unchanged) |
-| `frontend/app/hook/useVoiceInput.ts` | Singleton session + `registerPane(handle)` API | PR #741 (unchanged) |
-| `frontend/app/element/MicButton.tsx` | Toggle icon button with pulse-ring active state | PR #741 (moved from `view/agent/components/` since it's now pane-agnostic) |
-| `frontend/app/element/MicButton.scss` | Pulse-ring keyframes | Same move |
+| [`frontend/types/speech.d.ts`](../../frontend/types/speech.d.ts) | Web Speech API type declarations | PR #741 (unchanged) |
+| [`frontend/app/hook/useVoiceInput.ts`](../../frontend/app/hook/useVoiceInput.ts) | Singleton session + `registerPane(handle)` API | PR #741 (unchanged) |
+| [`frontend/app/element/MicButton.tsx`](../../frontend/app/element/MicButton.tsx) | Toggle icon button with pulse-ring active state | PR #741 (moved from `view/agent/components/` since it's now pane-agnostic) |
+| [`frontend/app/element/MicButton.scss`](../../frontend/app/element/MicButton.scss) | Pulse-ring keyframes | Same move |
 
 ### 3.2 Integration points (next PR — see §7)
 
 | Location | Change |
 |---|---|
-| `frontend/app/block/blockframe.tsx` | `BlockFrame_Header` renders `<MicButton />` in the right-side controls group (next to maximize/close) when `blockData.meta.view ∈ {"term", "agent"}`. Calls `voice.registerPane(handle)` when the button toggles on for this pane. |
-| `frontend/app/view/term/termViewModel.ts` | Expose a `voiceHandle: PaneVoiceHandle` that calls `RpcApi.ControllerInputCommand` with the text as `inputdata64` — voice characters stream into the PTY. |
-| `frontend/app/view/agent/agent-view.tsx` (or `useAgentStream.ts`) | Expose a `voiceHandle` that appends to the textarea (existing PR #741 logic, re-located from `AgentFooter`). |
-| `frontend/app/store/keymodel.ts` | `Ctrl:Shift:v` resolves to "toggle voice on the focused pane" by looking up the focused block's view and calling its `voiceHandle`. |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | `BlockFrame_Header` renders `<MicButton />` in the right-side controls group (next to maximize/close) when `blockData.meta.view ∈ {"term", "agent"}`. Calls `voice.registerPane(handle)` when the button toggles on for this pane. |
+| [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts) | Expose a `voiceHandle: PaneVoiceHandle` that calls `RpcApi.ControllerInputCommand` with the text as `inputdata64` — voice characters stream into the PTY. |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (or `useAgentStream.ts`) | Expose a `voiceHandle` that appends to the textarea (existing PR #741 logic, re-located from `AgentFooter`). |
+| [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) | `Ctrl:Shift:v` resolves to "toggle voice on the focused pane" by looking up the focused block's view and calling its `voiceHandle`. |
 
 ---
 
@@ -165,7 +165,7 @@ This avoids the original PR's "last-focused" ambiguity: the user always sees whi
 ### Phase 1 (this PR) — building blocks, no integration yet
 
 - ✓ Cherry-pick `useVoiceInput.ts`, `speech.d.ts`, `MicButton.{tsx,scss}` from PR #741
-- ✓ Move `MicButton.{tsx,scss}` to `frontend/app/element/` (pane-agnostic location)
+- ✓ Move `MicButton.{tsx,scss}` to [`frontend/app/element/`](../../frontend/app/element) (pane-agnostic location)
 - ✓ Write this spec
 - Build green, no behavior change yet (the building blocks aren't called from anywhere)
 
@@ -253,7 +253,7 @@ can't transcribe — gate it behind `getVoiceSession()` so only a real engine
 PR #741 stays open until this spec's Phase 1 lands. Then:
 
 - Comment on #741 linking to this spec
-- Close PR #741 with note: "Cherry-picked the building blocks (useVoiceInput, speech.d.ts, MicButton, *moved to `frontend/app/element/`*) into [new PR]. The integration is being redesigned for multi-pane support (Terminal + Agent), top-right frame-header button placement (next to max/close) instead of agent footer. See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md for the new design."
+- Close PR #741 with note: "Cherry-picked the building blocks (useVoiceInput, speech.d.ts, MicButton, *moved to [`frontend/app/element/`](../../frontend/app/element)*) into [new PR]. The integration is being redesigned for multi-pane support (Terminal + Agent), top-right frame-header button placement (next to max/close) instead of agent footer. See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md for the new design."
 - Author of #741 can be re-invited to drive Phase 2 if they want, or it's open work
 
 ---
@@ -290,7 +290,7 @@ Without re-reading the PR, the salvaged code is:
 
 - `useVoiceInput.ts` — the entire singleton design. `registerPane` already supports the multi-pane retargeting we need.
 - `speech.d.ts` — type declarations, untouched.
-- `MicButton.tsx` — relocated to `frontend/app/element/MicButton.tsx`. Already pane-agnostic; uses `getVoiceSession()` which is the singleton.
+- `MicButton.tsx` — relocated to [`frontend/app/element/MicButton.tsx`](../../frontend/app/element/MicButton.tsx). Already pane-agnostic; uses `getVoiceSession()` which is the singleton.
 - `MicButton.scss` — relocated. Pulse-ring keyframes carry over.
 
 What we discard:

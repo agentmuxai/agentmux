@@ -145,7 +145,7 @@ fn install_via_npm(provider: &str) -> Result<String, String> {
 
 ### 3. Frontend: Detect Error and Show Notification
 
-**File:** `frontend/app/view/agent/agent-model.ts`
+**File:** [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts)
 
 In the launch flow, before calling `install_cli`, check for Node.js:
 
@@ -173,7 +173,7 @@ async function ensureCliInstalled(provider: ProviderDefinition): Promise<string>
 
 ### 4. Notification UI
 
-**File:** `frontend/app/view/agent/agent-view.tsx`
+**File:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)
 
 When `NodejsNotFoundError` is caught, show an in-pane notification:
 
@@ -318,8 +318,8 @@ Is provider === "claude"?
 |------|---------|
 | `src-tauri/src/commands/cli_installer.rs` | Add `check_nodejs_available` command, add pre-flight check in `install_via_npm` |
 | `src-tauri/src/lib.rs` | Register `check_nodejs_available` command |
-| `frontend/app/view/agent/agent-model.ts` | Add `ensureCliInstalled` with Node.js check |
-| `frontend/app/view/agent/agent-view.tsx` | Add `NodejsRequiredNotice` component |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Add `ensureCliInstalled` with Node.js check |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Add `NodejsRequiredNotice` component |
 | `frontend/app/view/agent/agent.scss` | Add notice styles |
 
 ---

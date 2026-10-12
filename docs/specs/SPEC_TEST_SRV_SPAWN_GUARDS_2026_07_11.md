@@ -21,7 +21,7 @@ Each leaked srv holds:
 
 On a dev machine this pollutes `tasklist` and can confuse instance discovery
 (`muxlog ls`, wmic-based sweeps); on CI it accumulates until the runner
-recycles. The E2E suites (`test/e2e/harness.ts`) already solved this class for
+recycles. The E2E suites ([`test/e2e/harness.ts`](../../test/e2e/harness.ts)) already solved this class for
 their instance spawns (wrapper-first kill + scoped wmic sweep in
 `teardownInstance`); the Rust integration tests have no equivalent.
 

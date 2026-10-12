@@ -191,7 +191,7 @@ Rules:
 
 ### 5.1 Frontend
 
-New module `frontend/app/element/install/`:
+New module [`frontend/app/element/install/`](../../frontend/app/element/install):
 
 - **`InstallSession`** — a reactive model: `plan: InstallStep[]`,
   `log: LogLine[]`, `state: idle | running | done | failed | cancelled`,

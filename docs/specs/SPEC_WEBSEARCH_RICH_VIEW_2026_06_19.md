@@ -3,9 +3,9 @@
 **Date:** 2026-06-19
 **Status:** proposed — Planned
 **Author:** smike
-**Related:** `frontend/app/view/agent/components/tool-renderers/SearchResults.tsx`,
-             `frontend/app/view/agent/components/tool-renderers/search-results.ts`,
-             `frontend/app/view/agent/stream-parser.ts`
+**Related:** [`frontend/app/view/agent/components/tool-renderers/SearchResults.tsx`](../../frontend/app/view/agent/components/tool-renderers/SearchResults.tsx),
+             [`frontend/app/view/agent/components/tool-renderers/search-results.ts`](../../frontend/app/view/agent/components/tool-renderers/search-results.ts),
+             [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
 
 ---
 
@@ -256,12 +256,12 @@ When extraction returns empty array: show "No results found." message instead of
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/tool-renderers/search-results.ts` | JSON-string parsing in `findResultArray`; add `date`/`index` to `SearchResultItem`; fix `page_age` field mapping |
-| `frontend/app/view/agent/providers/claude-translator.ts` | Guard `canApplyStructured` to not overwrite array content with terminal result |
-| `frontend/app/view/agent/stream-parser.ts` | Add `web_search`/`WebSearch` to `extractToolDetail` |
-| `frontend/app/view/agent/types.ts` | Add `web_search`/`WebSearch` to `TOOL_ICONS` |
-| `frontend/app/view/agent/components/tool-renderers/SearchResults.tsx` | Favicon, citation number, header bar, date field, empty state |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | New card layout styles (favicon row, citation badge, date line) |
+| [`frontend/app/view/agent/components/tool-renderers/search-results.ts`](../../frontend/app/view/agent/components/tool-renderers/search-results.ts) | JSON-string parsing in `findResultArray`; add `date`/`index` to `SearchResultItem`; fix `page_age` field mapping |
+| [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts) | Guard `canApplyStructured` to not overwrite array content with terminal result |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | Add `web_search`/`WebSearch` to `extractToolDetail` |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `web_search`/`WebSearch` to `TOOL_ICONS` |
+| [`frontend/app/view/agent/components/tool-renderers/SearchResults.tsx`](../../frontend/app/view/agent/components/tool-renderers/SearchResults.tsx) | Favicon, citation number, header bar, date field, empty state |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | New card layout styles (favicon row, citation badge, date line) |
 
 ---
 

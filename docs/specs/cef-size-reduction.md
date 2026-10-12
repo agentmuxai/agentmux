@@ -26,7 +26,7 @@ inherent to Chromium.
 
 > **CORRECTION (2026-06-14): this does NOT apply to our patched fork build.** This
 > spec assumed our `libcef` was already official. It wasn't — the local fork build
-> (`docs/cef-build/build-patched-libcef.md`) omitted `is_official_build`, so it was a
+> ([`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md)) omitted `is_official_build`, so it was a
 > plain `is_debug=false` Release and ran **~2× bigger** than stock-official. Adding
 > `is_official_build=true` + `use_thin_lto=true` cut **`libcef.so` 414 → 263 MB
 > stripped** (below stock-official ~280 MB) and the **Linux AppImage 197 → 135 MB**
@@ -181,7 +181,7 @@ Effort: trivial. Marginal gain since the main library dominates.
 
 **NOTE:** True for the *stock-official* CEF. **But our patched fork build did NOT
 set these** (see the correction above) — so for us they are the ~50% lever, not
-"already set". The build doc (`docs/cef-build/build-patched-libcef.md`) now sets
+"already set". The build doc ([`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md)) now sets
 them. The feature-disable flags below are a *further* ~20–40 MB on top.
 
 ```gn

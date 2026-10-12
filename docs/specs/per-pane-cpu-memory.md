@@ -135,13 +135,13 @@ The `sysinfo::System` needs `refresh_process_specifics` or `refresh_process` to 
 
 ### 5. Event Type Constant
 
-**File:** `frontend/types/custom.d.ts` (or wherever event types are declared)
+**File:** [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) (or wherever event types are declared)
 
 Ensure `"blockstats"` is a recognized event type for `waveEventSubscribe`.
 
 ### 6. `useBlockStats` Hook
 
-**New file:** `frontend/app/hook/useBlockStats.ts`
+**New file:** [`frontend/app/hook/useBlockStats.ts`](../../frontend/app/hook/useBlockStats.ts)
 
 ```typescript
 import { createSignal, createEffect, onCleanup } from "solid-js";
@@ -178,7 +178,7 @@ export function useBlockStats(blockId: string): () => BlockStats | null {
 
 ### 7. `BlockStatsBadge` Component
 
-**New file:** `frontend/app/element/blockstats.tsx`
+**New file:** [`frontend/app/element/blockstats.tsx`](../../frontend/app/element/blockstats.tsx)
 
 ```tsx
 import { Show, createMemo } from "solid-js";
@@ -217,7 +217,7 @@ export function BlockStatsBadge(props: { blockId: string }) {
 
 ### 8. Styling
 
-**New file:** `frontend/app/element/blockstats.scss`
+**New file:** [`frontend/app/element/blockstats.scss`](../../frontend/app/element/blockstats.scss)
 
 ```scss
 .block-stats-badge {
@@ -245,7 +245,7 @@ export function BlockStatsBadge(props: { blockId: string }) {
 
 ### 9. Header Integration
 
-**File:** `frontend/app/block/blockframe.tsx`
+**File:** [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)
 
 In the header, render the badge between the text elems and end icons:
 

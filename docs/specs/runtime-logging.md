@@ -16,7 +16,7 @@ AgentMux has minimal, inconsistent logging that makes debugging production issue
 |-------|---------|-------------|-------------|-------------|
 | **Tauri host** (`src-tauri/`) | `tracing` with `tracing_appender` | Daily rolling file + stderr | Yes (rolling) | Semi (fmt layer) |
 | **Backend sidecar** (`agentmuxsrv-rs/`) | `tracing_subscriber::fmt` | stderr only | No | Semi (fmt layer) |
-| **Frontend** (`frontend/`) | `console.log/error/warn` | Browser DevTools only | No | No |
+| **Frontend** ([`frontend/`](../../frontend)) | `console.log/error/warn` | Browser DevTools only | No | No |
 | **Shell controller** | 4 `tracing::debug/warn` calls | stderr (via backend) | No | No |
 | **WebSocket RPC** | 13 `tracing::info/warn/debug` calls | stderr (via backend) | No | No |
 | **Crash handler** | Panic hook → crash log file | `{log_dir}/crash-{timestamp}.log` | Yes | No |
@@ -413,7 +413,7 @@ This immediately reveals that "codex" (bare name) isn't resolving even though PA
 | `src-tauri/src/lib.rs` | Move log dir, add JSON layer, startup diagnostics |
 | `src-tauri/src/commands/window.rs` | Add `fe_log_structured` command |
 | `frontend/app/util/logger.ts` | New: frontend logging utility |
-| `frontend/app/view/agent/agent-model.ts` | Replace console.log with Logger |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Replace console.log with Logger |
 | `frontend/app/view/agent/init-monitor.ts` | Replace console.log with Logger |
 
 ---

@@ -6,7 +6,7 @@
 **Trigger:** Repo owner: *"we also want to design a robust 'start with OS' feature."*
 **Builds on:** `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §4 (mechanism choice per platform, WS2)
 and §6 (consent rules); `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md` §4.1 (the Settings toggle).
-**Related:** PR #3785 (turned background mode on by default; reverted 2026-09-28 to icon on by default, background mode opt-in, see `docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md`; a tray that cannot start drops background mode).
+**Related:** PR #3785 (turned background mode on by default; reverted 2026-09-28 to icon on by default, background mode opt-in, see [`docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md`](../reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md); a tray that cannot start drops background mode).
 **Owner decisions (2026-09-25):** start at login is **off by default**, with no first-run prompt. It is
 controlled from a Settings toggle **and** a check item in the tray's right-click menu, and both control
 the **same reactive property** (§3.9).
@@ -53,13 +53,13 @@ kept.
 
 | # | Gap | Effect | Where |
 |---|---|---|---|
-| G1 | **Linux target is the raw launcher.** For AppImage, `current_exe()` is the versioned extract cache `~/.local/share/agentmux/extracted/<ver>/usr/bin/agentmux-launcher`, and AppRun prunes all but the two newest caches. For deb/rpm/tarball it bypasses the wrapper that sets `LD_LIBRARY_PATH`, and the launcher has no RPATH. | AppImage: the entry dies after two updates. deb/rpm/tarball: fails to load `libcef.so`, likely at every login. | `autostart/mod.rs:471`; `scripts/linux-apprun.sh:114-145`; `scripts/build-deb-linux.sh:28-31` |
+| G1 | **Linux target is the raw launcher.** For AppImage, `current_exe()` is the versioned extract cache `~/.local/share/agentmux/extracted/<ver>/usr/bin/agentmux-launcher`, and AppRun prunes all but the two newest caches. For deb/rpm/tarball it bypasses the wrapper that sets `LD_LIBRARY_PATH`, and the launcher has no RPATH. | AppImage: the entry dies after two updates. deb/rpm/tarball: fails to load `libcef.so`, likely at every login. | `autostart/mod.rs:471`; [`scripts/linux-apprun.sh:114-145`](../../scripts/linux-apprun.sh#L114-L145); [`scripts/build-deb-linux.sh:28-31`](../../scripts/build-deb-linux.sh#L28-L31) |
 | G2 | **`--background` still opens a window.** The host creates the first window unconditionally. | "Starts quietly" is false; the UI copy "tray only, no window" is wrong. | `agentmux-cef/src/app/mod.rs:1026` (`window_create_top_level` about 1132) |
 | G3 | **No login readiness.** On Linux the StatusNotifier watcher may register after the autostart entry runs, so `ksni` fails and the tray is reported unavailable. After #3785 that means background mode is dropped. | A login start comes up with no tray, and closing its window quits. | `tray/linux.rs:165-205` (5 s bounded start, no retry) |
 | G4 | **Nothing re-points the entry.** It is written once, at enable time. | Any path change (portable zip moved, new AppImage, macOS app moved) silently breaks it. | `autostart/mod.rs:349-351` |
 | G5 | **One identity for every channel.** `AUTOSTART_ID = "AgentMux"` and the macOS label are channel-independent, so enabling from a dev build overwrites the release entry, and disabling from any build removes it. | The owner, who runs `local-*` builds daily, can point login at a build that is later pruned. | `autostart/mod.rs:104-107` |
-| G6 | **Uninstall leaves entries behind.** Inno has no `[UninstallRun] --disable-autostart`; MSIX has no `StartupTask`; deb/rpm cannot clean per-user files; an AppImage has no uninstall. | An error or a no-op at every login, forever. Zoom-2019-shaped (tray spec §6). | `packaging/windows/agentmux.iss`; `packaging/msix/AppxManifest.xml.template:42` |
-| G7 | **macOS uses a raw LaunchAgent, not `SMAppService`.** Bundle ids are per version (`ai.agentmux.<channel>.<ver>`). | The entry may not show in System Settings → Login Items, where users look; a per-version id cannot be a stable login item. | `autostart/mod.rs:22-36`; `scripts/package-macos.sh:172` |
+| G6 | **Uninstall leaves entries behind.** Inno has no `[UninstallRun] --disable-autostart`; MSIX has no `StartupTask`; deb/rpm cannot clean per-user files; an AppImage has no uninstall. | An error or a no-op at every login, forever. Zoom-2019-shaped (tray spec §6). | [`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss); [`packaging/msix/AppxManifest.xml.template:42`](../../packaging/msix/AppxManifest.xml.template#L42) |
+| G7 | **macOS uses a raw LaunchAgent, not `SMAppService`.** Bundle ids are per version (`ai.agentmux.<channel>.<ver>`). | The entry may not show in System Settings → Login Items, where users look; a per-version id cannot be a stable login item. | `autostart/mod.rs:22-36`; [`scripts/package-macos.sh:172`](../../scripts/package-macos.sh#L172) |
 | G8 | **A second launch with `--background` opens a window** (it forwards `open_new_window`). | A login entry firing while AgentMux is already running pops a window. | `supervisor/windows.rs:157-190`; `second_instance.rs` about 325 |
 | G9 | **Status is "file exists".** `is_enabled()` does not check the target. | Settings says "on" for an entry that cannot start anything. | `autostart/mod.rs` `is_enabled` |
 
@@ -81,7 +81,7 @@ absent or names a missing file.
 
 | Kind | Stable target the entry runs | Who provides it |
 |---|---|---|
-| AppImage | The AppImage file itself (`$APPIMAGE`, e.g. `~/Desktop/AgentMux_<ver>.AppImage`) | AppRun exports it (`scripts/linux-apprun.sh`). A newer AppImage re-points the entry on its first start (§3.9), so deleting the old file after that is safe. |
+| AppImage | The AppImage file itself (`$APPIMAGE`, e.g. `~/Desktop/AgentMux_<ver>.AppImage`) | AppRun exports it ([`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh)). A newer AppImage re-points the entry on its first start (§3.9), so deleting the old file after that is safe. |
 | deb / rpm | `/usr/bin/agentmux` (the wrapper that sets `LD_LIBRARY_PATH`) | The wrapper exports it |
 | tarball | `<extract dir>/agentmux.sh` | The script exports it |
 | macOS | `current_exe()` inside the `.app` for now; `SMAppService` later (§3.7) | — |
@@ -302,13 +302,13 @@ in, the Settings copy says again that a login start opens in the tray, without a
 | Linux tray start bound | `agentmux-launcher/src/tray/linux.rs` |
 | First window creation | `agentmux-cef/src/app/mod.rs` (`on_context_initialized`) |
 | Single instance | `agentmux-launcher/src/supervisor/windows.rs`, `agentmux-launcher/src/second_instance.rs` |
-| AppImage re-exec and cache pruning | `scripts/linux-apprun.sh` |
-| App-menu entry writer | `scripts/install-linux-desktop.sh` |
-| deb/rpm/tarball wrappers | `scripts/build-deb-linux.sh`, `scripts/build-rpm-linux.sh`, `scripts/build-tarball-linux.sh` |
-| macOS bundle id | `scripts/package-macos.sh` |
-| Windows installers | `packaging/windows/agentmux.iss`, `packaging/msix/AppxManifest.xml.template` |
-| Settings toggle | `frontend/app/view/settings/sections/notifications-section.tsx`, `agentmux-cef/src/commands/autostart.rs` (status only) |
+| AppImage re-exec and cache pruning | [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) |
+| App-menu entry writer | [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) |
+| deb/rpm/tarball wrappers | [`scripts/build-deb-linux.sh`](../../scripts/build-deb-linux.sh), [`scripts/build-rpm-linux.sh`](../../scripts/build-rpm-linux.sh), [`scripts/build-tarball-linux.sh`](../../scripts/build-tarball-linux.sh) |
+| macOS bundle id | [`scripts/package-macos.sh`](../../scripts/package-macos.sh) |
+| Windows installers | [`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss), [`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template) |
+| Settings toggle | [`frontend/app/view/settings/sections/notifications-section.tsx`](../../frontend/app/view/settings/sections/notifications-section.tsx), `agentmux-cef/src/commands/autostart.rs` (status only) |
 | The property, tray redraw, reconcile | `agentmux-launcher/src/start_at_login.rs`, `autostart::plan` |
 | Tray check item | `agentmux-launcher/src/tray/mod.rs` (`menu_model`), `tray/{linux,windows,macos}.rs` |
 | srv session (config in, setconfig out) | `agentmux-launcher/src/notify/mod.rs` |
-| Setting declaration | `schema/settings.json`, `settings-template.jsonc`, `frontend/types/srv-types.d.ts` |
+| Setting declaration | [`schema/settings.json`](../../schema/settings.json), `settings-template.jsonc`, [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts) |

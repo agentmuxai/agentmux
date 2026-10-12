@@ -368,7 +368,7 @@ The frontend currently uses `window.api.*` (40+ methods) injected by Electron's 
 
 ### 2.1 Catalog all `window.api` methods
 
-From `emain/preload.ts` and `frontend/types/custom.d.ts`:
+From `emain/preload.ts` and [`frontend/types/custom.d.ts`](../../../frontend/types/custom.d.ts):
 
 **Synchronous getters (ipcRenderer.sendSync):**
 | Method | Returns | Tauri Equivalent |

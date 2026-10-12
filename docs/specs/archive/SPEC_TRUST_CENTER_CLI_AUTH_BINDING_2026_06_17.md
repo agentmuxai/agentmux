@@ -4,7 +4,7 @@
 
 **Date:** 2026-06-17
 **Status:** Draft — implementation (folded into the PR)
-**Scope:** Trust Center Accounts (`frontend/app/view/accounts/**`, `frontend/app/view/identity/identity-model.ts`)
+**Scope:** Trust Center Accounts (`frontend/app/view/accounts/**`, [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts))
 **Related:** `specs/archive/SPEC_TRUST_CENTER_2026_06_15.md` (the hub), `identity/migration.rs` (Default-bundle ambient discovery), `identity/resolver.rs::probe_oauth_status`
 
 ---
@@ -44,8 +44,8 @@ The fix is a **display-only normalization**: a CLI-OAuth provider *is* a brand a
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/accounts/provider-brand.ts` *(new)* | `brandForProvider(provider): AccountProvider` — CLI-OAuth id → brand (table above), else passthrough. Single source of the mapping. |
-| `frontend/app/view/identity/identity-model.ts` | `accountsByProvider()` groups by `brandForProvider(a.provider)` instead of the raw provider. Account `provider` is unchanged; only the **grouping key** normalizes. |
+| [`frontend/app/view/accounts/provider-brand.ts`](../../../frontend/app/view/accounts/provider-brand.ts) *(new)* | `brandForProvider(provider): AccountProvider` — CLI-OAuth id → brand (table above), else passthrough. Single source of the mapping. |
+| [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts) | `accountsByProvider()` groups by `brandForProvider(a.provider)` instead of the raw provider. Account `provider` is unchanged; only the **grouping key** normalizes. |
 | (verify) `AccountsGallery.countFor` | unchanged — it reads `accountsByProvider().get(id)`, so it's fixed transitively. |
 
 That's the whole fix: ~1 new tiny module + a one-line key change. No backend change — the account + live status already exist.

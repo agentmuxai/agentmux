@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-03
 **Status:** proposed — Spec — pending product confirmation on open questions
-**Scope:** `frontend/app/view/swarm/`
+**Scope:** [`frontend/app/view/swarm/`](../../frontend/app/view/swarm)
 
 ## Goal
 

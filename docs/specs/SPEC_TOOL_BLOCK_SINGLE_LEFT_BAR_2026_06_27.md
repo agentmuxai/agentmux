@@ -20,7 +20,7 @@ The inner bar is redundant: the outer bar already communicates tool status and i
 
 ## Current State (as of v0.49.6)
 
-File: `frontend/app/view/agent/styles/_document-nodes.scss`
+File: [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)
 
 ```scss
 // Line 132–158
@@ -72,7 +72,7 @@ Visual layout (target):
 
 ## Change
 
-**File:** `frontend/app/view/agent/styles/_document-nodes.scss`
+**File:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)
 
 **In `.agent-tool-panel` (lines 276–283):**
 
@@ -114,7 +114,7 @@ No changes needed to `.agent-tool-block`, `.agent-tool-summary`, or any other ru
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Remove `border-left` + set `margin-left: 0` on `.agent-tool-panel`; update adjacent comment |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Remove `border-left` + set `margin-left: 0` on `.agent-tool-panel`; update adjacent comment |
 
 No TypeScript, no Rust, no other SCSS files.
 

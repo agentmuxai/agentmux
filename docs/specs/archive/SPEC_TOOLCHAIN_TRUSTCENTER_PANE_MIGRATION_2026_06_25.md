@@ -134,7 +134,7 @@ export class ToolchainViewModel implements ViewModel {
 }
 ```
 
-**File:** `frontend/app/view/toolchain/toolchain.tsx`
+**File:** [`frontend/app/view/toolchain/toolchain.tsx`](../../../frontend/app/view/toolchain/toolchain.tsx)
 
 Port `ToolchainModal`'s render body verbatim into `ToolchainView`. Remove
 `ModalCloseProps`; accept `ViewComponentProps<ToolchainViewModel>` instead.
@@ -445,22 +445,22 @@ initResourceRegistry();   // attaches the addEventListener listeners
 | File | Change |
 |---|---|
 | `agentmux-srv/src/config/widgets.json` | Add `defwidget@toolchain`, `defwidget@trust` |
-| `frontend/app/block/block-registry.ts` | Register `"toolchain"`, `"trust"` |
+| [`frontend/app/block/block-registry.ts`](../../../frontend/app/block/block-registry.ts) | Register `"toolchain"`, `"trust"` |
 | `frontend/app/view/toolchain/toolchain-model.ts` | **New** — ViewModel |
-| `frontend/app/view/toolchain/toolchain.tsx` | **New** — ViewComponent (port of modal body) |
+| [`frontend/app/view/toolchain/toolchain.tsx`](../../../frontend/app/view/toolchain/toolchain.tsx) | **New** — ViewComponent (port of modal body) |
 | `frontend/app/view/trust/trust-model.ts` | **New** — ViewModel |
 | `frontend/app/view/trust/trust.tsx` | **New** — ViewComponent (port of modal body) |
-| `frontend/app/window/hamburger-menu.tsx` | Replace modal open with `openOrFocusPaneByView` |
-| `frontend/app/store/global.ts` | Add `openOrFocusPaneByView()` utility |
+| [`frontend/app/window/hamburger-menu.tsx`](../../../frontend/app/window/hamburger-menu.tsx) | Replace modal open with `openOrFocusPaneByView` |
+| [`frontend/app/store/global.ts`](../../../frontend/app/store/global.ts) | Add `openOrFocusPaneByView()` utility |
 | `frontend/app/modals/toolchain-modal.tsx` | Delete (or thin shim) |
 | `frontend/app/modals/bundle-manager-modal.tsx` | Delete `BundleManagerElsewhereBanner`, `acquireSingleton` wiring |
-| `frontend/app/store/agent-pane-state/types.ts` | Add `tool-started`, `tool-ended` to `AgentPaneEvent` |
-| `frontend/app/store/agent-pane-state/reducer.ts` | Emit events from `ToolStart`/`ToolEnd` arms |
+| [`frontend/app/store/agent-pane-state/types.ts`](../../../frontend/app/store/agent-pane-state/types.ts) | Add `tool-started`, `tool-ended` to `AgentPaneEvent` |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../../frontend/app/store/agent-pane-state/reducer.ts) | Emit events from `ToolStart`/`ToolEnd` arms |
 | `frontend/app/store/resource-in-use-store.ts` | **New** — registry |
-| `frontend/app-init.ts` | Call `initResourceRegistry()` at startup |
+| [`frontend/app-init.ts`](../../../frontend/app-init.ts) | Call `initResourceRegistry()` at startup |
 | `frontend/app/view/trust/IdentityManager.tsx` | Add delete guard + edit warning |
 | `frontend/app/view/trust/AccountsManager.tsx` | Add delete guard + edit warning |
-| `frontend/app/view/toolchain/toolchain.tsx` | Add in-use chip per tool row |
+| [`frontend/app/view/toolchain/toolchain.tsx`](../../../frontend/app/view/toolchain/toolchain.tsx) | Add in-use chip per tool row |
 
 ---
 

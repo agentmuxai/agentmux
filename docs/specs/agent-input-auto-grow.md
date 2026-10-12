@@ -6,7 +6,7 @@
 > **2026-08-07 audit note:** Implemented, differently than proposed here —
 > shipped via plain CSS `field-sizing: content` rather than the JS resize
 > handler this doc describes. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
 ## Summary
 
@@ -61,8 +61,8 @@ Call `autoGrow` in `onInput` after updating the signal, and after
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/AgentFooter.tsx` | Auto-grow logic, rows=1, ref |
-| `frontend/app/view/agent/agent-view.scss` | `resize: none`, `max-height`, adjust `min-height` |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | Auto-grow logic, rows=1, ref |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | `resize: none`, `max-height`, adjust `min-height` |
 
 ## Testing
 

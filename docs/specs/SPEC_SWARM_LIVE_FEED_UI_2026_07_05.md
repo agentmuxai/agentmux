@@ -47,7 +47,7 @@ doing:
   installed but unused — do not adopt it.
 - Realtime: `waveEventSubscribe` in `store/wps.ts`; canonical usage pattern
   in `swarm-model.ts` (subscribe in ctor, unsubs array, `dispose()`).
-- Design system: tokens in `frontend/app/theme.scss`; stylelint forbids raw
+- Design system: tokens in [`frontend/app/theme.scss`](../../frontend/app/theme.scss); stylelint forbids raw
   hex, `!important`, and non-token z-index.
 
 ## Design
@@ -106,7 +106,7 @@ swarm feed is a strictly simpler instance of the same problem (append-heavy
 list, bottom pinning, mixed row heights).
 
 - Extract the core (positioning, ResizeObserver measurement, scroll
-  anchoring) into a shared module under `frontend/app/element/` — or
+  anchoring) into a shared module under [`frontend/app/element/`](../../frontend/app/element) — or
   parametrize `AgentDocumentVirtualList` over a row renderer — so the agent
   doc and swarm tree consume one implementation. The streaming-buffer
   partition is disabled for swarm: stream rows are single-line and cheap.
