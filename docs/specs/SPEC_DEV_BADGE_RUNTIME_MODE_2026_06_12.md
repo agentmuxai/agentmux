@@ -35,11 +35,11 @@ A build's identity is a property of **the binary on disk** (where it lives / wha
 ## 2. Current behavior — why DEV shows everywhere (code-grounded)
 
 ### The render path
-- [`frontend/app/statusbar/StatusBar.tsx:79-81`](../../frontend/app/statusbar/StatusBar.tsx#L79-L81) and `:96-98` — the badge:
+- [`frontend/app/statusbar/StatusBar.tsx:79-81`](../../frontend/app/statusbar/StatusBar.tsx) and `:96-98` — the badge:
   ```tsx
   <Show when={isDev()}><span class="status-version-dev">DEV</span></Show>
   ```
-- [`frontend/app/store/global.ts:986-989`](../../frontend/app/store/global.ts#L986-L989) — `isDev()` → `getApi().getIsDev()` (cached once).
+- [`frontend/app/store/global.ts:986-989`](../../frontend/app/store/global.ts) — `isDev()` → `getApi().getIsDev()` (cached once).
 - `agentmux-cef/src/ipc.rs:199` — `"get_is_dev" => commands::platform::get_is_dev()`.
 
 ### The bug — `get_is_dev()` trusts inherited env first
@@ -67,12 +67,12 @@ Launch a portable or double-click-release build **as a descendant of that dev in
 > This is the **same class** as the `AGENTMUX_VITE_PORT=5289` bug: AgentMux leaks its own `AGENTMUX_*` identity vars to descendants, and descendants act on them as if they were their own.
 
 ### Secondary gap — macOS portable has no marker
-`RuntimeMode::current()` step 2 calls `is_portable_marker_present()` (`runtime_mode.rs:328-336`), which looks for `agentmux-portable.marker` next to the exe **or at the `.app` bundle root** (two levels up). That marker is written by [`scripts/package-portable.sh:79`](../../scripts/package-portable.sh#L79) — but **[`scripts/package-macos.sh`](../../scripts/package-macos.sh) never writes it.** So even with a *clean* env, a macOS portable `.app` fails the portable check and falls through to **`Installed`** (step 5), not `Portable`. (It won't show DEV — but it's misclassified, which affects anything keyed on Portable vs Installed, e.g. the instance panel / update path.)
+`RuntimeMode::current()` step 2 calls `is_portable_marker_present()` (`runtime_mode.rs:328-336`), which looks for `agentmux-portable.marker` next to the exe **or at the `.app` bundle root** (two levels up). That marker is written by [`scripts/package-portable.sh:79`](../../scripts/package-portable.sh) — but **[`scripts/package-macos.sh`](../../scripts/package-macos.sh) never writes it.** So even with a *clean* env, a macOS portable `.app` fails the portable check and falls through to **`Installed`** (step 5), not `Portable`. (It won't show DEV — but it's misclassified, which affects anything keyed on Portable vs Installed, e.g. the instance panel / update path.)
 
 ### Why this is macOS-only — the launcher's leak-defense is gated on the wrong condition
 **Both platforms ship the launcher.** On macOS it is the bundle entry point —
 `AgentMux.app/Contents/MacOS/agentmux-launcher`, `CFBundleExecutable: agentmux-launcher`
-([`scripts/package-macos.sh:79-86`](../../scripts/package-macos.sh#L79-L86)), and it paints the native splash
+([`scripts/package-macos.sh:79-86`](../../scripts/package-macos.sh)), and it paints the native splash
 (`agentmux-launcher/src/splash_mac.rs`, `#![cfg(target_os="macos")]`). The
 "runs the host directly / Phase 7" caveat applies to **`task dev` only**, not to
 packaged `.app`s.

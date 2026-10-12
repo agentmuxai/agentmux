@@ -43,7 +43,7 @@ ever existed, let alone its kind or its parent.
     sent to srv.
 - **Cold-launch behavior today:** `agentmux-cef/src/app.rs::on_context_initialized` creates exactly
   one native window unconditionally (implicitly "main"); the frontend inside it reads only
-  `Client.windowids[0]` ([`frontend/app-init.ts:317-339`](../../frontend/app-init.ts#L317-L339)). A second window or a subwindow is *never*
+  `Client.windowids[0]` ([`frontend/app-init.ts:317-339`](../../frontend/app-init.ts)). A second window or a subwindow is *never*
   automatically recreated — only ever by explicit user/agent action
   (`open_new_window`/`open_subwindow`, `agentmux-cef/src/commands/window/creation.rs:237-332`).
 
@@ -78,7 +78,7 @@ implementation, not guessed here:
 2. **Frontend-side**: thread `kind` through the existing `?windowLabel=`/tear-off URL param
    mechanism (subwindows already get a distinguishing URL context per
    `commands/window/creation.rs`'s call sites) and call the new RPC directly after
-   `WindowService.CreateWindow` resolves in `initHostNewWindow()` ([`frontend/app-init.ts:421-493`](../../frontend/app-init.ts#L421-L493)).
+   `WindowService.CreateWindow` resolves in `initHostNewWindow()` ([`frontend/app-init.ts:421-493`](../../frontend/app-init.ts)).
 
 **Resolved (2026-07-07, Phase 2 implementation): Candidate 1.** `register_backend_window`
 (`agentmux-cef/src/commands/window/meta.rs`) is exactly the right hook — it fires once per window
@@ -153,4 +153,4 @@ Each phase independently shippable, matching every other Pillar 1 spec's phasing
   `agentmux-cef/src/commands/window/meta.rs:64-67`, `agentmux-cef/src/state.rs:77-82`,
   `agentmux-launcher/src/state.rs:94-297`, `agentmux-srv/src/backend/obj.rs:314-358`,
   `agentmux-srv/src/server/service/window.rs:437-459` (the `SetWindowOpacity` precedent),
-  [`frontend/app-init.ts:317-493`](../../frontend/app-init.ts#L317-L493), [`frontend/app/store/services.ts:108-109`](../../frontend/app/store/services.ts#L108-L109).
+  [`frontend/app-init.ts:317-493`](../../frontend/app-init.ts), [`frontend/app/store/services.ts:108-109`](../../frontend/app/store/services.ts).

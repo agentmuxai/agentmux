@@ -36,20 +36,20 @@ click — see §2c for why that is a coincidence, not a working path.
 One mousedown on `Filter agents...` in an unselected pane:
 
 1. The browser moves DOM focus to the `<input>`
-   ([`frontend/app/view/agent/components/AgentPickerFilterBar.tsx:55-63`](../../frontend/app/view/agent/components/AgentPickerFilterBar.tsx#L55-L63)).
+   ([`frontend/app/view/agent/components/AgentPickerFilterBar.tsx:55-63`](../../frontend/app/view/agent/components/AgentPickerFilterBar.tsx)).
 2. `focusin` bubbles to the block frame
-   ([`frontend/app/block/blockframe.tsx:1313`](../../frontend/app/block/blockframe.tsx#L1313)) →
-   `handleChildFocus` ([`frontend/app/block/block.tsx:168-171`](../../frontend/app/block/block.tsx#L168-L171)) sees
+   ([`frontend/app/block/blockframe.tsx:1313`](../../frontend/app/block/blockframe.tsx)) →
+   `handleChildFocus` ([`frontend/app/block/block.tsx:168-171`](../../frontend/app/block/block.tsx)) sees
    `!isFocused()` and calls `nodeModel.focusNode()`.
 3. That dispatches `LayoutTreeActionType.FocusNode`, which sets
-   `shouldRequestFocus = true` ([`frontend/layout/lib/layoutModel.ts:646-648`](../../frontend/layout/lib/layoutModel.ts#L646-L648));
+   `shouldRequestFocus = true` ([`frontend/layout/lib/layoutModel.ts:646-648`](../../frontend/layout/lib/layoutModel.ts));
    once state commits, `treeReducer` calls `focusManager.requestNodeFocus()`
    (`layoutModel.ts:694-696`). This hook was added by #3519. Before that,
    `requestNodeFocus()` did nothing.
 4. `requestNodeFocus()` → `refocusNode()`
-   ([`frontend/app/store/focusManager.ts:45-60`](../../frontend/app/store/focusManager.ts#L45-L60)) calls the view's
+   ([`frontend/app/store/focusManager.ts:45-60`](../../frontend/app/store/focusManager.ts)) calls the view's
    `giveFocus()`. The agent view's `giveFocus()`
-   ([`frontend/app/view/agent/agent-model.ts:934-939`](../../frontend/app/view/agent/agent-model.ts#L934-L939)) returns `false` when the
+   ([`frontend/app/view/agent/agent-model.ts:934-939`](../../frontend/app/view/agent/agent-model.ts)) returns `false` when the
    footer textarea isn't mounted, and it isn't mounted on the picker page.
    `refocusNode()` then falls back to
    `document.getElementById(`${blockId}-dummy-focus`).focus()`.
@@ -64,13 +64,13 @@ it), so it does not move focus again. It is not the culprit, but see §4.3.
 ### 2b. Why `refocusNode()` does not notice
 
 `refocusNode()` (and its twin, `refocusNode(blockId)` in
-[`frontend/app/store/block-component-registry.ts:169-184`](../../frontend/app/store/block-component-registry.ts#L169-L184)) never looks at
+[`frontend/app/store/block-component-registry.ts:169-184`](../../frontend/app/store/block-component-registry.ts)) never looks at
 `document.activeElement`. "The user just put the caret somewhere in this
 pane" and "this pane was selected by keyboard / tab switch / creation" look
 the same to it.
 
 The browser pane is the one view that already guards against this, inside its
-own `giveFocus()` ([`frontend/app/view/browser/browser-model.ts:738-759`](../../frontend/app/view/browser/browser-model.ts#L738-L759)):
+own `giveFocus()` ([`frontend/app/view/browser/browser-model.ts:738-759`](../../frontend/app/view/browser/browser-model.ts)):
 when a non-dummy `INPUT`/`TEXTAREA` in the block is already focused (the URL
 bar), it keeps it. That is why the URL bar has always worked in one click. The
 guard is in the right spirit, but it lives in a single view instead of the

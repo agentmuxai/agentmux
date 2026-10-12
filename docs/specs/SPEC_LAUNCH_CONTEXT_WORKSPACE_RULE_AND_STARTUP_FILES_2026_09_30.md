@@ -47,9 +47,9 @@ their own workspace", matching the audit report's convention. See §8 Q1.
 
 - **Workspace:** the agent instance's working directory,
   `~/.agentmux/agents/<instance-slug>/` (e.g. `clamk-0612a`). The frontend
-  builds the path ([`frontend/app/view/agent/agent-model.ts:480-495`](../../frontend/app/view/agent/agent-model.ts#L480-L495), slug
+  builds the path ([`frontend/app/view/agent/agent-model.ts:480-495`](../../frontend/app/view/agent/agent-model.ts), slug
   from `defaults/instance-slug.ts:73`), srv claims it atomically
-  (`allocate_agent_workdir`, [`crates/srv/src/server/app_api/agent_define.rs:357`](../../crates/srv/src/server/app_api/agent_define.rs#L357))
+  (`allocate_agent_workdir`, [`crates/srv/src/server/app_api/agent_define.rs:357`](../../crates/srv/src/server/app_api/agent_define.rs))
   and stores it as the instance's `working_directory`. The agent gets it only
   as its launch cwd; no env var names it.
 - **Host agent:** an agent whose CLI runs as a process on this machine.
@@ -72,14 +72,14 @@ traced in code:
 | # | Content | How it arrives | Written by | In the card? |
 |---|---|---|---|---|
 | 1 | `~/.agentmux/agents/CLAUDE.md` (jekt security rules, PR identity tag) | Claude Code's ancestor-directory `CLAUDE.md` discovery | **No code.** Hand-maintained; its header calls itself the authoritative agent-facing copy since the repo `CLAUDE.md` was removed (#3403) | no |
-| 2 | `<workspace>/CLAUDE.md` | Claude's project `CLAUDE.md` | `write_claude_md_respecting_ownership` ([`crates/srv/src/backend/agent_config.rs:1401`](../../crates/srv/src/backend/agent_config.rs#L1401)). Rewritten only if it carries `CLAUDE_MD_MANAGED_MARKER` (:936) or doesn't exist | no |
+| 2 | `<workspace>/CLAUDE.md` | Claude's project `CLAUDE.md` | `write_claude_md_respecting_ownership` ([`crates/srv/src/backend/agent_config.rs:1401`](../../crates/srv/src/backend/agent_config.rs)). Rewritten only if it carries `CLAUDE_MD_MANAGED_MARKER` (:936) or doesn't exist | no |
 | 3 | `<workspace>/.claude/AGENTMUX_MEMORY.md` | `@.claude/AGENTMUX_MEMORY.md` import appended to a foreign `CLAUDE.md` (:941, :962, :1509-1523) | same function, every launch | no |
-| 4 | Global Memory (the 3 Operator Config entries, plus any workspace entries) | inside #2 or #3, as `# Memory` | `inject_global_bundles` ([`crates/srv/src/server/editor_handlers.rs:93-116`](../../crates/srv/src/server/editor_handlers.rs#L93-L116)) or `write_agent_config_files` (`app_api/agent_open.rs:1057-1066`), both via `format_global_bundle_block` (`backend/storage/bundles.rs:184`) | no (as a file) |
+| 4 | Global Memory (the 3 Operator Config entries, plus any workspace entries) | inside #2 or #3, as `# Memory` | `inject_global_bundles` ([`crates/srv/src/server/editor_handlers.rs:93-116`](../../crates/srv/src/server/editor_handlers.rs)) or `write_agent_config_files` (`app_api/agent_open.rs:1057-1066`), both via `format_global_bundle_block` (`backend/storage/bundles.rs:184`) | no (as a file) |
 | 5 | Global + Personal Memory again | SessionStart hook, `agentmux-bashwrap sessionstart --part 1..8` | `compose_delivery` (`server/memory_delivery_handlers.rs:340`), `global_entries` (:364), `personal_entries_in` (:387) | **yes, the only thing in the card** |
 | 6 | Skills index `# Available Skills` | inside #2/#3 | `build_config_files` (`agent_config.rs:101-117`) | no |
 | 7 | Skill files `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` | Claude's native skill/command listing | `agent_config.rs:139-158` | no |
 | 8 | MCP tools (`agentmux` server) | `.mcp.json` | `write_mcp_json_respecting_user_servers` (`agent_config.rs:1222-1312`) | no |
-| 9 | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` (user-level) | Claude's user memory | placeholder seeded by `seed_claude_md_placeholder_if_missing` ([`crates/srv/src/backend/providers.rs:812-869`](../../crates/srv/src/backend/providers.rs#L812-L869)) | no |
+| 9 | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` (user-level) | Claude's user memory | placeholder seeded by `seed_claude_md_placeholder_if_missing` ([`crates/srv/src/backend/providers.rs:812-869`](../../crates/srv/src/backend/providers.rs)) | no |
 | 10 | Continuation packet | prefixed to the first user message | `build_continuation_packet` (`backend/continuity.rs:262-337`) | no (label only; #4034 CD4 covers it) |
 
 The card ([`frontend/app/view/agent/components/ContextDeliveryCard.tsx`](../../frontend/app/view/agent/components/ContextDeliveryCard.tsx))
@@ -367,7 +367,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
 ### 6.1 How a repin reaches an agent today
 
 - **The pin is compiled in.** `ProviderDefinition.pinned_version`
-  ([`crates/srv/src/backend/providers.rs:113`](../../crates/srv/src/backend/providers.rs#L113); Claude `"2.1.285"` at :295,
+  ([`crates/srv/src/backend/providers.rs:113`](../../crates/srv/src/backend/providers.rs); Claude `"2.1.285"` at :295,
   mirrored in the frontend catalog). A repin reaches a user only with a new
   AgentMux build.
 - **Installs are shared, one directory per version.**
@@ -377,7 +377,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
   Old version directories are never pruned.
 - **The version is chosen when the CLI process spawns**, never for a
   running process. The frontend's `resolveCliBin`
-  ([`frontend/app/view/agent/agent-launch-env.ts:108-120`](../../frontend/app/view/agent/agent-launch-env.ts#L108-L120)) calls
+  ([`frontend/app/view/agent/agent-launch-env.ts:108-120`](../../frontend/app/view/agent/agent-launch-env.ts)) calls
   `ResolveCli` with a 300 s timeout, which npm-installs the pinned version
   if it's missing (`server/cli_handlers.rs:180-215`). A Claude persistent
   pane keeps its binary until its process respawns (restart, reconnect,
@@ -391,7 +391,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
 | A pane restored at startup (already in the layout) | **No.** `ResolveCli` installs silently; the pane is just slower to start. The only trace is srv's log line `"CLI installed (npm)"` (`cli_handlers.rs:208`). |
 | The agent comes back on a different version (e.g. 2.1.218 → 2.1.285) | **No,** on any path. The Toolchain pane shows the current version if you look. |
 | "Update available" badge | Fires only for `behind-pin` (`providers/version-drift.ts:58-66,106`), i.e. an *older* install found, which only the legacy per-AgentMux-version layout produces. Never for a fresh instance. |
-| The CLI updating itself | Unknown. Claude Code's auto-updater is disabled only in [`docker/Dockerfile.agent-agentmux:98`](../../docker/Dockerfile.agent-agentmux#L98) (`DISABLE_AUTOUPDATER=1`); srv sets nothing for host agents, so an install may drift past the pin unnoticed. |
+| The CLI updating itself | Unknown. Claude Code's auto-updater is disabled only in [`docker/Dockerfile.agent-agentmux:98`](../../docker/Dockerfile.agent-agentmux) (`DISABLE_AUTOUPDATER=1`); srv sets nothing for host agents, so an install may drift past the pin unnoticed. |
 
 ### 6.3 Design
 

@@ -49,9 +49,9 @@ Only the "show the menu above the pane" step is missing on macOS.
 |---|---|---|
 | 1. Right-click reaches the pane's Chromium view | Native. Windows: child window. macOS: `NativeWidgetMacNSWindow` overlay; right-mouse-down (ev 3) on the overlay falls through `swizzled_nsapp_send_event` (`ui_tasks/platform_macos.rs:229`) untouched | per-OS, already works on both |
 | 2. `run_context_menu` captures x/y, link, selection, editable, back/forward, target frame; cancels Chromium's menu; emits `browser-pane-context-menu` to the pane's owning window | `agentmux-cef/src/client/context_menu.rs:38-123`, registered for every browser pane in `client/handlers.rs:46-55`, no `cfg` | shared |
-| 3. Block frame maps pane x/y to window CSS px using `.browser-placeholder`'s rect and calls `onBodyContextMenu` | [`frontend/app/block/blockframe.tsx:1233-1285`](../../frontend/app/block/blockframe.tsx#L1233-L1285) | shared |
+| 3. Block frame maps pane x/y to window CSS px using `.browser-placeholder`'s rect and calls `onBodyContextMenu` | [`frontend/app/block/blockframe.tsx:1233-1285`](../../frontend/app/block/blockframe.tsx) | shared |
 | 4. Items: `BrowserModel.getBodyContextMenuItems` + `buildPaneContextMenu` | `browser-model.ts:650-739`, `block/pane-actions.ts:149-222` | shared |
-| 5. Render a DOM menu with a full-window backdrop; `.menu` and submenus are tagged `data-pane-overlay` | `showJsContextMenu`, [`frontend/util/cef-api.ts:151-395`](../../frontend/util/cef-api.ts#L151-L395) | shared |
+| 5. Render a DOM menu with a full-window backdrop; `.menu` and submenus are tagged `data-pane-overlay` | `showJsContextMenu`, [`frontend/util/cef-api.ts:151-395`](../../frontend/util/cef-api.ts) | shared |
 | 6. **Punch the menu's rect out of the pane so it shows through** | `pane-overlay-auto.ts` sees `[data-pane-overlay]` → `pane-overlay.ts sendClip()` → `browser_panes_set_overlay_clip` → `SetWindowRgn` (`browser_panes/clip.rs:58-351`) | **Windows only: the auto service returns early off Windows** |
 | 7. Actions run back on the pane via `browser_pane_go_back/forward/reload/print/view_source/inspect_element/cut/copy/paste` | `agentmux-cef/src/ipc.rs`, `browser_panes/navigation.rs` | shared |
 

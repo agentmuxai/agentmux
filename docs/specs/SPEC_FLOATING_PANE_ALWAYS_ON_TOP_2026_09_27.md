@@ -84,7 +84,7 @@ level. CEF Views `set_always_on_top(bool)` applies directly.
   chosen by `IS_FLOATING_PANE` (`app.tsx:387`). The pane's standard
   `BlockFrame_Header` is the only chrome. The window label comes from
   `?windowLabel=floating-*`, and the pane's block is the tab's single block.
-- The header's right end is `EndIcons` ([`frontend/app/block/blockframe.tsx:306-418`](../../frontend/app/block/blockframe.tsx#L306-L418)):
+- The header's right end is `EndIcons` ([`frontend/app/block/blockframe.tsx:306-418`](../../frontend/app/block/blockframe.tsx)):
   - the view's `endIconButtons` (the agent pane's **Stash** is one, `agent-model.ts:209-223`);
   - a separator;
   - (mic);

@@ -75,7 +75,7 @@ The new pane needs the `memory` id. The bundle-summary pane holds it today, and 
 - Pane label, tab pill, title (`Memory · Global`), aria label, widget bar, hamburger menu, command palette (keywords keep "knowledge" so the old name still finds it), macOS app menu (`Memory…`), Settings → Widget colors row, layout-import summary.
 - Pointers: "Knowledge → Bundles", "Knowledge → Skills", "Knowledge → Personal", "Browse all in Knowledge →", "Manage/Edit in Knowledge" become Memory (`AgentNewBundleModal`, `AgentSkillsModal`, `AgentStartupModal`, `bundle-summary.tsx`, `bundle-manager.tsx` help text, `MemoryAdoptionApprovalWindow`).
 - The new-agent form changes as in §3.6. The Drone node's "Memory" field becomes **Bundle**, or **Bundles** once agents take several (§6 D6).
-- Agent-facing text: the `GlobalMemoryWrite` and `GlobalMemoryRemove` tool descriptions ([`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs)), and the CLAUDE.md placeholder text that says to use "Knowledge -> Global" ([`crates/srv/src/backend/providers.rs:888`](../../crates/srv/src/backend/providers.rs#L888)). Files already written aren't rewritten; that's acceptable, the text stays understandable.
+- Agent-facing text: the `GlobalMemoryWrite` and `GlobalMemoryRemove` tool descriptions ([`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs)), and the CLAUDE.md placeholder text that says to use "Knowledge -> Global" ([`crates/srv/src/backend/providers.rs:888`](../../crates/srv/src/backend/providers.rs)). Files already written aren't rewritten; that's acceptable, the text stays understandable.
 - Comments and test names that describe the pane (about 45 lines), including the stale "Armory 'Memory' tab" ones in §2.
 
 ### 3.6 The new-agent form

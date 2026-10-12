@@ -56,10 +56,10 @@ Independent of the refactor; ship first.
 
 | File | Change |
 |------|--------|
-| [`frontend/layout/lib/TileLayout.win32.tsx:263`](../../frontend/layout/lib/TileLayout.win32.tsx#L263) | `magnifiedBlockSizeAtom() ?? 0.9` → `?? 1.0` |
-| [`frontend/layout/lib/TileLayout.linux.tsx:234`](../../frontend/layout/lib/TileLayout.linux.tsx#L234) | same |
-| [`frontend/layout/lib/TileLayout.darwin.tsx:232`](../../frontend/layout/lib/TileLayout.darwin.tsx#L232) | same |
-| [`frontend/app/block/block.scss:308`](../../frontend/app/block/block.scss#L308) | `--magnified-block-opacity: 0.95` → `1` |
+| [`frontend/layout/lib/TileLayout.win32.tsx:263`](../../frontend/layout/lib/TileLayout.win32.tsx) | `magnifiedBlockSizeAtom() ?? 0.9` → `?? 1.0` |
+| [`frontend/layout/lib/TileLayout.linux.tsx:234`](../../frontend/layout/lib/TileLayout.linux.tsx) | same |
+| [`frontend/layout/lib/TileLayout.darwin.tsx:232`](../../frontend/layout/lib/TileLayout.darwin.tsx) | same |
+| [`frontend/app/block/block.scss:308`](../../frontend/app/block/block.scss) | `--magnified-block-opacity: 0.95` → `1` |
 
 `window:magnifiedblocksize` / `window:magnifiedblockopacity` stay
 `Option<f64>` (default `None`) in `agentmux-srv/.../wconfig/types.rs` — the

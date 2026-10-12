@@ -42,10 +42,10 @@ Magnify any pane via its header button, then restore it. After restore,
 
 The magnify feature renders the magnified pane **twice**:
 
-- [`frontend/layout/lib/TileLayout.win32.tsx:502`](../../frontend/layout/lib/TileLayout.win32.tsx#L502) — the original tile node
+- [`frontend/layout/lib/TileLayout.win32.tsx:502`](../../frontend/layout/lib/TileLayout.win32.tsx) — the original tile node
   stays mounted and merely gets the `tile-hidden` CSS class while magnified
   (`class={clsx("tile-node", { "tile-hidden": isMagnified() })}`).
-- [`frontend/layout/lib/TileLayout.win32.tsx:260`](../../frontend/layout/lib/TileLayout.win32.tsx#L260) `MagnifiedPaneOverlay` —
+- [`frontend/layout/lib/TileLayout.win32.tsx:260`](../../frontend/layout/lib/TileLayout.win32.tsx) `MagnifiedPaneOverlay` —
   renders the *same node* a second time via
   `props.layoutModel.renderContent(nodeModel)` (line 300), into a separate
   overlay container "outside display-container to avoid stacking context
@@ -54,7 +54,7 @@ The magnify feature renders the magnified pane **twice**:
 So while magnified there are **two live `Block` components for the same
 `blockId`**.
 
-`Block` ([`frontend/app/block/block.tsx:290`](../../frontend/app/block/block.tsx#L290)) registers itself in a
+`Block` ([`frontend/app/block/block.tsx:290`](../../frontend/app/block/block.tsx)) registers itself in a
 **`blockId`-keyed map**:
 
 - `createEffect` (line 302) → `registerBlockComponentModel(blockId, { viewModel })`
@@ -62,7 +62,7 @@ So while magnified there are **two live `Block` components for the same
   `viewModel()?.dispose()`
 
 `blockComponentModelMap` is keyed by `blockId` alone
-([`frontend/app/store/global.ts:680-687`](../../frontend/app/store/global.ts#L680-L687)), so the two `Block` instances share
+([`frontend/app/store/global.ts:680-687`](../../frontend/app/store/global.ts)), so the two `Block` instances share
 **one** map entry.
 
 Lifecycle of the shared entry:
@@ -269,8 +269,8 @@ the user asks.
 | Magnify bug (Option A) | `frontend/layout/lib/TileLayout.{win32,linux,darwin}.tsx` | Single-instance magnified render — no duplicate `Block` mount (see arch spec §4.A) |
 | Browser-pane robustness | [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx); verify host `browser_panes` reducer | One `.browser-placeholder` drives geometry; no `browser_pane_close` on a magnify transition; optional recreate-if-`Closed` recovery (arch spec §4.A′) |
 | Regression tests | [`frontend/layout/tests/`](../../frontend/layout/tests), browser-pane tests | Registry survives magnify→restore; host `browser_panes` entry stays `Live` |
-| Cover whole window | [`frontend/layout/lib/TileLayout.win32.tsx:263`](../../frontend/layout/lib/TileLayout.win32.tsx#L263), `TileLayout.linux.tsx:234`, `TileLayout.darwin.tsx:232` | `?? 0.9` → `?? 1.0` |
-| Opacity 100% | [`frontend/app/block/block.scss:308`](../../frontend/app/block/block.scss#L308) | `--magnified-block-opacity: 0.95` → `1` |
+| Cover whole window | [`frontend/layout/lib/TileLayout.win32.tsx:263`](../../frontend/layout/lib/TileLayout.win32.tsx), `TileLayout.linux.tsx:234`, `TileLayout.darwin.tsx:232` | `?? 0.9` → `?? 1.0` |
+| Opacity 100% | [`frontend/app/block/block.scss:308`](../../frontend/app/block/block.scss) | `--magnified-block-opacity: 0.95` → `1` |
 
 The defaults (size, opacity) are frontend-only. The magnify/browser-pane fix
 is frontend-led but may need a host reducer change if magnify becomes a

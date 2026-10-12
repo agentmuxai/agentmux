@@ -34,7 +34,7 @@ Confirmed independently this session:
 - The downloaded `v0.55.21` AppImage's internal structure (icon, `.desktop`,
   `AppRun`) is completely correct — not a packaging defect.
 - `chrome-sandbox` is copied into the AppImage
-  ([`scripts/build-appimage-linux.sh:150-158`](../../scripts/build-appimage-linux.sh#L150-L158)) but is **never chmod'd, chown'd,
+  ([`scripts/build-appimage-linux.sh:150-158`](../../scripts/build-appimage-linux.sh)) but is **never chmod'd, chown'd,
   or made setuid anywhere** in the build — confirmed dead weight, consistent
   with [`docs/cef-build/build-patched-libcef.md:224-228`](../cef-build/build-patched-libcef.md) ("chrome-sandbox is
   intentionally omitted... ships fine without it").

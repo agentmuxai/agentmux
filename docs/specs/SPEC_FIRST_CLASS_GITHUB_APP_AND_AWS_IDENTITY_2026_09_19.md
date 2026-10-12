@@ -89,7 +89,7 @@ codebase has to a real extension point.
 - No `key_validator` arm for `aws` (`key_validator.rs:73-82`), so an AWS
   account can never validate.
 - `AccountContext.aws_profile / aws_role_arn / aws_region`
-  ([`frontend/app/view/identity/identity-model.ts:45-47`](../../frontend/app/view/identity/identity-model.ts#L45-L47)) are display-only.
+  ([`frontend/app/view/identity/identity-model.ts:45-47`](../../frontend/app/view/identity/identity-model.ts)) are display-only.
 - The AWS tile carries an explicit comment that IAM Identity Center "isn't
   wired in the backend yet" (`accounts-catalog.ts:40`).
 - **`credential_process` appears nowhere in the codebase.**

@@ -58,8 +58,8 @@ a separate decision is made to ship dumps off-machine.
   logging-only — no dump, and it doesn't catch a hung (not throwing) JS main
   thread.
 - **WER LocalDumps is registered for the backend only**, keyed to the exact
-  versioned srv exe filename ([`tools/enable-crash-dumps.reg:13`](../../tools/enable-crash-dumps.reg#L13),
-  [`scripts/register-crash-dumps.ps1:63`](../../scripts/register-crash-dumps.ps1#L63)). Nothing registers the host/CEF
+  versioned srv exe filename ([`tools/enable-crash-dumps.reg:13`](../../tools/enable-crash-dumps.reg),
+  [`scripts/register-crash-dumps.ps1:63`](../../scripts/register-crash-dumps.ps1)). Nothing registers the host/CEF
   exe. The handful of `agentmux-cef.exe` `.dmp` files already found on this
   machine are Windows' own unconfigured default WER queuing — no guaranteed
   path, retention, or dump-type configuration behind them.

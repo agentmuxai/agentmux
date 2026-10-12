@@ -56,7 +56,7 @@ implementations, all reading the same underlying meta key but computed
 differently per pane type:
 
 - **Agent**: `zoomFactor` — a `createMemo` inside `AgentPresentationView`
-  ([`frontend/app/view/agent/agent-view.tsx:1772-1777`](../../frontend/app/view/agent/agent-view.tsx#L1772-L1777)):
+  ([`frontend/app/view/agent/agent-view.tsx:1772-1777`](../../frontend/app/view/agent/agent-view.tsx)):
   ```ts
   const zoomFactor = createMemo(() => {
       const meta = block()?.meta;
@@ -298,7 +298,7 @@ they render permanently underneath the strip.
 
 ## B.1 Root cause
 
-`.agent-document` ([`frontend/app/view/agent/styles/_document.scss:100-141`](../../frontend/app/view/agent/styles/_document.scss#L100-L141))
+`.agent-document` ([`frontend/app/view/agent/styles/_document.scss:100-141`](../../frontend/app/view/agent/styles/_document.scss))
 had only 2px of top clearance (`var(--space-0-5)`) against a 28px-tall
 strip — the first `.agent-document-row` rendered essentially flush to
 y=0, directly behind the strip's full width, whenever the conversation

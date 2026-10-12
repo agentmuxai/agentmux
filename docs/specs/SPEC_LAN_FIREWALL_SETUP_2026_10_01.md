@@ -41,7 +41,7 @@ The owner approved the OS prompt. That is the point: **the prompt cannot be reli
 - mDNS uses the `mdns-sd` crate: raw sockets on UDP 5353, i.e. exactly the app-owned responder that needs its own UDP rule (R8).
 - Windows ships three ways: **portable zip** (no installer), **Inno Setup per-user installer** ([`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss), no admin), and **MSIX**. A fresh install has no admin and no rules.
 - LAN is **opt-in** (HostPopover toggle). `windows-firewall-fix.md` kept the prompt away by keeping mDNS off. That avoided the dialog but left LAN unusable until the owner hunted for a toggle, and gave no help when it broke.
-- macOS already declares both Local Network keys ([`scripts/package-macos.sh:386`](../../scripts/package-macos.sh#L386)). Whether raw-socket mDNS triggers the prompt is unverified (R10).
+- macOS already declares both Local Network keys ([`scripts/package-macos.sh:386`](../../scripts/package-macos.sh)). Whether raw-socket mDNS triggers the prompt is unverified (R10).
 - **The sidecar's filename embeds its version** (`runtime\agentmux-srv-0.59.1-windows.x64.exe`), and portable and dev builds live at a new path each time. A program rule therefore stops matching on every update, and re-registering it needs another elevation: the repeating-prompt failure R7 warns about. This is why the first draft of 4.1 (one rule per exe path) cannot deliver "one prompt, ever".
 - The indicator has `off | idle | peers | error`. A firewall block lands in `idle`, the "healthy" state.
 

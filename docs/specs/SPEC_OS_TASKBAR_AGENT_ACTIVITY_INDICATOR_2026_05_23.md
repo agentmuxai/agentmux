@@ -45,7 +45,7 @@ AgentMux already has the data we need; it just isn't aggregated globally.
 
 ### 2.1 Per-pane busy signal (today)
 
-[`frontend/app/store/agent-pane-state/types.ts:118`](../../frontend/app/store/agent-pane-state/types.ts#L118) defines `TurnPhase` — a discriminated union `{ Idle | Submitting | Streaming | Interrupting | Done | Disconnected }`. Since PR G this is the **sole** working-state encoding; the legacy `turnActiveAtom` / `stoppingAtom` / `streaming.active` booleans were removed. Per pane, [`frontend/app/view/agent/state.ts:83`](../../frontend/app/view/agent/state.ts#L83) exposes `turnPhaseAtom: SignalPair<TurnPhase>`, populated by the agent-pane-state reducer (driven by WebSocket events from `agentmux-srv`).
+[`frontend/app/store/agent-pane-state/types.ts:118`](../../frontend/app/store/agent-pane-state/types.ts) defines `TurnPhase` — a discriminated union `{ Idle | Submitting | Streaming | Interrupting | Done | Disconnected }`. Since PR G this is the **sole** working-state encoding; the legacy `turnActiveAtom` / `stoppingAtom` / `streaming.active` booleans were removed. Per pane, [`frontend/app/view/agent/state.ts:83`](../../frontend/app/view/agent/state.ts) exposes `turnPhaseAtom: SignalPair<TurnPhase>`, populated by the agent-pane-state reducer (driven by WebSocket events from `agentmux-srv`).
 
 The canonical "is this agent busy" selector is `workingFromPhase(phase)` (`agent-pane-state/types.ts:250-253`):
 
@@ -287,10 +287,10 @@ Each step is independently revertible. Steps 4 and 5 can land in either order; s
 
 ### Codebase
 
-- [`frontend/app/store/agent-pane-state/types.ts:118-152`](../../frontend/app/store/agent-pane-state/types.ts#L118-L152) — `TurnPhase` union.
-- [`frontend/app/store/agent-pane-state/types.ts:239-253`](../../frontend/app/store/agent-pane-state/types.ts#L239-L253) — `isWorking` / `workingFromPhase` selectors.
-- [`frontend/app/view/agent/state.ts:83`](../../frontend/app/view/agent/state.ts#L83) — `turnPhaseAtom` projection.
-- [`frontend/app/store/agent-pane-registration.ts:122`](../../frontend/app/store/agent-pane-registration.ts#L122) — atomic dual-store pane registration (the pattern `agentActivity.ts` registers alongside).
+- [`frontend/app/store/agent-pane-state/types.ts:118-152`](../../frontend/app/store/agent-pane-state/types.ts) — `TurnPhase` union.
+- [`frontend/app/store/agent-pane-state/types.ts:239-253`](../../frontend/app/store/agent-pane-state/types.ts) — `isWorking` / `workingFromPhase` selectors.
+- [`frontend/app/view/agent/state.ts:83`](../../frontend/app/view/agent/state.ts) — `turnPhaseAtom` projection.
+- [`frontend/app/store/agent-pane-registration.ts:122`](../../frontend/app/store/agent-pane-registration.ts) — atomic dual-store pane registration (the pattern `agentActivity.ts` registers alongside).
 - `agentmux-cef/src/window/window.rs:16-100` — existing IPC command pattern (`zoom_factor`, `close_window`).
 - `agentmux-cef/src/window/window.rs:92` — `BrowserHost::window_handle()` (HWND source).
 - `agentmux-cef/Cargo.toml:54-82` — `windows` crate features already include `Win32_UI_Shell`, `Win32_System_Com`.

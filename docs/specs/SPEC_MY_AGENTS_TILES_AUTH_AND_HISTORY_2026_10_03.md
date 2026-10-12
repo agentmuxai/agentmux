@@ -17,7 +17,7 @@ In the agent pane's **My Agents** list ("MY AGENTS 20"):
 
 ## 2. How a tile is built today
 
-One backend call fills the list: `ListRecentSessionsCommand`, handled in [`crates/srv/src/server/agent_handlers/session.rs`](../../crates/srv/src/server/agent_handlers/session.rs) (`register()`), returning `RecentSessionRow` ([`crates/srv/src/backend/rpc_types/instance.rs:164-231`](../../crates/srv/src/backend/rpc_types/instance.rs#L164-L231)). The frontend is [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx); tile styling is [`frontend/app/view/agent/styles/_recent-sessions.scss`](../../frontend/app/view/agent/styles/_recent-sessions.scss).
+One backend call fills the list: `ListRecentSessionsCommand`, handled in [`crates/srv/src/server/agent_handlers/session.rs`](../../crates/srv/src/server/agent_handlers/session.rs) (`register()`), returning `RecentSessionRow` ([`crates/srv/src/backend/rpc_types/instance.rs:164-231`](../../crates/srv/src/backend/rpc_types/instance.rs)). The frontend is [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx); tile styling is [`frontend/app/view/agent/styles/_recent-sessions.scss`](../../frontend/app/view/agent/styles/_recent-sessions.scss).
 
 | Element | Where it comes from |
 |---|---|

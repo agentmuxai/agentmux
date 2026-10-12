@@ -303,7 +303,7 @@ This spec's new tab-bar drop target (§4.1) must call `event.preventDefault()`-e
 - [`docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md`](SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) — original design doc for `RedockFloatingPane`, the pattern this spec copies.
 - [`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts), `layoutTree.ts`, `layoutGeometry.ts`, `layoutPersistence.ts` — reducer, tree ops, geometry, and backend-action delivery respectively.
 - [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx), `tabbar-dnd.ts`, `droppable-tab.tsx` — existing tab-reorder drag to extend.
-- [`frontend/app-init.ts:113-273`](../../frontend/app-init.ts#L113-L273) (`installFloatingRedockHoverListener`) — direction/ghost-rect vocabulary to reuse in §4.4.
+- [`frontend/app-init.ts:113-273`](../../frontend/app-init.ts) (`installFloatingRedockHoverListener`) — direction/ghost-rect vocabulary to reuse in §4.4.
 - `agentmux-srv/src/sagas/redock_floating_pane.rs`, `agentmux-srv/src/server/service/layout_helpers.rs`, `workspace.rs:1151-1230` — backend pattern this spec's new RPC should mirror.
 
 ---

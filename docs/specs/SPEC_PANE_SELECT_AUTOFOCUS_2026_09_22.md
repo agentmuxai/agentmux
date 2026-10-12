@@ -46,8 +46,8 @@ if (!ok) {
 
 and that this pattern is a **single synchronous attempt with no retry**,
 appearing in three places: `focusManager.refocusNode()`
-([`frontend/app/store/focusManager.ts:37-49`](../../frontend/app/store/focusManager.ts#L37-L49)), `refocusNode(blockId)`
-([`frontend/app/store/block-component-registry.ts:169-183`](../../frontend/app/store/block-component-registry.ts#L169-L183) — a second,
+([`frontend/app/store/focusManager.ts:37-49`](../../frontend/app/store/focusManager.ts)), `refocusNode(blockId)`
+([`frontend/app/store/block-component-registry.ts:169-183`](../../frontend/app/store/block-component-registry.ts) — a second,
 differently-implemented function with the same name), and
 `openOrFocusPaneByView()` (`block-component-registry.ts:191-208`, focus-only
 branch at line 202; the create branch never calls `giveFocus()` at all).
@@ -56,10 +56,10 @@ Re-verified for this spec:
 
 | `giveFocus()` implementation | Location | Status |
 |---|---|---|
-| Agent | [`frontend/app/view/agent/agent-model.ts:890-892`](../../frontend/app/view/agent/agent-model.ts#L890-L892) | **stub — `return false`** |
-| Editor | [`frontend/app/view/editor/editor-model.ts:1258`](../../frontend/app/view/editor/editor-model.ts#L1258) | **stub — `return false`** |
-| Terminal | [`frontend/app/view/term/termViewModel.ts:499`](../../frontend/app/view/term/termViewModel.ts#L499) | implemented, races mount (calls `termRef.current.terminal.focus()` only if the ref is already populated) |
-| Browser | [`frontend/app/view/browser/browser-model.ts:711`](../../frontend/app/view/browser/browser-model.ts#L711) | real implementation — out of scope, works today |
+| Agent | [`frontend/app/view/agent/agent-model.ts:890-892`](../../frontend/app/view/agent/agent-model.ts) | **stub — `return false`** |
+| Editor | [`frontend/app/view/editor/editor-model.ts:1258`](../../frontend/app/view/editor/editor-model.ts) | **stub — `return false`** |
+| Terminal | [`frontend/app/view/term/termViewModel.ts:499`](../../frontend/app/view/term/termViewModel.ts) | implemented, races mount (calls `termRef.current.terminal.focus()` only if the ref is already populated) |
+| Browser | [`frontend/app/view/browser/browser-model.ts:711`](../../frontend/app/view/browser/browser-model.ts) | real implementation — out of scope, works today |
 
 The prior spec treated the agent-pane stub as something that "falls out for
 free" from fixing the shared contract (its §2c, §4). **This spec elevates it
@@ -68,7 +68,7 @@ and it is the surface most users spend the most time in.
 
 ### 2a. New gap not covered by the prior spec: tab switch does zero focus work
 
-`setActiveTab()` ([`frontend/app/store/tab-actions.ts:92-135`](../../frontend/app/store/tab-actions.ts#L92-L135)) is the entry
+`setActiveTab()` ([`frontend/app/store/tab-actions.ts:92-135`](../../frontend/app/store/tab-actions.ts)) is the entry
 point for every tab switch — tab-bar click, `Ctrl+Tab`/`Ctrl+1..9` (keymodel),
 command palette, and the CEF test API. Read in full for this spec: it awaits
 `WorkspaceService.SetActiveTab(ws.oid, tabId)`, manages a reveal gate and
@@ -88,7 +88,7 @@ Selecting a different pane *within* the same tab (click, arrow-key nav via
 `switchNodeFocusInDirection`, `Cmd+1..9` via `switchNodeFocusByBlockNum` —
 both in [`frontend/layout/lib/layoutFocus.ts`](../../frontend/layout/lib/layoutFocus.ts)) does dispatch through the
 layout tree's `FocusNode` reducer case
-([`frontend/layout/lib/layoutModel.ts:634-637`](../../frontend/layout/lib/layoutModel.ts#L634-L637)):
+([`frontend/layout/lib/layoutModel.ts:634-637`](../../frontend/layout/lib/layoutModel.ts)):
 
 ```ts
 case LayoutTreeActionType.FocusNode:
@@ -96,7 +96,7 @@ case LayoutTreeActionType.FocusNode:
     focusManager.requestNodeFocus();
 ```
 
-But `requestNodeFocus()` ([`frontend/app/store/focusManager.ts:29-31`](../../frontend/app/store/focusManager.ts#L29-L31)) is:
+But `requestNodeFocus()` ([`frontend/app/store/focusManager.ts:29-31`](../../frontend/app/store/focusManager.ts)) is:
 
 ```ts
 requestNodeFocus(): void {
@@ -121,7 +121,7 @@ contract) exactly as designed there, and wire it into three call sites, not
 one:**
 
 1. **Pane creation** (prior spec §2d/§3) — `createBlock()`
-   ([`frontend/app/store/block-layout-actions.ts:68-86`](../../frontend/app/store/block-layout-actions.ts#L68-L86)) inserts a node with
+   ([`frontend/app/store/block-layout-actions.ts:68-86`](../../frontend/app/store/block-layout-actions.ts)) inserts a node with
    `focused: true` but never invokes the contract at all.
 2. **Within-tab pane selection** (§2b above) — make
    `focusManager.requestNodeFocus()` do what `refocusNode()` already does,
@@ -263,13 +263,13 @@ Grounded in this investigation, not exhaustive:
   create branch (line ~205), per the prior spec's §2d.
 - [`frontend/app/store/block-layout-actions.ts`](../../frontend/app/store/block-layout-actions.ts) (`createBlock`, line 68) —
   creation-path wiring per the prior spec.
-- [`frontend/app/view/agent/agent-model.ts:890`](../../frontend/app/view/agent/agent-model.ts#L890) +
+- [`frontend/app/view/agent/agent-model.ts:890`](../../frontend/app/view/agent/agent-model.ts) +
   [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) — real `giveFocus()`
   for the agent pane, via a registered handle (§3a).
-- [`frontend/app/view/editor/editor-model.ts:1258`](../../frontend/app/view/editor/editor-model.ts#L1258) +
+- [`frontend/app/view/editor/editor-model.ts:1258`](../../frontend/app/view/editor/editor-model.ts) +
   [`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx) — real `giveFocus()` for the
   editor pane, needs `cmView` exposed to the model (§3a).
-- [`frontend/app/view/term/termViewModel.ts:499`](../../frontend/app/view/term/termViewModel.ts#L499) — extend the existing
+- [`frontend/app/view/term/termViewModel.ts:499`](../../frontend/app/view/term/termViewModel.ts) — extend the existing
   implementation with the retry/readiness mechanism from Option A instead of
   a one-shot ref check.
 

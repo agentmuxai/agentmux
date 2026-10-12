@@ -33,10 +33,10 @@ via Win32 `SetWindowRgn(... RGN_DIFF ...)`:
 
 | Layer | File:line | What it does |
 |---|---|---|
-| Frontend hook | [`frontend/app/platform/pane-overlay.ts:59-72`](../../frontend/app/platform/pane-overlay.ts#L59-L72) | `usePaneOverlay(getEl)` reads `getBoundingClientRect`, stores in a module-level `Map`, sends the union to IPC |
+| Frontend hook | [`frontend/app/platform/pane-overlay.ts:59-72`](../../frontend/app/platform/pane-overlay.ts) | `usePaneOverlay(getEl)` reads `getBoundingClientRect`, stores in a module-level `Map`, sends the union to IPC |
 | IPC | `agentmux-cef/src/ipc.rs` → `browser_panes_set_overlay_clip` | Forwards rects to the lifecycle manager |
 | Backend | `agentmux-cef/src/browser_panes.rs:343-423` | For every live pane HWND: builds a region = pane-rect minus every intersecting overlay rect; `SetWindowRgn`. Empty list → `NULL` region → full visibility restored |
-| Consumer | [`frontend/app/window/action-widgets.tsx:144-214`](../../frontend/app/window/action-widgets.tsx#L144-L214) (`MoreDropdown`) | Calls `usePaneOverlay(() => overlayEl)` on the dropdown's outer div |
+| Consumer | [`frontend/app/window/action-widgets.tsx:144-214`](../../frontend/app/window/action-widgets.tsx) (`MoreDropdown`) | Calls `usePaneOverlay(() => overlayEl)` on the dropdown's outer div |
 
 The registry is shared and union-based — multiple overlays stack
 cleanly (`sendClip()` sends the Array of all current rects every time).

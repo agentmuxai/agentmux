@@ -321,7 +321,7 @@ the zone machinery.
 | File | Change |
 |------|--------|
 | [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) | Add context menu, active-instance badge, fork prompt inline UI |
-| [`frontend/app/view/agent/agent-model.ts:276`](../../frontend/app/view/agent/agent-model.ts#L276) | Add active-instance detection in `launchAgentDefinition()` |
+| [`frontend/app/view/agent/agent-model.ts:276`](../../frontend/app/view/agent/agent-model.ts) | Add active-instance detection in `launchAgentDefinition()` |
 | [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) | Pass active-instance map to MyAgentsList |
 | `agentmux-srv/src/server/agent_handlers.rs` | Add `AgentDefinitionForkCommand` handler |
 | `agentmux-srv/src/backend/storage/agents.rs` | Add `definition_active_instance()` helper |

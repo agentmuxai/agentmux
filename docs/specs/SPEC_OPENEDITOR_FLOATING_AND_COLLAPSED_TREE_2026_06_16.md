@@ -60,7 +60,7 @@ tear-off flow (drag path, `service.rs:1873` + `CrossWindowDragMonitor.*`):
 So a programmatic float needs a srv→frontend directive.
 
 ### 2.4 srv→frontend directive channel (scoped pub/sub)
-[`frontend/app/store/global.ts:259`](../../frontend/app/store/global.ts#L259) `initGlobalEventSubs` subscribes via `waveEventSubscribe(
+[`frontend/app/store/global.ts:259`](../../frontend/app/store/global.ts) `initGlobalEventSubs` subscribes via `waveEventSubscribe(
 {eventType, handler, scope?})` (`store/wps.ts`). `scope` becomes a `SubscriptionRequest.scopes`
 entry; srv broadcasts `WSEventType{eventtype, oref, data}` (`backend/eventbus.rs:43,158`) and the
 bus routes by `eventtype` + `oref`-vs-`scope`. The existing `userinput` sub is **scoped to

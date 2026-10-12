@@ -139,7 +139,7 @@ applies directly.
   choice, not a missing server capability.)
 - The correct function name is `estimateTokenCount`, not `estimateTokens`
   (this doc's own earlier draft got the name wrong) —
-  [`frontend/util/format-count.ts:63`](../../frontend/util/format-count.ts#L63) — `estimateTokenCount(text) =
+  [`frontend/util/format-count.ts:63`](../../frontend/util/format-count.ts) — `estimateTokenCount(text) =
   Math.ceil(text.length / 4)` — the repo's existing chars÷4 estimate
   convention, labeled `(est.)` wherever it's shown
   (`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`,

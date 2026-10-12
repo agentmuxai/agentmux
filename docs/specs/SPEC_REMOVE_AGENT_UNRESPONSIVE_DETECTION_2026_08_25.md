@@ -132,7 +132,7 @@ detail of the unresponsive detector** — it's the sole source of truth for:
 - `agentmux-srv/src/broker/process.rs`'s `lifecycle_from()` — the public
   `Lifecycle::Running/Idle/Done/Error` enum consumed by the Agent pane,
   the Swarm pane, and `muxspect describe`.
-- [`frontend/app/view/swarm/swarm-model.ts:813-820`](../../frontend/app/view/swarm/swarm-model.ts#L813-L820)'s
+- [`frontend/app/view/swarm/swarm-model.ts:813-820`](../../frontend/app/view/swarm/swarm-model.ts)'s
   `derivedRunningStatus()` — the Swarm pane's per-agent running/idle badge
   ("For `is_agent_pane` panes, trust `turn_active` alone").
 - `agentmux-srv/src/backend/subagent_watcher/scan.rs`'s stale-subagent

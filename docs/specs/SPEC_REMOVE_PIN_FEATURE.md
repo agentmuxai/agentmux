@@ -22,7 +22,7 @@ After the change, pinning is no longer a concept. Every tab is a regular tab; ev
 ### Data model
 
 - Workspace type in `agentmux-srv/src/backend/obj.rs:358` has `pub pinnedtabids: Vec<String>`. `tabids` holds the regular tabs. The effective order is `[...pinnedtabids, ...tabids]` (pinned first).
-- `UpdateTabIds(workspaceId, tabIds, pinnedTabIds)` RPC at [`frontend/app/store/services.ts:177`](../../frontend/app/store/services.ts#L177) — frontend writes both lists.
+- `UpdateTabIds(workspaceId, tabIds, pinnedTabIds)` RPC at [`frontend/app/store/services.ts:177`](../../frontend/app/store/services.ts) — frontend writes both lists.
 - Backend DnD (`agentmux-srv/src/backend/wcore/dnd.rs`) treats the two lists separately when reordering, cross-window tear-off, and validation.
 
 ### UI

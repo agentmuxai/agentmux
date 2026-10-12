@@ -30,8 +30,8 @@ dev server they want to keep, a stray `sleep`, or the agent's own tooling.
 
 | Step | Where |
 |---|---|
-| The pane × calls `beforeNodeDelete` | [`frontend/app/tab/tabcontent.tsx:122`](../../frontend/app/tab/tabcontent.tsx#L122) |
-| It collects busy members | `busyMembers()` in [`frontend/app/tab/pane-close-guard.ts:39`](../../frontend/app/tab/pane-close-guard.ts#L39) |
+| The pane × calls `beforeNodeDelete` | [`frontend/app/tab/tabcontent.tsx:122`](../../frontend/app/tab/tabcontent.tsx) |
+| It collects busy members | `busyMembers()` in [`frontend/app/tab/pane-close-guard.ts:39`](../../frontend/app/tab/pane-close-guard.ts) |
 | The process probe keeps **only the length** | `paneCloseProbe.processCount` in `tabcontent.tsx:41-42`: `(await RpcApi.AgentProcessListCommand(...)).processes.length` |
 | Each agent is rendered as one line of text | `describeBusyMember()` in `pane-close-guard.ts:53` |
 | The backend list | `agent.process-list` in `agentmux-srv/src/server/app_api/agent_io.rs:15`, backed by `AgentProcessRegistry::list_block`, which calls `agent_started()` (`agentmux-srv/src/backend/process_tracker/mod.rs:94`) |
@@ -105,7 +105,7 @@ pub struct AgentProcessInfo {
 ```
 
 Map it in `register_agent_process_list` (`agent_io.rs`) and add `parent_pid: number | null` to
-the inline return type in [`frontend/app/store/rpc-api/agent.ts:673`](../../frontend/app/store/rpc-api/agent.ts#L673). The field is additive, so
+the inline return type in [`frontend/app/store/rpc-api/agent.ts:673`](../../frontend/app/store/rpc-api/agent.ts). The field is additive, so
 existing consumers (Shell drawer, Swarm) are unaffected.
 
 ### 4.2 Frontend: group each agent's processes into chains

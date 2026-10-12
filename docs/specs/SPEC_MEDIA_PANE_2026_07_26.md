@@ -76,7 +76,7 @@ Two layers, both need a new entry:
    etc.). Per the file's own header comment, adding a pane never requires
    touching `block.tsx` — only a `registerBlockView()` call here, plus a
    `ViewModel` implementation (`viewType`, `viewIcon`, `viewName`,
-   `viewComponent`, `dispose` — [`frontend/types/custom.d.ts:481-510`](../../frontend/types/custom.d.ts#L481-L510)) and
+   `viewComponent`, `dispose` — [`frontend/types/custom.d.ts:481-510`](../../frontend/types/custom.d.ts)) and
    its Solid component.
 
 Secondary, low-cost additions: [`frontend/app/block/blockutil.tsx`](../../frontend/app/block/blockutil.tsx)'s
@@ -381,7 +381,7 @@ the path string itself changed.
 | `agentmux-srv/src/config/widgets.json` | Canonical widget list — new `defwidget@media` entry |
 | [`frontend/app/block/block-registry.ts`](../../frontend/app/block/block-registry.ts) | viewType → ViewModel registration point |
 | [`frontend/app/block/blockutil.tsx`](../../frontend/app/block/blockutil.tsx) | Fallback icon/label maps |
-| [`frontend/types/custom.d.ts:481-510`](../../frontend/types/custom.d.ts#L481-L510) | `ViewModel` interface new `MediaViewModel` implements |
+| [`frontend/types/custom.d.ts:481-510`](../../frontend/types/custom.d.ts) | `ViewModel` interface new `MediaViewModel` implements |
 | `agentmux-srv/src/server/mod.rs:268-271` | Route table — `stream-local-file`'s current `stub_501` mapping to replace |
 | `agentmux-srv/src/server/files.rs:26-170` | `handle_wave_file`, `handle_docsite`/`handle_schema`, and `mime_from_path` — the patterns the new handler copies (MIME mapping, traversal guards) |
 | `agentmux-srv/src/backend/editor_file_watcher.rs` | Watcher pattern to generalize into `MediaFileWatcher` |

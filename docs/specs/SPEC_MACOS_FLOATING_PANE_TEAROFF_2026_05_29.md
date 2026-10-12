@@ -21,9 +21,9 @@ On Windows, tearing a pane off produces a **chromeless floating window**: just t
 
 The macOS pane tear-off never routes to the floating-pane rendering path. Tracing the chain:
 
-1. **[`frontend/app/drag/CrossWindowDragMonitor.darwin.tsx:147-163`](../../frontend/app/drag/CrossWindowDragMonitor.darwin.tsx#L147-L163)** — `performTearOff()` calls `openTearOffWindow()` for **both** panes and tabs. It never calls `open_floating_pane_window`. (Windows branches: panes → `open_floating_pane_window`, tabs → `openTearOffWindow` — see `CrossWindowDragMonitor.win32.tsx:275-355`.)
+1. **[`frontend/app/drag/CrossWindowDragMonitor.darwin.tsx:147-163`](../../frontend/app/drag/CrossWindowDragMonitor.darwin.tsx)** — `performTearOff()` calls `openTearOffWindow()` for **both** panes and tabs. It never calls `open_floating_pane_window`. (Windows branches: panes → `open_floating_pane_window`, tabs → `openTearOffWindow` — see `CrossWindowDragMonitor.win32.tsx:275-355`.)
 
-2. **[`frontend/app/drag/tear-off-pool-helper.ts:43-64`](../../frontend/app/drag/tear-off-pool-helper.ts#L43-L64)** — `openTearOffWindow()` tries the warm pool (Windows-only; the pool init is `#[cfg(not(target_os = "windows"))] return` in `window_pool.rs:454-459`, so on macOS it's a no-op), then falls through to the cold path `api.openWindowAtPosition()`.
+2. **[`frontend/app/drag/tear-off-pool-helper.ts:43-64`](../../frontend/app/drag/tear-off-pool-helper.ts)** — `openTearOffWindow()` tries the warm pool (Windows-only; the pool init is `#[cfg(not(target_os = "windows"))] return` in `window_pool.rs:454-459`, so on macOS it's a no-op), then falls through to the cold path `api.openWindowAtPosition()`.
 
 3. **`agentmux-cef/src/commands/drag.rs:374-451`** — `open_window_at_position()` mints a `window-<uuid>` label and builds the URL with `ipc_port`, `ipc_token`, `windowLabel`, and (optionally) `workspaceId` — **never `floatingPaneId`**.
 

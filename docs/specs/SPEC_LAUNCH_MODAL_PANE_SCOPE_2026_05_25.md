@@ -36,7 +36,7 @@ The user is configuring **one agent pane**. The modal's authority shouldn't exte
 
 Switch to `scope="pane"`. The unified modal system already supports this:
 
-- `PaneModalScope` context in [`frontend/app/element/modal.tsx:96`](../../frontend/app/element/modal.tsx#L96) — symmetric with `TabModalScope`.
+- `PaneModalScope` context in [`frontend/app/element/modal.tsx:96`](../../frontend/app/element/modal.tsx) — symmetric with `TabModalScope`.
 - `<Modal scope="pane">` resolves the mount node from `useContext(PaneModalScope)`, applies inert to the pane root, backdrop is clipped to the pane via `position: absolute` inside the mount node.
 - Modal stack (§6 of the unified spec) already accounts for pane-scoped lock regions — multiple pane modals in different panes coexist; ESC/backdrop "reachable topmost" calculation does the right thing.
 

@@ -63,8 +63,8 @@ copy it.
 
 | Piece | Where | Use it for |
 |---|---|---|
-| `writeText` | [`frontend/util/clipboard.ts:10`](../../frontend/util/clipboard.ts#L10) → IPC `write_clipboard` (`agentmux-cef/src/commands/clipboard.rs:15`) | The clipboard write. `navigator.clipboard` is blocked in CEF; #2535 fixed this path |
-| `<CopyButton>` | [`frontend/app/element/copybutton.tsx:15`](../../frontend/app/element/copybutton.tsx#L15) | Icon button with copied / failed states. Used by `blockframe.tsx:943`, `markdown-codeblock.tsx:65` |
+| `writeText` | [`frontend/util/clipboard.ts:10`](../../frontend/util/clipboard.ts) → IPC `write_clipboard` (`agentmux-cef/src/commands/clipboard.rs:15`) | The clipboard write. `navigator.clipboard` is blocked in CEF; #2535 fixed this path |
+| `<CopyButton>` | [`frontend/app/element/copybutton.tsx:15`](../../frontend/app/element/copybutton.tsx) | Icon button with copied / failed states. Used by `blockframe.tsx:943`, `markdown-codeblock.tsx:65` |
 | `CopyableErrorMessage` | `view/accounts/AgentMuxConnectPanel.tsx:165` (file-private) | The shape wanted for inline error text. Export it and generalize it |
 | Copy on highlight | `block/BlockErrorBoundary.tsx:160-181` | Its fallback order: `execCommand` first, then IPC, for surfaces whose bridge may be down |
 | Install page "Copy path" | `agentmux-cef/src/commands/window/creation.rs:~220`, test at :1105-1118 | The rule for CEF `data:` pages: wire the handler with `addEventListener` in a `<script>`, never an inline `onclick` |

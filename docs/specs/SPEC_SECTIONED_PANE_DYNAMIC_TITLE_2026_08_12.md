@@ -140,7 +140,7 @@ No test file exists for Settings ([`frontend/app/view/settings/`](../../frontend
 
 ### 2.4 How the block header actually renders `viewName` (applies to all three)
 
-[`frontend/app/block/blockframe.tsx:333-347`](../../frontend/app/block/blockframe.tsx#L333-L347):
+[`frontend/app/block/blockframe.tsx:333-347`](../../frontend/app/block/blockframe.tsx):
 
 ```ts
 const viewName = createMemo(() => {

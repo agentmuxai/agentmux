@@ -23,7 +23,7 @@ Logging a Claude agent in today is unreliable and console-bound. The current tie
 
 Meanwhile the single-point-login spawn gate (`agentmux-srv/src/identity/resolver/inject.rs`) hard-blocks any Claude agent with no bound account — correct policy, but with no in-app way to create that account, users hit a dead-end "Agent encountered an error" (see `retro-agentu-0.54.9-stuck-error-2026-08-03`, the v0.54.9 stuck-instance incident).
 
-An in-app paste-code login UI **already exists and still works** — `AuthUrlBox` ([`frontend/app/view/agent/components/AgentDocumentView.tsx:219-346`](../../frontend/app/view/agent/components/AgentDocumentView.tsx#L219-L346)), fed by IPC `set_provider_auth` → `CliLoginStdin::write_line` (`agentmux-cef/src/commands/providers.rs:329`). It was built in #1277 and cut off for Claude by `35af4958f` because Claude Code **v2.1.183** never printed a login URL when host-spawned. That factual basis is now stale.
+An in-app paste-code login UI **already exists and still works** — `AuthUrlBox` ([`frontend/app/view/agent/components/AgentDocumentView.tsx:219-346`](../../frontend/app/view/agent/components/AgentDocumentView.tsx)), fed by IPC `set_provider_auth` → `CliLoginStdin::write_line` (`agentmux-cef/src/commands/providers.rs:329`). It was built in #1277 and cut off for Claude by `35af4958f` because Claude Code **v2.1.183** never printed a login URL when host-spawned. That factual basis is now stale.
 
 ## 2. New evidence (2026-08-03, live probes)
 

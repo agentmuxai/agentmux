@@ -62,12 +62,12 @@ race in the reload path:
 
 - On first load, the host opens the window with creds in the URL
   (`?ipc_port=..&ipc_token=..&windowLabel=..`). `cef-init.ts setupCefApi()`
-  reads them **synchronously** ([`frontend/cef-init.ts:50-58`](../../frontend/cef-init.ts#L50-L58)), then strips them
+  reads them **synchronously** ([`frontend/cef-init.ts:50-58`](../../frontend/cef-init.ts)), then strips them
   from the URL for security (`:66-71`).
 - On any later load (reload, or the back-navigation here) the URL no longer
   carries creds. `setupCefApi()` then depends on the host's `on_load_end`
   re-injection landing inside its `await waitForIpcCreds(2500)` window
-  ([`frontend/cef-init.ts:73-77`](../../frontend/cef-init.ts#L73-L77)).
+  ([`frontend/cef-init.ts:73-77`](../../frontend/cef-init.ts)).
 - The injection is unconditional but asynchronous
   (`agentmux-cef/src/client/mod.rs` `on_load_end`, executes JS after load
   commit). When it lands *after* the 2.5s budget, `setupCefApi` gives up,

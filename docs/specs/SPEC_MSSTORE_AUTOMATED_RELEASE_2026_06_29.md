@@ -20,7 +20,7 @@ correct artifact), reserving the app, or anything Microsoft gates manually.
 
 **`msstore` (Microsoft Store Developer CLI) driven from a GitHub Actions
 workflow.** AgentMux ships a **packaged MSIX** (`AgentMux_<semver>_x64.msix` from
-[`scripts/package-msix.ps1:156`](../../scripts/package-msix.ps1#L156)), so:
+[`scripts/package-msix.ps1:156`](../../scripts/package-msix.ps1)), so:
 
 - The `microsoft/store-submission` Action is **out** — it is the *unpackaged
   MSI/EXE* flow; wrong artifact class.

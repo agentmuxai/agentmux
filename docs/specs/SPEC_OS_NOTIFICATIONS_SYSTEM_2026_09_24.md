@@ -56,7 +56,7 @@
 | In-app toast bubbles | Live. About 15 callers of `pushNotification` / `pushFlashError` | [`frontend/app/store/flash-notifications.ts`](../../frontend/app/store/flash-notifications.ts), [`frontend/app/notification/notificationbubbles.tsx`](../../frontend/app/notification/notificationbubbles.tsx), mounted `app.tsx:450`. Type in `custom.d.ts:710-721` |
 | Sounds | Live. 6 sound IDs; suppressed while the source pane is focused | [`frontend/app/notification/sound/`](../../frontend/app/notification/sound) (`sounds.ts`, `sound-service.ts`), [`frontend/app/window/window-focus.ts`](../../frontend/app/window/window-focus.ts) |
 | "Ran while you were away" | Live | `agentmux-cef/src/background_audit.rs`, [`frontend/app/init/background-audit.ts`](../../frontend/app/init/background-audit.ts) |
-| OS toasts | **None. Deliberately disabled** | `agentmux-cef/src/app/mod.rs:911-918` (`disable-notifications`), [`scripts/package-macos.sh:286-293`](../../scripts/package-macos.sh#L286-L293) (Alerts helper stripped), [`docs/retro/retro-macos-notification-double-prompt-regression-2026-06-22.md`](../retro/retro-macos-notification-double-prompt-regression-2026-06-22.md) |
+| OS toasts | **None. Deliberately disabled** | `agentmux-cef/src/app/mod.rs:911-918` (`disable-notifications`), [`scripts/package-macos.sh:286-293`](../../scripts/package-macos.sh) (Alerts helper stripped), [`docs/retro/retro-macos-notification-double-prompt-regression-2026-06-22.md`](../retro/retro-macos-notification-double-prompt-regression-2026-06-22.md) |
 | Taskbar overlay / flash / dock badge | None. The draft spec was never built | `SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md` |
 
 Tauri-era history: `tauri-plugin-notification` and `frontend/util/notification.ts` were deleted in #665. Nothing survives.
@@ -83,7 +83,7 @@ The srv event bus is `backend/mps.rs` (a port of Wave's `wps`). It has one fan-o
   - The Inno Setup shortcuts ([`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss)) carry **no** `AppUserModelID:` parameter.
   - There is no HKCU `AppUserModelId` registration.
   - MSIX packages have a package identity (`AgentMux.AgentMux_vqr1k32tkfk4y!AgentMux`), so toasts work there without extra registration, but under a **different** AUMID.
-- **macOS bundle ID:** `ai.agentmux.<channel>.<version>` ([`scripts/package-macos.sh:163-172`](../../scripts/package-macos.sh#L163-L172)), so **each version is a new bundle ID**. Notification permission and per-app notification settings are keyed by bundle ID, so every update would re-prompt and reset the user's choices. The bundle's main executable is `agentmux-launcher` (`LSUIElement=true`), which is good: the launcher is the right process to own `UNUserNotificationCenter`.
+- **macOS bundle ID:** `ai.agentmux.<channel>.<version>` ([`scripts/package-macos.sh:163-172`](../../scripts/package-macos.sh)), so **each version is a new bundle ID**. Notification permission and per-app notification settings are keyed by bundle ID, so every update would re-prompt and reset the user's choices. The bundle's main executable is `agentmux-launcher` (`LSUIElement=true`), which is good: the launcher is the right process to own `UNUserNotificationCenter`.
 - **Linux:** [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop), with `StartupWMClass` rewritten per channel and version.
 - **Foreground signal:** the host already reports `ReportHwndForegroundChanged { hwnd }` to the launcher over the launcher pipe (`agentmux-common/src/ipc.rs:242`, handled `launcher/src/reducer/mod.rs:299`). **The launcher already knows whether an AgentMux window is foreground.** It does not know which pane or agent is focused; only the renderer knows that (`focusManager`).
 - **Custom URL scheme:** none (`agentmux://` has zero hits in code or packaging).
@@ -491,9 +491,9 @@ Phase 5 is what fully delivers G4. Until it lands, `InputWaiting` requires the a
 - jekt stop: `reactive/handler.rs:1219-1284`, `sanitize.rs:327-379`
 - AUMID: `agentmux-cef/src/lib.rs:475-485`
 - `disable-notifications`: `agentmux-cef/src/app/mod.rs:911-918`
-- bundle ID: [`scripts/package-macos.sh:163-172`](../../scripts/package-macos.sh#L163-L172)
+- bundle ID: [`scripts/package-macos.sh:163-172`](../../scripts/package-macos.sh)
 - foreground report: `agentmux-common/src/ipc.rs:242`
-- settings: `settings-template.jsonc:68-83`, [`schema/settings.json:244-310`](../../schema/settings.json#L244-L310), `wconfig/types.rs:259-310`
+- settings: `settings-template.jsonc:68-83`, [`schema/settings.json:244-310`](../../schema/settings.json), `wconfig/types.rs:259-310`
 
 **Microsoft:**
 - Toast content: https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/app-notifications-content

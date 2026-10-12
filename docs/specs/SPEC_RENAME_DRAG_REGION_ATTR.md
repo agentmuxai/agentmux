@@ -26,13 +26,13 @@ missing, parent-walk, which elements opt in/out) stay identical.
 **Readers** (the live attribute consumer):
 - `frontend/app/hook/useWindowDrag.win32.ts:5,16,72` — comment, `getAttribute` call, `dragProps` emitter.
 - `frontend/app/hook/useWindowDrag.darwin.ts:5,6,10` — comment + `dragProps` emitter (macOS handles drag at the WebView layer via this same attribute).
-- [`frontend/app/hook/useWindowDrag.linux.ts:6`](../../frontend/app/hook/useWindowDrag.linux.ts#L6) — comment only.
+- [`frontend/app/hook/useWindowDrag.linux.ts:6`](../../frontend/app/hook/useWindowDrag.linux.ts) — comment only.
 
 **Producers** (elements opting in/out of drag):
 - `frontend/app/tab/tabbar.tsx:160,163,183` — `add-tab-btn` (false), `tab-bar-scroll` (false), `tab-bar-fill` (true).
-- [`frontend/app/tab/tab.tsx:251`](../../frontend/app/tab/tab.tsx#L251) — tab root (false).
-- [`frontend/app/tab/droppable-tab.tsx:102`](../../frontend/app/tab/droppable-tab.tsx#L102) — drop wrapper (false).
-- [`frontend/app/window/action-widgets.tsx:393`](../../frontend/app/window/action-widgets.tsx#L393) — widget bar container (false). *Added in PR #438 to fix the double-click-maximize bug; the current PR uses the old name.*
+- [`frontend/app/tab/tab.tsx:251`](../../frontend/app/tab/tab.tsx) — tab root (false).
+- [`frontend/app/tab/droppable-tab.tsx:102`](../../frontend/app/tab/droppable-tab.tsx) — drop wrapper (false).
+- [`frontend/app/window/action-widgets.tsx:393`](../../frontend/app/window/action-widgets.tsx) — widget bar container (false). *Added in PR #438 to fix the double-click-maximize bug; the current PR uses the old name.*
 - `frontend/app/window/system-status.tsx:105,115,125` — three status buttons (false).
 
 No backend code touches this — confirmed via `grep -r tauri-drag-region agentmux-cef/src agentmux-srv/src` returns zero matches.

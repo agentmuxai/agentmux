@@ -79,10 +79,10 @@ never the Window Tab bar.
 
 ### 1.1 The whole-Pane drag handle is the ENTIRE header row, and nothing inside it currently competes
 
-- `BlockFrame_Header` ([`frontend/app/block/blockframe.tsx:520-530`](../../frontend/app/block/blockframe.tsx#L520-L530)) attaches
+- `BlockFrame_Header` ([`frontend/app/block/blockframe.tsx:520-530`](../../frontend/app/block/blockframe.tsx)) attaches
   `props.nodeModel.dragHandleRef` to the **outer header `<div class="block-frame-default-header" data-role="block-header">`** — the whole row, not a sub-element.
 - The actual `draggable()` (pragmatic-dnd) registration is in
-  [`frontend/layout/lib/TileLayout.core.tsx:441-488`](../../frontend/layout/lib/TileLayout.core.tsx#L441-L488), which re-queries
+  [`frontend/layout/lib/TileLayout.core.tsx:441-488`](../../frontend/layout/lib/TileLayout.core.tsx), which re-queries
   `tileNodeRef?.querySelector('[data-role="block-header"]')` fresh each time
   (two components can write the ref — primary header + its ErrorBoundary
   fallback — so it doesn't trust the ref directly). `canDrag` already gates on
@@ -148,7 +148,7 @@ the three new drop behaviors this spec needs:
    [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts): `SPRING_SWITCH_MS = 500`
    (`tabbar-dnd.ts:68`), `hoveredDropTabId` signal (`:55`),
    `dragActivatedTabIds` Set (`:74`). The dwell timer + drop target is
-   [`frontend/app/tab/droppable-tab.tsx:220-275`](../../frontend/app/tab/droppable-tab.tsx#L220-L275)'s
+   [`frontend/app/tab/droppable-tab.tsx:220-275`](../../frontend/app/tab/droppable-tab.tsx)'s
    `dropTargetForElements({ canDrop: source.data.type === tileItemType,
    onDragEnter: () => { setHoveredDropTabId(...); springTimer =
    setTimeout(...) }, onDragLeave: clearSpring, onDrop: ... })`, registered

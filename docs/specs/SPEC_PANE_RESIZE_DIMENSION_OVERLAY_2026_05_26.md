@@ -190,7 +190,7 @@ from [`frontend/app/app.scss`](../../frontend/app/app.scss) (next to the other b
 ### 3.4 No new state
 
 `layoutModel.isResizing()` already exists (see
-[`frontend/layout/lib/types.ts:252`](../../frontend/layout/lib/types.ts#L252) and `TileLayout.{win32,linux,darwin}.tsx`)
+[`frontend/layout/lib/types.ts:252`](../../frontend/layout/lib/types.ts) and `TileLayout.{win32,linux,darwin}.tsx`)
 and is flipped by `onResizeStart` / `onResizeEnd` in
 [`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts). No new reducer, no new event, no
 new IPC.
@@ -254,7 +254,7 @@ through.
 
 - [`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts) — `onResizeStart`,
   `onResizeMove`, `onResizeEnd`
-- [`frontend/layout/lib/types.ts:252`](../../frontend/layout/lib/types.ts#L252) — `isResizing: Accessor<boolean>`
+- [`frontend/layout/lib/types.ts:252`](../../frontend/layout/lib/types.ts) — `isResizing: Accessor<boolean>`
 - `frontend/layout/lib/TileLayout.{win32,linux,darwin}.tsx` — consumers of
   `isResizing()` for the `animate` class gating
 - [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) — mount point for the badge

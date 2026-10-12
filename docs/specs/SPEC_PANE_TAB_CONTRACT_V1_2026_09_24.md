@@ -63,7 +63,7 @@ had the same root shape as §2.4.
 
 ### 1.1 What Help is
 Plain DOM. `HelpViewModel` sets only `viewType`, `renderPaneChrome` and
-`noHeader` ([`frontend/app/view/helpview/helpview.tsx:23-42`](../../frontend/app/view/helpview/helpview.tsx#L23-L42)). `HelpView` is a
+`noHeader` ([`frontend/app/view/helpview/helpview.tsx:23-42`](../../frontend/app/view/helpview/helpview.tsx)). `HelpView` is a
 scrollable div around `<QuickTips />` with CSS `zoom` (`:87-101`). No iframe,
 no webview, no native surface, no browser-pane code.
 

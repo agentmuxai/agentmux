@@ -49,7 +49,7 @@ Two properties of that contract cause the symptom:
 
 ### 2a. Editor — `giveFocus()` is a stub
 
-[`frontend/app/view/editor/editor-model.ts:1210`](../../frontend/app/view/editor/editor-model.ts#L1210):
+[`frontend/app/view/editor/editor-model.ts:1210`](../../frontend/app/view/editor/editor-model.ts):
 
 ```ts
 giveFocus(): boolean {
@@ -63,7 +63,7 @@ with `editor-view.tsx` never calling `cmView.focus()` anywhere.
 
 ### 2b. Terminal — implemented, but racing
 
-[`frontend/app/view/term/termViewModel.ts:504`](../../frontend/app/view/term/termViewModel.ts#L504):
+[`frontend/app/view/term/termViewModel.ts:504`](../../frontend/app/view/term/termViewModel.ts):
 
 ```ts
 giveFocus(): boolean {

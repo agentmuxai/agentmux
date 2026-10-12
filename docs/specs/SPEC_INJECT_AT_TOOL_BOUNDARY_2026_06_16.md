@@ -342,7 +342,7 @@ already delivers via `agentinput → send_message`.
 | Concern | File:line |
 |---|---|
 | Per-provider controller type (subprocess default) | `frontend/app/view/agent/providers/index.ts:160,199,240,268,306,391` |
-| Claude persistent launch args | [`frontend/app/view/agent/providers/index.ts:161`](../../frontend/app/view/agent/providers/index.ts#L161) |
+| Claude persistent launch args | [`frontend/app/view/agent/providers/index.ts:161`](../../frontend/app/view/agent/providers/index.ts) |
 | ACP controller types | `frontend/app/view/agent/providers/index.ts:359,424,452` |
 | Controller selection (meta → controller) | `agentmux-srv/src/backend/blockcontroller/mod.rs:301,349-407` |
 | Persistent stdin write (`send_message`) | `agentmux-srv/src/backend/blockcontroller/persistent.rs:148-168` |
@@ -358,7 +358,7 @@ already delivers via `agentinput → send_message`.
 | ACP prompt delivery (`session/prompt`) | `agentmux-srv/src/backend/blockcontroller/acp.rs:569-611` |
 | Tool-boundary parsing (claude) | `agentmux-srv/src/agents/translator/claude.rs:103-176` |
 | Translators (codex/gemini/kimi/acp) | `frontend/app/view/agent/providers/{codex,gemini,kimi,acp}-translator.ts` |
-| Frontend turn phases / `toolsActive` | [`frontend/app/store/agent-pane-state/types.ts:118-152`](../../frontend/app/store/agent-pane-state/types.ts#L118-L152), `reducer.ts:452-467` |
+| Frontend turn phases / `toolsActive` | [`frontend/app/store/agent-pane-state/types.ts:118-152`](../../frontend/app/store/agent-pane-state/types.ts), `reducer.ts:452-467` |
 
 ## Appendix B — reproducing the steering probe
 

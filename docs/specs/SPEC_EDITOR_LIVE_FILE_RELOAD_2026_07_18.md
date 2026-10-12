@@ -209,5 +209,5 @@ the dirty-confirm-modal component already flagged as pending in
 | `agentmux-srv/src/backend/config_watcher_fs.rs` | The single-file watcher pattern this design generalizes (debounce, `notify` crate usage, WPS broadcast) |
 | `agentmux-srv/src/backend/blockcontroller/mod.rs:486-500` | `publish_controller_status` — the exact per-block WPS scoping pattern to reuse for the new event |
 | `frontend/app/view/editor/editor-model.ts:100-249,351-472` | Tab content cache, `_openFileWithMode`'s load path (to be reused, not duplicated), the existing event fan-out pattern to extend |
-| [`frontend/app/store/editor-pane-state-store.ts:583-613`](../../frontend/app/store/editor-pane-state-store.ts#L583-L613) | `TabContentLoaded`/`TabSaved` reducer cases — where the new `TabExternallyChanged` case is added |
+| [`frontend/app/store/editor-pane-state-store.ts:583-613`](../../frontend/app/store/editor-pane-state-store.ts) | `TabContentLoaded`/`TabSaved` reducer cases — where the new `TabExternallyChanged` case is added |
 | [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) (`summaryFlash`) | Existing "flash on change" UI pattern to reuse for the silent-refresh visual cue |

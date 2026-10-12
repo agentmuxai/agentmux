@@ -95,7 +95,7 @@ keeping them separate.
 
 | Term (this spec) | What it is | Existing code-level name(s) |
 |---|---|---|
-| **Pane** | A generic container — one leaf position in the split tree. Holds an ORDERED LIST of ≥1 Pane Tabs, exactly one of which is active/visible at a time. Owns pane-level chrome: the tab strip itself, and pane-level controls (minimize, magnify/restore, close-the-whole-pane) — see §4.1/§4.6. | `LayoutNode` (leaf) — `agentmux-common/src/layout_types.rs:71-91`, frontend mirror [`frontend/layout/lib/types.ts:185`](../../frontend/layout/lib/types.ts#L185). Colloquially "pane" in existing docs/code, but historically also used loosely to mean a widget instance — this spec stops that usage. |
+| **Pane** | A generic container — one leaf position in the split tree. Holds an ORDERED LIST of ≥1 Pane Tabs, exactly one of which is active/visible at a time. Owns pane-level chrome: the tab strip itself, and pane-level controls (minimize, magnify/restore, close-the-whole-pane) — see §4.1/§4.6. | `LayoutNode` (leaf) — `agentmux-common/src/layout_types.rs:71-91`, frontend mirror [`frontend/layout/lib/types.ts:185`](../../frontend/layout/lib/types.ts). Colloquially "pane" in existing docs/code, but historically also used loosely to mean a widget instance — this spec stops that usage. |
 | **Pane Tab** | One widget instance living inside a Pane's tab list — a `Block`, viewed from inside a Pane. **A widget IS a Pane Tab; it is never itself "a Pane."** Switching the active Pane Tab does not change which Pane you're in. | `Block` (`agentmux-srv/src/backend/obj.rs:480-495`) as referenced by a `LayoutNodeData.block_stack` entry (`agentmux-common/src/layout_types.rs:32-56`). "Widget" (`defwidget@X` in `widgets.json`) is the template used to CREATE the `Block` that becomes a Pane Tab; the template itself is never persisted. |
 | **Window Tab** | The OUTER, browser-style strip at the very top of the window. One Window Tab owns an entire split-pane tree (a whole arrangement of Panes, each with its own Pane Tabs) — one `LayoutModel`. A completely different layer from a Pane; out of scope for this spec, unchanged. | Existing code calls this object `Tab` (`agentmux-srv/src/backend/obj.rs:408-419`, [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx)). This spec adopts **"Window Tab"** as the plain-language, UI-facing term to keep it unambiguously distinct from "Pane Tab" in prose and in any user-facing copy/settings this redesign introduces — it is NOT a proposal to rename the `Tab` struct/RPC/table itself (that is a much larger, unrelated migration; see §7). |
 
@@ -163,8 +163,8 @@ agent/term/editor — see §2.4).
     swaps one mounted block at a time.
 - **Today's chrome for a hoisted pane is TWO stacked rows, confirmed by direct
   reading of both implementations** — `AgentPaneChrome`
-  ([`frontend/app/view/agent/agent-view.tsx:350-895`](../../frontend/app/view/agent/agent-view.tsx#L350-L895)) and `TermPaneChrome`
-  ([`frontend/app/view/term/term.tsx:442-751`](../../frontend/app/view/term/term.tsx#L442-L751)) have the identical structure: a
+  ([`frontend/app/view/agent/agent-view.tsx:350-895`](../../frontend/app/view/agent/agent-view.tsx)) and `TermPaneChrome`
+  ([`frontend/app/view/term/term.tsx:442-751`](../../frontend/app/view/term/term.tsx)) have the identical structure: a
   `headerElem` built from the real `BlockFrame_Header` component (full icon/
   title/minimize/magnify/close chrome, `agent-view.tsx:427-435`) is rendered FIRST
   (`agent-view.tsx:840`, `term.tsx:699`), and only THEN, in a separate wrapping div
@@ -409,7 +409,7 @@ markBlockRecentlyCreated(blockId);
 pushBlockOntoStack(layoutModel, thisPanesNodeId, blockId);
 ```
 
-using `pushBlockOntoStack` ([`frontend/layout/lib/layoutStack.ts:61`](../../frontend/layout/lib/layoutStack.ts#L61)) against **the
+using `pushBlockOntoStack` ([`frontend/layout/lib/layoutStack.ts:61`](../../frontend/layout/lib/layoutStack.ts)) against **the
 specific Pane whose own "+" was clicked** — always unambiguous, since a "+" only
 ever exists inside one Pane's strip. This is the whole mechanism §4.2 was missing a
 target for at the widget-bar level; a Pane's own strip has that target for free.
@@ -528,7 +528,7 @@ This is a vocabulary and mental-model correction, not just a UI change, and per 
 discussion that produced it, it touches more files than §4.1-4.10 individually cite.
 Listed here as one place to audit against, rather than scattered as asides:
 
-- **`NodeModel`** ([`frontend/layout/lib/types.ts:325`](../../frontend/layout/lib/types.ts#L325)) — already structurally
+- **`NodeModel`** ([`frontend/layout/lib/types.ts:325`](../../frontend/layout/lib/types.ts)) — already structurally
   correct (a leaf-level `NodeModel` plus `blockId`/`activeBlockId`/`blockStack`), but
   its own doc comments and every place it's described in prose should read as "the
   Pane's model," not "the block's model" — several existing comments in

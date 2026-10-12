@@ -14,7 +14,7 @@ Stated as a rule: in a column, for a run of one or more collapsed panes between 
 
 ## 2. How it behaves today
 
-A collapsed (minimized) pane is a display-mode flag on its layout leaf, `minimized: true` ([`frontend/layout/lib/types.ts:208`](../../frontend/layout/lib/types.ts#L208)); its stored `size` is untouched. Its extent is fixed and recomputed every layout pass (`collapsedExtentPx`, `layoutGeometry.ts:62-73`): a header strip, `HeaderHeightPx` (33) + gap, in a Column parent. In a Row parent it does not keep a slot: it **docks** onto the nearest expanded sibling (right preferred) with zero width, and its header chip is stacked on top of that sibling, pushing the sibling's top down (`resolveRowSlipTargets`, `layoutGeometry.ts:201-224`; Phase B, 430-481).
+A collapsed (minimized) pane is a display-mode flag on its layout leaf, `minimized: true` ([`frontend/layout/lib/types.ts:208`](../../frontend/layout/lib/types.ts)); its stored `size` is untouched. Its extent is fixed and recomputed every layout pass (`collapsedExtentPx`, `layoutGeometry.ts:62-73`): a header strip, `HeaderHeightPx` (33) + gap, in a Column parent. In a Row parent it does not keep a slot: it **docks** onto the nearest expanded sibling (right preferred) with zero width, and its header chip is stacked on top of that sibling, pushing the sibling's top down (`resolveRowSlipTargets`, `layoutGeometry.ts:201-224`; Phase B, 430-481).
 
 Resize handles are generated per parent, between consecutive rendered siblings of that parent only, in Phase C of `updateTreeHelper` (`layoutGeometry.ts:483-575`). Collapsed children are treated two ways (`layoutGeometry.ts:506-513`):
 

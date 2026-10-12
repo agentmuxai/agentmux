@@ -157,7 +157,7 @@ benefit over reusing the block's.
   the other way, and resolving label→block_id from it would require an unenforced 1:1 linear scan.
 - **The caller already has `block_id` in scope and doesn't need a host-side lookup at all.**
   `toggle_floating_maximize` (`chrome.rs:96-104`) is invoked from `FloatingMaximizeButton`
-  ([`frontend/app/block/blockframe.tsx:201-211`](../../frontend/app/block/blockframe.tsx#L201-L211)), itself rendered from `EndIcons`
+  ([`frontend/app/block/blockframe.tsx:201-211`](../../frontend/app/block/blockframe.tsx)), itself rendered from `EndIcons`
   (`blockframe.tsx:282`) — which already holds `props.nodeModel.blockId` in scope two lines earlier
   (used for the mic button, `blockframe.tsx:255`). **Design change from the original draft:** thread
   `block_id` through as a new IPC arg (`invokeCommand("toggle_floating_maximize", { label, block_id })`)
@@ -208,7 +208,7 @@ through `Command::UpdateBlockMeta` → the reducer → `apply_block_meta_updated
   `pane:floating_placement` always, and `pane:floating_normal_rect` when a rect is available (the
   pre-toggle `current_rect` on maximize, the reducer-returned `restore_rect` on restore).
 - **`open_floating_pane_window` read-back on creation — deliberately NOT implemented in this phase.**
-  Verified via [`frontend/app/workspace/floating-pane-workspace.tsx:9-11`](../../frontend/app/workspace/floating-pane-workspace.tsx#L9-L11)'s own doc comment: "The
+  Verified via [`frontend/app/workspace/floating-pane-workspace.tsx:9-11`](../../frontend/app/workspace/floating-pane-workspace.tsx)'s own doc comment: "The
   floating window's backend state is a normal workspace+tab+block (created by `TearOffBlock` in the
   source window)" — i.e. `OpenFloatingPaneArgs.pane_id` (`floating_pane.rs:38`) IS the block_id, and a
   *new* block is created by `TearOffBlock` on every single tear-off. That means
@@ -308,6 +308,6 @@ Phase 2/4 landing — the srv-side plumbing is valid and testable on its own.
   `agentmux-srv/src/backend/obj.rs:333-348,454-467`,
   `agentmux-srv/src/server/service/window.rs:437-459`,
   `agentmux-srv/src/backend/wconfig/types.rs:140-141,164-165`,
-  [`frontend/app-init.ts:317-370`](../../frontend/app-init.ts#L317-L370) (confirms `CreateWindow` is a first-launch/main-window path, not a
+  [`frontend/app-init.ts:317-370`](../../frontend/app-init.ts) (confirms `CreateWindow` is a first-launch/main-window path, not a
   per-floating-pane trigger),
-  [`frontend/app/store/services.ts:123-125`](../../frontend/app/store/services.ts#L123-L125).
+  [`frontend/app/store/services.ts:123-125`](../../frontend/app/store/services.ts).

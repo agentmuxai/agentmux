@@ -16,7 +16,7 @@ code against `SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md` found:
 
 ### 1. File-tree context menu — 90% done, one specific gap
 
-`buildContextMenuItems` ([`frontend/app/view/editor/editor-view.tsx:559-630`](../../frontend/app/view/editor/editor-view.tsx#L559-L630))
+`buildContextMenuItems` ([`frontend/app/view/editor/editor-view.tsx:559-630`](../../frontend/app/view/editor/editor-view.tsx))
 already implements everything in the original spec **except** two Phase-1
 items on the file-node menu:
 
@@ -54,7 +54,7 @@ in PR #1743 after a regression documented in
 [`docs/retro/retro-editor-markdown-preview-regression-2026-06-23.md`](../retro/retro-editor-markdown-preview-regression-2026-06-23.md)):
 
 - `.md` tabs default to `EditorMode = "preview"`
-  ([`frontend/app/view/editor/editor-model.ts:845`](../../frontend/app/view/editor/editor-model.ts#L845)); `"source"` and `"split"`
+  ([`frontend/app/view/editor/editor-model.ts:845`](../../frontend/app/view/editor/editor-model.ts)); `"source"` and `"split"`
   modes are also available via a toolbar and `Mod+Shift+V`
   (`editor-view.tsx:746-770`, `editor-model.ts:855-857`).
 - CodeMirror's `updateListener` calls `setLiveDoc(content)` on every
@@ -155,7 +155,7 @@ Terminal" sibling action and widget-bar editor launches).
 
 There is no single RPC that creates a tab *and* opens a specific pane into it
 with no preset — `WorkspaceService.CreateTab` (used by `createTab()` in
-[`frontend/app/store/global.ts:745-776`](../../frontend/app/store/global.ts#L745-L776)) is the primitive for creating a tab,
+[`frontend/app/store/global.ts:745-776`](../../frontend/app/store/global.ts)) is the primitive for creating a tab,
 but `createTab()` itself always layers on `applyTabPreset(tabId,
 DEFAULT_TAB_PRESET)` (agent + swarm + armory + sysinfo, as of
 `SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md`), which is wrong for this

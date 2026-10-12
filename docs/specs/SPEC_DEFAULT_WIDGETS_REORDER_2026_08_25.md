@@ -49,7 +49,7 @@ code with each other:
 
 ### 1.2 New tab (existing window, "+" button) — frontend TS
 
-[`frontend/app/tab/tab-presets.ts:47-59`](../../frontend/app/tab/tab-presets.ts#L47-L59) — `DEFAULT_TAB_PRESET`, a fully
+[`frontend/app/tab/tab-presets.ts:47-59`](../../frontend/app/tab/tab-presets.ts) — `DEFAULT_TAB_PRESET`, a fully
 declarative `PresetNode` tree (arbitrary N children, no hardcoded pane
 count). Own doc comment: *"To change the defaults, edit **only** this
 constant — the applier and every consumer of `createTab()` pick it up

@@ -35,7 +35,7 @@ pub trait NoWindow { fn no_window(&mut self) -> &mut Self; }
 ```
 
 - Removes the per-site `cfg` block and the `CommandExt` import; a call site becomes `cmd.no_window()`.
-- `make_cli_cmd` ([`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs#L24-L37)), `srv/src/util.rs`, and the launcher's new
+- `make_cli_cmd` ([`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs)), `srv/src/util.rs`, and the launcher's new
   `schtasks_command()` helper become one-liners.
 - Caveat to handle in the design: `creation_flags` overwrites, it does not OR. Sites that combine flags
   (`host_spawn.rs` uses `CREATE_SUSPENDED`; `cli_login.rs:1331` deliberately uses `CREATE_NEW_CONSOLE`)

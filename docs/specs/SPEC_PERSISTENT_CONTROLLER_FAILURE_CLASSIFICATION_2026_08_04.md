@@ -19,7 +19,7 @@ normal completion. This reproduces the exact symptom reported: "sometimes it
 returns too busy [and] currently it just quits."
 
 **"Quits" here means the turn silently completes, not that the app or the CLI
-process crashes.** [`frontend/app/view/agent/hooks/useTurnLifecycle.ts:113`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts#L113)
+process crashes.** [`frontend/app/view/agent/hooks/useTurnLifecycle.ts:113`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts)
 dispatches `TurnEnd` unconditionally whenever a `session_end` frame arrives,
 and the Claude translator always emits `session_end` alongside an
 `error_result` event (`claude-translator.ts`'s "Case 5a") — so the pane lands

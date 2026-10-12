@@ -113,7 +113,7 @@ No new CSS tokens needed — `--success-color` and `--warning-color` are already
 **Location:** [`frontend/app/view/agent/components/RuntimeBadge.tsx`](../../frontend/app/view/agent/components/RuntimeBadge.tsx)
 
 A tiny pill rendered identically across all surfaces. Uses FontAwesome icons (the existing
-icon system — see [`frontend/util/util.ts:100-131`](../../frontend/util/util.ts#L100-L131) for the `makeIconClass` pattern):
+icon system — see [`frontend/util/util.ts:100-131`](../../frontend/util/util.ts) for the `makeIconClass` pattern):
 
 - Container → `fa-solid fa-box` — box/package = sandboxed
 - Host → `fa-solid fa-server` — server = native machine
@@ -317,7 +317,7 @@ Not blocking — users can recreate agents to change runtime today.
 
 | File | Change |
 |------|--------|
-| [`frontend/app/store/launch-flow-state/types.ts:51`](../../frontend/app/store/launch-flow-state/types.ts#L51) | `runtime: "container"` |
+| [`frontend/app/store/launch-flow-state/types.ts:51`](../../frontend/app/store/launch-flow-state/types.ts) | `runtime: "container"` |
 | `agentmux-srv/src/server/app_api.rs:2528` | `agent_type: cmd.agent_type.clone()` (default `"host"`, caller-supplied) |
 | [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) | Host warning + radio subtext |
 | [`scripts/gen-seed.js`](../../scripts/gen-seed.js) | Update 1 template (claude → container) + bump schemaVersion to 9 |
@@ -384,14 +384,14 @@ reset on every re-seed (version bump) — that's the correct mechanism.
 - `agentmux-srv/src/server/agent_handlers.rs:3205-3208` — host/container branch
 - `agentmux-srv/src/server/app_api.rs:2528` — user agent create path (current "host" default)
 - `agentmux-srv/src/backend/storage/migrations.rs:141` — `agent_type TEXT NOT NULL DEFAULT 'standalone'`
-- [`frontend/app/store/launch-flow-state/types.ts:49-51`](../../frontend/app/store/launch-flow-state/types.ts#L49-L51) — `initialForm()` + runtime default
-- [`frontend/app/view/agent/components/AgentLaunchModal.tsx:743-768`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx#L743-L768) — current radio group
-- [`frontend/app/view/agent/agent-view.tsx:1139-1156`](../../frontend/app/view/agent/agent-view.tsx#L1139-L1156) — failure-recovery PaneRow (placement reference)
+- [`frontend/app/store/launch-flow-state/types.ts:49-51`](../../frontend/app/store/launch-flow-state/types.ts) — `initialForm()` + runtime default
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx:743-768`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) — current radio group
+- [`frontend/app/view/agent/agent-view.tsx:1139-1156`](../../frontend/app/view/agent/agent-view.tsx) — failure-recovery PaneRow (placement reference)
 - `frontend/app/view/agent/components/AgentControlBar.tsx:60-165` — Claude-only, gated on `providerId`
-- [`frontend/app/view/agent/agent-model.ts:523`](../../frontend/app/view/agent/agent-model.ts#L523) — `agentMode` written to block meta at launch
+- [`frontend/app/view/agent/agent-model.ts:523`](../../frontend/app/view/agent/agent-model.ts) — `agentMode` written to block meta at launch
 - [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts) — `containerSupported` per provider (source of truth)
 - `frontend/app/view/agent-def/components/AgentDefCard.tsx:38-51` — existing HOST/CONTAINER text badge (forge view)
-- [`scripts/gen-seed.js:142`](../../scripts/gen-seed.js#L142) — current `agent_type: "host"` in seed
+- [`scripts/gen-seed.js:142`](../../scripts/gen-seed.js) — current `agent_type: "host"` in seed
 - [`docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) — container architecture spec
 - [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) — container image definition
 - agent color conventions (green=container, amber/red=host), kept in a private tools repo

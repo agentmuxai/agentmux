@@ -664,8 +664,8 @@ either skipped this mode or needed special handling for it.
 
 - **One setting, two values:** `pane:tabstrip`, either `"always"` (default;
   also what you get when the key is absent) or `"multi-only"`. Typed in
-  [`frontend/types/srv-types.d.ts:1081-1083`](../../frontend/types/srv-types.d.ts#L1081-L1083), listed as a plain `string` in
-  [`schema/settings.json:113`](../../schema/settings.json#L113), and round-tripped but never read by the backend
+  [`frontend/types/srv-types.d.ts:1081-1083`](../../frontend/types/srv-types.d.ts), listed as a plain `string` in
+  [`schema/settings.json:113`](../../schema/settings.json), and round-tripped but never read by the backend
   (`agentmux-srv/src/backend/wconfig/types.rs:120-130`).
 - **Origin:** added with universal pane tabs (#3309, 2026-09-17), per
   `SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` §4.1. It's an

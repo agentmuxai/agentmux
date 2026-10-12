@@ -136,9 +136,9 @@ Phase 1 resolves the reported Ctrl+F bug; phases 2–4 deliver the title-bar "Fi
 
 | What | Location |
 |---|---|
-| Global `Cmd:f` → universal search | [`frontend/app/store/keymodel.ts:626`](../../frontend/app/store/keymodel.ts#L626), `activateSearch` @604 |
+| Global `Cmd:f` → universal search | [`frontend/app/store/keymodel.ts:626`](../../frontend/app/store/keymodel.ts), `activateSearch` @604 |
 | Universal search overlay | [`frontend/app/element/search.tsx`](../../frontend/app/element/search.tsx); impl example [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts) |
-| Per-view key dispatch hook | [`frontend/app/store/keymodel.ts:412`](../../frontend/app/store/keymodel.ts#L412) (`viewModel.keyDownHandler`) |
-| Editor CM setup (`search()`, `basicSetup`) | [`frontend/app/view/editor/editor-view.tsx:315-317`](../../frontend/app/view/editor/editor-view.tsx#L315-L317) |
+| Per-view key dispatch hook | [`frontend/app/store/keymodel.ts:412`](../../frontend/app/store/keymodel.ts) (`viewModel.keyDownHandler`) |
+| Editor CM setup (`search()`, `basicSetup`) | [`frontend/app/view/editor/editor-view.tsx:315-317`](../../frontend/app/view/editor/editor-view.tsx) |
 | Editor view model (no `searchAtoms` today) | [`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts) |
 | ripgrep crates | `ignore`, `grep-searcher`, `grep-regex` (crates.io) |

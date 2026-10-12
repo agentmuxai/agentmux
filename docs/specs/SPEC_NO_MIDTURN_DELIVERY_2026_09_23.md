@@ -383,7 +383,7 @@ for non-human senders** is reversed, from `Immediate` to `NextIdle`.
 
 ## 7. Test coverage required
 
-Current jekt tests ([`frontend/app/view/agent/stream-parser.test.ts:474-571`](../../frontend/app/view/agent/stream-parser.test.ts#L474-L571), 9 cases) all examine a
+Current jekt tests ([`frontend/app/view/agent/stream-parser.test.ts:474-571`](../../frontend/app/view/agent/stream-parser.test.ts), 9 cases) all examine a
 single well-formed or malformed block in isolation. Every interleaving case is untested, and
 `parseHistoryLines.test.ts` — the replay path, the only thing that reconstructs ordering from disk —
 has zero jekt tests.

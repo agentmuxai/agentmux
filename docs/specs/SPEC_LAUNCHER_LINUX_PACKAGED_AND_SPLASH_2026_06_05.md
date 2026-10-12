@@ -11,7 +11,7 @@
 
 ## 0. TL;DR
 
-1. **Linux launches the CEF host directly today** — [`scripts/linux-apprun.sh:39`](../../scripts/linux-apprun.sh#L39) does `exec "$this_dir/usr/bin/agentmux"`, and [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) never even copies the launcher binary into the AppImage. The launcher's entire reducer + saga + window-pool + single-instance subsystem is sitting in `dist/cef/agentmux-launcher` unused.
+1. **Linux launches the CEF host directly today** — [`scripts/linux-apprun.sh:39`](../../scripts/linux-apprun.sh) does `exec "$this_dir/usr/bin/agentmux"`, and [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) never even copies the launcher binary into the AppImage. The launcher's entire reducer + saga + window-pool + single-instance subsystem is sitting in `dist/cef/agentmux-launcher` unused.
 2. **The reducer and saga code is already platform-neutral.** `agentmux-launcher/src/state.rs:168-226` (State struct), `src/reducer/mod.rs:84-540` (60+ Command handlers), `src/saga/mod.rs` (coordinator), `src/saga/log/schema.rs:32-61` (SQLite schema) have **no `#[cfg(target_os = …)]` gates**. They've never been driven on Linux not because they're Windows-coupled, but because the only **transport** that delivers Commands to them is Windows-only.
 3. **Three concrete code gaps prevent driving the reducer on non-Windows** (each verifiable in 30 seconds): `ipc::run_ipc_server` on non-Windows is `tokio::spawn(async {})` (`src/ipc/server.rs:175-185` — comment: "Phase 7 of the broader tear-off cross-platform work will add Unix domain socket support"); `host_pipe/` has no Unix-socket impl and the host's `launcher_ipc::connect_to_launcher` is `cfg(not(target_os = "windows"))` → `None` (`agentmux-cef/src/launcher_ipc.rs:298-303`); `spawn_host_unix` (`main.rs:389-432`) exports `AGENTMUX_LAUNCHER_PID` only, not `AGENTMUX_LAUNCHER_PIPE` like Windows' `spawn_host_supervised` does at `main.rs:328`.
 4. **Two workstreams, very different sizes:**
@@ -25,7 +25,7 @@
 
 ### 1.1 AppRun bypasses the launcher
 
-[`scripts/linux-apprun.sh:39`](../../scripts/linux-apprun.sh#L39) (inside `run_normally()`):
+[`scripts/linux-apprun.sh:39`](../../scripts/linux-apprun.sh) (inside `run_normally()`):
 
 ```bash
 exec "$this_dir/usr/bin/agentmux" "$@"

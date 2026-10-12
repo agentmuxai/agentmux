@@ -55,7 +55,7 @@ block and placing it becomes one step.
   `addWidgetAsPaneTab`. Each edits the frontend's tree in place and calls
   `persistToBackend()`. The file's header (l.12-17) says they deliberately skip
   `treeReducer`.
-- `persistToBackend` ([`frontend/layout/lib/layoutPersistence.ts:391`](../../frontend/layout/lib/layoutPersistence.ts#L391)) is a
+- `persistToBackend` ([`frontend/layout/lib/layoutPersistence.ts:391`](../../frontend/layout/lib/layoutPersistence.ts)) is a
   100ms trailing debounce. It sends the whole tree through `UpdateObject`,
   which becomes `Command::LayoutSetTree`
   (`agentmux-srv/src/server/service/object.rs:486-627`).
@@ -84,7 +84,7 @@ queues no layout action. No backend path places a block into an existing stack.
 
 The frontend understands `insert`, `delete`, `insertatindex`, `clear`,
 `replace`, `splithorizontal`, `splitvertical`
-([`frontend/layout/lib/types.ts:56-64`](../../frontend/layout/lib/types.ts#L56-L64), handled in `layoutPersistence.ts:213-385`).
+([`frontend/layout/lib/types.ts:56-64`](../../frontend/layout/lib/types.ts), handled in `layoutPersistence.ts:213-385`).
 Every insert/replace/split builds a fresh leaf with a single block. Nothing can
 say "add this block to that pane's tabs" or "remove this one tab".
 
@@ -97,7 +97,7 @@ say "add this block to that pane's tabs" or "remove this one tab".
    still there to do it.
 2. **A backend `delete` for one tab removes the whole pane.** The frontend's
    `delete` handler looks the leaf up with `getNodeByBlockId`, which also
-   matches background stack members ([`frontend/layout/lib/layoutNodeModels.ts:222-230`](../../frontend/layout/lib/layoutNodeModels.ts#L222-L230)),
+   matches background stack members ([`frontend/layout/lib/layoutNodeModels.ts:222-230`](../../frontend/layout/lib/layoutNodeModels.ts)),
    then deletes the whole leaf (`layoutPersistence.ts:232-269`). Every
    `delete_block` saga run queues exactly that action
    (`agentmux-srv/src/sagas/delete_block.rs`, Step 2b). So when a terminal tab's

@@ -99,7 +99,7 @@ All paths in `agentmux-launcher/` unless noted. Verified 2026-06-03 at HEAD
   cef-cache,runtime}` — `data_paths.rs:200-210`.
 - Channel baked at build time via `option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT")`,
   default `"stable"` — `data_paths.rs:54-58`, `agentmux-common/build.rs:23`. Portable
-  builds bake `local-<branch>-<hash>` — [`scripts/package.sh:85-87`](../../scripts/package.sh#L85-L87).
+  builds bake `local-<branch>-<hash>` — [`scripts/package.sh:85-87`](../../scripts/package.sh).
 - Portable detection is the explicit marker `agentmux-portable.marker` next to the
   exe — `agentmux-common/src/runtime_mode.rs:328-341`; absence falls back to
   `Installed`.

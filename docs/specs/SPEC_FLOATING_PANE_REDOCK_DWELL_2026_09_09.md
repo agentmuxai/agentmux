@@ -70,7 +70,7 @@ reported behavior**, because 3.2 defeats any threshold value.
 
 ### 3.1 The threshold is below the human intent boundary
 
-[`frontend/app/workspace/floating-pane-constants.ts:12`](../../frontend/app/workspace/floating-pane-constants.ts#L12) — `REDOCK_DWELL_MS = 180`.
+[`frontend/app/workspace/floating-pane-constants.ts:12`](../../frontend/app/workspace/floating-pane-constants.ts) — `REDOCK_DWELL_MS = 180`.
 
 PR #1249's tuning note justifies it:
 
@@ -85,7 +85,7 @@ pane is grafted into the layout tree, and recovering the previous state means
 manually tearing off again and re-positioning the window.
 
 This codebase already reached the opposite conclusion for a strictly *smaller*
-action. [`frontend/app/tab/tabbar-dnd.ts:62`](../../frontend/app/tab/tabbar-dnd.ts#L62) sets `SPRING_SWITCH_MS = 500`, and
+action. [`frontend/app/tab/tabbar-dnd.ts:62`](../../frontend/app/tab/tabbar-dnd.ts) sets `SPRING_SWITCH_MS = 500`, and
 `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md:31-33` justifies it as:
 
 > deliberately longer than the redock ghost's 180 ms since switching the visible
@@ -127,7 +127,7 @@ shorter than any deliberate "place it here and let go."
 
 ### 3.3 There is no neutral surface to park over
 
-[`frontend/app-init.ts:180-182`](../../frontend/app-init.ts#L180-L182) maps `DropDirection::Center` (dir `8`) to the
+[`frontend/app-init.ts:180-182`](../../frontend/app-init.ts) maps `DropDirection::Center` (dir `8`) to the
 **full leaf rect**. Combined with Top/Right/Bottom/Left (half-leaf) and the
 `Outer*` bands (1/5 edge), every pixel of every pane in the main window resolves
 to a valid drop zone. There is no region a user can hover over that means

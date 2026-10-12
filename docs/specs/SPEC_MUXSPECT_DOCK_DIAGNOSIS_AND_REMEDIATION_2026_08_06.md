@@ -68,7 +68,7 @@ Traced end-to-end in [`frontend/app/view/agent/`](../../frontend/app/view/agent)
    dispatches `TurnEnd` to the **pane-state** reducer (clears "Working…")
    but never touches the **document** reducer that owns `nodes[]`, and
    never calls `scrubOrphanedInProgress`.
-5. `scrubOrphanedInProgress` ([`frontend/app/store/agent-document/reducer.ts:53-148`](../../frontend/app/store/agent-document/reducer.ts#L53-L148))
+5. `scrubOrphanedInProgress` ([`frontend/app/store/agent-document/reducer.ts:53-148`](../../frontend/app/store/agent-document/reducer.ts))
    only runs on three real triggers, all session/reload/reconnect
    boundaries — `SessionEnd` (pane unmount/reconnect/close), `HistoryLoaded`,
    `HistoryRestored` — never on an ordinary turn boundary. (A fourth,

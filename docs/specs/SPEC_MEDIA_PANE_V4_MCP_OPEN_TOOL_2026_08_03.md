@@ -188,7 +188,7 @@ list (see "Corrections from automated review" below):
 
 `MediaViewModel` needs one small addition: a path-derived `viewName`,
 mirroring `EditorViewModel`'s existing pattern exactly
-([`frontend/app/view/editor/editor-model.ts:290-296`](../../frontend/app/view/editor/editor-model.ts#L290-L296), `useBlockAtom` wrapping
+([`frontend/app/view/editor/editor-model.ts:290-296`](../../frontend/app/view/editor/editor-model.ts), `useBlockAtom` wrapping
 a `createMemo` over the tracked file-path signal, falling back to a static
 label — `"Editor"` there — when no path is set yet):
 
@@ -260,5 +260,5 @@ from the finding alone:
 | `agentmux-mcp/src/main.rs:1719-1747` | Test-only `defs` array + count assertion — add `OPEN_MEDIA_TOOL`, bump `assert_eq!` to 27. Validity/count coverage only, not a substitute for `main.rs:513` |
 | `frontend/app/view/media/media.tsx:24,169-197` | `media:path` meta read on mount — confirmed unchanged, the target this spec's backend arm populates |
 | [`frontend/app/view/media/media.tsx`](../../frontend/app/view/media/media.tsx) (new) | Add `viewName` (§3) — fixes the P2 Codex finding (tool description promised a file-name default title that didn't exist) |
-| [`frontend/app/view/editor/editor-model.ts:290-296`](../../frontend/app/view/editor/editor-model.ts#L290-L296) | `EditorViewModel.viewName` — the exact pattern §3's `MediaViewModel.viewName` mirrors |
+| [`frontend/app/view/editor/editor-model.ts:290-296`](../../frontend/app/view/editor/editor-model.ts) | `EditorViewModel.viewName` — the exact pattern §3's `MediaViewModel.viewName` mirrors |
 | [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](SPEC_MEDIA_PANE_2026_07_26.md) | v1 — this spec adds an agent entry point to the pane it defines, no other change |
