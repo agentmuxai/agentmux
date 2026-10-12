@@ -7,8 +7,6 @@ import {
     computeInsertionPoint,
     computeNearestTab,
     insertionPointToIndex,
-    markTabMerged,
-    wasTabRecentlyMerged,
     tabWrapperRefs,
     startWindowTabDrag,
     releaseWindowTabDrag,
@@ -358,27 +356,6 @@ describe("insertionPointToIndex", () => {
 
     test("unknown afterTabId falls back to append", () => {
         expect(insertionPointToIndex({ beforeTabId: "a", afterTabId: "ghost" }, tabs)).toBe(3);
-    });
-});
-
-// ── cross-window merge dedup ──────────────────────────────────────────────────
-
-describe("markTabMerged / wasTabRecentlyMerged", () => {
-    test("unmarked tab is not recently merged", () => {
-        expect(wasTabRecentlyMerged("never-marked")).toBe(false);
-    });
-
-    test("marked tab is recently merged within the window", () => {
-        markTabMerged("t1", 1_000_000);
-        expect(wasTabRecentlyMerged("t1", 1_000_100)).toBe(true);
-        expect(wasTabRecentlyMerged("t1", 1_004_999)).toBe(true);
-    });
-
-    test("mark expires after the dedup window and is pruned", () => {
-        markTabMerged("t2", 1_000_000);
-        expect(wasTabRecentlyMerged("t2", 1_006_000)).toBe(false);
-        // Pruned on the expired read — a later in-window read stays false.
-        expect(wasTabRecentlyMerged("t2", 1_000_100)).toBe(false);
     });
 });
 

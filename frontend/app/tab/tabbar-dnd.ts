@@ -222,31 +222,3 @@ export function insertionPointToIndex(ip: InsertionPoint | null, tabs: string[])
     const idx = tabs.indexOf(ip.afterTabId);
     return idx < 0 ? tabs.length : idx;
 }
-
-// ── Cross-window merge dedup ────────────────────────────────────────────────
-// A direct cross-window tab remount (tabdrag:merge-direct, emitted by the
-// host's mouse hook) and the legacy HTML5 cross-drag pipeline
-// (CrossWindowDropOverlay's cross-drag-end → MoveTabToWorkspace) can BOTH fire for
-// one gesture — the hook resolves on WM_LBUTTONUP while the source
-// window's dragend independently drives the cross-drag pipeline. Both
-// handlers run in the TARGET window, so a same-context recency mark is
-// enough to make the second one a no-op. The backend would reject the
-// duplicate anyway (the tab has already left its claimed source
-// workspace), but deduping here avoids a guaranteed error-log per merge.
-
-const MERGE_DEDUP_WINDOW_MS = 5000;
-const recentTabMerges = new Map<string, number>();
-
-export function markTabMerged(tabId: string, now: number = Date.now()): void {
-    recentTabMerges.set(tabId, now);
-}
-
-export function wasTabRecentlyMerged(tabId: string, now: number = Date.now()): boolean {
-    const at = recentTabMerges.get(tabId);
-    if (at === undefined) return false;
-    if (now - at > MERGE_DEDUP_WINDOW_MS) {
-        recentTabMerges.delete(tabId);
-        return false;
-    }
-    return true;
-}
