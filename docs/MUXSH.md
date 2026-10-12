@@ -6,8 +6,8 @@
 family as `muxlog`/`muxspect`/`muxopen`. It's AgentMux's own successor to
 Wave Terminal's `wsh` CLI — not a revival of it (AgentMux retired the
 inherited `wsh` entirely in 2026-04 after finding zero real usage; see
-`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`), but a purpose-built
-collection scoped per `docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md` —
+[`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](specs/archive/SPEC_RETIRE_WSH_2026_04_12.md)), but a purpose-built
+collection scoped per [`docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md`](specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) —
 every subcommand maps to a real, `$AGENTMUX_AUTH_KEY`-gated App API route,
 not an agent-identity-signed one (a distinction that ruled out a couple of
 `wsh` commands that looked buildable on paper — see "What's not here" below).
@@ -139,7 +139,7 @@ already-shipped tool) — not duplicated here as `muxsh agent open`.
 Two commands from the original design turned out not to be buildable as
 scoped, caught by verifying the actual routes against source before writing
 code (not assumed from the docs) — see
-`docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md` §5.5/§5.6 for the full
+[`docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md`](specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) §5.5/§5.6 for the full
 account:
 
 - **`pane close`** — the real route (`ClosePane`) requires an HMAC signature
@@ -165,8 +165,8 @@ Same single-instance scope as the rest of this tool family: `muxsh` operates
 on the instance the calling pane belongs to. Cross-instance operation is not
 implemented here.
 
-Implementation: `crates/srv/src/backend/shellintegration/muxsh.mjs` (core),
+Implementation: [`crates/srv/src/backend/shellintegration/muxsh.mjs`](../crates/srv/src/backend/shellintegration/muxsh.mjs) (core),
 `lib/muxclient.mjs` (shared auth/fetch plumbing), and the per-shell `muxsh`
 delegators in the same directory. Route field names are checked against
-`docs/specs/app-api-manifest.json` from both the Rust and Node sides — see
+[`docs/specs/app-api-manifest.json`](specs/app-api-manifest.json) from both the Rust and Node sides — see
 that file and `SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md` §2.8.

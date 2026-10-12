@@ -2,8 +2,8 @@
 
 **Audience:** AgentMux maintainers building a Windows CEF binary with
 proprietary codec support (H.264/AAC/HEVC/AC3/EAC3/Dolby Vision) —
-see `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md` for why,
-`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md` for
+see [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md) for why,
+[`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`](../specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) for
 the full 3-platform plan this is one piece of.
 **Time:** First build ~3-6 hours wall-clock (CPU-bound chromium compile) —
 confirmed on a real run: 55,367/55,367 ninja targets, zero errors (see
@@ -194,7 +194,7 @@ Same fork/branch as Linux/macOS — see the header note above on why
 Windows uses this branch despite not needing its patches.
 
 > **Build from the integration branch, never a feature branch.**
-> `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
+> [`docs/cef-build/CEF_FORK_MAINTENANCE.md`](CEF_FORK_MAINTENANCE.md) §4 (R3). A feature branch may look
 > newer and still be missing part of the carry-set — that is exactly how the
 > 2026-07 transparency gap happened. Run §5 of that doc against this checkout
 > before building; it must report **21 `OK`**. If it does not, the integration
@@ -245,7 +245,7 @@ as Linux).
 ### 4. Configure the build
 
 The canonical GN args are version-controlled at
-**`scripts/cef-build/args-windows.gn`**. Use the configure script:
+**[`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn)**. Use the configure script:
 
 ```powershell
 # Run from your agentmux repo checkout. Defaults to
@@ -254,7 +254,7 @@ The canonical GN args are version-controlled at
 pwsh scripts\cef-build\configure-cef-build-windows.ps1
 ```
 
-See `scripts/cef-build/args-windows.gn`'s own header comment for the
+See [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn)'s own header comment for the
 codec-flag rationale (shared with Linux/macOS) and the
 official-build/size-lever note (same `is_official_build=true` mechanism
 as Linux — expect a similar roughly-halving effect on `libcef.dll` size,
@@ -308,7 +308,7 @@ A window with example.com proves the libcef.dll is functional.
 
 Local AgentMux builds will resolve the CEF runtime from
 `~\cef-build\...\Release_GN_x64` directly once
-`scripts/resolve-cef-runtime-windows.ps1` and the `Taskfile.yml` wiring
+[`scripts/resolve-cef-runtime-windows.ps1`](../../scripts/resolve-cef-runtime-windows.ps1) and the `Taskfile.yml` wiring
 land (see the linked spec §2-3) — this step is for **CI**, which has no
 build tree and pulls from a release in `agentmuxai/cef`, exactly like
 Linux/macOS already do.
@@ -382,7 +382,7 @@ expects when it's implemented.
 
 ## Using the built CEF in AgentMux
 
-Once `scripts/resolve-cef-runtime-windows.ps1` and the `Taskfile.yml`
+Once [`scripts/resolve-cef-runtime-windows.ps1`](../../scripts/resolve-cef-runtime-windows.ps1) and the `Taskfile.yml`
 Windows-task wiring exist (spec §2-3, not yet landed as of this doc's
 writing):
 
@@ -429,14 +429,14 @@ timing/size numbers replacing the estimates above.
 ### 7a. Ship the symbols too, and which out dir is real (added 2026-09-23)
 
 Two lessons from the 2026-09-22 renderer deadlock
-(`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`),
+([`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`](../incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md)),
 where the only reason the crash dump could be read was that the build machine
 still had the matching PDB on disk:
 
 - **Attach `libcef.dll.pdb` to every release tag.** The build produces it next
   to `libcef.dll` (~5.4 GB); `xz -T0 -6` brings it to ~600 MB, under GitHub's
   2 GB per-asset limit, in about a minute on 32 cores. Name it so it cannot
-  match the runtime download's `*.zip` pattern in `.github/workflows/build-windows.yml`
+  match the runtime download's `*.zip` pattern in [`.github/workflows/build-windows.yml`](../../.github/workflows/build-windows.yml)
   (e.g. `libcef.dll.pdb-<tag>.xz`). Upstream CEF symbol packages do **not**
   match this fork's binary (different link order), so without this asset a
   dump from the field is unreadable. Also keep the exact `args.gn` and fork

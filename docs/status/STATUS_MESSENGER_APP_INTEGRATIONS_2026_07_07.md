@@ -172,7 +172,7 @@ be treated as the tracking issue for the webview/bridge work described here.
   (the heartbeat-ghost failure mode called out above) would currently go unnoticed.
 - **Docs drift**: `docs/specs/pane-types.md` still lists 9 pane types while `widgets.json`
   registers 17 — Discord/Slack/Telegram/WhatsApp/Teams are among the ones missing from that
-  doc (independently flagged in `docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md:256`).
+  doc (independently flagged in [`docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md:256`](../reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md)).
 - **Program has stalled at 1 of 5 bridges** with no open work. If resuming, Telegram is the
   cheapest next platform (no tunnel/webhook infra, unlike WhatsApp/Teams) and would validate
   the shared `MessagingBridge` trait against a second, different protocol shape

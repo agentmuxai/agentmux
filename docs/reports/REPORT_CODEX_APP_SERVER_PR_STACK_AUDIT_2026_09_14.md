@@ -71,7 +71,7 @@ straightforward sequential merge.
 Codex CLI 0.154.0 added a managed **App Server** mode (`codex app-server --listen stdio://`) —
 a long-lived process speaking line-delimited JSON-RPC, as an alternative to the current
 one-shot `codex exec --json` subprocess AgentMux drives today. The spec added in #3207
-(`docs/specs/SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md`) proposes a staged
+([`docs/specs/SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md`](../specs/SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md)) proposes a staged
 migration to it, keeping `exec --json` as a rollout fallback.
 
 The 9 PRs, in dependency order (each PR's base = previous PR's branch):
@@ -166,7 +166,7 @@ gated on fixing the ReAgent review failure, not on any code problem.
 ### 2d. CI results otherwise are healthy
 
 Ignoring #3213's doc-gate failure and the routine Windows-runner cancellations (a known,
-pre-existing flake — see `docs/incident/INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md`),
+pre-existing flake — see [`docs/incident/INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md`](../incident/INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md)),
 every PR's Linux build, `vitest`, and doc/grep gates pass. The Rust test counts cited in PR
 bodies (9, 4, 15, etc., scoped to `backend::blockcontroller::app_server*`) are consistent
 with the diff sizes and match what CI actually ran.
@@ -223,7 +223,7 @@ already has all 9 branches fetched.
    the queuing fix. (Have not done this yet — flagging for a decision, since it changes PR
    #3215's diff after the fact.)
 2. **Fix #3213's doc-status gate** (add a `**Status:**` line to
-   `docs/specs/SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md`) so the rest of the chain goes green.
+   [`docs/specs/SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md`](../specs/SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md)) so the rest of the chain goes green.
 3. **Get a real review pass before merging anything.** Re-trigger ReAgent on #3207 and see if
    it's a transient failure or reproducible; if reproducible, this is worth its own bug report
    against the reagent tooling (every PR in a 9-deep stacked chain failing identically is a

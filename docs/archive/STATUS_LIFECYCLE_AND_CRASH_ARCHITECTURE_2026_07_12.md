@@ -6,7 +6,7 @@
 > lifecycle bug found live tonight.
 
 **Type:** Status snapshot + forward roadmap, not a plan doc — a point-in-time picture of the
-three-pillar disposability program (`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`)
+three-pillar disposability program ([`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`](../architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md))
 plus everything adjacent to it that's shipped or been found since 2026-07-07.
 **Verify before acting:** re-check file:line references if read more than a few days after
 2026-07-12 — this subsystem moves fast (see the historical-audit trend in §5 of the discussion doc:
@@ -66,7 +66,7 @@ investigative/live-usage pressure the program exists to relieve. Each has its ow
 |---|---|---|
 | Browser-pane renderer leak (`DestroyWindow` off owner-thread → silent no-op on every pane close) | ✅ Fixed, merged (PR #2000) | `retro-browser-pane-renderer-leak-2026-07-07.md` |
 | `Client.windowids` leak, IPC close path | ✅ Fixed (#2087) | — |
-| `Client.windowids` leak, registration race | ✅ Fixed (#2088) + `test/e2e/window-close-baseline.e2e.test.ts` | — |
+| `Client.windowids` leak, registration race | ✅ Fixed (#2088) + [`test/e2e/window-close-baseline.e2e.test.ts`](../../test/e2e/window-close-baseline.e2e.test.ts) | — |
 | `Client.windowids` leak, OS-level WM_CLOSE (Alt+F4/taskbar) bypassing IPC entirely | ✅ Fixed (#2089), wndproc subclass hook | — |
 | Pool-warmup window `backend_window_id` leak into `Client.windowids` | ✅ Fixed (#2102-era) | — |
 | Launcher teardown backstop, UI-thread liveness probe (observe-only) | ✅ Phase 1 merged | — |
@@ -124,9 +124,9 @@ claim-a-HWND sections can never interleave.
 ## 6. Sources
 
 - `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` (superseded by this doc)
-- `docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md` (program index)
-- `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`, `SPEC_PILLAR1_STEP4` phases
-- `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`
-- `docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`
-- `docs/retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md` (new)
-- `docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`
+- [`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`](../architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md) (program index)
+- [`docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`](../specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md), `SPEC_PILLAR1_STEP4` phases
+- [`docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`](../specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md)
+- [`docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`](../retro/retro-browser-pane-renderer-leak-2026-07-07.md)
+- [`docs/retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md`](../retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md) (new)
+- [`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`](../specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md)

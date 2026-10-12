@@ -1,7 +1,7 @@
 # Report: Robust dispatch attribution + swarm session lifecycle
 
 **Date:** 2026-08-19
-**Spec:** `docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`
+**Spec:** [`docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`](../specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md)
 **Status:** Implemented, tested. No interactive/visual verification (see Verification below — same constraint as the prior report today).
 
 ## Context

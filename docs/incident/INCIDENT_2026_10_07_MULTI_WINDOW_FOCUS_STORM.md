@@ -42,7 +42,7 @@ The 8 that were recreated were real, restorable windows, so every launch on that
 
 ## 4. Fix
 
-`MainFocusReclaimTask` (`crates/cef/src/ui_tasks/window.rs`) now acts only when the target window is the foreground window (Windows). It resolves the target's top-level HWND first and compares it with `GetAncestor(GetForegroundWindow(), GA_ROOT)`. If they differ, it does nothing:
+`MainFocusReclaimTask` ([`crates/cef/src/ui_tasks/window.rs`](../../crates/cef/src/ui_tasks/window.rs)) now acts only when the target window is the foreground window (Windows). It resolves the target's top-level HWND first and compares it with `GetAncestor(GetForegroundWindow(), GA_ROOT)`. If they differ, it does nothing:
 - **neither `host.set_focus(1)` nor Win32 `SetFocus`,** since either can activate a background window;
 - **nothing when no AgentMux window is foreground,** because then a reclaim would steal focus from another app.
 

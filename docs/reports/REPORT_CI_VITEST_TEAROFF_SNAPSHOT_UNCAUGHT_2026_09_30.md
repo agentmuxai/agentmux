@@ -37,7 +37,7 @@ This error originated in "frontend/app/drag/tearoff-snapshot.test.ts" test file.
 
 ## 3. What throws, and why it can
 
-- `frontend/app/drag/tearoff-snapshot.ts` `blobToBase64()` encodes a JPEG blob with
+- [`frontend/app/drag/tearoff-snapshot.ts`](../../frontend/app/drag/tearoff-snapshot.ts) `blobToBase64()` encodes a JPEG blob with
   `FileReader.readAsDataURL`.
 - jsdom 29.1.1 does that read in two `setImmediate` hops. In the second it calls
   `@exodus/bytes` 1.15.1 `toBase64(file._bytes)`.

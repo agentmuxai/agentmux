@@ -101,8 +101,8 @@ GRACE + 2 probe intervals. Verification hook: `debug:hang_ui` (double-gated behi
 ## 7. Sources
 
 - `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_12.md` (superseded)
-- `docs/specs/SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md`
-- `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md` (§4c added 07-16)
-- `docs/retro/retro-last-window-close-quit-race-2026-07-16.md`
-- `docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md` (07-16 correction header)
-- `docs/retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md`
+- [`docs/specs/SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md`](../specs/SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md)
+- [`docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`](../specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md) (§4c added 07-16)
+- [`docs/retro/retro-last-window-close-quit-race-2026-07-16.md`](../retro/retro-last-window-close-quit-race-2026-07-16.md)
+- [`docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md`](../specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md) (07-16 correction header)
+- [`docs/retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md`](../retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md)

@@ -7,7 +7,7 @@
 from `main` at `f4b9f8d18` (includes #3719, #3751, #3826, #3834, #3837). Channel
 `local-main-b28b7a-4a884b76`; srv log
 `channels/local-main-b28b7a-4a884b76/versions/0.57.6/logs/agentmuxsrv-v0.57.6.log.2026-09-26`.
-**Related:** `docs/specs/REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md` (same failure
+**Related:** [`docs/specs/REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md`](../specs/REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md) (same failure
 chain on v0.57.5, AgentA), `SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md` §4.2,
 `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` §4.4.
 
@@ -117,7 +117,7 @@ same basis (`fresh_spawn_would_continue`), so the two stay consistent. A comment
 visible and no extra label, keeping the Dismiss button.
 
 **Fix:** `ResumeFailedBanner` in
-`frontend/app/view/agent/components/AgentSessionNotices.tsx` shows `15s`, `14s`, … beside Dismiss.
+[`frontend/app/view/agent/components/AgentSessionNotices.tsx`](../../frontend/app/view/agent/components/AgentSessionNotices.tsx) shows `15s`, `14s`, … beside Dismiss.
 At zero it does exactly what Dismiss does (clears `session:resume_failed`). The timer is torn down
 with the banner, and a new failure mounts a new banner with a fresh countdown.
 
@@ -168,7 +168,7 @@ token, loaded once at connect. A desktop (PKCE) token lives 15 minutes and a con
 outlive it, so from minute 15 every `GET /agents/<agent>/wan-key` was a 401, read as
 `wan_key_unavailable`. It fits the data here: narko's connection opened at 06:11:29, and AgentA's
 jekt arrived at 06:28:52, 17 minutes in. #3866 fixes three more calls that used the same token.
-Retro: `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`. The analysis below,
+Retro: [`docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`](../retro/retro-wan-verify-stale-directory-token-2026-09-26.md). The analysis below,
 written before that landed, narrowed it down to the directory fetch; #3863 makes the cause of any
 future `wan_key_unavailable` visible in the log and the audit.
 
@@ -180,7 +180,7 @@ same thing.
 
 **What exists:** same-account WAN signing (W3-S, issue #2586's WAN half) is on `main`: #3734 (D1a),
 #3771 (D1b, publish + carry gate), #3775 (D2, verifier, `TRUST=wan-verified`). Tracking:
-`docs/specs/TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md`. That doc says C1 (the cloud-side change) is
+[`docs/specs/TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md`](../specs/TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md). That doc says C1 (the cloud-side change) is
 "merged, **not deployed**", which is stale. The cloud deploy ran successfully at 2026-09-25 21:00 UTC,
 and `https://muxbus.agentmux.ai/api/health` now reports `1.10.0` (the doc's bar is `1.9.0`).
 Cross-account verification (W0–W2) is deliberately not built.

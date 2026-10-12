@@ -8,7 +8,7 @@ source). Nothing exercises `main()` or `apiCall()` — the dispatch switch,
 HTTP-error handling, and `fail()`/exit-code paths in
 `agentmux-srv/src/backend/shellintegration/muxsh.mjs:407-537`. Surfaced while
 investigating a user-reported "basic stuff" error (which turned out to be the
-already-documented tool-spawned-shell gap, `docs/MUXSH.md:18-19` — unrelated
+already-documented tool-spawned-shell gap, [`docs/MUXSH.md:18-19`](../MUXSH.md) — unrelated
 to this gap, but prompted auditing coverage while in the file).
 
 ## In scope

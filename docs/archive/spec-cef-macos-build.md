@@ -86,7 +86,7 @@ dist/cef/
     └── en-US.pak
 ```
 
-Note: `frontend/` is NOT needed in dev mode — CEF connects to the Vite dev server.
+Note: [`frontend/`](../../frontend) is NOT needed in dev mode — CEF connects to the Vite dev server.
 
 ### Release (`.app` bundle → DMG)
 
@@ -295,7 +295,7 @@ Check and fix if needed — this is likely already handled or uses a `file://` U
 
 2. **Pak files location in framework** — On macOS, CEF pak files may be inside `Chromium Embedded Framework.framework/Resources/` rather than a separate directory. Verify after first build: `ls target/release/build/cef-dll-sys-*/out/Chromium\ Embedded\ Framework.framework/Resources/`.
 
-3. **Frontend URL in production** — How does the built binary serve/load `frontend/`? Check `agentmux-cef/src/app.rs` around where the initial URL is constructed. If it uses `--url=` flag only and has no file:// fallback, add one pointing to `exe_dir/../Resources/frontend/index.html`.
+3. **Frontend URL in production** — How does the built binary serve/load [`frontend/`](../../frontend)? Check `agentmux-cef/src/app.rs` around where the initial URL is constructed. If it uses `--url=` flag only and has no file:// fallback, add one pointing to `exe_dir/../Resources/frontend/index.html`.
 
 4. **App icon** — `agentmux-cef/resources/` currently only has a Windows `.ico`. Need `.icns` for macOS. Can convert from existing icon source or use Tauri's `src-tauri/icons/icon.icns` as a stopgap (Tauri source files may still be around in git history).
 

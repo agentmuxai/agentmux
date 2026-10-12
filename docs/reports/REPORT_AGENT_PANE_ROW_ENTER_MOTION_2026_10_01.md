@@ -15,7 +15,7 @@ is an animation set now, and what do other apps do?
 ## 2. What the pane does today
 
 **There is an enter animation, but it is small.**
-`frontend/app/view/agent/styles/_document.scss` (the
+[`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) (the
 `.agent-document-streaming-buffer[data-animate]` rule): a new row fades from
 opacity 0 to 1 and rises 4px over **120 ms**
 (`cubic-bezier(0.4, 0, 0.2, 1)`), via `@starting-style`. Only rows of the turn

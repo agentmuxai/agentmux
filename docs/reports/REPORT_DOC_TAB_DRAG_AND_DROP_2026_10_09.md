@@ -7,7 +7,7 @@
 
 ## 1. Verdict
 
-The document-tab **model** is DRY, as believed: Editor and Media tabs are one pure reducer (`frontend/app/doc-tabs/doc-tabs.ts`), drawn by one strip component (`PaneTabStrip`), persisted in one format (`doctabs`). The feature fits the existing design: `SPEC_DOCUMENT_TABS` already reserves it as Phase 5 ("a document tab dragged onto another pane's strip of the same type moves it there"), and already rules out cross-type moves, as the request does.
+The document-tab **model** is DRY, as believed: Editor and Media tabs are one pure reducer ([`frontend/app/doc-tabs/doc-tabs.ts`](../../frontend/app/doc-tabs/doc-tabs.ts)), drawn by one strip component (`PaneTabStrip`), persisted in one format (`doctabs`). The feature fits the existing design: `SPEC_DOCUMENT_TABS` already reserves it as Phase 5 ("a document tab dragged onto another pane's strip of the same type moves it there"), and already rules out cross-type moves, as the request does.
 
 Three things stand in the way, and each has a DRY fix:
 

@@ -4,7 +4,7 @@
 **Status:** analysis — the zoom in §2 is built in the PR that adds this report; §3 to §5 are recommendations.
 **Author:** Korp (narko)
 **Trigger:** Owner request: "we want to introduce zoom into the Media viewer. in that case, simply scrolling (no need for [a modifier]) will zoom in. also, research best practices for any other features, write report to file".
-**Method:** Read the Media pane (`frontend/app/view/media/`) on `main` at `f1acbe33d`. Compared how a dozen viewers and libraries handle zoom, pan, fit and live reload, from their docs and source (VS Code's image preview, Chrome's image document, Windows Photos, macOS Preview, Figma, Photopea, GIMP, Krita, ImageGlass, IrfanView, XnView, Google Photos, OpenSeadragon, PhotoSwipe, Panzoom, tev, HDRView). Sources in §7.
+**Method:** Read the Media pane ([`frontend/app/view/media/`](../../frontend/app/view/media)) on `main` at `f1acbe33d`. Compared how a dozen viewers and libraries handle zoom, pan, fit and live reload, from their docs and source (VS Code's image preview, Chrome's image document, Windows Photos, macOS Preview, Figma, Photopea, GIMP, Krita, ImageGlass, IrfanView, XnView, Google Photos, OpenSeadragon, PhotoSwipe, Panzoom, tev, HDRView). Sources in §7.
 
 ## 1. Summary
 

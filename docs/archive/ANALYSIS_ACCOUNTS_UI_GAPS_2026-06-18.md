@@ -91,7 +91,7 @@ for SM accounts instead.
 
 | File | Lines | Change |
 |------|-------|--------|
-| `frontend/app/view/identity/identity-model.ts` | 378 | Added `"agentmux"` to `accountsByProvider()` order |
+| [`frontend/app/view/identity/identity-model.ts`](../../frontend/app/view/identity/identity-model.ts) | 378 | Added `"agentmux"` to `accountsByProvider()` order |
 | `frontend/app/view/identity/identity-view.tsx` | 157–159 | Removed deprecated `assigned_agents` count badge from `AccountRow` |
 | `frontend/app/view/identity/identity-view.tsx` | 238–249 | Replaced deprecated Agents section with Identities note |
 | `frontend/app/view/identity/identity-view.tsx` | 254–268 | Added Validate/Reauth CTAs scoped by backend type |

@@ -4,9 +4,9 @@
 **Author:** AgentY
 **Type:** Investigation + UX/architecture recommendations — fully implemented
 as of 2026-08-31.
-**Scope:** `frontend/app/view/agent/components/AgentPicker.tsx`,
+**Scope:** [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx),
 `AgentPickerFilterBar.tsx`, `MyAgentsList.tsx`,
-`frontend/app/view/agent/styles/_recent-sessions.scss`,
+[`frontend/app/view/agent/styles/_recent-sessions.scss`](../../frontend/app/view/agent/styles/_recent-sessions.scss),
 `agentmux-srv/src/server/agent_handlers/session.rs`
 
 **Status update (2026-08-24, later same day):** §2 (field reorder), §3
@@ -25,7 +25,7 @@ source failure its own distinct fallback text instead of reusing the
 genuinely-empty case's copy), and a cross-channel row (`block_id_hint ===
 ""`) now reads "(history may exist in another version)" instead of the
 flatly inaccurate "(no conversation snapshot)". See
-`frontend/app/view/agent/components/MyAgentsList.tsx`'s `noSnapshotText`
+[`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx)'s `noSnapshotText`
 and `agentmux-srv/src/server/agent_handlers/session.rs`'s
 `snapshot_check_failed` handling.
 
@@ -135,7 +135,7 @@ creds)"` — correct when the agent genuinely has no bound identity.
 PR #2296), `links_by_agent` comes back empty for the WHOLE response, so
 **every** row shows `"(ambient creds)"`, including agents with a real,
 correctly-bound account. This exact failure mode is already documented in
-`docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md` §9 rec 1
+[`docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md`](../retro/retro-my-agents-fresh-channel-regression-2026-07-27.md) §9 rec 1
 — previously caused the whole list to look empty; the current code degrades
 that source in isolation instead of aborting the request (an improvement),
 but the wrong-text symptom on every row was never itself eliminated.
@@ -205,8 +205,8 @@ The user then pointed at the right thing: dispatch naming and terminal
 through `invoke_ambient_haiku_call()` (`session.rs:670`) via the same
 coalescing gateway, `crate::ambient::gateway()` (`agentmux-srv/src/ambient/mod.rs:61`),
 keyed by `AmbientCallKey{entity_id, purpose}` — a deliberately reusable
-choke point per `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`
-and `docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md:89-91`
+choke point per [`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](../specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md)
+and [`docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md:89-91`](../specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md)
 ("any future ambient-call purpose gets the same protection for free").
 
 `invoke_ambient_haiku_call(cli_path, prompt, meta, cancel)` takes an

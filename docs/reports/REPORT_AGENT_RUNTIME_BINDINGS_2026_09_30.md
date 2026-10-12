@@ -4,8 +4,8 @@
 **Status:** analysis — complete inventory of the model / effort / permission-mode bindings. The launch, `agent.open`, spawn-time, queueing, effort, definition-flag, fork and mode-text gaps are fixed (§8); what remains open is listed there, honestly.
 **Author:** Agento
 **Prompted by:** the owner, after an agent resumed into Opus 5.5 while its menu read Sonnet 5.5.
-Follows `docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md` (root cause) and
-`docs/reports/REPORT_AGENT_RUNTIME_STATE_RECONCILIATION_2026_09_30.md` (the end-state design). Those two say
+Follows [`docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md`](../retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md) (root cause) and
+[`docs/reports/REPORT_AGENT_RUNTIME_STATE_RECONCILIATION_2026_09_30.md`](REPORT_AGENT_RUNTIME_STATE_RECONCILIATION_2026_09_30.md) (the end-state design). Those two say
 *why* and *what to build*; this one is the complete list of *where*, so the match can be held hard.
 
 ## 1. The invariant
@@ -39,11 +39,11 @@ Each finding below carries one:
 
 | # | Writer | Where | Writes |
 |---|---|---|---|
-| W1 | Launch, `launchAgentDefinition` | `frontend/app/view/agent/agent-model.ts` (`resolveInitialRuntimeConfig`) | `{bypass, <override ‖ provider default ‖ sonnet>, high}` |
+| W1 | Launch, `launchAgentDefinition` | [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) (`resolveInitialRuntimeConfig`) | `{bypass, <override ‖ provider default ‖ sonnet>, high}` |
 | W2 | `applyRuntimeChange` | `runtime-apply.ts` | the merged config; callers are the `/model` `/effort` `/permission-mode` `/bypass` `/plan` commands and the Runtime dropup |
 | W3 | Dropup auto-migration | `components/AgentRuntimeDropup.tsx` | replaces a stored model id that left the overlaid list; goes through W2 and so restarts the process (G13) |
 
-Nothing in `crates/` writes or reads `agent:runtime`. No other frontend code writes it. Fork, quick-fork,
+Nothing in [`crates/`](../../crates) writes or reads `agent:runtime`. No other frontend code writes it. Fork, quick-fork,
 continue, reattach, split and "new session" all go through W1.
 
 ### 3.2 Writers of `cmd:args`
@@ -53,7 +53,7 @@ continue, reattach, split and "new session" all go through W1.
 | A1 | Launch | `agent-model.ts` | **now yes** (was no — G0) |
 | A2 | Per-send rebuild | `hooks/useAgentCommands.ts` | yes |
 | A3 | Runtime change + `forcerestart` | `runtime-apply.ts` | yes |
-| A4 | srv `agent.open` (MCP `OpenAgent`, layouts) | `crates/srv/src/server/app_api/agent_open.rs` via `backend/agent_runtime.rs` | **now yes** for Claude and Codex (was no — G3); other providers have no wired model |
+| A4 | srv `agent.open` (MCP `OpenAgent`, layouts) | [`crates/srv/src/server/app_api/agent_open.rs`](../../crates/srv/src/server/app_api/agent_open.rs) via `backend/agent_runtime.rs` | **now yes** for Claude and Codex (was no — G3); other providers have no wired model |
 | A5 | `/btw` side-question block | `agent_handlers/side_question.rs` | copies the source pane's (G11) |
 | A6 | `open:agent` command | `store/command-registry.ts` | `[]` — a bare picker, not a launch |
 | A7 | Legacy `launchAgent()` | `agent-model.ts` | no callers; dead code |
@@ -226,5 +226,5 @@ Found after the inventory was written:
 - The **permission modes still do not prompt** on a persistent agent, and **Plan does not stop edits** there (observed, spec §7.3). Only the menu's description of them was corrected. Making Plan refuse writes, or the modes ask the user, is the one open product decision (spec §2.7); the code deliberately keeps `should_route_to_decision_panel` inert until it is made.
 - A definition's `--model` that is *also* in the agent's pane flags is taken out when the user picks; a user who wants the definition's model back has to pick it again (or relaunch).
 - ~~Whether the CLI takes the last of two repeated `--model` flags~~ is now **observed** (2.1.285: the last wins, both orders), and so is what `--effort` does on Haiku: the CLI drops it, so the earlier "400s on Haiku" is **not established for the pinned CLI** (spec §7.3).
-- Whether `muxcode`, `openclaw`, `copilot`, `pi` and antigravity tolerate `--dangerously-skip-permissions` (G1) is **unverified**: only the Claude CLI was run (the harness, `scripts/cli-probe`, is generic and would answer it once those CLIs are installed).
+- Whether `muxcode`, `openclaw`, `copilot`, `pi` and antigravity tolerate `--dangerously-skip-permissions` (G1) is **unverified**: only the Claude CLI was run (the harness, [`scripts/cli-probe`](../../scripts/cli-probe), is generic and would answer it once those CLIs are installed).
 - **Nothing here has been exercised in a running build** with a real restored layout, a real `agent.open` after a pick, or a live `get_settings` readback; the CLI behaviours were observed by the harness, the app code by tests.

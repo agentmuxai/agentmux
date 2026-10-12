@@ -82,7 +82,7 @@ doc exists to prevent).
 - During drag, throttled `update_floating_redock_hover` (~50ms) drives the drop-target highlight.
 
 ### 2.3 Edge-resize (floater only)
-`floating-pane-workspace.tsx:130-260` — an 8px (`FLOATER_EDGE_RESIZE_BORDER`) invisible **pointer** grab-band → `get_window_rect`/`set_window_rect`. Browser floaters inset their web-content child by the band depth (`use-pane-rect-sync.ts:70`) so the frontend owns the band. **Note:** the band overlaps the top of the 33px header → grabbing the top edge resizes instead of moving (a known UX sharp-edge; reagent flagged it on #1177). Shipped at 12px, regressed to 4px as a side effect of PR #1829's browser-pane matte fix, restored to 8px — see `docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`.
+`floating-pane-workspace.tsx:130-260` — an 8px (`FLOATER_EDGE_RESIZE_BORDER`) invisible **pointer** grab-band → `get_window_rect`/`set_window_rect`. Browser floaters inset their web-content child by the band depth (`use-pane-rect-sync.ts:70`) so the frontend owns the band. **Note:** the band overlaps the top of the 33px header → grabbing the top edge resizes instead of moving (a known UX sharp-edge; reagent flagged it on #1177). Shipped at 12px, regressed to 4px as a side effect of PR #1829's browser-pane matte fix, restored to 8px — see [`docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`](../retro/retro-floating-pane-resize-hit-target-2026-07-27.md).
 
 ### 2.4 Redock (floater → drop on a window)
 `onMouseUp` → `clear_floating_redock_hover` → `tryRedockAtCursor()` (`floating-pane-workspace.tsx:409`):
@@ -221,10 +221,10 @@ The five themes share a root: **identity (which window?) and ownership (whose li
 
 | Concern | File(s) |
 |---|---|
-| Tear-off (frontend) | `frontend/layout/lib/TileLayout.win32.tsx`, `frontend/app/drag/CrossWindowDragMonitor.win32.tsx`, `frontend/app-init.ts`, `frontend/app/app.tsx` |
-| Floater workspace (frontend) | `frontend/app/workspace/floating-pane-workspace.tsx`, `frontend/app/workspace/floater-resize.ts` |
-| Browser pane (frontend) | `frontend/app/view/browser/browser-view.tsx`, `frontend/app/platform/pane-rect-registry.ts` |
-| Layout / onNodeDelete | `frontend/app/tab/tabcontent.tsx`, `frontend/layout/lib/{layoutTree,layoutPersistence}.ts` |
+| Tear-off (frontend) | [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx), [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx), [`frontend/app-init.ts`](../../frontend/app-init.ts), [`frontend/app/app.tsx`](../../frontend/app/app.tsx) |
+| Floater workspace (frontend) | [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx), [`frontend/app/workspace/floater-resize.ts`](../../frontend/app/workspace/floater-resize.ts) |
+| Browser pane (frontend) | [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx), [`frontend/app/platform/pane-rect-registry.ts`](../../frontend/app/platform/pane-rect-registry.ts) |
+| Layout / onNodeDelete | [`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx), `frontend/layout/lib/{layoutTree,layoutPersistence}.ts` |
 | Floater OS window (host) | `agentmux-cef/src/floating_pane.rs`, `agentmux-cef/src/commands/floating_pane.rs` |
 | Window resolution (host) | `agentmux-cef/src/commands/window/lifecycle.rs`, `…/motion.rs`, `…/mod.rs` |
 | Browser-pane lifecycle (host) | `agentmux-cef/src/browser_panes.rs`, `agentmux-cef/src/browser_pane/{creation,callbacks,trace}.rs` |
@@ -234,10 +234,10 @@ The five themes share a root: **identity (which window?) and ownership (whose li
 
 | Spec / analysis | Path |
 |---|---|
-| Tear-off | `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` |
-| Edge-resize | `docs/specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md` |
-| Header drag | `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` |
-| HWND cache stale | `docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md` |
-| Redock load race | `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md` |
-| Browser-pane state | `docs/specs/browser-pane-state-catalog.md`, `…/browser-pane-reducer-roadmap.md` |
+| Tear-off | [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) |
+| Edge-resize | [`docs/specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md`](../specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) |
+| Header drag | [`docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) |
+| HWND cache stale | [`docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md`](../specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md) |
+| Redock load race | [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`](../analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md) |
+| Browser-pane state | [`docs/specs/browser-pane-state-catalog.md`](../specs/browser-pane-state-catalog.md), `…/browser-pane-reducer-roadmap.md` |
 | Per-window opacity (cache origin) | `docs/specs/SPEC_PER_WINDOW_OPACITY_2026-05-14.md` |

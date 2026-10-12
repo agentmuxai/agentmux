@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-19  
 **Version:** AgentMux 0.34.0  
-**File:** `frontend/app/view/term/termwrap.ts`  
+**File:** [`frontend/app/view/term/termwrap.ts`](../frontend/app/view/term/termwrap.ts)\
 **PR Branch:** `agenty/term-input-latency-fix`
 
 ---
@@ -212,7 +212,7 @@ Slow writes (>4ms) also log to console as `[raf-write] SLOW chunks=N bytes=M ela
 
 ### 1. Chromium GC Pauses
 
-The LongTask observer (`frontend/perf/observers.ts`) fires on tasks ≥50ms. These would
+The LongTask observer ([`frontend/perf/observers.ts`](../frontend/perf/observers.ts)) fires on tasks ≥50ms. These would
 appear in `muxlog host '\[perf\]'` as `[perf] longtask` entries. If GC pauses are frequent,
 the options are:
 
@@ -240,7 +240,7 @@ write queue depth warnings.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/term/termwrap.ts` | Remove `writeInFlight` guard from fast path; add `term-keypress`, `term-echo-render`, `term-raf-write` perf marks; lower slow-write log threshold 8ms→4ms |
+| [`frontend/app/view/term/termwrap.ts`](../frontend/app/view/term/termwrap.ts) | Remove `writeInFlight` guard from fast path; add `term-keypress`, `term-echo-render`, `term-raf-write` perf marks; lower slow-write log threshold 8ms→4ms |
 | `.changesets/1779148800-fix-term-echo-latency-writeflight-bypass-k8m2.md` | Patch changeset |
 
 ---

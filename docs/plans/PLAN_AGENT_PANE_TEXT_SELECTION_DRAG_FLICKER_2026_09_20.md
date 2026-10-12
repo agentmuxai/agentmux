@@ -26,11 +26,11 @@ does not match that.
 ## 2. Confirmed facts
 
 - Many collapsible header/summary rows in conversation content (`.agent-message-summary`,
-  `.agent-jekt-summary` in `frontend/app/view/agent/styles/_document-nodes.scss`) are
+  `.agent-jekt-summary` in [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)) are
   `user-select: none`.
 - Those same rows attach `onMouseEnter`/`onMouseLeave` handlers (`handlePeekEnter`/
   `handlePeekLeave`, sourced from `useNodePeek()`) that drive a conditionally-rendered
-  `<PeekOverlay>` (`frontend/app/view/agent/virtualization/DocumentRow.tsx`, ~lines 202-581).
+  `<PeekOverlay>` ([`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx), ~lines 202-581).
 - SolidJS's keyed `<Show>`/`<For>` reconciliation replaces/re-parents real DOM nodes when their
   controlling signal flips — inherent framework behavior, not a bug by itself. Replacing a DOM
   node that is inside, or is an endpoint of, an active browser `Selection` Range collapses that
@@ -119,13 +119,13 @@ Fix approach #1+#2 (combined, not staged) plus a proactive #3, done in one pass 
 incrementally, since the mechanism (mount/unmount racing an active drag) is identical everywhere
 it appears:
 
-- **`frontend/app/util/pointer-drag-state.ts`** (new) — a framework-agnostic, module-level
-  singleton (mirroring the existing `frontend/app/util/submenu-hover.ts` pattern) exposing
+- **[`frontend/app/util/pointer-drag-state.ts`](../../frontend/app/util/pointer-drag-state.ts)** (new) — a framework-agnostic, module-level
+  singleton (mirroring the existing [`frontend/app/util/submenu-hover.ts`](../../frontend/app/util/submenu-hover.ts) pattern) exposing
   `isPrimaryButtonDown()`. Tracked via `window`-level `pointerdown`/`pointerup`/`pointercancel`
   listeners registered with `capture: true` (so they observe every button transition regardless of
   which element the event lands on or whether it stops propagation), plus a `blur` listener to
   reset state if the mouse is released outside the window.
-- **`frontend/app/view/agent/hooks/useNodePeek.ts`** — only `handlePeekEnter` (mount) no-ops
+- **[`frontend/app/view/agent/hooks/useNodePeek.ts`](../../frontend/app/view/agent/hooks/useNodePeek.ts)** — only `handlePeekEnter` (mount) no-ops
   while `isPrimaryButtonDown()` is true; `handlePeekLeave` (unmount) is never gated. Original
   version gated both ("freeze whatever was showing") — **reagentx P1 on PR #3470** caught that
   this left a peek stuck open indefinitely whenever its row's mouseleave fired mid-drag but the
@@ -136,7 +136,7 @@ it appears:
   trade-off against the original bug. Also re-checks `isPrimaryButtonDown()` again when the
   enter-delay timer fires, not just at the initial call, since the button can go down during that
   window.
-- **`frontend/app/element/tooltip.tsx`** (`Tooltip`, the shared hover-triggered Portal-rendered
+- **[`frontend/app/element/tooltip.tsx`](../../frontend/app/element/tooltip.tsx)** (`Tooltip`, the shared hover-triggered Portal-rendered
   tooltip primitive used across the app — pane tab strips, widget-bar buttons, etc., not just
   agent-pane rows) — same enter-only gate, same reasoning, same reagentx finding (identical
   stuck-open defect, fixed the same way). Added in response to the user separately reporting the
@@ -147,9 +147,9 @@ it appears:
   its use on nearby toolbar buttons) that gating it the same way generalizes the fix broadly. If
   the address-bar case persists after this fix, it has a different root cause — see the follow-up
   note below.
-- Tests: `frontend/app/util/pointer-drag-state.test.ts` (new), `useNodePeek.test.ts` (4 new cases:
+- Tests: [`frontend/app/util/pointer-drag-state.test.ts`](../../frontend/app/util/pointer-drag-state.test.ts) (new), `useNodePeek.test.ts` (4 new cases:
   gated enter, leave still closes while held, enter-delay button-down race, resumes after
-  release), `frontend/app/element/tooltip.test.tsx` (new, 4 cases covering the same behaviors plus
+  release), [`frontend/app/element/tooltip.test.tsx`](../../frontend/app/element/tooltip.test.tsx) (new, 4 cases covering the same behaviors plus
   the ungated baseline).
 
 **Follow-up, not yet done:** if the browser-pane address-bar flicker is still reproducible after

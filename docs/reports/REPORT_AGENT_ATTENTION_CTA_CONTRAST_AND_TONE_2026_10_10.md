@@ -88,7 +88,7 @@ The tone loops while the registry is non-empty for a pane, and stops when that p
 - **Tab switches.** The tone stops when its pane unmounts, so a tab switch silences a question that is still waiting. The registry should live per window, not per mounted pane, and stop only when the request ends.
 - **Autoplay.** A request that arrives before the user's first click or key press in that window is silent, because the audio engine starts on the first gesture (`sound-service.ts:101-117`). Keep that browser rule, and rely on the OS toast and taskbar flash for it.
 - **Flash.** The waiting tone has no flash: `startWaiting` never calls `emitActivityFlash`. Pulse the pane and window tabs with the tone, in the attention color.
-- **Settings.** Rename the setting to say what it now covers ("An agent is waiting for you"), keeping the old key's value. Fix its out-of-date description in `schema/settings.json`. Consider a separate toggle for browser hand-offs, which the user is often looking at already.
+- **Settings.** Rename the setting to say what it now covers ("An agent is waiting for you"), keeping the old key's value. Fix its out-of-date description in [`schema/settings.json`](../../schema/settings.json). Consider a separate toggle for browser hand-offs, which the user is often looking at already.
 - **Repeats.** A request that waits a long time could ring once more before the 5-minute auto-stop, as the shutdown banner does at 5 s left.
 
 ## Where to start
@@ -103,7 +103,7 @@ Then the permission panel, which has the same gap. After that, the approval wind
 
 ## As built (§2)
 
-- **The registry.** `frontend/app/notification/waiting-for-you.ts`, per window. A pane waits while any of its sources does:
+- **The registry.** [`frontend/app/notification/waiting-for-you.ts`](../../frontend/app/notification/waiting-for-you.ts), per window. A pane waits while any of its sources does:
   - `question` (`useAgentQuestions`);
   - `permission` (`useAgentDecisions`);
   - `srv:<key>`, srv's announcements.

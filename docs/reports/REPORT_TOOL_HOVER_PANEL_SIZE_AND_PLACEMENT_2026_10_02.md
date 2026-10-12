@@ -15,7 +15,7 @@ window.
 ## 0. Summary
 
 The panel you see when hovering a tool call is `PeekOverlay`
-(`frontend/app/view/agent/components/PeekOverlay.tsx`), fed by `ToolBlock.tsx`
+([`frontend/app/view/agent/components/PeekOverlay.tsx`](../../frontend/app/view/agent/components/PeekOverlay.tsx)), fed by `ToolBlock.tsx`
 (tool name + the full command, plus a time/token row). Three asks:
 
 | Ask | Finding | Size of the fix |
@@ -336,7 +336,7 @@ The most any panel ever reaches past its pane is about 317px (950 / 3), for a pa
 
 **Implementation.**
 
-- `frontend/app/view/agent/components/peek-placement.ts`: `READABLE_WIDTH_CHARS`, the `readableWidth` input of `computePeekHorizontal`, and the `min(…)` above. It is pure geometry, swept by `peek-placement.test.ts` (the "readable width" block pins the table; the invariant sweep includes it).
+- [`frontend/app/view/agent/components/peek-placement.ts`](../../frontend/app/view/agent/components/peek-placement.ts): `READABLE_WIDTH_CHARS`, the `readableWidth` input of `computePeekHorizontal`, and the `min(…)` above. It is pure geometry, swept by `peek-placement.test.ts` (the "readable width" block pins the table; the invariant sweep includes it).
 - `PeekOverlay.tsx` `measureReadableWidth()`: measures `120ch` in `var(--font-mono)` inside the panel, so it follows the pane's zoom and font size. If nothing can be measured (0), the limit is skipped and the 50% cap alone applies (the previous behaviour).
 
 **To reassess.**
@@ -350,15 +350,15 @@ The most any panel ever reaches past its pane is about 317px (950 / 3), for a pa
 
 ## References
 
-- `frontend/app/view/agent/components/PeekOverlay.tsx` — placement, flip, zoom.
-- `frontend/app/view/agent/hooks/useNodePeek.ts` — hover state.
-- `frontend/app/view/agent/components/ToolBlock.tsx` — the tool-call peek content.
-- `frontend/app/view/agent/styles/_document-nodes.scss` — `.agent-node-peek-*`.
-- `frontend/app/element/anchored-popover.tsx`, `frontend/app/util/menu-position.ts`,
-  `frontend/app/platform/pane-overlay.ts` — the shared popover stack (#4208).
-- `docs/specs/SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md`,
-  `docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`,
-  `docs/specs/SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md` — the specs this
+- [`frontend/app/view/agent/components/PeekOverlay.tsx`](../../frontend/app/view/agent/components/PeekOverlay.tsx) — placement, flip, zoom.
+- [`frontend/app/view/agent/hooks/useNodePeek.ts`](../../frontend/app/view/agent/hooks/useNodePeek.ts) — hover state.
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — the tool-call peek content.
+- [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) — `.agent-node-peek-*`.
+- [`frontend/app/element/anchored-popover.tsx`](../../frontend/app/element/anchored-popover.tsx), [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts),
+  [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) — the shared popover stack (#4208).
+- [`docs/specs/SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md`](../specs/SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md),
+  [`docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`](../specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md),
+  [`docs/specs/SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md`](../specs/SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md) — the specs this
   panel came from (the last one introduced the cursor-following placement).
-- `docs/reports/REPORT_CHROME_ZOOM_POPOVERS_2026_10_02.md` — why `AnchoredPopover`
+- [`docs/reports/REPORT_CHROME_ZOOM_POPOVERS_2026_10_02.md`](REPORT_CHROME_ZOOM_POPOVERS_2026_10_02.md) — why `AnchoredPopover`
   splits shell and body.

@@ -28,7 +28,7 @@ Everything else is contained — a handful of god files, two same-file render-tr
 ## 1. Method
 
 - **Sizes** — line counts per crate/file via `find`+`wc`; top-N largest files.
-- **Duplication** — `jscpd` 4.x, `--min-tokens 60 --min-lines 8`, tests excluded, run separately over `frontend/` (ts/tsx) and the six Rust crates. Token-based, so it catches renamed copies that `diff` misses (this mattered — see §2.4).
+- **Duplication** — `jscpd` 4.x, `--min-tokens 60 --min-lines 8`, tests excluded, run separately over [`frontend/`](../../frontend) (ts/tsx) and the six Rust crates. Token-based, so it catches renamed copies that `diff` misses (this mattered — see §2.4).
 - **Verification of every clone cited** — each headline pair was re-checked with `diff` (line-level) and, for renamed twins, with identifier-normalized `diff`, so the similarity numbers below are two independent measures agreeing, not one tool's output.
 - **Self-annotation** — grep for `kept in sync | must match | mirror of | by convention, not shared | copied from` in non-test sources. This is the codebase's own confession list and turned out to be the single most useful signal.
 - **Symbol collisions** — `fn`/`const` names defined in ≥2 non-test files; `pub struct`/`enum` names defined in >1 crate.
@@ -44,17 +44,17 @@ Everything measured is reproducible from a clean checkout; the two `jscpd` JSON 
 | Surface | Count | Generated? |
 |---|---|---|
 | `frontend/app/store/rpc-api/*.ts` command stubs | **284** | No — header: *"Hand-maintained RPC bindings. Keep in sync with the agentmux-srv RPC…"* |
-| `frontend/app/store/services.ts` service methods | **38** | No — same header |
+| [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts) service methods | **38** | No — same header |
 | `frontend/types/gotypes.d.ts` | **2,819 lines** | No generated marker; the name is a Go-era leftover |
 | srv `rpc_types` `Command*` structs | 110 | — the source these should derive from |
-| Generator script in `scripts/` | **none** | — |
+| Generator script in [`scripts/`](../../scripts) | **none** | — |
 
 The consequence is spread, not concentrated: the 334 sync comments cluster at **max 8 per file**. Representative confessions:
 
-- `agentmux-srv/src/backend/blockcontroller/persistent.rs:785` — *"KEEP IN SYNC (no shared constant crosses the Rust/TypeScript boundary for…"*; its twin `frontend/app/view/agent/hooks/useAgentQuestions.ts:86` says the same words.
-- `frontend/app/tab/tab-presets.ts:45` — the default layout tree, *"a SEPARATE mechanism kept in sync by convention, not shared code"* with `wcore::default_three_pane_tree`. I hit this one directly this week (PR #2988): the frontend preset was still four panes after the backend went to three, and its own comment claimed sync. It also **cannot express the backend's 20/80 sizing** — the applier only emits even splits — so the two are not even capable of agreeing.
-- Provider catalog: `agentmux-srv/src/backend/providers.rs` (1,206 lines), `agentmux-cef/src/commands/providers.rs` (822), `frontend/app/view/agent/providers/catalog.ts` (573) — **2,601 lines across three crates and two languages** defining the same registry, with `pinned_version` tracked by hand in all three (`providers.rs:211`, `catalog.ts:118`, cef `providers.rs:200` each say "Keep in sync with…").
-- Cross-language **formatter mirrors** — TypeScript re-implementations of Rust functions so a preview matches the file the backend will write: `frontend/app/view/brain/global-brain-model.ts:36` (*"Mirror of the backend format_global_brain_block"*) and `frontend/app/view/agent/agent-color.ts:63` (*"Mirrors agent_color.rs::dim_agent_color"*).
+- `agentmux-srv/src/backend/blockcontroller/persistent.rs:785` — *"KEEP IN SYNC (no shared constant crosses the Rust/TypeScript boundary for…"*; its twin [`frontend/app/view/agent/hooks/useAgentQuestions.ts:86`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts#L86) says the same words.
+- [`frontend/app/tab/tab-presets.ts:45`](../../frontend/app/tab/tab-presets.ts#L45) — the default layout tree, *"a SEPARATE mechanism kept in sync by convention, not shared code"* with `wcore::default_three_pane_tree`. I hit this one directly this week (PR #2988): the frontend preset was still four panes after the backend went to three, and its own comment claimed sync. It also **cannot express the backend's 20/80 sizing** — the applier only emits even splits — so the two are not even capable of agreeing.
+- Provider catalog: `agentmux-srv/src/backend/providers.rs` (1,206 lines), `agentmux-cef/src/commands/providers.rs` (822), [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) (573) — **2,601 lines across three crates and two languages** defining the same registry, with `pinned_version` tracked by hand in all three (`providers.rs:211`, `catalog.ts:118`, cef `providers.rs:200` each say "Keep in sync with…").
+- Cross-language **formatter mirrors** — TypeScript re-implementations of Rust functions so a preview matches the file the backend will write: `frontend/app/view/brain/global-brain-model.ts:36` (*"Mirror of the backend format_global_brain_block"*) and [`frontend/app/view/agent/agent-color.ts:63`](../../frontend/app/view/agent/agent-color.ts#L63) (*"Mirrors agent_color.rs::dim_agent_color"*).
 
 **Why it's root cause #1:** every other boundary finding (layout tree, provider catalog, formatter mirrors, the 322 stubs) is a symptom of the same missing tool. Codegen from `rpc_types` + a shared-constants module removes a whole *class* of sync comment rather than one instance.
 
@@ -131,15 +131,15 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 | `agentmux-srv/src/server/app_api/bundle.rs` | 3,568 | |
 | `agentmux-srv/src/server/app_api/mod.rs` | 2,965 | |
 | `agentmux-srv/src/identity/resolver/inject.rs` | 2,895 | |
-| `frontend/app/view/agent/agent-view.tsx` | 2,730 | Also carries 4 sync comments and hosts the tab-strip logic I extracted into a pure module this week — the extract-and-test pattern already used in that directory is the right tool for the rest of it |
-| `frontend/app/view/swarm/swarm-model.ts` | 1,962 | |
-| `frontend/app/view/agent/hooks/useAgentCommands.ts` | 1,726 | |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 2,730 | Also carries 4 sync comments and hosts the tab-strip logic I extracted into a pure module this week — the extract-and-test pattern already used in that directory is the right tool for the rest of it |
+| [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) | 1,962 | |
+| [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) | 1,726 | |
 
 ### 3.2 Same-file repetition
 
-- **`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`** — *corrected 2026-09-07.* The first draft of this report called this a **378-line** render tree appearing twice (`:239` / `:313`). That was a tooling artifact: `jscpd`'s `javascript` tokenizer mis-parses TSX and matched a 377-line span against a 12-line one, while the `tsx` tokenizer finds **no** clone in the file. The real duplication was two identical 7-line `<ConnectCta …/>` invocations in the first and last `<Match>` arms — folded into one arm in #3039. There is no legacy render path to delete.
+- **[`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx)** — *corrected 2026-09-07.* The first draft of this report called this a **378-line** render tree appearing twice (`:239` / `:313`). That was a tooling artifact: `jscpd`'s `javascript` tokenizer mis-parses TSX and matched a 377-line span against a 12-line one, while the `tsx` tokenizer finds **no** clone in the file. The real duplication was two identical 7-line `<ConnectCta …/>` invocations in the first and last `<Match>` arms — folded into one arm in #3039. There is no legacy render path to delete.
 - **`agentmux-cef/src/client/helpers.rs`** — one ~25-line block repeated **seven times** (`:196, :281, :361, :428, :492, :684, :756`); 287 duplicated lines in a 1-file cluster. Reads as a copy-pasted "open socket to srv with timeout, send, read" sequence that wants to be one function with a payload parameter.
-- `frontend/app/element/flyoutmenu.tsx` (`:295`/`:497`, `:323`/`:515` — 62 + 68 lines), `frontend/app/view/editor/file-tree.tsx` (`:76`/`:280`, 57 lines), `agentmux-srv/src/server/service/session_restore.rs` (`:504`/`:671`, 45 lines), `tab_move.rs`, `window_mutate.rs`, `backend/history/mod.rs` (three internal clones). *(`flyoutmenu` and `file-tree` folded in #3039: one `MenuRows` level renderer, and a `{...props}` pass-through for `TreeNode`.)*
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) (`:295`/`:497`, `:323`/`:515` — 62 + 68 lines), [`frontend/app/view/editor/file-tree.tsx`](../../frontend/app/view/editor/file-tree.tsx) (`:76`/`:280`, 57 lines), `agentmux-srv/src/server/service/session_restore.rs` (`:504`/`:671`, 45 lines), `tab_move.rs`, `window_mutate.rs`, `backend/history/mod.rs` (three internal clones). *(`flyoutmenu` and `file-tree` folded in #3039: one `MenuRows` level renderer, and a `{...props}` pass-through for `TreeNode`.)*
 
 ### 3.3 Smaller cross-file pairs worth a look
 
@@ -159,7 +159,7 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 ## 4. What is already clean (record it, so the plan doesn't "fix" it)
 
-- **Frontend utility helpers are centralized.** Across 677 files, only `formatBytes` is defined twice; `clamp`, `sleep`, `debounce` live once in `frontend/util/util.ts`. The frontend's duplication is at the platform-fork and twin-feature level, not the helper level — the fix is architectural, not a util sweep.
+- **Frontend utility helpers are centralized.** Across 677 files, only `formatBytes` is defined twice; `clamp`, `sleep`, `debounce` live once in [`frontend/util/util.ts`](../../frontend/util/util.ts). The frontend's duplication is at the platform-fork and twin-feature level, not the helper level — the fix is architectural, not a util sweep.
 - **`agentmux-mcp` re-declares no shared types** and already depends on `common`. Its 4.6K-line `main.rs` is a splitting job, not a dedup job.
 - **The dependency graph is a star.** Nothing depends on anything but `common`. Every lift in §5 is cycle-free by construction.
 - **`process_tracker` is a real abstraction** (Windows job / Linux cgroup / macOS pgid behind one trait). The problem is that four other sites *bypass* it, not that it's wrong.
@@ -169,7 +169,7 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 Ordered by payoff ÷ risk. Each step is independently shippable.
 
-**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 landed in #3041: `TileLayout` measured **437 of 598 lines identical across all three platform files** (73%); the shared body is now `TileLayout.core.tsx` + three `TileLayoutPlatform` hook objects (1,652 → 957 lines), and the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models. **Later the same day:** Phase 4's storage half landed as #3045 — `storage/managed.rs`, one `ManagedResource` implementation behind the eighteen skill and MCP store methods each (the frontend half and the "does memory bundles fit as a third?" test remain). Phase 2 is designed, not built: `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` explains why a command registry has to exist before any generator can, and sets the migration order. Phase 5 is decided and closed: `docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md` (now `active`) — keep both frameworks, document the split. The four module headers carry the cross-references.
+**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 landed in #3041: `TileLayout` measured **437 of 598 lines identical across all three platform files** (73%); the shared body is now `TileLayout.core.tsx` + three `TileLayoutPlatform` hook objects (1,652 → 957 lines), and the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models. **Later the same day:** Phase 4's storage half landed as #3045 — `storage/managed.rs`, one `ManagedResource` implementation behind the eighteen skill and MCP store methods each (the frontend half and the "does memory bundles fit as a third?" test remain). Phase 2 is designed, not built: [`docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`](../specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) explains why a command registry has to exist before any generator can, and sets the migration order. Phase 5 is decided and closed: [`docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md`](../architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md) (now `active`) — keep both frameworks, document the split. The four module headers carry the cross-references.
 
 ### Phase 1 — mechanical lifts into `agentmux-common` (low risk, immediate)
 
@@ -184,7 +184,7 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 
 ### Phase 2 — codegen the Rust↔TS boundary (medium effort, highest leverage)
 
-7. Generate `gotypes.d.ts` and the 322 RPC stubs (the 284 command stubs plus the 38 service methods of §2.1) from srv `rpc_types` (`Command*` structs already carry the shape; `serde` attributes carry the wire names). A `scripts/gen-rpc-bindings.sh` + a CI gate ("bindings are current," same pattern as the existing "specs index is current" gate) turns 200+ sync comments into a build error. **Designed in `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`** — the registry-first shape, because the command → type mapping is not data anywhere today.
+7. Generate `gotypes.d.ts` and the 322 RPC stubs (the 284 command stubs plus the 38 service methods of §2.1) from srv `rpc_types` (`Command*` structs already carry the shape; `serde` attributes carry the wire names). A `scripts/gen-rpc-bindings.sh` + a CI gate ("bindings are current," same pattern as the existing "specs index is current" gate) turns 200+ sync comments into a build error. **Designed in [`docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`](../specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md)** — the registry-first shape, because the command → type mapping is not data anywhere today.
 8. Emit shared *constants* through the same generator — `persistent.rs:785`'s "no shared constant crosses the boundary" becomes false.
 9. Move the default layout tree, the provider catalog's `pinned_version`, and the two formatter mirrors (`format_global_brain_block`, `dim_agent_color`) to single-source: backend owns them, frontend receives them over RPC or from generated constants. The layout preset's inability to express 20/80 sizing goes away with it.
 
@@ -200,13 +200,13 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 
 ### Phase 5 — a decision on saga/reducer (no code until decided)
 
-14. ~~Choose: one shared saga/reducer crate, or rename the launcher's and srv's types~~ — **DONE.** Decided 2026-09-07: keep both, document the split. `docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md` (now `active`), and the four module headers carry cross-references so a reader meeting either framework learns the other exists and why. No code moved: the two saga modules share one method name (`new`) and no types, so there was no duplication to remove — only a naming collision to stop implying one.
+14. ~~Choose: one shared saga/reducer crate, or rename the launcher's and srv's types~~ — **DONE.** Decided 2026-09-07: keep both, document the split. [`docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md`](../architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md) (now `active`), and the four module headers carry cross-references so a reader meeting either framework learns the other exists and why. No code moved: the two saga modules share one method name (`new`) and no types, so there was no duplication to remove — only a naming collision to stop implying one.
 
 ### Anytime — contained cleanups
 
 15. `PreLaunchAuthPanel.tsx`: ~~finish the migration to controller state and delete the 378-line legacy render path~~ — **withdrawn**; see the corrected §3.2 row. The two-arm `ConnectCta` fold is done.
 16. `client/helpers.rs`: fold the seven repeats into one function. **Done in #3036** — it was ten repeats, not seven; `backend_close_window` was left alone on purpose.
-17. Split `persistent.rs` (7,151) along the seams it already has (`persistent_resume.rs` and `session_recovery.rs` were split out; continue). Split `agentmux-mcp/src/main.rs` into `tools/` by tool family.
+17. Split `persistent.rs` (7,151) along the seams it already has (`persistent_resume.rs` and `session_recovery.rs` were split out; continue). Split `agentmux-mcp/src/main.rs` into [`tools/`](../../tools) by tool family.
 18. Add a one-paragraph policy to `migrations.rs` stating that migrations deliberately freeze copies of live logic and must not be "deduplicated." **Done in #3039** — in `agentmux-srv/src/migrations/mod.rs` (the module that owns the migrations), not `backend/storage/migrations.rs` (schema DDL).
 
 ## 6. Limits of this audit

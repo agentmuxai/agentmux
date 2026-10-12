@@ -40,7 +40,7 @@ See [`docs/cef-build/build-patched-libcef.md`](cef-build/build-patched-libcef.md
 
 ## Sandbox blocked by system policy
 
-AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disable-setuid-sandbox` — see `crates/cef/src/app/mod.rs`), not the classic root-owned SUID `chrome-sandbox` binary. This is the right choice for an AppImage, which has no privileged install step to set up a SUID binary — but it depends on the kernel allowing unprivileged processes to create user namespaces at all.
+AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disable-setuid-sandbox` — see [`crates/cef/src/app/mod.rs`](../crates/cef/src/app/mod.rs)), not the classic root-owned SUID `chrome-sandbox` binary. This is the right choice for an AppImage, which has no privileged install step to set up a SUID binary — but it depends on the kernel allowing unprivileged processes to create user namespaces at all.
 
 **Ubuntu backported an AppArmor restriction on exactly that** (originally landed in 23.10, later security-patched into 22.04/20.04 LTS too, ~early 2024) that blocks this for any Chromium/Electron/CEF-based application system-wide — this is not an AgentMux bug, and it hit Chrome itself, VS Code, Discord, Slack, and others the same way around the same time. A system that picks up this policy via `unattended-upgrades` will see AgentMux (and everything else using this sandboxing approach) stop working with no code change on either side.
 
@@ -157,7 +157,7 @@ own `build-linux.yml` / `task package:linux:deb` / `task package:linux:tarball`
 | `.tar.gz` | `task package:linux:tarball` | Extract, run `./AgentMux/agentmux.sh` | No install step, no packaging tool dependency — closest Linux equivalent to the Windows portable .7z |
 
 All four formats are built from the identical staged runtime
-(`scripts/stage-linux-runtime.sh`) — same binaries, same CEF runtime, same
+([`scripts/stage-linux-runtime.sh`](../scripts/stage-linux-runtime.sh)) — same binaries, same CEF runtime, same
 BeginWindowDrag release gate — only the final packaging step differs. See
-`docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md` for
+[`docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md`](specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md) for
 the full design and the formats still planned (`.pacman`, arm64).

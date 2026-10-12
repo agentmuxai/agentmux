@@ -161,13 +161,13 @@ New class `AgentNativeMemoryModel` (same pattern as `MemoryViewModel`) with reac
 
 | File | Notes |
 |---|---|
-| `docs/specs/SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md` | Full spec; §4 = identity modal, §5 = memory modal, §7 = backend RPCs, §8 = frontend model, §9 = phases |
-| `frontend/app/element/modal-layer.ts` | `ModalLayerRequest` union — add new kinds here |
-| `frontend/app/element/modal-dispatch.tsx` | Add `requestLabel` + `renderRequest` cases here |
-| `frontend/app/view/agent/components/AgentIdentityModal.tsx` | NEW (Phase 1) — identity modal |
+| [`docs/specs/SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md`](../specs/SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md) | Full spec; §4 = identity modal, §5 = memory modal, §7 = backend RPCs, §8 = frontend model, §9 = phases |
+| [`frontend/app/element/modal-layer.ts`](../../frontend/app/element/modal-layer.ts) | `ModalLayerRequest` union — add new kinds here |
+| [`frontend/app/element/modal-dispatch.tsx`](../../frontend/app/element/modal-dispatch.tsx) | Add `requestLabel` + `renderRequest` cases here |
+| [`frontend/app/view/agent/components/AgentIdentityModal.tsx`](../../frontend/app/view/agent/components/AgentIdentityModal.tsx) | NEW (Phase 1) — identity modal |
 | `frontend/app/view/agent/components/AgentMemoryModal.tsx` | NEW (Phase 1) — memory stub |
-| `frontend/app/view/agent/agent-model.ts` | `_openIdentityModal`, `_openMemoryModal` callbacks |
-| `frontend/app/view/agent/agent-view.tsx` | Wires modal callbacks; `<ModalLayer scope="pane">` at line ~103 |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | `_openIdentityModal`, `_openMemoryModal` callbacks |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Wires modal callbacks; `<ModalLayer scope="pane">` at line ~103 |
 | `agentmux-srv/src/server/app_api.rs` | `write_agent_config_files` has the shared-workdir guard (~line 2297) |
 | `agentmux-srv/src/backend/agent_config.rs` | Global settings injected at launch; `autoMemoryEnabled` now NOT suppressed |
 
@@ -192,4 +192,4 @@ New class `AgentNativeMemoryModel` (same pattern as `MemoryViewModel`) with reac
 - codex only auto-reviews on PR open; re-trigger with `@codex review` comment using the a5af PAT (see `reference_a5af_pat_path.md`)
 - reagent re-reviews on every push automatically
 - Merge when reagent APPROVED on HEAD; codex quota-limit is acceptable blocker to skip
-- `bump patch` before each build; use `scripts/bump-wrapper.sh` or sync package-lock.json after
+- `bump patch` before each build; use [`scripts/bump-wrapper.sh`](../../scripts/bump-wrapper.sh) or sync package-lock.json after

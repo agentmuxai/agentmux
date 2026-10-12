@@ -80,7 +80,7 @@ Remote `main` is at `156bfa6` (PR #277 merge). A `git push origin main` will syn
 
 Docs/specs/analysis files accumulated across sessions:
 - 4 handoff docs, 1 prior report
-- 10 analysis/spec docs in `docs/`
+- 10 analysis/spec docs in [`docs/`](..)
 - Leftover temp dirs: `46316runtimeDir/`, `4648runtimeDir/`, `cef-testbed/`
 
 Consider: commit the docs, `.gitignore` or delete the temp dirs.

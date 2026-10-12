@@ -3,13 +3,13 @@
 **Date:** 2026-09-22
 **Status:** implemented in #3509 — see §8 for what shipped (differs
 slightly from §6's proposed fix)
-**Area:** `frontend/app/view/settings/sections/terminal-section.tsx` (setting
-UI), `frontend/app/view/term/termwrap.ts` (xterm.js construction),
-`frontend/app/view/term/term.tsx` +
-`frontend/app/view/agent/components/AgentShellSubblock.tsx` (the two live
+**Area:** [`frontend/app/view/settings/sections/terminal-section.tsx`](../../frontend/app/view/settings/sections/terminal-section.tsx) (setting
+UI), [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) (xterm.js construction),
+[`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) +
+[`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) (the two live
 terminal surfaces)
 **Related:**
-`docs/specs/SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md` (the
+[`docs/specs/SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md`](../specs/SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md) (the
 spec that added the setting, PR #2876) — §2 and §4.2 of that spec name this
 exact limitation and defer it; this report is the investigation for
 actually closing it.
@@ -199,7 +199,7 @@ Implemented as §6 proposed, with one deliberate deviation and one addition:
 - **Deviation:** instead of duplicating the `typeof … === "number" && … > 0
   ? … : 1` clamp inline in the new atom (as §6 literally suggested),
   extracted it into a new shared module,
-  `frontend/app/view/term/termscrollsensitivity.ts`
+  [`frontend/app/view/term/termscrollsensitivity.ts`](../../frontend/app/view/term/termscrollsensitivity.ts)
   (`resolveTermScrollSensitivity`), mirroring the existing
   `termscrollback.ts` — the sibling module this codebase already uses for
   exactly this "every xterm surface must resolve a setting the same way"
@@ -210,7 +210,7 @@ Implemented as §6 proposed, with one deliberate deviation and one addition:
   prevent.
 - **Addition, as a side effect of the above:** the shared resolver also
   clamps to the schema's documented `0.1`–`10` range
-  (`schema/settings.json`), which `termwrap.ts`'s original inline logic
+  ([`schema/settings.json`](../../schema/settings.json)), which `termwrap.ts`'s original inline logic
   did not — it only checked `> 0` with no upper bound. A value above `10`
   was previously only reachable by hand-editing `settings.json` past what
   the UI's own number input accepts; it now clamps to `10` instead of
@@ -222,8 +222,8 @@ Implemented as §6 proposed, with one deliberate deviation and one addition:
   in use there for `term:scrollback`) rather than adding a new
   `getSettingsKeyAtom` import — one fewer subscription, same reactivity.
 - 6 unit tests for the resolver (`termscrollsensitivity.test.ts`), full
-  frontend suite (1980 tests across `frontend/app/view/term` +
-  `frontend/app/view/agent`) and `npx tsc --noEmit -p
+  frontend suite (1980 tests across [`frontend/app/view/term`](../../frontend/app/view/term) +
+  [`frontend/app/view/agent`](../../frontend/app/view/agent)) and `npx tsc --noEmit -p
   tsconfig.citypecheck.json` (the exact CI config) both clean.
 
 **Not live-verified against a running instance this pass** — no dev CEF
