@@ -530,40 +530,67 @@ fn main() {
         }
         println!("{line}");
     }
-    footprint_cross_check(&last_rows);
+    footprint_cross_check(&last_rows, json.as_mut());
 }
 
 /// macOS: `footprint`'s own total over the app processes of the last
-/// sample. It counts a region shared between processes once, where the
-/// per-process sum above can count it in each.
+/// sample, printed and kept in the raw data. It counts a region shared
+/// between processes once, where the per-process sums above can count it in
+/// each, so on macOS those sums are an upper bound and this is the figure
+/// to quote. (A probe; the plan's harness takes it every sample.)
 #[cfg(target_os = "macos")]
-fn footprint_cross_check(rows: &[Row]) {
+fn footprint_cross_check(rows: &[Row], json: Option<&mut std::fs::File>) {
     let app: Vec<&Row> = rows.iter().filter(|r| r.app).collect();
     let mut cmd = std::process::Command::new("footprint");
     for r in &app {
         cmd.arg("-p").arg(r.pid.to_string());
     }
     println!();
-    match cmd.output() {
+    println!("On macOS the private totals above sum per-process footprints: an upper bound.");
+    let text = match cmd.output() {
         Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout);
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
             let lines: Vec<&str> = text.lines().collect();
             println!(
-                "footprint over the {} app processes (last 25 lines):",
+                "footprint over the {} app processes, which counts shared memory once (last 25 lines):",
                 app.len()
             );
             for l in &lines[lines.len().saturating_sub(25)..] {
                 println!("  {l}");
             }
+            text
         }
-        Ok(out) => println!(
-            "footprint failed ({}): {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        ),
-        Err(e) => println!("footprint not run: {e}"),
+        Ok(out) => {
+            let msg = format!(
+                "footprint failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            println!("{msg}");
+            msg
+        }
+        Err(e) => {
+            let msg = format!("footprint not run: {e}");
+            println!("{msg}");
+            msg
+        }
+    };
+    if let Some(f) = json {
+        let pids: Vec<String> = app.iter().map(|r| r.pid.to_string()).collect();
+        if let Err(e) = writeln!(
+            f,
+            "{{\"footprint\":{{\"ts_ms\":{},\"pids\":[{}],\"output\":\"{}\"}}}}",
+            now_ms(),
+            pids.join(","),
+            esc(&text)
+        )
+        .and_then(|_| f.flush())
+        {
+            eprintln!("memtree: writing footprint to the .jsonl: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn footprint_cross_check(_rows: &[Row]) {}
+fn footprint_cross_check(_rows: &[Row], _json: Option<&mut std::fs::File>) {}
