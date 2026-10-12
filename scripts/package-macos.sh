@@ -625,13 +625,14 @@ OSA
     sync
     hdiutil detach "$RWMNT" >/dev/null 2>&1 || true
 fi
-# ULMO (LZMA) compression — LZMA-class like Linux's SquashFS AppImage, vs the
-# default UDZO (zlib) which left the DMG ~50% larger. Requires macOS 10.15+ to
-# mount (we target 11+, so fine). On this build: UDZO 248MB -> ULMO 167MB.
-# Purge inactive pages first — LZMA peaks at 4-6GB RAM and gets OOM-killed if
-# the system is under memory pressure after the Rust compile phase.
-sudo -n purge 2>/dev/null || true
-hdiutil convert "$RW" -format ULMO -o "$DMG" >/dev/null
+# ULFO (LZFSE) compression. Every page of the app read from a mounted DMG is
+# decompressed on the way in: the first launch from a fresh mount, and the
+# copy into /Applications. ULMO (LZMA) made that slow: on 0.59.20 (M2), reading
+# the 309 MB Chromium framework from a fresh mount took 4.2 s with ULMO and
+# 0.4 s with ULFO, and a cold launch from the mount 16.1 s vs 10.1 s. The cost
+# is size: ULMO 170 MB, ULFO 223 MB (UDZO/zlib was ~248 MB). ULFO mounts on
+# macOS 10.11+ (we target 11+).
+hdiutil convert "$RW" -format ULFO -o "$DMG" >/dev/null
 rm -f "$RW"
 codesign --force --timestamp --sign "$CERT" "$DMG"
 
