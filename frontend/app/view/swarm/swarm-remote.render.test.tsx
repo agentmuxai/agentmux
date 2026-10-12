@@ -134,7 +134,10 @@ describe("OtherInstanceSections", () => {
         const chips = sections(container).map((s) =>
             [...s.querySelectorAll(".swarm-remote-agent")].map((row) => {
                 const chip = row.querySelector(".swarm-remote-agent-status");
-                return chip ? [chip.querySelector(".swarm-status-chip")!.textContent, chip.getAttribute("title")] : null;
+                // The label span only: the chip also holds the spinner glyph.
+                return chip
+                    ? [chip.querySelector(".swarm-status-label")!.textContent, chip.getAttribute("title")]
+                    : null;
             })
         );
         expect(chips).toEqual([
