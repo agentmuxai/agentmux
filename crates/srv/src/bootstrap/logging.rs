@@ -142,17 +142,20 @@ pub fn enrich_path() {
     let cache_file = std::env::var_os("AGENTMUX_SHARED_DIR")
         .map(|d| std::path::PathBuf::from(d).join("cache").join("login-path.json"));
     let outcome = agentmux_common::enrich_current_process_path_cached(cache_file.as_deref());
-    if outcome.source == agentmux_common::PathSource::Inherited {
-        return;
+    if outcome.source != agentmux_common::PathSource::Inherited {
+        // Record the source for the Toolchain modal (the host sets this when it
+        // spawns the srv; on a direct launch we set it here after enriching).
+        std::env::set_var("AGENTMUX_PATH_SOURCE", outcome.source.as_str());
+        tracing::info!(
+            source = outcome.source.as_str(),
+            cached = outcome.from_cache,
+            "Enriched srv PATH on direct launch (stripped PATH detected)"
+        );
     }
-    // Record the source for the Toolchain modal (the host sets this when it
-    // spawns the srv; on a direct launch we set it here after enriching).
-    std::env::set_var("AGENTMUX_PATH_SOURCE", outcome.source.as_str());
-    tracing::info!(
-        source = outcome.source.as_str(),
-        cached = outcome.from_cache,
-        "Enriched srv PATH on direct launch (stripped PATH detected)"
-    );
+
+    // Refresh after every cache hit, including one that added nothing: a
+    // cached "nothing to add" must still be able to notice a tool directory
+    // the user's setup gains later through a file the fingerprint can't see.
 
     #[cfg(unix)]
     if let (true, Some(cache_file)) = (outcome.from_cache, cache_file) {

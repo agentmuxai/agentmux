@@ -69,7 +69,7 @@ pub fn resolve_login_path() -> EnrichedPath {
 
     #[cfg(unix)]
     {
-        let login_shell = capture_login_shell_path(&resolve_user_shell());
+        let login_shell = capture_login_shell_path(&resolve_user_shell(), None);
         build_enriched(&inherited, login_shell.as_deref(), &wellknown_dirs())
     }
 }
@@ -141,7 +141,7 @@ fn enrich_from_cache_or_shell(cache_file: &Path, current: &str) -> EnrichOutcome
     let (login, from_cache) = match cache::read(cache_file, &fingerprint) {
         Some(login) => (Some(login), true),
         None => {
-            let login = capture_login_shell_path(&shell);
+            let login = capture_login_shell_path(&shell, None);
             if let Some(login) = login.as_deref() {
                 cache::write(cache_file, &fingerprint, login);
             }
@@ -169,7 +169,12 @@ pub fn refresh_login_path_cache(
 ) -> Option<String> {
     let shell = resolve_user_shell();
     let fingerprint = login_path_fingerprint(&shell, inherited);
-    let login = capture_login_shell_path(&shell)?;
+    // Start the shell from the PATH this process inherited, as the boot-time
+    // capture did, not the enriched one now in the environment: a startup
+    // file that appends to $PATH would otherwise carry every cached entry
+    // forward, and a directory removed from the user's setup would never
+    // drop out of the cache.
+    let login = capture_login_shell_path(&shell, Some(inherited))?;
     cache::write(cache_file, &fingerprint, &login);
     let enriched = build_enriched(inherited, Some(&login), &wellknown_dirs());
     (enriched.path != current_enriched).then_some(enriched.path)
@@ -295,7 +300,7 @@ fn resolve_user_shell() -> String {
 /// the user's rc files to stdout can't corrupt the parse. Bounded by a 2s hard
 /// timeout so a slow/hung rc file can never block startup.
 #[cfg(unix)]
-fn capture_login_shell_path(shell: &str) -> Option<String> {
+fn capture_login_shell_path(shell: &str, path: Option<&str>) -> Option<String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
@@ -305,7 +310,11 @@ fn capture_login_shell_path(shell: &str) -> Option<String> {
     // banner the rc files emit to stdout.
     let script = r#"printf '__AMUX_PATH__%s__AMUX_END__' "$PATH""#;
 
-    let mut child = Command::new(shell)
+    let mut cmd = Command::new(shell);
+    if let Some(path) = path {
+        cmd.env("PATH", path);
+    }
+    let mut child = cmd
         .args(["-lic", script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -579,7 +588,7 @@ mod tests {
     fn capture_via_real_sh_roundtrips_path() {
         // /bin/sh honors -c; -lic is accepted (login+interactive flags are
         // tolerated). The script echoes $PATH between the sentinels.
-        let got = capture_login_shell_path("/bin/sh");
+        let got = capture_login_shell_path("/bin/sh", None);
         // On any unix dev/CI box /bin/sh exists and $PATH is non-empty.
         assert!(got.is_some(), "expected a captured PATH from /bin/sh");
         assert!(!got.unwrap().is_empty());
