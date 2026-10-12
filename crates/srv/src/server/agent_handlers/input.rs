@@ -1277,7 +1277,10 @@ pub async fn run_agent_turn_joining(
         // key and the poll key are always consistent.
         // Both calls are idempotent: add_agent skips the WS send if already
         // subscribed; register_agent replaces any stale mapping from a prior session.
-        let agent_name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
+        // As its route name for every use below ("Loap #3" → "Loap-3"), or the
+        // controller's own id disagrees with what a jekt resolves to (#2695).
+        let display = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
+        let agent_name = crate::backend::reactive::sanitize::route_name(&display).unwrap_or_default();
         if !agent_name.is_empty() {
             // Identity M2: the display binding is `agentName`, the key is
             // the UID carried in this turn's spawn env. A block that spawned

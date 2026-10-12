@@ -601,6 +601,9 @@ fn test_handler_invalid_agent_id() {
 async fn test_handler_fork_display_name_registers_and_is_reachable() {
     let mut handler = Handler::new();
     handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    // The block's live id, as the Register-tail now sets it (input.rs): the
+    // route name. A raw "Loap #3" here failed #2695's identity check.
+    handler.set_agent_identity_confirmer(Arc::new(|_block_id: &str| Some("Loap-3".to_string())));
     handler.register_agent("Loap #3", "block1", None).unwrap();
     let resp = handler.inject_message(InjectionRequest {
         target_agent: "Loap #3".to_string(),
