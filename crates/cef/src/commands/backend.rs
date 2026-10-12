@@ -428,6 +428,9 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
         crate::commands::pane_pool::on_snapshot_shown(&label);
         return serde_json::Value::Null;
     }
+    if status == "wave-ready" && label == "main" {
+        crate::commands::startup_pools::on_main_window_ready(state);
+    }
     *state.window_init_status.lock() = status.to_string();
     // Capture HWND once the window is fully shown (CEF Views returns NULL at
     // on_after_created time; the renderer-ready callback is the earliest safe moment).

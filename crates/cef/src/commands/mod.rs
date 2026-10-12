@@ -15,6 +15,7 @@ pub mod drag;
 pub mod tear_off_hook;
 pub mod window_pool;
 pub mod pane_pool;
+pub mod startup_pools;
 pub mod clipboard;
 pub mod stubs;
 pub mod palette;

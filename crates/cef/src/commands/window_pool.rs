@@ -1178,9 +1178,9 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     }
 }
 
-/// Initialize the pool after primary-window first paint. Spawns
-/// `POOL_TARGET_SIZE` windows. Called once per app run from
-/// `on_after_created` for the "main" label.
+/// Initialize the pool. Spawns `POOL_TARGET_SIZE` windows. Called once the
+/// "main" window has loaded, not when its browser is created (see
+/// `commands::startup_pools`).
 ///
 /// Phase 7: now cross-platform. Pool windows are spawned off-screen at
 /// (-32000, -32000) DIP — invisible on macOS Cocoa (accepts any coordinate)
