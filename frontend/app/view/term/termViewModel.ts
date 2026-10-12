@@ -317,7 +317,7 @@ class TermViewModel {
         // this block (the pane chrome's runtime badge, multi-input), which
         // then read those fields (ReAgent P1 on #3807).
         this.unregisterModel = termModels.register(blockId, this);
-        // The App API's RunCommand/PressKeys: the same commands as the keys,
+        // MuxAPI's RunCommand/PressKeys: the same commands as the keys,
         // with a guard on paste (agents are first-class, with protections).
         this.unregisterCommands = registerPaneCommandRunner(
             blockId,
@@ -464,7 +464,7 @@ class TermViewModel {
         return this.runTermCommand("term:paste") ? { ran: true } : { ran: false, reason: "term:paste didn't apply" };
     }
 
-    /** The terminal's own commands, run by its keys and by the App API's RunCommand. */
+    /** The terminal's own commands, run by its keys and by MuxAPI's RunCommand. */
     runTermCommand(command: string): boolean {
         switch (command) {
             case "term:copy": {

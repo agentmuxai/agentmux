@@ -126,7 +126,7 @@ inside the container:
    required, but "guessing" is doing a lot of work in that sentence — this
    is the least reliable option and should be the fallback, not the
    primary mechanism.
-2. **Explicit registration call.** A new App API verb / MCP tool (e.g.
+2. **Explicit registration call.** A new MuxAPI verb / MCP tool (e.g.
    `RegisterDevServer { project: string, port: u16 }`) an agent calls once
    its dev server is up. Matches the existing pattern of agent-facing App
    API verbs already documented in

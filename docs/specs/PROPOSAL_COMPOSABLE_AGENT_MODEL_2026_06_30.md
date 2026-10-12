@@ -4,7 +4,7 @@
 **Status:** proposed — Proposal — for discussion (naming + IA decisions needed)
 **Author:** AgentX
 **Driver:** "I'd like a cleaner model… break out skills and MCP into the Trust Center… should we call them bundles? preset bundles? would a preset be a one-stop shop?" *(verbatim — the Trust Center → Armory rename came later, PR #1917)*
-**Related:** CLAUDE.md "Not widgets" (Identity / Presets); `db_memory_bundles`, `db_identity_bundles`; the per-agent identity provisioning work (`specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`); the agent App API identity/preset/memory handlers.
+**Related:** CLAUDE.md "Not widgets" (Identity / Presets); `db_memory_bundles`, `db_identity_bundles`; the per-agent identity provisioning work (`specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`); the agent MuxAPI identity/preset/memory handlers.
 
 ---
 
@@ -54,13 +54,13 @@ Armory.
 | Primitive | What it is | Today | Proposed home |
 |---|---|---|---|
 | **Account** | The provider login + credential the agent authenticates as (OAuth/key, per-account `CLAUDE_CONFIG_DIR`) | `db_identity_accounts`, wrapped in a redundant identity-**bundle** layer | Armory › **Accounts** (drop the bundle wrapper — §3.3) |
-| **Memory** | Persistent learned knowledge (native memory store; the `memory.*` App API / `memory/` dir) | colloquially "the brain", per-account | Armory › **Memories** |
+| **Memory** | Persistent learned knowledge (native memory store; the `memory.*` MuxAPI / `memory/` dir) | colloquially "the brain", per-account | Armory › **Memories** |
 | **MCP server** | An external tool/connection surface (URL/stdio + which tools) | inlined in preset | Armory › **MCP Servers** (break out) |
 | **Skill** | On-demand instruction/knowledge module (a folder) | inlined in preset | Armory › **Skills** (break out) |
 | **Brief** | **The first message** injected when an agent pane opens — the startup payload (session context / identity / kickoff). That is *all* it is. It is **not** a standing instruction set; there is no always-on instruction blob. Behavioral/instructional content lives in **Skills** (on-demand). | the `startup` content type | Armory › **Briefs** |
 
 > Each primitive carries its own **ownership/sharing** (agent-owned vs **global**,
-> mirroring the App API's existing global-preset guard) and its own audit trail.
+> mirroring MuxAPI's existing global-preset guard) and its own audit trail.
 > Accounts and MCP servers especially are security-sensitive — first-class status
 > gives them proper review, not burial inside a preset blob.
 
@@ -171,7 +171,7 @@ read alias for one release).
 ### 4.2 The primitives — naming
 
 Keep them concrete and singular: **Account, Memory, MCP Server, Skill, Brief**.
-(**Memory** matches the native concept + the `memory.*` App API — no UI/backend
+(**Memory** matches the native concept + the `memory.*` MuxAPI — no UI/backend
 split; "the brain" stays a colloquial nickname, not the canonical term. The reason
 "Brain" was ever needed — disambiguating from `db_memory_bundles` — is removed by
 this proposal's `db_memory_bundles` → `db_bundles` rename. **`Brief` is the name —
@@ -216,11 +216,11 @@ workspace.
 
 ## 6. Trust & sharing model
 
-- Each primitive is **agent-owned** or **global** (shared). The App API already
+- Each primitive is **agent-owned** or **global** (shared). MuxAPI already
   guards global presets (`preset.upsert` rejects modifying `is_global`); generalize
   that guard to **every** primitive: an agent may write its own, never another's or
   a global one without authorization. (Ties directly to the S1/S4 work in the agent
-  App API.)
+  MuxAPI.)
 - **Accounts** and **MCP servers** carry the heaviest trust weight (credentials +
   external reach). First-class status means they get explicit grant/review in the
   Armory instead of riding hidden inside a preset.
@@ -241,14 +241,14 @@ workspace.
     agents/bundles reference accounts directly.
   - `db_identity_accounts` → `db_accounts`.
   - Phase it: rename the **concept/UI now** (cheap), do the **storage migration**
-    behind the App API later so agents only ever see the clean surface.
+    behind MuxAPI later so agents only ever see the clean surface.
 - **Resolver change:** spawn resolution moves from `instance → identity_bundle →
   binding → account` to `instance/bundle → account` directly (one account per
   provider, enforced at resolve). Reconcile with
   `specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`.
 - **Compatibility:** keep "preset" / `db_memory_bundles` as a read alias for one
   release; new writes go to Bundles.
-- **App API:** add `mcp.*`, `skill.*`, and `account.*` agent commands paralleling
+- **MuxAPI:** add `mcp.*`, `skill.*`, and `account.*` agent commands paralleling
   the existing `memory.*`, with the same S1 + ownership/global guards. `preset.*`
   becomes `bundle.*`.
 

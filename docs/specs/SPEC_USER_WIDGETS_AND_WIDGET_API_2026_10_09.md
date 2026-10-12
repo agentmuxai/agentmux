@@ -376,7 +376,7 @@ How it works:
 - The answer goes to srv the only way an approval can, through the host (§8.3). The host's approval route answers every request for that version, so approving in Settings answers the agent too; an answer for one version ends requests for the widget's other versions.
 - A newer version replaces an older request for the same widget; a version asked for twice is one prompt.
 
-What agents are told: an Operator Config entry, "Building widgets", given to host agents, says what a widget is, how to write the smallest one, the loop (`WidgetInstall`, `OpenWidget`, `UIScreenshot` of its pane, fix, install again), and to ask for as few permissions as possible and never make a widget trusted unless the user asks. The full reference is served by srv where an agent can read it: `/agentmux/widget-sdk/README.md` and `/agentmux/widget-sdk/v1.d.ts`. The App API entry lists the three tools.
+What agents are told: an Operator Config entry, "Building widgets", given to host agents, says what a widget is, how to write the smallest one, the loop (`WidgetInstall`, `OpenWidget`, `UIScreenshot` of its pane, fix, install again), and to ask for as few permissions as possible and never make a widget trusted unless the user asks. The full reference is served by srv where an agent can read it: `/agentmux/widget-sdk/README.md` and `/agentmux/widget-sdk/v1.d.ts`. MuxAPI entry lists the three tools.
 
 ## 11. Security summary
 

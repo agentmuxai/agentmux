@@ -95,7 +95,7 @@ pub(crate) async fn handle_ui_press_keys(
 /// ClosePane closes it (`app_api::pane::close_pane_as`). A pane the agent is
 /// in closes at once; another agent's pane waits 15 s for its user to keep
 /// it, and the answer says so. The key itself closes the focused pane at
-/// once, with no undo, so the page never runs it for the App API.
+/// once, with no undo, so the page never runs it for MuxAPI.
 async fn close_pane(state: &AppState, req: &UiRunCommandRequest, own_block_id: &str) -> axum::response::Response {
     let Some(target) = req.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
         return err_response(

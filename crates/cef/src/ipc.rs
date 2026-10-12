@@ -489,7 +489,7 @@ async fn route_command(
         // ---- Command palette ----
         "run_command" => commands::palette::run_command(state, args),
 
-        // ---- App API (frontend-driven) ----
+        // ---- MuxAPI (frontend-driven) ----
         "open_agent" => commands::palette::open_agent(state, args),
 
         // ---- Browser panes (native CefBrowserView) ----

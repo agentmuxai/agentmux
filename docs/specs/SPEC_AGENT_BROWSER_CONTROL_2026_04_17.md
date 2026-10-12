@@ -118,7 +118,7 @@ inject, etc.):
 | `mcp__agentmux__browser_execute_js` | `{ script }` | Execute JavaScript in the page |
 | `mcp__agentmux__browser_get_text` | `{ selector? }` | Get text content (full page or selector) |
 
-### App API (Frontend → Host)
+### MuxAPI (Frontend → Host)
 
 The frontend browser view component calls these IPC commands:
 

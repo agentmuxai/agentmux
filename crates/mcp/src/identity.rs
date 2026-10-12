@@ -7,7 +7,7 @@
 use super::*;
 
 /// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
-/// this MCP server's trusted environment. The App API identity/preset/memory
+/// this MCP server's trusted environment. MuxAPI identity/preset/memory
 /// REST endpoints stamp their `agent_id` from this — the agent's own model
 /// output cannot reach those endpoints (no auth key in the PTY) nor override
 /// this value, so the slug cannot be forged. See

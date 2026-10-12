@@ -146,12 +146,12 @@ fn agent_claude_config_dir(mstore: &crate::backend::storage::store::Store, agent
 /// `working_directory` falls through to the registry rather than failing (see
 /// the inline note below; that short-circuit was a real bug).
 ///
-/// Shared by `native_memory_handlers` and the `memory.*` App API handlers.
+/// Shared by `native_memory_handlers` and the `memory.*` MuxAPI handlers.
 pub(crate) fn memory_dir_for_agent(
     mstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<std::path::PathBuf, String> {
-    // agent_id arriving from App API is the agent slug (AGENTMUX_AGENT_ID /
+    // agent_id arriving from MuxAPI is the agent slug (AGENTMUX_AGENT_ID /
     // bus:register id), not a UUID and not the literal display name — use
     // instance_get_by_slug (agent_def_get queries by UUID and would always
     // return None here; instance_get_by_name matches the display name, a
@@ -433,7 +433,7 @@ pub(crate) fn validate_memory_filename(filename: &str) -> Result<(), String> {
     validate_filename(filename)
 }
 
-/// Parse `metadata.type` from YAML frontmatter (re-exported for App API).
+/// Parse `metadata.type` from YAML frontmatter (re-exported for MuxAPI).
 pub(crate) fn parse_memory_frontmatter_type(content: &str) -> Option<String> {
     parse_frontmatter_type(content)
 }

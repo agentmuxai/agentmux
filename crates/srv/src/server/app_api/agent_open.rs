@@ -664,7 +664,7 @@ async fn open_agent_inner(
                 env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(routing_id));
                 // Mirror under MUXBUS_AGENT_ID too, matching the same
                 // additive fix in agent_handlers/input.rs (ARCH-002) --
-                // this App API path (agent.open -> agent.send, via
+                // this MuxAPI path (agent.open -> agent.send, via
                 // agent_io.rs reading this back from persisted cmd:env)
                 // builds its own env_vars independently of input.rs's spawn
                 // path, so it needs the same mirror applied here rather than

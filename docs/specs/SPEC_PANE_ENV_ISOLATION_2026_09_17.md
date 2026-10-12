@@ -235,7 +235,7 @@ through.
 **`AGENTMUX_LOCAL_URL` + `AGENTMUX_AUTH_KEY` remain inheritable**, and they are
 the largest residual coupling: a process inheriting both holds an authenticated
 handle to the instance that spawned it, and `AGENTMUX_AUTH_KEY` is the sole auth
-factor for the whole App API (`server/mod.rs`, a string equality against a
+factor for the whole MuxAPI (`server/mod.rs`, a string equality against a
 per-launch UUID with no scoping, expiry or rate limit).
 
 Removing them is a redesign of how helpers reach the server — a per-invocation

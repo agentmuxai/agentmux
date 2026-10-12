@@ -1,4 +1,4 @@
-# SPEC: Deep, no-mouse control of a browser pane via the Agent App API
+# SPEC: Deep, no-mouse control of a browser pane via MuxAPI
 
 **Date:** 2026-09-20
 **Status:** implemented — PR #3445.
@@ -17,7 +17,7 @@ use as future work), [`docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026
 "Deep control of the browser" for an agent that has a browser pane open —
 not synthetic OS-level mouse/pixel automation (the CDP-over-screen approach
 used earlier this session for whole-window screenshot tooling), but
-structured, semantic control reachable through the Agent App API: navigate,
+structured, semantic control reachable through MuxAPI: navigate,
 read page content, click by selector, type, all without moving a literal
 mouse. Question: do we already have this?
 

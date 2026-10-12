@@ -21,7 +21,7 @@ raw `agent:memory:write_file` RPC for the same agent failed outright with
 `SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md` (#2901) fixed exactly
 this class of bug — but only inside `memory_dir_for_agent` and
 `memory_dir_for_agent_by_id` (`native_memory_handlers.rs`), the resolvers used
-by the App API (`app_api/mod.rs`, what `MemoryWrite`/`MemoryList` MCP tools
+by MuxAPI (`app_api/mod.rs`, what `MemoryWrite`/`MemoryList` MCP tools
 call) and by `bundle.rs`'s import/export.
 
 The four WebSocket RPC handlers that back the Armory UI —

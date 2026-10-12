@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The agent App API's view of the shortcut table: ListShortcuts, RunCommand and
+// The agent MuxAPI's view of the shortcut table: ListShortcuts, RunCommand and
 // PressKeys (docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4).
 // The host calls these through `window.__agentmux_shortcuts`, in the window that
 // holds the calling agent's own pane; srv decides which window that is.
@@ -39,7 +39,7 @@ export interface ResolvedNote {
 }
 
 /**
- * What the page refuses to run for the App API, with the reason it gives.
+ * What the page refuses to run for MuxAPI, with the reason it gives.
  * Agents are first-class owners, so this is only what has no protection: a
  * permanent delete can't be undone. `pane:close` is handled by srv, through
  * ClosePane's undo (srv `ui_shortcuts.rs`), so it never reaches the page from
@@ -57,7 +57,7 @@ export const API_REFUSED: ReadonlyMap<string, string> = new Map([
  *  today: `files:trash` can be put back there too. */
 const API_REFUSED_MAC: ReadonlyMap<string, string> = new Map();
 
-/** Why the App API refuses `command` on `platform`, or undefined if it doesn't. */
+/** Why MuxAPI refuses `command` on `platform`, or undefined if it doesn't. */
 export function refusalFor(command: string, platform: KeyPlatform): string | undefined {
     return API_REFUSED.get(command) ?? (platform === "mac" ? API_REFUSED_MAC.get(command) : undefined);
 }
@@ -72,7 +72,7 @@ let lastResolved: ResolvedNote | null = null;
 
 /** A pane's own command runner: true/false, or a result when it needs to say why (or to wait). */
 export type PaneRun = (command: string) => boolean | RunResult | Promise<RunResult>;
-/** Why a pane won't let the App API run `command` right now, or undefined. */
+/** Why a pane won't let MuxAPI run `command` right now, or undefined. */
 export type PaneRefuse = (command: string) => Promise<string | undefined>;
 
 const paneRunners = new Map<string, { run: PaneRun; refuse?: PaneRefuse }>();

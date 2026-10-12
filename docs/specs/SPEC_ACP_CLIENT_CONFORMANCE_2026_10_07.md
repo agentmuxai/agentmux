@@ -23,7 +23,7 @@ checked against the ACP SDK's schema (`@agentclientprotocol/sdk` 0.26.0,
    (`blockcontroller/mod.rs`), so a UI-launched ACP agent runs under the
    per-turn subprocess controller. pi-acp then received the startup message
    as plain text lines and rejected each one ("Failed to parse JSON
-   message"). Only `agent.open` (app API) writes `"acp"`.
+   message"). Only `agent.open` (MuxAPI) writes `"acp"`.
 2. **Messages can't reach an ACP controller.** `run_agent_turn`
    (`agentinput`, reactive delivery, fleet broadcast) and `agent.send`
    handle only the persistent and subprocess controllers, and return

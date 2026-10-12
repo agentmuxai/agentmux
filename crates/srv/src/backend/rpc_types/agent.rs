@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Agent domain: App API agent lifecycle (agent.open/send/stop/status/…),
+//! Agent domain: MuxAPI agent lifecycle (agent.open/send/stop/status/…),
 //! agent definition CRUD + content, skills, history, import/export, and the
 //! two-tier template / fork command shapes.
 

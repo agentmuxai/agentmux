@@ -6,7 +6,7 @@ Three interlocking problems found during the 2026-05-21 terminal input investiga
 
 1. **Terminal opening has no timeout, no error surface, no retry** — any backend delay causes a silent hang
 2. **The echo-latency benchmark used internal RPC plumbing directly** — `controllerinput` + seq is the private keyboard wire format; agents must not touch it; flooding it with 220 concurrent fire-and-forget RPCs overflowed the 32-slot reorder buffer and permanently froze those terminals
-3. **Agents need a real typing API** — `seq` is an internal mechanism; the agent app API must expose an opaque `term.type` command that delivers input through the same code path as keyboard input, with no seq exposure to callers
+3. **Agents need a real typing API** — `seq` is an internal mechanism; the agent MuxAPI must expose an opaque `term.type` command that delivers input through the same code path as keyboard input, with no seq exposure to callers
 
 Full spec: [`docs/specs/SPEC_BULLETPROOF_TERMINALS_2026_05_21.md`](SPEC_BULLETPROOF_TERMINALS_2026_05_21.md)
 
@@ -27,7 +27,7 @@ After these drops, all input to that block was lost. Opening new terminals in th
 
 ---
 
-## Proposed: `term.type` Agent App API
+## Proposed: `term.type` MuxAPI
 
 A single, stable command for agent-driven terminal input:
 
@@ -74,7 +74,7 @@ A single, stable command for agent-driven terminal input:
 - [ ] Verify no "reorder buffer full" log entries after stream benchmark run
 - [ ] Verify user terminals remain responsive after benchmark completes
 
-### Phase 2 — Add `term.type` to agent app API
+### Phase 2 — Add `term.type` to agent MuxAPI
 - [ ] Add `term.type` command handler in backend (routes to `send_input(..., None)`)
 - [ ] Return structured error if controller not running
 - [ ] Rewrite `bench-term-echo.mjs` to use `term.type` exclusively (no raw seq RPCs)

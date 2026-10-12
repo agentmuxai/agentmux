@@ -234,7 +234,7 @@ Cost per mark: ~50 ns. Surfaced in the dev-mode Perf HUD per `SPEC_PERFORMANCE_I
 ### 7.2 Per-surface bench
 
 - Terminal: extend [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs) to capture P95 echo latency in CI on every PR that touches `frontend/app/view/term/**`.
-- Agent: write a parallel [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) that drives the agent pane via the App API (`pane.open` → focus → simulated keydown sequence → measure `agent-keystroke` mark P95).
+- Agent: write a parallel [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) that drives the agent pane via MuxAPI (`pane.open` → focus → simulated keydown sequence → measure `agent-keystroke` mark P95).
 
 ### 7.3 ESLint / grep guardrails
 

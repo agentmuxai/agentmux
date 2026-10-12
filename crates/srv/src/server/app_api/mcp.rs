@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! App API handlers for the v1 standalone MCP Server primitive.
+//! MuxAPI handlers for the v1 standalone MCP Server primitive.
 //! mcp.list / mcp.get / mcp.upsert / mcp.delete / mcp.bind / mcp.unbind
 //!
 //! Plus the Armory-level catalog (mcp.catalog.*): global servers only,

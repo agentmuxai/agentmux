@@ -157,7 +157,7 @@ Permission modes map to agy's own flags: bypass is
 - **The user's message** is written to the transcript by the subprocess
   controller (`persists_user_record`), as for Codex and Kimi, since `agy`
   doesn't echo it; the live feed's roll-off includes the format.
-- **The app API's `agent.open`** stamped every provider outside a hard-coded
+- **MuxAPI's `agent.open`** stamped every provider outside a hard-coded
   list as `claude-stream-json`. It now writes the provider's own
   `styled_output_format`, as the UI launch does.
 - **Containers** refuse a provider that takes its prompt as an argument: the

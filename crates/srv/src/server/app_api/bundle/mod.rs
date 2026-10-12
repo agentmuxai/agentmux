@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `bundle.*` App API handlers — the Armory Bundle Format (ABF) surface.
+//! `bundle.*` MuxAPI handlers — the Armory Bundle Format (ABF) surface.
 //!
 //! Module layout (split 2026-09-22): this file holds registration, the plain
 //! CRUD/validate/self_get handlers, and the helpers every family shares;
@@ -83,7 +83,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Normalize a `bundle.upsert` request body into the shape the `Bundle` struct
-/// deserializes from, so the App API accepts the request exactly as documented
+/// deserializes from, so MuxAPI accepts the request exactly as documented
 /// in the spec:
 ///   - `id` may be omitted to create (the struct has no serde default), so an
 ///     absent or null `id` is filled with an empty string (the handler then
@@ -610,7 +610,7 @@ fn bundle_self_get_by_memory_id(
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
 
-/// The agent a self-scoped App API call is about — whose personal memory
+/// The agent a self-scoped MuxAPI call is about — whose personal memory
 /// (`memory.*`, M4c-2b), linked accounts (`identity.self.accounts`,
 /// `identity.account.validate`), bound preset (`preset.get` self) and
 /// history (`history.search`, M4c-2c) — identity spec §6.5.9.

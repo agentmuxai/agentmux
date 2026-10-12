@@ -3,7 +3,7 @@
 **Date:** 2026-07-02
 **Author:** Agent1
 **Governing decision:** `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (PR #1861, **merged**). Product owner chose **Bundle** as the collection name; "preset" is retired; the `_bundles` storage collision is removed (not worked around).
-**This spec implements Phases 2–4** of that proposal's sequence. Phase 1 (break out **MCP Servers + Skills** as first-class primitives) already shipped (spec #1865, impl #1877 — the `mcp.*`/`skill.*` App API).
+**This spec implements Phases 2–4** of that proposal's sequence. Phase 1 (break out **MCP Servers + Skills** as first-class primitives) already shipped (spec #1865, impl #1877 — the `mcp.*`/`skill.*` MuxAPI).
 
 > **Terminology (from the proposal, canonical):** the six primitives are **Account, Memory, MCP Server, Skill, Brief**, plus **Bundle** = the optional named *collection* of references. "Preset" → **Bundle**. "Identity" is a *derived view* over an agent's bound Accounts, **not** a stored object. After this refactor, the word "bundle" means exactly one thing: the collection.
 
@@ -14,15 +14,15 @@
 - **Reference, don't copy.** A Bundle stores primitive **IDs**, not inline JSON.
 - **Compatibility window.** Keep `preset.*` / `db_memory_bundles` as **read aliases for one release**; new writes go to Bundle names.
 - **No user-visible regression.** The Armory IA gains no new required step; direct bindings remain the base, Bundle is optional sugar.
-- **Contract-test discipline.** Renaming App API commands changes the rpc-contract surface ([`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts)) — every phase updates the baselines in lockstep (this is the guard that caught the mcp/skill drift in #1896).
+- **Contract-test discipline.** Renaming MuxAPI commands changes the rpc-contract surface ([`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts)) — every phase updates the baselines in lockstep (this is the guard that caught the mcp/skill drift in #1896).
 
 ---
 
-## Phase 2 — "Preset" → "Bundle" (concept + UI + App API)
+## Phase 2 — "Preset" → "Bundle" (concept + UI + MuxAPI)
 
 The cheap, high-value, mostly-reversible layer. No storage migration yet — Bundle is introduced as the concept/surface name over the existing store.
 
-### 2.1 App API command rename (`preset.*` → `bundle.*`)
+### 2.1 MuxAPI command rename (`preset.*` → `bundle.*`)
 
 `agentmux-srv/src/backend/rpc_types/commands.rs` (lines 292–296):
 | Old | New |
@@ -57,7 +57,7 @@ The cheap, high-value, mostly-reversible layer. No storage migration yet — Bun
 - [`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts) baselines: move the five `preset.*` entries → `bundle.*` in `KNOWN_REGISTERED_UNDECLARED` (once frontend binds `bundle.*`, they'll be *declared* and drop out — verify direction). Keep `preset.*` aliases acknowledged if they remain registered.
 - Persisted pane `view: "memory"` key stays (Phase 2) — the view still resolves; the label change is cosmetic. (Renaming the view key is optional Phase 4 cleanup, gated by a `block.tsx` shim like `trust`/`forge`.)
 
-**Phase 2 deliverable:** one PR. UI + App API say "Bundle"; storage untouched; `preset.*` aliased. `tsc` + `vitest` (esp. contract + AgentLaunchModal) green.
+**Phase 2 deliverable:** one PR. UI + MuxAPI say "Bundle"; storage untouched; `preset.*` aliased. `tsc` + `vitest` (esp. contract + AgentLaunchModal) green.
 
 ---
 
@@ -70,7 +70,7 @@ The proposal's "one real refactor" (§3.3, §7). Today: `instance → identity_b
 - `agentmux-srv/src/identity/resolver.rs` — change spawn resolution to read the agent's **directly-bound accounts** (+ accounts referenced by any included Bundle) instead of walking `identity_bundle → bindings`. Enforce "one account per provider" at resolution; a conflict is a surfaced validation error (not a silent pick).
 - Reconcile with `specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md` (an Account already carries its own `OAuthConfigDir`, so there's no bundle to provision — log in → Account → bind).
 
-### 3.2 Deprecate the identity-bundle App API + UI
+### 3.2 Deprecate the identity-bundle MuxAPI + UI
 
 - Commands `listidentitybundles` / `getidentitybundle` / `upsertidentitybundle` / `deleteidentitybundle` / `bindidentityaccount` / `unbindidentityaccount` / `listidentitybindings` (commands.rs 164–170, incl. `COMMAND_DELETE_IDENTITY_BUNDLE` at 167) → mark deprecated; keep read paths for the compat window, stop new writes.
 - Armory: the **Identities** tab becomes a **derived view** ("what is this agent running as" over bound Accounts) — no stored identity-bundle object. Per the proposal IA (§5) there is **no Identities tab** in the target; fold it into the Accounts + Bundle surfaces. (This is a UI change — confirm the exact interim: hide the tab, or convert to read-only derived view for one release.)
@@ -162,7 +162,7 @@ Orthogonal but touches the same files. If Armory lands first, this refactor oper
 
 | Phase | PR | Risk | Gate |
 |-------|-----|------|------|
-| 2 | Preset→Bundle UI + App API (+ aliases) | **Low** (reversible, aliased) | tsc + vitest (contract, AgentLaunchModal) |
+| 2 | Preset→Bundle UI + MuxAPI (+ aliases) | **Low** (reversible, aliased) | tsc + vitest (contract, AgentLaunchModal) |
 | 3 | Account-direct resolver + identity-bundle collapse + backfill | **High** (behavior + data) | resolver tests; coordinate with #1624; product decision on derived-Identity UX + Policy primitive |
 | 4 | Storage `_bundles` drop + symbol renames + alias removal | **Medium** (SQLite migration) | migration test on a populated db; adopt-legacy-on-open verified; contract baselines |
 

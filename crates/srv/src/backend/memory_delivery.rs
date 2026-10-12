@@ -89,7 +89,7 @@ impl Tier {
 /// or one Personal Memory file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// What the notice calls it (`[AgentMux System] App API`, `notes.md`, …).
+    /// What the notice calls it (`[AgentMux System] MuxAPI`, `notes.md`, …).
     pub label: String,
     pub tier: Tier,
     /// The full text sent to the model.

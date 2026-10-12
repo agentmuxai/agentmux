@@ -290,7 +290,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
     if (fromTabId === tabId) return;
     // Canonical chokepoint for tab-switch perf marks. Wraps every entry
     // path: click (tabbar), keyboard (Ctrl+Tab/1..9 in keymodel),
-    // palette (command-registry), test app API (cef-api). markEnd lands
+    // palette (command-registry), test MuxAPI (cef-api). markEnd lands
     // two rAFs after the IPC so the duration captures user-perceived
     // switch cost — IPC + Solid fan-out + layout + paint — not just IPC.
     // Backend-driven switches (tearoff merge, cross-drag) bypass this

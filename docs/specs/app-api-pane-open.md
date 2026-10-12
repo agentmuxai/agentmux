@@ -1,4 +1,4 @@
-# App API — `pane.open` Spec
+# MuxAPI — `pane.open` Spec
 
 Status: Partially Implemented (MVP shipped; idempotency, `is_new`, and `mode` pending)
 Date: 2026-04-20
@@ -35,7 +35,7 @@ Depends on: `app-api-extension.md`, `app-api-status.md`
 
 ## Motivation
 
-Agents running inside an agent pane can already call the App API over
+Agents running inside an agent pane can already call MuxAPI over
 WebSocket RPC to open/send/stop other agents (`agent.open`,
 `agent.send`, etc.). What they **can't** do today is ask the host to
 open an arbitrary view — for example, to show a spec file they just
@@ -190,7 +190,7 @@ example. Without discoverability, no agent will know to call it.
   Full four-direction split is necessary for agent-driven layouts.
 - **Multiple files:** Yes — a future `files: string[]` variant should open them as
   a tab group. Not in scope for Phase 1 (single-file only).
-- **Permission model:** Existing App API authkey is sufficient for Phase 1. Per-agent
+- **Permission model:** Existing MuxAPI authkey is sufficient for Phase 1. Per-agent
   capability flags are a Phase 3+ concern alongside the MCP façade.
 - **`is_new` flow:** Scratch file semantics are specified in
   `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md`. The `pane.open` protocol simply
@@ -203,7 +203,7 @@ example. Without discoverability, no agent will know to call it.
 - `agentmux-srv/src/backend/rpc_types.rs`
 - `agentmux-srv/src/backend/blocks.rs` (or wherever block creation
   lives) — confirm CreateBlock + layout helpers are callable from the
-  App API handler
+  MuxAPI handler
 - `frontend/app/store/wshrpc` CEF IPC surface (if we also expose this
   in-process)
 - [`docs/specs/app-api-extension.md`](app-api-extension.md) — cross-reference

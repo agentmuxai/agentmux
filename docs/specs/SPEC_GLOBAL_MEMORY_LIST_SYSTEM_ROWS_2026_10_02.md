@@ -10,7 +10,7 @@
 
 The owner's Armory Global Memory pane showed a full list. An agent calling `GlobalMemoryList` got `{"entries": []}`, and the owner called it a bug.
 
-The live store for that instance held six Global Memory rows: the five "AgentMux Operator Config" system rows (App API, Environment & Gotchas, Rich output in the agent pane, Your workspace, Swarm broadcasts) and one ordinary row that was added a few seconds after the empty answer. The pane lists all six (`global-bundle-model.ts` builds its sections from every `is_global` row and splits them into system and ordinary for display). The tool listed only the ordinary one, because `global_memory_list_impl` filtered `!is_system`, so before the ordinary row existed it returned nothing.
+The live store for that instance held six Global Memory rows: the five "AgentMux Operator Config" system rows (MuxAPI, Environment & Gotchas, Rich output in the agent pane, Your workspace, Swarm broadcasts) and one ordinary row that was added a few seconds after the empty answer. The pane lists all six (`global-bundle-model.ts` builds its sections from every `is_global` row and splits them into system and ordinary for display). The tool listed only the ordinary one, because `global_memory_list_impl` filtered `!is_system`, so before the ordinary row existed it returned nothing.
 
 So the code did what it said. The result was still wrong for a reader: an empty list reads as "there is no Global Memory", when the truth was "there is Global Memory, and none of it is yours to edit".
 

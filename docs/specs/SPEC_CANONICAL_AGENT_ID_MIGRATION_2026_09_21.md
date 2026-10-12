@@ -50,7 +50,7 @@ rather than erroring — a second, smaller instance of the same class of bug.
 `db_agents.id` **is** a properly enforced-unique `TEXT PRIMARY KEY`. It is
 already used correctly as the canonical key for agent CRUD, credential
 injection at spawn, and (after a prior fix, see §4) the Memory/Identity/
-Preset App API family. It is simply not used consistently — most of the
+Preset MuxAPI family. It is simply not used consistently — most of the
 runtime-messaging and work-tracking surfaces never adopted it.
 
 ## 2. Inventory (full audit — see below for methodology)

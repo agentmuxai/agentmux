@@ -21,7 +21,7 @@ This spec (a) inventories that gap against Claude Desktop and Cursor's current (
 The v1 composable-model `McpServer` primitive (Phase 1 of the Preset→Bundle refactor, already shipped):
 
 - **Storage** (`mcp_servers.rs`, `migrations.rs:416-441`): `db_mcp_servers(id, name, transport TEXT DEFAULT 'stdio', config TEXT DEFAULT '{}', is_global, created_at, updated_at)` + `db_agent_mcp_ref(agent_id, mcp_id)` bind table. `config` is an opaque JSON string — the store never looks inside it.
-- **App API** (`app_api/mcp.rs`): `mcp.list/get/upsert/delete/bind/unbind` (agent-scoped, `check_s1`-gated) + `mcp.catalog.list/upsert/delete` (window-scoped, global rows only — the Armory's **MCP Servers** tab, `armory-view.tsx:20`).
+- **MuxAPI** (`app_api/mcp.rs`): `mcp.list/get/upsert/delete/bind/unbind` (agent-scoped, `check_s1`-gated) + `mcp.catalog.list/upsert/delete` (window-scoped, global rows only — the Armory's **MCP Servers** tab, `armory-view.tsx:20`).
 - **Launch-time merge** (`agent_config.rs:320` `build_mcp_config_from_refs`): synthesizes the reserved `agentmux` entry, layers the legacy blob, then layers each bound `McpServer.config` **as-is** under `mcpServers.<name>` in `.mcp.json`. Whatever JSON the user typed is whatever Claude Code receives — AgentMux never validates it beyond "is it a JSON object."
 - **UI** (`AgentMcpModal.tsx`, `mcp-manager.tsx`): a name field, a free-text transport field (defaults `"stdio"`, not validated against known values), and a raw JSON `<textarea>` for `config`. No connect test, no tool list, no distinction between `stdio`/`sse`/`streamable-http` beyond what the user happens to type inside the blob.
 
@@ -77,7 +77,7 @@ Redirect URI: reuse the existing AgentMux desktop-app callback scheme (already w
 
 ### 4.4 Health / prerequisite probe
 
-New App API command `mcp.probe(agent_id, id)`: opens a short-lived MCP client connection, performs the `initialize` handshake, and — on success — `tools/list` (and `resources/list`/`prompts/list` where the server declares those capabilities). Returns `{status: "connected"|"unreachable"|"handshake_failed", tool_count, resource_count, prompt_count, server_info, error}`.
+New MuxAPI command `mcp.probe(agent_id, id)`: opens a short-lived MCP client connection, performs the `initialize` handshake, and — on success — `tools/list` (and `resources/list`/`prompts/list` where the server declares those capabilities). Returns `{status: "connected"|"unreachable"|"handshake_failed", tool_count, resource_count, prompt_count, server_info, error}`.
 
 Frontend: a new `mcp-capabilities.ts` module, structurally identical to `toolchain-capabilities.ts` (module-level `createStore`, `ensureCapability`/`watchCapability`, in-flight de-dup) — same pattern, new domain. The Armory MCP Servers list gets a status pill per server (Connected · N tools / Not connected / Error) instead of the current name-only row, polling while the Armory tab is open the same way the Toolchain widget polls Docker liveness.
 
