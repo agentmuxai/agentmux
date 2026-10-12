@@ -6,11 +6,11 @@
 **Date:** 2026-05-22
 **Author:** AgentA
 **Area:**
-- Hamburger menu — `frontend/app/tab/tabbar.tsx`
-- Identity pane — `frontend/app/view/identity/identity-pane-view.tsx`, `identity-pane-model.ts`
+- Hamburger menu — [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx)
+- Identity pane — [`frontend/app/view/identity/identity-pane-view.tsx`](../../../frontend/app/view/identity/identity-pane-view.tsx), `identity-pane-model.ts`
 - Memory pane — `frontend/app/view/memory/memory-view.tsx`, `memory-model.ts`
-- Launch-modal OAuth — `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`, `AgentNewIdentityModal.tsx`, `auth.ts`
-- Unified modal — `frontend/app/element/modal.tsx`, `frontend/app/store/modalmodel.ts`
+- Launch-modal OAuth — [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx), `AgentNewIdentityModal.tsx`, `auth.ts`
+- Unified modal — [`frontend/app/element/modal.tsx`](../../../frontend/app/element/modal.tsx), [`frontend/app/store/modalmodel.ts`](../../../frontend/app/store/modalmodel.ts)
 - Backend — `agentmux-srv/src/server/agent_handlers.rs` (`bundle_*` wstore methods)
 
 Three related changes that give identity & memory **bundles** a single, coherent
@@ -84,7 +84,7 @@ open — this is the "lock the window" the user asked for. The hamburger's
 
 ### 1.6 The hamburger menu
 
-`frontend/app/tab/tabbar.tsx` → `tabBarMenuItems()` builds a static `MenuItem[]`
+[`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx) → `tabBarMenuItems()` builds a static `MenuItem[]`
 rendered in a `<FlyoutMenu>`. Items are `{ label, icon?, shortcut?, onClick }`
 or `{ label, subItems }`. Current items: New Tab/Window, Theme, Opacity,
 Settings, Command Palette, DevTools, Online Docs, Exit. Adding an entry = push
@@ -195,7 +195,7 @@ reimplement it. Plan:
 
 ### Notes
 
-- `BundleManagerModal` is a new component under `frontend/app/modals/` (or
+- `BundleManagerModal` is a new component under [`frontend/app/modals/`](../../../frontend/app/modals) (or
   `frontend/app/view/bundles/`), opened via `openModal`. It receives the
   injected `close` prop and renders `<Modal scope="window" size="lg">`.
 - No new RPCs.

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-15  
 **Status:** Proposed  
-**Affected file:** `frontend/app/window/action-widgets.tsx`
+**Affected file:** [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx)
 
 ---
 

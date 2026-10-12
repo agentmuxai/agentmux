@@ -175,8 +175,8 @@ AgentMux already has the building blocks for subagent watching:
 - **Agent registration:** `agentmuxsrv-rs/src/server/reactive.rs` → `handle_reactive_register()`
 - **File watching:** `agentmuxsrv-rs/src/backend/config_watcher_fs.rs` → `spawn_settings_watcher()` (pattern to follow)
 - **Event broadcasting:** `agentmuxsrv-rs/src/backend/eventbus.rs` → `broadcast_event()`
-- **OSC handling:** `frontend/app/view/term/termosc.ts` → `handleOsc16162Command()`
-- **Layout manipulation:** `frontend/layout/lib/layoutModel.ts` → `insertNode()`, `splitHorizontal()`
+- **OSC handling:** [`frontend/app/view/term/termosc.ts`](../../frontend/app/view/term/termosc.ts) → `handleOsc16162Command()`
+- **Layout manipulation:** [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) → `insertNode()`, `splitHorizontal()`
 
 ---
 
@@ -446,7 +446,7 @@ The **Swarm** widget is a standalone top-level view — separate from Forge and 
 - Index JSONL files into SQLite FTS5 for fast conversation search
 - Background indexer runs on startup, watches for new session files
 - RPC endpoints: `SearchConversations`, `GetAgentAnalytics`, `GetTokenUsage`
-- Frontend: `frontend/app/view/swarm/swarm-view.tsx` with search bar, agent cards, activity charts
+- Frontend: [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) with search bar, agent cards, activity charts
 - Live updates via EventBus subscriptions (`subagent:spawned`, `subagent:completed`, agent registration events)
 
 ---

@@ -3,7 +3,7 @@
 **Status:** Implemented (PR #791)
 **Owner:** AgentA
 **Date:** 2026-05-10
-**Revised:** 2026-05-10 — first cut targeted the right-click tabbar context menu (`base-menus.ts` `createTabBarMenu`); corrected to the actual hamburger (≡) button in `frontend/app/tab/tabbar.tsx` (`tabBarMenuItems`). Opacity moved alongside Theme. Added `Exit` entry and softened menu-item hover color (`--accent-color` → `--hover-bg-color`).
+**Revised:** 2026-05-10 — first cut targeted the right-click tabbar context menu (`base-menus.ts` `createTabBarMenu`); corrected to the actual hamburger (≡) button in [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) (`tabBarMenuItems`). Opacity moved alongside Theme. Added `Exit` entry and softened menu-item hover color (`--accent-color` → `--hover-bg-color`).
 **Driving observation:** AgentMux ships nine themes (`default`, `midnight`, `high-contrast`, `monokai`, `nord`, `dracula`, `catppuccin`, `tokyo-night`, `gruvbox`) and the `window:theme` setting is fully wired end-to-end, but the only way for a user to switch is to hand-edit `settings.json`. We want a `Theme` entry in the hamburger (window-header) menu that expands to a radio list of the available themes. Additionally, the `midnight` theme's deep-navy background (`rgb(10, 12, 22)`) is too light for the agent pane; midnight specifically should paint the agent pane pure black.
 
 ---
@@ -13,12 +13,12 @@
 | Piece | Location | Notes |
 |---|---|---|
 | Theme files | `frontend/app/themes/{default,midnight,high-contrast,monokai,nord,dracula,catppuccin,tokyo-night,gruvbox}.scss` | Each declares a `[data-theme="<name>"]` block of CSS custom properties (`--main-bg-color`, `--main-text-color`, etc.) |
-| Theme barrel | `frontend/app/themes/index.scss` | Imports all theme files |
-| Theme selector | `frontend/app/app.tsx` lines 150-156 in `AppSettingsUpdater` | Reads `window:theme`, calls `document.documentElement.setAttribute("data-theme", theme)` when not `"default"`; removes the attribute for `"default"` |
-| Persistence | `~/.agentmux-<version>/config/settings.json`, key `window:theme` | Already a string in the enum at `schema/settings.json:221-225` |
+| Theme barrel | [`frontend/app/themes/index.scss`](../../frontend/app/themes/index.scss) | Imports all theme files |
+| Theme selector | [`frontend/app/app.tsx`](../../frontend/app/app.tsx) lines 150-156 in `AppSettingsUpdater` | Reads `window:theme`, calls `document.documentElement.setAttribute("data-theme", theme)` when not `"default"`; removes the attribute for `"default"` |
+| Persistence | `~/.agentmux-<version>/config/settings.json`, key `window:theme` | Already a string in the enum at [`schema/settings.json:221-225`](../../schema/settings.json#L221-L225) |
 | RPC write | `RpcApi.SetConfigCommand(TabRpcClient, { "window:theme": value })` | Used by the Opacity submenu today (`menu-builder.ts:114-117`) |
 | Menu builder | `frontend/app/menu/{base-menus.ts, menu-builder.ts}` | `MenuBuilder.submenu(label, builder)` + radio items with `checked` is exactly the Opacity pattern we'll copy |
-| Hamburger trigger | `frontend/app/window/window-header.tsx:27-30` calls `createTabBarMenu(fullConfig())` | Right-click on window header → `ContextMenuModel.showContextMenu()` |
+| Hamburger trigger | [`frontend/app/window/window-header.tsx:27-30`](../../frontend/app/window/window-header.tsx#L27-L30) calls `createTabBarMenu(fullConfig())` | Right-click on window header → `ContextMenuModel.showContextMenu()` |
 
 The implementation is genuinely additive — no new state, no new RPC, no new infrastructure.
 
@@ -26,7 +26,7 @@ The implementation is genuinely additive — no new state, no new RPC, no new in
 
 ## 2. UI: hamburger menu `Theme` submenu
 
-The hamburger (≡) button lives in `frontend/app/tab/tabbar.tsx` line 623, wrapped in `<FlyoutMenu items={tabBarMenuItems()}>`. `tabBarMenuItems` is a `createMemo<MenuItem[]>` returning a static list (New Tab / New Window / Settings / Help). Insert `Theme` (and `Opacity`, moved from the right-click context menu) between the New Window divider and Settings. The submenu is a radio list — exactly one theme is active — using a new `checked?: boolean` field on `MenuItem` that `FlyoutMenu` renders as a check icon (true) or blank-width spacer (false).
+The hamburger (≡) button lives in [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) line 623, wrapped in `<FlyoutMenu items={tabBarMenuItems()}>`. `tabBarMenuItems` is a `createMemo<MenuItem[]>` returning a static list (New Tab / New Window / Settings / Help). Insert `Theme` (and `Opacity`, moved from the right-click context menu) between the New Window divider and Settings. The submenu is a radio list — exactly one theme is active — using a new `checked?: boolean` field on `MenuItem` that `FlyoutMenu` renders as a check icon (true) or blank-width spacer (false).
 
 ### Theme list, in menu order
 
@@ -44,7 +44,7 @@ The order matters for muscle memory; once shipped, don't reshuffle.
 
 ### Implementation sketch
 
-`frontend/app/menu/base-menus.ts`:
+[`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts):
 
 ```ts
 interface ThemeOption {
@@ -116,7 +116,7 @@ Today midnight's `--main-bg-color` is `rgb(10, 12, 22)` (deep navy). That paints
 
 Adding a `--agent-pane-bg-color` variable would force every theme to declare it and would break the "agent pane just inherits `--main-bg-color`" simplicity. Easier: scope the override to `[data-theme="midnight"] .agent-view` and use a plain color.
 
-Add to `frontend/app/themes/midnight.scss` at the end of the existing `[data-theme="midnight"]` block:
+Add to [`frontend/app/themes/midnight.scss`](../../frontend/app/themes/midnight.scss) at the end of the existing `[data-theme="midnight"]` block:
 
 ```scss
 [data-theme="midnight"] {
@@ -137,7 +137,7 @@ Why both `.agent-view` and `.agent-view .agent-document`:
 
 ### Hover-strip background
 
-`NodeHoverStrip` currently uses `background: var(--main-bg-color)` (see `frontend/app/view/agent/styles/_document.scss:53`). Under midnight that would read deep navy and produce a visible color mismatch when the strip floats over a pure-black pane.
+`NodeHoverStrip` currently uses `background: var(--main-bg-color)` (see [`frontend/app/view/agent/styles/_document.scss:53`](../../frontend/app/view/agent/styles/_document.scss#L53)). Under midnight that would read deep navy and produce a visible color mismatch when the strip floats over a pure-black pane.
 
 Fix at the same scope:
 
@@ -159,7 +159,7 @@ Terminal, browser, sysinfo, swarm — all read `--main-bg-color` and stay on dee
 
 - **First launch with no `window:theme` key set.** Existing behavior: `AppSettingsUpdater` reads `undefined`, treats it as `"default"`, removes the attribute. The menu shows `Default` checked. No change.
 - **User selects a theme not in the menu (manually edited `settings.json`).** The radio group reflects no selection (none of the items have `checked: true`). The theme still applies. Acceptable; menu is a convenience layer, not a constraint.
-- **Schema enum drift.** If a new theme is added to `schema/settings.json`, the `THEME_OPTIONS` array above must be updated. Mitigation: a short comment in the schema file pointing to `THEME_OPTIONS` and vice versa. Not worth a code-gen step for a once-a-year change.
+- **Schema enum drift.** If a new theme is added to [`schema/settings.json`](../../schema/settings.json), the `THEME_OPTIONS` array above must be updated. Mitigation: a short comment in the schema file pointing to `THEME_OPTIONS` and vice versa. Not worth a code-gen step for a once-a-year change.
 - **Pane-zoom interaction.** Per-pane CSS `zoom` doesn't affect the theme; `data-theme` lives on `<html>`. Already works for all other themes; midnight's agent-pane override is plain CSS and will scale identically.
 - **Multiple windows.** Theme is global (set on `<html>`). Every window in the same `task dev` / portable instance switches together. Acceptable — matches Opacity behavior today.
 - **Existing pane content rendered under the old theme.** Repaint is automatic; CSS variable resolution is per-frame. No DOM remount or virtualizer invalidation needed.
@@ -205,8 +205,8 @@ Terminal, browser, sysinfo, swarm — all read `--main-bg-color` and stay on dee
 
 | Path | Change |
 |---|---|
-| `frontend/app/menu/base-menus.ts` | Add `THEME_OPTIONS`, `createThemeMenu`, wire into `createTabBarMenu` |
-| `frontend/app/themes/midnight.scss` | Add scoped `.agent-view` + `.node-strip` `background: #000` rules |
+| [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) | Add `THEME_OPTIONS`, `createThemeMenu`, wire into `createTabBarMenu` |
+| [`frontend/app/themes/midnight.scss`](../../frontend/app/themes/midnight.scss) | Add scoped `.agent-view` + `.node-strip` `background: #000` rules |
 | `frontend/app/menu/base-menus.test.ts` (or sibling) | New unit test for theme menu builder |
 
 No schema changes, no Rust changes, no migrations.
@@ -215,12 +215,12 @@ No schema changes, no Rust changes, no migrations.
 
 ## 9. Cross-references
 
-- Existing theme registry: `frontend/app/themes/index.scss`
-- Theme selector: `frontend/app/app.tsx` (`AppSettingsUpdater`)
+- Existing theme registry: [`frontend/app/themes/index.scss`](../../frontend/app/themes/index.scss)
+- Theme selector: [`frontend/app/app.tsx`](../../frontend/app/app.tsx) (`AppSettingsUpdater`)
 - Menu builder: `frontend/app/menu/menu-builder.ts`
-- Opacity submenu (template pattern): `frontend/app/menu/base-menus.ts` (lines 97-128)
-- Hamburger trigger: `frontend/app/window/window-header.tsx`
-- Settings schema: `schema/settings.json` (`window:theme`)
+- Opacity submenu (template pattern): [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) (lines 97-128)
+- Hamburger trigger: [`frontend/app/window/window-header.tsx`](../../frontend/app/window/window-header.tsx)
+- Settings schema: [`schema/settings.json`](../../schema/settings.json) (`window:theme`)
 
 ---
 

@@ -7,10 +7,10 @@
 > **2026-08-07 audit note:** Implemented (`renderWrite()` in
 > `ToolOverlayLog.tsx`, PR #1601 — also confirmed by the extending spec
 > below citing it as implemented). Status field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
-**Related:** `frontend/app/view/agent/components/ToolOverlayLog.tsx` (`renderWrite`),
-             `frontend/app/view/agent/components/HighlightedCode.tsx`,
-             `frontend/app/view/agent/types.ts` (`WriteParams`, `WriteResult`)
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
+**Related:** [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) (`renderWrite`),
+             [`frontend/app/view/agent/components/HighlightedCode.tsx`](../../frontend/app/view/agent/components/HighlightedCode.tsx),
+             [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) (`WriteParams`, `WriteResult`)
 
 ---
 
@@ -133,8 +133,8 @@ function formatBytes(n: number): string {
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` | Replace `renderWrite` with the version above; add `formatBytes` helper |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Add `.agent-tool-file-path-row`, `.agent-tool-write-bytes`, `.agent-tool-write-content` styles |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) | Replace `renderWrite` with the version above; add `formatBytes` helper |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Add `.agent-tool-file-path-row`, `.agent-tool-write-bytes`, `.agent-tool-write-content` styles |
 
 No new components needed — `HighlightedCode`, `detectLanguage`, `capText`,
 `OutputHiddenMarker` are already imported in `ToolOverlayLog.tsx`.

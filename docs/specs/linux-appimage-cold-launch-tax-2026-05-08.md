@@ -196,7 +196,7 @@ is unjustified. Measure first.
 
 ## Implementation outline (Phase 1 spike)
 
-`scripts/build-appimage-linux.sh` invokes `appimagetool` to produce the
+[`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) invokes `appimagetool` to produce the
 `AgentMux_*.AppImage` artifact. The artifact's first arg parsing is
 controlled by the runtime ELF embedded by `appimagetool` (the
 `type2-runtime`).
@@ -214,7 +214,7 @@ Two options:
    one-file-distribution premise.
 
 3. **Generate a wrapper at the user's `agentmux.desktop` Exec= line:**
-   the desktop file we install via `scripts/install-linux-desktop.sh`
+   the desktop file we install via [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh)
    already does `Exec=…AppImage`. Change to
    `Exec=…AppImage --appimage-extract-and-run`. Affects launch from
    GNOME Shell / KDE / shortcuts, but NOT from `./AgentMux_*.AppImage`
@@ -328,9 +328,9 @@ After Phase 2:
 
 ## See also
 
-- `scripts/build-appimage-linux.sh` — current AppImage build pipeline.
-- `scripts/install-linux-desktop.sh` — current desktop file install.
-- `docs/specs/linux-pool-startup-fill-2026-05-08.md` — sister spec for
+- [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) — current AppImage build pipeline.
+- [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) — current desktop file install.
+- [`docs/specs/linux-pool-startup-fill-2026-05-08.md`](linux-pool-startup-fill-2026-05-08.md) — sister spec for
   Linux tear-off latency. **Note: pool startup fill solves *tear-off*
   cold-path; this spec solves *app launch* cold-path. Both contribute to
   user-perceived "Linux feels slow."**

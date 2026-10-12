@@ -261,17 +261,17 @@ CSS recalc: .window-header and .status-bar height/font-size update
 
 | File | Role |
 |------|------|
-| `frontend/app/store/zoom.ts` | Central zoom module. Per-pane functions (`zoomIn/Out/Reset`, `zoomBlockIn/Out`), chrome functions (`chromeZoomIn/Out/Reset`), zoom indicator, constants. |
-| `frontend/app/app.tsx` | `AppZoomHandler` component. Ctrl+wheel listener that dispatches to pane or chrome zoom based on DOM target. |
-| `frontend/app/store/keymodel.ts` | Keyboard shortcut registration. `Ctrl/Cmd +/-/0` mapped to `zoomIn/Out/Reset`. |
-| `frontend/app/view/term/termViewModel.ts` | `termZoomAtom` (reads `term:zoom` from block metadata), `fontSizeAtom` (base * zoom). |
-| `frontend/app/view/term/term.tsx` | Terminal construction useEffect (line 110-172) and font-size-only update useEffect (line 176-182). |
-| `frontend/app/element/zoomindicator.tsx` | Transient zoom % overlay. Reads `zoomIndicatorVisibleAtom` and `zoomIndicatorTextAtom`. |
+| [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) | Central zoom module. Per-pane functions (`zoomIn/Out/Reset`, `zoomBlockIn/Out`), chrome functions (`chromeZoomIn/Out/Reset`), zoom indicator, constants. |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) | `AppZoomHandler` component. Ctrl+wheel listener that dispatches to pane or chrome zoom based on DOM target. |
+| [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) | Keyboard shortcut registration. `Ctrl/Cmd +/-/0` mapped to `zoomIn/Out/Reset`. |
+| [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts) | `termZoomAtom` (reads `term:zoom` from block metadata), `fontSizeAtom` (base * zoom). |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | Terminal construction useEffect (line 110-172) and font-size-only update useEffect (line 176-182). |
+| [`frontend/app/element/zoomindicator.tsx`](../../frontend/app/element/zoomindicator.tsx) | Transient zoom % overlay. Reads `zoomIndicatorVisibleAtom` and `zoomIndicatorTextAtom`. |
 | `frontend/wave.ts` | Startup init. Pins `setZoomFactor(1.0)`, calls `initChromeZoom()`. |
-| `frontend/app/block/blockframe.tsx` | Renders `data-blockid` attribute on pane container (line 677), used by wheel handler for target detection. |
-| `frontend/tailwindsetup.css` | Declares `:root { --zoomfactor: 1; }` default. |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Renders `data-blockid` attribute on pane container (line 677), used by wheel handler for target detection. |
+| [`frontend/tailwindsetup.css`](../../frontend/tailwindsetup.css) | Declares `:root { --zoomfactor: 1; }` default. |
 | `frontend/app/window/window-header.scss` | Header container. Uses `calc(Npx * var(--zoomfactor))` for height and font-size. |
-| `frontend/app/statusbar/StatusBar.scss` | Status bar container. Uses `calc(Npx * var(--zoomfactor))` for height, font-size, version font-size. |
-| `frontend/app/tab/tab.scss` | Individual tab styling. All values hardcoded px — does NOT respond to `--zoomfactor`. |
-| `frontend/app/tab/tabbar.scss` | Tab bar container and add-tab button. All values hardcoded px. |
-| `frontend/app/window/action-widgets.scss` | Window action widgets (right side of header). Hardcoded px. |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | Status bar container. Uses `calc(Npx * var(--zoomfactor))` for height, font-size, version font-size. |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | Individual tab styling. All values hardcoded px — does NOT respond to `--zoomfactor`. |
+| [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) | Tab bar container and add-tab button. All values hardcoded px. |
+| [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) | Window action widgets (right side of header). Hardcoded px. |

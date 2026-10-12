@@ -35,7 +35,7 @@
 
 All on Windows 10, dev build, 3 visible agent panes streaming a synthetic
 ~20 KB reply each while one composer receives 20 keys/s,
-`scripts/ui-screenshots/full-conversation-bench.mjs`. macOS and Linux not yet
+[`scripts/ui-screenshots/full-conversation-bench.mjs`](../../scripts/ui-screenshots/full-conversation-bench.mjs). macOS and Linux not yet
 measured.
 
 **What a "run" is.** The replies are paced for 10 s (`--secs 10`, a chunk
@@ -197,7 +197,7 @@ the table above is the memory result.
 
 ### 2.3 `main` baseline, direct mode (Phase 0)
 
-`docs/analysis/ANALYSIS_AGENT_PANE_FULL_CONVERSATION_BASELINE_2026_09_23.md`.
+[`docs/analysis/ANALYSIS_AGENT_PANE_FULL_CONVERSATION_BASELINE_2026_09_23.md`](../analysis/ANALYSIS_AGENT_PANE_FULL_CONVERSATION_BASELINE_2026_09_23.md).
 Direct mode injects straight into the document store; see §3.2 for why those
 absolute numbers understate real cost.
 
@@ -297,7 +297,7 @@ A CPU profile of the same runs showed the opposite — the fix removed 3.1 s of
 
 Fix: every window now starts once the page has gone 1 s without a frame gap
 over 50 ms (capped at 30 s), recorded as `settle: { quiet, ms }`
-(`waitQuiet` in `scripts/ui-screenshots/lib/bench-page.js`). The soak loop,
+(`waitQuiet` in [`scripts/ui-screenshots/lib/bench-page.js`](../../scripts/ui-screenshots/lib/bench-page.js)). The soak loop,
 which had no settle at all, gets the same. N = 0 windows were at most lightly
 affected (only a clear precedes them, no injection); N > 0 figures taken
 before this carry some setup cost and are best compared only within the same

@@ -4,7 +4,7 @@
 **Date:** 2026-09-24
 **Author:** maricon
 **Related:**
-- #1531, #1699: pane reflow settle window 220 ms → 32 ms → 4 ms (`frontend/app/platform/pane-anim.ts`)
+- #1531, #1699: pane reflow settle window 220 ms → 32 ms → 4 ms ([`frontend/app/platform/pane-anim.ts`](../../frontend/app/platform/pane-anim.ts))
 - #1735 / #1737: removed the 50 ms debounce on the tile-layout container resize (`layoutModelHooks.ts`)
 - #1667, #1747: sysinfo chart 150 ms resize debounce, then per-instance gradient ids
 - #986: agent-pane PTY width 150 ms debounce (`usePtyWidth.ts`)
@@ -35,10 +35,10 @@ concern is real, but it belongs on the PTY resize, not on the on-screen grid.
   `WM_SIZE`/`WasResized` handling of our own, no off-screen rendering, and no
   host-side debounce.
 - The tile layout reflows every frame: `useOnResize(displayContainerRef,
-  onContainerResize)` (`frontend/layout/lib/layoutModelHooks.ts:69`) passes no
+  onContainerResize)` ([`frontend/layout/lib/layoutModelHooks.ts:69`](../../frontend/layout/lib/layoutModelHooks.ts#L69)) passes no
   debounce, so `updateTree()` runs on every ResizeObserver tick. This was fixed
   in #1735.
-- `createStopContainerResizing` (`frontend/layout/lib/layoutResize.ts:275`,
+- `createStopContainerResizing` ([`frontend/layout/lib/layoutResize.ts:275`](../../frontend/layout/lib/layoutResize.ts#L275),
   `debounce(30)`) only delays switching animations back on. It never delays
   content.
 
@@ -46,10 +46,10 @@ concern is real, but it belongs on the PTY resize, not on the on-screen grid.
 
 | # | Where | Delay | What is held back | Visible mid-drag |
 |---|---|---|---|---|
-| D1 | `frontend/app/view/term/termwrap.ts:132` `handleResize_debounced = debounce(50, …)`, called by the ResizeObserver at `term.tsx:213-216` | 50 ms, **trailing** | xterm grid refit (`customFit` → `terminal.resize`) **and** the PTY size (`sendTermSize`) | **Yes, the main symptom.** The grid is frozen for the whole drag. |
-| D2 | `frontend/app/view/agent/components/AgentShellSubblock.tsx:703-708` (same `handleResize_debounced`) | 50 ms, trailing | Agent Shell drawer terminal refit | Same as D1, inside the drawer |
-| D3 | `frontend/app/view/sysinfo/sysinfo-plot.tsx:38-60` `setTimeout(…, 150)` after the first event | 150 ms, trailing | Chart re-render at the new size | Chart stays at its old size, clipped or with blank space |
-| D4 | `frontend/app/view/agent/hooks/usePtyWidth.ts:55` `DEBOUNCE_MS = 150` | 150 ms, trailing | PTY column count sent to the backend only | **No repaint effect.** New CLI output wraps at the old width until settle. |
+| D1 | [`frontend/app/view/term/termwrap.ts:132`](../../frontend/app/view/term/termwrap.ts#L132) `handleResize_debounced = debounce(50, …)`, called by the ResizeObserver at `term.tsx:213-216` | 50 ms, **trailing** | xterm grid refit (`customFit` → `terminal.resize`) **and** the PTY size (`sendTermSize`) | **Yes, the main symptom.** The grid is frozen for the whole drag. |
+| D2 | [`frontend/app/view/agent/components/AgentShellSubblock.tsx:703-708`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx#L703-L708) (same `handleResize_debounced`) | 50 ms, trailing | Agent Shell drawer terminal refit | Same as D1, inside the drawer |
+| D3 | [`frontend/app/view/sysinfo/sysinfo-plot.tsx:38-60`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx#L38-L60) `setTimeout(…, 150)` after the first event | 150 ms, trailing | Chart re-render at the new size | Chart stays at its old size, clipped or with blank space |
+| D4 | [`frontend/app/view/agent/hooks/usePtyWidth.ts:55`](../../frontend/app/view/agent/hooks/usePtyWidth.ts#L55) `DEBOUNCE_MS = 150` | 150 ms, trailing | PTY column count sent to the backend only | **No repaint effect.** New CLI output wraps at the old width until settle. |
 
 **Why a trailing debounce freezes rather than just delays.** throttle-debounce
 v5's `debounce(delay, cb)` defaults to `atBegin: false`: the callback runs
@@ -82,7 +82,7 @@ bug #1735 found and removed for the tile layout ("updateTree() only ran once —
   growing the window, black edges filling in can read as "slow paint".
   Follow-up F3.
 - **Dead CSS:** `.tile-node.resizing { backdrop-filter: blur(8px) }`
-  (`frontend/layout/lib/tilelayout.scss:92-95`) is never applied, since nothing
+  ([`frontend/layout/lib/tilelayout.scss:92-95`](../../frontend/layout/lib/tilelayout.scss#L92-L95)) is never applied, since nothing
   sets the class. Remove it (§4.4).
 
 ## 3. Why each delay was introduced
@@ -120,7 +120,7 @@ bug #1735 found and removed for the tile layout ("updateTree() only ran once —
   code comment is stale.
 - **D4, PTY width 150 ms (#986).** It keeps a drag from sending a PTY-resize RPC
   on every frame ("a drag-resize emits at most one RPC per gesture";
-  `docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md` §4.3). This is the
+  [`docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md`](../analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md) §4.3). This is the
   right concern in the right place, since it gates only the PTY. Keep it.
 
 ## 4. Proposal
@@ -252,7 +252,7 @@ should be coalesced. No change, apart from confirming it flushes on unmount.
 
 - **F1:** browser-pane rect sync. Measure the IPC trailing; consider sending the
   rect ahead of layout (already ruled a non-goal in
-  `docs/retro/perf-baseline-2026-05-09.md` H1, so revisit only if it is
+  [`docs/retro/perf-baseline-2026-05-09.md`](../retro/perf-baseline-2026-05-09.md) H1, so revisit only if it is
   measured).
 - **F2:** macOS `SetPaneBoundsViewsTask`. Have the 50 ms reaffirm re-read the
   **current** pane rect instead of the captured one, and skip the

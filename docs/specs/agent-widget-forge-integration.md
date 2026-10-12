@@ -199,8 +199,8 @@ as today, just configured on the agent rather than hard-coded to provider button
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/agent-view.tsx` | Remove `AgentProviderPicker`, `ProviderButton`, add `AgentPicker`; rename `AgentStyledSession` → `AgentPresentationView` |
-| `frontend/app/view/agent/agent-view.scss` | Remove Raw/Styled mode groups; add agent card styles + empty state |
-| `frontend/app/view/agent/agent-model.ts` | Remove `connectWithProvider()`, `connectStyled()` → `launchAgent(agentId)` |
-| `frontend/app/view/agent/state.ts` | Replace `agentProvider`/`agentMode` meta with `agentId` |
-| `frontend/app/view/agent/providers/index.ts` | Phase 1: keep temporarily; Phase 3: remove |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Remove `AgentProviderPicker`, `ProviderButton`, add `AgentPicker`; rename `AgentStyledSession` → `AgentPresentationView` |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | Remove Raw/Styled mode groups; add agent card styles + empty state |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Remove `connectWithProvider()`, `connectStyled()` → `launchAgent(agentId)` |
+| [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) | Replace `agentProvider`/`agentMode` meta with `agentId` |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Phase 1: keep temporarily; Phase 3: remove |

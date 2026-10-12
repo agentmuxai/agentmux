@@ -37,8 +37,8 @@ The model catalog section is all `current`, so it needs no change.
 |---|---|---|---|---|
 | cef-rs binding (`cef-dll-sys`) | 154.2.0+154.0.28 | 154.3.0+154.0.32 | `Cargo.toml`, patched from `agentmuxai/cef-rs` | 2 |
 | Node.js (desktop) | 24.11.0 | 24.21.0 | `.nvmrc`, `package.json` `engines` | 2 |
-| jq (bundled) | 1.7.1 | 1.8.2 | `scripts/package-portable.sh` | 2 |
-| ripgrep (bundled) | 14.1.1 | 15.2.0 | `scripts/package-portable.sh` | 2 |
+| jq (bundled) | 1.7.1 | 1.8.2 | [`scripts/package-portable.sh`](../../scripts/package-portable.sh) | 2 |
+| ripgrep (bundled) | 14.1.1 | 15.2.0 | [`scripts/package-portable.sh`](../../scripts/package-portable.sh) | 2 |
 | Rust toolchain | unpinned (stable) | 1.99.0 | no `rust-toolchain.toml` | 2 (decision, §4.3) |
 | CEF runtime (all 3 platforms), CEF milestone | 154.0.8037.58 | same | — | none |
 | Lambda runtimes | — | — | AWS | none. The report marks them all `current` (they're within support). |
@@ -78,16 +78,16 @@ Phase 5 runs right after phase 1b, as soon as all the CLI pins are new. It doesn
 
 ### 4.1 Phase 1a: five CLI pins
 
-Pin locations, enforced by `frontend/app/view/agent/providers/pin-consistency.test.ts`:
+Pin locations, enforced by [`frontend/app/view/agent/providers/pin-consistency.test.ts`](../../frontend/app/view/agent/providers/pin-consistency.test.ts):
 
 | Location | claude | gemini | qwen | openclaw | copilot |
 |---|---|---|---|---|---|
-| `frontend/app/view/agent/providers/catalog.ts` `pinnedVersion` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `crates/srv/src/backend/providers.rs` `pinned_version` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `.github/workflows/container-image.yml` `claude_version` | ✅ | — | — | — | — |
-| `docker/Dockerfile.agent-agentmux` `ARG CLAUDE_VERSION` | ✅ | — | — | — | — |
+| [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) `pinnedVersion` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [`crates/srv/src/backend/providers.rs`](../../crates/srv/src/backend/providers.rs) `pinned_version` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml) `claude_version` | ✅ | — | — | — | — |
+| [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) `ARG CLAUDE_VERSION` | ✅ | — | — | — | — |
 
-A version string isn't the whole contract. `crates/srv/src/backend/blockcontroller/subprocess/argv.rs` records, for each provider, which flags were "checked against the pinned CLI". For each bumped provider, install the new version into a scratch prefix (`npm install --prefix <tmp> <pkg>@<new>`) and confirm that every flag and subcommand AgentMux passes still appears in `--help`. Update the "checked against" comments to the new version. Test fixtures that only illustrate a version string (`cli-notice.test.ts`, `version-drift.test.ts`) stay as they are, because they test parsing, not the pin.
+A version string isn't the whole contract. [`crates/srv/src/backend/blockcontroller/subprocess/argv.rs`](../../crates/srv/src/backend/blockcontroller/subprocess/argv.rs) records, for each provider, which flags were "checked against the pinned CLI". For each bumped provider, install the new version into a scratch prefix (`npm install --prefix <tmp> <pkg>@<new>`) and confirm that every flag and subcommand AgentMux passes still appears in `--help`. Update the "checked against" comments to the new version. Test fixtures that only illustrate a version string (`cli-notice.test.ts`, `version-drift.test.ts`) stay as they are, because they test parsing, not the pin.
 
 **Done for this PR on 2026-10-01.** I installed the old and new version of each CLI side by side and compared their help output for every flag and subcommand that `providers.rs`, `catalog.ts`, `argv.rs` and `buildRuntimeArgs.ts` pass:
 
@@ -103,7 +103,7 @@ The `GEMINI_DENY_ALL_TOOLS_POLICY` note in `argv.rs` says it was verified "by ca
 
 ### 4.2 Phase 1b: codex
 
-Follow `schema/providers/codex/app-server/README.md`:
+Follow [`schema/providers/codex/app-server/README.md`](../../schema/providers/codex/app-server/README.md):
 1. Bump the pins.
 2. Run `codex app-server generate-json-schema` at the new version into `schema/providers/codex/app-server/<new>/`.
 3. Review the stable and experimental method-set diff, update `manifest.json`, and run `codex-app-server-schema-gate.test.ts`.
@@ -128,7 +128,7 @@ What blocks the PR: `codex-version-fixture-gate.test.ts` requires all five live 
 
 ### 4.3 Phase 2 notes
 
-- **cef-dll-sys:** rebase the `agentmuxai/cef-rs` patch onto the 154.3.0 tag and bump the `rev`. The runtime pin (`scripts/cef-build/windows-runtime-pin.sh`) doesn't change, because the binding moves within milestone 154.
+- **cef-dll-sys:** rebase the `agentmuxai/cef-rs` patch onto the 154.3.0 tag and bump the `rev`. The runtime pin ([`scripts/cef-build/windows-runtime-pin.sh`](../../scripts/cef-build/windows-runtime-pin.sh)) doesn't change, because the binding moves within milestone 154.
 - **Node:** bump `.nvmrc` and the `engines` floor to 24.21.0. CI's `node-version: 24` already tracks the latest 24.x.
 - **jq / ripgrep:** bump the URLs and expected hashes in `package-portable.sh`. ripgrep 15 is a major: check that the flags agents use (`rg --json`, `--glob`, `-n`) are unchanged.
 - **Rust toolchain:** the decision is whether to add `rust-toolchain.toml` pinned to 1.99.0. A pin gives reproducible local and CI builds, at the cost of a bump PR per release. My recommendation is yes, with the drift reporter keeping it fresh.

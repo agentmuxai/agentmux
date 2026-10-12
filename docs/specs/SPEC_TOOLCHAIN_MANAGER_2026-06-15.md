@@ -88,11 +88,11 @@ Decision: implement the resolver in `agentmux-common` (shared) as `resolve_login
 ## 4. Toolchain Manager — UX
 
 ### 4.1 Entry point
-Add to `frontend/app/window/hamburger-menu.tsx` `menuItems()` (~line 107, before the Settings group):
+Add to [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) `menuItems()` (~line 107, before the Settings group):
 ```ts
 { label: "Toolchain", icon: "wrench", onClick: () => openModal(ToolchainModal) },
 ```
-`openModal` already imported from `@/app/store/modalmodel`. `ToolchainModal` receives the auto-injected `{ close }` prop, wrapped in `<Modal scope="window">` (`frontend/app/element/modal.tsx`).
+`openModal` already imported from `@/app/store/modalmodel`. `ToolchainModal` receives the auto-injected `{ close }` prop, wrapped in `<Modal scope="window">` ([`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx)).
 
 ### 4.2 Layout
 A window-scoped modal, three sections:
@@ -107,7 +107,7 @@ A window-scoped modal, three sections:
    - Action: **external tools** (node/git/docker) → "Install ↗" (platform install URL) + a copyable command, **always available** (v1 baseline). One-click "Install with Homebrew" is a **P3 add-on** (resolves Q3): shown only when `brew` is detected, requires an **explicit confirm**, runs `brew install <formula>` through the existing streamed-install channel with live output, and is **never** auto-run. Link+command remain the always-present fallback so the modal is useful even without brew.
    - `node` row shows the Node **minimum** (18+) and flags outdated **warn-only** — a ⚠ pill + "Node 18+ recommended", never a launch block (resolves Q2). Rationale: exact-path version detection is fuzzy, claude's native binary needs no Node, and blocking is hostile; the existing Node banner stays warn-only too.
 
-3. **Agent CLIs** — iterate `Object.values(PROVIDERS)` from `frontend/app/view/agent/providers/index.ts`.
+3. **Agent CLIs** — iterate `Object.values(PROVIDERS)` from [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts).
    - Each row: provider icon + displayName, detected version + source (`local_install` versioned dir / `system_path`), status pill.
    - Action: **managed (npm) providers** → **Install / Repair** button in place (reuses the `install.start` streamed flow, same as `AgentInstallModal`); **non-npm** (kimi/pip, claude/native) → guided install (docs link + command).
    - Show declared `systemPrereqs` per provider (e.g. claude→git) with their own found/missing state, so "claude needs git and git is missing" is visible here.
@@ -170,7 +170,7 @@ Each phase is a separate PR through the AgentO → reagent → squash flow.
 - `agentmux-srv/src/main.rs:229` — fallback enrichment for direct-launch.
 - `agentmux-srv/src/server/install_handlers.rs` / `cli_handlers.rs` — `toolchain.status` handler (reuse `resolve_tool_path`, `get_cli_version`, `is_safe_cli_command`).
 - `frontend/app/store/rpc-api.ts` — `ToolchainStatusCommand`.
-- `frontend/app/window/hamburger-menu.tsx:107` — menu item.
+- [`frontend/app/window/hamburger-menu.tsx:107`](../../frontend/app/window/hamburger-menu.tsx#L107) — menu item.
 - `frontend/app/view/.../ToolchainModal.tsx` — new modal (reuse `Modal`, `install_chunk` pattern from `AgentInstallModal.tsx`).
 - `frontend/app/view/agent/providers/toolchain-catalog.ts` — new core-tools catalog.
 

@@ -343,7 +343,7 @@ Small, independently landable PRs.
 
 ## 9. Cross-references
 
-- `frontend/app/element/modal.tsx` / `.scss` — primitive being retired.
+- [`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx) / `.scss` — primitive being retired.
 - `frontend/app/modals/*` — callers being migrated.
 - `SPEC_MULTIWINDOW_TASKBAR_GROUPING` — multi-window context resolution.
 - MDN [dialog element](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog) / [ARIA APG dialog pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) — canonical accessibility references this spec targets.

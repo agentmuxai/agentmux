@@ -252,10 +252,10 @@ included) since Chrome 63. No fallback needed for the Tauri/Electron target.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Re-add 150ms hover enter delay; post-completion hold signal + effect; replace `<Show>` panel with always-rendered + CSS modifier class |
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` | `"Running..."` → `"Thinking..."` |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | `overflow: hidden` on panel; `&--hidden` modifier with 200ms collapse transition |
-| `frontend/app/view/agent/styles/_tool-overlay-portal.scss` | `overscroll-behavior: contain` on `.agent-tool-overlay-log` |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Re-add 150ms hover enter delay; post-completion hold signal + effect; replace `<Show>` panel with always-rendered + CSS modifier class |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) | `"Running..."` → `"Thinking..."` |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | `overflow: hidden` on panel; `&--hidden` modifier with 200ms collapse transition |
+| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | `overscroll-behavior: contain` on `.agent-tool-overlay-log` |
 
 ---
 

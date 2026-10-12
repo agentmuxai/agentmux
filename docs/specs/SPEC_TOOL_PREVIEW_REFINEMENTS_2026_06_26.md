@@ -1,7 +1,7 @@
 # SPEC — Tool Preview Refinements: Word-wrap + Independent Zoom
 
 **Date:** 2026-06-26  
-**Status:** implemented — in #1798: streaming log lines stopped soft-wrapping, and Ctrl+Scroll zoomed the preview. The preview zoom was later removed (Ctrl+wheel zooms the pane). Finished string results still wrap; see `docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md`.
+**Status:** implemented — in #1798: streaming log lines stopped soft-wrapping, and Ctrl+Scroll zoomed the preview. The preview zoom was later removed (Ctrl+wheel zooms the pane). Finished string results still wrap; see [`docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md`](../reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md).
 
 ---
 
@@ -85,8 +85,8 @@ applied to specific renderers that need wrap behavior.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_tool-overlay-portal.scss` | `.agent-tool-log-line`: `white-space: pre`, `overflow-wrap: normal` |
-| `frontend/app/view/agent/styles/_tool-overlay-portal.scss` | `.agent-tool-log-body`: add `overflow-x: auto` |
+| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | `.agent-tool-log-line`: `white-space: pre`, `overflow-wrap: normal` |
+| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | `.agent-tool-log-body`: add `overflow-x: auto` |
 
 ---
 
@@ -208,9 +208,9 @@ Recommend **props** for now — avoids context machinery for a single value.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Add `toolPreviewFontScale` signal + `handleToolWheelZoom`; pass scale as prop to overlay |
-| `frontend/app/view/agent/components/ToolBlockOverlay.tsx` | Accept + forward `fontScale` prop to `ToolOverlayLog` |
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` | Accept `fontScale` prop; apply to log body `style` + attach `onWheel` handler |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Add `toolPreviewFontScale` signal + `handleToolWheelZoom`; pass scale as prop to overlay |
+| [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) | Accept + forward `fontScale` prop to `ToolOverlayLog` |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) | Accept `fontScale` prop; apply to log body `style` + attach `onWheel` handler |
 
 ---
 
@@ -218,4 +218,4 @@ Recommend **props** for now — avoids context machinery for a single value.
 
 - `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` — tool chunk delivery
 - `SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md` — shell node log rendering (same log body, same fix applies)
-- `docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md` — zoom/layout invariants (INV-2)
+- [`docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md`](../analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md) — zoom/layout invariants (INV-2)

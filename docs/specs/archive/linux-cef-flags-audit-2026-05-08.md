@@ -1,5 +1,5 @@
 > **Archived 2026-07-17:** Superseded by the still-live
-> `docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md` ("Implemented in
+> [`docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md`](../SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) ("Implemented in
 > PR #1394"), which replaced the VMware DMI gate this audit fed into. Kept for
 > historical reference only.
 
@@ -25,7 +25,7 @@ two distinct eras:
    subprocess limits, sandbox configuration.
 
 When we migrated from Tauri to CEF (commit `12333fa2`), the WebKit-era env
-vars in `scripts/linux-apprun.sh` were carried forward unchanged. Most of
+vars in [`scripts/linux-apprun.sh`](../../../scripts/linux-apprun.sh) were carried forward unchanged. Most of
 them target a runtime that no longer exists in this codebase (WebKitGTK is
 gone; we ship 100% CEF/Chromium on Linux). Some are dead (CEF doesn't read
 WebKit env vars at all). Some are still active but were never reconsidered
@@ -242,7 +242,7 @@ flag profile**.
 
 ### Touch list
 
-1. **`scripts/linux-apprun.sh`** — replace WebKit-era env-var block with a
+1. **[`scripts/linux-apprun.sh`](../../../scripts/linux-apprun.sh)** — replace WebKit-era env-var block with a
    minimal CEF-appropriate version:
 
    ```bash
@@ -375,11 +375,11 @@ a "WHY" comment.
 
 ## See also
 
-- `docs/specs/linux-pool-startup-fill-2026-05-08.md` — startup pool fill
+- [`docs/specs/linux-pool-startup-fill-2026-05-08.md`](../linux-pool-startup-fill-2026-05-08.md) — startup pool fill
   (already merged in 0.33.724).
-- `docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md` — the FUSE /
+- [`docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md`](../linux-appimage-cold-launch-tax-2026-05-08.md) — the FUSE /
   SquashFS / V8-cold-cache tax (separate fix, not this PR).
-- `scripts/linux-apprun.sh` — file under review.
+- [`scripts/linux-apprun.sh`](../../../scripts/linux-apprun.sh) — file under review.
 - `agentmux-cef/src/app.rs::on_before_command_line_processing` — file under
   review.
 - `CLAUDE.md` (root) and the auto-memory file in

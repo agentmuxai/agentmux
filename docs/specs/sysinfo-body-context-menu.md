@@ -121,7 +121,7 @@ common pattern (app-specific actions first, destructive/structural actions last)
 
 ### Step 1 — Add method to ViewModel interface
 
-**File:** `frontend/types/custom.d.ts`
+**File:** [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)
 
 Add to the `ViewModel` interface:
 
@@ -131,7 +131,7 @@ getBodyContextMenuItems?: () => ContextMenuItem[];
 
 ### Step 2 — Implement in `SysinfoViewModel`
 
-**File:** `frontend/app/view/sysinfo/sysinfo-model.ts`
+**File:** [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts)
 
 Add new method (alongside existing `getSettingsMenuItems`):
 
@@ -158,7 +158,7 @@ getBodyContextMenuItems(): ContextMenuItem[] {
 
 ### Step 3 — Wire into body context menu
 
-**File:** `frontend/app/block/blockframe.tsx`
+**File:** [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)
 
 Modify `onBodyContextMenu` (line 675) to inject view-specific items before pane
 actions:
@@ -198,9 +198,9 @@ spreading it here is safe.
 
 | File | Change |
 |------|--------|
-| `frontend/types/custom.d.ts` | Add `getBodyContextMenuItems?: () => ContextMenuItem[]` to `ViewModel` |
-| `frontend/app/view/sysinfo/sysinfo-model.ts` | Add `getBodyContextMenuItems()` method |
-| `frontend/app/block/blockframe.tsx` | Modify `onBodyContextMenu` to inject body items |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Add `getBodyContextMenuItems?: () => ContextMenuItem[]` to `ViewModel` |
+| [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) | Add `getBodyContextMenuItems()` method |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Modify `onBodyContextMenu` to inject body items |
 
 **No backend changes needed** — metric selection writes to block meta via existing
 `SetMetaCommand`, same as the header "Plot Type" submenu.

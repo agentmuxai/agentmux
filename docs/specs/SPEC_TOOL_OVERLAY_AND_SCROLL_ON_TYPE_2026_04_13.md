@@ -338,11 +338,11 @@ Still 30-150× faster than the pre-#345 regression. Still in the "feels instant"
 
 | File | Change | Est. lines |
 |---|---|---|
-| `frontend/app/view/agent/components/ToolBlock.tsx` | `overlayUp` signal, `handleMouseEnter`/`handleMouseLeave`, `findScrollParent` helper, `overlay-mode` / `overlay-up` class application | +35 / -5 |
-| `frontend/app/view/agent/agent-view.scss` | `.agent-tool-block { position: relative }`, `.overlay-mode .agent-tool-content` overlay rules, `.overlay-up` flip variant | +30 / -5 |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | `scrollToBottomRef` prop, `scrollToBottom` local function, expose on mount | +20 / -0 |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | Re-introduce `handleInput` (RAF-debounced), `onTyping` prop, updated top-of-file comment | +20 / -5 |
-| `frontend/app/view/agent/agent-view.tsx` | `scrollToBottomFn` ref, wire `onTyping`, wire `scrollToBottomRef` | +6 / -0 |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | `overlayUp` signal, `handleMouseEnter`/`handleMouseLeave`, `findScrollParent` helper, `overlay-mode` / `overlay-up` class application | +35 / -5 |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | `.agent-tool-block { position: relative }`, `.overlay-mode .agent-tool-content` overlay rules, `.overlay-up` flip variant | +30 / -5 |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | `scrollToBottomRef` prop, `scrollToBottom` local function, expose on mount | +20 / -0 |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | Re-introduce `handleInput` (RAF-debounced), `onTyping` prop, updated top-of-file comment | +20 / -5 |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | `scrollToBottomFn` ref, wire `onTyping`, wire `scrollToBottomRef` | +6 / -0 |
 
 **Total:** ~110 lines changed across 5 files.
 

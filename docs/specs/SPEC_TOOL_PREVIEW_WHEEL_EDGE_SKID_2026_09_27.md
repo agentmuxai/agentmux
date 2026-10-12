@@ -1,13 +1,13 @@
 # SPEC: Wheel edge skid — a nested preview absorbs a few wheel notches before the pane scrolls
 
 **Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
-**Amended 2026-10-07:** §8 decision 4 is reversed for jekt and context-delivery boxes. Every capped transcript preview box now skids when its content fits, through one helper, `previewBox()`, and one SCSS mixin, `transcript-preview-box`. Operator's request; see `docs/reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md` §2.2–2.3.
+**Amended 2026-10-07:** §8 decision 4 is reversed for jekt and context-delivery boxes. Every capped transcript preview box now skids when its content fits, through one helper, `previewBox()`, and one SCSS mixin, `transcript-preview-box`. Operator's request; see [`docs/reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md`](../reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md) §2.2–2.3.
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
 **Author:** Camper (agent), at operator request
 **Related:** `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (the hand-off this spec
 amends), `SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md` §2 (the shared hand-off it builds
 on), `SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md` (pane follow / pin, must
-not be disturbed), `frontend/app/view/agent/components/scroll-handoff.ts`.
+not be disturbed), [`frontend/app/view/agent/components/scroll-handoff.ts`](../../frontend/app/view/agent/components/scroll-handoff.ts).
 
 ---
 

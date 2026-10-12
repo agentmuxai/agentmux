@@ -129,7 +129,7 @@ This fixes the latent bug where wsh could never find the backend's endpoints fil
 
 ### 5. Settings button — Create file if missing
 
-**File:** `frontend/app/window/action-widgets.tsx`
+**File:** [`frontend/app/window/action-widgets.tsx`](../../../frontend/app/window/action-widgets.tsx)
 
 **Current:**
 ```typescript

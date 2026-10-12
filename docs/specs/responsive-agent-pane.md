@@ -177,7 +177,7 @@ Also make the raw output and footer responsive:
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/agent-view.scss` | Add `container-type`/`container-name` to `.agent-view`, add `@container` queries for 4 breakpoints |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | Add `container-type`/`container-name` to `.agent-view`, add `@container` queries for 4 breakpoints |
 
 **No TypeScript changes needed.**
 

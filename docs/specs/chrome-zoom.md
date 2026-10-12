@@ -28,7 +28,7 @@ When terminal panes are zoomed up, the title bar and status bar stay at fixed si
 
 ### 1. New atom: `chromeZoomAtom`
 
-In `frontend/app/store/zoom.ts`:
+In [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts):
 
 ```ts
 export const chromeZoomAtom = atom<number>(1.0);
@@ -122,10 +122,10 @@ function setChromeZoom(factor: number): void {
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/zoom.ts` | Add `chromeZoomAtom`, `chromeZoomIn`, `chromeZoomOut`, `setChromeZoom` |
-| `frontend/app/app.tsx` | Update wheel handler to detect chrome hover |
+| [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) | Add `chromeZoomAtom`, `chromeZoomIn`, `chromeZoomOut`, `setChromeZoom` |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) | Update wheel handler to detect chrome hover |
 | `frontend/app/window/window-header.scss` | Use `var(--chrome-zoom)` for sizing |
-| `frontend/app/statusbar/StatusBar.scss` | Use `var(--chrome-zoom)` for sizing |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | Use `var(--chrome-zoom)` for sizing |
 | `frontend/wave.ts` | Load persisted chrome zoom on startup |
 
 ### 6. Edge cases

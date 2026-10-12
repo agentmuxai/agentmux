@@ -34,7 +34,7 @@ Repo `C:/Users/user/.claw/agentx-workspace/agentmux`, HEAD `3012bfc5`.
 | Bundled runtime is **CEF 146** | Desktop `runtime/libcef.dll` ProductVersion `146.0.9 / chromium 146.0.7680.165`; `chrome_elf.dll` `146.0.7680.165` |
 | `Cargo.lock` is consistent at 148 | both `cef` and `cef-dll-sys` resolve to `148.3.0+148.0.9` from crates.io — there is **no** `[patch.crates-io]` and **no** version skew in the lock |
 | The 146 runtime comes from a **stale staging dir** | `target/cef-sdk/cef_windows_x86_64/libcef.dll` = CEF `146.0.9`, dated **Mar 27**, **262,352,384 bytes** — byte-identical to both `target/release/libcef.dll` and the Desktop portable's `runtime/libcef.dll` |
-| Not a `CEF_PATH` override | `CEF_PATH` unset in build env; `.cargo/config.toml` has it only as a comment |
+| Not a `CEF_PATH` override | `CEF_PATH` unset in build env; [`.cargo/config.toml`](../../.cargo/config.toml) has it only as a comment |
 
 **Mechanism (empirically verified).** The `cef` crate is pulled with
 `features = ["build-util"]` (`agentmux-cef/Cargo.toml:33`). build-util **stages a CEF
@@ -54,7 +54,7 @@ once `target/cef-sdk/` itself is removed and re-downloaded. PR #1232 made the bu
 
 **Two independent defects compound:**
 1. **No version guard** anywhere — nothing asserts `bundled libcef.dll major == linked
-   cef crate major` (searched `Taskfile.yml`, `scripts/`, `build.rs` — none).
+   cef crate major` (searched `Taskfile.yml`, [`scripts/`](../../scripts), `build.rs` — none).
 2. **Silent host failure** — on CEF init mismatch the host logs to
    `cef-debug.log` and `std::process::exit(exit_code)` with **no user-facing dialog**
    (`agentmux-cef/src/main.rs:700-736`), producing "splash then nothing."
@@ -75,7 +75,7 @@ once `target/cef-sdk/` itself is removed and re-downloaded. PR #1232 made the bu
 **Non-Goals**
 - Changing the CEF version itself or the `cef`/`cef-dll-sys` crates.
 - macOS/Linux bundling (their resolvers differ — `bundle:darwin`,
-  `scripts/resolve-cef-runtime.sh`; apply the same *guard* idea as a follow-up).
+  [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh); apply the same *guard* idea as a follow-up).
 
 ---
 
@@ -90,7 +90,7 @@ After confirming `libcef.dll` exists, assert its version matches the linked crat
 - **Actual major:** read the bundled `libcef.dll`'s `ProductVersion` (e.g. via
   `(Get-Item …).VersionInfo.ProductVersion` → `146.0.9…` → major `146`). The build
   task already shells out; a small `pwsh -NoProfile` call is fine and deterministic.
-- On mismatch (implemented in `scripts/verify-cef-version.sh`):
+- On mismatch (implemented in [`scripts/verify-cef-version.sh`](../../scripts/verify-cef-version.sh)):
   ```
   ❌ CEF version mismatch: bundled libcef.dll is 146.0.9… (major 146) but the host
      links cef crate major 148. The runtime is stale relative to the linked bindings…

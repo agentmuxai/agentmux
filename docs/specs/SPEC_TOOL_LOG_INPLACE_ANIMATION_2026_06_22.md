@@ -172,6 +172,6 @@ wraps `<LinkifiedText>` like the other lines.
 
 ## Files changed
 
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx` — update `ChunkList`
-- `frontend/app/view/agent/components/PersistentShellBlock.tsx` — same collapse
-- `docs/specs/SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md` — this file
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — update `ChunkList`
+- [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx) — same collapse
+- [`docs/specs/SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md`](SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md) — this file

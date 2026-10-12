@@ -67,7 +67,7 @@ Plus comments in a few files referencing "wave.ts" by name.
 
 ## Modularization Plan
 
-Split into focused modules under `frontend/app/init/`:
+Split into focused modules under [`frontend/app/init/`](../../frontend/app/init):
 
 ```
 frontend/app/init/
@@ -167,7 +167,7 @@ Testable: call and check DOM output.
 
 ### PR 2: Extract host-detect + error-display + workspace
 
-1. Create `frontend/app/init/` directory
+1. Create [`frontend/app/init/`](../../frontend/app/init) directory
 2. Move pure functions out of app-init.ts
 3. Add unit tests for each extracted module
 4. app-init.ts imports from the new modules
@@ -184,7 +184,7 @@ Testable: call and check DOM output.
 
 ### PR 4: Delete app-init.ts, replace with init/index.ts
 
-1. Final rename: `frontend/app-init.ts` → `frontend/app/init/index.ts`
+1. Final rename: [`frontend/app-init.ts`](../../frontend/app-init.ts) → `frontend/app/init/index.ts`
 2. bootstrap.ts imports from `@/app/init`
 3. Clean, modular, tested
 

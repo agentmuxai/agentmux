@@ -1,13 +1,13 @@
 # SPEC — Windows builds refuse a CEF runtime that isn't the pinned tracer-off build
 
-**Status:** implemented (#3615) — `scripts/cef-build/verify-cef-runtime-windows.sh`, wired into `bundle:windows` (Taskfile.yml), pin in `scripts/cef-build/windows-runtime-pin.sh`, tests in `scripts/cef-build/verify-cef-runtime-windows.test.sh` (run by ci-pr).
+**Status:** implemented (#3615) — [`scripts/cef-build/verify-cef-runtime-windows.sh`](../../scripts/cef-build/verify-cef-runtime-windows.sh), wired into `bundle:windows` (Taskfile.yml), pin in [`scripts/cef-build/windows-runtime-pin.sh`](../../scripts/cef-build/windows-runtime-pin.sh), tests in [`scripts/cef-build/verify-cef-runtime-windows.test.sh`](../../scripts/cef-build/verify-cef-runtime-windows.test.sh) (run by ci-pr).
 **Date:** 2026-09-23
 **Author:** agentx
 **Related:**
-- `docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md` (§3a: `InstanceTracer` mutex deadlock; the lock at `libcef+0x11656b38`)
+- [`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`](../incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md) (§3a: `InstanceTracer` mutex deadlock; the lock at `libcef+0x11656b38`)
 - #3561 (pinned the tracer-off runtime `cef-windows-x86_64-152.0.7977.83-r2`)
 - #3592 (`fetch-patched-cef-windows.sh` re-fetches a stale cached runtime)
-- `docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md` (the sibling version guard this sits next to)
+- [`docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md`](SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md) (the sibling version guard this sits next to)
 
 ---
 
@@ -47,7 +47,7 @@ it off there), and changing *which* runtime is fetched.
 
 ### 3.1 One pin, by content
 
-`scripts/cef-build/windows-runtime-pin.sh` (sourced, not executed) holds:
+[`scripts/cef-build/windows-runtime-pin.sh`](../../scripts/cef-build/windows-runtime-pin.sh) (sourced, not executed) holds:
 
 - `CEF_WINDOWS_RELEASE_TAG`, the agentmuxai/cef release;
 - `CEF_WINDOWS_ASSET`, its zip;

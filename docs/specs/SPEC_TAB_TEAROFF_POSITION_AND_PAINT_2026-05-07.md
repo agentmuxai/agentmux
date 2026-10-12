@@ -110,11 +110,11 @@ openWindowAtPosition(screenX, screenY, workspaceId?, width?, height?, tabAnchorX
 
 | File | Change |
 |---|---|
-| `frontend/app/tab/tab-grab-offset.ts` (new) | Module-level signal for `(x, y)` of grab offset within tab |
-| `frontend/app/tab/droppable-tab.tsx` | `onDragStart` populates the signal; `onGenerateDragPreview` suppresses OS image |
-| `frontend/app/tab/tabbar.tsx` | `TEAR_PAST_PX 24 → 5`; read offset; compute screen anchor; thread through |
-| `frontend/util/cef-api.ts` | Accept + forward `tabAnchorX`/`tabAnchorY` |
-| `frontend/types/custom.d.ts` | Update API type signatures |
+| [`frontend/app/tab/tab-grab-offset.ts`](../../frontend/app/tab/tab-grab-offset.ts) (new) | Module-level signal for `(x, y)` of grab offset within tab |
+| [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) | `onDragStart` populates the signal; `onGenerateDragPreview` suppresses OS image |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | `TEAR_PAST_PX 24 → 5`; read offset; compute screen anchor; thread through |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | Accept + forward `tabAnchorX`/`tabAnchorY` |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Update API type signatures |
 | `agentmux-cef/src/commands/drag.rs` | Parse anchor args; thread to promote |
 | `agentmux-cef/src/commands/window_pool.rs` | Use anchor for `pos_x/pos_y` if provided |
 

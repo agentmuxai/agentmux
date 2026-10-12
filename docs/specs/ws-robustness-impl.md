@@ -136,9 +136,9 @@ window.addEventListener("ws-connected", () => setWsConnected(true));
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/ws.ts` | Never give up, refresh endpoint, visibility reconnect, logging |
+| [`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) | Never give up, refresh endpoint, visibility reconnect, logging |
 | `agentmux-cef/src/sidecar.rs` | Monitor thread, emit backend-terminated |
-| `frontend/app/app.tsx` or new component | Reconnecting banner |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) or new component | Reconnecting banner |
 
 ## Test Plan
 

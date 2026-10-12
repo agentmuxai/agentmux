@@ -146,5 +146,5 @@ no extra wiring needed. If issue B persists after fix A, add a
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/term/xterm.css` | `.xterm-viewport { background-color: transparent }` |
-| `frontend/app/view/term/termwrap.ts` | Replace `fitAddon.fit()` calls with `customFit()` |
+| [`frontend/app/view/term/xterm.css`](../../frontend/app/view/term/xterm.css) | `.xterm-viewport { background-color: transparent }` |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | Replace `fitAddon.fit()` calls with `customFit()` |

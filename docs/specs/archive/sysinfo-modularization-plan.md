@@ -1,7 +1,7 @@
 # Sysinfo Module Modularization Plan
 
 **Date:** 2026-03-08
-**Current state:** Single 589-line file (`frontend/app/view/sysinfo/sysinfo.tsx`)
+**Current state:** Single 589-line file ([`frontend/app/view/sysinfo/sysinfo.tsx`](../../../frontend/app/view/sysinfo/sysinfo.tsx))
 **Goal:** Split into focused modules for maintainability as we add complexity
 
 ---

@@ -254,9 +254,9 @@ to be meaningful). A is independent and lands first.
   `scan_subagents_dir`/backfill, the `unwrap_or(true)` gate.
 - `agentmux-srv/src/backend/subagent_watcher/query.rs` — `list_active`/`list_dispatches`
   (unbounded, unfiltered).
-- `frontend/app/view/swarm/swarm-model.ts` — `buildDispatchBuckets`,
+- [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) — `buildDispatchBuckets`,
   `orphanedWorkflowMembers`, `subagentDisplayLabel`, `_retiredRowKeys`.
-- `frontend/app/view/swarm/swarm-view.tsx` / `swarm-view.scss` — status
+- [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) / `swarm-view.scss` — status
   label mapping, `Abandoned`/`Completed` visual parity.
 - Prior specs this builds on: `SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md`,
   `SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md`,

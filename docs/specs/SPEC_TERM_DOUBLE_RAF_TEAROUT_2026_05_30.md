@@ -48,7 +48,7 @@ entire Stage-1 machinery are deleted. One coalescer, not two; no dead toggle.
 
 ## What changed (this PR)
 
-`frontend/app/view/term/termwrap.ts`:
+[`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts):
 - Deleted fields `rafBuffer`, `rafPending`, `writeInFlight`, and `coalesceWrites`.
 - Deleted `RAF_BYPASS_THRESHOLD`, `scheduleRafWrite()`, and `armRaf()`.
 - `handleNewFileSubjectData` now calls `doTerminalWrite(decodedData)` directly,
@@ -56,9 +56,9 @@ entire Stage-1 machinery are deleted. One coalescer, not two; no dead toggle.
   `doTerminalWrite`'s write callback).
 
 Setting removal (it had exactly one reader, now gone):
-- `frontend/app/view/term/term.tsx` — dropped the `coalesceWrites` option.
-- `frontend/app/view/term/termwrap.ts` — dropped `coalesceWrites` from `TermWrapOptions`.
-- `schema/settings.json`, `frontend/types/gotypes.d.ts`,
+- [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) — dropped the `coalesceWrites` option.
+- [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) — dropped `coalesceWrites` from `TermWrapOptions`.
+- [`schema/settings.json`](../../schema/settings.json), `frontend/types/gotypes.d.ts`,
   `agentmux-srv/src/backend/wconfig/types.rs` — removed `term:disablerafcoalesce`.
 
 Perf marks: `term-keypress` and `term-echo-render` unchanged; `term-raf-write` is
@@ -66,7 +66,7 @@ gone (there is no rAF write). Net **−96 lines** across 6 files.
 
 Build verified: `npx tsc --noEmit` — no new errors (27-error pre-existing baseline
 unchanged; none in `termwrap.ts`/`term.tsx`). `cargo check -p agentmux-srv` — clean.
-`schema/settings.json` valid JSON.
+[`schema/settings.json`](../../schema/settings.json) valid JSON.
 
 ## ⚠️ Windows-10 verification — REQUIRED before this ships in a release
 

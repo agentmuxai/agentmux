@@ -161,10 +161,10 @@ The CSS fallback `var(--tab-natural-width, 160px)` means tabs render at 160 px u
 
 | File | Change |
 |---|---|
-| `frontend/app/tab/tab-measure.ts` | **New** — canvas measurement helper |
-| `frontend/app/tab/droppable-tab.tsx` | Pass `--tab-natural-width` as inline CSS var; call `measureTabWidth(label)` in an effect |
-| `frontend/app/tab/tabbar.scss` | Replace `--ws-tab-basis: 240px` global with per-tab var; update `--ws-tab-min/max` tokens |
-| `frontend/app/tab/tab.scss` | Update `max-width` fallback to match new max |
+| [`frontend/app/tab/tab-measure.ts`](../../frontend/app/tab/tab-measure.ts) | **New** — canvas measurement helper |
+| [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) | Pass `--tab-natural-width` as inline CSS var; call `measureTabWidth(label)` in an effect |
+| [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) | Replace `--ws-tab-basis: 240px` global with per-tab var; update `--ws-tab-min/max` tokens |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | Update `max-width` fallback to match new max |
 
 No Rust changes. No RPC changes. No prop-shape changes (dead `tabWidth` prop stays untouched).
 
@@ -200,6 +200,6 @@ No Rust changes. No RPC changes. No prop-shape changes (dead `tabWidth` prop sta
 
 - VS Code `tabsTitleControl.ts` — `computeTabLabels`, `redrawTab`, tab width calculation
 - `SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md` — prior fixed-basis spec (superseded by §3 here)
-- `frontend/app/tab/tabbar.scss` — current flex contract
-- `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md` — why old JS-width approach failed (avoid repeating)
+- [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) — current flex contract
+- [`docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`](../retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md) — why old JS-width approach failed (avoid repeating)
 - MDN `CanvasRenderingContext2D.measureText()` — layout-free text measurement

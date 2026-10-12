@@ -32,12 +32,12 @@ All of the building blocks already exist:
 | Capability | Where | Notes |
 |---|---|---|
 | Modal primitive | `frontend/app/element/modal-v2.tsx` | ARIA, stackable, ESC/backdrop dismiss, focus trap, sizes `sm`/`md`/`lg`/`xl`/`fit` |
-| Modal state | `frontend/app/store/modalmodel.ts` | `modalsModel.pushModal(displayName, props)` / `popModal()` |
+| Modal state | [`frontend/app/store/modalmodel.ts`](../../frontend/app/store/modalmodel.ts) | `modalsModel.pushModal(displayName, props)` / `popModal()` |
 | Modal registry | `frontend/app/modals/modalregistry.tsx` | Add `SettingsModal` here |
 | Modal styling | `frontend/app/element/modal-v2.scss` | Uses theme tokens (`--z-modal`, `--shadow-modal`, etc.) |
-| Read settings | `frontend/app/store/global.ts:86-88` — `settingsAtom`, `getSettingsKeyAtom(key)` | Already reactive |
+| Read settings | [`frontend/app/store/global.ts:86-88`](../../frontend/app/store/global.ts#L86-L88) — `settingsAtom`, `getSettingsKeyAtom(key)` | Already reactive |
 | **Write settings (unused)** | `frontend/app/store/rpc-api.ts` — `RpcApi.SetConfigCommand(client, data, opts)` | Wraps `setconfig` RPC; called only by `tabbar.tsx:610` today for `window:theme` |
-| JSON Schema | `schema/settings.json` | Per-key types |
+| JSON Schema | [`schema/settings.json`](../../schema/settings.json) | Per-key types |
 | Rust schema | `agentmux-srv/src/backend/wconfig/types.rs` | Authoritative defaults |
 | Existing form controls | `frontend/app/element/{input,toggle,multilineinput}.tsx` | Need to add: number, dropdown, color, key-binding capture, dict editor |
 | Existing tabbed inline UI | `frontend/app/view/agent/components/AgentCardSettingsPanel.tsx` | Reference for tab pattern (Identity/Memory tabs) |
@@ -131,7 +131,7 @@ await RpcApi.SetConfigCommand(TabRpcClient, draftSettings);
 // frontend re-fetches via existing flow.
 ```
 
-Open question: `SetConfigCommand` may currently expect a *full* `SettingsType` or a *patch*. The tabbar usage at `frontend/app/tab/tabbar.tsx:610` sends a single-key object — confirm before implementation whether the backend merges patches or replaces wholesale. **If wholesale**, the modal must send the full merged settings on save; **if patch**, the modal can send the delta.
+Open question: `SetConfigCommand` may currently expect a *full* `SettingsType` or a *patch*. The tabbar usage at [`frontend/app/tab/tabbar.tsx:610`](../../frontend/app/tab/tabbar.tsx#L610) sends a single-key object — confirm before implementation whether the backend merges patches or replaces wholesale. **If wholesale**, the modal must send the full merged settings on save; **if patch**, the modal can send the delta.
 
 ### 2.3 External edits
 
@@ -147,7 +147,7 @@ If the user has the settings.json open in an editor and modifies it while the mo
 
 Three layers, increasing strictness:
 
-1. **Client-side, per-control.** Number inputs enforce min/max. Color pickers enforce hex. Path inputs trim whitespace. Use the JSON Schema (`schema/settings.json`) as the source of constraints — generate TypeScript types/validators at build time, or hand-mirror the constraints in the registry (§4).
+1. **Client-side, per-control.** Number inputs enforce min/max. Color pickers enforce hex. Path inputs trim whitespace. Use the JSON Schema ([`schema/settings.json`](../../schema/settings.json)) as the source of constraints — generate TypeScript types/validators at build time, or hand-mirror the constraints in the registry (§4).
 2. **Form-level, on Save.** Run the draft through a schema validator (`ajv` is already a common pick for SolidJS apps; verify dependency before adding). Surface errors next to the offending control + a footer summary.
 3. **Backend, on `SetConfigCommand`.** Backend should reject malformed settings with a structured error. **Required:** backend currently does not return field-level errors — add a `{ ok: false, errors: [{ key, message }] }` shape so the modal can map errors back to controls.
 
@@ -206,7 +206,7 @@ This registry becomes the single source of truth for the modal. **Critically**: 
 
 ## 5. New Form Controls Needed
 
-Existing controls cover only ~50% of the settings. Add to `frontend/app/element/`:
+Existing controls cover only ~50% of the settings. Add to [`frontend/app/element/`](../../frontend/app/element):
 
 | Control | Use cases | Notes |
 |---|---|---|
@@ -220,7 +220,7 @@ Existing controls cover only ~50% of the settings. Add to `frontend/app/element/
 
 (No `KeybindingCapture` needed — `app:globalhotkey` was removed in cleanup as unused.)
 
-Each lives in its own file, follows the existing pattern (controlled component with `value`/`onChange` props), and uses SCSS modules under `frontend/app/element/`.
+Each lives in its own file, follows the existing pattern (controlled component with `value`/`onChange` props), and uses SCSS modules under [`frontend/app/element/`](../../frontend/app/element).
 
 ---
 

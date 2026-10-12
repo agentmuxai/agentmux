@@ -4,7 +4,7 @@
 **Status:** Draft
 **Scope:** Frontend + Rust host — no backend (srv) schema changes
 **Files touched:**
-- `frontend/app/window/action-widgets.tsx` — `buildItemMenuItems`, menu item handlers
+- [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) — `buildItemMenuItems`, menu item handlers
 - `agentmux-cef/src/commands/window/creation.rs` — extend `open_new_window` to accept optional initial view
 - `agentmux-cef/src/ipc.rs` — wire new parameter through IPC dispatch
 

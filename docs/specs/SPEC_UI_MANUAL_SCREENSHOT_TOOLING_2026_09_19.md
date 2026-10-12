@@ -3,18 +3,18 @@
 **Date:** 2026-09-19
 **Status:** implemented — PR #3432. First run complete (§6a), tool itself
 working.
-**Related:** `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` (the
+**Related:** [`docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`](SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md) (the
 CDP automation layer this reuses — `Page.captureScreenshot`/`Input.dispatchMouseEvent`/
 `Runtime.evaluate` already built into `agentmux-cef/src/browser_api/`, exposed
-to agents as `UIScreenshot`/`UIClick`/`UIQuery`), `docs/specs/SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md`
+to agents as `UIScreenshot`/`UIClick`/`UIQuery`), [`docs/specs/SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md`](SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md)
 (capture is no longer own-pane-restricted, but the MCP tools themselves stayed
 scoped that way — see §2 for why this spec talks to CDP directly instead),
-`docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md`
+[`docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md`](../reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md)
 (OS-level `CaptureWindow` blockers — irrelevant here since this tool never
-uses OS-level capture at all, see §2), `docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`
+uses OS-level capture at all, see §2), [`docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`](../reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md)
 (the full blockers log from building and first-running this tool — isolated-instance
 setup Attempts 1-5, then navigation-robustness Attempts 6-8 once capturing
-against the live primary instance instead), `docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md`
+against the live primary instance instead), [`docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md`](SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md)
 (the one blocker from that report fixed so far — a misleading `task dev:local`
 refusal message hit while trying to stand up the isolated instance this
 spec's own §3 describes).
@@ -98,7 +98,7 @@ single-instance socket is keyed on `hash(data_dir + version)` — see
 the version, not a bare env var — confirmed live: a second launch under a
 different `AGENTMUX_CHANNEL` was rejected as "already running" against the
 primary instance's socket). What actually works, and is the tool's own
-documented escape hatch (`scripts/dev-local.sh`, `task dev:local`): a
+documented escape hatch ([`scripts/dev-local.sh`](../../scripts/dev-local.sh), `task dev:local`): a
 temporary, uncommitted version bump (`package.json` + `Cargo.toml`
 `[workspace.package].version`) before `task dev`, reverted via
 `git checkout -- package.json Cargo.toml` once the capture run is done. No
@@ -110,7 +110,7 @@ channel/data-dir differs, which is what isolation actually needs.
 
 ## 4. Reusable tool
 
-`scripts/ui-screenshots/`:
+[`scripts/ui-screenshots/`](../../scripts/ui-screenshots):
 
 - **`shots.mjs`** — the declarative manifest. An array of shot descriptors:
   `{ id, title, description, selector?, padding?, prep? }`. `selector`
@@ -208,7 +208,7 @@ the "MY AGENTS" list / bundle list). Not conversation content, but not
 manual-safe either; flagged rather than shipped silently. The full
 narrative, including a live UI-navigation mistake that briefly surfaced
 real conversation content on screen (no image of it was ever saved), is in
-`docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`'s
+[`docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`](../reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md)'s
 Attempts 6-8.
 
 **Net assessment: the tool itself works as designed** — selector-based
@@ -267,7 +267,7 @@ crops. Files are `<id>-<size>.png`; `--sizes small,large` limits a run.
 
 `--suite` picks the manifest: `manual` (`shots.mjs`, the default) or `widgets`
 (`widget-shots.mjs`). The widget suite is built from the app's own widget
-config (`crates/srv/src/config/widgets.json`), so a new widget is captured
+config ([`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json)), so a new widget is captured
 without editing the suite; `EXCLUDE` lists the ones left out, with a reason.
 A new suite is a new manifest file plus one line in `capture.mjs`'s `SUITES`.
 
@@ -332,7 +332,7 @@ shot is `"review"`: a person checks each image before it is published.
 
 ## 9. Verify, redaction and the chrome shots (2026-10-10)
 
-Part 2 of `docs/reports/REPORT_DOCS_SCREENSHOT_COVERAGE_PLAN_2026_10_10.md`:
+Part 2 of [`docs/reports/REPORT_DOCS_SCREENSHOT_COVERAGE_PLAN_2026_10_10.md`](../reports/REPORT_DOCS_SCREENSHOT_COVERAGE_PLAN_2026_10_10.md):
 the window's chrome, its menus and Settings, captured for the docs. It needs
 two things the runner didn't have: a check that `prep` reached what the shot
 is of (§7's `verify` follow-up), and a way to keep the capturing machine's
@@ -446,7 +446,7 @@ describe changes to the `acme-web` demo project (§8.3).
 
 srv looks for a provider's CLI in `<home>/shared/cli/<provider>/<pinned
 version>/` and uses it only when that folder holds the completion marker
-(`crates/srv/src/backend/cli_install.rs`). `install-fake-claude.mjs --home
+([`crates/srv/src/backend/cli_install.rs`](../../crates/srv/src/backend/cli_install.rs)). `install-fake-claude.mjs --home
 <dir>` writes an npm-style `.cmd` shim there, in the shape
 `crates/common/src/cli.rs` resolves to `node <script>`, with the script and
 the marker. It refuses the machine's own `~/.agentmux`: the stand-in must never
@@ -610,7 +610,7 @@ is one command, then a review.
   need (the memory suite uses an agent the agent suite creates), then
   `record.mjs`, each into its own folder, and with `--docs` publishes them. A
   suite that fails doesn't stop the others; the summary lists it.
-- **`README.md`** in `scripts/ui-screenshots/` gives the commands in order,
+- **`README.md`** in [`scripts/ui-screenshots/`](../../scripts/ui-screenshots) gives the commands in order,
   for whoever reruns them.
 
 The first full refresh (2026-10-11) retook 102 screenshots and the Stash clip

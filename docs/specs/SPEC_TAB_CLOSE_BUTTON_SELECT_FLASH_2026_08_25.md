@@ -12,12 +12,12 @@ fires, after it produced its own, different visible transition in practice.
 **Owner:** unassigned
 **Date:** 2026-08-25
 **Why it took five rounds:** analysed in
-`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md` — §§2-7 each
+[`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md`](../reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md) — §§2-7 each
 tried to *win* an ordering race; only §8 left the race. That report also
 records the verification gap (no build ever contained §§5-7 together during
 testing) and the wider ~40-document flicker family this belongs to.
-**Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`,
-`frontend/app/tab/droppable-tab.tsx`, `agentmux-srv/src/reducer/tab.rs`
+**Scope:** [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx), [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx),
+[`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx), `agentmux-srv/src/reducer/tab.rs`
 (`handle_set_active_tab`, `handle_delete_tab`)
 **Related:** `SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md` (tab-bar layout
 invariants), `SPEC_TAB_UI_REFINEMENTS_2026_06_20.md` (close-confirm modal /
@@ -43,7 +43,7 @@ clicks on the per-tab "✕" button are affected.
 
 ### 2.1 The click event is not stopped from bubbling past the close button
 
-`frontend/app/tab/tab.tsx:251-267` renders each tab as:
+[`frontend/app/tab/tab.tsx:251-267`](../../frontend/app/tab/tab.tsx#L251-L267) renders each tab as:
 
 ```tsx
 <div class={clsx("tab", { active: props.active, ... })}
@@ -106,7 +106,7 @@ calls fired back-to-back on the client.** The close flow
 
 - `WorkspaceService.CloseTab(wsId, tabId)` — from step 1 above.
 - `WorkspaceService.SetActiveTab(wsId, tabId)` — from step 2's bubbled
-  `onSelect` (via `setActiveTab` in `frontend/app/store/tab-actions.ts:66-112`).
+  `onSelect` (via `setActiveTab` in [`frontend/app/store/tab-actions.ts:66-112`](../../frontend/app/store/tab-actions.ts#L66-L112)).
 
 Whichever HTTP request the backend happens to service first decides what
 the user sees, because the reducer (`agentmux-srv/src/reducer/tab.rs`)
@@ -163,7 +163,7 @@ the same way `mousedown` is already stopped. This removes the spurious
 `onSelect` call at the source, so no race between `SetActiveTab` and
 `CloseTab` is ever created — no backend-ordering fix is needed.
 
-`frontend/app/tab/tab.tsx`:
+[`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx):
 
 ```tsx
 const handleMouseDownOnClose = (event: MouseEvent) => {
@@ -465,7 +465,7 @@ atomic (§6).
 - `eventbus.rs::tests` — `broadcast_wave_obj_updates` emits exactly one
   `waveobj:batchedupdates` frame with the array order preserved, and no
   frame for an empty slice.
-- `frontend/app/tab/tab.test.tsx` — §4's long-owed component test: a click
+- [`frontend/app/tab/tab.test.tsx`](../../frontend/app/tab/tab.test.tsx) — §4's long-owed component test: a click
   on a background tab's close button fires `onClose` only (never
   `onSelect`); a click on the tab body still selects.
 - Manual: close the active tab via the confirm modal — the tab vanishes

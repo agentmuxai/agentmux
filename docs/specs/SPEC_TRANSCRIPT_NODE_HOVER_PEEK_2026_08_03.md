@@ -13,9 +13,9 @@ Before designing anything, the audit turned up two prior specs that each **remov
 
 | When | Spec | What it did | Why |
 |---|---|---|---|
-| 2026-04-15 | `docs/specs/node-timestamp-hover.md` | Designed a per-node hover popover: absolute-positioned pill, shown via CSS `:hover`, on every node row (`tool`, `markdown`, `section`, etc.), showing `HH:MM:SS.M`. Marked "Ready to implement." | — (superseded by the next two before/without fully shipping as drafted) |
-| 2026-05-28 | `docs/specs/SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md` | **Removed** `ToolBlock`'s hover-driven behavior: a browser-native title tooltip + a full log-panel auto-expand + fast expand/collapse were all firing on hover simultaneously. Reduced to click-to-pin only, plus one narrow surviving tooltip (word-wrapped command text, read-only, no state change). | Direct user complaint, quoted in the spec: *"There should be NO expand/collapse on hover... We want the small popup... to be at the top of the larger popup, so it's just 1 popup."* Hover was reintroducing flicker/"the row dances around my cursor." |
-| 2026-06-15 | `docs/specs/SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15.md` | **Deleted** `NodeHoverStrip` — the generic per-row hover pill (timestamp + expand/collapse toggle) that the April spec's model had become. Timestamp was **dropped entirely**, not relocated. | *"It's the last remnant of the legacy 'popups on hover' model... floats over line content."* |
+| 2026-04-15 | [`docs/specs/node-timestamp-hover.md`](node-timestamp-hover.md) | Designed a per-node hover popover: absolute-positioned pill, shown via CSS `:hover`, on every node row (`tool`, `markdown`, `section`, etc.), showing `HH:MM:SS.M`. Marked "Ready to implement." | — (superseded by the next two before/without fully shipping as drafted) |
+| 2026-05-28 | [`docs/specs/SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md`](SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md) | **Removed** `ToolBlock`'s hover-driven behavior: a browser-native title tooltip + a full log-panel auto-expand + fast expand/collapse were all firing on hover simultaneously. Reduced to click-to-pin only, plus one narrow surviving tooltip (word-wrapped command text, read-only, no state change). | Direct user complaint, quoted in the spec: *"There should be NO expand/collapse on hover... We want the small popup... to be at the top of the larger popup, so it's just 1 popup."* Hover was reintroducing flicker/"the row dances around my cursor." |
+| 2026-06-15 | [`docs/specs/SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15.md`](SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15.md) | **Deleted** `NodeHoverStrip` — the generic per-row hover pill (timestamp + expand/collapse toggle) that the April spec's model had become. Timestamp was **dropped entirely**, not relocated. | *"It's the last remnant of the legacy 'popups on hover' model... floats over line content."* |
 
 **What survived and is proven acceptable:** `ToolBlock.tsx`'s own narrow `<Tooltip>` (`ToolBlock.tsx:297-305`) — wraps just the tool-name text, shows only the word-wrapped command/args, no expand/collapse, no other side effect, suppressed the instant the row is already expanded. This is the one hover surface nobody has complained about or removed.
 
@@ -36,7 +36,7 @@ Traced to `AgentComposerStrip.tsx:57-67` (`contextTitle()`) + `:253-264` (usage)
 
 There's no "code" here to reuse beyond the idea of building a multi-line string — no positioning, animation, or Portal logic. The literal string "Session Context" doesn't appear near this UI at all (it only appears as a markdown heading in agent startup payloads and a Bundle-picker modal label — unrelated).
 
-**The actually-reusable mechanism is `frontend/app/element/tooltip.tsx`'s `Tooltip` component** — floating-ui positioned (`computePosition` + `autoUpdate`, offset/flip/shift middleware), Portal-rendered, hover-driven with a configurable delay (default 300ms), already proven in production on `ToolBlock.tsx`. **Recommend reusing `Tooltip`, not the native-`title=` pattern** — it's animated, positions correctly near viewport edges, and is the one hover surface with a track record of not getting ripped out.
+**The actually-reusable mechanism is [`frontend/app/element/tooltip.tsx`](../../frontend/app/element/tooltip.tsx)'s `Tooltip` component** — floating-ui positioned (`computePosition` + `autoUpdate`, offset/flip/shift middleware), Portal-rendered, hover-driven with a configurable delay (default 300ms), already proven in production on `ToolBlock.tsx`. **Recommend reusing `Tooltip`, not the native-`title=` pattern** — it's animated, positions correctly near viewport edges, and is the one hover surface with a track record of not getting ripped out.
 
 `Tooltip`'s props (`tooltip.tsx:17-28`): `children` (anchor content), `content` (arbitrary JSX, not just a string), `placement` (`"top"|"bottom"|"left"|"right"`), `forceOpen`, `disable`, `divClassName`/`divStyle`/`divOnClick`, `delayMs`.
 
@@ -92,7 +92,7 @@ Two ways forward, not mutually exclusive:
 ### 1.5 Time-ago formatting — 6+ duplicate implementations, none shared
 
 No shared utility exists; every call site copy-pastes the same `<60s→"Ns ago" / <1h→"Nm ago" / <1d→"Nh ago" / else→"Nd ago"` shape:
-`MyAgentsList.tsx:65-67` (tested — `MyAgentsList.test.tsx`), `AgentLaunchModal.tsx:324-326`, `AgentDisconnectedBanner.tsx:43-47`, `swarm-view.tsx:440-443`, `usenotification.tsx:93-97`, `warden.tsx` (`formatAge`), plus two devtools-only copies. This session already established `frontend/util/format-time.ts` (PR #2386, merged) as the shared home for elapsed/relative time formatting — the natural place to add a `formatTimeAgo` here too, sourced from `MyAgentsList.tsx`'s already-tested version, rather than adding a 7th duplicate.
+`MyAgentsList.tsx:65-67` (tested — `MyAgentsList.test.tsx`), `AgentLaunchModal.tsx:324-326`, `AgentDisconnectedBanner.tsx:43-47`, `swarm-view.tsx:440-443`, `usenotification.tsx:93-97`, `warden.tsx` (`formatAge`), plus two devtools-only copies. This session already established [`frontend/util/format-time.ts`](../../frontend/util/format-time.ts) (PR #2386, merged) as the shared home for elapsed/relative time formatting — the natural place to add a `formatTimeAgo` here too, sourced from `MyAgentsList.tsx`'s already-tested version, rather than adding a 7th duplicate.
 
 The unshipped `node-timestamp-hover.md` also sketched an exact-time formatter (`HH:MM:SS.M`, tenths precision) — worth reviving for the tooltip's absolute-time line, same file.
 
@@ -104,10 +104,10 @@ One `<Tooltip>` per node, wrapping a specific existing element (not the whole ro
 
 ### 2.2 Shared building blocks (new)
 
-- **`frontend/util/format-time.ts`** (existing file) gains:
+- **[`frontend/util/format-time.ts`](../../frontend/util/format-time.ts)** (existing file) gains:
   - `formatTimeAgo(ms: number): string` — relative time ("3m ago", "2h ago", …), consolidating the 6 duplicates listed in §1.5.
   - `formatExactTime(ms: number): string` — `HH:MM:SS` local time (tenths optional), adapted from `node-timestamp-hover.md`'s draft.
-- **`frontend/util/format-count.ts`** (existing file, from this session's earlier consolidation) gains:
+- **[`frontend/util/format-count.ts`](../../frontend/util/format-count.ts)** (existing file, from this session's earlier consolidation) gains:
   - `estimateTokenCount(text: string): number` — `Math.ceil(text.length / 4)`, paired with `formatCompactNumber` for display (e.g. `~${formatCompactNumber(estimateTokenCount(text))} tok (est.)`).
 
 ### 2.2a Presentation — large/readable, like the native tooltip looks, NOT the existing cramped command-tooltip styling
@@ -147,13 +147,13 @@ Bash: npm run build --workspace=frontend ...
 
 | File | Change |
 |---|---|
-| `frontend/util/format-time.ts` | Add `formatTimeAgo`, `formatExactTime`; migrate `MyAgentsList.tsx` to the shared one (bonus DRY win, matches this session's established pattern) |
-| `frontend/util/format-count.ts` | Add `estimateTokenCount` |
-| `frontend/app/view/agent/stream-parser.ts` | Stamp `timestamp` in `thinkingToNode()` on first creation only |
-| `frontend/app/view/agent/types.ts` | No type change needed — `MarkdownNode.timestamp?: number` already exists in the union, just unset for thinking today |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Extend existing `Tooltip`'s `content=` with time + estimate lines, switch content wrapper to the new larger-format class (§2.2a) |
-| `frontend/app/view/agent/components/MarkdownBlock.tsx` | Wrap thinking-block header in a new `<Tooltip>`, same content shape, same new class |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | New `.agent-node-peek-tooltip` rule (§2.2a) — larger font/padding than the existing `.agent-tool-cmd-tooltip` |
+| [`frontend/util/format-time.ts`](../../frontend/util/format-time.ts) | Add `formatTimeAgo`, `formatExactTime`; migrate `MyAgentsList.tsx` to the shared one (bonus DRY win, matches this session's established pattern) |
+| [`frontend/util/format-count.ts`](../../frontend/util/format-count.ts) | Add `estimateTokenCount` |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | Stamp `timestamp` in `thinkingToNode()` on first creation only |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | No type change needed — `MarkdownNode.timestamp?: number` already exists in the union, just unset for thinking today |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Extend existing `Tooltip`'s `content=` with time + estimate lines, switch content wrapper to the new larger-format class (§2.2a) |
+| [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) | Wrap thinking-block header in a new `<Tooltip>`, same content shape, same new class |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | New `.agent-node-peek-tooltip` rule (§2.2a) — larger font/padding than the existing `.agent-tool-cmd-tooltip` |
 
 ## 4. Open questions — resolved
 

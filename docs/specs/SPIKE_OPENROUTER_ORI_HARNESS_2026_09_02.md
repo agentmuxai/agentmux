@@ -74,7 +74,7 @@ ProjectInitError: Project initialization failed while fetching templates
 GNU tar reads `C:\Users\...\.ori\global` as a remote `host:path`. Re-running
 with `PATH=C:\Windows\System32;C:\Windows` — so Windows' bsdtar 3.8.4 wins —
 bootstraps cleanly, creating `~/.ori/global` with `AGENTS.md`, `.agents/`,
-`.claude/`.
+[`.claude/`](../../.claude).
 
 This is **not** "Ori is broken on Windows". It is broken in a very common
 Windows dev environment, and specifically in ours: our own `CLAUDE.md` tells

@@ -32,7 +32,7 @@ Change the OS window title (the string Windows shows in the taskbar, macOS shows
 
 ## 2. Current Behavior (what we're replacing)
 
-`document.title` is set in three places in `frontend/app-init.ts`:
+`document.title` is set in three places in [`frontend/app-init.ts`](../../frontend/app-init.ts):
 
 - `app-init.ts:306` — `document.title = "AgentMux ${appVersion}"` (initial, e.g. `"AgentMux 0.33.860"`)
 - `app-init.ts:485` — `document.title = "AgentMux ${appVersion} - ${initialTab.name}"` (reinitWave path)
@@ -156,8 +156,8 @@ Every release path in `Taskfile.yml` is exercised:
 
 | Release type                       | Taskfile target                | Bundle source                | Covered? |
 | ---------------------------------- | ------------------------------ | ---------------------------- | -------- |
-| Dev (launcher in loop, Windows)    | `task dev`                     | Vite HMR (`frontend/`)       | Yes      |
-| Dev (host direct, all OS)          | `task dev:standalone`          | Vite HMR (`frontend/`)       | Yes      |
+| Dev (launcher in loop, Windows)    | `task dev`                     | Vite HMR ([`frontend/`](../../frontend))       | Yes      |
+| Dev (host direct, all OS)          | `task dev:standalone`          | Vite HMR ([`frontend/`](../../frontend))       | Yes      |
 | Portable ZIP (Windows)             | `task package`                 | `frontend/dist/` (bundled)   | Yes      |
 | AppImage (Linux)                   | `task package:linux`           | `frontend/dist/` (bundled)   | Yes      |
 | MSIX (Windows Store)               | `task package:msix` *(TODO)*   | `frontend/dist/` (bundled)   | Auto, when implemented |
@@ -240,7 +240,7 @@ Leave these alone — they're how the user discovers the running version. The ch
 - [ ] Unit test for `formatWindowTitle` (omit tab when empty; otherwise three-part join)
 - [ ] Unit test for `resolveWindowName` (display name → workspace → "Window N" fallback chain)
 - [ ] Refactor `InstancePanel.tsx` to call `resolveWindowName`; existing visual behavior unchanged
-- [ ] No existing test asserts on `document.title` format (`frontend/app/block/autotitle.test.ts` is about block titles, not window titles) — no test breakage expected
+- [ ] No existing test asserts on `document.title` format ([`frontend/app/block/autotitle.test.ts`](../../frontend/app/block/autotitle.test.ts) is about block titles, not window titles) — no test breakage expected
 
 ---
 
@@ -258,10 +258,10 @@ Leave these alone — they're how the user discovers the running version. The ch
 
 | File                                                | Change                                                                  |
 | --------------------------------------------------- | ----------------------------------------------------------------------- |
-| `frontend/util/window-title.ts`                 | **NEW** — `resolveWindowName`, `formatWindowTitle`                      |
-| `frontend/app-init.ts`                              | Remove 3 title writes (lines 306, 485, 590); replace with reactive effect |
+| [`frontend/util/window-title.ts`](../../frontend/util/window-title.ts)                 | **NEW** — `resolveWindowName`, `formatWindowTitle`                      |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts)                              | Remove 3 title writes (lines 306, 485, 590); replace with reactive effect |
 | `frontend/app/element/InstancePanel.tsx`            | Refactor name resolution to call `resolveWindowName`                    |
-| `frontend/util/window-title.test.ts`            | **NEW** — unit tests for the helper                                     |
+| [`frontend/util/window-title.test.ts`](../../frontend/util/window-title.test.ts)            | **NEW** — unit tests for the helper                                     |
 | `agentmux-cef/src/client/mod.rs`                    | None                                                                    |
 | `agentmux-cef/src/client/handlers.rs`               | None                                                                    |
 | `agentmux-cef/src/ipc.rs`                           | None (`getAboutModalDetails().version` still serves StatusBar / About) |

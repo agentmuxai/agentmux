@@ -4,9 +4,9 @@
 **Status:** Draft — design choices below need user/reviewer sign-off before code.
 **Author:** AgentA
 **Reads-this-first:**
-- `docs/retro/next-steps-architecture-completeness-2026-05-01.md` — step 4.
-- `docs/retro/reducer-architecture-gaps-2026-05-01.md` — §3 saga state durability.
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — Phase A coordinator placement.
+- [`docs/retro/next-steps-architecture-completeness-2026-05-01.md`](../retro/next-steps-architecture-completeness-2026-05-01.md) — step 4.
+- [`docs/retro/reducer-architecture-gaps-2026-05-01.md`](../retro/reducer-architecture-gaps-2026-05-01.md) — §3 saga state durability.
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) — Phase A coordinator placement.
 - `agentmux-srv/src/sagas/mod.rs` — current in-memory saga coordinator (Phase E.5.5 shipped).
 
 ---

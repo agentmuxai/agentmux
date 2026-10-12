@@ -3,9 +3,9 @@
 **Date:** 2026-06-21  
 **Status:** proposed — Ready for implementation
 **Files in scope:**
-- `frontend/app/view/sysinfo/sysinfo-model.ts`
-- `frontend/app/view/sysinfo/sysinfo-view.tsx`
-- `frontend/app/view/sysinfo/sysinfo-plot.tsx`
+- [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts)
+- [`frontend/app/view/sysinfo/sysinfo-view.tsx`](../../frontend/app/view/sysinfo/sysinfo-view.tsx)
+- [`frontend/app/view/sysinfo/sysinfo-plot.tsx`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx)
 
 ---
 

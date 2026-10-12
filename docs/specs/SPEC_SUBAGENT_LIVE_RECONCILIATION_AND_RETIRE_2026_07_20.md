@@ -3,11 +3,11 @@
 **Date:** 2026-07-20
 **Status:** active — Phase A shipped (#2234, merged). Phase B (#2235, this PR) implements
 the rest of this doc. — #2235
-**Builds on:** `docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`
+**Builds on:** [`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md)
 (closes its Open Question 1; makes a fresh product decision on Open
-Question 2). Diagnosis: `docs/specs/REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20.md`.
+Question 2). Diagnosis: [`docs/specs/REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20.md`](REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20.md).
 **Scope:** `agentmux-srv/src/backend/blockcontroller/persistent.rs`,
-`agentmux-srv/src/backend/subagent_watcher.rs` (backend); `frontend/app/view/swarm/swarm-model.ts`,
+`agentmux-srv/src/backend/subagent_watcher.rs` (backend); [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts),
 `swarm-view.tsx` (frontend).
 
 ---

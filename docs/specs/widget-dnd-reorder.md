@@ -159,8 +159,8 @@ This field goes through the existing `#[serde(flatten)] extra: HashMap` if we ke
 
 | File | Change |
 |------|--------|
-| `frontend/app/window/action-widgets.tsx` | Add drag state, `getSortedWidgets`, drop handlers, drop indicator |
-| `frontend/app/window/action-widgets.scss` | `.widget-dragging` opacity, drop indicator line, drag cursor |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | Add drag state, `getSortedWidgets`, drop handlers, drop indicator |
+| [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) | `.widget-dragging` opacity, drop indicator line, drag cursor |
 | `frontend/app/types/` or `gotypes.d.ts` | Add `"widget:order"?: string[]` to `SettingsType` |
 | `agentmuxsrv-rs/src/backend/wconfig.rs` | Optional: add typed `widget_order` field (may not be needed) |
 

@@ -292,7 +292,7 @@ let exec = docker.create_exec("agentmux-agent1", CreateExecOptions {
 
 | Phase | File | Change |
 |-------|------|--------|
-| 1 | `frontend/app/view/agent/agent-view.tsx` | Enhanced Docker detection with daemon check |
+| 1 | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Enhanced Docker detection with daemon check |
 | 2 | `agentmuxsrv-rs/src/backend/container.rs` | New module: container lifecycle |
 | 2 | `agentmuxsrv-rs/src/server/websocket.rs` | New RPC handlers for container commands |
 | 3 | `agentmuxsrv-rs/src/backend/blockcontroller/subprocess.rs` | Docker exec wrapper for container agents |

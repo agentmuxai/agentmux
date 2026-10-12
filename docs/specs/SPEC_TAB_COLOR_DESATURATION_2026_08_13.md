@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 **Status:** Implemented (see revision note below) — #2568
-**Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`, `frontend/app/view/agent/agent-color.ts`, `agentmux-srv/src/backend/agent_color.rs` (doc comment only)
+**Scope:** [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx), [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx), [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts), `agentmux-srv/src/backend/agent_color.rs` (doc comment only)
 
 **Revision (same day):** the first implementation used a fully muted
 `S=45%/L=32%` palette (§3 table below). User feedback: "a little too
@@ -16,7 +16,7 @@ Green/Teal/Cyan) where the raw average dropped below WCAG AA. See the
 ## Problem
 
 The tab color picker (right-click a tab → color) assigns colors from the
-`TAB_COLORS` array in `frontend/app/tab/tab.tsx:20-35` — 14 stock
+`TAB_COLORS` array in [`frontend/app/tab/tab.tsx:20-35`](../../frontend/app/tab/tab.tsx#L20-L35) — 14 stock
 Tailwind-500 hues, ~26° apart on the hue wheel, applied as a solid
 `background: var(--tab-color)` fill on the tab (`tab.scss:141-159`). At
 full Tailwind-500 saturation (81-95%) these read as neon/fluorescent,
@@ -28,13 +28,13 @@ stay exactly as they are.
 
 ## Why this isn't a one-line palette edit
 
-`TAB_COLORS` is not tab-exclusive. `frontend/app/view/agent/agent-color.ts:18-20`
+`TAB_COLORS` is not tab-exclusive. [`frontend/app/view/agent/agent-color.ts:18-20`](../../frontend/app/view/agent/agent-color.ts#L18-L20)
 reuses the same array as `AGENT_COLOR_PALETTE`, which auto-assigns agent
 pane **border** colors (`frame:bordercolor` / `frame:activebordercolor` in
-`frontend/app/block/blockframe.tsx:704-750`, dimmed via `dimAgentColor` for
+[`frontend/app/block/blockframe.tsx:704-750`](../../frontend/app/block/blockframe.tsx#L704-L750), dimmed via `dimAgentColor` for
 unfocused panes). A separate 12-hue vivid palette
 (`hueToActiveBorder(hue) = hsl(hue, 65%, 52%)` in
-`frontend/app/block/pane-color-menu.ts`) also drives pane border color when
+[`frontend/app/block/pane-color-menu.ts`](../../frontend/app/block/pane-color-menu.ts)) also drives pane border color when
 a user picks a custom hue.
 
 Editing `TAB_COLORS` in place would silently desaturate agent pane borders
@@ -57,7 +57,7 @@ unchanged.
    since those read `TAB_COLORS` at call time rather than a stored hex.
 
 2. Rename the current vivid array (don't delete it) to
-   `AGENT_BORDER_COLORS` and move it to `frontend/app/view/agent/agent-color.ts`
+   `AGENT_BORDER_COLORS` and move it to [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts)
    (or keep it in `tab.tsx` under a new name and re-export) so
    `AGENT_COLOR_PALETTE` keeps pointing at the original vivid hexes with no
    behavior change. `pane-color-menu.ts`'s `hueToActiveBorder` formula is

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-26
 **Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the second PR; §3.5 and §3.6 (text bodies, content blocks) in the third; §3.7 ToolSearch in the fourth (TodoWrite and ExitPlanMode deferred, not observed)
-**Scope:** agent pane tool previews (`frontend/app/view/agent/`)
+**Scope:** agent pane tool previews ([`frontend/app/view/agent/`](../../frontend/app/view/agent))
 **Verified against:** `main` @ `6b5c2b59b`, which includes #3861 (the jekt
 height cap)
 **Related:** `SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md`,
@@ -11,7 +11,7 @@ height cap)
 `PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`,
 `SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md`,
 `SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md` §3
-**Companion report:** `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`
+**Companion report:** [`docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`](../reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md)
 
 ---
 

@@ -205,4 +205,4 @@ macOS: `agentmux-cef` needs `NSAccessibilityUsageDescription` + `NSScreenCapture
 
 - [Claude Code computer use docs](https://code.claude.com/docs/en/computer-use)
 - [Anthropic computer use tool API](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool)
-- Full spec: `docs/specs/computer-use-pane.md`
+- Full spec: [`docs/specs/computer-use-pane.md`](computer-use-pane.md)

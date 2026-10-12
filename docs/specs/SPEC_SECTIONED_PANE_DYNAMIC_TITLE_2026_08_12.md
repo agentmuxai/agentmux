@@ -31,8 +31,8 @@ static `viewName`. Surveyed all three against source:
 | Pane | Model file | Section state lives... | Has `blockAtom`? | Has `zoomAtom`? | Fix shape |
 |---|---|---|---|---|---|
 | **Armory** | `frontend/app/view/armory/armory-model.ts` | in the **view** (`armory-view.tsx:26`, local `createSignal`) | yes | yes (`term:zoom`) | move state into model, meta-backed (§3.1) |
-| **Warden** | `frontend/app/view/warden/warden-model.ts` | in the **view** (`warden-view.tsx:26`, local `createSignal`) | yes | yes (`term:zoom`) | identical to Armory (§3.1) — near-verbatim clone, comments in source even cite Armory as the precedent |
-| **Settings** | `frontend/app/view/settings/settings-model.ts` | already on the **model** (`activeSection`/`setSection`, plain `createSignal` in the constructor) | **no** | **no** | smaller fix — wire `viewName` to the signal that's already there (§3.2) |
+| **Warden** | [`frontend/app/view/warden/warden-model.ts`](../../frontend/app/view/warden/warden-model.ts) | in the **view** (`warden-view.tsx:26`, local `createSignal`) | yes | yes (`term:zoom`) | identical to Armory (§3.1) — near-verbatim clone, comments in source even cite Armory as the precedent |
+| **Settings** | [`frontend/app/view/settings/settings-model.ts`](../../frontend/app/view/settings/settings-model.ts) | already on the **model** (`activeSection`/`setSection`, plain `createSignal` in the constructor) | **no** | **no** | smaller fix — wire `viewName` to the signal that's already there (§3.2) |
 
 `toolchain-model.ts` also has a static `viewName = () => "Toolchain"` but was
 checked and does **not** have a rail/section pattern (single view, different
@@ -134,13 +134,13 @@ reason its fix is smaller (§3.2) but also why it can't reuse the `zoomAtom`
 meta-persistence template the way Armory/Warden can — there's no existing
 `blockAtom` plumbing to piggyback on.
 
-No test file exists for Settings (`frontend/app/view/settings/` has no
+No test file exists for Settings ([`frontend/app/view/settings/`](../../frontend/app/view/settings) has no
 `*.test.*`), unlike Armory/Warden which both have thorough
 `*-view.test.tsx` coverage of the rail and zoom behavior.
 
 ### 2.4 How the block header actually renders `viewName` (applies to all three)
 
-`frontend/app/block/blockframe.tsx:333-347`:
+[`frontend/app/block/blockframe.tsx:333-347`](../../frontend/app/block/blockframe.tsx#L333-L347):
 
 ```ts
 const viewName = createMemo(() => {
@@ -465,24 +465,24 @@ them), not a currently-exercised interaction.
   `sectionAtom` defaulting/clamping and `viewName` reactivity.
 
 **Warden (same shape, own files):**
-- `frontend/app/view/warden/warden-model.ts` — add `WARDEN_SECTION_LABELS`,
+- [`frontend/app/view/warden/warden-model.ts`](../../frontend/app/view/warden/warden-model.ts) — add `WARDEN_SECTION_LABELS`,
   `isWardenSection`, `sectionAtom` (backed by `warden:section`), reactive
   `viewName`.
-- `frontend/app/view/warden/warden-view.tsx` — replace local `createSignal`
+- [`frontend/app/view/warden/warden-view.tsx`](../../frontend/app/view/warden/warden-view.tsx) — replace local `createSignal`
   (line 26) with `model.sectionAtom`; meta-write `setSection`; `RAIL` labels
   reference `WARDEN_SECTION_LABELS`.
-- `frontend/app/view/warden/warden-view.test.tsx` — existing tests
+- [`frontend/app/view/warden/warden-view.test.tsx`](../../frontend/app/view/warden/warden-view.test.tsx) — existing tests
   unaffected; add `viewName()` reactivity coverage.
 - New: `frontend/app/view/warden/warden-model.test.ts`.
 
 **Settings (smaller diff, no new file needed for state):**
-- `frontend/app/view/settings/settings-model.ts` — add
+- [`frontend/app/view/settings/settings-model.ts`](../../frontend/app/view/settings/settings-model.ts) — add
   `SETTINGS_SECTION_LABELS`; move `viewName` into the constructor as
   `this.viewName = () => SETTINGS_SECTION_LABELS[this.activeSection()]`,
   replacing the static class-field version.
-- `frontend/app/view/settings/settings-view.tsx` — `RAIL`'s `label` fields
+- [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx) — `RAIL`'s `label` fields
   reference `SETTINGS_SECTION_LABELS` instead of inline literals.
-- New: `frontend/app/view/settings/settings-view.test.tsx` (doesn't exist
+- New: [`frontend/app/view/settings/settings-view.test.tsx`](../../frontend/app/view/settings/settings-view.test.tsx) (doesn't exist
   today, §2.3) — at minimum, cover `viewName()` reactivity across all five
   sections; optionally backfill the rail-ordering/click coverage Armory and
   Warden already have, since this fix touches the same file and there's

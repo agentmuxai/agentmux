@@ -167,16 +167,16 @@ summary of what it produced.
   `subagent.GenerateName`.
 
 **Frontend**:
-- `frontend/app/view/swarm/swarm-model.ts` — `display_name` field;
+- [`frontend/app/view/swarm/swarm-model.ts`](../../../frontend/app/view/swarm/swarm-model.ts) — `display_name` field;
   `subagent:named` subscription + in-place patch.
-- `frontend/app/view/swarm/swarm-view.tsx` — `SubagentRow` gains local
+- [`frontend/app/view/swarm/swarm-view.tsx`](../../../frontend/app/view/swarm/swarm-view.tsx) — `SubagentRow` gains local
   `expanded` signal (mirrors `WorkflowGroupRow`); on first expand, calls
   the new naming RPC if unnamed, and `useSubagentDetail(agent_id)` for the
   event log; renders the trimmed header + no-timestamp log inline.
 - New `frontend/app/view/swarm/useSubagentDetail.ts` (or inline in
   `swarm-view.tsx` if small enough) — extracted data-fetching logic from
   `SubagentViewModel`, taking `subagentId` directly.
-- `frontend/app/view/swarm/swarm-view.scss` — trimmed spacing, no
+- [`frontend/app/view/swarm/swarm-view.scss`](../../../frontend/app/view/swarm/swarm-view.scss) — trimmed spacing, no
   timestamp column, name/metadata header + log-body layout for the
   expanded state.
 - Retire (pending confirmation, see §1's open question):

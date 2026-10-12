@@ -3,7 +3,7 @@
 **Status:** proposed — Ready to implement
 **Date:** 2026-03-04
 **Owner:** AgentA
-**Target file:** `frontend/app/view/term/term.tsx` (1,181 lines)
+**Target file:** [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) (1,181 lines)
 
 ---
 

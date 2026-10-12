@@ -6,16 +6,16 @@
 rejected rather than deferred: it would put the top terminal row under glass,
 breaking full-screen TUIs and changing the PTY's row count. If that tradeoff
 is ever reconsidered, §2.2 is the starting point. — #3079
-**Related:** `docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`
+**Related:** [`docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`](SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md)
 (the agent-pane original — this spec deliberately reverses its "agent-pane-only"
-scope decision, see §1), `docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`
-(made the agent strip float), `docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`
+scope decision, see §1), [`docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`](SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md)
+(made the agent strip float), [`docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md)
 (shrink-to-fit sizing, still in force for the terminal),
-`docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md`
+[`docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md`](SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md)
 (why the strip's outer box is deliberately un-zoomed),
-`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md` §2.4
+[`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) §2.4
 (the terminal strip's `animateWidth`, which interacts with §3.1 here),
-`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` (the shared strip)
+[`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) (the shared strip)
 
 ---
 
@@ -157,7 +157,7 @@ which is a legitimate outcome of this spec, not a failure of it.
 
 ### 3.2 Scoping
 
-Scoped override in `frontend/app/view/term/term.scss`, mirroring the agent
+Scoped override in [`frontend/app/view/term/term.scss`](../../frontend/app/view/term/term.scss), mirroring the agent
 pane's own scoped override rather than touching shared `PaneTabStrip.scss`:
 
 ```scss

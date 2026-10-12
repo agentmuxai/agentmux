@@ -6,7 +6,7 @@
 **Date:** 2026-06-29
 **Status:** Draft — design note, for review before any code
 **Author:** AgentX
-**Related:** `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/store/agent-pane-state/reducer.ts`, `frontend/app/store/agent-pane-state/types.ts`, `frontend/app/view/agent/stream-parser.ts`
+**Related:** [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts), [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts), [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts), [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
 
 ---
 

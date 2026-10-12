@@ -22,7 +22,7 @@
 
 ## Changes Made in v0.33.187 That Could Cause Regression
 
-In `frontend/app/view/agent/agent-model.ts`:
+In [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts):
 
 1. Added `import { createSignal } from "solid-js"` — first time this module imports from solid-js
 2. Called `createSignal<OverlayTab | null>(null)` inside the `AgentViewModel` class constructor

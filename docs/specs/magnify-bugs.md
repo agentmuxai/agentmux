@@ -101,8 +101,8 @@ Lower `.block-focused` z-index to below the magnified node threshold, or raise t
 | File | Change |
 |------|--------|
 | `frontend/app/element/magnify.tsx` | Inline SVG with `?raw` import, fix SolidJS prop destructuring |
-| `frontend/app/block/block.scss` | Fix `.block-focused` z-index conflict |
-| `frontend/app/theme.scss` | Potentially raise magnified node z-index |
+| [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) | Fix `.block-focused` z-index conflict |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | Potentially raise magnified node z-index |
 
 ---
 

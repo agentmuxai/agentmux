@@ -481,7 +481,7 @@ interface MigrationProgressEvent {
 
 ### Phase 3 — Frontend API
 
-**`frontend/util/cef-api.ts`:**
+**[`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts):**
 ```typescript
 runMigrations: async () =>
     invokeCommand<{ started: boolean }>("run_migrations"),
@@ -489,11 +489,11 @@ runSagaVacuum: async () =>
     invokeCommand<{ rows_deleted: number }>("run_saga_vacuum"),
 ```
 
-**`frontend/types/custom.d.ts`** — add both methods to the `AppApi` interface.
+**[`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)** — add both methods to the `AppApi` interface.
 
 ### Phase 4 — Maintenance section component
 
-**`frontend/app/statusbar/MaintenanceSection.tsx`** (new)
+**[`frontend/app/statusbar/MaintenanceSection.tsx`](../../frontend/app/statusbar/MaintenanceSection.tsx)** (new)
 
 Props: none — reads global atoms directly.
 
@@ -536,7 +536,7 @@ Follow the existing InstancePanel CSS variable conventions (`--main-text-color`,
 
 ### Phase 5 — Wire into InstancePanel
 
-**`frontend/app/statusbar/InstancePanel.tsx`:**
+**[`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx):**
 
 1. Import `MaintenanceSection`
 2. Add a `<div class="instance-panel-divider" />` after the floating panes section
@@ -591,10 +591,10 @@ Wire the existing `install_update` stub per `specs/app-update-check.md`:
 | `agentmux-cef/src/ipc.rs` | Route both commands |
 | `agentmux-cef/src/commands/stubs.rs` | Remove `run_migrations` / `run_saga_vacuum` stubs if present; keep `install_update` stub until Phase 7 |
 | `frontend/app/store/wps-events.ts` | Add 4 `upgrade:*` event constants |
-| `frontend/util/cef-api.ts` | Add `runMigrations`, `runSagaVacuum` |
-| `frontend/types/custom.d.ts` | Add both to `AppApi` interface |
-| `frontend/app/statusbar/MaintenanceSection.tsx` | New component |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | Add `runMigrations`, `runSagaVacuum` |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Add both to `AppApi` interface |
+| [`frontend/app/statusbar/MaintenanceSection.tsx`](../../frontend/app/statusbar/MaintenanceSection.tsx) | New component |
 | `frontend/app/statusbar/MaintenanceSection.scss` | New styles |
-| `frontend/app/statusbar/InstancePanel.tsx` | Add `<MaintenanceSection />` before footer |
-| `frontend/app/statusbar/BackendStatus.tsx` | Replace static migration text with "Open Maintenance ↗" button |
+| [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx) | Add `<MaintenanceSection />` before footer |
+| [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx) | Replace static migration text with "Open Maintenance ↗" button |
 | `agentmux-cef/src/commands/stubs.rs` | Remove `install_update` stub (Phase 7 only) |

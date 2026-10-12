@@ -3,10 +3,10 @@
 **Date:** 2026-04-25
 **Status:** Draft, ready to implement
 **Owner:** AgentA
-**Touches:** `frontend/app/tab/tab.scss` (or wherever the
+**Touches:** [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) (or wherever the
              tab-bar layout rules live),
              tab-creation code paths that assign default
-             names — likely `frontend/app/store/global.ts`
+             names — likely [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts)
              and any "new window" / "new tab" RPC code in
              `agentmux-srv/src/` and `agentmux-cef/src/`.
 
@@ -112,7 +112,7 @@ distribution can drift.
 
 ### 4.2 Audit + remove conflicting rules
 
-While migrating, grep `frontend/app/tab/` for any of:
+While migrating, grep [`frontend/app/tab/`](../../frontend/app/tab) for any of:
 - `flex: 1` on tab children
 - `justify-content: space-between` / `space-around` on the
   bar
@@ -228,7 +228,7 @@ candidates to migrate:
 
 ## 9. Cross-references
 
-- `frontend/app/tab/` — target dir
+- [`frontend/app/tab/`](../../frontend/app/tab) — target dir
 - `SPEC_DESIGN_SYSTEM_2026_04_23.md §5.2` — `--space-*`
   spacing scale (use a token, no raw px)
 - `SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24.md` —

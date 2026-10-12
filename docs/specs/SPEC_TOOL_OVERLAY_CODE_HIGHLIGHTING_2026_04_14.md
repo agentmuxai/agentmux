@@ -1,15 +1,15 @@
 # Spec: Syntax highlighting inside the tool hover overlay
 
-**Status:** implemented — in #388 (`components/HighlightedCode.tsx`). Its `:global(.line)` rules never applied (the stylesheet is not a CSS module); see `docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md` §3.4.
+**Status:** implemented — in #388 (`components/HighlightedCode.tsx`). Its `:global(.line)` rules never applied (the stylesheet is not a CSS module); see [`docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md`](../reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md) §3.4.
 **Date:** 2026-04-14
-**Scope:** `frontend/app/view/agent/components/ToolBlock.tsx` + children
+**Scope:** [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) + children
 
 ---
 
 ## 1. Why this matters
 
 Tool blocks in the agent pane are one-line collapsed by default (per
-`docs/specs/tool-collapse.md` + SPEC_AGENT_PANE_FOLLOWUPS items #4/#5).
+[`docs/specs/tool-collapse.md`](tool-collapse.md) + SPEC_AGENT_PANE_FOLLOWUPS items #4/#5).
 Hover expands them in a portal overlay that shows the full tool content
 — file reads, diffs, bash output, etc.
 
@@ -99,7 +99,7 @@ string literals, comments, numbers. Specifically:
 
 ### 4.1 Component shape
 
-New file: `frontend/app/view/agent/components/HighlightedCode.tsx`
+New file: [`frontend/app/view/agent/components/HighlightedCode.tsx`](../../frontend/app/view/agent/components/HighlightedCode.tsx)
 
 ```ts
 interface HighlightedCodeProps {
@@ -139,7 +139,7 @@ Internally:
 
 ### 4.2 Language detection
 
-New helper: `frontend/app/view/agent/components/detectLanguage.ts`
+New helper: [`frontend/app/view/agent/components/detectLanguage.ts`](../../frontend/app/view/agent/components/detectLanguage.ts)
 
 ```ts
 /**
@@ -326,7 +326,7 @@ Each step is self-contained and testable.
 
 - Create the helper with the extension/filename/shebang logic.
 - Add a small test file at
-  `frontend/app/view/agent/components/detectLanguage.test.ts` that
+  [`frontend/app/view/agent/components/detectLanguage.test.ts`](../../frontend/app/view/agent/components/detectLanguage.test.ts) that
   asserts: `foo.ts → typescript`, `Dockerfile → dockerfile`,
   `foo.unknown → text`, `#!/usr/bin/env python3 → python`.
 - No behavior change to the app — can ship as its own PR.
@@ -406,7 +406,7 @@ separate PRs.
    is a reasonable default and nobody will tweak it. If someone does
    want to, they can open a follow-up.
 2. Should we lift `HighlightedCode` to a shared component in
-   `frontend/app/element/` so markdown / streamdown / tool overlay all
+   [`frontend/app/element/`](../../frontend/app/element) so markdown / streamdown / tool overlay all
    converge on one implementation? Leaning yes *after* this lands —
    ship it scoped first, then refactor upward in a separate PR once
    we're sure the API is right.

@@ -3,7 +3,7 @@
 **Date:** 2026-07-14
 **Author:** Agent2
 **Status:** Implemented (PR #2162), revised post-review — see correction note below
-**Scope:** `frontend/app/view/settings/` (the pane itself), `schema/settings.json` (audit only, no schema changes proposed), `CLAUDE.md` (one stale line).
+**Scope:** [`frontend/app/view/settings/`](../../frontend/app/view/settings) (the pane itself), [`schema/settings.json`](../../schema/settings.json) (audit only, no schema changes proposed), `CLAUDE.md` (one stale line).
 **Related (must-read first):**
 - `specs/SPEC_SETTINGS_PANE_2026_06_25.md` — the original spec this one completes. Phases 1–2 of that spec are **done and live**; this spec covers Phases 3–5, and **corrects the settings catalog**, which had drifted significantly since 2026-06-25 (see §2).
 - `specs/settings-cleanup.md` — a pre-existing (2026-05-11) dead-key audit of the same schema that this spec's first draft failed to cross-reference. It is authoritative on which keys have real read sites; see the correction note.
@@ -15,11 +15,11 @@ The first draft of this spec (and the PR built from it) checked keys for **front
 **Reclassified from "NEW, needs UI" to DEAD (zero reads beyond struct declaration) — removed from the shipped UI:**
 `window:showmenubar`, `window:nativetitlebar`, `window:disablehardwareacceleration`, `window:maxtabcachesize`, `window:confirmclose`, `window:savelastwindow`, `window:zoom`, `app:globalhotkey`, `widget:showhelp`, `telemetry:enabled`, `preview:showhiddenfiles`.
 
-**Reclassified as wrong-file (schema/settings.json declares them but `SettingsType` has no matching Rust struct field; the real, live versions are per-connection fields in `schema/connections.json`) — removed:**
+**Reclassified as wrong-file (schema/settings.json declares them but `SettingsType` has no matching Rust struct field; the real, live versions are per-connection fields in [`schema/connections.json`](../../schema/connections.json)) — removed:**
 `conn:wshenabled`, `conn:askbeforewshinstall`.
 
 **Reclassified as UX duplicate (real and live, but already has an established home) — removed from Settings, left in place at its existing location:**
-`network:lan_discovery` — already toggleable from `frontend/app/statusbar/HostPopover.tsx`. Adding a second, disconnected control for the same key in Settings was flagged by review as confusing rather than helpful; deferred rather than shipped.
+`network:lan_discovery` — already toggleable from [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx). Adding a second, disconnected control for the same key in Settings was flagged by review as confusing rather than helpful; deferred rather than shipped.
 
 Losing `network:lan_discovery` and both `conn:*` keys left the **Network** section with nothing in it, so it was dropped entirely — same reasoning §3 already used to drop the old spec's **Files** section for being down to one key. The pane now has **5** sections, not 6. `telemetry:interval`/`telemetry:numpoints` survived (real consumers — see `specs/settings-cleanup.md` §A — they drive the sysinfo widget's polling rate, not literal telemetry transmission, hence the relabel to "Sysinfo widget" in the UI to stop implying data leaves the machine).
 
@@ -36,12 +36,12 @@ The rest of this document is left as originally written for the historical recor
 The Settings pane exists, is registered as a widget, and opens correctly from the hamburger menu — the original spec's Phases 1–2 are fully implemented (`settings-model.ts`, `settings-view.tsx`, `settings.scss`, `settings.tsx` barrel). Two of the planned seven sections are wired end-to-end: **Appearance** and **Terminal**. The other five (`Agent`, `Sounds`, `Network`, `Files`, `Advanced`) are `<StubSection>` placeholders reading "coming soon."
 
 This spec does two things:
-1. **Re-audits the full `schema/settings.json` catalog against the current codebase.** The original spec's catalog (written 2026-06-25) is now significantly stale: it references keys that don't exist today (`voice:*`, `dnd:*`, `messaging:discord:*`, `term:agentmaxruntimehours`, `term:agentidletimeoutmins` — none are in the current schema) and is silent on ~25 keys that do exist. §2 is a corrected, current, key-by-key catalog.
+1. **Re-audits the full [`schema/settings.json`](../../schema/settings.json) catalog against the current codebase.** The original spec's catalog (written 2026-06-25) is now significantly stale: it references keys that don't exist today (`voice:*`, `dnd:*`, `messaging:discord:*`, `term:agentmaxruntimehours`, `term:agentidletimeoutmins` — none are in the current schema) and is silent on ~25 keys that do exist. §2 is a corrected, current, key-by-key catalog.
 2. **Proposes a revised section structure** (6 sections instead of 7 — see §3) and a phased implementation plan to wire the remaining ~46 keys (§4–§5), reusing the exact primitives (`SettingRow`, `ToggleControl`, `SliderControl`, the `set()` helper) already built and proven in the Appearance/Terminal sections.
 
 ## 2. Current settings catalog — corrected, as of this repo's `main`
 
-`schema/settings.json` currently defines **60 real keys** (excludes JSON-Schema structural keywords like `properties`/`additionalProperties`). Status column: **✅ live** (wired in the pane today), **NEW** (exists in schema, not in the original spec's catalog at all), **DEAD** (in schema, zero frontend consumers — flagging, not proposing removal from schema here), **GONE** (was in the original spec's catalog, doesn't exist in schema anymore).
+[`schema/settings.json`](../../schema/settings.json) currently defines **60 real keys** (excludes JSON-Schema structural keywords like `properties`/`additionalProperties`). Status column: **✅ live** (wired in the pane today), **NEW** (exists in schema, not in the original spec's catalog at all), **DEAD** (in schema, zero frontend consumers — flagging, not proposing removal from schema here), **GONE** (was in the original spec's catalog, doesn't exist in schema anymore).
 
 | Key | Status | Notes |
 |---|---|---|
@@ -91,9 +91,9 @@ This spec does two things:
 | `telemetry:enabled` | **DEAD** (corrected post-review) | not shipped; `telemetry:interval`/`telemetry:numpoints` below are real, this toggle isn't |
 | `telemetry:interval` | NEW | real consumer — drives the sysinfo widget's polling rate (not literal telemetry transmission; see `specs/settings-cleanup.md` §C4). Shipped, relabeled "Sysinfo widget" in the UI to avoid implying data collection. |
 | `telemetry:numpoints` | NEW | same as above, has schema `min/max/default` (30–1024, default 120) — shipped |
-| `conn:askbeforewshinstall` | **wrong file** (corrected post-review) | Declared in `schema/settings.json` but `SettingsType` has no matching Rust struct field — the live version is per-connection in `schema/connections.json`. Not shipped in global Settings. |
+| `conn:askbeforewshinstall` | **wrong file** (corrected post-review) | Declared in [`schema/settings.json`](../../schema/settings.json) but `SettingsType` has no matching Rust struct field — the live version is per-connection in [`schema/connections.json`](../../schema/connections.json). Not shipped in global Settings. |
 | `conn:wshenabled` | same as above | not shipped |
-| `network:lan_discovery` | ✅ live, but duplicate (corrected post-review) | Already has a working toggle in `frontend/app/statusbar/HostPopover.tsx`. Not duplicated into Settings — see correction note. |
+| `network:lan_discovery` | ✅ live, but duplicate (corrected post-review) | Already has a working toggle in [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx). Not duplicated into Settings — see correction note. |
 | `notify:sounds:enabled` | ✅ old spec (Sounds) | still stubbed |
 | `notify:sounds:volume` | ✅ old spec (Sounds) | still stubbed |
 | `notify:sounds:suppresswhenfocused` | ✅ old spec (Sounds) | still stubbed |
@@ -174,10 +174,10 @@ These three are the exceptions; every other key in the schema gets a home somewh
 
 | File | Change |
 |---|---|
-| `frontend/app/view/settings/settings-model.ts` | `SettingsSection` union: drop `"agent"`/`"files"`/`"network"`, add `"window"` (Window & Panes) |
-| `frontend/app/view/settings/settings-view.tsx` | `RAIL` array update; new `WindowPanesSection`, `SoundsSection`, `AdvancedSection` components (replacing their `StubSection` placeholders — no `NetworkSection`, cut post-review); `AppearanceSection`/`TerminalSection` extended with the new keys from §3; new key-value/string-array editor controls |
-| `frontend/app/view/settings/settings-controls.tsx` | **New, optional** — split out of `settings-view.tsx` once it grows past ~600 lines with the new controls, to keep the file navigable (judgment call at implementation time, not a hard requirement) |
-| `frontend/app/view/settings/settings.scss` | New styles for key-value editor rows, string-array editor rows |
+| [`frontend/app/view/settings/settings-model.ts`](../../frontend/app/view/settings/settings-model.ts) | `SettingsSection` union: drop `"agent"`/`"files"`/`"network"`, add `"window"` (Window & Panes) |
+| [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx) | `RAIL` array update; new `WindowPanesSection`, `SoundsSection`, `AdvancedSection` components (replacing their `StubSection` placeholders — no `NetworkSection`, cut post-review); `AppearanceSection`/`TerminalSection` extended with the new keys from §3; new key-value/string-array editor controls |
+| [`frontend/app/view/settings/settings-controls.tsx`](../../frontend/app/view/settings/settings-controls.tsx) | **New, optional** — split out of `settings-view.tsx` once it grows past ~600 lines with the new controls, to keep the file navigable (judgment call at implementation time, not a hard requirement) |
+| [`frontend/app/view/settings/settings.scss`](../../frontend/app/view/settings/settings.scss) | New styles for key-value editor rows, string-array editor rows |
 | `CLAUDE.md` | "Settings" row in the "Not widgets" table still says "Opens `settings.json` in the user's default editor" — stale since Phase 1 shipped; the raw-JSON open is now a footer link inside the pane, not the primary action. One-line fix, unrelated to the rest of this spec's scope but should be corrected whenever this work lands. |
 
 ## 8. Out of scope (unchanged from the original spec)

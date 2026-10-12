@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Status:** proposed — Spec → implementation
-**Related:** `docs/retro/retro-macos-keychain-prompt-2026-05-30.md` (the incident this fixes)
+**Related:** [`docs/retro/retro-macos-keychain-prompt-2026-05-30.md`](../retro/retro-macos-keychain-prompt-2026-05-30.md) (the incident this fixes)
 
 ---
 

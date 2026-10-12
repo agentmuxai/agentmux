@@ -7,11 +7,11 @@ picks up exactly what Phase 1 left incomplete or explicitly deferred, see §1)
 **Scope:** Frontend only — no backend (srv) or host (agentmux-cef) changes. Every
 primitive this spec needs already exists and is already cross-platform (see §7).
 **Files touched:**
-- `frontend/app/window/action-widgets.tsx` — `handlePinnedContextMenu`,
+- [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) — `handlePinnedContextMenu`,
   `buildItemMenuItems`; both replaced by a single shared builder
-- `frontend/app/window/action-widgets-menu.ts` *(new)* — the shared
+- [`frontend/app/window/action-widgets-menu.ts`](../../frontend/app/window/action-widgets-menu.ts) *(new)* — the shared
   `buildWidgetOpenActions()` helper, consumed by both menu-rendering paths
-- `frontend/app/tab/tab-presets.ts` — export a reusable
+- [`frontend/app/tab/tab-presets.ts`](../../frontend/app/tab/tab-presets.ts) — export a reusable
   `openViewInNewTab(view, meta)` helper (generalizes the pattern already used by
   `EditorViewModel.openInNewTab`)
 
@@ -111,8 +111,8 @@ Opens a **brand new tab** in the current window, containing only the clicked wid
 view as its sole pane, and switches to it.
 
 **Must not** be implemented as `pane.open` against a freshly created `tab_id`. This is
-a documented, confirmed footgun (`frontend/app/tab/tab-presets.ts` and
-`frontend/app/view/editor/editor-model.ts`, both around the `openInNewTab`-style call
+a documented, confirmed footgun ([`frontend/app/tab/tab-presets.ts`](../../frontend/app/tab/tab-presets.ts) and
+[`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts), both around the `openInNewTab`-style call
 sites): the RPC succeeds server-side (block created, layout updated, no error) but
 never renders client-side, because the new tab's `layoutModel` is not yet subscribed
 to the backend's `layout:update` broadcast at the moment `pane.open` would be called.
@@ -153,7 +153,7 @@ Phase 1's actual failure mode was duplicating the same menu-item list into two
 functions and trusting them to stay in sync ("no divergence needed" — they diverged
 immediately). This spec removes that duplication instead of adding a third copy.
 
-New helper, `frontend/app/window/action-widgets-menu.ts`:
+New helper, [`frontend/app/window/action-widgets-menu.ts`](../../frontend/app/window/action-widgets-menu.ts):
 
 ```ts
 export interface WidgetOpenAction {
@@ -192,7 +192,7 @@ own separator + Pin/Unpin entry, rather than each hand-building the three action
 - `handlePinnedContextMenu` maps the same array → `ContextMenuItem[]` (`{ label, click: run }`) for the native `ContextMenuModel.showContextMenu` path (direct pinned-bar-icon right-click).
 
 Both `PopoverMenuItem` (`popover-menu.tsx`) and `ContextMenuItem`
-(`frontend/types/custom.d.ts`) already use the same `{ label; click }` / `{ type:
+([`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)) already use the same `{ label; click }` / `{ type:
 "separator" }` shape, so the mapping is a one-line `.map()` in each call site — there
 is no remaining place for the two menus to silently diverge again, since both now
 read from the same array.
@@ -291,7 +291,7 @@ it depends on is already fully cross-platform:
   `SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md`) stating it is fully supported on
   all three platforms.
 - **`WorkspaceService.CreateTab` / `createBlockOnModel` / `setActiveTab`**
-  (`frontend/app/tab/tab-presets.ts`, `frontend/app/store/services.ts`): pure
+  ([`frontend/app/tab/tab-presets.ts`](../../frontend/app/tab/tab-presets.ts), [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts)): pure
   frontend + srv-RPC calls, no platform conditionals anywhere in the chain.
 
 `CLAUDE.md`'s launcher-level Windows multi-instance isolation invariants (I1–I6 —

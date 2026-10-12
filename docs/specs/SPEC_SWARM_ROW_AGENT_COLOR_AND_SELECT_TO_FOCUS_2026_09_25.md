@@ -13,8 +13,8 @@ the agent border for the swarm entry is highlighted, and that also brings
 the pane into focus. you also need to tweak the pane with multiple tabs.
 (the hover open button should be removed, simply selecting the agent does
 that operation)"*
-**Scope:** `frontend/app/view/swarm/swarm-view.tsx`,
-`frontend/app/view/swarm/swarm-view.scss`, `frontend/app/view/agent/agent-color.ts`.
+**Scope:** [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx),
+[`frontend/app/view/swarm/swarm-view.scss`](../../frontend/app/view/swarm/swarm-view.scss), [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts).
 No backend changes.
 
 ---
@@ -27,9 +27,9 @@ No backend changes.
 | Hover "open" button | `swarm-view.tsx:336-345`, class `.swarm-agent-focus` | `e.stopPropagation()` then `void focusBlock(node.blockId)` — the only place in this file that currently focuses the target agent's own pane. |
 | Selected-row border | `swarm-view.scss:112-119`, `.swarm-agent-card--active` | `box-shadow: inset 0 0 0 1px var(--accent-color, #5b8dd9)` — one fixed theme accent color for every agent, regardless of that agent's own color. |
 | Hover background | `swarm-view.scss:108-110` | `background: var(--highlight-bg)` — a generic theme tint, same for every agent. |
-| Why clicking a row "selects the entire pane" today | `frontend/app/block/block.tsx:218-227`, `handleBlockClick` (bound as the Swarm block's own `onClick`) | Unconditionally calls `giveBlockFocus(nodeModel.blockId)` — `nodeModel.blockId` here is the **Swarm pane's own** block id — whenever the click isn't already `stopPropagation`'d before it bubbles this far. Today's row click (`toggleAgentCollapsed`) never stops propagation, so every row click also re-focuses the Swarm pane itself as a side effect. This is exactly the behavior the trigger quote describes as the bug. |
+| Why clicking a row "selects the entire pane" today | [`frontend/app/block/block.tsx:218-227`](../../frontend/app/block/block.tsx#L218-L227), `handleBlockClick` (bound as the Swarm block's own `onClick`) | Unconditionally calls `giveBlockFocus(nodeModel.blockId)` — `nodeModel.blockId` here is the **Swarm pane's own** block id — whenever the click isn't already `stopPropagation`'d before it bubbles this far. Today's row click (`toggleAgentCollapsed`) never stops propagation, so every row click also re-focuses the Swarm pane itself as a side effect. This is exactly the behavior the trigger quote describes as the bug. |
 
-This is a **regression, not a new ask**: `docs/specs/swarm-active-pane-sync.md`
+This is a **regression, not a new ask**: [`docs/specs/swarm-active-pane-sync.md`](swarm-active-pane-sync.md)
 (2026-06-23, status "Implemented — #1721") already specified *"Swarm → Pane
 (already done): clicking a Swarm row focuses the corresponding pane,
 switching tabs if needed."* That binding was later repurposed for
@@ -43,7 +43,7 @@ the new color work.
 ### 2.1 Selected-row border = the agent's own pane-tab color
 
 The pane tab's "selected color" already has one canonical source:
-`computeBlockActiveBorderColor(blockMeta)` (`frontend/app/block/blockframe.tsx:985-994`) —
+`computeBlockActiveBorderColor(blockMeta)` ([`frontend/app/block/blockframe.tsx:985-994`](../../frontend/app/block/blockframe.tsx#L985-L994)) —
 the exact function `PaneChrome.tsx`'s `tabColors` memo (~line 159) calls per
 tab to paint its underline. It is hue-aware: a user's explicit `frame:hue`
 override wins; otherwise it falls back to `frame:activebordercolor`, the
@@ -146,9 +146,9 @@ that doesn't, today.
    focus/tab-switch logic needed. `focusBlock` already: finds the leaf
    hosting the block via `layoutModel.getNodeByBlockId` (which searches
    both a leaf's active `blockId` and its `blockStack` of background
-   tabs — `frontend/layout/lib/layoutNodeModels.ts:222-231`), switches
+   tabs — [`frontend/layout/lib/layoutNodeModels.ts:222-231`](../../frontend/layout/lib/layoutNodeModels.ts#L222-L231)), switches
    that leaf's active tab if the agent is a background tab in a
-   multi-tab pane (`setActiveTab`, `frontend/app/store/tab-actions.ts:94`),
+   multi-tab pane (`setActiveTab`, [`frontend/app/store/tab-actions.ts:94`](../../frontend/app/store/tab-actions.ts#L94)),
    and focuses the leaf (`layoutModel.focusNode`). **This is the "tweak
    the pane with multiple tabs" the trigger asks for — it is already
    built and already exercised today by the hover button; the only
@@ -241,7 +241,7 @@ for review clarity, not separate merges.
 
 ## 6. Verification
 
-- **Unit**: `lightenAgentColor` test in `frontend/app/view/agent/agent-color.test.ts`,
+- **Unit**: `lightenAgentColor` test in [`frontend/app/view/agent/agent-color.test.ts`](../../frontend/app/view/agent/agent-color.test.ts),
   mirroring the existing `describe("dimAgentColor", ...)` block (lines
   43-58) — a known hex in, an expected lighter hex out, invalid-hex
   passthrough unchanged.

@@ -9,7 +9,7 @@ registration in `settings-view.tsx`/`settings-model.ts`), reusing the
 **No runtime backend logic changes** — all four bridges are already fully
 wired and read their config from `settings.json` via the generic `setconfig`
 merge path — but implementation IS expected to add the ~24 `messaging:*` keys
-to `schema/settings.json` and regenerate `frontend/types/gotypes.d.ts` (see
+to [`schema/settings.json`](../../schema/settings.json) and regenerate `frontend/types/gotypes.d.ts` (see
 §0 below): today those keys are declared nowhere, and this schema is
 `additionalProperties: false`, so anything this section's UI saves is
 technically invalid against the shipped schema and invisible to the
@@ -17,7 +17,7 @@ generated frontend type until that's done.
 
 ## Why this needs its own spec
 
-Candidate #3 from `docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md`
+Candidate #3 from [`docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md`](SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md)
 (tracked in #2671), explicitly deferred to a follow-up spec rather than
 designed in full in that pass: *"the most 'product-shaped' gap in the whole
 audit — arguably bigger in scope than the Recording section (4 separate
@@ -36,7 +36,7 @@ real, fully wired server-side integrations (`agentmux-srv/src/bootstrap.rs`,
 `agentmux-srv/src/server/messaging_handlers.rs`, ~24 dedicated fields across
 `agentmux-srv/src/backend/wconfig/types.rs:295-437`), each with its own
 enable toggle, bot token(s), and per-bridge routing config. **None of this
-has any Settings UI, and none of it is even present in `schema/settings.json`**
+has any Settings UI, and none of it is even present in [`schema/settings.json`](../../schema/settings.json)**
 (confirmed by grep — zero `messaging:*` schema entries exist today, unlike
 every other settings family). The only way to configure any of these four
 integrations is hand-writing raw JSON into `settings.json`, including
@@ -92,7 +92,7 @@ WhatsApp spec §2.1) — so there is exactly one "mode" per bridge, unlike
 
 ### 0. Schema additions (in scope, despite "no backend changes")
 
-Add all ~24 `messaging:*` keys (§ tables above) to `schema/settings.json`,
+Add all ~24 `messaging:*` keys (§ tables above) to [`schema/settings.json`](../../schema/settings.json),
 following the exact per-field `type`/`description` shape every other family
 already uses there, and regenerate `frontend/types/gotypes.d.ts` to match
 (same mechanical step the Recording section's PR took for `voice:inputDeviceId`
@@ -100,7 +100,7 @@ and the watchdog PR took for `term:agentmaxruntimehours`/`term:agentidletimeoutm
 This is schema/type-declaration work, not runtime logic — no Rust behavior
 changes, `SettingsType` in `types.rs` already declares these fields with
 their real serde renames — but it's a real, necessary part of implementing
-this spec, not optional polish: `schema/settings.json` has
+this spec, not optional polish: [`schema/settings.json`](../../schema/settings.json) has
 `"additionalProperties": false`, so a key this section's UI saves via
 `setconfig` is technically invalid against the shipped schema (and invisible
 to the generated frontend type) until this step is done.
@@ -281,21 +281,21 @@ or manages anything.
 
 ## References
 
-- `docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md` — candidate #3,
+- [`docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md`](SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md) — candidate #3,
   the audit this follows up on.
-- `docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md` —
+- [`docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`](SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md) —
   `MaskedKeyField`'s origin spec; §2 and Open Question 1 anticipate this
   exact reuse. Implemented in PR #2751 (open, not yet merged as of this
   writing) — see Open Question 4.
-- `docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md` — WhatsApp
+- [`docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md`](SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md) — WhatsApp
   bridge's own design, including the Cloud-API-only v1 scope decision this
   spec inherits.
 - `agentmux-srv/src/backend/wconfig/types.rs:295-437` — the full field set
   this spec's UI surfaces (Discord/Telegram/Slack/WhatsApp settings structs).
 - `agentmux-srv/src/bootstrap.rs`, `agentmux-srv/src/server/messaging_handlers.rs`
   — bridge startup/wiring, relevant to Open Question 3.
-- `frontend/app/view/settings/sections/sounds-section.tsx` — the
+- [`frontend/app/view/settings/sections/sounds-section.tsx`](../../frontend/app/view/settings/sections/sounds-section.tsx) — the
   toggle-gates-sub-rows pattern this section's per-bridge collapsing reuses.
-- `frontend/app/view/settings/sections/recording-section.tsx`,
-  `frontend/app/view/settings/settings-controls.tsx` — `MaskedKeyField` and
+- [`frontend/app/view/settings/sections/recording-section.tsx`](../../frontend/app/view/settings/sections/recording-section.tsx),
+  [`frontend/app/view/settings/settings-controls.tsx`](../../frontend/app/view/settings/settings-controls.tsx) — `MaskedKeyField` and
   general section conventions this spec follows.

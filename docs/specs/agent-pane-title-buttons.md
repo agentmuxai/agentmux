@@ -7,7 +7,7 @@
 > **2026-08-07 audit note:** Superseded — references a "Forge" tab /
 > `AgentCardSettingsPanel` no longer in code, replaced by the Identity/Armory
 > consolidation (see the Widgets section of `README.md`). See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
 ---
 
@@ -174,7 +174,7 @@ envVars["GIT_CONFIG_GLOBAL"] = `~/.agentmux/agents/${slug}/.gitconfig`;
 
 #### Where to implement
 
-- `frontend/app/view/agent/agent-model.ts` → add env vars in the launch section (~line 273)
+- [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) → add env vars in the launch section (~line 273)
 - `agentmux-srv/src/backend/forge/` (or equivalent) → write `.gitconfig` on agent workspace init
 
 #### Identity panel integration (future)
@@ -187,7 +187,7 @@ When the user sets an email in the Identity panel for a GitHub account, propagat
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/agent-model.ts` | Add 3 icon buttons to `endIconButtons`; add `showOverlayTab` signal; add git env vars |
-| `frontend/app/view/agent/agent-view.tsx` | Render `AgentFocusedPanel` overlay when `showOverlayTab` is set |
-| `frontend/app/view/agent/components/` | New `AgentFocusedPanel.tsx` (thin wrapper around existing panels) |
-| `frontend/app/view/agent/agent-view.scss` | `.agent-overlay-focused` positioning styles |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Add 3 icon buttons to `endIconButtons`; add `showOverlayTab` signal; add git env vars |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Render `AgentFocusedPanel` overlay when `showOverlayTab` is set |
+| [`frontend/app/view/agent/components/`](../../frontend/app/view/agent/components) | New `AgentFocusedPanel.tsx` (thin wrapper around existing panels) |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | `.agent-overlay-focused` positioning styles |

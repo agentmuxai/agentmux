@@ -2,10 +2,10 @@
 
 **Date:** 2026-06-22
 **Status:** proposed — Spec / Ready to implement
-**Extends:** `docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md` (P2/P3 phases)
+**Extends:** [`docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md`](SPEC_TOOLCHAIN_MANAGER_2026-06-15.md) (P2/P3 phases)
 **Scope:**
 - `frontend/app/view/agent/providers/toolchain-catalog.ts` — add Python + uv
-- `frontend/app/view/agent/providers/widget-catalog.ts` — new file
+- [`frontend/app/view/agent/providers/widget-catalog.ts`](../../frontend/app/view/agent/providers/widget-catalog.ts) — new file
 - `frontend/app/modals/toolchain-modal.tsx` — new "External Widgets" section
 - `agentmux-srv/src/server/install_handlers.rs` — pip install handler
 - `agentmux-srv/src/server/widget_health_handlers.rs` — new file, HTTP health check RPC

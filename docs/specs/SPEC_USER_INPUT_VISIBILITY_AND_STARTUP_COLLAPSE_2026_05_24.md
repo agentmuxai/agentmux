@@ -32,7 +32,7 @@ Both have the same root: **user-input messages are a single rendering class toda
 
 ### 1. Render site
 
-`frontend/app/view/agent/virtualization/DocumentRow.tsx:249-261`
+[`frontend/app/view/agent/virtualization/DocumentRow.tsx:249-261`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx#L249-L261)
 
 ```tsx
 <Show when={props.node() && props.node().type === "user_message"}>
@@ -54,7 +54,7 @@ The collapse state today is driven by a separate `collapsedNodes` set on the doc
 
 ### 2. SCSS
 
-`frontend/app/view/agent/styles/_document-nodes.scss:598-624`
+[`frontend/app/view/agent/styles/_document-nodes.scss:598-624`](../../frontend/app/view/agent/styles/_document-nodes.scss#L598-L624)
 
 ```scss
 .agent-user-message {
@@ -81,11 +81,11 @@ The collapse state today is driven by a separate `collapsedNodes` set on the doc
 
 ### 3. Startup payload
 
-`frontend/app/view/agent/agent-view.tsx:497-539` (`onReadyFn`) builds a Markdown payload via `buildStartupPayload()` (`frontend/app/view/agent/startup/buildStartupPayload.ts`) and sends it via `handleSendMessage(payload)`. The payload always begins with the literal heading **`# Session Context`** as line 1 (see `buildStartupPayload.ts:46-119`). On the wire it's an ordinary `user_message` event; the stream-parser stores it as `type: "user_message"` with no distinguishing metadata.
+[`frontend/app/view/agent/agent-view.tsx:497-539`](../../frontend/app/view/agent/agent-view.tsx#L497-L539) (`onReadyFn`) builds a Markdown payload via `buildStartupPayload()` ([`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts)) and sends it via `handleSendMessage(payload)`. The payload always begins with the literal heading **`# Session Context`** as line 1 (see `buildStartupPayload.ts:46-119`). On the wire it's an ordinary `user_message` event; the stream-parser stores it as `type: "user_message"` with no distinguishing metadata.
 
 ### 4. Tool-block hover-expand pattern (reference)
 
-`frontend/app/view/agent/components/ToolBlock.tsx:42-156` + `_document-nodes.scss:96-159`:
+[`frontend/app/view/agent/components/ToolBlock.tsx:42-156`](../../frontend/app/view/agent/components/ToolBlock.tsx#L42-L156) + `_document-nodes.scss:96-159`:
 
 - `hovering` signal, `HOVER_ENTER_DELAY_MS = 150`.
 - `pinned` prop (parent-managed) and `onTogglePin` callback.
@@ -390,6 +390,6 @@ Each commit is independently revertible; the SCSS commit alone delivers the high
 
 ## Related
 
-- `docs/specs/tool-collapse.md` — the source pattern for hover-expand-pin, with the same 150ms enter-delay and the same CSS-class trio (`collapsed` / `expanded` / `pinned`).
-- `docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md` — the contract that defines what the startup payload contains and when it's sent. The collapse target is exactly the message that spec produces.
+- [`docs/specs/tool-collapse.md`](tool-collapse.md) — the source pattern for hover-expand-pin, with the same 150ms enter-delay and the same CSS-class trio (`collapsed` / `expanded` / `pinned`).
+- [`docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md`](SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md) — the contract that defines what the startup payload contains and when it's sent. The collapse target is exactly the message that spec produces.
 - `feedback_agent_pane_tool_display` (user memory) — "Tool blocks ONE LINE by default, expand on hover (instant), click to pin." The same rule, now applied to the startup injection.
