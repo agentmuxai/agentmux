@@ -159,14 +159,15 @@ pub fn enrich_path() {
         std::thread::spawn(move || {
             std::thread::sleep(LOGIN_PATH_REFRESH_DELAY);
             let current = std::env::var("PATH").unwrap_or_default();
-            if let Some(fresh) =
-                agentmux_common::refresh_login_path_cache(&cache_file, &inherited, &current)
-            {
+            if agentmux_common::refresh_login_path_cache(&cache_file, &inherited, &current).is_some() {
                 // A file the fingerprint can't see changed (a sourced plugin,
-                // nvm's default alias). Use the fresh value from now on; agents
-                // spawned before this point keep the PATH they started with.
-                std::env::set_var("PATH", &fresh);
-                tracing::info!("login-shell PATH changed since the cached copy; applied the fresh one");
+                // nvm's default alias). The cache now holds the fresh value for
+                // the next launch. It is deliberately not applied to this
+                // process: other threads are running by now, and `set_var`
+                // can race C code reading the environment (libc `getenv`).
+                tracing::info!(
+                    "login-shell PATH changed since the cached copy; the next launch uses the fresh one"
+                );
             }
         });
     }

@@ -120,7 +120,8 @@ pub struct EnrichOutcome {
 ///
 /// Startup files can source other files (a plugin, `nvm alias default`) whose
 /// changes the fingerprint can't see, so a hit is only as fresh as the last
-/// launch: run [`refresh_login_path_cache`] after boot to keep it current.
+/// launch: run [`refresh_login_path_cache`] after boot so the next launch
+/// picks such a change up.
 pub fn enrich_current_process_path_cached(cache_file: Option<&Path>) -> EnrichOutcome {
     let current = std::env::var("PATH").unwrap_or_default();
     if !looks_like_launchd_default(&current) {
@@ -158,8 +159,8 @@ fn enrich_from_cache_or_shell(cache_file: &Path, current: &str) -> EnrichOutcome
 /// [`enrich_current_process_path_cached`] read. `inherited` is the PATH the
 /// process started with (before enrichment), so the fingerprint matches the
 /// next launch's. Returns the freshly captured enriched PATH when it differs
-/// from `current_enriched`, so the caller can apply it; `None` when nothing
-/// changed or the shell couldn't be read.
+/// from `current_enriched`, `None` when nothing changed or the shell
+/// couldn't be read. Never touches this process' environment.
 #[cfg(unix)]
 pub fn refresh_login_path_cache(
     cache_file: &Path,
