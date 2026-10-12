@@ -336,6 +336,10 @@ pub(crate) async fn run_unix(
     //    follow-up; for now we still pass an empty string so srv's
     //    Windows-only IPC code stays disabled).
     let srv_pipe_path = String::new();
+    // This launcher owns the data dir now (it won the single-instance socket
+    // above), so an srv still holding the dir's lock was left behind by an
+    // earlier launcher; stop it rather than fail to start.
+    crate::stale_srv::reclaim_stale_srv_lock(&paths.data_dir);
     let (setup_result, srv_spawn_result) = tokio::join!(
         launcher_setup,
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink)

@@ -74,6 +74,8 @@ mod startup_events;
 #[cfg(target_os = "windows")]
 mod srv_liveness;
 mod srv_spawner;
+#[cfg(unix)]
+mod stale_srv;
 mod state;
 mod wrr;
 
