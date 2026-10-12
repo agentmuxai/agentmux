@@ -639,13 +639,13 @@ impl AgentMuxHandler {
         self.browser_list.push(browser);
 
         // Tear-off Phase 6 — pre-warmed window pool.
-        // - When the "main" window registers, kick off the initial pool spawn.
+        // - When the "main" window registers, arm the pool spawn; it runs
+        //   once main reports `wave-ready` (see `defer_startup_pools`).
         // - When a "window-pool-*" window registers, log only — actual
         //   queue insertion waits for the frontend's renderer-ready IPC
         //   so emit_event_to_window doesn't race the listener install.
         if label == "main" {
-            crate::commands::window_pool::init_pool(&self.state);
-            crate::commands::window_pool::init_pane_pool(&self.state);
+            crate::commands::window_pool::defer_startup_pools(&self.state);
 
             // SPEC_PILLAR1_STEP4 Phase 2 fix — "main" registering here is
             // our proof CEF's UI-thread message loop is actually pumping

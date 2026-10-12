@@ -34,9 +34,9 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 
 // `Task`/`WrapTask`/`ImplTask` are what `cef::wrap_task!` expands into —
-// needed for `DestroyPoolHwndTask` (memory-pressure eviction). Same import
-// shape as `pane_pool.rs`'s identical need for its own destroy task.
-#[cfg(target_os = "windows")]
+// needed for `StartPendingPoolsTask` (every platform) and, on Windows,
+// `DestroyPoolHwndTask` (memory-pressure eviction). Same import shape as
+// `pane_pool.rs`'s identical need for its own destroy task.
 use cef::{rc::Rc, ImplTask, Task, WrapTask};
 
 use crate::state::{AppState, WindowKind, WindowMeta};
@@ -1178,9 +1178,9 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     }
 }
 
-/// Initialize the pool after primary-window first paint. Spawns
-/// `POOL_TARGET_SIZE` windows. Called once per app run from
-/// `on_after_created` for the "main" label.
+/// Initialize the pool. Spawns `POOL_TARGET_SIZE` windows. Called by
+/// [`start_pending_pools`] once the "main" window has loaded, not when its
+/// browser is created (see [`defer_startup_pools`]).
 ///
 /// Phase 7: now cross-platform. Pool windows are spawned off-screen at
 /// (-32000, -32000) DIP — invisible on macOS Cocoa (accepts any coordinate)
@@ -1197,6 +1197,60 @@ pub fn init_pool(state: &Arc<AppState>) {
     // reports ready. This sequencing keeps spawns serialised (one CEF
     // window at a time) and avoids spawn pressure spikes at startup.
     spawn_pool_window(state);
+}
+
+/// Set when the "main" browser is created; cleared by whichever comes first
+/// of the main window's `wave-ready` and the fallback timer, which then start
+/// the window and pane pools.
+static STARTUP_POOLS_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// How long after the "main" browser is created the pools start anyway if the
+/// main window never reports `wave-ready` (its frontend failed to initialize).
+const STARTUP_POOLS_FALLBACK_MS: i64 = 15_000;
+
+/// Called from `on_after_created` for the "main" label. The pools used to be
+/// spawned right here, before main's page had even loaded, so on every launch
+/// three renderers (main, a window-pool and a pane-pool window) parsed and ran
+/// the same frontend bundle at once, and a fourth followed. Now the pools wait
+/// until main is loaded ([`on_main_window_ready`]), so main gets the CPU first.
+/// A tear-off or new window before then takes the cold path, as it does
+/// whenever the pool is empty.
+pub fn defer_startup_pools(state: &Arc<AppState>) {
+    STARTUP_POOLS_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut task = StartPendingPoolsTask::new(Arc::clone(state), "fallback timer");
+    cef::post_delayed_task(cef::ThreadId::UI, Some(&mut task), STARTUP_POOLS_FALLBACK_MS);
+}
+
+/// The main window finished loading (`wave-ready`): start the pools if they
+/// are still pending. Safe from any thread; the spawn runs on the UI thread.
+pub fn on_main_window_ready(state: &Arc<AppState>) {
+    if STARTUP_POOLS_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
+        let mut task = StartPendingPoolsTask::new(Arc::clone(state), "main window ready");
+        cef::post_task(cef::ThreadId::UI, Some(&mut task));
+    }
+}
+
+fn start_pending_pools(state: &Arc<AppState>, trigger: &str) {
+    if !STARTUP_POOLS_PENDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    tracing::info!(target: "dnd:tearoff:pool", trigger, "[pool] starting the window and pane pools");
+    init_pool(state);
+    init_pane_pool(state);
+}
+
+cef::wrap_task! {
+    struct StartPendingPoolsTask {
+        state: Arc<AppState>,
+        trigger: &'static str,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            start_pending_pools(&self.state, self.trigger);
+        }
+    }
 }
 
 /// What the promote-liveness fallback needs in order to recreate what this

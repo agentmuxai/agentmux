@@ -207,8 +207,8 @@ wrap_window_delegate! {
                 // places windows itself and ignores client positions.) Both
                 // former blockers are resolved.
                 //
-                // NOTE: init_pool() is called from on_after_created("main") in
-                // client/lifecycle.rs on ALL platforms — this block (on_window_created)
+                // NOTE: the pool is started for "main" from client/lifecycle.rs
+                // (defer_startup_pools) on ALL platforms — this block (on_window_created)
                 // only runs the CEF Views window registration for non-Windows.
                 // No duplicate pool init call needed here.
             }
