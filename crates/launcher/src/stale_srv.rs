@@ -7,13 +7,14 @@
 //! into it (`crates/srv/src/backend/base.rs`, `acquire_data_dir_lock`). If an
 //! srv outlives its launcher, every later launch's srv fails on that lock and
 //! the app cannot be opened (2026-10-11: macOS "Quit & Reopen" left one
-//! behind). By the time the launcher spawns srv it has already won its
-//! single-instance socket, so no live launcher owns this data dir: an srv still
-//! holding the lock is stale. Stop it, and start fresh.
+//! behind). An srv still holding the lock whose launcher is gone (it was
+//! reparented to launchd/init) is stale: stop it, and start fresh.
 //!
 //! Only a process that is an `agentmux-srv` binary is stopped, and never one
 //! started headless (`--headless` / `AGENTMUX_HEADLESS=1`), which runs on its
-//! own by design.
+//! own by design, and never one whose parent is still an AgentMux launcher:
+//! winning the single-instance socket isn't proof enough on its own, since two
+//! local builds of one checkout can share a data dir with different sockets.
 
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
@@ -69,6 +70,24 @@ pub fn reclaim_stale_srv_lock(data_dir: &Path) {
     if headless_arg || headless_env {
         crate::log(&format!("stale-srv: pid {pid} is a headless srv using this data dir; leaving it"));
         return;
+    }
+
+    // Only an srv whose launcher is really gone: winning this launcher's
+    // single-instance socket doesn't prove nobody else owns the data dir (two
+    // local builds of one checkout have different socket hashes but the same
+    // data dir). An orphan is reparented to launchd/init (PPID 1); one whose
+    // parent is still an AgentMux process belongs to a running app.
+    let ppid = ps_field(pid, "ppid=", false).and_then(|p| p.trim().parse::<i32>().ok());
+    if let Some(ppid) = ppid.filter(|p| *p > 1) {
+        let parent = ps_field(ppid, "comm=", false)
+            .and_then(|c| Path::new(&c).file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_default();
+        if parent.to_ascii_lowercase().contains("agentmux") {
+            crate::log(&format!(
+                "stale-srv: srv pid {pid} still has its launcher (pid {ppid}, {parent}); another instance owns this data dir, leaving it"
+            ));
+            return;
+        }
     }
 
     crate::log(&format!(
@@ -162,3 +181,7 @@ mod tests {
         assert!(!lock_is_free(&lock));
     }
 }
+
+
+
+
