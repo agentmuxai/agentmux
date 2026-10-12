@@ -1,7 +1,7 @@
 # Verifying the performance numbers on agentmux.ai, on all three platforms
 
 **Date:** 2026-10-11
-**Status:** active. Shipped in #4712: this plan and its first tool, `crates/procstats/examples/memtree.rs`, a memory-only probe used for a pilot on all three platforms. Still to do: the owner's answers in §9, the full harness (§6), and Phases 1–6.
+**Status:** active. Shipped in #4712: this plan and its first tool, [`crates/procstats/examples/memtree.rs`](../../crates/procstats/examples/memtree.rs), a memory-only probe used for a pilot on all three platforms. Still to do: the owner's answers in §9, the full harness (§6), and Phases 1–6.
 **Author:** Agent4@narko, at the operator's request
 **Scope:** every number on the live [agentmux.ai/compare](https://agentmux.ai/compare) and [agentmux.ai/sources](https://agentmux.ai/sources) pages: AgentMux's own, and the competitors'.
 **Runs with:** [SPEC_CROSS_PLATFORM_TESTING_PROTOCOL_2026_10_11.md](../specs/SPEC_CROSS_PLATFORM_TESTING_PROTOCOL_2026_10_11.md) (one lead, one tester per platform).
@@ -66,7 +66,7 @@ The research basis for each rule is in §7.
 - **Cross-check for the Chromium-based apps** (AgentMux, Wave, Cursor, Windsurf): Chromium's own total, `Memory.Total.PrivateMemoryFootprint`, which counts each shared region once [C1, C2]. If the harness and Chromium disagree by more than 10%, find out why before publishing. (Electron's own `getAppMetrics()` gives private bytes on Windows only, so it can't be the cross-OS metric [E1].)
 - **Also RSS and working set**, because community reports quote those. They let us compare like with like, but they are never the headline: they double-count shared Chromium pages across processes.
 - **The tree:** everything from the app's top process down, at a stated moment. For AgentMux, that is the launcher, the CEF host and every `--type=` subprocess, and `agentmux-srv`. The shell and any agent CLI running in a pane are reported separately, which matches the site's "agent processes excluded" note. For an Electron app, that is the main process and all its helpers. For Zed and Warp, it is the app and any language-server or helper children.
-- **Reuse `crates/procstats`.** It already reads exactly these metrics on all three OSes (Windows `WorkingSetPrivateSize`, macOS `ri_phys_footprint`, Linux `RssAnon + VmSwap`, with `smaps_rollup` on demand), and the Tower pane's "agentmux" task already sums AgentMux's tree with it. The harness (§6) is a thin CLI over it: given a root process, it samples the tree. One code path for the app's own Tower view and for the published numbers.
+- **Reuse [`crates/procstats`](../../crates/procstats).** It already reads exactly these metrics on all three OSes (Windows `WorkingSetPrivateSize`, macOS `ri_phys_footprint`, Linux `RssAnon + VmSwap`, with `smaps_rollup` on demand), and the Tower pane's "agentmux" task already sums AgentMux's tree with it. The harness (§6) is a thin CLI over it: given a root process, it samples the tree. One code path for the app's own Tower view and for the published numbers.
 - **"Idle, one terminal pane" means**, for every app:
   - a fresh profile, default settings, no extensions or plugins;
   - signed out where the app allows; where it doesn't, signed in and idle;
@@ -143,7 +143,7 @@ These are shared development machines with several agents on each. A build or an
 
 `scripts/perf/claims/` (new), in this repo, so anyone can rerun it:
 
-- `perfprobe` (a small Rust binary over `crates/procstats`) does three things:
+- `perfprobe` (a small Rust binary over [`crates/procstats`](../../crates/procstats)) does three things:
   - `tree --root <pid>` samples the tree's per-process and summed private, resident and commit memory, with Linux PSS and USS;
   - `launch -- <cmd>` spawns an app and times T1 from the OS window list (Windows `EnumWindows`, macOS `CGWindowListCopyWindowInfo`, Linux X11 `_NET_CLIENT_LIST`; on Wayland, through XWayland for apps that use it, and for native Wayland apps by screen capture only);
   - `sample` writes JSON lines.

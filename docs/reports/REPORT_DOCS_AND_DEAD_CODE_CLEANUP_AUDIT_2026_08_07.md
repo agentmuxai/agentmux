@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-07
 **Author:** Agent3
-**Scope:** `docs/`, `specs/` (stale-doc audit) + full Rust/TS workspace (dead-code audit)
-**Related:** `docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` (the existing, not-yet-fully-shipped plan this report defers to — see §1), `docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md` and `_2026_07_20.md` (two prior audits covering similar ground, neither of which produced lasting action — see §1 for why this one should end differently)
+**Scope:** [`docs/`](..), `specs/` (stale-doc audit) + full Rust/TS workspace (dead-code audit)
+**Related:** [`docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`](../specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) (the existing, not-yet-fully-shipped plan this report defers to — see §1), [`docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md`](REPORT_REPO_HEALTH_AUDIT_2026_07_05.md) and `_2026_07_20.md` (two prior audits covering similar ground, neither of which produced lasting action — see §1 for why this one should end differently)
 
 ---
 
@@ -32,7 +32,7 @@ what to do, it does not do it.** Nothing below has been deleted or edited yet.
 Every doc below was verified against actual code (grep for the specific
 files/functions it references, `git log` for shipping commits) — not just
 its own `Status:` field, per the hardening plan's own Phase 4 guardrail.
-**This is a sample of `docs/specs/`'s ~591 files, prioritized toward
+**This is a sample of [`docs/specs/`](../specs)'s ~591 files, prioritized toward
 `Status: Planned`/`Proposed` headers — not exhaustive.**
 
 ### Confirmed implemented, status field just never updated (highest-confidence batch)
@@ -88,9 +88,9 @@ its own `Status:` field, per the hardening plan's own Phase 4 guardrail.
 ### `docs/retro/` — two lower-urgency findings
 
 1. **Four retros on one incident, all dated 2026-03-19** (`retro-chrome-zoom-complete-analysis.md`, `-cross-platform-regression.md`, `-macos-breakage.md`, `-per-platform-fix.md`) — read as four separate write-ups of the *same* Windows/macOS zoom-widget regression chain, not four incidents. Consolidation candidate.
-2. **~10 planning/status docs mis-filed as retros**, violating `docs/retro/README.md`'s own definition ("post-incident retrospectives") — `next-steps-*.md`, `phase-e-status-*.md`, `multi-reducer-*.md`, `b9-3-*-analysis.md`, all from the April–May reducer-migration effort. Legitimate historical docs, just filed in the wrong directory. Low urgency — retros are meant to be append-only.
+2. **~10 planning/status docs mis-filed as retros**, violating [`docs/retro/README.md`](../retro/README.md)'s own definition ("post-incident retrospectives") — `next-steps-*.md`, `phase-e-status-*.md`, `multi-reducer-*.md`, `b9-3-*-analysis.md`, all from the April–May reducer-migration effort. Legitimate historical docs, just filed in the wrong directory. Low urgency — retros are meant to be append-only.
 
-The previously-known duplicate `docs/retros/` (plural) directory is already gone — merged into `docs/retro/` by a prior Phase-0 pass (commits `4797b8358`/`f3790992f`).
+The previously-known duplicate `docs/retros/` (plural) directory is already gone — merged into [`docs/retro/`](../retro) by a prior Phase-0 pass (commits `4797b8358`/`f3790992f`).
 
 ---
 
@@ -135,9 +135,9 @@ Every finding below was individually verified (grepped for other call sites, che
 
 ### Frontend: unused exports (medium confidence — not orphaned files)
 
-18 exported symbols with zero references elsewhere in `frontend/`, concentrated in two utility modules whose API outgrew their consumers:
-- `frontend/util/srv-events.ts` — `srvEvent`, `srvEventVersion`, `srvEventsActive`, `srvEventStats` (only `installSrvEventBridge` is actually consumed)
-- `frontend/app/store/block-atom-cache.ts` — `useBlockCache`, `cleanupTabAtomCache`, `useBlockMetaKeyAtom`, `getTabMetaKeyAtom`, `useTabMetaKeyAtom`, `useSettingsKeyAtom`, `useOverrideConfigAtom`, `useBlockDataLoaded`
+18 exported symbols with zero references elsewhere in [`frontend/`](../../frontend), concentrated in two utility modules whose API outgrew their consumers:
+- [`frontend/util/srv-events.ts`](../../frontend/util/srv-events.ts) — `srvEvent`, `srvEventVersion`, `srvEventsActive`, `srvEventStats` (only `installSrvEventBridge` is actually consumed)
+- [`frontend/app/store/block-atom-cache.ts`](../../frontend/app/store/block-atom-cache.ts) — `useBlockCache`, `cleanupTabAtomCache`, `useBlockMetaKeyAtom`, `getTabMetaKeyAtom`, `useTabMetaKeyAtom`, `useSettingsKeyAtom`, `useOverrideConfigAtom`, `useBlockDataLoaded`
 - Singletons: `launcherEventStats`, `busyCount`, `anyBusy`, `reducedMotionSetting`, `isApplyingRemoteEvent`
 
 **No orphaned files** in either language — every `.rs` resolves via a `mod` declaration or is a Cargo integration-test crate (auto-discovered by convention); every unreferenced `.tsx`/`.ts` in the frontend is either a platform variant resolved by `vite.config.ts`'s `platformResolve()` plugin, the HTML entry point, or a `.bench.ts` file run by a separate runner. This is a genuinely clean result — worth stating plainly since it's the one part of this audit with no follow-up needed.
@@ -149,7 +149,7 @@ Every finding below was individually verified (grepped for other call sites, che
 Per the hardening plan's own Phase 4 guardrail (spot-verify before trusting a doc's claims) and non-goal (no big-bang rewrite), the actionable scope from this report is:
 
 1. **Check `SPEC_XTERM_PASTE_TRUNCATION_2026_06_12.md` first** — flagged P1/silent-data-loss and still marked "Proposed" 2 months later. If genuinely unfixed, that's a bug to triage, not a docs cleanup.
-2. **Docs:** add supersession banners (in the Phase-1-eventual `Status: superseded` / `Superseded-by:` shape once that lands, or a plain note today matching the pattern already used on `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md`) to the ~21 confirmed-implemented/superseded docs in §2's first two tables. Delete the untracked, never-implemented `SPEC_AGENT_COLOR_2026_08_05.md` outright (no review history to preserve). Leave `docs/retro/`'s two lower-urgency findings for a separate, smaller pass.
+2. **Docs:** add supersession banners (in the Phase-1-eventual `Status: superseded` / `Superseded-by:` shape once that lands, or a plain note today matching the pattern already used on `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md`) to the ~21 confirmed-implemented/superseded docs in §2's first two tables. Delete the untracked, never-implemented `SPEC_AGENT_COLOR_2026_08_05.md` outright (no review history to preserve). Leave [`docs/retro/`](../retro)'s two lower-urgency findings for a separate, smaller pass.
 3. **Dead code:** delete the §3 "safe to delete now" list (re-verify on macOS/Linux first, per the cross-platform caveat). Bring the launcher `saga/log` module in line with its srv twin (`#[allow(dead_code)]` + matching justification, or wire it up) rather than deleting a half-shipped feature. Leave the `preset.*` aliases until Phase 4. Leave every `[CFG]`/`[TEST]` finding untouched.
 4. **Frontend:** confirm the 18 unused exports aren't intended public API before removing (quick check: are any referenced by string key / dynamic import rather than a static `import`?).
 

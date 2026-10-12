@@ -10,12 +10,12 @@
 **This doc is the source of truth (dated 2026-06-13).** It is code-anchored — every claim is checked against the files cited in §7, not against aspirational specs.
 
 **Active companion docs (still current, scoped to a slice this doc summarizes):**
-- `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` — the live P0→P3 rollout plan for promoting agents to global scope.
-- `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md` — the live tracker for the **separate** `db_agents` storage-consolidation effort (collapsing the 5 read-sides / 27 write-sites onto one table; Phase 3b/3c/R/O). Related to but distinct from cross-channel.
-- `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` — conversation **transcripts/history** (orthogonal; transcripts are already global).
-- `docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md` — the "continue agent" UX feature spec.
-- `docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md` — the **channel** model (Increment A is live; the schema-migration framework + import wizard in B/C are future work, not shipped).
-- `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — a real, unimplemented dev-isolation bug (orthogonal).
+- [`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](../specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md) — the live P0→P3 rollout plan for promoting agents to global scope.
+- [`docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md`](../specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md) — the live tracker for the **separate** `db_agents` storage-consolidation effort (collapsing the 5 read-sides / 27 write-sites onto one table; Phase 3b/3c/R/O). Related to but distinct from cross-channel.
+- [`docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md`](../specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md) — conversation **transcripts/history** (orthogonal; transcripts are already global).
+- [`docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md`](../specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) — the "continue agent" UX feature spec.
+- [`docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md`](../specs/SPEC_DATA_CHANNELS_2026_05_24.md) — the **channel** model (Increment A is live; the schema-migration framework + import wizard in B/C are future work, not shipped).
+- [`docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`](../analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md) — a real, unimplemented dev-isolation bug (orthogonal).
 
 **Superseded specs — kept in place, banner-marked 2026-06-13.** Each carries a `SUPERSEDED → this doc` header. They are *retained* (not deleted) because live code comments and other kept specs cite them as design rationale — but their architecture has been overtaken; read this doc for the current shape:
 - `SPEC_DATA_DIR_UNIFICATION_2026-05-05` — its design shipped as the `RuntimeMode` + `DataPaths` resolver (PR #695); see §2.
@@ -156,6 +156,6 @@ Log, at startup, which store served My Agents and the counts (`global=N local=M`
 - `agentmux-srv/src/backend/storage/agents.rs` — `agent_def_list` definition read-merge.
 - `agentmux-srv/src/backend/storage/registry_mirror.rs` / `def_registry_mirror.rs` — live mirrors.
 - Specs (current — see §0 for the full annotated companion list): `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`, `SPEC_AGENT_ARCHITECTURE_2026_05_27.md`, `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md`.
-- Analysis: the definitions deep-dive lands with PR #1391 (`docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md` once that PR merges).
+- Analysis: the definitions deep-dive lands with PR #1391 ([`docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md`](../analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md) once that PR merges).
 
 *Written 2026-06-13 by AgentX. Architecture overview + improvement proposals — definitions backfill fixed in #1391; instance backfill (I1) not yet implemented.*

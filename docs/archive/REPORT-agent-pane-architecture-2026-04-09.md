@@ -9,7 +9,7 @@
 
 ### 1.1 File Structure
 
-**Location:** `frontend/app/view/agent/`
+**Location:** [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 
 | File | Purpose |
 |------|---------|
@@ -24,7 +24,7 @@
 
 ### 1.2 Components Subdirectory
 
-**Location:** `frontend/app/view/agent/components/`
+**Location:** [`frontend/app/view/agent/components/`](../../frontend/app/view/agent/components)
 
 | Component | Responsibility |
 |-----------|----------------|
@@ -92,7 +92,7 @@
 
 ## 3. Provider System
 
-**Location:** `frontend/app/view/agent/providers/index.ts`
+**Location:** [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts)
 
 ### ProviderDefinition Interface
 ```
@@ -265,16 +265,16 @@ AgentPicker -> click card
 
 | File | Lines | Role |
 |------|-------|------|
-| `frontend/app/view/agent/agent-model.ts` | L13-412 | ViewModel |
-| `frontend/app/view/agent/agent-view.tsx` | L59-675 | Wrapper + Picker + Presentation |
-| `frontend/app/view/agent/state.ts` | L46-87 | Atoms factory |
-| `frontend/app/view/agent/types.ts` | L14-347 | Type definitions |
-| `frontend/app/view/agent/stream-parser.ts` | L27-200+ | NDJSON parser |
-| `frontend/app/view/agent/useAgentStream.ts` | L31-184 | Stream hook |
-| `frontend/app/view/agent/providers/index.ts` | L4-134 | Provider configs |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | L32-200 | Document renderer |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | L16-57 | Input + spinner |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | L23-163 | Tool rendering |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | L13-412 | ViewModel |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | L59-675 | Wrapper + Picker + Presentation |
+| [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) | L46-87 | Atoms factory |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | L14-347 | Type definitions |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | L27-200+ | NDJSON parser |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | L31-184 | Stream hook |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | L4-134 | Provider configs |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | L32-200 | Document renderer |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | L16-57 | Input + spinner |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | L23-163 | Tool rendering |
 | `agentmux-srv/src/backend/blockcontroller/subprocess.rs` | L1-530+ | Subprocess controller |
 | `agentmux-srv/src/server/cli_handlers.rs` | L12-596 | CLI resolution, auth, login |
 | `agentmux-srv/src/server/websocket.rs` | L714-783 | AgentInput RPC handler |

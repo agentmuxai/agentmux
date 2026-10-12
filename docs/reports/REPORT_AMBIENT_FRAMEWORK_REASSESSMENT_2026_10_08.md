@@ -61,8 +61,8 @@ Eight purposes, all on `claude-haiku-4-5` through `claude -p`:
 | Timeout | `ambient/cli.rs`, or continuity's own constant |
 | Concurrency | `ambient/limits.rs`, `reactive/activity_watcher.rs`, `continuity_state.rs` |
 | Caller | `ambient/tasks.rs`, `server/app_api/session.rs`, `continuity_state.rs` |
-| Title validation (TS port) | `frontend/app/store/ambient-title.ts` |
-| Display names | `frontend/app/store/ambient-outcomes.ts` |
+| Title validation (TS port) | [`frontend/app/store/ambient-title.ts`](../../frontend/app/store/ambient-title.ts) |
+| Display names | [`frontend/app/store/ambient-outcomes.ts`](../../frontend/app/store/ambient-outcomes.ts) |
 
 ## 3. Evidence: four days of outcome logs
 
@@ -153,7 +153,7 @@ The outcome classifier then labels a correct empty abstain `rejected:empty`. So 
 
 ### 5.3 P1 — subagent names: a free answer is ignored, and the input is unbounded
 
-Claude Code's `Agent` tool makes the *parent* model write a 3–5 word `description` for every subagent. It is in the parent's `tool_use`, which the pane already links to the subagent (`frontend/app/view/agent/activity/dispatch-correlation.ts`). `subagent_watcher` never reads it, and asks Haiku to name the task from the subagent's whole first message (`read_task_prompt`, no size cap) instead. That one change would remove most naming calls, their 29.5% timeouts and the injection failures.
+Claude Code's `Agent` tool makes the *parent* model write a 3–5 word `description` for every subagent. It is in the parent's `tool_use`, which the pane already links to the subagent ([`frontend/app/view/agent/activity/dispatch-correlation.ts`](../../frontend/app/view/agent/activity/dispatch-correlation.ts)). `subagent_watcher` never reads it, and asks Haiku to name the task from the subagent's whole first message (`read_task_prompt`, no size cap) instead. That one change would remove most naming calls, their 29.5% timeouts and the injection failures.
 
 ### 5.4 P2 — one purpose bypasses the framework
 
@@ -325,7 +325,7 @@ Build the digest from `agents::translator` `AgentEvent`s instead of raw Claude f
 
 The hidden-reinjection filter stays. It is about AgentMux's own message, not the provider's format.
 
-**What was built instead (PR 5).** The srv translators turned out not to fit: they translate replies only (Codex's serves `/btw`), and `AgentEvent` carries no user message, so a digest built from them could not say what was asked. The pane already holds every provider's conversation, translated, in its document, with hidden reinjection turns left out. So the pane sends it: `frontend/app/view/agent/ambient-activity.ts` renders the document in the digest's entry form, `session:next_prompt_suggestion` takes it as an optional `activity` field, and `digest::activity_from_entries` applies the same caps, the same turn-ending gate and the same hidden-turn refusal as the file reader. Without the field (an older pane) the server still reads the file. The title already arrives with the user's own message, so it needed nothing. The background title sweep has no pane to ask, so it now skips any block whose `agentOutputFormat` the file reader can't parse (`digest::reads_output_format`) rather than reading 96 KB of it to find nothing.
+**What was built instead (PR 5).** The srv translators turned out not to fit: they translate replies only (Codex's serves `/btw`), and `AgentEvent` carries no user message, so a digest built from them could not say what was asked. The pane already holds every provider's conversation, translated, in its document, with hidden reinjection turns left out. So the pane sends it: [`frontend/app/view/agent/ambient-activity.ts`](../../frontend/app/view/agent/ambient-activity.ts) renders the document in the digest's entry form, `session:next_prompt_suggestion` takes it as an optional `activity` field, and `digest::activity_from_entries` applies the same caps, the same turn-ending gate and the same hidden-turn refusal as the file reader. Without the field (an older pane) the server still reads the file. The title already arrives with the user's own message, so it needed nothing. The background title sweep has no pane to ask, so it now skips any block whose `agentOutputFormat` the file reader can't parse (`digest::reads_output_format`) rather than reading 96 KB of it to find nothing.
 
 ### 6.6 Subagent and dispatch names
 
@@ -347,9 +347,9 @@ The hidden-reinjection filter stays. It is about AgentMux's own message, not the
 
 **What was built (PR 6), and what changed on the way.**
 - The title is stored by `ambient::title::store_title`, in one transaction, for both the pane's request and the recovery sweep (`Replace::IfNews` and `Replace::IfEmpty`); `isTitleNews` moved there with its cases. The title hook now only schedules the request.
-- Spend is published by srv from `call::Slot::run` as an `ambient:spent` event, for every purpose, and recorded by one listener (`frontend/app/store/ambient-spend.ts`). No call site records spend any more, so none can be counted twice, and the five background purposes reach the totals. `PurposeSpec::counts_toward_totals` was not needed: every purpose counts.
-- `requestSubagentName`, `onSubagentNamed` and `withSubagentName` (`frontend/app/view/swarm/subagent-naming.ts`) replace the three name requests and two identical `subagent:named` handlers. The dock's subagent title uses `subagentDisplayLabel`, the Swarm's label, so same-slug siblings no longer look identical there.
-- `frontend/app/store/meta-keys.ts` names the title, OSC title and suggestion keys; Rust reads the title key as `ambient::title::META_TITLE`.
+- Spend is published by srv from `call::Slot::run` as an `ambient:spent` event, for every purpose, and recorded by one listener ([`frontend/app/store/ambient-spend.ts`](../../frontend/app/store/ambient-spend.ts)). No call site records spend any more, so none can be counted twice, and the five background purposes reach the totals. `PurposeSpec::counts_toward_totals` was not needed: every purpose counts.
+- `requestSubagentName`, `onSubagentNamed` and `withSubagentName` ([`frontend/app/view/swarm/subagent-naming.ts`](../../frontend/app/view/swarm/subagent-naming.ts)) replace the three name requests and two identical `subagent:named` handlers. The dock's subagent title uses `subagentDisplayLabel`, the Swarm's label, so same-slug siblings no longer look identical there.
+- [`frontend/app/store/meta-keys.ts`](../../frontend/app/store/meta-keys.ts) names the title, OSC title and suggestion keys; Rust reads the title key as `ambient::title::META_TITLE`.
 - **`useAmbientPull` was not written.** Once the title hook stopped writing and neither hook records spend, what the two share is one RPC call with a timeout and a silent catch. Their triggers, guards and results differ, so a shared hook would be a wrapper around a function call.
 - **The provider gate is moot:** after PR 5 every pane can produce a digest.
 - The Tab/→ mask shipped in PR 1.
@@ -378,7 +378,7 @@ PR 1 is small and stands alone. PRs 2 and 3 can run in parallel. PR 4 should fol
 ## 9. Method
 
 - **Read in full:**
-  - `crates/srv/src/ambient/` (`mod.rs`, `purpose.rs`, `call.rs`, `cli.rs`, `prompt.rs`, `validate.rs`, `outcome.rs`, `digest.rs`, `tasks.rs`, the start of `sanitize.rs`, `limits.rs`);
+  - [`crates/srv/src/ambient/`](../../crates/srv/src/ambient) (`mod.rs`, `purpose.rs`, `call.rs`, `cli.rs`, `prompt.rs`, `validate.rs`, `outcome.rs`, `digest.rs`, `tasks.rs`, the start of `sanitize.rs`, `limits.rs`);
   - the two pull handlers in `server/app_api/session.rs`;
   - `backend/continuity_state.rs` (the call path);
   - `backend/reactive/activity_watcher.rs`;

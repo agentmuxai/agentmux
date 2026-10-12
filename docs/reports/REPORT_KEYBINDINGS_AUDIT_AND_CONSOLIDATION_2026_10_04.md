@@ -24,9 +24,9 @@
 
 ## 2. Help pane vs. code
 
-The help pane is `frontend/app/view/helpview/helpview.tsx`, which renders `QuickTips` (`frontend/app/element/quicktips.tsx`). Its key labels are hand-written. "All Keybindings" links to docs.agentmux.ai/keybindings.
+The help pane is [`frontend/app/view/helpview/helpview.tsx`](../../frontend/app/view/helpview/helpview.tsx), which renders `QuickTips` ([`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx)). Its key labels are hand-written. "All Keybindings" links to docs.agentmux.ai/keybindings.
 
-`Cmd` in a binding means ⌘ on macOS and **Alt** on Windows/Linux (`frontend/util/keyutil.ts:50-56`). The help pane draws it correctly as "Alt" there.
+`Cmd` in a binding means ⌘ on macOS and **Alt** on Windows/Linux ([`frontend/util/keyutil.ts:50-56`](../../frontend/util/keyutil.ts)). The help pane draws it correctly as "Alt" there.
 
 ### 2.1 Every shortcut the help pane lists
 
@@ -91,7 +91,7 @@ The help pane is `frontend/app/view/helpview/helpview.tsx`, which renders `Quick
 
 ### 3.1 Why a pane can't stop a global shortcut
 
-The global handler is a plain `document` keydown listener (`frontend/app/app.tsx:193-194`). Solid's `onKeyDown` handlers are *also* delegated to `document` (solid-js `delegateEvents`). A pane's `stopPropagation()` stops only Solid's own walk, not the second `document` listener, and `keydownWrapper` never checks `defaultPrevented`. Separately, the global map is checked **before** any "is the user typing?" test (`keymodel-dispatch.ts:128`); only dispatch to the focused pane is gated.
+The global handler is a plain `document` keydown listener ([`frontend/app/app.tsx:193-194`](../../frontend/app/app.tsx)). Solid's `onKeyDown` handlers are *also* delegated to `document` (solid-js `delegateEvents`). A pane's `stopPropagation()` stops only Solid's own walk, not the second `document` listener, and `keydownWrapper` never checks `defaultPrevented`. Separately, the global map is checked **before** any "is the user typing?" test (`keymodel-dispatch.ts:128`); only dispatch to the focused pane is gated.
 
 ### 3.2 The terminal hands every key to the global map first
 
@@ -130,7 +130,7 @@ The global handler is a plain `document` keydown listener (`frontend/app/app.tsx
 | M5 | Document-tab keys | `doc-tabs-controller.ts:214-255` | 7 literal-Ctrl keys | Live |
 | M6 | Ad-hoc `window`/`document` listeners | about 30 sites | perf HUD, diag panel, startup reload, many Escape-to-close, pane zoom | Live |
 | M7 | Component `onKeyDown` | 77 uses in 55 files | Files pane (about 30 keys), composer, modals, palette, F2 rename | Live |
-| M8 | Host `OnPreKeyEvent` (Rust) | `crates/cef/src/client/handlers.rs:218-451` | browser pane Ctrl+L/R, Alt+arrows; lets Ctrl+P/G through to JS | Live |
+| M8 | Host `OnPreKeyEvent` (Rust) | [`crates/cef/src/client/handlers.rs:218-451`](../../crates/cef/src/client/handlers.rs) | browser pane Ctrl+L/R, Alt+arrows; lets Ctrl+P/G through to JS | Live |
 | M9 | Native keys | `macos_menu.rs`, tear-off drag hooks | macOS Edit/App menu; Escape during a tab drag | Live, macOS mostly |
 
 There are also four different meanings of "handled": return `true` (M1), return `false` (xterm), `preventDefault` + `stopPropagation` (DOM) and return `1` (host).
@@ -151,9 +151,9 @@ The command registry (`command-registry.ts`, about 33 ids) feeds the palette, th
 
 1. **Ctrl+Shift "layout mode" and the numbered pane overlay:**
    - Files: `keymodel-dispatch.ts:12,38-56,151-159`, `global.ts:64`, `blockframe.tsx:895,1072`.
-   - It waits for a `control-shift-state-update` event that nothing in `crates/` emits, so it is never on. Settings still advertises "Show numbered overlays for quick pane-jump shortcuts".
+   - It waits for a `control-shift-state-update` event that nothing in [`crates/`](../../crates) emits, so it is never on. Settings still advertises "Show numbered overlays for quick pane-jump shortcuts".
    - **Remove it, or rebuild it in the frontend:** show the overlay while Ctrl+Shift is held.
-2. **Chord-mode IPC:** `setKeyboardChordMode` → `set_keyboard_chord_mode` is a host stub (`crates/cef/src/commands/stubs.rs:40`). The chord already works entirely in JS.
+2. **Chord-mode IPC:** `setKeyboardChordMode` → `set_keyboard_chord_mode` is a host stub ([`crates/cef/src/commands/stubs.rs:40`](../../crates/cef/src/commands/stubs.rs)). The chord already works entirely in JS.
 3. **`onReinjectKey` and `onMenuItemAbout`** (`cef-api.ts:617`, `global.ts:220`): no emitter, no caller.
 4. **Unused helpers:** `keyutil.ts` `keyMap`, `keymodel.ts` `getAllGlobalKeyBindings`. Also `isInputEvent`, which returns `undefined` on its last path.
 5. **`TermViewModel.keyDownHandler`:** always returns false.
@@ -176,7 +176,7 @@ Extend the existing command registry. It already feeds the palette, the macOS me
 `CommandEntry` gains `when?` and `args?`. Every keymodel action becomes a command id: `tab:next`, `tab:close`, `pane:split:right`, `pane:focus:left`, `pane:close`, `pane:replaceWithLauncher`, `term:copy`, `term:paste`, `term:clear`, `doctab:reopen`, `editor:save`, `palette:open`, `view:zoom:in`, … The palette, keyboard, macOS menu, `run_command` and MCP all run the same ids.
 
 ### 6.2 Default bindings
-One file, `frontend/app/keybindings/defaults.ts`, with rows of `{ key, command, when?, platform? }`:
+One file, [`frontend/app/keybindings/defaults.ts`](../../frontend/app/keybindings/defaults.ts), with rows of `{ key, command, when?, platform? }`:
 - `key` uses one string syntax: `mod+shift+t`, `ctrl+[`, `code:Digit1`, chords as `ctrl+shift+s ArrowUp`.
 - Two platform tokens, both explicit (§11.2):
   - `mod`: ⌘ on macOS, Ctrl on Windows/Linux. For actions that are editing conventions: save, find, zoom, select all.
@@ -199,7 +199,7 @@ A small context service, read synchronously on each key:
 - **Not bindings:** keys inside a widget (arrows in a list, Enter/Esc in one text field, the composer's history arrows) stay local, documented in the table as reserved so the conflict test knows about them.
 
 ### 6.5 Host layer
-- The host's `OnPreKeyEvent` list and the macOS menu accelerators are **generated from the table**, for example a JSON file written at build time and read by `crates/cef`.
+- The host's `OnPreKeyEvent` list and the macOS menu accelerators are **generated from the table**, for example a JSON file written at build time and read by [`crates/cef`](../../crates/cef).
 - In a browser pane, the host forwards app-level shortcuts (tab switch, palette, close pane) to the app, the same way it already forwards Ctrl+L as `browser-pane-shortcut`.
 
 ### 6.6 User overrides
@@ -233,7 +233,7 @@ A small context service, read synchronously on each key:
   - **Reload:** `building.md:148` vs `keybindings.md:59` (reload only during startup).
 - **Fix the in-app hints now:** the terminal mic tooltip (term.tsx:498), and the editor empty state's Save hint.
 - **Repo specs that are out of date:**
-  - `docs/specs/archive/SPEC_PANE_CYCLE_FOCUS.md` (Tab/Ctrl+Tab vs. the real `Ctrl+[`/`]`).
+  - [`docs/specs/archive/SPEC_PANE_CYCLE_FOCUS.md`](../specs/archive/SPEC_PANE_CYCLE_FOCUS.md) (Tab/Ctrl+Tab vs. the real `Ctrl+[`/`]`).
   - `SPEC_FILE_BROWSER_PANE_2026_10_01.md:106` ("all bindings go through keyutil"; they don't).
   - `SPEC_MACOS_NATIVE_MENU_BAR` Phase 2 (accelerators): becomes §6.5.
 
@@ -418,7 +418,7 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 |---|---|---|
 | 0 | #4320 | The destructive conflicts in §3.3, with no key changes. Terminal clear on Windows/Linux moved from Alt+K to Ctrl+Shift+L so Alt+K reaches the shell. |
 | 2 | #4321 | §5's dead code. The numbered pane overlay is rebuilt on DOM key events. `app:globalhotkey` removed. |
-| 3 | #4323 | The shortcut table (`frontend/app/keybindings/`), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel are table rows (dev-only) on Ctrl+Alt+Shift+P and Ctrl+Alt+Shift+F12. |
+| 3 | #4323 | The shortcut table ([`frontend/app/keybindings/`](../../frontend/app/keybindings)), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel are table rows (dev-only) on Ctrl+Alt+Shift+P and Ctrl+Alt+Shift+F12. |
 
 **Added after phase 3** (#4324):
 - move a tab: ⇧⌘PgUp / PgDn, Ctrl+Alt+Shift+PgUp / PgDn;
@@ -432,7 +432,7 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 
 **Still to do:**
 - Phase 4 (#4325): **done** for document tabs, the editor and the Files pane. They are `pane` rows in the table, matched by `matchPaneKey`. CodeMirror's Save keys are generated from it, and the help pane has Documents, Editor and Files sections. Global rows sharing a key are scoped away from that pane, and the conflict check proves it. The composer's keys (Enter, Esc, history arrows) are widget-internal and stay local.
-- Phase 5 (#4326): **done for browser panes.** `host-keys.json` is generated from the table and pinned by `host-keys.test.ts`. `crates/cef` reads it, so a focused browser pane forwards app shortcuts to the app (`app-shortcut` event), consumed before the page sees them.
+- Phase 5 (#4326): **done for browser panes.** `host-keys.json` is generated from the table and pinned by `host-keys.test.ts`. [`crates/cef`](../../crates/cef) reads it, so a focused browser pane forwards app shortcuts to the app (`app-shortcut` event), consumed before the page sees them.
   - **What's forwarded:** window, tab and pane commands that skip the shell, plus the palette, Settings and the shortcuts sheet.
   - **Left out:** find and zoom, which a page has its own of; typing-scoped keys, because the host can't see whether the page has a text field focused (F6 still leaves the pane); chords.
   - **Decided against: macOS native menu key equivalents.** An NSMenu key equivalent takes the key before the web view sees it, so it would bypass the table's `when` rules: ⌘W would close the pane even in the Files pane, whose own ⌘W closes a folder tab. The menu keeps running commands by click (`menu:invoke`), and its items show no accelerators. The command palette and the help pane show every key instead.
@@ -443,4 +443,4 @@ A shortcut made of one character key (no modifier) must either be possible to tu
     - optional `when` and `platform`;
     - a bad entry is skipped with a console warning.
   - **Overrides show everywhere:** the help pane, menus and palette read the effective rows.
-  - **`docs/keybindings.md`** is generated from the table and pinned by `doc.test.ts`. The docs site's `keybindings.md` takes the same content, in its own PR, merged once these keys ship in a release.
+  - **[`docs/keybindings.md`](../keybindings.md)** is generated from the table and pinned by `doc.test.ts`. The docs site's `keybindings.md` takes the same content, in its own PR, merged once these keys ship in a release.

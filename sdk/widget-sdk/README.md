@@ -2,7 +2,7 @@
 
 The client for **sandboxed AgentMux widgets**. A widget's page runs in a sandboxed iframe inside an AgentMux pane; this SDK connects it to AgentMux and wraps the widget API (protocol 1).
 
-The full reference is `docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (§5 the package, §6 the bridge, §7 this SDK). Starter widgets are in `docs/examples/widgets/`.
+The full reference is [`docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`](../../docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) (§5 the package, §6 the bridge, §7 this SDK). Starter widgets are in [`docs/examples/widgets/`](../../docs/examples/widgets).
 
 ## Use it without a build step
 
@@ -27,7 +27,7 @@ npm install @agentmuxai/widget-sdk
 import { connect } from "@agentmuxai/widget-sdk";
 ```
 
-That bundles a copy into your widget, which works with any AgentMux that speaks protocol 1, and gives you its types. Or keep importing it from `/agentmux/widget-sdk/v1.js`, the copy AgentMux serves, and tell the bundler to leave that import alone (Vite: `build.rollupOptions.external`; see `docs/examples/widgets/react-vite/`).
+That bundles a copy into your widget, which works with any AgentMux that speaks protocol 1, and gives you its types. Or keep importing it from `/agentmux/widget-sdk/v1.js`, the copy AgentMux serves, and tell the bundler to leave that import alone (Vite: `build.rollupOptions.external`; see [`docs/examples/widgets/react-vite/`](../../docs/examples/widgets/react-vite)).
 
 ## The API
 

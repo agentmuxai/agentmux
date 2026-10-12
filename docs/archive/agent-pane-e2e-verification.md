@@ -17,13 +17,13 @@ This plan is **mostly complete**. Full end-to-end agent pane interaction has bee
 
 ## Remaining
 
-- Typing smoothness — primary fix shipped in 0.33.91 (uncontrolled textarea). Secondary optimizations tracked in `docs/analysis/agent-pane-typing-lag-2026-04-12.md`.
+- Typing smoothness — primary fix shipped in 0.33.91 (uncontrolled textarea). Secondary optimizations tracked in [`docs/analysis/agent-pane-typing-lag-2026-04-12.md`](../analysis/agent-pane-typing-lag-2026-04-12.md).
 - Tool execution end-to-end (Bash/Edit/Grep from inside agent pane) — should work via the persistent stdin path but not explicitly tested.
 - `agent.stop` cancel-mid-stream — not tested yet.
 
 ## Related Docs
 
-- `docs/specs/app-api-extension.md` — full App API spec
-- `docs/specs/app-api-status.md` — implementation status per command
-- `docs/analysis/agent-pane-typing-lag-2026-04-12.md` — typing lag root cause + fixes
-- `docs/analysis/persistent-process-retro-2026-04-10.md` — debug history for persistent mode
+- [`docs/specs/app-api-extension.md`](../specs/app-api-extension.md) — full App API spec
+- [`docs/specs/app-api-status.md`](../specs/app-api-status.md) — implementation status per command
+- [`docs/analysis/agent-pane-typing-lag-2026-04-12.md`](../analysis/agent-pane-typing-lag-2026-04-12.md) — typing lag root cause + fixes
+- [`docs/analysis/persistent-process-retro-2026-04-10.md`](../analysis/persistent-process-retro-2026-04-10.md) — debug history for persistent mode

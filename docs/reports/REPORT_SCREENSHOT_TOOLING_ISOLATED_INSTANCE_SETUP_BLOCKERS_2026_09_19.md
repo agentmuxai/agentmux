@@ -2,9 +2,9 @@
 
 **Date:** 2026-09-19
 **Status:** retro — a live-as-it-happened record. Attempts 1/3's root
-cause is fixed by `docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md`;
+cause is fixed by [`docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md`](../specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md);
 the rest (Attempts 2, 4-8) are recorded findings, not yet acted on.
-**Context:** Building a UI-manual screenshot tool (`scripts/ui-screenshots/`,
+**Context:** Building a UI-manual screenshot tool ([`scripts/ui-screenshots/`](../../scripts/ui-screenshots),
 not yet landed as of this report — not cited by path here for that reason)
 needed a clean, isolated AgentMux instance — no real conversations/accounts — to capture
 manual screenshots against. Getting a second instance running turned into
@@ -83,7 +83,7 @@ silently resolving to a same-named-but-wrong package if one happens to be
 npx-cacheable.
 
 **Platform scope:** the script is bash, so this exact failure is
-Unix-shell-specific (`scripts/dev-local.sh` — check whether a Windows
+Unix-shell-specific ([`scripts/dev-local.sh`](../../scripts/dev-local.sh) — check whether a Windows
 equivalent exists and has the analogous bare-`bump` issue; not checked this
 session).
 
@@ -162,7 +162,7 @@ worktree become a recurring need (not just this one-off), set
 `CARGO_TARGET_DIR` to a shared, absolute, worktree-independent path (e.g.
 `~/.cargo-target-shared/agentmux`) **from the very first build**, in both
 the primary checkout and any worktree — never let either build into its
-own path-fingerprinted `target/` first. This is a `.cargo/config.toml` or
+own path-fingerprinted `target/` first. This is a [`.cargo/config.toml`](../../.cargo/config.toml) or
 env-var change to make once, not a per-worktree workaround.
 
 **Platform scope:** Cargo's build-fingerprinting behavior (including
@@ -319,7 +319,7 @@ justified pushing further. Fell back to capturing the first 10 shots
 against the **already-running primary dev instance**, restricted to
 chrome/widgets that don't expose real conversation content (the alternate
 option from the original scoping discussion) — not the originally-chosen
-"clean staged instance" path. `scripts/ui-screenshots/` itself is unaffected
+"clean staged instance" path. [`scripts/ui-screenshots/`](../../scripts/ui-screenshots) itself is unaffected
 by this — it just points at whatever CDP port it's given; running it
 against a properly isolated instance later (once GPU contention isn't a
 factor, or `--disable-gpu` is confirmed to help) needs no tool changes.

@@ -10,9 +10,9 @@ positive chrome guard. §F's regression was fixed in #3456. Outstanding: recomme
 (explicit coverage assertion), recommendation 5 (chrome subscribes to readiness), and
 the §5 stray-microphone hypothesis, which remains UNREPRODUCED — the positive guard
 removes the mechanism without confirming it was ever the cause.
-**Scope examined:** `frontend/app/block/block.tsx` (the `ready()` gate and its
-BrainSpinner), `frontend/app/block/blockframe.tsx` (pane chrome, header mic),
-`frontend/app/view/agent/agent-view.tsx` (`.agent-pane-loading-overlay` and its
+**Scope examined:** [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) (the `ready()` gate and its
+BrainSpinner), [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) (pane chrome, header mic),
+[`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (`.agent-pane-loading-overlay` and its
 five-stage reveal), `frontend/app/view/agent/styles/_loading-overlay.scss`.
 **Related:** `REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`,
 `SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`,

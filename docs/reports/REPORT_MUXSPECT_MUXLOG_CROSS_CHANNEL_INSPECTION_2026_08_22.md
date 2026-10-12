@@ -71,7 +71,7 @@ after the fact — `muxlog`'s own log-rendering pipeline
 
 ### 2.4 `muxspect` is explicitly single-instance by design
 
-Per `docs/MUXSPECT.md` and `muxspect.mjs`'s own header comment: Phase 1 only
+Per [`docs/MUXSPECT.md`](../MUXSPECT.md) and `muxspect.mjs`'s own header comment: Phase 1 only
 queries "the instance you're already inside," via
 `$AGENTMUX_LOCAL_URL`/`$AGENTMUX_AUTH_KEY` read from the caller's own
 environment. `muxspect conversations`/`conversation <agent>` (Phase A of
@@ -174,4 +174,4 @@ identity-bound agent, and re-resolves the REAL value on every turn via a
 separate code path (`inject_identity_env_with_broker`) that never writes
 back into `cmd:env`. `subagent_watcher` was added later and never joined
 that re-resolution. Fixed in
-`docs/specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`.
+[`docs/specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`](../specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md).

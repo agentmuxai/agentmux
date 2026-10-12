@@ -148,7 +148,7 @@ second phase; do not do WAN in this work.** That mirrors the sequencing
   agent from a terminal without the GUI. `muxspect` already answers "what is
   running"; this answers "make it run". Same core-invocation caveat applies
   (`node ~/.agentmux/shell/muxopen.mjs` from a tool-spawned shell — see
-  `docs/MUXSPECT.md` and the known bare-function gap).
+  [`docs/MUXSPECT.md`](../MUXSPECT.md) and the known bare-function gap).
 - **`muxspect` cross-reference** — teach it to show `addressable` alongside
   lifecycle, so "container up, agent unreachable" is visible in one place rather
   than requiring `FleetList` + `docker ps` to be correlated by hand, as was

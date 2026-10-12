@@ -55,7 +55,7 @@ For a card with one main action and some secondary actions:
 5. **Float panels with the floating-panel component the app already has.** Don't open them with `position: absolute`
    inside a grid item.
 
-On point 5: `frontend/app/element/anchored-popover.tsx` (`AnchoredPopover`) is already used by the status bar and the
+On point 5: [`frontend/app/element/anchored-popover.tsx`](../../frontend/app/element/anchored-popover.tsx) (`AnchoredPopover`) is already used by the status bar and the
 agent pane's model and session panels. It portals to `document.body`, positions with floating-ui against a live anchor
 element, follows chrome zoom, dismisses on an outside click or Esc, and handles the native-pane overlay case. The row
 menu has its own outside-click handling and relies on `z-index: 5` plus a blur on every other tile to stay readable.

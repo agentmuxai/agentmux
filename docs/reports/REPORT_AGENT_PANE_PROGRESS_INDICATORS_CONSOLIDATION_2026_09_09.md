@@ -33,7 +33,7 @@ else in this document is measured against.
 
 The **Claude Code harness** decides, per call, whether a tool call runs in the background. AgentMux only *observes* the outcome, by matching a literal string in the tool result:
 
-- `frontend/app/view/agent/activity/tool-adapter.ts:57` — `BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:"`
+- [`frontend/app/view/agent/activity/tool-adapter.ts:57`](../../frontend/app/view/agent/activity/tool-adapter.ts) — `BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:"`
 - `tool-adapter.ts:111` — `isAcceptedBackgroundLaunch()` requires `params.run_in_background === true` **and** `status === "success"` **and** that prefix.
 
 Its own doc comment (`:84-110`) records that a fast-finishing call is returned synchronously *despite* the flag — the misclassification behind issue #2518's 17 stuck dock rows.
@@ -49,7 +49,7 @@ The 30-second constant that does exist is a **display promotion**, not a backgro
 
 ### 2.2 Turn-phase and process-liveness are orthogonal — do not merge them
 
-`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` carries an explicit correction notice to this effect, from a 12-hour stuck-state incident. A previous attempt to collapse the two axes was wrong.
+[`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) carries an explicit correction notice to this effect, from a 12-hour stuck-state incident. A previous attempt to collapse the two axes was wrong.
 
 This constrains §8.1: the fix is that the two **indicators** derive from one predicate. It is *not* that the underlying axes get unified. `turn_active` (backend, CLI `result` frame) and `turnPhase`/`attachedTask` (frontend) stay distinct.
 
@@ -137,11 +137,11 @@ There is no shared source of truth. The same idea is written out three times, an
 
 | Consumer | Expression | Site |
 |---|---|---|
-| Top progress bar | `showingLaunchActivity() \|\| workingFromPhase(paneModel.state.turnPhase)` | `frontend/app/view/agent/agent-view.tsx:2296-2297` |
+| Top progress bar | `showingLaunchActivity() \|\| workingFromPhase(paneModel.state.turnPhase)` | [`frontend/app/view/agent/agent-view.tsx:2296-2297`](../../frontend/app/view/agent/agent-view.tsx) |
 | "Working…" text | the same, **minus** `supersededByDock()`, **plus** `compacting`/`reconnecting` | `agent-view.tsx:1630-1634`; `components/AgentFooter.tsx:314` |
 | Composer strip | the bar's raw expression, copied again | `agent-view.tsx:2580` |
 
-Shared base predicates: `workingFromPhase` (`frontend/app/store/agent-pane-state/types.ts:468-471` — true for `Submitting`/`Streaming`/`Interrupting`) and `showingLaunchActivity` (`agent-view.tsx:1327`).
+Shared base predicates: `workingFromPhase` ([`frontend/app/store/agent-pane-state/types.ts:468-471`](../../frontend/app/store/agent-pane-state/types.ts) — true for `Submitting`/`Streaming`/`Interrupting`) and `showingLaunchActivity` (`agent-view.tsx:1327`).
 
 ### 3.1 Divergence A — dock promotion (text OFF, bar ON)
 
@@ -160,7 +160,7 @@ still closed. The user learns the truth by typing and being told to wait.
 
 `AgentFooter.tsx:314` renders the loading row for `compacting` or `reconnecting` alone, and `reconnecting` is documented as settable while `loading` is false (`AgentFooter.tsx:106-109`). The bar has no input for either.
 
-Compounding it, the liveness watchdog is suspended entirely while compacting (`frontend/app/store/agent-pane-state/reducer.ts:327-329`), so nothing force-clears the mismatch.
+Compounding it, the liveness watchdog is suspended entirely while compacting ([`frontend/app/store/agent-pane-state/reducer.ts:327-329`](../../frontend/app/store/agent-pane-state/reducer.ts)), so nothing force-clears the mismatch.
 
 Here the **row is right and the bar is wrong** — the reverse of §3.1.
 `reconnecting` is set ONLY after the underlying process has already crashed or
@@ -201,7 +201,7 @@ Two distinct layers, and the bug is in the seam.
 
 There is a clean attachment point at the exact moment of detection:
 
-- `frontend/app/view/agent/stream-flush-queue.ts:68` sends `docknodestatus` with `run_in_background`
+- [`frontend/app/view/agent/stream-flush-queue.ts:68`](../../frontend/app/view/agent/stream-flush-queue.ts) sends `docknodestatus` with `run_in_background`
 - handler `COMMAND_DOCK_NODE_STATUS` (`agentmux-srv/src/server/websocket.rs` ~1252) → `background_task_observe()` → `publish_background_task_updated()`
 - broadcast `WaveEvent { event: "background-task-updated", scopes: ["block:<id>"] }` (`websocket.rs:765-773`) — payload is `{ block_id }` only, an invalidation ping
 - already consumed: `frontend/app/store/wps-events.ts:69` → `hooks/useBackgroundTaskRegistry.ts:16-22`
@@ -216,7 +216,7 @@ Distinct from the desync, and the strongest lead in the codebase.
 
 `SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md` §1.1 root-caused stuck `running` ToolNodes: `toolCallToNode()` creates nodes optimistically at `status:"running"` (`stream-parser.ts` ~519); the only exit is a matching `tool_result` (`claude-translator.ts:334-350`); a harness *pre-execution rejection* arrives as a turn-terminating top-level `result` frame instead, so the node never closes.
 
-`finalizeTurn()` (`hooks/useTurnLifecycle.ts:73`) clears "Working…" in the *pane* reducer but never touches the *document* reducer's `nodes[]`, and never calls `scrubOrphanedInProgress`. That scrub (`frontend/app/store/agent-document/reducer.ts:53-148`) runs only on session/reload boundaries — never on a turn boundary.
+`finalizeTurn()` (`hooks/useTurnLifecycle.ts:73`) clears "Working…" in the *pane* reducer but never touches the *document* reducer's `nodes[]`, and never calls `scrubOrphanedInProgress`. That scrub ([`frontend/app/store/agent-document/reducer.ts:53-148`](../../frontend/app/store/agent-document/reducer.ts)) runs only on session/reload boundaries — never on a turn boundary.
 
 ~~**`ScrubOrphanedInProgress` has zero live dispatch call sites.**~~ **Wrong — corrected 2026-09-10.** It is dispatched from `agent-view.tsx:1361-1372`, on a `turnJustEnded` effect with a 2s delay and a `workingFromPhase` guard, added for a user report on 2026-08-10 (a ~1s `git status` stuck as a "running 45m" dock row). The spec quoted above predates that fix.
 
@@ -232,7 +232,7 @@ There is **no production mechanism that writes an assistant/model-authored messa
 
 What exists is adjacent but different:
 
-- **View-only node injection**, not in the real transcript: `frontend/app/view/agent/inject-history-link.ts:25`, `inject-resume-preflight.ts`, `failure/synthetic-row.ts` (a "Not signed in" row). These splice `DocumentNode`s into `displayDocument` at render time.
+- **View-only node injection**, not in the real transcript: [`frontend/app/view/agent/inject-history-link.ts:25`](../../frontend/app/view/agent/inject-history-link.ts), `inject-resume-preflight.ts`, `failure/synthetic-row.ts` (a "Not signed in" row). These splice `DocumentNode`s into `displayDocument` at render time.
 - **User-side injection**: `persistent.rs:2147` `send_user_message` — the jekt/muxbus path. Writes a *user* turn and would start a new turn. Wrong role, wrong side effect.
 - Assistant-role JSON is only ever parsed (`agents/translator/claude.rs:112,280`) or fabricated in tests.
 
@@ -339,7 +339,7 @@ Concretely this means:
   them, both indicators light; if it does not, neither does. Today the row lights
   and the bar does not, which cannot both be right.
 
-Model the extraction on `frontend/app/workspace/redock-arming.ts` — a gate that was
+Model the extraction on [`frontend/app/workspace/redock-arming.ts`](../../frontend/app/workspace/redock-arming.ts) — a gate that was
 hand-implemented twice, collapsed into one tested module, with the duplicated
 fallbacks deleted rather than retuned. Same shape of problem, same remedy.
 

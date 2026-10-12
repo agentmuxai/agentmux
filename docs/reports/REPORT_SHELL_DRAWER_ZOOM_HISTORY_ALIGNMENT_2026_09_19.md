@@ -8,11 +8,11 @@ nothing" (addendum B) in #3454; the drawer's coordinate-space decoupling in #345
 The original 2026-09-19 body below was written as analysis-only and is preserved as
 written — addenda A and B record what later measurement confirmed and what it falsified.
 **Related:**
-`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md` (drawer-only initial-paint zoom bug, fixed),
-`docs/specs/SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md` (Windows PSReadLine cursor-tracking thaw, fixed),
-`docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` (the two-tier persistence model this report examines),
-`docs/reports/REPORT_ZOOM_BINDINGS_AUDIT_2026_09_06.md` (catalogs the drawer's hand-rolled zoom gesture as one of six duplicated sites),
-`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md` (prior finding that xterm/ConPTY reflow under repeated resize is fragile even with ConPTY's own reflow option enabled).
+[`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`](../specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) (drawer-only initial-paint zoom bug, fixed),
+[`docs/specs/SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md`](../specs/SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md) (Windows PSReadLine cursor-tracking thaw, fixed),
+[`docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md`](../specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) (the two-tier persistence model this report examines),
+[`docs/reports/REPORT_ZOOM_BINDINGS_AUDIT_2026_09_06.md`](REPORT_ZOOM_BINDINGS_AUDIT_2026_09_06.md) (catalogs the drawer's hand-rolled zoom gesture as one of six duplicated sites),
+[`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md`](../archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md) (prior finding that xterm/ConPTY reflow under repeated resize is fragile even with ConPTY's own reflow option enabled).
 
 **User framing (2026-09-19):** "the drawer is a fairly uncomfortable control. Ideally we'd like a smooth experience, where zoom opens normally and if you zoom out/in it will properly align the console history. currently it is all over the place, it could be because of it need an architecture rethink, something more elegant that handles zoom and generalizes across platforms."
 
@@ -118,7 +118,7 @@ if (mainFile != null) {
 
 The raw delta bytes are literal output the shell produced for a specific column width (cursor addressing, line-wrap points, and any width-dependent control sequences are all computed relative to that width at write time). If the terminal's current width at replay time differs from what was live when those bytes were generated, replaying them verbatim has no correctness guarantee — unlike the snapshot path, which explicitly resizes to the recorded width, replays, then resizes back and lets xterm reflow cleanly.
 
-**This is exactly the shape of "zoom out/in and history doesn't align":** a zoom change is persisted via `SetMetaCommand`, which changes `term:zoom` → font size → cols/rows on the *next* resize. If the drawer or pane is closed and reopened (or the controller resyncs) between when some raw delta bytes were written and when they get replayed, they now replay against a different column count than the one they were emitted for, with none of the snapshot path's temp-resize-then-reflow protection. Prior work already found xterm/ConPTY reflow to be fragile under resize even with ConPTY's own `reflowCursorLine: true` enabled (`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md:51` — enabling it "made it worse"), reinforcing that a wrong-width replay is not something xterm silently self-corrects.
+**This is exactly the shape of "zoom out/in and history doesn't align":** a zoom change is persisted via `SetMetaCommand`, which changes `term:zoom` → font size → cols/rows on the *next* resize. If the drawer or pane is closed and reopened (or the controller resyncs) between when some raw delta bytes were written and when they get replayed, they now replay against a different column count than the one they were emitted for, with none of the snapshot path's temp-resize-then-reflow protection. Prior work already found xterm/ConPTY reflow to be fragile under resize even with ConPTY's own `reflowCursorLine: true` enabled ([`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md:51`](../archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md) — enabling it "made it worse"), reinforcing that a wrong-width replay is not something xterm silently self-corrects.
 
 **This gap is not covered by any existing spec.** `SPEC_AGENT_SHELL_ZOOM_SEED_RACE` fixes an initial-paint flash, not history alignment. `SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE` fixes a live cursor-tracking desync on Windows only, not replay. Neither touches `loadInitialTerminalData`.
 
@@ -237,7 +237,7 @@ session. Trimming is also per-row, which is exactly why the topmost reachable li
 appears **cut through its middle** rather than at a line boundary — the specific detail
 in the original bug report.
 
-**Fix:** `frontend/app/view/term/termscrollback.ts` — one `resolveTermScrollback()`
+**Fix:** [`frontend/app/view/term/termscrollback.ts`](../../frontend/app/view/term/termscrollback.ts) — one `resolveTermScrollback()`
 helper, adopted by both `term.tsx` and `AgentShellSubblock.tsx`, so the two surfaces
 cannot drift again. Unit tests in `termscrollback.test.ts`; a drawer-level regression
 test in `AgentShellSubblock.test.tsx` that fails against the old hardcode.

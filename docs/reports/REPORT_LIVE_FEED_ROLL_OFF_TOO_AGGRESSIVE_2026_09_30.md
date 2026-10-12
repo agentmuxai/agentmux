@@ -59,7 +59,7 @@ From the owner, 2026-09-30:
 
 ### 2.1 Roll-off: the live feed (frontend)
 
-`frontend/app/view/agent/live-feed.ts`, driven by
+[`frontend/app/view/agent/live-feed.ts`](../../frontend/app/view/agent/live-feed.ts), driven by
 `hooks/useLiveFeedRollOff.ts`.
 
 - **A turn** starts at each `user_message` node (`splitTurns`, :61).
@@ -86,7 +86,7 @@ From the owner, 2026-09-30:
 
 - **The request:** for Claude panes, `agent-view.tsx:413` asks for
   `tail_turns = 6 + 1`.
-- **The trim:** `crates/srv/src/server/app_api/blockfile.rs` keeps the
+- **The trim:** [`crates/srv/src/server/app_api/blockfile.rs`](../../crates/srv/src/server/app_api/blockfile.rs) keeps the
   lines from the 7th-last turn start (`last_turns_start`, :428;
   `trim_to_last_turns`, :446).
 - **A turn start** (`is_claude_turn_start`, :397) is any `user` record whose
@@ -103,7 +103,7 @@ From the owner, 2026-09-30:
 
 ### 2.3 The session-scope clamp (frontend reducer)
 
-- **What it does:** `frontend/app/store/agent-document/reducer.ts`
+- **What it does:** [`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts)
   `clampToSessionScope` (:44) drops every node before the **last**
   `session_outcome` node with `outcome: "fresh"`.
 - **When:** on history load (:363), on restore (:459) and on stream flush

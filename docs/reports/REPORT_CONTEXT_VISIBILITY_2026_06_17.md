@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-17
 **Scope:** Why the agent-pane context meter is wrong, what token/context data AgentMux can actually get from the CLIs it drives, how to source model context windows reliably, and the recommended path forward.
-**Design detail:** `docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md` (this report is the executive summary + decisions).
+**Design detail:** [`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`](../specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md) (this report is the executive summary + decisions).
 
 ---
 
@@ -10,7 +10,7 @@
 
 The context meter in the agent pane's composer aux bar (`ContextWindowBar.tsx`) overflows (e.g. shows `300k / 200k`, pinned full) and never appears to compress. **Root cause: one wrong constant.**
 
-- `frontend/app/view/agent/providers/index.ts` hardcodes the **Claude provider** `contextWindow: 200_000`. That's Haiku's window — **Opus and Sonnet are 1,000,000**. Running Opus, the meter divides real context by 200K instead of 1M.
+- [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) hardcodes the **Claude provider** `contextWindow: 200_000`. That's Haiku's window — **Opus and Sonnet are 1,000,000**. Running Opus, the meter divides real context by 200K instead of 1M.
   - *Overflow* = real ~300K Opus context ÷ 200K = 150%.
   - *"Never compresses"* = the CLI auto-compacts near Opus's *real* ceiling (~987K), so at 200–400K it correctly hasn't compacted — but the meter thinks 200K is the wall.
 - The meter's **numerator is correct**: `contextTokens` is fed per turn from `message_start.usage` as `input_tokens + cache_creation + cache_read` (the true prompt size) and is **overwritten, not accumulated** (`useAgentStream.ts:689`, reducer `TokensIn`). So once the denominator is right, it will track compaction.
@@ -85,7 +85,7 @@ Meter everything **against the compaction threshold**, never imply >100%, and ve
 
 ## 7. Pointers
 
-- Design spec (full detail): `docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`
+- Design spec (full detail): [`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`](../specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md)
 - Touch points: `ContextWindowBar.tsx`, `AgentComposerStrip.tsx`, `agent-view.tsx`, `providers/index.ts`, `useAgentStream.ts`, `claude-translator.ts`; per-pane state in `agent-pane-state/`.
 - Agent OAuth creds (for the Models API call): `~/.agentmux/shared/providers/claude/.credentials.json` (token expires — fetch when fresh).
 - Both this report and the spec are **uncommitted** — commit when ready.

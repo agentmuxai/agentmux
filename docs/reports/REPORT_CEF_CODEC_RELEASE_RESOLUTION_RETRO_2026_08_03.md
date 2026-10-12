@@ -2,8 +2,8 @@
 
 **Author:** AgentO
 **Date:** 2026-08-03
-**Related:** `docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md`,
-`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`,
+**Related:** [`docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md`](../specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md),
+[`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md),
 PR [#2353](https://github.com/agentmuxai/agentmux/pull/2353)
 
 ## Summary

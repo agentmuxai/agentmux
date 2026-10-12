@@ -5,7 +5,7 @@
 **Branch:** `agenta/menu-snappy-research`
 **Driving brief:** *"setTimeouts(0) are sloppy programming. Can we take a deep dive and figure out how to get [the menu] as snappy as possible."*
 
-This continues from `docs/analysis/flyout-menu-hover-delay-2026-05-10.md` (which diagnosed and laid out a 5-phase remediation). Here we push further: the user's lossless framing is **zero perceived delay**, matching native context menus and VSCode. We catalogue every async hop, name what's avoidable, propose the architecture that opens submenus *before* the next paint, and pin a measurable target.
+This continues from [`docs/analysis/flyout-menu-hover-delay-2026-05-10.md`](../analysis/flyout-menu-hover-delay-2026-05-10.md) (which diagnosed and laid out a 5-phase remediation). Here we push further: the user's lossless framing is **zero perceived delay**, matching native context menus and VSCode. We catalogue every async hop, name what's avoidable, propose the architecture that opens submenus *before* the next paint, and pin a measurable target.
 
 ---
 
@@ -55,10 +55,10 @@ Concretely, on a 60 Hz display:
 
 | Site | What it defers | Real reason | Replacement |
 |---|---|---|---|
-| `frontend/app/element/flyoutmenu.tsx:84` (`handleSubMenuPosition`) | Submenu position calc + visibility flip | Wait for the submenu portal's DOM to exist so `offsetWidth/Height` can be read | Compute position synchronously from parent rect + `max-content` width (no measurement needed). If measurement IS needed, use `queueMicrotask` (fires before next paint, ~0ms). |
-| `frontend/app/block/blockframe.tsx:148` | `.focus()` + `.select()` on a `ref` callback | Wait for element to be attached to the document before focusing | Solid `onMount` (fires after attachment) — synchronous, no macrotask hop |
-| `frontend/app/view/agent/components/AgentSearchBar.tsx:58` | `.focus()` on a `ref` callback | Same as above | Same — Solid `onMount` |
-| `frontend/app/store/command-source.test.ts:119` | `await new Promise(r => setTimeout(r, 0))` in a test | Wait for an async store update to settle | `await Promise.resolve()` flushes the microtask queue, or use a deterministic event-based wait. Test-only; not user-facing. |
+| [`frontend/app/element/flyoutmenu.tsx:84`](../../frontend/app/element/flyoutmenu.tsx) (`handleSubMenuPosition`) | Submenu position calc + visibility flip | Wait for the submenu portal's DOM to exist so `offsetWidth/Height` can be read | Compute position synchronously from parent rect + `max-content` width (no measurement needed). If measurement IS needed, use `queueMicrotask` (fires before next paint, ~0ms). |
+| [`frontend/app/block/blockframe.tsx:148`](../../frontend/app/block/blockframe.tsx) | `.focus()` + `.select()` on a `ref` callback | Wait for element to be attached to the document before focusing | Solid `onMount` (fires after attachment) — synchronous, no macrotask hop |
+| [`frontend/app/view/agent/components/AgentSearchBar.tsx:58`](../../frontend/app/view/agent/components/AgentSearchBar.tsx) | `.focus()` on a `ref` callback | Same as above | Same — Solid `onMount` |
+| [`frontend/app/store/command-source.test.ts:119`](../../frontend/app/store/command-source.test.ts) | `await new Promise(r => setTimeout(r, 0))` in a test | Wait for an async store update to settle | `await Promise.resolve()` flushes the microtask queue, or use a deterministic event-based wait. Test-only; not user-facing. |
 
 The flyoutmenu site is the only one with user-visible impact, but the pattern shows up enough to warrant a codebase rule.
 
@@ -414,10 +414,10 @@ The handful of existing sites (§1.1) should be migrated as part of this work or
 
 ## 11. Cross-references
 
-- Predecessor analysis: `docs/analysis/flyout-menu-hover-delay-2026-05-10.md`
-- Implementation site: `frontend/app/element/flyoutmenu.tsx`, `flyoutmenu.scss`
-- Hamburger caller: `frontend/app/tab/tabbar.tsx`
+- Predecessor analysis: [`docs/analysis/flyout-menu-hover-delay-2026-05-10.md`](../analysis/flyout-menu-hover-delay-2026-05-10.md)
+- Implementation site: [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx), `flyoutmenu.scss`
+- Hamburger caller: [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx)
 - Other submenu caller: none — the chat view (formerly the only other `subItems` caller) was removed 2026-06-13
-- Project specs index: `docs/specs/`
+- Project specs index: [`docs/specs/`](../specs)
 - Floating UI docs: https://floating-ui.com/docs/autoUpdate, https://floating-ui.com/docs/computePosition
 - Web Animation timing primer: https://developer.mozilla.org/en-US/docs/Web/API/HTML_DOM_API/Microtask_guide

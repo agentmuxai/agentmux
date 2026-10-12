@@ -64,7 +64,7 @@ GitHub keeps the closed item's discussion intact and cross-linked.
 concurrent pane creation (opening N terminal panes stalled the UI by N×~10ms).
 
 - **Fix A implemented and PR'd**: [PR #2291](https://github.com/agentmuxai/agentmux/pull/2291)
-  drops the `await` on `resyncController("init")` in `frontend/app/view/term/termwrap.ts`,
+  drops the `await` on `resyncController("init")` in [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts),
   reordering `hasResized = true` ahead of it per the issue's own review-comment guidance (avoids
   missing a reconnect event during the fire-and-forget window). Verified with `tsc --noEmit` —
   no new type errors. This removes the frontend-side serialization, which per the issue's own

@@ -57,7 +57,7 @@ not the `148.0.9` this table previously claimed):
 | Patch symbol | `__ZN13CefWindowImpl15BeginWindowDragEv` (local symbol, `nm` type `t`) |
 
 > ⚠️ The patch symbol is **local**, not exported. Verify with full `nm` —
-> `nm -gU` (external-only) will MISS it. `scripts/verify-cef-framework-darwin.sh`
+> `nm -gU` (external-only) will MISS it. [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh)
 > handles this; don't "optimize" it to `nm -gU`.
 
 ---
@@ -85,7 +85,7 @@ not the `148.0.9` this table previously claimed):
          use: xcodebuild -downloadComponent MetalToolchain
   ```
 
-  **`docs/cef-patches/README.md` §Metal already documented this for the 148
+  **[`docs/cef-patches/README.md`](../cef-patches/README.md) §Metal already documented this for the 148
   build** — including a second failure mode: `-downloadComponent` can itself be
   broken by a stale `DVTDownloads.framework`, needing
   `sudo installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/XcodeSystemResources.pkg -target /`
@@ -113,7 +113,7 @@ Linux** — follow `build-patched-libcef.md` §1–§3, with `--branch=7778`.
 
 ## Configure the build (macOS args)
 
-The canonical GN args are version-controlled at **`scripts/cef-build/args-darwin.gn`**
+The canonical GN args are version-controlled at **[`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn)**
 — the configuration that produced the verified arm64 framework. Key deltas from the
 Linux `args.gn`:
 
@@ -160,7 +160,7 @@ bash /path/to/agentmux/scripts/verify-cef-framework-darwin.sh \
 
 - `task bundle:darwin` runs this **advisorily** (a warning — so `task dev` still
   works on the upstream cef-dll-sys fallback).
-- `scripts/package-macos.sh` runs it as a **hard release gate** before signing
+- [`scripts/package-macos.sh`](../../scripts/package-macos.sh) runs it as a **hard release gate** before signing
   (override with `AGENTMUX_SKIP_CEF_PATCH_CHECK=1` for a deliberate upstream-CEF
   package). The gate runs on `dist/Frameworks/` — unstripped at that point; the
   `strip -S -x` happens later inside the assembled `.app`.
@@ -304,7 +304,7 @@ release via `gh release list --json tagName --jq '[.[] | select(startswith(...))
 > the old framework. The reliable fix is deleting/retiring the superseding
 > older tag(s) so there's no ambiguity for `[0]` to get wrong — not something
 > a version bump or suffix alone fixes. See
-> `docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md` for the
+> [`docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md`](../specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md) for the
 > full incident and what was actually done about it for this release.
 
 ---
@@ -313,10 +313,10 @@ release via `gh release list --json tagName --jq '[.[] | select(startswith(...))
 
 As of 2026-07-28 macOS is at CEF `148.23.23` (this doc's "verified artifact"
 table above) — check the current Linux release
-(`docs/cef-build/build-patched-libcef.md` or `gh release list --repo
+([`docs/cef-build/build-patched-libcef.md`](build-patched-libcef.md) or `gh release list --repo
 agentmuxai/cef`) before assuming either platform's exact version, since both
 move independently and this note will drift out of date the next time either
 rebuilds. **Tracked follow-up:** align both platforms on the same CEF version
 (and build macOS with `is_official_build=true` for the size win — see the
-size-reduction follow-up note in `scripts/cef-build/args-darwin.gn`) and
+size-reduction follow-up note in [`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn)) and
 re-cut the release so both platforms converge.

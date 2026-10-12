@@ -22,7 +22,7 @@ Both 1 and 2 reverse an earlier decision, deliberately. This report names each o
 
 ### 1.1 Jekts are open by default; tool calls are closed
 
-Every row's open/closed state comes from one rule, `rowDisclosure()` in `frontend/app/view/agent/virtualization/disclosure.ts` (#3906, `SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md`):
+Every row's open/closed state comes from one rule, `rowDisclosure()` in [`frontend/app/view/agent/virtualization/disclosure.ts`](../../frontend/app/view/agent/virtualization/disclosure.ts) (#3906, `SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md`):
 
 | Row | Default | Toggle | State |
 |---|---|---|---|
@@ -37,7 +37,7 @@ So a jekt arrives fully expanded: body, metadata line, raw payload. That's what 
 
 ### 1.2 The skid exists, but jekt boxes that fit skip it
 
-The skid is `frontend/app/view/agent/components/scroll-handoff.ts` (`SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md`). When the wheel reaches a capped box's edge, the next `SKID_NOTCHES` (3) notches are absorbed and a 2px accent line shows on that edge; only then does the pane scroll. It has one option, `skidWhenFits`. A box whose content fits has no scrollbar, and without that option it hands every notch straight to the pane.
+The skid is [`frontend/app/view/agent/components/scroll-handoff.ts`](../../frontend/app/view/agent/components/scroll-handoff.ts) (`SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md`). When the wheel reaches a capped box's edge, the next `SKID_NOTCHES` (3) notches are absorbed and a 2px accent line shows on that edge; only then does the pane scroll. It has one option, `skidWhenFits`. A box whose content fits has no scrollbar, and without that option it hands every notch straight to the pane.
 
 That spec's decision 4 (operator, 2026-10-04/05) was: "Tool previews without a scrollbar skid too … Jekt and context-delivery boxes that fit keep handing notches straight on." So a short jekt under the pointer doesn't hold the wheel, while a short tool preview does. That's the gap the operator noticed.
 

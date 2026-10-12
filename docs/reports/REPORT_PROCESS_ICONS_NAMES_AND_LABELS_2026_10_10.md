@@ -4,7 +4,7 @@
 **Date:** 2026-10-10 | **Version:** main at 0.59.18 (`f2da6d823`); Windows measured on 0.59.16 and 0.59.17 portables and four `task dev` builds running side by side. macOS and Linux findings are from the packaging scripts, not from a running machine (§10).
 **Requested by:** repo owner: "in the background processes … AgentMux Server, and all the agentmux-bashwrap, mcp, etc, we want to use our icons, currently they are using generic ones"; then "there are many entries with just 'AgentMux' … are we able to get more information in the name?", "do they relate to actual panes in the agentmux instances? can they be labeled?" and "can we ensure the icons are supported on 3 platforms?"
 **Author:** Loap.
-**Related:** `scripts/inject-exe-icon.sh`, `crates/{cef,launcher,srv}/build.rs`, `scripts/package-macos.sh`, `scripts/build-appimage-linux.sh`, `docs/specs/SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md` (§ open question 2: whether Tower splits out CEF helpers).
+**Related:** [`scripts/inject-exe-icon.sh`](../../scripts/inject-exe-icon.sh), `crates/{cef,launcher,srv}/build.rs`, [`scripts/package-macos.sh`](../../scripts/package-macos.sh), [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh), [`docs/specs/SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md`](../specs/SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) (§ open question 2: whether Tower splits out CEF helpers).
 
 ---
 
@@ -29,16 +29,16 @@ From the running processes (`Win32_Process` for parent PIDs and command lines; `
 
 | Executable | Icons | FileDescription | CompanyName | Resources come from |
 |---|---|---|---|---|
-| `agentmux.exe` (launcher) | 1 | AgentMux v0.59.17 | AgentMux | `winres`, `crates/launcher/build.rs` |
-| `agentmux-<ver>.exe` (CEF host; `agentmux-cef.exe` in dev) | 1 | AgentMux | AgentMux Corp | rcedit after the build, `scripts/inject-exe-icon.sh` |
-| `agentmux-srv-<ver>-windows.x64.exe` | **0** | AgentMux Server v0.59.17 | AgentMux | `winres`, `crates/srv/build.rs`: strings only, **no `set_icon`** |
+| `agentmux.exe` (launcher) | 1 | AgentMux v0.59.17 | AgentMux | `winres`, [`crates/launcher/build.rs`](../../crates/launcher/build.rs) |
+| `agentmux-<ver>.exe` (CEF host; `agentmux-cef.exe` in dev) | 1 | AgentMux | AgentMux Corp | rcedit after the build, [`scripts/inject-exe-icon.sh`](../../scripts/inject-exe-icon.sh) |
+| `agentmux-srv-<ver>-windows.x64.exe` | **0** | AgentMux Server v0.59.17 | AgentMux | `winres`, [`crates/srv/build.rs`](../../crates/srv/build.rs): strings only, **no `set_icon`** |
 | `agentmux-mcp.exe` | **0** | *(empty)* | *(empty)* | **nothing**: no `build.rs` |
 | `agentmux-bashwrap.exe` | **0** | *(empty)* | *(empty)* | **nothing**: no `build.rs` |
 
 Side observations:
 
 - **CompanyName is inconsistent:** `AgentMux` from `winres`, `AgentMux Corp` from `inject-exe-icon.sh` (and `package.json`, and every crate's `authors`).
-- **The host's strings don't come from its `build.rs`.** The host exe is CEF's `bootstrap.exe` renamed (sandbox host, #1633), so what ships is what `inject-exe-icon.sh` stamps afterwards. The `winres` block in `crates/cef/build.rs` only matters for a non-sandbox raw build.
+- **The host's strings don't come from its `build.rs`.** The host exe is CEF's `bootstrap.exe` renamed (sandbox host, #1633), so what ships is what `inject-exe-icon.sh` stamps afterwards. The `winres` block in [`crates/cef/build.rs`](../../crates/cef/build.rs) only matters for a non-sandbox raw build.
 
 **What the 38 "AgentMux" rows were** (six instances running):
 
@@ -60,10 +60,10 @@ The portable's `runtime/` holds exactly seven executables: the five above plus `
 |---|---|---|
 | `agentmux-srv`, `agentmux-mcp`, `agentmux-bashwrap` | generic icon | **yes**: §5 |
 | CEF subprocesses | AgentMux icon already (they run the host exe), all named "AgentMux" | names: §6 |
-| `muxlog`, `muxsh`, `muxspect` | **Node.js**: they're `.mjs` scripts (`crates/srv/src/backend/shellintegration/`) run by the user's `node.exe` | not without shipping our own executable for them; not proposed |
+| `muxlog`, `muxsh`, `muxspect` | **Node.js**: they're `.mjs` scripts ([`crates/srv/src/backend/shellintegration/`](../../crates/srv/src/backend/shellintegration)) run by the user's `node.exe` | not without shipping our own executable for them; not proposed |
 | `jq.exe`, `rg.exe` (bundled) | bare file name, generic icon (upstream ships none) | **no**: third-party; restamping would mislabel someone else's program and break their published hashes |
 | Agents' processes (`claude.exe`, `codex`, `bash.exe`, `pwsh.exe`, `conhost`) | their vendors' icons | no |
-| Installer and uninstaller | AgentMux icon (`packaging/windows/agentmux.iss`) | no change needed |
+| Installer and uninstaller | AgentMux icon ([`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss)) | no change needed |
 | `agentmux-remote` | not shipped in the Windows portable (runs on SSH hosts) | no |
 
 ## 4. Why Chrome looks different on Windows
@@ -76,7 +76,7 @@ The portable's `runtime/` holds exactly seven executables: the five above plus `
 
 Embed the icon and version strings at compile time with `winres`, in each binary's own `build.rs`, as the launcher already does. Keep rcedit only for the host, the one exe `winres` can't reach.
 
-**`crates/srv/build.rs`:** add the icon to the existing block:
+**[`crates/srv/build.rs`](../../crates/srv/build.rs):** add the icon to the existing block:
 
 ```rust
 let icon = std::path::Path::new("../cef/resources/win/agentmux.ico");
@@ -85,7 +85,7 @@ if icon.exists() {
 }
 ```
 
-**`crates/mcp` and `crates/bashwrap`:** add a `build.rs` with the same block (strings + icon) and the build-dependency `srv` uses:
+**[`crates/mcp`](../../crates/mcp) and [`crates/bashwrap`](../../crates/bashwrap):** add a `build.rs` with the same block (strings + icon) and the build-dependency `srv` uses:
 
 ```toml
 [target.'cfg(windows)'.build-dependencies]
@@ -121,7 +121,7 @@ Meanwhile, with no code change: Task Manager's Details tab → right-click a col
 
 ## 7. Do the processes relate to panes, and can they be labelled?
 
-**What maps to what** (from the measurements and `crates/cef/src/app/mod.rs`, which notes "main window, every pool window, every tear-off window, and every browser-pane gets its own renderer process"):
+**What maps to what** (from the measurements and [`crates/cef/src/app/mod.rs`](../../crates/cef/src/app/mod.rs), which notes "main window, every pool window, every tear-off window, and every browser-pane gets its own renderer process"):
 
 | Process | Relates to |
 |---|---|
@@ -141,7 +141,7 @@ Meanwhile, with no code change: Task Manager's Details tab → right-click a col
 
 Activity Monitor shows an app bundle's name and icon (`CFBundleName`, `CFBundleIconFile`) for a process whose executable is a bundle's main executable; a bare executable shows its file name and a generic icon.
 
-| Process | Today (from `scripts/package-macos.sh`) | Proposed |
+| Process | Today (from [`scripts/package-macos.sh`](../../scripts/package-macos.sh)) | Proposed |
 |---|---|---|
 | Main app (`AgentMux.app`, launcher/host) | name and icon (`CFBundleIconFile` = `AgentMux`, `AgentMux.icns`) | — |
 | CEF helpers: `AgentMux Helper`, `(GPU)`, `(Renderer)`, `(Plugin)`, `(Alloy)` in `Contents/Frameworks/` | **named per type already**, but each helper's `Info.plist` has **no `CFBundleIconFile`** and its bundle no `.icns` | copy `AgentMux.icns` into each helper's `Contents/Resources/` and add `CFBundleIconFile`; small, in the same loop that writes the plist |
@@ -152,7 +152,7 @@ The nested apps change signed bundle layout, so they go through codesign/notariz
 
 ### 8.2 Linux
 
-ELF binaries have no resource section, so there's nothing to embed. Desktop system monitors guess an icon: GNOME System Monitor, for example, uses the app's window and desktop entry when there is one, then looks for an icon-theme icon named like the process, then falls back to a generic one. AgentMux's main window is matched today through `StartupWMClass` and the hicolor `agentmux` icon (`build-appimage-linux.sh`, `assets/linux/agentmux.desktop`); background processes get the generic icon.
+ELF binaries have no resource section, so there's nothing to embed. Desktop system monitors guess an icon: GNOME System Monitor, for example, uses the app's window and desktop entry when there is one, then looks for an icon-theme icon named like the process, then falls back to a generic one. AgentMux's main window is matched today through `StartupWMClass` and the hicolor `agentmux` icon (`build-appimage-linux.sh`, [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop)); background processes get the generic icon.
 
 Names, though, are per process on Linux, unlike Windows:
 

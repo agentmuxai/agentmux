@@ -16,7 +16,7 @@ The operator, 2026-10-07:
 
 ## 1. Theme menu stays open after a choice
 
-**Where it closes.** The hamburger menu (`frontend/app/window/hamburger-menu.tsx`) is a `FlyoutMenu`. Every theme is a leaf item whose `onClick` writes `window:theme` (`hamburger-menu.tsx:44–52`). `FlyoutMenu.handleOnClick` (`frontend/app/element/flyoutmenu.tsx:192`) closes the whole menu first, then runs the click:
+**Where it closes.** The hamburger menu ([`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx)) is a `FlyoutMenu`. Every theme is a leaf item whose `onClick` writes `window:theme` (`hamburger-menu.tsx:44–52`). `FlyoutMenu.handleOnClick` ([`frontend/app/element/flyoutmenu.tsx:192`](../../frontend/app/element/flyoutmenu.tsx)) closes the whole menu first, then runs the click:
 
 ```ts
 const handleOnClick = (e: MouseEvent, item: MenuItem) => {
@@ -27,7 +27,7 @@ const handleOnClick = (e: MouseEvent, item: MenuItem) => {
 };
 ```
 
-There's no way for an item to opt out. `MenuItem` (`frontend/types/custom.d.ts:632`) has no such field.
+There's no way for an item to opt out. `MenuItem` ([`frontend/types/custom.d.ts:632`](../../frontend/types/custom.d.ts)) has no such field.
 
 **Precedent.** The app's other menu, `PopoverMenu` (`frontend/app/element/popover-menu.tsx:20, :131`), already has `keepOpen?: boolean` and skips its close for such an item (#1586, used by the title-bar menu at `titlebar-context-menu.tsx:97`). The runtime panel also stays open by decision (`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md` §9.2), and that spec names `FlyoutMenu`'s close-on-select as the behaviour it departs from.
 
@@ -49,15 +49,15 @@ There's no way for an item to opt out. `MenuItem` (`frontend/types/custom.d.ts:6
 
 ## 2. Runtime panel text fits the panel
 
-**Where the text comes from.** The panel is `frontend/app/view/agent/components/AgentRuntimeDropup.tsx`. Each option row is the check icon, then `label`, then an optional `description` span (`:516`). There are three sources:
+**Where the text comes from.** The panel is [`frontend/app/view/agent/components/AgentRuntimeDropup.tsx`](../../frontend/app/view/agent/components/AgentRuntimeDropup.tsx). Each option row is the check icon, then `label`, then an optional `description` span (`:516`). There are three sources:
 
 | Section | Source | Longest today |
 |---|---|---|
-| Mode | `permissionModeText()` notes (`frontend/app/view/agent/runtime-capabilities.ts:161`) | 110 characters: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically" |
-| Model | each provider's `models[].description` (`frontend/app/view/agent/providers/catalog.ts`) | 41 characters ("Anthropic's Sonnet, served by Antigravity"), next to a 28-character label ("Claude Sonnet 4.6 (Thinking)") |
+| Mode | `permissionModeText()` notes ([`frontend/app/view/agent/runtime-capabilities.ts:161`](../../frontend/app/view/agent/runtime-capabilities.ts)) | 110 characters: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically" |
+| Model | each provider's `models[].description` ([`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts)) | 41 characters ("Anthropic's Sonnet, served by Antigravity"), next to a 28-character label ("Claude Sonnet 4.6 (Thinking)") |
 | Effort | `EFFORT_OPTIONS` (`AgentRuntimeDropup.tsx:66`) | none have a description |
 
-**Why it overflows.** `.menu.agent-runtime-dropup-panel` has `min-width: 180px` and no maximum (`frontend/app/view/agent/styles/_composer-strip.scss:247`). `.agent-runtime-dropup-description` is `white-space: nowrap` with an ellipsis (`:315`). The row never constrains the description, so the ellipsis never applies: the panel grows to the longest single line and runs past the pane.
+**Why it overflows.** `.menu.agent-runtime-dropup-panel` has `min-width: 180px` and no maximum ([`frontend/app/view/agent/styles/_composer-strip.scss:247`](../../frontend/app/view/agent/styles/_composer-strip.scss)). `.agent-runtime-dropup-description` is `white-space: nowrap` with an ellipsis (`:315`). The row never constrains the description, so the ellipsis never applies: the panel grows to the longest single line and runs past the pane.
 
 **Fix, in two parts.**
 
@@ -95,9 +95,9 @@ There's no way for an item to opt out. `MenuItem` (`frontend/types/custom.d.ts:6
 
 | State | Where | Code |
 |---|---|---|
-| Output streaming | `ChunkList`, above the log lines | `frontend/app/view/agent/components/ToolOverlayLog.tsx:505` (`bashCommand()`, `:125`) |
+| Output streaming | `ChunkList`, above the log lines | [`frontend/app/view/agent/components/ToolOverlayLog.tsx:505`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) (`bashCommand()`, `:125`) |
 | Waiting for the first output | `ToolOverlayResult`'s "Thinking…" fallback | `ToolOverlayLog.tsx:556` |
-| Finished | `BashOutputViewer`, above stdout / stderr | `frontend/app/view/agent/components/BashOutputViewer.tsx` (`<BashCommandView command={props.params.command} />`) |
+| Finished | `BashOutputViewer`, above stdout / stderr | [`frontend/app/view/agent/components/BashOutputViewer.tsx`](../../frontend/app/view/agent/components/BashOutputViewer.tsx) (`<BashCommandView command={props.params.command} />`) |
 
 **The command is already shown twice elsewhere:**
 - the collapsed row, truncated (`ToolBlock.tsx:467`, `ShellTokens`);
@@ -117,9 +117,9 @@ There's no way for an item to opt out. `MenuItem` (`frontend/types/custom.d.ts:6
 
 ## 4. Paths keep their end in the tool row
 
-**Where it's cut.** The tool row's name run (`ToolBlock.tsx`, `.agent-tool-name`) is a single text run: icon, label, line range (for a Read), then the detail. It has `text-overflow: ellipsis` (`frontend/app/view/agent/styles/_document-nodes.scss`), so a long path is cut on the right and the file name is the part that disappears: "📖 Read /c/Users/me/projects/agentmux/front…".
+**Where it's cut.** The tool row's name run (`ToolBlock.tsx`, `.agent-tool-name`) is a single text run: icon, label, line range (for a Read), then the detail. It has `text-overflow: ellipsis` ([`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)), so a long path is cut on the right and the file name is the part that disappears: "📖 Read /c/Users/me/projects/agentmux/front…".
 
-**Which tools.** The descriptors whose detail is a file path (`pathOf` in `frontend/app/view/agent/tool-meta/tool-descriptors.ts`):
+**Which tools.** The descriptors whose detail is a file path (`pathOf` in [`frontend/app/view/agent/tool-meta/tool-descriptors.ts`](../../frontend/app/view/agent/tool-meta/tool-descriptors.ts)):
 - Read (`read`, `read_file`)
 - Write (`write`, `write_file`)
 - Edit (`edit`, `str_replace_editor`, `multiedit`)

@@ -12,7 +12,7 @@ hermetic Xcode pin (§4), a Phase D build-time check. **Phase B's port is
 COMPLETE — 18 of 18 files** (§5b), and **compiled successfully on Windows**
 (`libcef.dll` built and boot-verified 2026-09-09, see the toolchain correction
 below) — macOS and Linux remain unbuilt. This is the Phase A output that
-`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates on.
+[`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](../specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) §4 gates on.
 **Verdict:** **Go** on §3's "straight to 152" decision — the *milestone target*
 is sound: nothing found makes 152 harder, and 16 of the 18 fork-modified CEF
 files are byte-identical upstream. **This is not a statement that the port is
@@ -220,7 +220,7 @@ actual machine rather than trusting this table for that row.
 > **Fixed** by installing a newer public SDK (`10.0.28000.0`) and editing
 > `SDK_VERSION` in *both* `build/vs_toolchain.py` and
 > `build/toolchain/win/setup_toolchain.py` — the GN arg alone doesn't
-> propagate. Full detail: `docs/cef-build/build-patched-cef-windows.md`'s
+> propagate. Full detail: [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md)'s
 > 2026-09-09 update. **Lesson repeated a third time in this same recon
 > effort** (after the API-annotation bug and the invalid `strings`-based
 > symbol check): comparing version pins is not a substitute for actually
@@ -252,7 +252,7 @@ The authoritative provenance is the build records, not the tags:
   `BeginWindowDrag` explicitly re-verified in the built framework
   (`verify-cef-framework-darwin.sh`, exit 0). The framework's own
   `CEF_COMMIT_HASH` embeds `6c570e2490c9…`, which is the real provenance.
-- **Windows** — `docs/cef-build/build-patched-cef-windows.md` states it is
+- **Windows** — [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) states it is
   "built from the same fork branch anyway for one-canonical-source-branch"
   reasons, with the drag/transparency patches "present but inert on Windows."
 
@@ -280,7 +280,7 @@ verified by direct file checks (404 on the file, zero `patch.cfg` matches), not
 by the tag inference that was wrong.
 
 This still matters, because per
-`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md` the -67030
+[`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`](../retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md) the -67030
 Mach-port peer validation failure is "a *real* functional code-sign failure...
 not a DCHECK" and was "the only reason we went from-source [CEF] at all" —
 without it, the self-reexec CEF helper fails peer validation and the renderer

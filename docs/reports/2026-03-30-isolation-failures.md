@@ -46,14 +46,14 @@ Even if the *running* instance is a portable from `~/Desktop/agentmux-cef-0.33.4
 
 **Root cause:** `cef-dll-sys` build script uses `$OUT_DIR` (which includes a cargo fingerprint hash) as the extraction target. The hash changes whenever `Cargo.toml` version changes. The crate has no mechanism to reuse a previous extraction.
 
-**Mitigation applied:** Set `CEF_PATH` in `.cargo/config.toml` to a stable path (`C:/Systems/cef-runtime/cef_146.0.9_windows_x86_64`). This skips the download entirely.
+**Mitigation applied:** Set `CEF_PATH` in [`.cargo/config.toml`](../../.cargo/config.toml) to a stable path (`C:/Systems/cef-runtime/cef_146.0.9_windows_x86_64`). This skips the download entirely.
 
 **Remaining risk:** The `CEF_PATH` directory must contain `archive.json`, `libcef_dll/`, `include/`, `cmake/`, `CMakeLists.txt` — all of which were manually assembled. If someone clones the repo fresh, they'll hit the original download issue unless `CEF_PATH` is documented.
 
 **Fix requirements:**
 1. Document `CEF_PATH` setup in `BUILD.md` or `CLAUDE.md`
 2. Add a `task cef:setup` that automates the stable CEF extraction
-3. Consider committing `.cargo/config.toml` with `CEF_PATH` pointing to a project-relative path (e.g., `.cef-sdk/`) and add a one-time download task
+3. Consider committing [`.cargo/config.toml`](../../.cargo/config.toml) with `CEF_PATH` pointing to a project-relative path (e.g., `.cef-sdk/`) and add a one-time download task
 
 ---
 

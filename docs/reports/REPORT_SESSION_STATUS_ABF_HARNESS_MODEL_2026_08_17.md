@@ -82,7 +82,7 @@ No code has been committed for this feature yet pending that decision.
   content) had a flat `padding: var(--space-4)` with no extra top clearance
   for the floating `PaneTabStrip`, which renders even over the blank/picker
   tab (`agent-view.tsx`). Icons/header content rendered behind the strip.
-  Fixed in `frontend/app/view/agent/styles/_picker.scss` by mirroring the
+  Fixed in [`frontend/app/view/agent/styles/_picker.scss`](../../frontend/app/view/agent/styles/_picker.scss) by mirroring the
   exact `padding-top: calc(... + var(--pane-tab-strip-height, 28px))`
   pattern `_document.scss` already uses for `.agent-document`.
   **Status: fixed locally, uncommitted** — no changeset/PR yet.

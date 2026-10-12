@@ -19,12 +19,12 @@ the uptime; and they still come and go as the instance recovers. Reassess the ar
 | `backend` | srv's responsiveness: the launcher's rolling average of health-probe round trips (`srv_liveness::LatencyTracker`, 6 probes) | launcher supervisor → `NotifySrvLatency` over the launcher pipe → CEF host | warn ≥ 1.0 s (clears < 0.6 s), critical ≥ 2.5 s (back to warn < 1.8 s); a missed probe counts as the full timeout | **on transitions only** |
 
 Specs: `SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md` §5.F, `SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md`,
-`docs/analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md` §8.2.
+[`docs/analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md`](../analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md) §8.2.
 
 ### 1.2 Transport
 
 All three ride one CEF event, `memory-pressure`, emitted to every top-level window
-(`crates/cef/src/ui_tasks/window.rs`: `EmitMemoryPressureTask`, `EmitSrvLatencyTask`). The payload is
+([`crates/cef/src/ui_tasks/window.rs`](../../crates/cef/src/ui_tasks/window.rs): `EmitMemoryPressureTask`, `EmitSrvLatencyTask`). The payload is
 `{ kind, level, … }` with per-kind extras (`phys_free_mb`; `commit_free_mb`, `system_managed`,
 `disk_free_pct`; `avg_ms`). The event has no replay: a window only knows what it hears after it subscribes.
 
@@ -37,7 +37,7 @@ above the workspace in every window except floating-pane windows. Each instance:
 - renders a full-width strip (amber for warn, red-tinted for critical) with a sentence of advice and ×;
 - hides on dismiss until the level escalates or a new episode starts (normal, then up again).
 
-The status bar (`frontend/app/statusbar/StatusBar.tsx`) starts with `BackendStatus`: a dot coloured by
+The status bar ([`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx)) starts with `BackendStatus`: a dot coloured by
 srv's connection state (accent running, yellow spinning connecting, red crashed) and the uptime. Clicking
 it opens `BackendStatusPanel` (status, PID, uptime, endpoint, pending migrations, GPU, crash details).
 Nothing in the status bar knows about the three signals.
@@ -62,7 +62,7 @@ Nothing in the status bar knows about the three signals.
 
 ### 3.1 One health-signal store per window
 
-New `frontend/app/store/health-signals.ts`:
+New [`frontend/app/store/health-signals.ts`](../../frontend/app/store/health-signals.ts):
 
 ```ts
 type HealthKind = "ram" | "pagefile" | "backend";

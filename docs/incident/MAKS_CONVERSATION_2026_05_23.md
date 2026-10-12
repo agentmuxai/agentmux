@@ -6,7 +6,7 @@
 **Block**: 445cba95-bc87-4a90-9f3a-02599f978036
 **Agent identity**: Maks — Claude sonnet, host mode, cwd `~/.agentmux/agents/maks-05155`
 
-Related: `docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md` · spec at `docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` · implementation branch `agenta/tool-block-ux-polish-2026-05-23`
+Related: [`docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md`](../retro/retro-agent-pane-cascade-replacechild-2026-05-23.md) · spec at [`docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md`](../specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md) · implementation branch `agenta/tool-block-ux-polish-2026-05-23`
 
 ---
 
@@ -391,7 +391,7 @@ The spec was already written to the cloned repo. Opening it now.
 - 🔧 **2026-05-23 08:12:39Z** 🔧 Bash code "~/<tmp>/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md" 2>&1 ✓ (collapsed)
 ### 🤖 Maks — 2026-05-23 08:12:43Z — _node_29_
 
-Done — `SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` is open in VS Code. It's at `docs/specs/` in the cloned repo alongside the other specs.
+Done — `SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` is open in VS Code. It's at [`docs/specs/`](../specs) in the cloned repo alongside the other specs.
 
 ## 👤 user — 2026-05-23 08:12:49Z
 

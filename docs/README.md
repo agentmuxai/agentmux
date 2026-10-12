@@ -5,33 +5,33 @@ Project documentation organized by type.
 | Path | Purpose |
 |------|---------|
 | [`linux.md`](linux.md) | Linux operator guide — AppImage structure, display server, logging, diagnostics, known limitations |
-| `analysis/` | Technical analysis, audits, benchmarks, root cause investigations |
-| `api/` | User-facing API guides (start with `api/getting-started.md`) |
-| `architecture/` | Architecture decision records and subsystem design docs |
-| `archive/` | Retired handoff/report docs, kept for historical reference |
-| `brand-icons/` | Logo/icon assets |
-| `cef-build/` | Guides for building the patched `libcef.so` from source |
-| `cef-patches/` | Patches applied to the vendored CEF source |
-| `debug/` | Screenshots and captures attached to a specific investigation |
-| `examples/` | Working samples for extension points, e.g. a third-party pane tab widget (`examples/widgets/`) |
-| `incident/` | Incident write-ups and recovery runbooks |
-| `investigations/` | Active bug investigations with reproduction steps |
-| `plans/` | Standalone implementation plans |
-| `providers/` | Provider (Claude/Codex/etc.) integration notes |
-| `reports/` | Session reports, handoff notes, bug fix summaries |
-| `research/` | Research into technologies, approaches, and design options |
-| `retro/` | Post-incident retrospectives |
-| `specs/` | Specs, design explorations, and implementation plans, from draft through implemented |
-| `status/` | Point-in-time subsystem status snapshots |
+| [`analysis/`](analysis) | Technical analysis, audits, benchmarks, root cause investigations |
+| [`api/`](api) | User-facing API guides (start with [`api/getting-started.md`](api/getting-started.md)) |
+| [`architecture/`](architecture) | Architecture decision records and subsystem design docs |
+| [`archive/`](archive) | Retired handoff/report docs, kept for historical reference |
+| [`brand-icons/`](brand-icons) | Logo/icon assets |
+| [`cef-build/`](cef-build) | Guides for building the patched `libcef.so` from source |
+| [`cef-patches/`](cef-patches) | Patches applied to the vendored CEF source |
+| [`debug/`](debug) | Screenshots and captures attached to a specific investigation |
+| [`examples/`](examples) | Working samples for extension points, e.g. a third-party pane tab widget ([`examples/widgets/`](examples/widgets)) |
+| [`incident/`](incident) | Incident write-ups and recovery runbooks |
+| [`investigations/`](investigations) | Active bug investigations with reproduction steps |
+| [`plans/`](plans) | Standalone implementation plans |
+| [`providers/`](providers) | Provider (Claude/Codex/etc.) integration notes |
+| [`reports/`](reports) | Session reports, handoff notes, bug fix summaries |
+| [`research/`](research) | Research into technologies, approaches, and design options |
+| [`retro/`](retro) | Post-incident retrospectives |
+| [`specs/`](specs) | Specs, design explorations, and implementation plans, from draft through implemented |
+| [`status/`](status) | Point-in-time subsystem status snapshots |
 
-This table is checked by `scripts/check-docs-dir-map.mjs` on every PR: every directory
-listed here must exist, and every directory under `docs/` must be listed. The
+This table is checked by [`scripts/check-docs-dir-map.mjs`](../scripts/check-docs-dir-map.mjs) on every PR: every directory
+listed here must exist, and every directory under [`docs/`](.) must be listed. The
 former handoff directory was merged away in #2407, and its row survived here
 for six weeks afterwards — which is why the check now exists.
 
 Spec `**Status:**` lines use a closed vocabulary (`draft | proposed | active | implemented | living | historical | superseded`) — the rule, and the reader guardrail that goes with it, live in [`docs/specs/README.md`](specs/README.md#status-field).
 
-All specs live under `docs/specs/`. The top-level `specs/` tree was merged into it
+All specs live under [`docs/specs/`](specs). The top-level `specs/` tree was merged into it
 (2026-09-01) — a doc's lifecycle is its `**Status:**` line, not the directory it sits in,
 and the two had come to contradict each other. See [`docs/specs/README.md`](specs/README.md)
 for why. There is no `docs-internal/` directory in this repo.

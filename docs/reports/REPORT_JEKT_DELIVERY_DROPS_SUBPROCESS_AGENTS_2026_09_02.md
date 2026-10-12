@@ -280,7 +280,7 @@ failing test is the signal that `Skip` can be revisited.
 - `agentmux-srv/src/bootstrap.rs:997-1003` — pre-`AppState` `set_message_sender`
 - `agentmux-srv/src/server/app_api/agent_open.rs:294-301` — container forces subprocess
 - `agentmux-srv/src/backend/providers.rs` — per-provider controller types
-- `docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md` — container turn design
-- `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md` §6 — the Phase-3 delivery
+- [`docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md`](../specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) — container turn design
+- [`docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`](../specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) §6 — the Phase-3 delivery
   primitive this extends
-- `docs/specs/SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md` §2.2 — §2's gate
+- [`docs/specs/SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`](../specs/SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md) §2.2 — §2's gate

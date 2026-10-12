@@ -64,7 +64,7 @@ The renderer swap (entry 7) is the most informative: it proves the bug is **not 
 2. **xterm's reported numerical state is correct throughout init.** Across `init-start` → `post-customfit` → `post-resync` → `raf-refit`, the diagnostic chain shows consistent, plausible `cols`/`rows`/`cssCellW`/`connectElemRect` for every terminal — including the jumbled ones.
 3. **The bug is not renderer-specific.** Demonstrated by swapping xterm.js → ghostty-web.
 4. **Three different mechanisms fix the jumble after it appears:** manual resize, zoom, HMR re-mount. All three trigger a fresh `xterm.resize()` (or component re-create) against a settled layout.
-5. **AgentMux's layout system is transform-based, not flex grow/shrink.** Each tile-leaf gets explicit `width`/`height`/`transform` from `addlProps()` (see `frontend/layout/lib/TileLayout.win32.tsx:527-534`). The CSS `transition-duration` is `--animation-time-s` which defaults to `0s` — so there is no actual CSS animation in the layout. Sizes change instantly.
+5. **AgentMux's layout system is transform-based, not flex grow/shrink.** Each tile-leaf gets explicit `width`/`height`/`transform` from `addlProps()` (see [`frontend/layout/lib/TileLayout.win32.tsx:527-534`](../../frontend/layout/lib/TileLayout.win32.tsx)). The CSS `transition-duration` is `--animation-time-s` which defaults to `0s` — so there is no actual CSS animation in the layout. Sizes change instantly.
 
 ---
 

@@ -12,7 +12,7 @@ sounds like perhaps we have spaghetti that needs to be cleaned up."*
 **Method:** three independent deep-dive investigations (git archaeology across
 every retro/report/spec touching this symptom family; live read of the current
 Activity Dock data-flow architecture, frontend and backend; a structural survey
-of the whole `frontend/app/view/agent/` module and its prior architecture
+of the whole [`frontend/app/view/agent/`](../../frontend/app/view/agent) module and its prior architecture
 assessments), plus direct verification of the current release/version state.
 **Scope:** analysis only, per the request — no code changes. Recommendations at
 the end are unimplemented, for discussion.
@@ -137,10 +137,10 @@ pattern, separate from the technical root cause below.
 | File | Commits | |
 |---|---|---|
 | `agentmux-srv/src/backend/subagent_watcher.rs` (+ later module split) | **41** | The single hottest file in this entire bug family |
-| `frontend/app/view/agent/components/ActivityDock.tsx` | **~14** | Every dock-visible symptom touches this one file |
-| `frontend/app/view/agent/activity/subagent-source.ts` | 5 | Every commit since creation has been a bug fix, none a clean feature add |
-| `frontend/app/view/agent/activity/dispatch-source.ts` | 3 | 2 of 3 commits are fixes; same shape as its sibling |
-| `frontend/app/block/block.tsx` (`ready()` gate) | 3 incidents in 3 consecutive days (08-22 to 08-24), same ~10-line region | |
+| [`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) | **~14** | Every dock-visible symptom touches this one file |
+| [`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts) | 5 | Every commit since creation has been a bug fix, none a clean feature add |
+| [`frontend/app/view/agent/activity/dispatch-source.ts`](../../frontend/app/view/agent/activity/dispatch-source.ts) | 3 | 2 of 3 commits are fixes; same shape as its sibling |
+| [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) (`ready()` gate) | 3 incidents in 3 consecutive days (08-22 to 08-24), same ~10-line region | |
 
 ---
 
@@ -169,7 +169,7 @@ consume the dock's own signal rather than recompute it, and doesn't.
 ### 3.2 On the frontend, at least 11 independent modules each maintain their own refresh cycle
 
 A full inventory (not just the 2-3 already implicated in recent bugs) found
-11 distinct modules under `frontend/app/view/agent/` that independently
+11 distinct modules under [`frontend/app/view/agent/`](../../frontend/app/view/agent) that independently
 subscribe to backend/WPS events for "what's currently running"-adjacent state.
 Most are legitimately separate concerns (process count, controller status,
 tab-title text) — but a few are genuine, unreconciled duplication of the same
@@ -245,14 +245,14 @@ external judgment being imposed:
 
 ### 4.1 `agent-view.tsx` broke its own documented budget by 8.3x
 
-`docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md` set a hard cap of
+[`docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md`](../specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) set a hard cap of
 **≤300 lines** for this file. A verification pass the same week measured it at
 302 ("2 lines over, not urgent"). **Today it is 2,496 lines**, with **216
 commits** touching it historically — the single most-churned file in the
 entire pane module. No later doc revisits or re-authorizes this regrowth; it
 simply happened, uncontested, over four months.
 
-It is not alone. `docs/analysis/ANALYSIS_LARGE_FILE_MODULARIZATION_CANDIDATES_2026_05_28.md`
+It is not alone. [`docs/analysis/ANALYSIS_LARGE_FILE_MODULARIZATION_CANDIDATES_2026_05_28.md`](../analysis/ANALYSIS_LARGE_FILE_MODULARIZATION_CANDIDATES_2026_05_28.md)
 flagged `AgentLaunchModal.tsx` (1,020 lines then) and `agent-view.tsx` (958
 lines then, already 3x its own budget) as carve candidates in May, alongside
 six Rust files that *did* get modularized the same day (e.g. `store.rs`:
@@ -269,7 +269,7 @@ Other files currently over 500 lines and mixing concerns:
 
 ### 4.2 The team already, explicitly, self-diagnosed scope creep in this exact module
 
-`docs/analysis/agent-pane-rich-features-structure-2026-04-13.md`'s own
+[`docs/analysis/agent-pane-rich-features-structure-2026-04-13.md`](../analysis/agent-pane-rich-features-structure-2026-04-13.md)'s own
 author, investigating an unrelated bug, wrote: *"I added seven features the
 user didn't ask for... The right longer-term move is probably to remove all
 four banners and the two panels entirely... and re-introduce them one by one
@@ -283,7 +283,7 @@ This is the single most important structural finding for the "do we need an
 architecture rethink" question, and the answer is nuanced: **no, you already
 built one — a specific new subsystem was built outside it.**
 
-`docs/specs/frontend-reducer-conventions-2026-05-03.md` establishes an
+[`docs/specs/frontend-reducer-conventions-2026-05-03.md`](../specs/frontend-reducer-conventions-2026-05-03.md) establishes an
 explicit, principled pattern (modeled on the Rust backend's own
 `agentmux-srv/src/reducer.rs`): pure `update(state, command) -> {state,
 events}` slices, mandatory "negative events" for every suppressed/dropped
@@ -291,7 +291,7 @@ command (specifically for audit-ability — exactly the kind of guarantee that
 would surface "this refresh was suppressed because a burst was in flight"
 instead of silently racing), an echo-loop guard for slices mirroring backend
 state, required tests. A companion audit
-(`docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md`) confirmed, as of
+([`docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md`](../analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md)) confirmed, as of
 2026-05-12, that **100% of the agent pane's rendering-relevant state was
 already reducer-routed** — a deliberate, verified architecture.
 
@@ -320,7 +320,7 @@ guarantees were designed for.
 ### 4.4 Confirming this is the current hot zone, independent of the docs
 
 **54.5% of all frontend commits since 2026-06-01 (399 of 732) touched
-`frontend/app/view/agent/`.** Four distinct flicker-on-load bugs shipped in
+[`frontend/app/view/agent/`](../../frontend/app/view/agent).** Four distinct flicker-on-load bugs shipped in
 this one subsystem within a single 48-hour window (Aug 22-24), each retro
 explicitly noting "not the same bug as the last one, a different-but-adjacent
 race in the same neighborhood." This is the clearest available signal that

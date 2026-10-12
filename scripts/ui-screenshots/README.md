@@ -2,7 +2,7 @@
 
 The images in agentmux-docs are taken by these scripts, so they can be
 retaken when the UI changes. The design and the reasons behind it are in
-`docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md` (§8 onward).
+[`docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md`](../../docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) (§8 onward).
 
 ## When the UI has changed
 
