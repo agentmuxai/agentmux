@@ -8,13 +8,13 @@ description: Launch and verify AgentMux's own `task dev` build on Windows — th
 This is the verified path for launching AgentMux's own dev build to check a
 change, superseding a generic Electron-app procedure. It exists because an
 agent spent about an hour rediscovering all of this from scratch — see
-`docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md`
+[`docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md`](../../../docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md)
 for the full incident and root-causing. Follow this verbatim; don't
 re-diagnose the same four problems.
 
 **Scope note:** this is dev-workflow friction, not an isolation bug. Nothing
 below is needed because AgentMux's multi-instance guarantees (I1–I6 in
-`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`) are
+[`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](../../../docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md)) are
 broken — they hold. This is about an *agent* reliably launching and
 *observing* its own instance on a host where several peers are doing the
 same, which those invariants don't cover.
@@ -38,7 +38,7 @@ pwd -P | wc -c   # if this is over ~100, assume trouble; CEF's own nested
 ```
 
 If it's long, map a short drive letter **before** building — this is a
-verified fix (`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`),
+verified fix ([`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`](../../../docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md)),
 not a fallback to try after failing:
 
 ```bash
@@ -76,7 +76,7 @@ dev window is a Chromium window, and Chromium refuses certain ports outright
 and a few others. A dev instance pointed at one of them starts, Vite answers
 200, and the window then flickers forever with no message. This cost an agent a
 long debugging session on 2026-10-02 (port 6000 — see
-`docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md`). `task dev` now
+[`docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md`](../../../docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md)). `task dev` now
 refuses such a port up front, but don't walk into it.
 
 **Do not write your own free-port probe.** The earlier recipe here used bash's
@@ -109,13 +109,13 @@ powershell -NoProfile -Command "Get-Process | Where-Object {\$_.MainWindowTitle 
 
 **Match by substring, not exact equality.** `TITLE=` becomes the window's
 *display name*, not the whole OS title — the real title is built by
-`frontend/util/window-title.ts`'s `formatWindowTitle()` as
+[`frontend/util/window-title.ts`](../../../frontend/util/window-title.ts)'s `formatWindowTitle()` as
 `"<displayName> - <tabName> - AgentMux"` (or `"<displayName> - AgentMux"` with
 no tab). You'll see things like `"Lark - Tab 1 - AgentMux"` from other
 agents' own sessions on a shared host — that's normal, not a collision.
 
 **Expect a real delay between "window exists" and "title is set."** The
-title is applied by `frontend/app-init.ts` only after `initMuxWrap()`
+title is applied by [`frontend/app-init.ts`](../../../frontend/app-init.ts) only after `initMuxWrap()`
 finishes — i.e., after the frontend has actually loaded and connected. A
 window that's `Responding: True` with a bare `"AgentMux"` title for a while
 is not stuck; it just hasn't finished init yet. If it *never* progresses past
@@ -207,9 +207,9 @@ external interrupt.
 
 ## References
 
-- `docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md` — full incident, evidence, and the plan this skill implements (P1).
-- `docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md` — why §2 forbids a hand-rolled probe and a blocked port.
-- `docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md` — the `MAX_PATH` root cause.
-- `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — the `AGENTMUX_VITE_PORT` mechanism this skill works around.
-- `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` — the I1–I6 invariants this skill's guidance is careful not to violate.
-- `frontend/util/window-title.ts`, `frontend/app-init.ts` — the title-formatting and application logic §3 relies on.
+- [`docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md`](../../../docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md) — full incident, evidence, and the plan this skill implements (P1).
+- [`docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md`](../../../docs/specs/SPEC_DEV_VITE_UNSAFE_PORT_GUARD_2026_10_02.md) — why §2 forbids a hand-rolled probe and a blocked port.
+- [`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`](../../../docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md) — the `MAX_PATH` root cause.
+- [`docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`](../../../docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md) — the `AGENTMUX_VITE_PORT` mechanism this skill works around.
+- [`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](../../../docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) — the I1–I6 invariants this skill's guidance is careful not to violate.
+- [`frontend/util/window-title.ts`](../../../frontend/util/window-title.ts), [`frontend/app-init.ts`](../../../frontend/app-init.ts) — the title-formatting and application logic §3 relies on.

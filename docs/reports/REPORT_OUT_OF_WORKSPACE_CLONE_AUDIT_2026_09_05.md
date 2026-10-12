@@ -32,7 +32,7 @@ non-compliant, regardless of who created it.
 
 **No agent is currently *running* from an out-of-workspace clone.** Nothing
 executing on this machine has a binary path under `C:\Systems\`, and no
-agent's `CLAUDE.md`, `.claude/`, or `.mcp.json` references a `C:\Systems\`
+agent's `CLAUDE.md`, [`.claude/`](../../.claude), or `.mcp.json` references a `C:\Systems\`
 path — so no agent is *configured* to work there either. The exposure is
 entirely from **abandoned working state left behind** by past sessions,
 mine included.

@@ -102,7 +102,7 @@ independently, each with its own spec or retro:
 - `#2770` — activity dock flashing stale shell rows
 - `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §§2-3, 5, 6, 7 — this one
 
-A full sweep of `docs/specs`, `docs/retro`, `docs/reports` and `docs/status`
+A full sweep of [`docs/specs`](../specs), [`docs/retro`](../retro), [`docs/reports`](.) and [`docs/status`](../status)
 puts the real number closer to **forty documents across eleven families** —
 tab strip, pane/block mount, activity dock, browser-pane indicators,
 startup/splash, terminal streaming, menus/popovers, modals,
@@ -165,7 +165,7 @@ objects. "One tab closed" is inherently a multi-object fact:
 - `Tab` — the tab object itself
 - `LayoutState` — its pane tree, a *separate* object again
 - `Block` objects — one per pane, separate again
-- `layoutModelMap` (`frontend/layout/lib/layoutModelHooks.ts:13`) — a **plain non-reactive `Map`** holding the live layout model per tab
+- `layoutModelMap` ([`frontend/layout/lib/layoutModelHooks.ts:13`](../../frontend/layout/lib/layoutModelHooks.ts#L13)) — a **plain non-reactive `Map`** holding the live layout model per tab
 
 Six places, no shared version, no epoch, no transaction. The version guard in
 `updateWaveObject` (`wos.ts:280`) is **per object** — it can't detect that
@@ -202,7 +202,7 @@ matches the reported trigger — *"after the modal closes"* — exactly.
 
 Panes are **native surfaces composited by the Rust/CEF host**, not just DOM. To
 render a modal above a pane, the frontend punches a hole in the native overlay:
-`usePaneOverlay` (`frontend/app/platform/pane-overlay.ts:265`) registers the
+`usePaneOverlay` ([`frontend/app/platform/pane-overlay.ts:265`](../../frontend/app/platform/pane-overlay.ts#L265)) registers the
 modal's rect and calls `sendClip()`. And `sendClip` (`pane-overlay.ts:83`):
 
 ```ts
@@ -241,7 +241,7 @@ should be ranked on evidence next time, not on narrative fit.
 
 ### 3.4 All tabs are mounted at all times, most of them zero-sized
 
-`frontend/app/workspace/workspace.tsx:35-40` keeps **every** tab's content
+[`frontend/app/workspace/workspace.tsx:35-40`](../../frontend/app/workspace/workspace.tsx#L35-L40) keeps **every** tab's content
 mounted simultaneously, switching with `display: none`, to preserve xterm.js
 scrollback. Consequences:
 

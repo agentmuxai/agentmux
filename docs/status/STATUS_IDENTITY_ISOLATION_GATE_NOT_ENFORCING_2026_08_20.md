@@ -13,7 +13,7 @@ separately, see §8.
 **Trigger:** Operator closed this agent's (`AgentY`) pane on AgentMux v0.55.15 and reopened
 it on v0.55.18, expecting conversation continuity. None occurred — investigating why led
 to a much larger finding than the original complaint. Full forensic trail:
-`docs/retro/retro-agenty-global-claude-home-leak-2026-08-20.md`. This doc is the
+[`docs/retro/retro-agenty-global-claude-home-leak-2026-08-20.md`](../retro/retro-agenty-global-claude-home-leak-2026-08-20.md). This doc is the
 action-oriented summary for anyone picking this up next.
 
 Sections 1-7 below are kept as-written (the investigation as it actually happened,
@@ -28,7 +28,7 @@ including the wrong turn) rather than silently rewritten — §8 is the correcti
 block any spawn of an oauth-class-provider agent (claude/codex/gemini/copilot/openclaw)
 that has no bound account — a deliberate hardening (commit `860fb0b6a`, 2026-07-23, "single-
 point enforcement... `use_ambient_login` no longer has any effect") of the exact hole
-`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md` documented:
+[`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`](../retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md) documented:
 silent fallback to the user's personal, global `~/.claude` login.
 
 **By every static read of the code, this agent's own pane (`identity_id=""`, zero rows in
@@ -52,10 +52,10 @@ top of findings from the two related docs below would be built on a foundation
 
 ## 3. Three related, previously-documented issues feeding into this
 
-1. `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md` — the
+1. [`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`](../retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md) — the
    original "auto-isolate" behavior for unbound agents was orphaned across five commits
    (2026-05-22 → 2026-07-14); today's gate is the eventual hardening response to it.
-2. `docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md` — a prior
+2. [`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`](../specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md) — a prior
    instance of this same agent found that `db_agent_identity_links`/`db_accounts` resolve
    through a **per-channel-isolated** store by default on any non-`stable` channel, so a
    version/channel switch can silently empty an agent's binding row. Verdict at the time:
@@ -148,7 +148,7 @@ correct in isolation, the two live outcomes to distinguish are just:
 
 ## 7. Non-goals / what this doc is not about
 
-Not about Part B/C of `docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md`
+Not about Part B/C of [`docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md`](../specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md)
 (cross-instance session rehydration) — that gap is real but unrelated; this agent's
 session file is in the *correct* isolated location and simply isn't being looked at
 because the live process isn't using that `CLAUDE_CONFIG_DIR` at all.

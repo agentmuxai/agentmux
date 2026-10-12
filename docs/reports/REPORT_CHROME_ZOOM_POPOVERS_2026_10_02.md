@@ -19,7 +19,7 @@ Behind that sits a larger problem: nine surfaces each hand-roll the same floatin
 
 ## 2. Background: two zoom systems
 
-- **Chrome zoom.** `--zoomfactor` on `:root`, set by `applyChromeZoomCSS()` (`frontend/app/store/zoom.ts`). Ctrl+wheel over the title bar, status bar or a pane header. Applied with CSS `zoom` on two in-flow containers: `.window-header` (`window-header.{win32,linux,darwin}.scss`) and `.status-bar` (`StatusBar.scss:25`).
+- **Chrome zoom.** `--zoomfactor` on `:root`, set by `applyChromeZoomCSS()` ([`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts)). Ctrl+wheel over the title bar, status bar or a pane header. Applied with CSS `zoom` on two in-flow containers: `.window-header` (`window-header.{win32,linux,darwin}.scss`) and `.status-bar` (`StatusBar.scss:25`).
 - **Per-pane zoom.** `term:zoom` block meta. Ctrl+wheel over a pane. In the agent pane it is applied on `.agent-view-zoomed` (`agent-view.tsx:1265`), and `--agent-pane-zoom` is published on `.agent-view` (`agent-view.tsx:1231`).
 
 CSS `zoom` is inherited down the DOM tree, not across a `<Portal>`. A portaled element only scales if something inside the portal applies `zoom`.
@@ -43,7 +43,7 @@ CSS `zoom` is inherited down the DOM tree, not across a `<Portal>`. A portaled e
 
 ### 3.1 Why the status bar popovers lost their zoom
 
-They used to declare `zoom: var(--zoomfactor)` themselves. PR #2736 removed it (`docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md`), because a self-zoomed popover placed in real pixels was scaled twice and landed far from its anchor (case B in §4). That spec named the remaining work: keep the *content* scaling with a "non-position-affecting alternative". It was never done, so the popovers have sat at 1x since 2026-08-22. The comments "Deliberately NOT `zoom: var(--zoomfactor)`" mark the spots (`_token-usage.scss:62`, `_cpu-cores-popover.scss:41`, `_disk-volumes-popover.scss:38`, `StatusBarTip.scss:16`, `StatusBar.scss:250`).
+They used to declare `zoom: var(--zoomfactor)` themselves. PR #2736 removed it ([`docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md`](../specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md)), because a self-zoomed popover placed in real pixels was scaled twice and landed far from its anchor (case B in §4). That spec named the remaining work: keep the *content* scaling with a "non-position-affecting alternative". It was never done, so the popovers have sat at 1x since 2026-08-22. The comments "Deliberately NOT `zoom: var(--zoomfactor)`" mark the spots (`_token-usage.scss:62`, `_cpu-cores-popover.scss:41`, `_disk-volumes-popover.scss:38`, `StatusBarTip.scss:16`, `StatusBar.scss:250`).
 
 ## 4. Measurements: which zoom pattern actually works
 
@@ -90,7 +90,7 @@ Line count of the copied plumbing: about 40–60 lines per surface for positioni
 
 ## 6. Recommendation: one `AnchoredPopover` primitive
 
-A single Solid component (for example `frontend/app/element/anchored-popover.tsx`) that every in-scope panel renders through. It owns the six concerns that are copied today; the panel keeps only its own content.
+A single Solid component (for example [`frontend/app/element/anchored-popover.tsx`](../../frontend/app/element/anchored-popover.tsx)) that every in-scope panel renders through. It owns the six concerns that are copied today; the panel keeps only its own content.
 
 ```tsx
 <AnchoredPopover
@@ -120,7 +120,7 @@ Sizes move from inline `width: 320px` on the root to the body, so they scale. No
 
 **`.menu`-styled panels need one adjustment.** `.menu` sets `position: absolute` (`flyoutmenu.scss:9`). On the body inside a shell, that takes the body out of flow and collapses the shell to 0×0. For the model/effort and session stats panels, the body should get `position: static` or use the `menu-frame` mixin directly instead of the `.menu` class.
 
-**Why not the alternatives:** re-adding self-zoom is the #2736 bug (B). Compensating in `computeMenuPosition` is ruled out by measurement (C). A zoomed layer root fails the same way (F). Per-property `calc()` scaling is what `docs/specs/zoom-architecture.md` §3 rejected as tedious and error-prone, and it would spread across every panel's content SCSS.
+**Why not the alternatives:** re-adding self-zoom is the #2736 bug (B). Compensating in `computeMenuPosition` is ruled out by measurement (C). A zoomed layer root fails the same way (F). Per-property `calc()` scaling is what [`docs/specs/zoom-architecture.md`](../specs/zoom-architecture.md) §3 rejected as tedious and error-prone, and it would spread across every panel's content SCSS.
 
 ## 7. Migration plan
 
@@ -147,13 +147,13 @@ Each phase is one PR. Each phase is checked live over CDP at `--zoomfactor` 0.65
 
 ## 10. What shipped (feat/chrome-zoom-popovers)
 
-`AnchoredPopover` (`frontend/app/element/anchored-popover.tsx`) as recommended in §6, with phases 1–3 of §7 in one PR:
+`AnchoredPopover` ([`frontend/app/element/anchored-popover.tsx`](../../frontend/app/element/anchored-popover.tsx)) as recommended in §6, with phases 1–3 of §7 in one PR:
 
 - **On it:** token usage, CPU cores, disk volumes, backend, host, the status bar tips, the version panel, and the agent pane's model/effort and session stats panels.
 - **Decisions taken (§8):** the agent panels follow chrome zoom; the title bar menus stay out (phase 4); the version panel keeps its own look, only its stacking moved to the shell.
 - **The status bar popovers anchor to their trigger element**, not a rect captured on click (§5.4).
 - **One dismiss rule** for the status bar popovers and the version panel: capture-phase mousedown outside the panel and its anchor, and Esc (§5.1, §5.5). Esc in a field inside the panel stays with the field, so the version panel's rename keeps working. The two agent panels keep their own keyboard and focus handling.
-- **`popover-frame` mixin** (`frontend/app/element/popover-frame.scss`) for the shared status bar frame (§5.7).
+- **`popover-frame` mixin** ([`frontend/app/element/popover-frame.scss`](../../frontend/app/element/popover-frame.scss)) for the shared status bar frame (§5.7).
 - **Ctrl+wheel over an open popover zooms the chrome** (`data-zoom-scope="chrome"` in `isOverChrome`, §5.6).
 
 Two more defects found while migrating, both gone with the copies:

@@ -4,7 +4,7 @@
 one concretely actionable bug this investigation surfaced (3 of 7 agent
 panes losing their live process silently on restart) is filed as issue
 #3463 and specified in
-`docs/specs/SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`
+[`docs/specs/SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`](../specs/SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md)
 (not yet implemented). The broader recommendations below (launcher exit
 sentinel, §5.E/§5.G of `SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`,
 re-measuring issue #2218's pool cap, opt-in audit-policy change) are not
@@ -68,7 +68,7 @@ user to manually relaunch. Every agent session hosted in that instance
 (confirmed via `ListAgents`: all peers showed restart times under a minute
 apart) was killed and restarted along with it.
 
-This is the same headline as `docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`
+This is the same headline as [`docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`](INCIDENT_2026_06_26_APP_CLOSED.md)
 ("AgentMux Closed Unexpectedly") — that incident's root cause (Windows
 OOM-killing the process with zero warning under page-file/commit exhaustion)
 is the leading, well-corroborated explanation here too, not a new mechanism.
@@ -121,12 +121,12 @@ independently by two sessions from the same `mem_attribution` telemetry
 checked live against the actual running processes rather than assumed from
 history:
 - `sysinfo` crate's `CreateToolhelp32Snapshot` handle leak
-  (`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`,
+  ([`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`](../status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md),
   fixed PR #2666, confirmed via a 4-hour soak) — `agentmux-srv/Cargo.toml`
   still pins `sysinfo = "0.35"` (the fixed floor); live handle counts on both
   running `agentmux-srv-0.56.8` PIDs were 170 and 905 — nowhere near the
   leak's hundreds-of-thousands signature.
-- `FsWatchPool` sweep leak (`docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`,
+- `FsWatchPool` sweep leak ([`docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`](../status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md),
   fixed PR #2722) — not independently re-verified this session, but no
   evidence implicates it (handle counts are healthy, and that leak has the
   same handle-count signature the check above already ruled out).
@@ -158,7 +158,7 @@ history:
    backend RPC it wraps) at incident time, not a session-messaging or log
    proxy. The July 2026-07-02 GPU-driver-renderer-commit
    investigation (issue #2218, fixed PRs #2220/#2221/#2222 — see the
-   correction added to `docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`
+   correction added to [`docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`](../specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md)
    this same day) *bounded* that floor's growth (pressure-aware pool-demote
    cap) but never eliminated the fact that every pane/window still costs
    the GPU driver real, kernel-charged, pagefile-backed commit. Whether
@@ -248,13 +248,13 @@ history:
 
 ## Corrections made to prior docs as part of this investigation
 
-- `docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`'s
+- [`docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`](../specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md)'s
   status line was stale — it read "proposed — Ready to schedule" for §B.5,
   but §B.5's core mechanism was in fact implemented (issue #2218, PRs
   #2220-2222, shipped v0.54.4), just via a different, better-informed
   design (pool-demote-and-reuse, not literal destroy-on-close) than the
   section's own original prose describes, because destroy-on-close turned
-  out not to work at all (`docs/retro/retro-window-lifecycle-leak-2026-07-04.md`).
+  out not to work at all ([`docs/retro/retro-window-lifecycle-leak-2026-07-04.md`](../retro/retro-window-lifecycle-leak-2026-07-04.md)).
   Corrected in place with a dated note; see that file.
 
 ---

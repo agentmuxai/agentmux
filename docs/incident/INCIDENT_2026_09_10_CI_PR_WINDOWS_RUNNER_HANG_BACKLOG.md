@@ -187,5 +187,5 @@ per-test timing breakdown before deciding what moves — not attempted here.
 - Korp's PR: https://github.com/agentmuxai/agentmux/pull/3198 (`korp/ci-concurrency-groups`).
 - `git log origin/main --since="2026-09-10 14:00" --until="2026-09-11 05:00"` for the merge
   correlation check in §3.
-- `.github/workflows/ci-pr.yml` (current, at the time of writing — confirms no
+- [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml) (current, at the time of writing — confirms no
   `timeout-minutes` anywhere in the file).

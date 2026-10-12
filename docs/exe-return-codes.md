@@ -2,7 +2,7 @@
 
 ## agentmux.exe / agentmux-launcher (Windows entry point)
 
-On Windows, the executable users actually launch is `agentmux.exe` — `scripts/package-portable.sh` builds it by copying `agentmux-launcher.exe`, and `packaging/windows/agentmux.iss` installs it under that name. The launcher owns `agentmux-srv`'s lifecycle directly and spawns `agentmux-cef` itself (see the Architecture section of [`README.md`](../README.md#architecture)).
+On Windows, the executable users actually launch is `agentmux.exe` — [`scripts/package-portable.sh`](../scripts/package-portable.sh) builds it by copying `agentmux-launcher.exe`, and [`packaging/windows/agentmux.iss`](../packaging/windows/agentmux.iss) installs it under that name. The launcher owns `agentmux-srv`'s lifecycle directly and spawns `agentmux-cef` itself (see the Architecture section of [`README.md`](../README.md#architecture)).
 
 This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can also **pass through the CEF host's or `agentmux-srv`'s own raw OS exit code** once a restart/recovery budget is exhausted (`break code`, e.g. after repeated abnormal host exits or repeated system-OOM restarts) or a relaunch attempt itself fails to spawn. Codes below are the launcher's own, not inherited ones.
 
@@ -29,16 +29,16 @@ This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can
 | **0** | Clean shutdown — server exited normally. This includes: version/help flag requested, signal-based shutdown (SIGTERM/SIGINT), lock file indicates another instance is running, or graceful stop via internal command |
 | **1** | Fatal startup error — server failed to start. Causes include: lock file creation failure, database migration failure, HTTP/WebSocket server bind failure, or other unrecoverable initialization error |
 | **2** | CLI usage error (unknown flag, bad value) — clap default. Not an AgentMux code; listed so `migrate --verify` scripts do not mistake it for a data finding. |
-| **3** | `migrate --verify` only: at least one APPLIED migration failed its post-condition check (a mismatch, or the check itself errored — including a tracking table that could not be read). Distinct from 1 (a migration run failed) and from clap 2. `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 1b. |
+| **3** | `migrate --verify` only: at least one APPLIED migration failed its post-condition check (a mismatch, or the check itself errored — including a tracking table that could not be read). Distinct from 1 (a migration run failed) and from clap 2. [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) Phase 1b. |
 
-A failed data migration exits 1 **without** emitting `AGENTMUXSRV-ESTART`; srv first writes a single `AGENTMUXSRV-MIGRATION-FAILED error:<reason>` line to stderr so the launcher / CEF host can surface the reason immediately (`crates/common/src/srv_stderr.rs`). Before 2026-09-06 a migration failure was logged as a warning and the server started anyway — `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 1.
+A failed data migration exits 1 **without** emitting `AGENTMUXSRV-ESTART`; srv first writes a single `AGENTMUXSRV-MIGRATION-FAILED error:<reason>` line to stderr so the launcher / CEF host can surface the reason immediately ([`crates/common/src/srv_stderr.rs`](../crates/common/src/srv_stderr.rs)). Before 2026-09-06 a migration failure was logged as a warning and the server started anyway — [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) Phase 1.
 
 ## Windows Installer (Inno Setup)
 
-The Windows installer moved from NSIS to **Inno Setup** (`packaging/windows/agentmux.iss`, driven by `scripts/package-installer.ps1`). It uses Inno Setup's own standard `Setup.exe` exit codes (not the NSIS table this doc previously listed) — see the [Inno Setup documentation](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes) for the authoritative list, since no custom exit-code handling is defined in `agentmux.iss`. Standard silent-install flags apply: `/SILENT`, `/VERYSILENT`.
+The Windows installer moved from NSIS to **Inno Setup** ([`packaging/windows/agentmux.iss`](../packaging/windows/agentmux.iss), driven by [`scripts/package-installer.ps1`](../scripts/package-installer.ps1)). It uses Inno Setup's own standard `Setup.exe` exit codes (not the NSIS table this doc previously listed) — see the [Inno Setup documentation](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes) for the authoritative list, since no custom exit-code handling is defined in `agentmux.iss`. Standard silent-install flags apply: `/SILENT`, `/VERYSILENT`.
 
 ## Notes
 
 - On Windows, `agentmux-launcher` auto-spawns `agentmux-srv` as a sidecar process (owning its lifecycle directly, rather than `agentmux-cef` spawning it) and also spawns `agentmux-cef` itself. If the backend exits with code 1, the application will not function correctly.
 - Child processes running inside terminal panes (shells, commands) have their own exit codes which are tracked internally but do not affect the application's exit code.
-- `wsh` (the old shell-integration binary) has been retired — see `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`. There is no binary to deploy or document return codes for anymore.
+- `wsh` (the old shell-integration binary) has been retired — see [`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](specs/archive/SPEC_RETIRE_WSH_2026_04_12.md). There is no binary to deploy or document return codes for anymore.

@@ -83,4 +83,4 @@ Fixed by skipping any candidate in `recheck_all_watched_agents` with an empty `p
 | `agentmux-srv/src/identity/resolver/inject.rs` | `resolve_bound_oauth_config_dir`, `resolve_claude_config_dir`'s fallback chain (unmodified, read for diagnosis) |
 | `agentmux-srv/src/server/reactive.rs` | `handle_reactive_register` — call site 3 (the P1 self-check, closing the resolve-then-install window) |
 | `agentmux-srv/src/bootstrap.rs`, `agentmux-srv/src/main.rs` | Threading `id_store`/`identity_store` into `SubagentWatcher::new`/`spawn` and `spawn_background_subsystems` |
-| `docs/specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md` | The adjacent, earlier fix for the "identity already resolvable at registration" case |
+| [`docs/specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`](../specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md) | The adjacent, earlier fix for the "identity already resolvable at registration" case |

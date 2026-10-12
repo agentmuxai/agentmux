@@ -115,12 +115,12 @@ The race depends on timing:
 
 | File | Line | Issue |
 |------|------|-------|
-| `frontend/app/view/term/term.tsx` | 162 | `fireAndForget(initTerminal)` — not awaited |
-| `frontend/app/view/term/termwrap.ts` | 749-751 | `resyncController()` called from `handleResize()` before subscribe |
-| `frontend/app/view/term/termwrap.ts` | 595-596 | `subscribe()` happens after resync already sent |
-| `frontend/app/view/term/termwrap.ts` | 600 | `this.loaded = true` set after `loadInitialTerminalData()` |
-| `frontend/app/view/term/termwrap.ts` | 652-667 | `handleNewFileSubjectData()` buffers to `heldData` when `!loaded` |
-| `frontend/app/view/term/termwrap.ts` | 687-718 | `loadInitialTerminalData()` — **never flushes `heldData`** |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | 162 | `fireAndForget(initTerminal)` — not awaited |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | 749-751 | `resyncController()` called from `handleResize()` before subscribe |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | 595-596 | `subscribe()` happens after resync already sent |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | 600 | `this.loaded = true` set after `loadInitialTerminalData()` |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | 652-667 | `handleNewFileSubjectData()` buffers to `heldData` when `!loaded` |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | 687-718 | `loadInitialTerminalData()` — **never flushes `heldData`** |
 | `agentmuxsrv-rs/src/backend/blockcontroller/shell.rs` | 522-544 | PTY read loop starts immediately, no frontend readiness check |
 
 ---

@@ -70,7 +70,7 @@ how Swarm's client-side list gets invalidated/refreshed after its first fetch.
    bug either, a theory this investigation raised and then ruled out.
 
 4. **The frontend mounts eagerly, not lazily, within the currently-open window** —
-   `frontend/app/workspace/workspace.tsx`'s `<For each={allTabIds()}>` renders every tab
+   [`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx)'s `<For each={allTabIds()}>` renders every tab
    unconditionally (inactive ones get `display:none`, not omitted); within a tab, `TileLayout` gives
    every leaf a real `ContentRenderer`, not a lazy placeholder.
 
@@ -156,7 +156,7 @@ are now superseded by direct evidence:
   **`SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`** — both about *subagent*
   (Task-tool/Workflow-tool) reconciliation nested under an already-tracked top-level agent block,
   not about the top-level block's own tracked/untracked status. Different layer of the same tree.
-- Searched every doc under `docs/specs/`, `docs/reports/`, `docs/retro/` for
+- Searched every doc under [`docs/specs/`](../specs), [`docs/reports/`](.), [`docs/retro/`](../retro) for
   restore/mount/startup/lazy language crossed with `tracked-blocks`/`CONTROLLER_REGISTRY`/
   `get_all_controllers` — no other hits. **This is, as far as the repo's own documentation shows,
   an unaddressed gap**, not a regression in something that used to work.

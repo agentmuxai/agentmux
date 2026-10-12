@@ -11,7 +11,7 @@ terminal (bash / zsh / pwsh / fish), delegating to a small Node core
 > environment (already present in any agent pane, the same way
 > `agentmux-mcp` reaches every other `/api/v1/*` route). It cannot yet
 > discover or query a *different* running instance — see
-> `docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md` for the
+> [`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`](specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) for the
 > full design and the planned Phase 2.
 
 ---
@@ -74,7 +74,7 @@ signal that survives the trip: a `bg` row with an old `age` and
 `status: success` is worth checking by hand in the live UI even though
 `STUCK?` reads clean for it.
 
-Full design: `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
+Full design: [`docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`](specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md).
 This targets one specific, narrow bug class — it is not a fix for the
 underlying issue (a first-party in-renderer self-expiry fix is tracked
 separately, see that spec §1.2) and not general Activity Dock
@@ -94,10 +94,10 @@ then cross-channel — same underlying route `GetAgentTranscript` uses, so
 an agent's own MCP tool call and a human running this command see
 identical data.
 
-This is Phase A of `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
+This is Phase A of [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`](specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md)
 — it does not reach LAN or WAN conversation content (Phase B/C, not yet
 built, and gated on the jekt security rules in
-`docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` — those
+[`docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`](specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md) — those
 rules are now live in code as of PR #2764, so this gate is satisfied).
 
 ## Finding which instance has a block/agent (`find`)
@@ -117,7 +117,7 @@ muxspect find Korp
 An empty result is a legitimate answer — "not found on this host, in any
 known channel" — not an error. Same LAN/WAN boundary as `conversations`
 above (host + cross-channel only). See
-`docs/specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`.
+[`docs/specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`](specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md).
 
 ## Inspecting the pane layout (`layout`)
 
@@ -173,7 +173,7 @@ muxspect work --json
 
 Muxqueue is the shared backlog any agent can add to and any agent can claim —
 the pull counterpart to jekt's addressed push delivery. See
-`docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md`.
+[`docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md`](reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
 
 Each item shows its state, current holder, attempts burned against its limit,
 any kind/target restriction, and the `result` field — which is the completion
@@ -213,10 +213,10 @@ checkable effect. Both are produced by one function
 **The thing to look for: `MISMATCH`.** That row is a migration the tracking
 table says has run, but whose effect is not in the data — the "marker says
 done, table is empty" shape behind
-`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`. It is the one
+[`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md). It is the one
 migration-state answer to "why is this agent / definition / bundle missing
 after an upgrade" that `describe`'s `last_error` cannot give you. The command
-names the migration and the counts; `docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`
+names the migration and the counts; [`docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`](incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md)
 §4–§5 is what to do next.
 
 Read-only, like the CLI: it opens both tracking stores `SQLITE_OPEN_READ_ONLY`
@@ -251,7 +251,7 @@ independent view of process/turn state. Concretely it can see:
   actionable fix available" look identical without it. Added to close
   exactly that gap after a real incident where `muxspect describe` came
   back diagnostically empty on a wedged agent — see
-  `docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`.
+  [`docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`](reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md).
   Not a live/independent error tracker — it's a second reader over the
   same durable frame the pane's own error bubble already comes from, so it
   can never drift from what the UI shows.
@@ -281,4 +281,4 @@ header every route sets. A 404 specifically gets a version hint folded
 into the failure message: a stale local build predating whatever command
 you just ran looks exactly like a missing route otherwise (a real gap this
 session hit live — `muxspect conversations` 404ing against an
-un-rebuilt instance). See `docs/specs/SPEC_MUXSPECT_SRV_VERSION_HEADER_2026_08_22.md`.
+un-rebuilt instance). See [`docs/specs/SPEC_MUXSPECT_SRV_VERSION_HEADER_2026_08_22.md`](specs/SPEC_MUXSPECT_SRV_VERSION_HEADER_2026_08_22.md).

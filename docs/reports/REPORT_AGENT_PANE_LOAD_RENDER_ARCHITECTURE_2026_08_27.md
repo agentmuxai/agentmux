@@ -260,7 +260,7 @@ everything is ready, then one transition. What exists instead is `ready()` — a
 single boolean in `block.tsx` that each async source must be individually
 taught to hold down.
 
-There are **26 modules** under `frontend/app/view/agent/` that independently
+There are **26 modules** under [`frontend/app/view/agent/`](../../frontend/app/view/agent) that independently
 call `waveEventSubscribe` (excluding tests). Each maintains its own async
 settle path. `ready()` currently accounts for three of them. Every future
 surface — a new dock row type, a new status strip, a new inline panel — is a
@@ -454,7 +454,7 @@ sequence still reads as the argument it was.
 - `agentmux-srv/src/server/app_api/blockfile.rs:100-200` (freshness check)
 - `frontend/app/view/agent/hooks/useSnapshotPersistence.ts:41,74,133`
 - `frontend/app/view/agent/activity/{backfill-tracker,debounced-refresh,subagent-source,dispatch-source}.ts`
-- `frontend/app/view/agent/hooks/useSubagentBackfillGate.ts`
+- [`frontend/app/view/agent/hooks/useSubagentBackfillGate.ts`](../../frontend/app/view/agent/hooks/useSubagentBackfillGate.ts)
 - `frontend/app/store/wps.ts:41-48` (unscoped subscribe ⇒ `allscopes: true`)
 - Prior work: `REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`,
   `REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md`,

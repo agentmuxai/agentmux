@@ -171,7 +171,7 @@ review rather than by me:
 **macOS — still cannot authenticate, but no longer breaks.** Claude Code on
 macOS keeps OAuth credentials in the encrypted Keychain and never writes
 `.credentials.json` at all (`identity/resolver/oauth_probe.rs` §77–121,
-`docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`). An
+[`docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`](../retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md)). An
 unguarded bind of a nonexistent source makes Docker refuse `create_container`,
 which would have turned "container agents cannot authenticate on macOS" into
 "container agents cannot START on macOS" — strictly worse than the bug being
@@ -221,8 +221,8 @@ break in a long-running container, this is the first thing to suspect.
   `agent_home_mounts`, `mounts_match`, `CONTAINER_ENV_DENYLIST`
 - `agentmux-srv/src/server/agent_handlers/input.rs` — `agentinput` container branch
 - `agentmux-srv/src/server/app_api/agent_io.rs` — `agent.send` container branch
-- `docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md` — Open Question #2
-- `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md` — container-agent UX,
+- [`docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md`](../specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) — Open Question #2
+- [`docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md`](../specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) — container-agent UX,
   still open and unrelated to this fix
-- `docs/reports/REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md` — the
+- [`docs/reports/REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md`](REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md) — the
   delivery-path bug found earlier in the same investigation (PR #2930)

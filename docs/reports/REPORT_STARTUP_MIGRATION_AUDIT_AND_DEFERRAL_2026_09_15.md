@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-15
 **Status:** active — audit stands; the design follow-through is
-`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`,
+[`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`](../specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md),
 tracked by [#3258](https://github.com/agentmuxai/agentmux/issues/3258)
 **Ask:** "there should be no migrations at startup... any migrations will run
 through the upgrade system which will appear as a button in the status bar,
@@ -13,11 +13,11 @@ migrations) and propose how to remove them from the ordinary boot path.
 (`agentmux-launcher/src/srv_spawner.rs`), and the existing (partially built)
 Maintenance/upgrade UI (`frontend/app/statusbar/{UpdateStatus,MaintenanceSection,
 BackendStatus}.tsx`, `agentmux-cef/src/commands/backend.rs`,
-`docs/specs/SPEC_UPGRADE_PANEL_2026_06_27.md`,
-`docs/specs/app-update-check.md`).
-**Related:** `docs/reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md`
+[`docs/specs/SPEC_UPGRADE_PANEL_2026_06_27.md`](../specs/SPEC_UPGRADE_PANEL_2026_06_27.md),
+[`docs/specs/app-update-check.md`](../specs/app-update-check.md)).
+**Related:** [`docs/reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md`](REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md)
 (today, earlier — the per-migration splash-row overflow symptom this report's
-fix makes moot for ordinary boots), `docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`.
+fix makes moot for ordinary boots), [`docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`](REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md).
 
 ---
 
@@ -45,7 +45,7 @@ constraints, not just history:
   to cut the subprocess-spawn latency the deferred design added **to every
   ordinary boot**, not just the rare migration boot. This is the architecture
   that ships today.
-- `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` §1.5
+- [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](../specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) §1.5
   independently re-derives the same tradeoff a month later and explicitly
   recommends *against* re-reverting to the subprocess model, closing the
   safety gap a different way instead (fatal-on-failure before `ESTART`,
@@ -121,9 +121,9 @@ isolated `task package` per-build data dir.
 
 ## 3. The existing Maintenance/upgrade UI does NOT actually gate this today
 
-`docs/specs/SPEC_UPGRADE_PANEL_2026_06_27.md` (header still literally says
+[`docs/specs/SPEC_UPGRADE_PANEL_2026_06_27.md`](../specs/SPEC_UPGRADE_PANEL_2026_06_27.md) (header still literally says
 **"Status: Spec — not yet implemented"**, though the components it
-describes have since shipped — `frontend/app/statusbar/UpdateStatus.tsx`,
+describes have since shipped — [`frontend/app/statusbar/UpdateStatus.tsx`](../../frontend/app/statusbar/UpdateStatus.tsx),
 `MaintenanceSection.tsx`, `getApi().runMigrations()` /
 `cef-api.ts:796`, `agentmux-cef/src/commands/backend.rs:173` — the doc
 status line is stale and should be corrected regardless of this report's
@@ -273,7 +273,7 @@ exactly what `341faa981` caught. Recommendations for whoever implements §4:
 ## 6. Everything else in startup is not the bottleneck here
 
 For completeness (the ask was to audit startup as a whole, not just
-migrations): `docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`
+migrations): [`docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`](REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md)
 already audited the rest of the boot sequence (prep → backend → host spawn →
 cef_init → window creation → paint → frontend bootstrap → tab reveal) and
 found its issues to be about **visibility** (gaps that look stuck but

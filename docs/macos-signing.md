@@ -3,13 +3,13 @@
 How to build, sign, and notarize the AgentMux macOS app for direct distribution.
 
 The app is a **CEF (Chromium Embedded Framework)** desktop app — 100% Rust, no Tauri/Electron.
-`task package:macos` (`scripts/package-macos.sh`) does the full build + sign + (attempted)
+`task package:macos` ([`scripts/package-macos.sh`](../scripts/package-macos.sh)) does the full build + sign + (attempted)
 notarize in one command; this doc explains what it does and how to set up credentials.
 
-**As of `docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md`, plain `task package:macos`
+**As of [`docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md`](specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md), plain `task package:macos`
 bakes an isolated per-build channel — it does NOT open the real user data dir.** For direct
 distribution (this doc's actual purpose), use `task package:release:macos` instead, which
-bakes the `stable` channel and is guarded (`scripts/guard-stable-build.sh`) to refuse unless
+bakes the `stable` channel and is guarded ([`scripts/guard-stable-build.sh`](../scripts/guard-stable-build.sh)) to refuse unless
 the tree is clean and `HEAD` is a merged `chore: release v*` commit — see "Build + Sign +
 Notarize" below.
 
@@ -18,7 +18,7 @@ Credential details (Apple ID, Team ID, certificate name) were also kept in the p
 `agentmuxai` org, 2026-09-09). Corrected 2026-09-09 (Codex catch on PR #3122): this
 was stale even before the repo vanished — for CI, the credentials actually live as
 this repo's own GitHub Actions secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, consumed by `.github/workflows/build-macos.yml`),
+`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, consumed by [`.github/workflows/build-macos.yml`](../.github/workflows/build-macos.yml)),
 not in a separate repo. For local signing (this doc's own manual flow below), the
 packager's Keychain auto-detection is still the source.
 
@@ -66,7 +66,7 @@ task package:release:macos          # → ~/Desktop/AgentMux_<VERSION>_arm64.dmg
 ```
 
 `task package:release:macos` refuses to run unless the tree is clean and `HEAD` is a merged
-`chore: release v*` commit (`scripts/guard-stable-build.sh`; `AGENTMUX_STABLE_OVERRIDE=1`
+`chore: release v*` commit ([`scripts/guard-stable-build.sh`](../scripts/guard-stable-build.sh); `AGENTMUX_STABLE_OVERRIDE=1`
 bypasses the guard for a one-off local test — never use it for an artifact you actually
 intend to distribute). It then runs `RELEASE_CHANNEL=stable bash scripts/package-macos.sh`,
 which builds `build:frontend`/`build:backend`/`build:host`/`copy:schema`/`bundle` itself
@@ -101,7 +101,7 @@ which builds `build:frontend`/`build:backend`/`build:host`/`copy:schema`/`bundle
    `agentmux-srv`, `agentmux-mcp` and `agentmux-bashwrap` (srv's keeps the fixed identifier
    `ai.agentmux.srv`, which the login keychain's "Always Allow" is tied to), the host, then
    the `.app` bundle. The backend + host + app get
-   `build/entitlements.mac.plist` (CEF JIT + CLI feature access). Signing each Mach-O before
+   [`build/entitlements.mac.plist`](../build/entitlements.mac.plist) (CEF JIT + CLI feature access). Signing each Mach-O before
    sealing the bundle is required for notarization to accept them.
 
 3. **Builds + signs the DMG** (with an `/Applications` drag-target symlink).
@@ -159,7 +159,7 @@ Where the leanness comes from — so you know what to fix if a check fails:
 - **Source maps**: `package-macos.sh` deletes `frontend/**/*.map` (~28 MB). `STRIP_MAPS=0`
   keeps them (debugging only).
 - **Channel**: `task package:release:macos` sets `RELEASE_CHANNEL=stable`, which
-  `scripts/package-macos.sh` exports as `AGENTMUX_BUILD_CHANNEL_DEFAULT=stable` before any
+  [`scripts/package-macos.sh`](../scripts/package-macos.sh) exports as `AGENTMUX_BUILD_CHANNEL_DEFAULT=stable` before any
   cargo invocation, so `option_env!` bakes in `stable` → the app opens the real user data dir.
   Plain `task package:macos` bakes a `local-<branch>-<hash>-<build-id>` channel instead (same
   scheme as Windows `task package` / Linux `task package:linux`) — that's the right default for
@@ -196,7 +196,7 @@ Nothing here ever depended on `agentmux-builder`, which no longer exists (confir
 from the `agentmuxai` org, 2026-09-09) and, per the above, never actually held this
 pipeline regardless.
 
-See `docs/windows-code-signing.md` for the equivalent *Windows* research — signing
+See [`docs/windows-code-signing.md`](windows-code-signing.md) for the equivalent *Windows* research — signing
 there genuinely is unautomated and deferred, unlike macOS. That doc was recovered from
 the same now-deleted `agentmux-builder` repo.
 

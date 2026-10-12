@@ -16,7 +16,7 @@ The two turned out to be unrelated. They are reported together because the secon
 
 ## 2. LAN: announced over IPv6 only
 
-This is the same fault recorded in `docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` §8.1 and §8.3. What is new is that, since #4196, the mDNS library's own messages reach the srv log, which neither earlier investigation had.
+This is the same fault recorded in [`docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md`](../specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) §8.1 and §8.3. What is new is that, since #4196, the mDNS library's own messages reach the srv log, which neither earlier investigation had.
 
 ### 2.1 What the warning means
 

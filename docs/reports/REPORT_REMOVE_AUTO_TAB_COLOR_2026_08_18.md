@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18
 **Status:** Analysis complete — no code changed. Written to inform implementation.
-**Scope:** `frontend/app/store/tab-actions.ts`, `frontend/app/tab/tabbar.tsx`.
+**Scope:** [`frontend/app/store/tab-actions.ts`](../../frontend/app/store/tab-actions.ts), [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx).
 
 ## Ask
 
@@ -12,7 +12,7 @@ Default tabs and new tabs currently get an automatically-assigned color. Remove 
 
 ### 1. Random color on every new tab
 
-`frontend/app/store/tab-actions.ts:22-32`, in `createTab()`:
+[`frontend/app/store/tab-actions.ts:22-32`](../../frontend/app/store/tab-actions.ts#L22-L32), in `createTab()`:
 
 ```ts
 function randomNewTabColor(): string {
@@ -24,7 +24,7 @@ Called immediately after `WorkspaceService.CreateTab(...)`, via `ObjectService.U
 
 ### 2. Fixed "Blue" on the startup (first) tab
 
-`frontend/app/tab/tabbar.tsx:99-128`, an `onMount` effect: if the workspace has exactly one tab and it has no `tab:color` set yet (and hasn't been backfilled before, per the `tab:color-initialized` guard), it applies `#2562c5` ("Blue" in `TAB_COLORS`) unconditionally. This exists because the backend-created startup tab doesn't get a color meta at creation time, so without this, the very first tab a user ever sees would look different (neutral) from every subsequently-created tab (vibrant) — the backfill was added specifically to make the *first* tab consistent with the *random* behavior of every tab after it, not as an independent feature.
+[`frontend/app/tab/tabbar.tsx:99-128`](../../frontend/app/tab/tabbar.tsx#L99-L128), an `onMount` effect: if the workspace has exactly one tab and it has no `tab:color` set yet (and hasn't been backfilled before, per the `tab:color-initialized` guard), it applies `#2562c5` ("Blue" in `TAB_COLORS`) unconditionally. This exists because the backend-created startup tab doesn't get a color meta at creation time, so without this, the very first tab a user ever sees would look different (neutral) from every subsequently-created tab (vibrant) — the backfill was added specifically to make the *first* tab consistent with the *random* behavior of every tab after it, not as an independent feature.
 
 **These two are coupled**, not independent: #2 exists to paper over the inconsistency #1 creates. Removing #1 without #2 would leave the startup tab colored and every new tab neutral — the opposite of today's problem. Removing #1 makes #2 pointless (nothing left for it to stay "consistent" with), so both need to go together, which is what's proposed below.
 

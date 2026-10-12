@@ -21,7 +21,7 @@ units, and nothing connects them.
 
 ### 1. Chrome zoom scales the pane header in CSS only
 
-`frontend/app/store/zoom.ts:235` (`applyChromeZoomCSS`) sets one CSS variable,
+[`frontend/app/store/zoom.ts:235`](../../frontend/app/store/zoom.ts#L235) (`applyChromeZoomCSS`) sets one CSS variable,
 `--zoomfactor`, on `<html>`. The pane header picks it up through the shared
 mixin:
 
@@ -68,7 +68,7 @@ gained `zoom: var(--zoomfactor)`.
 ### 3. Nothing re-runs layout on a chrome zoom change
 
 `chromeZoomAtom` (`zoom.ts:52`) is read only by `chromeZoomIn`/`chromeZoomOut`
-inside `zoom.ts`. The layout engine (`frontend/layout/`) never imports it.
+inside `zoom.ts`. The layout engine ([`frontend/layout/`](../../frontend/layout)) never imports it.
 Neither `updateTree()` nor `computeMainAxisAllocation` gets a zoom input,
 so the chip slot stays at `33 + gap` whatever the header actually renders at.
 This is the decoupling you suspected.

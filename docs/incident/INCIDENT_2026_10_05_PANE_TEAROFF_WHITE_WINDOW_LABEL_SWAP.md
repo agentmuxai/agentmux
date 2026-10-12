@@ -5,7 +5,7 @@
 **Author:** AgentY (Claude Opus 5.5), from the installed instance's logs and read-only window queries (nothing was attached to or driven).
 **Severity:** Medium-high. The tear-off left the operator with an empty window instead of their pane. Nothing was logged as an error and nothing recovered. The same mislabelling is frequent (§5), so any pool-backed tear-off or new window can land on it.
 **Affected:** installed v0.59.9 (latest release), Windows. Mislabelling seen in the retained logs of every version from v0.58.2 (2026-09-29) on.
-**Fixed in:** the change this document ships with (first release after v0.59.9). Until then no release had touched the label binding: no commit between `v0.59.9` and this fix changes `crates/cef/src/client/`, `crates/cef/src/reducer/`, the window or pane pool, the floating-pane window or the frontend's pool bootstrap.
+**Fixed in:** the change this document ships with (first release after v0.59.9). Until then no release had touched the label binding: no commit between `v0.59.9` and this fix changes [`crates/cef/src/client/`](../../crates/cef/src/client), [`crates/cef/src/reducer/`](../../crates/cef/src/reducer), the window or pane pool, the floating-pane window or the frontend's pool bootstrap.
 **Related:** `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30.md` (pool relabel on promotion), `SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md` (snapshot/reveal handshake).
 
 ---
@@ -43,7 +43,7 @@ The real pane page inside the frame never heard anything, and its browser child 
 ## 3. How labels are bound today
 
 - Every window creation first enqueues a `PendingWindowCreation { label, kind }` (`EnqueuePendingWindowCreation`).
-- `on_after_created` (`crates/cef/src/client/lifecycle.rs`) dispatches `DequeuePendingWindowCreation`, which pops the **front** of that queue, and registers the new browser under the popped label.
+- `on_after_created` ([`crates/cef/src/client/lifecycle.rs`](../../crates/cef/src/client/lifecycle.rs)) dispatches `DequeuePendingWindowCreation`, which pops the **front** of that queue, and registers the new browser under the popped label.
 - That is only correct if browsers finish creation in the order their creations were enqueued. Two creation paths race here:
   - the pane pool creates its own Win32 frame and a windowed CEF browser inside it;
   - the window pool goes through CEF Views (`browser_view_create` + `window_create_top_level`).
@@ -83,7 +83,7 @@ Startup-only logs (three registrations, one per pool window spawned at launch) s
 
 ## 6. Fixes
 
-1. **Bind the label to the browser, not to arrival order. Implemented** (`crates/cef/src/client/creation_labels.rs`). `on_after_created` now takes the pending entry for this browser's own label (`HostCommand::TakePendingWindowCreation`), wherever it is in the queue. It learns the label one of two ways:
+1. **Bind the label to the browser, not to arrival order. Implemented** ([`crates/cef/src/client/creation_labels.rs`](../../crates/cef/src/client/creation_labels.rs)). `on_after_created` now takes the pending entry for this browser's own label (`HostCommand::TakePendingWindowCreation`), wherever it is in the queue. It learns the label one of two ways:
    - a browser with a handler of its own carries the label in it (`AgentMuxHandler::new_for_creation`): floating panes, the Windows pane pool, browser panes;
    - a CEF Views window (window pool, new windows, tab tear-off, and the macOS/Linux pools) shares the top-level client, so its `BrowserView` is tagged with a view ID right after `browser_view_create`. The browser is only created inside `window_create_top_level`, so the tag is in place when `on_after_created` reads it back. (`BrowserViewDelegate::OnBrowserCreated` would have been the obvious hook, but CEF calls it *after* `OnAfterCreated`.)
 

@@ -22,7 +22,7 @@ The request had three questions: (1) was this done before, (2) what does outside
 
 ### 1.1 The existing spec (#4065)
 
-`docs/specs/SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md`, by Maricon@charlie, status "proposed — nothing here is built". It already contains:
+[`docs/specs/SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md`](../specs/SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md), by Maricon@charlie, status "proposed — nothing here is built". It already contains:
 
 - a measurement (comments 27.7% of lines, ~37% of characters in non-test source);
 - a taxonomy of eight comment kinds, with a 100-block sample (85% worth keeping, ~14% narration, restating, essay or stale);
@@ -38,7 +38,7 @@ I checked by searching the tree and git history, not by trusting the spec's stat
 
 | Thing the spec proposes | Present on `main`? |
 |---|---|
-| `scripts/check-comment-hygiene.mjs` (gate, report, `--code-equal`) | No (no file; no reference in `scripts/`, `.github/`, `package.json`, `Taskfile.yml`) |
+| [`scripts/check-comment-hygiene.mjs`](../../scripts/check-comment-hygiene.mjs) (gate, report, `--code-equal`) | No (no file; no reference in [`scripts/`](../../scripts), [`.github/`](../../.github), `package.json`, `Taskfile.yml`) |
 | "Comments" rules in `CONTRIBUTING.md` | No (no mention of comments there) |
 | Any condensing PR since 2026-09-30 | No (135 commits since, none about this) |
 | Open PR or issue | No (GitHub search finds only #4065 itself; 3 open PRs repo-wide, none related) |
@@ -58,7 +58,7 @@ All were mechanical, targeted at one *pattern* (labels, phase tags, PR citations
 
 ## 2. Re-measurement (does the spec's baseline hold?)
 
-I wrote an independent lexer (`scratch/measure.mjs` in my workspace, not committed) and ran it on `9e3e01438`. It skips strings, template literals, Rust raw strings and char literals, and handles nested block comments. Excluded: tests, the generated `frontend/types/rpc/` bindings, `splash_font.rs`. Tokens are chars / 4, so treat them as ±20%.
+I wrote an independent lexer (`scratch/measure.mjs` in my workspace, not committed) and ran it on `9e3e01438`. It skips strings, template literals, Rust raw strings and char literals, and handles nested block comments. Excluded: tests, the generated [`frontend/types/rpc/`](../../frontend/types/rpc) bindings, `splash_font.rs`. Tokens are chars / 4, so treat them as ±20%.
 
 | Measure (non-test TS + Rust) | Spec (09-30, `cee674b6f`) | Mine (10-02, `9e3e01438`) |
 |---|---:|---:|
@@ -69,7 +69,7 @@ I wrote an independent lexer (`scratch/measure.mjs` in my workspace, not committ
 | Review-history marker lines | 3,636 | 3,474 (2.1%) |
 | Lines in comment blocks of 10+ | "nearly half" | 44.7% (4,165 blocks, 73k lines) |
 
-The totals agree within 1–2%, and the ratio is flat. (My file count is higher because the `crates/` move and new files landed since; the spec's marker regex differs slightly from mine.)
+The totals agree within 1–2%, and the ratio is flat. (My file count is higher because the [`crates/`](../../crates) move and new files landed since; the spec's marker regex differs slightly from mine.)
 
 New facts the spec doesn't have:
 
@@ -175,7 +175,7 @@ The honest summary: the *accuracy* argument is evidence-backed, the *context* ar
 3. **Tier the work by risk.** The spec treats all condensing as one activity. I'd split it:
    - *Tier 0, mechanical:* delete review-marker narration ("`reagentx P1 on PR #2338 (thirty-fifth re-review)`") while keeping the `(#NNNN)`, and fix the dead file references. About 3,474 lines in 664 files, and the top 50 files hold 40%.
    - *Tier 1, judgment:* condense long why-comments in the hot files.
-   - *Tier 2, structural:* move essays (>8 lines) to `docs/`.
+   - *Tier 2, structural:* move essays (>8 lines) to [`docs/`](..).
    Tier 0 is low-risk and most of the "wrong comment" benefit. Tiers 1–2 carry the meaning risk.
 4. **The doc-comment half (54%) needs a different bar.** Rust `///` and JSDoc feed rustdoc and editor hovers, and the Rust API Guidelines ask for them. I would not condense public interface docs in the pilot; start with `//` and internal blocks.
 5. **Prevention is cheaper than the stock and already justified** (the spec's option B). It is a few hours of work and stops about 400 narration lines a month. Because agents ignore prose rules (§3.3), it should be a gate.
@@ -265,7 +265,7 @@ The 241 broken references stay until fixed. 196 have a verified replacement path
 
 ## 7. Trial: one file condensed (2026-10-03)
 
-§4.3 and §5 recommended condensing one file first and measuring it against criteria set in advance. The file was `frontend/app/view/agent/hooks/useAgentCommands.ts`, the densest file in the repo (68% comment lines) and the one with the most review narration (111 lines).
+§4.3 and §5 recommended condensing one file first and measuring it against criteria set in advance. The file was [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts), the densest file in the repo (68% comment lines) and the one with the most review narration (111 lines).
 
 ### 7.1 Method
 
@@ -298,20 +298,20 @@ Comment tokens are chars / 4. "Marker lines" are lines matching a review-history
 | File | Lines | Comment lines | Line ratio | Comment tok | Comment share of chars | Marker lines |
 |---|---:|---:|---:|---:|---:|---:|
 | `crates/srv/src/backend/storage/agents.rs` | 3,846 | 1,405 | 37% | ~21k | 45% | 46 |
-| `crates/bashwrap/src/bash_wrap.rs` | 3,627 | 1,341 | 37% | ~20.3k | 48% | 31 |
-| `frontend/app/view/agent/hooks/useAgentCommands.ts` | 1,927 | 1,310 | 68% | ~18.4k | 67% | 111 |
-| `crates/srv/src/backend/storage/migrations.rs` | 3,032 | 993 | 33% | ~16k | 40% | 16 |
-| `crates/srv/src/backend/lan_discovery.rs` | 3,088 | 972 | 31% | ~15.1k | 42% | 20 |
-| `crates/srv/src/server/reactive.rs` | 2,766 | 958 | 35% | ~15k | 47% | 33 |
-| `crates/srv/src/backend/blockcontroller/shell/lifecycle.rs` | 2,829 | 996 | 35% | ~14.8k | 42% | 30 |
-| `crates/common/src/ipc.rs` | 2,269 | 1,055 | 46% | ~14.3k | 60% | 11 |
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | 1,529 | 930 | 61% | ~14.2k | 65% | 28 |
-| `crates/cef/src/commands/window_pool.rs` | 2,215 | 923 | 42% | ~14k | 55% | 25 |
-| `frontend/app/view/swarm/swarm-model.ts` | 2,138 | 902 | 42% | ~14k | 52% | 20 |
-| `crates/srv/src/backend/blockcontroller/persistent/mod.rs` | 1,695 | 886 | 52% | ~13.9k | 64% | 19 |
-| `crates/srv/src/backend/agent_config.rs` | 3,190 | 877 | 27% | ~13.7k | 35% | 39 |
-| `crates/srv/src/backend/blockcontroller/persistent/spawn.rs` | 2,213 | 1,048 | 47% | ~13.7k | 40% | 54 |
-| `crates/srv/src/backend/bundle_import.rs` | 2,851 | 852 | 30% | ~13.2k | 38% | 99 |
+| [`crates/bashwrap/src/bash_wrap.rs`](../../crates/bashwrap/src/bash_wrap.rs) | 3,627 | 1,341 | 37% | ~20.3k | 48% | 31 |
+| [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) | 1,927 | 1,310 | 68% | ~18.4k | 67% | 111 |
+| [`crates/srv/src/backend/storage/migrations.rs`](../../crates/srv/src/backend/storage/migrations.rs) | 3,032 | 993 | 33% | ~16k | 40% | 16 |
+| [`crates/srv/src/backend/lan_discovery.rs`](../../crates/srv/src/backend/lan_discovery.rs) | 3,088 | 972 | 31% | ~15.1k | 42% | 20 |
+| [`crates/srv/src/server/reactive.rs`](../../crates/srv/src/server/reactive.rs) | 2,766 | 958 | 35% | ~15k | 47% | 33 |
+| [`crates/srv/src/backend/blockcontroller/shell/lifecycle.rs`](../../crates/srv/src/backend/blockcontroller/shell/lifecycle.rs) | 2,829 | 996 | 35% | ~14.8k | 42% | 30 |
+| [`crates/common/src/ipc.rs`](../../crates/common/src/ipc.rs) | 2,269 | 1,055 | 46% | ~14.3k | 60% | 11 |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | 1,529 | 930 | 61% | ~14.2k | 65% | 28 |
+| [`crates/cef/src/commands/window_pool.rs`](../../crates/cef/src/commands/window_pool.rs) | 2,215 | 923 | 42% | ~14k | 55% | 25 |
+| [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) | 2,138 | 902 | 42% | ~14k | 52% | 20 |
+| [`crates/srv/src/backend/blockcontroller/persistent/mod.rs`](../../crates/srv/src/backend/blockcontroller/persistent/mod.rs) | 1,695 | 886 | 52% | ~13.9k | 64% | 19 |
+| [`crates/srv/src/backend/agent_config.rs`](../../crates/srv/src/backend/agent_config.rs) | 3,190 | 877 | 27% | ~13.7k | 35% | 39 |
+| [`crates/srv/src/backend/blockcontroller/persistent/spawn.rs`](../../crates/srv/src/backend/blockcontroller/persistent/spawn.rs) | 2,213 | 1,048 | 47% | ~13.7k | 40% | 54 |
+| [`crates/srv/src/backend/bundle_import.rs`](../../crates/srv/src/backend/bundle_import.rs) | 2,851 | 852 | 30% | ~13.2k | 38% | 99 |
 
 `agent-view.tsx` has since shrunk to 1,497 lines (672 comment lines, ~10.7k comment tokens) as its split progressed; `store/agent-pane-state/types.ts` is 71% comments (862 of 1,218 lines).
 

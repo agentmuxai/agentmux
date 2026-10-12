@@ -69,7 +69,7 @@ python3 automate-git.py \
 ### 2. Switch to the AgentMux fork
 
 > **Build from the integration branch, never a feature branch.**
-> `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
+> [`docs/cef-build/CEF_FORK_MAINTENANCE.md`](CEF_FORK_MAINTENANCE.md) §4 (R3). A feature branch may look
 > newer and still be missing part of the carry-set — that is exactly how the
 > 2026-07 transparency gap happened. Run §5 of that doc against this checkout
 > before building; it must report **21 `OK`**. If it does not, the integration
@@ -110,7 +110,7 @@ If you see "class member cannot be redeclared" compile errors later, the patcher
 
 ### 4. Configure the build
 
-The canonical GN args are version-controlled at **`scripts/cef-build/args.gn`** in
+The canonical GN args are version-controlled at **[`scripts/cef-build/args.gn`](../../scripts/cef-build/args.gn)** in
 the agentmux repo — the exact configuration that built the shipped v0.45.0 libcef.
 Use the configure script: it regenerates the gitignored C-API wrappers (gotcha #1
 below), installs those args into the build tree, and runs `gn gen`:
@@ -206,7 +206,7 @@ bash scripts/verify-cef-patch.sh ~/cef-build/chromium_git/chromium/src/out/Relea
 ```
 
 `task bundle:linux` runs this **advisorily** (a warning, so `task dev` still works on the
-upstream cef-dll-sys fallback); `scripts/build-appimage-linux.sh` runs it as a **hard
+upstream cef-dll-sys fallback); [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) runs it as a **hard
 release gate** that refuses to package an AppImage whose libcef.so lacks the patch.
 The symbol it keys on (`window_begin_window_drag_<apiver>`) lives in `.symtab` — present
 in the unstripped build, gone after `strip` — so the gate must (and does) run **before**
@@ -215,10 +215,10 @@ the packaging strip. Override the gate with `AGENTMUX_SKIP_CEF_PATCH_CHECK=1` (e
 ### 8. Package + upload as a GitHub release (for CI)
 
 Local AgentMux builds resolve the libcef from `~/cef-build/.../Release_GN_x64` directly
-(`scripts/resolve-cef-runtime.sh`), so this step is **only for CI** — which has no build
+([`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh)), so this step is **only for CI** — which has no build
 tree and pulls the patched runtime from a release in `agentmuxai/cef`.
 
-**Do NOT strip first.** `scripts/build-appimage-linux.sh` strips at bundle time, and the
+**Do NOT strip first.** [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) strips at bundle time, and the
 patch-verification gate keys on `.symtab` symbols that `strip` removes — upload the
 **unstripped** `libcef.so`.
 
@@ -306,7 +306,7 @@ The AgentMux build pipeline finds your patched libcef automatically if it's in t
 
 ### Option A: Default location
 
-If you built at `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/`, you're done — `task bundle:linux` and `task package:linux` will pick it up via the resolver in `scripts/resolve-cef-runtime.sh`.
+If you built at `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/`, you're done — `task bundle:linux` and `task package:linux` will pick it up via the resolver in [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh).
 
 ### Option B: Explicit override
 

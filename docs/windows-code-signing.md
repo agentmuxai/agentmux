@@ -24,7 +24,7 @@
 
 - **Chosen path (when we activate): SignPath Foundation** — free code signing for Apache-2.0 OSS.
 - **Not EV.** EV no longer bypasses SmartScreen (removed 2024) and is only needed for kernel drivers (we have none). OV-level is functionally equivalent now — don't pay the EV premium or deal with USB tokens.
-- **The CI plumbing does not exist yet in this repo.** Activating this means adding the signing step to `.github/workflows/build-windows.yml` from scratch, not flipping on something already wired — see the corrected checklist below.
+- **The CI plumbing does not exist yet in this repo.** Activating this means adding the signing step to [`.github/workflows/build-windows.yml`](../.github/workflows/build-windows.yml) from scratch, not flipping on something already wired — see the corrected checklist below.
 
 ## The 2026 landscape (why these choices)
 

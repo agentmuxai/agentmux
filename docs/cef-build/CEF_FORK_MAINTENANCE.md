@@ -63,8 +63,8 @@ itself worth keeping.
 The probe was real, but it ran against a stale local ref.
 `agentmux/7977-drag-rightclick-and-transparency` had been **force-updated**
 (`d6fe3d449` -> `55edc030a`). Two existing documents already said the port was
-done -- `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md` and
-`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` -- and were not
+done -- [`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`](../reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md) and
+[`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](../specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) -- and were not
 consulted.
 
 **Re-verified against the full 21-probe gate** (the first pass used only the
@@ -157,7 +157,7 @@ git diff --name-only <upstream-base> <branch> -- \
 ```
 
 The 18 of the first four features agree with
-`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md` §5b, which reached
+[`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`](../reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md) §5b, which reached
 that number independently while scoping the 152 port. The theme observer added
 two (agentmuxai/cef#11, 154 r2).
 
@@ -282,7 +282,7 @@ scripts/cef-verify.sh --remote fork      # whatever you named agentmuxai/cef
 
 Exit 0 = all 23 present. It never modifies the repository it inspects.
 
-**This lives in `scripts/cef-verify.sh`, not in this document, and that is a
+**This lives in [`scripts/cef-verify.sh`](../../scripts/cef-verify.sh), not in this document, and that is a
 deliberate correction.** These checks were originally markdown code blocks here,
 and four separate bugs shipped in them — each one making the check incapable of
 failing, or worse:
@@ -294,7 +294,7 @@ failing, or worse:
 | `git -C ""` | does not fail; answers for the current directory, silently returning Chromium's HEAD |
 | `set -o pipefail` + `grep -q` | grep exits on first match, `git show` takes SIGPIPE, pipeline reports failure **despite** the match |
 
-None were visible by reading. All four die to `scripts/cef-verify.test.sh`,
+None were visible by reading. All four die to [`scripts/cef-verify.test.sh`](../../scripts/cef-verify.test.sh),
 which CI runs on every PR against synthetic fixtures. Shell embedded in
 markdown is untested by construction; that is the whole lesson, and it cost four
 rounds of review to learn.
@@ -431,7 +431,7 @@ None of these were source or patch problems. Each cost a build restart.
   used by other workloads: `-j 20` ran out of memory in Blink's generators; `-j 14 -l 24`
   finished, including the `libcef` ThinLTO link.
 - **Linux: fontconfig's bindgen crate trips `-Dwarnings`** (`unnecessary_transmutes`);
-  `scripts/cef-build/args.gn` sets `treat_warnings_as_errors=false` (#3991).
+  [`scripts/cef-build/args.gn`](../../scripts/cef-build/args.gn) sets `treat_warnings_as_errors=false` (#3991).
 - **Linux: keep `libcef.so` unstripped in the release.** `verify-cef-patch` reads
   `.symtab`, which strip removes (`build-patched-libcef.md` §8); the 152 release shipped
   it unstripped too.
@@ -509,7 +509,7 @@ scripts/cef-verify-patches.sh --build-dir out/Release_GN_arm64
 
 Expect one `OK` per no-symbol patch: two on macOS, one elsewhere
 (`agentmux_process_requirement` patches a macOS-only file). It never writes to
-the build directory — `scripts/cef-verify.test.sh` asserts that with a fake
+the build directory — [`scripts/cef-verify.test.sh`](../../scripts/cef-verify.test.sh) asserts that with a fake
 compiler, because an earlier inline version of this check *did* write to it
 (below).
 
@@ -569,7 +569,7 @@ eyeballing assembly is not.
 
 ## 8. Release pinning across three platforms
 
-All three pins live in one place — `scripts/cef-build/cef-runtime-pins.sh` —
+All three pins live in one place — [`scripts/cef-build/cef-runtime-pins.sh`](../../scripts/cef-build/cef-runtime-pins.sh) —
 which `release.yml`'s `cef-runtime-pins` job reads for releases and every
 `build-*.yml` reads when its `cef-runtime-tag` is blank (nightlies, direct
 dispatches). So publishing a runtime changes no build until a PR moves the

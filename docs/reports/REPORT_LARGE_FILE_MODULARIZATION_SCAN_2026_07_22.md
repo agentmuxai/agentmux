@@ -26,7 +26,7 @@ A third pattern, and the one requiring the most care: files where the size is **
 
 **Two cross-cutting bonus findings** surfaced during the read-through, beyond pure line-count modularization:
 - **`frontend/layout/lib/TileLayout.{win32,linux,darwin}.tsx`** each independently define byte-identical copies of `NodeBackdrops`, `MagnifiedPaneOverlay`, `DisplayNodesWrapper`, and `Placeholder` — ~250 duplicated lines × 3 platforms = **~750 lines of exact duplication** that could collapse into one shared `tilelayout-shared.tsx`, without touching the genuinely platform-specific drag/resize logic in each file.
-- **`frontend/app/view/agent/components/AgentPicker.tsx`** contains two functions, `openLaunchModal` and `autoContinue`, that are defined and exported but — per grep — never called or imported anywhere in the current codebase. Likely dead code left over from a removed picker flow; worth a follow-up deletion pass rather than folding into any split.
+- **[`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx)** contains two functions, `openLaunchModal` and `autoContinue`, that are defined and exported but — per grep — never called or imported anywhere in the current codebase. Likely dead code left over from a removed picker flow; worth a follow-up deletion pass rather than folding into any split.
 
 ---
 

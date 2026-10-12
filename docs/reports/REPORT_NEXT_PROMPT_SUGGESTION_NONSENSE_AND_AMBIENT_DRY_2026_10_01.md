@@ -13,7 +13,7 @@ sometimes sensible but inappropriate. Example shown in the composer:
 
 ## 1. What happens today
 
-`session:next_prompt_suggestion` (`crates/srv/src/server/app_api/session.rs`):
+`session:next_prompt_suggestion` ([`crates/srv/src/server/app_api/session.rs`](../../crates/srv/src/server/app_api/session.rs)):
 
 1. `read_recent_activity_digest` reads the tail of the block's `output` file, keeps the
    **last 30 non-empty raw lines**, and turns them into text with `extract_digest_text`.

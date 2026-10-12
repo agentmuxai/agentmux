@@ -42,14 +42,14 @@ paths deliver the catalog the same way.
 
 ### 2.1 The pane
 
-- `frontend/app/view/connectors/connectors.tsx` mounts `McpManager`
-  (`frontend/app/view/mcp/mcp-manager.tsx`), moved unchanged from the
+- [`frontend/app/view/connectors/connectors.tsx`](../../frontend/app/view/connectors/connectors.tsx) mounts `McpManager`
+  ([`frontend/app/view/mcp/mcp-manager.tsx`](../../frontend/app/view/mcp/mcp-manager.tsx)), moved unchanged from the
   Armory (`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md`).
 - `McpCatalogModel` (`mcp-model.ts`) calls `mcp.catalog.list`
-  (`crates/srv/src/server/app_api/mcp.rs`), which returns global rows with
+  ([`crates/srv/src/server/app_api/mcp.rs`](../../crates/srv/src/server/app_api/mcp.rs)), which returns global rows with
   `bound_count` (`storage/mcp_servers.rs` `mcp_server_list_global`,
   `storage/managed.rs` `managed_list_global` / `managed_bound_counts`).
-- The status pill (`McpStatusPill`, `frontend/app/store/mcp-capabilities.ts`,
+- The status pill (`McpStatusPill`, [`frontend/app/store/mcp-capabilities.ts`](../../frontend/app/store/mcp-capabilities.ts),
   `backend/mcp_probe.rs`) starts its own copy of a catalog server and runs
   `initialize` + `tools/list`. It tests the config. It says nothing about
   whether any agent has the server.
@@ -110,7 +110,7 @@ of it.
   This is the one authoritative list of what an agent actually has, for
   every source at once, and it costs nothing to read.
 - **agentmux-mcp's startup call.** It calls `GET /agentmux/agents/self/keys`
-  with the agent's token at startup (`crates/mcp/src/main.rs`,
+  with the agent's token at startup ([`crates/mcp/src/main.rs`](../../crates/mcp/src/main.rs),
   `server/agent_self_keys.rs`). srv records nothing for it, but it means
   "this agent's agentmux server started", for any provider that runs it.
 - **The startup-files card** ("MCP servers: agentmux",
@@ -223,7 +223,7 @@ path with a clear rule (§5, Phase 0).
   - Anything else is *account config*.
   - The exact name shapes for connectors and plugins must be confirmed
     against the pinned CLI before relying on them.
-- **Contract test.** Extend `scripts/cli-contract/` (the fake-API harness
+- **Contract test.** Extend [`scripts/cli-contract/`](../../scripts/cli-contract) (the fake-API harness
   used for the bashwrap hook, no model cost): launch the real CLI with a
   stub stdio MCP server in `.mcp.json` and assert init reports it
   `connected`. A second stub that exits should report `failed`. This pins

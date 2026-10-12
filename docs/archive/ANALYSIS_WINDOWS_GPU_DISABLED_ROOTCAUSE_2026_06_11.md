@@ -18,7 +18,7 @@
 > Kept only as a record of how the wrong conclusion was reached. **Anyone
 > scoping CEF fork/build work should not treat this as evidence that the fork's
 > build configuration causes GPU failures** — see
-> `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §7.3, which
+> [`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](../specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) §7.3, which
 > flagged this doc as misleading for exactly that reason.
 >
 > (Separately: the custom codec-enabled `agentmuxai/cef` runtime builds that

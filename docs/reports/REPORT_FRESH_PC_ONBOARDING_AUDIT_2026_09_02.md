@@ -27,7 +27,7 @@ real, recurring failure mode here, not a hypothetical one, but neither is a
 tracking effort.
 
 **One adjacent, already-shipped feature exists and must not be duplicated:**
-`docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md` — a one-click
+[`docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md`](../specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) — a one-click
 in-app installer (git/Node/npm/Python via winget/brew/pkexec) that fires from
 `AgentPrereqModal` when a *launched agent's own CLI* (Claude Code, Copilot,
 etc.) needs a missing tool. Implemented and tested for git/Node/npm/Python
@@ -127,8 +127,8 @@ PATH entry, not a hard requirement), but worth correcting alongside 2a so
 |---|---|---|
 | `BUILD.md` | Fullest of the three root docs — real per-OS install commands, troubleshooting section, quick-reference table | Base to correct and extend, not replace |
 | `README.md` Prerequisites table | Quick-glance version/purpose table | Correct in lockstep with BUILD.md so they can't re-diverge |
-| `docs/linux.md` | AppArmor userns-sandbox blocker (Ubuntu 22.04+/23.10+ backported restriction breaks all CEF/Electron/Chromium apps), install/extraction, single-instance sockets | Fold the AppArmor gotcha into the fresh-Ubuntu path explicitly — this is a real first-run blocker the Ubuntu test machine will almost certainly hit |
-| `scripts/install-userns-apparmor-fix.sh` | Installs the narrow AppArmor exception, today invoked via `pkexec` from the app's own "Fix it now" dialog | Confirm it also works run manually pre-install (docs/linux.md documents a manual alternative) — verify on the real fresh-Ubuntu box |
+| [`docs/linux.md`](../linux.md) | AppArmor userns-sandbox blocker (Ubuntu 22.04+/23.10+ backported restriction breaks all CEF/Electron/Chromium apps), install/extraction, single-instance sockets | Fold the AppArmor gotcha into the fresh-Ubuntu path explicitly — this is a real first-run blocker the Ubuntu test machine will almost certainly hit |
+| [`scripts/install-userns-apparmor-fix.sh`](../../scripts/install-userns-apparmor-fix.sh) | Installs the narrow AppArmor exception, today invoked via `pkexec` from the app's own "Fix it now" dialog | Confirm it also works run manually pre-install (docs/linux.md documents a manual alternative) — verify on the real fresh-Ubuntu box |
 | `SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md` | Detect/install pattern (winget/brew/pkexec, fixed catalog, consent step) | Reference/reuse the *pattern*, not the code path — that installer targets already-launched-app agent prereqs, this project targets the dev checkout before the app is even built |
 | CI workflows (`build-{windows,linux,macos}.yml`) | Currently the most authoritative, tested source of true per-OS install commands | Treat as ground truth when BUILD.md and CI disagree (as in 2c) |
 

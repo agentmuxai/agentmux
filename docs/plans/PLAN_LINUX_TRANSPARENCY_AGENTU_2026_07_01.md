@@ -3,7 +3,7 @@
 **Date:** 2026-07-01
 **Owner:** AgentU (Linux/ubuntu agent)
 **Written by:** AgentO (macOS agent) — questions → jekt AgentO or leave PR comments
-**Read first:** `docs/specs/SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01.md` (the two-track model)
+**Read first:** [`docs/specs/SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01.md`](../specs/SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01.md) (the two-track model)
 **Status of the other half:** macOS Track 1 merged-in-flight (agentmux PR #1895, verified working);
 the shared CEF patches are on fork PR agentmuxai/cef#4 (branch `agento/7778-renderer-transparency`).
 
@@ -32,7 +32,7 @@ Do L1 first (small, self-contained, immediately shippable), then L2.
   `agentmux-cef/src/commands/window/transparency.rs` are implemented for Windows
   (`WS_EX_LAYERED`) and macOS (`NSWindow.alphaValue`, PR #1895). The Linux branch is a
   no-op. You are filling it in with the X11 EWMH mechanism.
-- AgentMux on Linux runs ozone **X11/XWayland by default** (`docs/linux.md`);
+- AgentMux on Linux runs ozone **X11/XWayland by default** ([`docs/linux.md`](../linux.md));
   `_NET_WM_WINDOW_OPACITY` is honored by Mutter, KWin, picom, xfwm4 — including for
   XWayland clients. Native-Wayland ozone (opt-in via `AGENTMUX_OZONE_PLATFORM=wayland`)
   has **no** uniform-alpha protocol → log once and no-op there.
@@ -193,7 +193,7 @@ PR referencing the spec + PR #1895 as the sibling. reagent reviews automatically
 
 Fork PR **agentmuxai/cef#4** (branch `agento/7778-renderer-transparency`, 2 commits on top
 of `2720ba103`) adds the **renderer-side Blink base-background-color override** — the
-confirmed root cause fix from `docs/retro/cef-linux-transparency-consolidated.md` §"The
+confirmed root cause fix from [`docs/retro/cef-linux-transparency-consolidated.md`](../retro/cef-linux-transparency-consolidated.md) §"The
 patch (not yet implemented)". This is the ONE remaining blocker for pane-interior
 transparency on Linux. (The second commit is macOS-only — `patch/patches/
 mac_rwhv_transparent_background.patch` — it rides along harmlessly in your build.)
@@ -202,7 +202,7 @@ mac_rwhv_transparent_background.patch` — it rides along harmlessly in your bui
 
 1. Get PR #4 merged into `agentmux/7778-drag-rightclick-and-transparency` first (reagent
    review), or build from the PR branch directly if the user says go.
-2. On your Linux build box, follow **`docs/cef-build/build-patched-libcef.md`** exactly as
+2. On your Linux build box, follow **[`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md)** exactly as
    for `148.0.20-2`, except checkout `agento/7778-renderer-transparency` (or the canonical
    branch post-merge). Remember from that doc: `is_official_build=true`, `patcher.py` is
    NOT idempotent (reset first), verify runs pre-strip.
@@ -252,4 +252,4 @@ When done (or blocked), update:
 - agentmux PR for L1; fork PR #4 thread for L2 results.
 - The spec's §7 sequencing table (check off Linux items).
 - If pane interiors work: close the loop on issues #301/#828/#872 references and note it
-  in `docs/retro/cef-linux-transparency-consolidated.md` (add a dated postscript).
+  in [`docs/retro/cef-linux-transparency-consolidated.md`](../retro/cef-linux-transparency-consolidated.md) (add a dated postscript).

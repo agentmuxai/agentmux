@@ -234,7 +234,7 @@ Add benchmarking to CI/CD:
 
 ## Agent-open latency (`agent-open.mjs`)
 
-Opens agents from My Agents in a running instance and checks each open's `[agent-open]` trace against a budget, so an open-latency regression fails a run instead of reaching users (`docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md`).
+Opens agents from My Agents in a running instance and checks each open's `[agent-open]` trace against a budget, so an open-latency regression fails a run instead of reaching users ([`docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md`](../../docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md)).
 
 ```bash
 # A dev build (CDP on by default), or a release instance started with AGENTMUX_CDP_PORT

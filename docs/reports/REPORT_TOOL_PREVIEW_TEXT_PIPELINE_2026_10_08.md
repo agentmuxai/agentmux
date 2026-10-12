@@ -4,9 +4,9 @@
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "the preview formatting sometimes doesn't process right. We had a couple work on it including simulating 2 space tabs that doesn't appear to work. Sometimes lines are wordwrapped for no reason … I worry the code is spaghetti and isn't cleanly processing display in a robust way … we want a clear preview parser that ensures previews are always clean."
 **Author:** Masty.
-**Related:** `docs/specs/SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md`, `docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md`, `docs/specs/SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md`, `docs/specs/SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md`, `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`.
+**Related:** [`docs/specs/SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md`](../specs/SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md), [`docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md`](../analysis/tool-preview-indentation-and-wrapping-2026-09-02.md), [`docs/specs/SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md`](../specs/SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md), [`docs/specs/SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md`](../specs/SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md), [`docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`](REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md).
 
-"Preview" here means the capped boxes under each tool call in the agent pane: Read, Write, Edit, Bash, Grep/Glob, MCP and other tools, web results, jekts. All paths below are under `frontend/app/view/agent/` unless they start with `crates/` or `frontend/app/`.
+"Preview" here means the capped boxes under each tool call in the agent pane: Read, Write, Edit, Bash, Grep/Glob, MCP and other tools, web results, jekts. All paths below are under [`frontend/app/view/agent/`](../../frontend/app/view/agent) unless they start with [`crates/`](../../crates) or [`frontend/app/`](../../frontend/app).
 
 ---
 
@@ -17,7 +17,7 @@ The concern is justified. There is no preview pipeline: each preview type takes 
 - **"2-space tabs don't work."** No code turns tabs into spaces. The only lever is one CSS rule, `tab-size: 2`, on one part of the tool panel. It doesn't reach jekts, the persistent shell or the activity dock. Where it does reach, tab stops are counted from the start of the line *including the line-number gutter*, so the first indent level of a tab-indented file comes out half as wide as the rest. Separately, the JS indent narrowing gives up the moment a file has a tab.
 - **"Lines wrap for no reason."** Three separate causes:
   1. Every plain-text result (Grep, Glob, MCP, Task, the default renderer, a Read that fell back) goes through a viewer that soft-wraps anywhere, mid-path and mid-token. Code previews (Read, Write, Edit, Bash) never wrap. So whether a line wraps depends on which tool produced it.
-  2. Every Bash command runs in an **80-column terminal** (`crates/bashwrap/src/bash_wrap.rs:990`, `COLUMNS=80`). Programs that size their output to the terminal (tables, help text, column lists, progress bars) put real line breaks at column 80 before the preview ever sees the text. No CSS can undo that.
+  2. Every Bash command runs in an **80-column terminal** ([`crates/bashwrap/src/bash_wrap.rs:990`](../../crates/bashwrap/src/bash_wrap.rs#L990), `COLUMNS=80`). Programs that size their output to the terminal (tables, help text, column lists, progress bars) put real line breaks at column 80 before the preview ever sees the text. No CSS can undo that.
   3. While a tool streams, each output chunk is its own block. bashwrap flushes at 4096 bytes or 50 ms of quiet, so a line can break mid-line while streaming and rejoin when the tool finishes.
 
 There are also defects nobody has reported yet:
@@ -69,7 +69,7 @@ The same jobs are done several times, differently:
 
 ### 3.2 Tabs: one CSS rule, partly applied, with the gutter in its tab stops
 
-- `frontend/app/reset.scss:26` sets `tab-size: 4` everywhere, and Tailwind's preflight sets it again.
+- [`frontend/app/reset.scss:26`](../../frontend/app/reset.scss#L26) sets `tab-size: 4` everywhere, and Tailwind's preflight sets it again.
 - The only override is `tab-size: 2` on `.agent-view .agent-tool-block .agent-tool-panel` (`styles/_document-nodes.scss:643`, PR #2785).
 - **Not reached (still 4):** jekt body and raw payload, context-delivery bodies, the persistent shell log (`PersistentShellBlock.tsx` renders `.agent-tool-panel` under `.agent-shell-block`, not `.agent-tool-block`), the activity dock log, message bodies, and the hover peek (portaled outside `.agent-view`).
 - **No JS converts tabs.** `normalizeIndentWidth` returns early if any leading run contains a tab (`dedent.ts:171`, "tab width is CSS's business"). A tab-indented file is therefore not narrowed at all, and a file mixing tabs and spaces keeps its space indentation at full width.
@@ -111,7 +111,7 @@ In the Shiki path, diff lines are therefore inline and their highlight covers on
 
 ### 3.5 Text that should never reach the screen
 
-- **`^[[1;1R` on every Bash result.** bashwrap pre-writes a cursor-position report into the terminal (`crates/bashwrap/src/bash_wrap.rs:1149`). The terminal echoes it back as the printable characters `^[[1;1R`, which escape-code stripping can't recognise. It is the first text of every Bash tool result, in the preview and in what the model receives.
+- **`^[[1;1R` on every Bash result.** bashwrap pre-writes a cursor-position report into the terminal ([`crates/bashwrap/src/bash_wrap.rs:1149`](../../crates/bashwrap/src/bash_wrap.rs#L1149)). The terminal echoes it back as the printable characters `^[[1;1R`, which escape-code stripping can't recognise. It is the first text of every Bash tool result, in the preview and in what the model receives.
 - **Read's gutter goes into Shiki as code** (`tool-renderers/builtins.tsx:221`), so line numbers are tokenised by the file's grammar.
 - **Shebang detection doesn't work for Read.** It looks at the first line, which still has the gutter on it (`builtins.tsx:85`).
 - **The raw tab gutter comes back** whenever `splitNumberedGutter` declines (any line without a number), or when a Read has no `content` and falls back to `TerminalOutput`, which then wraps.
@@ -262,7 +262,7 @@ Phases 1–3 are built in #4512. What's where:
 
 | Layer | Files |
 |---|---|
-| Text stage | `frontend/app/view/agent/preview-text/`: `types.ts` (PreviewDoc), `terminal.ts` (decoder), `tabs.ts`, `cap.ts`, `docs.ts` (builders per kind: `codeDoc`, `diffDocFromSides`, `diffDocFromUnified`, `outputDoc`, `commandDoc`, `chunksDoc`, `jsonDoc`, `proseDoc`), `highlight.ts` (one Shiki loader, tokens per line, a diff's sides tokenized apart) |
+| Text stage | [`frontend/app/view/agent/preview-text/`](../../frontend/app/view/agent/preview-text): `types.ts` (PreviewDoc), `terminal.ts` (decoder), `tabs.ts`, `cap.ts`, `docs.ts` (builders per kind: `codeDoc`, `diffDocFromSides`, `diffDocFromUnified`, `outputDoc`, `commandDoc`, `chunksDoc`, `jsonDoc`, `proseDoc`), `highlight.ts` (one Shiki loader, tokens per line, a diff's sides tokenized apart) |
 | Renderer | `components/PreviewLines.tsx` (one block per line; gutter and marker in their own boxes) and `components/ChunkPreview.tsx` (streamed chunks, joined into lines) |
 | Stylesheet | `styles/_preview.scss` (scroll and wrap modes) |
 | Guard | `components/PreviewLines.layout.test.tsx` (real browser), via `components/layout-browser.ts`; `preview-text/preview-text.test.ts` (fixtures) |

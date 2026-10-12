@@ -4,8 +4,8 @@
 > computed, how panes render (DOM **and** native browser HWNDs), and how (and why not yet)
 > panes animate when they open/close/split. Living document.
 >
-> Companion: `docs/CEF_ARCHITECTURE.md` (host/CEF), `docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`
-> (the animation problem), `docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md` (the animation design).
+> Companion: [`docs/CEF_ARCHITECTURE.md`](../CEF_ARCHITECTURE.md) (host/CEF), [`docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`](../analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md)
+> (the animation problem), [`docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`](../specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md) (the animation design).
 
 ---
 
@@ -45,10 +45,10 @@ CSS can animate layer 1. It **cannot** touch layer 2 — the host moves the HWND
 **Key invariant:** the backend stores **relative flex sizes**, never pixel coordinates. Each window computes its own pixels from its own container size — which is how the same tab can render at different sizes in different windows.
 
 ### Backend types & ops
-- `crates/common/src/layout_types.rs` — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `ResizeOp`, `SplitPosition`. Leaf = `data: Some`, no children; group = `data: None`, has children.
-- `crates/srv/src/backend/layout/mod.rs` — pure tree mutators: `insert_node`, `insert_node_at_index`, `delete_node` (collapses sole-child parents), `move_node`, `swap_nodes`, `resize_nodes` (atomic, validates all sizes ∈ [0,100] before mutating), `replace_node`, `split_horizontal/vertical`, `ensure_group_node`. **No geometry here.**
-- `crates/srv/src/reducer/layout.rs` + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
-- Persistence: `crates/srv/src/backend/obj.rs` `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
+- [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs) — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `ResizeOp`, `SplitPosition`. Leaf = `data: Some`, no children; group = `data: None`, has children.
+- [`crates/srv/src/backend/layout/mod.rs`](../../crates/srv/src/backend/layout/mod.rs) — pure tree mutators: `insert_node`, `insert_node_at_index`, `delete_node` (collapses sole-child parents), `move_node`, `swap_nodes`, `resize_nodes` (atomic, validates all sizes ∈ [0,100] before mutating), `replace_node`, `split_horizontal/vertical`, `ensure_group_node`. **No geometry here.**
+- [`crates/srv/src/reducer/layout.rs`](../../crates/srv/src/reducer/layout.rs) + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
+- Persistence: [`crates/srv/src/backend/obj.rs`](../../crates/srv/src/backend/obj.rs) `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
 
 ### Sync path (backend ↔ frontend)
 ```
@@ -96,7 +96,7 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 `layoutResize.ts`: pointer-move (throttled 10ms) → `SetPendingAction(ResizeNode)` + `updateTree(false)` (no balance) → rects update **instantly**. `isResizing()` = `isContainerResizing() || isSplitterDragging()` is **true** during a drag, which **removes the `.animate` class** so the drag tracks the cursor with no transition. On release: `CommitPendingAction` → balance + persist.
 
 ### 2.4 Reveal / first-paint gate
-- `frontend/app/store/tab-reveal.ts`: on tab switch/open, sets a `tab-content-hidden` (`visibility:hidden`) gate, then lifts it after a settle window (≈80ms clean of >50ms long-tasks, hard cap 800ms) so users never see a piecemeal first paint.
+- [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts): on tab switch/open, sets a `tab-content-hidden` (`visibility:hidden`) gate, then lifts it after a settle window (≈80ms clean of >50ms long-tasks, hard cap 800ms) so users never see a piecemeal first paint.
 - `TileLayout.win32.tsx onMount`: at **150ms** it flips `setAnimate(true)` and `layoutModel.ready._set(true)`. So the `.animate` class (and thus all tile transitions) is **off for the first 150ms** and **on thereafter** (except during resize).
 
 ---
@@ -113,7 +113,7 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 ### 3.2 The chosen design (one clock; native tracks DOM)
 `SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`. Implemented on branch `agentx/pane-open-close-animation`:
 - **DOM panes — pure CSS:** `DefaultAnimationTimeS = 0.15`; `.tile-node` transition switched to ease-out; the inner rect is applied **immediately** on open/close (was debounced — see §3.4) and `.block-content` width/height get a matching CSS transition so the body glides with the wrapper. Drag path unchanged (`.animate` off → instant). Reduced-motion zeroes the transitions.
-- **Browser panes — per-frame tracking:** a shared signal `frontend/app/platform/pane-anim.ts` (`notifyPaneReflow()` / `paneReflowActive()`). `DisplayNode` pings it whenever a node's geometry changes while animating (and not resizing). `browser-view.tsx` runs a `requestAnimationFrame` loop while the signal is active, re-sampling its placeholder's live (CSS-animating) `getBoundingClientRect()` and forwarding it via the existing `browser_pane_resize` → `SetWindowPos`. The native window therefore tracks exactly what its DOM placeholder is doing — **one clock (frontend rAF), no drift, zero new Rust.**
+- **Browser panes — per-frame tracking:** a shared signal [`frontend/app/platform/pane-anim.ts`](../../frontend/app/platform/pane-anim.ts) (`notifyPaneReflow()` / `paneReflowActive()`). `DisplayNode` pings it whenever a node's geometry changes while animating (and not resizing). `browser-view.tsx` runs a `requestAnimationFrame` loop while the signal is active, re-sampling its placeholder's live (CSS-animating) `getBoundingClientRect()` and forwarding it via the existing `browser_pane_resize` → `SetWindowPos`. The native window therefore tracks exactly what its DOM placeholder is doing — **one clock (frontend rAF), no drift, zero new Rust.**
 - **Decision:** rejected a host-side (Rust/tokio) interpolation loop — it runs on a separate clock/easing and would drift against the DOM CSS transition. For browser-pane *resize* cost, the agreed fallback is **smooth position / snap size** if per-frame CEF relayout stutters on heavy pages.
 
 ### 3.3 Native pane positioning (host)
@@ -126,7 +126,7 @@ Files: `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeMod
 `useDebouncedNodeInnerRect` (`layoutModelHooks.ts`) historically delayed applying the content's `innerRect` by `animationTimeS` on open/close (instant only during resize/magnify/reduced-motion). With the wrapper transition dormant (`0s`), this meant content snapped to its new size with no animation. Even with the wrapper transition on, the debounce holds the **body** at its old size for the whole animation and then snaps it — so only the empty wrapper would ease. The fix removes the open/close debounce (apply immediately) and lets the `.block-content` CSS transition animate the body in lockstep.
 
 ### 3.5 Status — ✅ root cause found: suppressed by `prefers-reduced-motion`
-The implementation (§3.2) is **correct**. It appeared to "still snap" because the **OS had *reduce motion* enabled** (`prefers-reduced-motion: reduce`), which AgentMux honors via a **global accessibility reset** in `frontend/app/app.scss`:
+The implementation (§3.2) is **correct**. It appeared to "still snap" because the **OS had *reduce motion* enabled** (`prefers-reduced-motion: reduce`), which AgentMux honors via a **global accessibility reset** in [`frontend/app/app.scss`](../../frontend/app/app.scss):
 
 ```scss
 .prefers-reduced-motion {        // class toggled on the root from prefersReducedMotionAtom
@@ -146,18 +146,18 @@ A one-shot runtime diagnostic confirmed it (live app, `.tile-node`): `.animate` 
 ## 4. Magnify, ephemeral, multi-window (brief)
 - **Magnify:** `magnifiedNodeId` in tree state. The magnified pane's single `.tile-leaf` is **reparented** (DOM `appendChild`) into a centered `.magnify-pane` overlay; other tiles get `display:none` (`.tile-hidden`) so native browser HWNDs reporting 0×0 are hidden by the host. Block/view/native window survive intact.
 - **Ephemeral (peek):** a node outside the tree, rendered in the overlay sized like a magnified pane; dismissed on Escape/click.
-- **Multi-window / tear-off:** layout is **per-tab** (shared across windows showing the tab); each window keeps its own browser-pane label↔blockId↔HWND map (`crates/cef/src/reducer/panes.rs`). Tear-off moves the subtree via layout commands + reassigns the block's tab.
+- **Multi-window / tear-off:** layout is **per-tab** (shared across windows showing the tab); each window keeps its own browser-pane label↔blockId↔HWND map ([`crates/cef/src/reducer/panes.rs`](../../crates/cef/src/reducer/panes.rs)). Tear-off moves the subtree via layout commands + reassigns the block's tab.
 
 ---
 
 ## 5. File map
 | Area | Files |
 |---|---|
-| Backend tree + ops | `crates/common/src/layout_types.rs`, `crates/srv/src/backend/layout/mod.rs` |
-| Backend reducer + persistence | `crates/srv/src/reducer/layout.rs`, `reducer.rs`, `state.rs`, `backend/obj.rs` |
-| Host browser-pane lifecycle | `crates/cef/src/reducer/panes.rs`, `browser_panes.rs`, `browser_pane/*` |
+| Backend tree + ops | [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs), [`crates/srv/src/backend/layout/mod.rs`](../../crates/srv/src/backend/layout/mod.rs) |
+| Backend reducer + persistence | [`crates/srv/src/reducer/layout.rs`](../../crates/srv/src/reducer/layout.rs), `reducer.rs`, `state.rs`, `backend/obj.rs` |
+| Host browser-pane lifecycle | [`crates/cef/src/reducer/panes.rs`](../../crates/cef/src/reducer/panes.rs), `browser_panes.rs`, `browser_pane/*` |
 | Frontend model/geometry | `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeModels,layoutModelHooks,layoutResize,layoutPersistence,utils}.ts` |
-| Frontend render + styles | `frontend/layout/lib/TileLayout.win32.tsx` (+ darwin/linux), `tilelayout.scss`; `frontend/app/block/block.tsx`, `block.scss` |
-| Reveal gate | `frontend/app/store/tab-reveal.ts` |
-| Native pane positioning (FE) | `frontend/app/view/browser/browser-view.tsx`, `frontend/app/platform/{pane-rect-registry,pane-overlay,pane-anim,ipc}.ts` |
-| Reflow animation design/analysis | `docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`, `docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md` |
+| Frontend render + styles | [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) (+ darwin/linux), `tilelayout.scss`; [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx), `block.scss` |
+| Reveal gate | [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts) |
+| Native pane positioning (FE) | [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx), `frontend/app/platform/{pane-rect-registry,pane-overlay,pane-anim,ipc}.ts` |
+| Reflow animation design/analysis | [`docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`](../specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md), [`docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`](../analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md) |

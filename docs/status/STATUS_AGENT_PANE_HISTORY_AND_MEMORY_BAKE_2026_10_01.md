@@ -27,8 +27,8 @@ limitations, and what is still open.
 
 Docs:
 
-- `docs/reports/REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30.md` — root cause, owner direction (§6), flash cause (§7).
-- `docs/specs/SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md` — U1/U2 design.
+- [`docs/reports/REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30.md`](../reports/REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30.md) — root cause, owner direction (§6), flash cause (§7).
+- [`docs/specs/SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md`](../specs/SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md) — U1/U2 design.
 
 ### 2.1 Behaviour now
 

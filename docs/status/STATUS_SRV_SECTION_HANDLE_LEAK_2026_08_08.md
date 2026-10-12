@@ -27,7 +27,7 @@
 > self-healing path, not a resolution. See §17.
 > *(Superseded by the RESOLVED banner above — accurate when written.)*
 
-**Related, but a different mechanism:** `docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`
+**Related, but a different mechanism:** [`docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`](STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md)
 (RESOLVED 2026-07-25 — that investigation's root cause was an **Audiosrv**
 Section-handle leak, unrelated to AgentMux, fixed by `Restart-Service
 Audiosrv`). This doc is a **new, separate finding**: this time the leak is
@@ -132,7 +132,7 @@ instrument or disable **both** paths (or stagger their intervals so a
 `ATTRIBUTION_INTERVAL` and seeing no change would NOT clear `sysinfo`.
 
 **No prior documentation of this exact issue was found** — grepped
-`agentmux-srv/src`, `docs/retro/`, `docs/specs/` for "section handle",
+`agentmux-srv/src`, [`docs/retro/`](../retro), [`docs/specs/`](../specs) for "section handle",
 "handle leak", "leaked handle" and found nothing. This is new.
 
 ## 5. Live mitigation — identified, NOT executed
@@ -141,7 +141,7 @@ Restarting `agentmux-srv` (by PID, per `CLAUDE.md`'s "always kill by PID,
 never by image name" rule) should reclaim the leaked handles/commit the same
 way `Restart-Service Audiosrv` did for the original bug — srv death is a
 first-class supervised event (`agentmux-launcher`'s exit-triggered respawn,
-`docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`).
+[`docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`](../specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md)).
 
 **This is NOT a free/silent fix like the Audiosrv restart was**, confirmed
 by tracing the actual supervision path before considering doing this live:
@@ -249,7 +249,7 @@ process.
   CLI process respawned with `--resume 556ddd36-dcdd-4798-b8b7-70ad8c233632`
   — its own real session id, matching this very conversation. **First-hand
   confirmation the documented recovery path
-  (`docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`) works as
+  ([`docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`](../specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md)) works as
   designed**: this conversation was not visibly interrupted (the crash
   landed between turns, not mid-turn, so there was nothing in flight to
   lose), and resumed on the new process with full history intact via the

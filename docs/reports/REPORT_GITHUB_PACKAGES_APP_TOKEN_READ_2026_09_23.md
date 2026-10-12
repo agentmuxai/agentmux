@@ -25,7 +25,7 @@ the token type.
 
 Every command below was run against live infrastructure on 2026-09-23. Tokens
 were minted by the fleet's App-token minter (`github-app-token.py <agent> <org>`,
-then under `scripts/`; that tooling has since moved out of this repository).
+then under [`scripts/`](../../scripts); that tooling has since moved out of this repository).
 
 ### 2.1 The permission is already granted
 
@@ -147,8 +147,8 @@ package to a repo both orgs can reach, or publishing to a registry with
 cross-org reads, would address this properly.
 
 **C. Vendor the tool.** `bump-cli` is a small, config-driven bump utility;
-`agentmux` already carries `scripts/bump-wrapper.sh` and
-`scripts/sync-lockfile-version.mjs` around it. Vendoring removes a
+`agentmux` already carries [`scripts/bump-wrapper.sh`](../../scripts/bump-wrapper.sh) and
+[`scripts/sync-lockfile-version.mjs`](../../scripts/sync-lockfile-version.mjs) around it. Vendoring removes a
 cross-organization credential dependency from the release path entirely — the
 release then depends on nothing outside this repo.
 
