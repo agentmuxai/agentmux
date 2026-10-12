@@ -30,7 +30,7 @@ import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
 import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
 import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
-import { remoteSections, seenAgo } from "./swarm-remote";
+import { remoteChip, remoteSections, seenAgo } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import { SwarmStatsPanel } from "./swarm-stats";
 import "./swarm-view.scss";
@@ -173,13 +173,15 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
 }
 
 /**
- * The agents of other AgentMux instances: one section per host and channel,
- * names only (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md), each with the
- * machine's platform and how it was found. Every agent has the same selection
- * checkbox as a local row, and a section's header selects that machine's agents
+ * The agents of other AgentMux instances: one section per host and channel
+ * (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md), each with the machine's
+ * platform and how it was found. Every agent has the same selection checkbox as
+ * a local row, and a section's header selects that machine's agents
  * (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md). A stale
- * section can't be selected: it is about to disappear. There is no status
- * phrase, since nothing is known about these agents beyond their names.
+ * section can't be selected: it is about to disappear. An agent whose instance
+ * reports its state gets the same status chip as a local row (Phase 4); there is
+ * no summary line, since that would be content, and an agent with no reported
+ * state shows its name alone.
  */
 export function OtherInstanceSections(props: { model: SwarmViewModel }): JSX.Element {
     const sections = createMemo(() => remoteSections(props.model.otherInstancesAtom()));
@@ -251,6 +253,16 @@ export function OtherInstanceSections(props: { model: SwarmViewModel }): JSX.Ele
                                                         }
                                                     />
                                                     <span class="swarm-remote-agent-name">{agent.name}</span>
+                                                    <Show when={remoteChip(agent.status, section.stale)}>
+                                                        {(chip) => (
+                                                            <span class="swarm-remote-agent-status" title={chip().label}>
+                                                                <AgentStatusChip
+                                                                    status={chip().status}
+                                                                    awaitingUser={chip().awaitingUser}
+                                                                />
+                                                            </span>
+                                                        )}
+                                                    </Show>
                                                 </div>
                                             );
                                         }}

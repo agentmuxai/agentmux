@@ -7,13 +7,14 @@
 //! continuously browses for peers. Discovered instances are tracked in memory
 //! and broadcast to frontend clients via EventBus.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::{Mutex, RwLock};
 
+use crate::backend::agent_state::AgentState;
 use crate::backend::lan_mdns_diag;
 use crate::backend::lan_mdns_health;
 use serde::{Deserialize, Serialize};
@@ -23,8 +24,10 @@ use tokio::sync::oneshot;
 
 use super::eventbus::{EventBus, WSEventType};
 
+mod agent_names;
 mod lan_instances;
 mod udp_peers;
+pub(crate) use agent_names::{parse_agent_names_body, PeerAgents};
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
@@ -89,7 +92,7 @@ const LAN_AGENT_NAMES_REFRESH_SECS: u64 = 30;
 /// via `Content-Length` (a malicious peer can omit or lie about that while
 /// still streaming an unbounded chunked body). 64 KiB is generous for a
 /// plain name list — real fleets are agents-per-machine, not per-thousand.
-const LAN_AGENT_NAMES_MAX_RESPONSE_BYTES: usize = 64 * 1024;
+pub(crate) const LAN_AGENT_NAMES_MAX_RESPONSE_BYTES: usize = 64 * 1024;
 /// Defense in depth past the byte cap above: even a response that fits in
 /// 64 KiB could be an adversarially compact array of many short strings.
 const LAN_AGENT_NAMES_MAX_COUNT: usize = 500;
@@ -224,6 +227,10 @@ pub struct LanInstance {
     pub port: u16,
     pub auth_key: String,
     pub agents: Vec<String>,
+    /// Each listed agent's state as the peer reported it, by lower-cased name
+    /// (`lan_discovery/agent_names.rs`). Self-reported, for the Swarm's status chip only.
+    #[serde(default)]
+    pub agent_status: BTreeMap<String, AgentState>,
     pub first_seen: u64,
     pub last_seen: u64,
     /// Unix seconds of the last successful agent-name poll of this peer
@@ -702,7 +709,7 @@ impl LanDiscovery {
             // each burn their full LAN_PEER_QUERY_TIMEOUT_SECS in turn
             // (Codex P2 on PR #3102), stretching the nominal 30s refresh
             // interval by however many peers are currently slow to answer.
-            let outcomes: Vec<(String, Option<Vec<String>>)> = {
+            let outcomes: Vec<(String, Option<PeerAgents>)> = {
                 use futures_util::StreamExt as _;
                 let http_ref = &http;
                 let mut inflight = futures_util::stream::FuturesUnordered::new();
@@ -730,12 +737,13 @@ impl LanDiscovery {
             let mut changed = false;
             {
                 let mut instances = self.instances.write();
-                for (key, names) in outcomes {
-                    if let Some(names) = names {
+                for (key, peer) in outcomes {
+                    if let Some(peer) = peer {
                         if let Some(entry) = instances.get_mut(&key) {
                             entry.last_polled_ok = agentmux_common::time::now_secs_u64();
-                            if entry.agents != names {
-                                entry.agents = names;
+                            if entry.agents != peer.names || entry.agent_status != peer.status {
+                                entry.agents = peer.names;
+                                entry.agent_status = peer.status;
                                 changed = true;
                             }
                         }
@@ -757,7 +765,7 @@ impl LanDiscovery {
         http: &reqwest::Client,
         base_url: &str,
         lan_key: &str,
-    ) -> Option<Vec<String>> {
+    ) -> Option<PeerAgents> {
         let url = format!("{base_url}/agentmux/reactive/agent-names");
         let resp = match http.get(&url).header(agentmux_common::AUTH_KEY_HEADER, lan_key).send().await {
             Ok(r) => r,
@@ -789,19 +797,7 @@ impl LanDiscovery {
             }
         };
 
-        let names: Vec<String> = value
-            .get("agents")
-            .and_then(|a| a.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|n| n.as_str())
-                    .filter(|n| n.len() <= LAN_AGENT_NAMES_MAX_NAME_LEN)
-                    .take(LAN_AGENT_NAMES_MAX_COUNT)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(names)
+        Some(parse_agent_names_body(&value))
     }
 
     /// Reads an HTTP response body up to `max_bytes`, erroring out as soon as
@@ -810,7 +806,7 @@ impl LanDiscovery {
     /// peer that responds successfully but with an enormous body would
     /// otherwise be read into memory in full before this code ever gets a
     /// chance to reject it.
-    async fn read_body_capped(
+    pub(crate) async fn read_body_capped(
         mut resp: reqwest::Response,
         max_bytes: usize,
     ) -> Result<Vec<u8>, String> {
@@ -1187,6 +1183,7 @@ impl LanDiscovery {
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
                     agents: Vec::new(),
+                    agent_status: Default::default(),
                     first_seen: now,
                     last_seen: now,
                     last_polled_ok: 0,
@@ -3016,6 +3013,7 @@ mod peer_fanout_tests {
             port: port.parse().unwrap(),
             auth_key: "k".into(),
             agents: vec![],
+            agent_status: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,
@@ -3244,7 +3242,8 @@ mod agent_names_refresh_tests {
 
         let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant")
             .await
-            .expect("a well-formed, appropriately-sized response must parse");
+            .expect("a well-formed, appropriately-sized response must parse")
+            .names;
 
         assert_eq!(names.len(), LAN_AGENT_NAMES_MAX_COUNT, "must truncate to the count cap");
         assert!(names.contains(&"agent-0".to_string()));

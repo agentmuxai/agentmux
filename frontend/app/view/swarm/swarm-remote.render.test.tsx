@@ -66,15 +66,15 @@ const data: SwarmOtherInstances = {
             display_name: "narko",
             tier: "host",
             channels: [
-                { channel: "dev-fix-lan", seen_at_ms: Date.now(), stale: false, os: "windows", agents: [{ name: "Loap", block_id: "b1" }, { name: "Korp", block_id: "b2" }] },
-                { channel: "old", seen_at_ms: Date.now() - 120_000, stale: true, os: "windows", agents: [{ name: "Opaz", block_id: "b3" }] },
+                { channel: "dev-fix-lan", seen_at_ms: Date.now(), stale: false, os: "windows", agents: [{ name: "Loap", block_id: "b1", status: "working" }, { name: "Korp", block_id: "b2", status: "waiting" }] },
+                { channel: "old", seen_at_ms: Date.now() - 120_000, stale: true, os: "windows", agents: [{ name: "Opaz", block_id: "b3", status: "working" }] },
             ],
         },
         {
             host_id: "lan:area54#1",
             display_name: "Area54",
             tier: "lan",
-            channels: [{ channel: "stable", seen_at_ms: Date.now(), stale: false, os: "macos", agents: [{ name: "Manoz", block_id: "" }, { name: "Opaz", block_id: "" }] }],
+            channels: [{ channel: "stable", seen_at_ms: Date.now(), stale: false, os: "macos", agents: [{ name: "Manoz", block_id: "", status: "stopped" }, { name: "Opaz", block_id: "" }] }],
         },
         {
             host_id: "lan:legacy#2",
@@ -127,6 +127,28 @@ describe("OtherInstanceSections", () => {
         fireEvent.click(container.querySelector(".swarm-remote-header")!);
         expect(names(sections(container)[0])).toEqual([]);
         expect(sections(container)[0].querySelector(".swarm-agent-collapsed-count")?.textContent).toBe("2");
+    });
+
+    it("shows each agent's reported state as a status chip, and none when it has no state or its section is stale", () => {
+        const { container } = render(() => <OtherInstanceSections model={modelWith(data)} />);
+        const chips = sections(container).map((s) =>
+            [...s.querySelectorAll(".swarm-remote-agent")].map((row) => {
+                const chip = row.querySelector(".swarm-remote-agent-status");
+                return chip ? [chip.querySelector(".swarm-status-chip")!.textContent, chip.getAttribute("title")] : null;
+            })
+        );
+        expect(chips).toEqual([
+            // Korp, Loap
+            [
+                ["question", "Waiting for an answer"],
+                ["working", "Working"],
+            ],
+            // Stale: whatever it last said may be long out of date.
+            [null],
+            // Manoz stopped (the chip says idle, the tooltip says which); Opaz gave no state.
+            [["idle", "Stopped"], null],
+            [null],
+        ]);
     });
 
     it("renders nothing with no other instances", () => {

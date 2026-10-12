@@ -1152,3 +1152,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+// The status chip sits at the row's right edge, as on a local row.
+.swarm-remote-agent-status {
+    margin-left: auto;
+    flex-shrink: 0;
+}

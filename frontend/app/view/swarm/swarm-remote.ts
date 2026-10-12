@@ -7,15 +7,22 @@
  * docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md section 3.
  *
  * The data comes from `swarm.other-instances` (crates/srv/src/backend/swarm_remote.rs).
- * Phase 1 is this machine's other channels, names only; LAN hosts and cloud
+ * It lists this machine's other channels and the LAN hosts (Phases 1 and 2),
+ * with each agent's state where its instance reports one (Phase 4); cloud
  * installs arrive later as more hosts with their own `tier`.
  */
 
 import { formatAgoPrecise } from "@/util/format-time";
+import type { AgentDisplayStatus } from "./swarm-view";
+
+/** An agent's state as its own instance reports it (srv `agent_state::AgentState`). */
+export type RemoteAgentState = "working" | "waiting" | "idle" | "stopped" | "error";
 
 export interface RemoteAgent {
     name: string;
     block_id: string;
+    /** Absent when its instance gave no state: a build from before it did. */
+    status?: RemoteAgentState;
 }
 
 export interface RemoteChannel {
@@ -98,6 +105,33 @@ export function remoteSections(data: SwarmOtherInstances | null | undefined): Re
         }
     }
     return out;
+}
+
+/** What a remote agent's status chip shows, in the chip's own terms. */
+export interface RemoteChip {
+    status: AgentDisplayStatus;
+    awaitingUser: boolean;
+    /** The exact state, for the tooltip: the chip folds stopped and error into idle. */
+    label: string;
+}
+
+const REMOTE_CHIPS: Record<RemoteAgentState, RemoteChip> = {
+    working: { status: "working", awaitingUser: false, label: "Working" },
+    waiting: { status: "working", awaitingUser: true, label: "Waiting for an answer" },
+    idle: { status: "idle", awaitingUser: false, label: "Idle" },
+    stopped: { status: "idle", awaitingUser: false, label: "Stopped" },
+    error: { status: "error", awaitingUser: false, label: "Exited with an error" },
+};
+
+/**
+ * The chip for a remote agent, or null for none: no state reported, a state
+ * this build doesn't know (the value is self-reported by its instance), or a
+ * stale section, whose last state may be long out of date.
+ * docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md §3.2, §3.4 Phase 4.
+ */
+export function remoteChip(status: string | null | undefined, stale: boolean): RemoteChip | null {
+    if (stale || !status || !Object.hasOwn(REMOTE_CHIPS, status)) return null;
+    return REMOTE_CHIPS[status as RemoteAgentState];
 }
 
 /** "seen 2m ago" for a stale section, from Unix ms. */

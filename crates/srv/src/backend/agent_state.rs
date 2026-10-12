@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::backend::blockcontroller;
 use crate::backend::storage::store::Store;
@@ -25,7 +25,7 @@ use crate::backend::storage::store::Store;
 pub const META_AWAITING_USER: &str = "term:awaiting_user";
 
 /// An agent's state as the wire reports it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
     Working,
