@@ -41,7 +41,10 @@ use windows as os;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod os {
     pub fn snapshot() -> std::io::Result<Vec<super::ProcInfo>> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "no process reader for this OS"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no process reader for this OS",
+        ))
     }
     pub fn command_line(_pid: u32) -> Option<String> {
         None
@@ -50,7 +53,9 @@ mod os {
         None
     }
     pub fn cpu_count() -> usize {
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
     }
 }
 
@@ -93,7 +98,10 @@ pub struct ProcInfo {
 impl ProcInfo {
     /// The key that tells this process apart from a later one with its PID.
     pub fn key(&self) -> ProcKey {
-        ProcKey { pid: self.pid, start_key: self.start_key }
+        ProcKey {
+            pid: self.pid,
+            start_key: self.start_key,
+        }
     }
 
     /// The OS couldn't tell us its CPU or memory (another user's process on
@@ -135,6 +143,13 @@ pub fn command_line(pid: u32) -> Option<String> {
     os::command_line(pid)
 }
 
+/// Whether the process `key` names is still the one running under its PID
+/// (it hasn't exited, and no newer process has reused the PID). Check it
+/// before and after reading anything about a process by PID.
+pub fn is_running(key: ProcKey) -> bool {
+    os::start_key(key.pid) == Some(key.start_key)
+}
+
 /// The command line of exactly the process `key` names: `None` if it has
 /// exited or a newer process has its PID, checked both before and after the
 /// read, so a PID reused in between never hands back the successor's line.
@@ -166,7 +181,10 @@ pub struct RateMeter<K> {
 
 impl<K> Default for RateMeter<K> {
     fn default() -> Self {
-        Self { prev: HashMap::new(), next: HashMap::new() }
+        Self {
+            prev: HashMap::new(),
+            next: HashMap::new(),
+        }
     }
 }
 
@@ -230,10 +248,16 @@ mod tests {
     fn rate_needs_two_rounds_and_is_a_fraction_of_one_core() {
         let mut m = RateMeter::new();
         let t0 = Instant::now();
-        assert_eq!(m.sample("a", 1_000_000_000, t0), None, "first round has no rate");
+        assert_eq!(
+            m.sample("a", 1_000_000_000, t0),
+            None,
+            "first round has no rate"
+        );
         m.finish();
         // 1.5 s of CPU over 1 s of wall: one and a half cores.
-        let r = m.sample("a", 2_500_000_000, t0 + Duration::from_secs(1)).unwrap();
+        let r = m
+            .sample("a", 2_500_000_000, t0 + Duration::from_secs(1))
+            .unwrap();
         assert!((r - 1.5).abs() < 1e-9, "{r}");
     }
 
@@ -265,7 +289,10 @@ mod tests {
         let real_parent = proc(10, None, Some(500));
         assert!(child.is_child_of(&real_parent));
         assert!(!child.is_child_of(&proc(12, None, Some(0))), "wrong pid");
-        assert!(proc(11, Some(10), None).is_child_of(&parent), "unknown start times trust the pid");
+        assert!(
+            proc(11, Some(10), None).is_child_of(&parent),
+            "unknown start times trust the pid"
+        );
     }
 
     #[test]
@@ -282,15 +309,27 @@ mod tests {
         let me = std::process::id();
         let all = snapshot().expect("snapshot");
         assert!(all.len() > 1, "only {} processes", all.len());
-        let p = all.iter().find(|p| p.pid == me).expect("this process is listed");
+        let p = all
+            .iter()
+            .find(|p| p.pid == me)
+            .expect("this process is listed");
         assert!(p.cpu_ns.is_some(), "{p:?}");
         assert!(p.mem_private.unwrap_or(0) > 0, "{p:?}");
-        assert!(p.mem_resident.unwrap_or(0) >= p.mem_private.unwrap_or(0) / 4, "{p:?}");
+        assert!(
+            p.mem_resident.unwrap_or(0) >= p.mem_private.unwrap_or(0) / 4,
+            "{p:?}"
+        );
         assert!(p.ppid.is_some(), "{p:?}");
         assert!(!p.name.is_empty(), "{p:?}");
-        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let started = p.started_at_ms.expect("start time");
-        assert!(started <= now_ms + 5_000 && started > now_ms - 24 * 3600 * 1000, "started {started}, now {now_ms}");
+        assert!(
+            started <= now_ms + 5_000 && started > now_ms - 24 * 3600 * 1000,
+            "started {started}, now {now_ms}"
+        );
         // Two snapshots agree on identity.
         let again = snapshot().unwrap();
         assert_eq!(again.iter().find(|q| q.pid == me).unwrap().key(), p.key());
@@ -299,7 +338,14 @@ mod tests {
     #[test]
     fn cpu_time_grows_while_this_process_spins() {
         let me = std::process::id();
-        let cpu = || snapshot().unwrap().into_iter().find(|p| p.pid == me).and_then(|p| p.cpu_ns).unwrap();
+        let cpu = || {
+            snapshot()
+                .unwrap()
+                .into_iter()
+                .find(|p| p.pid == me)
+                .and_then(|p| p.cpu_ns)
+                .unwrap()
+        };
         let before = cpu();
         let spin_until = Instant::now() + Duration::from_millis(300);
         let mut x = 0u64;
@@ -309,9 +355,15 @@ mod tests {
         std::hint::black_box(x);
         let after = cpu();
         // At least a third of the spin shows up (coarse clocks: 10-16 ms ticks).
-        assert!(after >= before + 100_000_000, "before {before} after {after}");
+        assert!(
+            after >= before + 100_000_000,
+            "before {before} after {after}"
+        );
         // And not absurdly more (a units bug, e.g. Mach ticks read as ns).
-        assert!(after < before + 30_000_000_000, "before {before} after {after}");
+        assert!(
+            after < before + 30_000_000_000,
+            "before {before} after {after}"
+        );
     }
 
     #[test]
@@ -325,15 +377,24 @@ mod tests {
 
     #[test]
     fn a_command_line_only_for_the_exact_process() {
-        let me = snapshot().unwrap().into_iter().find(|p| p.pid == std::process::id()).unwrap();
+        let me = snapshot()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.pid == std::process::id())
+            .unwrap();
         assert!(command_line_of(me.key()).is_some(), "{me:?}");
-        let newer = ProcKey { pid: me.pid, start_key: me.start_key.wrapping_add(1) };
+        let newer = ProcKey {
+            pid: me.pid,
+            start_key: me.start_key.wrapping_add(1),
+        };
         assert_eq!(command_line_of(newer), None, "same PID, another process");
     }
 
     #[test]
     fn cpu_count_is_at_least_what_this_process_may_use() {
-        let usable = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let usable = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
         assert!(cpu_count() >= usable, "{} < {usable}", cpu_count());
     }
 }
