@@ -6,7 +6,7 @@ PR #773's virtualization retrofit was reverted (PR #781) after it caused gaps, b
 
 ## Plan
 
-Architectural redesign in `docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` on branch `agenta/spec-agent-pane-virt-redesign`. Treats virtualization as a first-class concern + adds intelligent perf probing built into the render contract.
+Architectural redesign in [`docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`](SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md) on branch `agenta/spec-agent-pane-virt-redesign`. Treats virtualization as a first-class concern + adds intelligent perf probing built into the render contract.
 
 ## Key design points
 
@@ -29,6 +29,6 @@ Validated against: `react-virtuoso`'s Message List, Stream's `VirtualizedMessage
 
 - PR #781 — revert of #773 (must merge before this work starts)
 - Issue #774 — tab content reveal gate (complementary)
-- `frontend/perf/marks.ts`, `frontend/app/devtools/diag-panel.tsx` — extension points
+- [`frontend/perf/marks.ts`](../../frontend/perf/marks.ts), [`frontend/app/devtools/diag-panel.tsx`](../../frontend/app/devtools/diag-panel.tsx) — extension points
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

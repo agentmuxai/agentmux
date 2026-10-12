@@ -2,7 +2,7 @@
 
 **Status:** implemented — build completed and tagged (see STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md); verified 2026-08-10.
 
-> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> **Implementing PR not recoverable (checked 2026-09-17).** [`docs/specs/README.md`](README.md)
 > requires an `implemented` Status to cite its PR. This one cannot, and a guess would
 > be worse than the gap: the only commit that set this Status was a bulk restamp
 > (or predates the PR-squash convention), so git alone does not identify who
@@ -15,15 +15,15 @@
 ("Rebuild patched CEF with proprietary codecs — Linux + macOS"), assigning
 **macOS** to AgentO (this agent) and Linux to AgentU. Windows is Agent2's,
 already implemented in PR #2308 (merged).
-**Related:** `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`
-(root cause), `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`
+**Related:** [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)
+(root cause), [`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md)
 (3-platform design, PR #2308 — already merged, GN args already updated),
-`docs/cef-build/build-patched-framework-macos.md` (the existing manual build
-process this extends), `docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md`.
+[`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md) (the existing manual build
+process this extends), [`docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md).
 
 ## What's already done (no action needed here)
 
-PR #2308 is merged into `main` (confirmed, pulled today). `scripts/cef-build/args-darwin.gn`
+PR #2308 is merged into `main` (confirmed, pulled today). [`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn)
 already carries the codec block:
 
 ```
@@ -57,7 +57,7 @@ with this task). Confirmed today:
 
 ### Bug found: wrong ninja target name, in two places
 
-`docs/cef-build/build-patched-framework-macos.md`'s own "Build" section says:
+[`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md)'s own "Build" section says:
 
 > Build the framework target (**NOT** the phony `cef` meta-target, which won't
 > relink after a source-only change).
@@ -116,7 +116,7 @@ running, so the codec-updated `args-darwin.gn` is actually the one installed.
    be meaningfully shorter than a full fresh build, though the exact time isn't
    known until it's run.
 5. **Verify the existing patch is intact:**
-   `scripts/verify-cef-framework-darwin.sh` on the fresh unstripped output —
+   [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh) on the fresh unstripped output —
    must still exit 0 (`BeginWindowDrag` present). This only checks the window-drag
    patch, not codecs — expected, see step 6.
 6. **New: codec playback sanity check** (issue's explicit new ask, no existing
@@ -147,7 +147,7 @@ running, so the codec-updated `args-darwin.gn` is actually the one installed.
    per the issue's own disambiguation instruction.
 9. **Stage locally too:** `ditto` the fresh framework into
    `~/cef-build/darwin/aarch64` — **not** `arm64`. Confirmed by reading
-   `scripts/resolve-cef-runtime-darwin.sh`: it hard-requires `aarch64` (Rust's
+   [`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh): it hard-requires `aarch64` (Rust's
    `target_arch` naming) at tier 2 and explicitly calls out `arm64` as the
    wrong name that "silently misses" resolution — `rebuild-mac-cef.sh` already
    gets this right (`STAGE="$ROOT/darwin/aarch64"`), but the pre-codec
@@ -160,7 +160,7 @@ running, so the codec-updated `args-darwin.gn` is actually the one installed.
 
 ## Follow-up doc fixes (small, unrelated to the main plan, found during this pass)
 
-- `docs/cef-build/build-patched-framework-macos.md`: fix the `ninja ... cef`
+- [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md): fix the `ninja ... cef`
   command to `ninja ... cef_framework` (bug above).
 - Same doc's "verified artifact" table and "Version skew with Linux" section
   are stale (claims `148.0.9`; actual latest published tag is `148.23.21`) —

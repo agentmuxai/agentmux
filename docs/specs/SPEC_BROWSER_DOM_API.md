@@ -428,7 +428,7 @@ for v1 is the page's own world (simpler, slightly less isolated).
 ## 8. Test plan
 
 - Unit: CDP client round-trip against a fake CDP server.
-- Integration: new `tools/tests/dom-smoke.ps1` that opens a test
+- Integration: new [`tools/tests/dom-smoke.ps1`](../../tools/tests/dom-smoke.ps1) that opens a test
   layout, calls `browser.query` for `input[name='q']` in both
   browser panes, asserts both match and have non-empty `rect`.
 - Harness rewrite: `pane-focus-stress.ps1` swaps pixel clicks for

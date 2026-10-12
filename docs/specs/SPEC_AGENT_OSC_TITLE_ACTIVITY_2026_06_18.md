@@ -346,12 +346,12 @@ selectors if necessary.
 
 ### Modified — Frontend
 - `frontend/app/store/wps-events.ts` — add `BlockActivity: "block:activity"`
-- `frontend/app/view/agent/agent-view.tsx` — subscribe to `block:activity`,
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — subscribe to `block:activity`,
   debounce 300 ms, call `UpdateObjectMeta`; clear on `SessionEnd`
 
 ### No changes
 - `agentmux-bashwrap/` — bash tool-call path; out of scope
-- `frontend/app/view/term/` — terminal pane path unchanged
+- [`frontend/app/view/term/`](../../frontend/app/view/term) — terminal pane path unchanged
 - `rpc-api.ts`, `gotypes.d.ts` — no new RPC or schema
 
 ---

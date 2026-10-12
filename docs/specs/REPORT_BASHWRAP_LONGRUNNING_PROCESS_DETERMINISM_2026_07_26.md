@@ -135,7 +135,7 @@ const DEFAULT_IDLE_KILL_TIMEOUT: Duration = Duration::from_secs(600);
 
 The doc comment directly above it (`bash_wrap.rs:95-106`) is honest about the tradeoff: it exists because a
 wrapped command can block forever on interactive input that will never come (a pager the PTY makes think
-`isatty(stdout) == true`, per `docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`), and killing the
+`isatty(stdout) == true`, per [`docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`](../retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md)), and killing the
 whole process tree after 600s of *zero bytes of output* is how the wrapper avoids leaking forever. The
 mechanism is correctly scoped as an idle timeout, not a total-runtime timeout — a command with continuous
 output for hours is unaffected, only literal silence trips it. **The problem is not that this heuristic is
@@ -226,7 +226,7 @@ reading a given command line before writing it.
 
 ### 3.3 Corroborating (not confirmed) prior evidence, ten days apart
 
-`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` documents Agent1's own dev stack
+[`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) documents Agent1's own dev stack
 running for ~12 hours while its pane showed an ambiguous "Waiting…/Working…." That retro's root-cause section
 offers, with an explicit hedge, the reason Agent1's setup *didn't* trip bashwrap's idle-kill: it had wrapped
 its own launch in a deliberate heartbeat loop —
@@ -279,7 +279,7 @@ prior reports already diagnose it precisely, so this section is a pointer, not n
   obvious enough to get right on the first attempt.
 - **A structurally identical failure shape, found today in a completely different subsystem.** While
   addressing PR review feedback earlier in this session (unrelated to bashwrap), a genuine bug was found and
-  fixed in `frontend/app/view/agent/flows/launch-flow.ts`: a failed `ControllerResyncCommand` was logged in a
+  fixed in [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts): a failed `ControllerResyncCommand` was logged in a
   catch block, but execution still fell through to an unconditional "Ready"/"Resumed" success notification —
   the code's own adjacent comment claimed this exact fallthrough was avoided, and it wasn't. This is the same
   *shape* of bug as the Agent1 incident and the dock-flood bug: a failure or edge-case path gets silently
@@ -475,10 +475,10 @@ that already exists somewhere in this codebase today.
 | `agentmux-bashwrap/src/wps_client.rs` | Bashwrap's only outbound integration — `tool_chunk` streaming, unrelated to any liveness/tracking mechanism |
 | `agentmux-srv/src/backend/shell_node.rs` | `ShellNodeRunner` — the other, unrelated execution surface behind `mcp__agentmux__Shell`; no idle-kill |
 | `frontend/app/view/agent/activity/{types,shell-adapter}.ts` | `ShellNode`/`PinnedActivity` — what the dock actually sees (only `shell_node.rs`-backed processes, never bashwrap-executed ones) |
-| `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` | First occurrence of this report's core finding, arrived at independently ten days earlier |
-| `docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md` | The pager-hang bug the idle-kill exists to guard against — legitimate original motivation, still valid for the foreground case |
-| `docs/specs/SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20.md` | Documents both execution surfaces independently, from an unrelated bug (console-window flashes) |
-| `frontend/app/view/agent/flows/launch-flow.ts` | Unrelated file, cited in §4 only as a third corroborating data point for "silently-absorbed failure states" as a recurring pattern |
+| [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) | First occurrence of this report's core finding, arrived at independently ten days earlier |
+| [`docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`](../retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md) | The pager-hang bug the idle-kill exists to guard against — legitimate original motivation, still valid for the foreground case |
+| [`docs/specs/SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20.md`](SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20.md) | Documents both execution surfaces independently, from an unrelated bug (console-window flashes) |
+| [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) | Unrelated file, cited in §4 only as a third corroborating data point for "silently-absorbed failure states" as a recurring pattern |
 
 ---
 

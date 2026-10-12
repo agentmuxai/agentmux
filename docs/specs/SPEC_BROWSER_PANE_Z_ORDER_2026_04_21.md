@@ -101,7 +101,7 @@ Implementation:
 
 ### Fix A (focus border)
 
-- `frontend/app/block/block.scss` (or whichever file owns `.block-frame-default` and `.block-content-browser`) — inset the placeholder element by the focus-border width. Might need a new class or a conditional rule for browser-view blocks only (terminals don't have this bug because the terminal is DOM-rendered, not native HWND).
+- [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) (or whichever file owns `.block-frame-default` and `.block-content-browser`) — inset the placeholder element by the focus-border width. Might need a new class or a conditional rule for browser-view blocks only (terminals don't have this bug because the terminal is DOM-rendered, not native HWND).
 
 ### Fix B (hide panes under overlays)
 

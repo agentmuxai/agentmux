@@ -3,7 +3,7 @@
 **Date:** 2026-06-15
 **Status:** Implemented (self-heal loop, recovery UI, Ctrl+R/F5 keybinding all shipped) — #2092
 **Correction (2026-07-16):** §3.5's premise that *"the document is a real `http://…` URL, so `location.reload()` does work and preserves the `__AGENTMUX_IPC_PORT__`/token query params"* was **proven false** by the #52 investigation (PR #2181): `setupCefApi` strips `ipc_port`/`ipc_token` from the URL after first read (the 2026-06-12 token-leak fix), so a reload arrives cred-less and — for `is_browser_pane`-flagged floating-pane/pool windows, which the host's `on_load_end` skipped — could never reacquire them. The self-heal reload loop this spec designed was re-entering an identical, deterministic failure every ~5s. Fixed in #2181 by (a) origin-gating the host's cred re-injection instead of gating on the pane flag, (b) making `isCef()` sticky via sessionStorage across the strip, and (c) injecting the authoritative `state.ipc_port` (pool handlers carry `self.ipc_port = 0`). With those in place, the reload-based self-heal below works as designed for all windows.
-**Scope:** `frontend/app/init/error-display.ts` + `frontend/app-init.ts` startup-error path
+**Scope:** [`frontend/app/init/error-display.ts`](../../frontend/app/init/error-display.ts) + [`frontend/app-init.ts`](../../frontend/app-init.ts) startup-error path
 
 ---
 
@@ -71,7 +71,7 @@ reachable seconds later, so the app should **self-heal**, not wedge.
 The codebase already solves this exact shape for two adjacent failures; the fix
 should reuse their patterns:
 
-- **WebGL context loss** (`frontend/bootstrap.ts:59-73`): a `webglcontextlost`
+- **WebGL context loss** ([`frontend/bootstrap.ts:59-73`](../../frontend/bootstrap.ts#L59-L73)): a `webglcontextlost`
   listener that reads a **`sessionStorage` reload counter**, auto-reloads after
   1s if under `CONTEXT_LOSS_MAX_RELOADS`, **suppresses** past the cap (logs
   "possible driver issue"), and **resets the counter after 60s** of stability.
@@ -202,8 +202,8 @@ export function tryAutoReload(reason: string): boolean;
 
 | File | Change |
 |------|--------|
-| `frontend/app/init/error-display.ts` | Recovery card + `showReconnecting` + `tryAutoReload` (loop-guarded) |
-| `frontend/app-init.ts` | On bridge-init timeout: `tryAutoReload()` instead of bare `showStartupError`; clear counter on success |
+| [`frontend/app/init/error-display.ts`](../../frontend/app/init/error-display.ts) | Recovery card + `showReconnecting` + `tryAutoReload` (loop-guarded) |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts) | On bridge-init timeout: `tryAutoReload()` instead of bare `showStartupError`; clear counter on success |
 | `frontend/app/init/error-display.scss` *(new, optional)* | Card + button styles (or inline, matching current approach) |
 
 ## 6. Test / Verify

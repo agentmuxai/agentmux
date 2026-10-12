@@ -4,8 +4,8 @@
 **Type:** Responsive layout fix
 **Status:** Implemented — #2393
 **Owner:** Agent3
-**Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` +
-`frontend/app/view/agent/styles/_composer-strip.scss`
+**Scope:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) +
+[`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss)
 
 ## Related history
 
@@ -190,8 +190,8 @@ in tension with that from the start once any sub-component could also wrap.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_composer-strip.scss` | `.agent-composer-strip`: grid (+ 07-30's `≤480px` 2-row swap) → permanent wrapping flex, left-justified, no height cap (see §6). Removed `grid-area`/`justify-self` from all three zones. `.agent-composer-strip-controls`/`-right` gained their own `flex-wrap: wrap` (§6, Codex P1). Shed queries (auth/badge/controls-cap) moved from `300/260/220px` to `220/180/150px` to match the extra line of headroom. |
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | No structural change — updated stale comments referencing the old centered-grid design to describe the new left-justified flow. |
+| [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) | `.agent-composer-strip`: grid (+ 07-30's `≤480px` 2-row swap) → permanent wrapping flex, left-justified, no height cap (see §6). Removed `grid-area`/`justify-self` from all three zones. `.agent-composer-strip-controls`/`-right` gained their own `flex-wrap: wrap` (§6, Codex P1). Shed queries (auth/badge/controls-cap) moved from `300/260/220px` to `220/180/150px` to match the extra line of headroom. |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | No structural change — updated stale comments referencing the old centered-grid design to describe the new left-justified flow. |
 
 ## Addendum 2026-08-03 (later same day) — restore true-centered stats at the widest tier
 

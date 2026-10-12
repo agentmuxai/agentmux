@@ -3,7 +3,7 @@
 **Date:** 2026-06-09  
 **Status:** Draft  
 **Scope:** CSS-only changes + one JSX attribute addition  
-**Files touched:** `frontend/app/view/agent/styles/_document-nodes.scss`, `frontend/app/view/agent/styles/_tool-overlay-portal.scss`, `frontend/app/view/agent/components/ToolBlock.tsx`
+**Files touched:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss), [`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss), [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)
 
 ---
 
@@ -64,7 +64,7 @@ All colors are **existing CSS variables from `theme.scss`**. No new hex literals
 
 ### Change 1 — `data-tool` attribute on `.agent-tool-block` (JSX)
 
-**File:** `frontend/app/view/agent/components/ToolBlock.tsx`  
+**File:** [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)\
 **Lines:** 143–152 (the outer `<div class={clsx("agent-tool-block", {...})}>`)
 
 Add `data-tool={props.node.tool.toLowerCase()}` to the outer div so CSS can
@@ -97,7 +97,7 @@ The `tool` field type is `"Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" |
 
 ### Change 2 — Per-tool `.agent-tool-name` color rules (CSS)
 
-**File:** `frontend/app/view/agent/styles/_document-nodes.scss`  
+**File:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)\
 **Insert after:** the `.agent-tool-summary` block (after line ~233)
 
 ```scss
@@ -123,7 +123,7 @@ hover rules. Place them immediately after the closing `}` of `.agent-tool-block`
 
 ### Change 3 — Bash command text color (CSS)
 
-**File:** `frontend/app/view/agent/styles/_document-nodes.scss`  
+**File:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)\
 **Target:** `.agent-bash-cmd-code` block (currently lines 523–541)
 
 The `$` prefix already uses `--accent-color`. The command text next to it
@@ -140,7 +140,7 @@ should match so the entire command line reads as a unit.
 
 ### Change 4 — Streaming stdout and diff-hunk chunk colors (CSS)
 
-**File:** `frontend/app/view/agent/styles/_tool-overlay-portal.scss`  
+**File:** [`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss)\
 **Target:** `.agent-tool-log-line` block (lines 41–58)
 
 Two modifier classes currently map from `KIND_CLASS` in `ToolOverlayLog.tsx`
@@ -173,7 +173,7 @@ feels like a terminal).
 
 ### Change 5 — Section heading colors (CSS)
 
-**File:** `frontend/app/view/agent/styles/_document-nodes.scss`  
+**File:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)\
 **Target:** `.agent-section` block (lines 969–994)
 
 ```scss
@@ -193,7 +193,7 @@ feels like a terminal).
 
 ### Change 6 — Thinking block body text color (CSS)
 
-**File:** `frontend/app/view/agent/styles/_document-nodes.scss`  
+**File:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)\
 **Target:** `.agent-markdown-block.thinking-block` block (lines 46–53)
 
 Currently the thinking block is italic + 60% opacity but the text is still the

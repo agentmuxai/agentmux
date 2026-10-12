@@ -62,7 +62,7 @@ way, because nothing states it:
    took longer than it should have only because nothing documents that this
    is the move.
 
-Separately, `docs/retro/retro-cross-agent-conversation-lookup-2026-09-20.md`
+Separately, [`docs/retro/retro-cross-agent-conversation-lookup-2026-09-20.md`](../retro/retro-cross-agent-conversation-lookup-2026-09-20.md)
 (this same agent, four days earlier — not previously in this repo; added by
 this PR alongside this spec) hit the mirror-image problem for *another*
 agent's identity: `GetAgentTranscript` reads a stale live buffer,

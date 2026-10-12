@@ -40,7 +40,7 @@ the composer specifically: it doesn't call `preventDefault`/`stopPropagation`
 when there's no selection, so an empty/partially-typed composer's
 right-click falls through to (1) anyway.
 
-Confirmed via full-file greps: `frontend/app/view/swarm/` has zero
+Confirmed via full-file greps: [`frontend/app/view/swarm/`](../../frontend/app/view/swarm) has zero
 context-menu wiring anywhere, and its rows are `user-select: none`
 (`swarm-view.scss`), so right-click there did literally nothing — not even
 degraded to the generic Copy-on-selection fallback.
@@ -49,7 +49,7 @@ degraded to the generic Copy-on-selection fallback.
 
 **Shared helper, single source of truth.** `app.tsx`'s root fallback logic
 (`canEnableCut/Copy/Paste`, clipboard-URL detection, the Cut/Copy/Paste role
-menu) moved into `frontend/app/store/contextmenu.ts` as an exported
+menu) moved into [`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts) as an exported
 `showTextInputContextMenu(e: MouseEvent)`, colocated with `ContextMenuModel`
 it already depends on. `app.tsx` now imports and uses it instead of a local
 duplicate — no behavior change for the root-fallback path itself.
@@ -98,7 +98,7 @@ Found during the sweep, deliberately out of scope for this pass:
   **Update (Swarm sub-rows and Drone nodes/run rows fixed in PR #3773):** every Swarm sub-row (shell, cron, subagent, workflow,
   long-running, todo) and Drone's canvas nodes and run-panel rows now have a
   "Copy ..." right-click menu via the shared `showCopyContextMenu` helper
-  (`frontend/app/store/contextmenu.ts`). Drone's node-type palette chips were
+  ([`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts)). Drone's node-type palette chips were
   left alone (static kind names, nothing to copy). The warden and
   skill/MCP/memory/brain-manager list rows above remain unfixed.
 - **Low-value single-line inputs**, same underlying bug but short/rarely-pasted

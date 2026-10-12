@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-10
 **Status:** implemented. — #2526
-**Related:** `docs/specs/SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md` (§4 —
-original progress-bar design), `docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`
+**Related:** [`docs/specs/SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md`](SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md) (§4 —
+original progress-bar design), [`docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md)
 (tab strip shrink-to-fit/transparency — a separate, already-shipped fix
 investigated alongside this one; see §0).
 
@@ -36,7 +36,7 @@ not resolved here — see §5.
 The agent pane's full vertical stack, verified across two separate
 components in `agent-view.tsx`:
 
-1. **`.block-frame-default-header`** (`frontend/app/block/blockframe.tsx`)
+1. **`.block-frame-default-header`** ([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx))
    — the pane's own header (icon, title, controls). Entirely outside
    `agent-view.tsx`; not touched by this spec.
 2. **`AgentViewWrapper`** — renders `.agent-pane-stack` (a flex column):
@@ -133,15 +133,15 @@ and living in unzoomed pane chrome achieves that automatically. Removed.
 
 ## 3. Files touched
 
-- `frontend/app/view/agent/agent-view.tsx` — `Portal` import;
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — `Portal` import;
   `progressBarSlot` signal + slot div in `AgentViewWrapper`; new
   `progressBarMount` prop on `AgentPresentationView`; the progress bar's
   JSX wrapped in `<Show>`/`<Portal>` instead of rendered inline.
-- `frontend/app/view/agent/agent-view.scss` — new
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) — new
   `.agent-pane-progress-bar-slot` rule (in `.agent-pane-stack`'s block) and
   the relocated, zoom-math-simplified `.agent-pane-progress-bar` +
   `@keyframes agent-ant-march`.
-- `frontend/app/view/agent/styles/_control-bar.scss` — old
+- [`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/view/agent/styles/_control-bar.scss) — old
   `.agent-pane-progress-bar` rule and `@keyframes agent-ant-march` removed
   (was nested under `.agent-view`, no longer applicable since the bar isn't
   a DOM descendant of `.agent-view` anymore).
@@ -154,7 +154,7 @@ and living in unzoomed pane chrome achieves that automatically. Removed.
 ## 4. Verification
 
 - `npx tsc --noEmit` — clean.
-- Full `frontend/app/view/agent/` suite — 85 files / 1102 tests passing (no
+- Full [`frontend/app/view/agent/`](../../frontend/app/view/agent) suite — 85 files / 1102 tests passing (no
   existing test targeted this component tree directly; none needed
   updating).
 - `bash scripts/vite-build.sh --mode production` — compiles cleanly;
@@ -171,7 +171,7 @@ and living in unzoomed pane chrome achieves that automatically. Removed.
 ## 5. Open: is this actually what caused the original "black space" report?
 
 Not established either way. `.agent-pane-loading-overlay` — a separate,
-untouched-by-this-spec element (`frontend/app/view/agent/agent-view.tsx`,
+untouched-by-this-spec element ([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx),
 styled in `styles/_loading-overlay.scss`) — is `position: absolute; inset:
 0` relative to `.agent-view`, with an opaque `--main-bg-color` background
 and a high z-index (`--zindex-elem-modal`), shown "from mount until the

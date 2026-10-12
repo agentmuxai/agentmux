@@ -69,7 +69,7 @@ here, not an omission.
 |---|---|---|---|
 | 1 | `Repository` (3–11) | **Delete** — duplicates `README.md` | — |
 | 2 | `Development Workflow` (12–324) | **Split**, see §3 | multiple |
-| 3 | `Log Access` (325–361) | **Merge** — `docs/MUXLOG.md` already exists and is fuller | `docs/MUXLOG.md` |
+| 3 | `Log Access` (325–361) | **Merge** — [`docs/MUXLOG.md`](../MUXLOG.md) already exists and is fuller | [`docs/MUXLOG.md`](../MUXLOG.md) |
 | 4 | `Version Management` (362–416) | **Port** | `CONTRIBUTING.md` |
 | 5 | `Git Workflow` (417–530) | **Port** | `CONTRIBUTING.md` |
 | 6 | `Testing` (531–540) | **Port** | `CONTRIBUTING.md` |
@@ -116,7 +116,7 @@ Derived from the classified inventory (§1.1). Counts are **active** citations
 | Version management / changesets | 14 | `CONTRIBUTING.md` |
 | GitHub identity / `gh-agent.sh` | 7 | private standard (§4.2) |
 | Architecture section | 6 | `docs/ARCHITECTURE.md` |
-| Log access / muxlog | 3 | `docs/MUXLOG.md` |
+| Log access / muxlog | 3 | [`docs/MUXLOG.md`](../MUXLOG.md) |
 | Naming / muxbus | 2 | `docs/ARCHITECTURE.md` |
 
 > **Note on I1–I6 vs I1–I7.** Several citations say "I1–I6" — stale text
@@ -224,7 +224,7 @@ Each step is independently reviewable and leaves the repo consistent.
 - **Step 2 — Create the new homes** with content ported verbatim:
   `docs/ARCHITECTURE.md`, `docs/JEKT_SECURITY_RULES.md`,
   `docs/AGENT_BUILD_WORKFLOW.md`, `docs/TROUBLESHOOTING.md`; extend
-  `BUILD.md`, `CONTRIBUTING.md`, `docs/MUXLOG.md`. **No deletion yet** —
+  `BUILD.md`, `CONTRIBUTING.md`, [`docs/MUXLOG.md`](../MUXLOG.md). **No deletion yet** —
   `CLAUDE.md` still exists, so nothing dangles mid-sequence.
 - **Step 3 — Repoint the 147 citations**, cluster by cluster (§3), correcting
   I1–I6 → I1–I7 en route.
@@ -249,14 +249,14 @@ Each step is independently reviewable and leaves the repo consistent.
 
 ## 7. Verification — enforced in CI, not left to memory
 
-**Check 1 is now a script wired into CI** (`scripts/check-claude-md-references.sh`,
+**Check 1 is now a script wired into CI** ([`scripts/check-claude-md-references.sh`](../../scripts/check-claude-md-references.sh),
 added in #3403, run by `ci-pr.yml`). An earlier revision listed these as grep
 commands for a human to run — which review correctly flagged as the *same* gap
 that caused the missed-citation failure described below. A check nobody runs is
 not a check.
 
 That script immediately found dangling references this spec's own hand-run
-analysis had missed, in `docs/status/` and `docs/specs/archive/` — trees the
+analysis had missed, in [`docs/status/`](../status) and [`docs/specs/archive/`](archive) — trees the
 ad-hoc patterns never covered. Twelve files were repointed as a result.
 
 Checks 2–6 stay manual: they are one-time, port-specific judgements that do not

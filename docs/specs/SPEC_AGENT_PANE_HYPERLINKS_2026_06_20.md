@@ -371,10 +371,10 @@ blocks are wrapped in `.agent-markdown-block.thinking-block`.
 
 ## 10. Implementation Steps
 
-1. `pnpm add linkify-it && pnpm add -D @types/linkify-it` (in `frontend/`)
-2. Create `frontend/app/element/rehype-linkify.ts` (§4.2) — use `unist-util-visit-parents` for ancestor checking
+1. `pnpm add linkify-it && pnpm add -D @types/linkify-it` (in [`frontend/`](../../frontend))
+2. Create [`frontend/app/element/rehype-linkify.ts`](../../frontend/app/element/rehype-linkify.ts) (§4.2) — use `unist-util-visit-parents` for ancestor checking
 3. Wire `rehypeLinkify` into `markdown.tsx` rehype plugin array (§4.3)
-4. Create `frontend/app/element/linkified-text.tsx` (§5.1)
+4. Create [`frontend/app/element/linkified-text.tsx`](../../frontend/app/element/linkified-text.tsx) (§5.1)
 5. Update `AgentMessageBlock.tsx` (§5.2)
 6. Update `UserMessageBlock.tsx` (§5.3)
 7. Update shell output renderer (§5.4)

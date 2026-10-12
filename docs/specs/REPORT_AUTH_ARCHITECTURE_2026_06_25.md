@@ -4,7 +4,7 @@
 **Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Purpose:** Design-session input for making auth robust app-wide. Covers current state, the terminal-vs-agent gap, the "Login Again" crash, and gaps to fix.
 
-> **Staleness note (2026-08-03):** table/column names here (e.g. `db_identity_accounts`) predate the 2026-07-12 Phase 4a rename to `db_accounts`. See `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` for a later pass over the same territory (itself also flagged as partially stale — check both against current code before relying on either for schema names).
+> **Staleness note (2026-08-03):** table/column names here (e.g. `db_identity_accounts`) predate the 2026-07-12 Phase 4a rename to `db_accounts`. See [`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`](REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md) for a later pass over the same territory (itself also flagged as partially stale — check both against current code before relying on either for schema names).
 
 ---
 
@@ -199,9 +199,9 @@ CEF CliLogin (fix)
 | `agentmux-srv/src/server/muxbus_handlers.rs:50` | `muxbus.login` / `inject_muxbus_env` |
 | `agentmux-srv/src/muxbus/pkce.rs:26` | Cognito PKCE browser flow |
 | `agentmux-cef/src/commands/platform.rs:656` | `run_cli_login_pty` — the crashing PTY path |
-| `frontend/app/view/agent/hooks/useAgentControllerStatus.ts:171` | "Login Again" button handler |
-| `frontend/app/view/agent/hooks/useAgentControllerStatus.ts:212` | "Use Existing Login" (the working path) |
-| `frontend/app/view/accounts/AgentMuxConnectPanel.tsx:59` | `useMuxBusStatus` hook |
-| `docs/specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` | FD crash investigation |
+| [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:171`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts#L171) | "Login Again" button handler |
+| [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:212`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts#L212) | "Use Existing Login" (the working path) |
+| [`frontend/app/view/accounts/AgentMuxConnectPanel.tsx:59`](../../frontend/app/view/accounts/AgentMuxConnectPanel.tsx#L59) | `useMuxBusStatus` hook |
+| [`docs/specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md`](SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md) | FD crash investigation |
 | `specs/SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md` | Token presence vs validity bug |
-| `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` | OAuth session lifecycle design |
+| [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) | OAuth session lifecycle design |

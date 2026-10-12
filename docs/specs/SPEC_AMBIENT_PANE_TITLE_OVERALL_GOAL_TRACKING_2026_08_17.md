@@ -40,10 +40,10 @@ the way a PR title would.
 
 ### What generates it
 
-- Frontend trigger: `frontend/app/view/agent/hooks/useAgentActivitySummary.ts:88-113`
+- Frontend trigger: [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts:88-113`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts#L88-L113)
   — fires once per genuine, backend-confirmed turn completion (the
   `turn_active: true→false` edge, not `TurnPhase.kind === "Done"` — see
-  `docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md` for why that
+  [`docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md`](REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md) for why that
   distinction already exists). In an interactive session with many user
   messages, that's once per response — frequent, but not literally "every
   micro-step" by itself; see "The actual bug" below for why it still *reads*
@@ -74,7 +74,7 @@ the way a PR title would.
   ```
 
 - Consumption: the result is written to block meta key `term:ambient_summary`;
-  `frontend/app/store/activitySummary.ts:19-25` (`readActivitySummary`) prefers
+  [`frontend/app/store/activitySummary.ts:19-25`](../../frontend/app/store/activitySummary.ts#L19-L25) (`readActivitySummary`) prefers
   it over the free CLI-emitted `term:osc_title` OSC signal, and both
   `agent-model.ts` (pane title) and `swarm-model.ts` read through that same
   function. This is the **only** consumer found — there is no separate
@@ -98,10 +98,10 @@ Two compounding problems, not one:
    literally has no way to know what it was.
 
 No existing spec proposes goal-level tracking — confirmed by reading
-`docs/retro/retro-haiku-activity-pane-header-2026-06-24.md`,
-`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` §0/1.1 ("a Haiku
+[`docs/retro/retro-haiku-activity-pane-header-2026-06-24.md`](../retro/retro-haiku-activity-pane-header-2026-06-24.md),
+[`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md) §0/1.1 ("a Haiku
 call that summarizes what an agent is doing, once per completed turn"),
-`docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md`
+[`docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md`](SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md)
 (terseness/formatting only, §2.3 explicitly out-of-scopes trigger/behavior
 changes), and `specs/SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29.md:108`
 (explicitly treats "Haiku-per-turn" generation as out of scope, layout only).
@@ -266,7 +266,7 @@ coverage instead of only being exercisable through the full RPC handler.
   not proposed here since nothing today reads such a thing.
 - No change to the 20s timer-driven push sweep in
   `agentmux-srv/src/backend/reactive/activity_watcher.rs` — per
-  `docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md` §5 its
+  [`docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md`](REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md) §5 its
   `agent:summary` event is already unconsumed by the frontend (dead code), so
   it isn't part of the visible bug and isn't touched here.
 
@@ -274,12 +274,12 @@ coverage instead of only being exercisable through the full RPC handler.
 
 ## Related
 
-- `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` — the gateway
+- [`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md) — the gateway
   (admission/cancellation/generation-fencing) this call is routed through;
   unaffected by this spec.
-- `docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md` —
+- [`docs/specs/SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md`](SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md) —
   prior formatting-only pass over the same prompt.
-- `docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md` — prior
+- [`docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md`](REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md) — prior
   frequency fix (turn-completion detection); this spec doesn't revisit that
   detection logic, only which edge (`Submitting` vs `turnJustEndedAtom`) it's
   attached to.

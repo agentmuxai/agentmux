@@ -43,7 +43,7 @@ User-created entries are not touched by seeding.
 
 ### Picker (current)
 
-`frontend/app/view/agent/components/AgentPicker.tsx:619-625`:
+[`frontend/app/view/agent/components/AgentPicker.tsx:619-625`](../../frontend/app/view/agent/components/AgentPicker.tsx#L619-L625):
 - `<RecentSessionsList>` at top (generic, lists sessions across all agents).
 - `<For each={agents()}>` below — `agents()` is `ListNamedAgentsCommand` output (or similar), unfiltered.
 - Click on an `AgentCard` → `handleSelect(agent, evt)` → Option E logic: if `:current` zone non-empty, auto-continue; otherwise open the launch modal.

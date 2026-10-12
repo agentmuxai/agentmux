@@ -41,15 +41,15 @@ main window.
 ## 2. Why — six gaps
 
 **G0. My agents can only see the window it is drawn in — the trigger.** [verified] A row's "active" state is
-`openDefinitions.has(row.definition_id)` (`frontend/app/view/agent/components/MyAgentsList.tsx:998`). The map comes from
-`getOpenDefinitionMap()` (`frontend/app/store/agent-pane-state-store.ts:467`), which walks `slots`, a module-local `Map`
+`openDefinitions.has(row.definition_id)` ([`frontend/app/view/agent/components/MyAgentsList.tsx:998`](../../frontend/app/view/agent/components/MyAgentsList.tsx#L998)). The map comes from
+`getOpenDefinitionMap()` ([`frontend/app/store/agent-pane-state-store.ts:467`](../../frontend/app/store/agent-pane-state-store.ts#L467)), which walks `slots`, a module-local `Map`
 (`:107`) holding the panes registered in **this renderer only**. Every floating/pool window is a separate renderer with
 its own `slots`. The file says so itself at `:486`: *"Scope: THIS renderer only … a pane showing the same agent in another
 window is not listed here."* So an agent open in a floating window, or in any other window, shows as not active. Clicking
 it then skips the fork / "switch to existing" prompt and reattaches, creating the second pane that §1 fails on. The same
-blind spot affects the identity bind menu (`frontend/app/view/identity/bind-to-agent-menu.ts:90`, `runningBlockId`) and
+blind spot affects the identity bind menu ([`frontend/app/view/identity/bind-to-agent-menu.ts:90`](../../frontend/app/view/identity/bind-to-agent-menu.ts#L90), `runningBlockId`) and
 the delete sweep (`getOpenBlockIdsForDefinition`, `:492`). The srv already knows every agent pane in the process:
-`AgentTrackedBlocks` (`crates/srv/src/server/app_api/agent_io.rs`, `ProcessBroker::list_agent_panes()` over
+`AgentTrackedBlocks` ([`crates/srv/src/server/app_api/agent_io.rs`](../../crates/srv/src/server/app_api/agent_io.rs), `ProcessBroker::list_agent_panes()` over
 `get_all_controllers()`). It returns block ids only, and no UI surface uses it for this.
 
 A side effect seen in §1: the muxbus registration for Korp moved to the refused pane (`DiscoverAgents` listed Korp at
@@ -253,7 +253,7 @@ always logs the `persist_last_failure` it produced, which is the line missing in
 
 ## 11. Phase 0 as built
 
-- **srv:** `agent.open-panes` (`COMMAND_AGENT_OPEN_PANES`, `crates/srv/src/server/app_api/agent_io.rs`). Same source as
+- **srv:** `agent.open-panes` (`COMMAND_AGENT_OPEN_PANES`, [`crates/srv/src/server/app_api/agent_io.rs`](../../crates/srv/src/server/app_api/agent_io.rs)). Same source as
   `agent.tracked-blocks` (`ProcessBroker::list_agent_panes()`). For each agent pane it returns
   `AgentOpenPane { block_id, agent_id, tab_id, tab_name, window_ids }`. `window_ids` are the `Window` oids on the pane's
   workspace. A floating window gets its own `Window` through `CreateWindow` with the tear-off workspace, so it is covered.
@@ -261,7 +261,7 @@ always logs the `persist_last_failure` it produced, which is the line missing in
 - **No new event.** Refresh rides `processbroker:tracked-blocks-changed`. That event is already published, with no
   scope, on every `register_controller` and on `release_block_processes` (pane close), so it reaches every renderer.
 - **frontend:** `useInstanceOpenDefinitions()` (`AgentPicker.tsx`) merges srv's list with the local map
-  (`frontend/app/view/agent/open-agent-panes.ts`, unit-tested). A pane in this window wins over one elsewhere, and the
+  ([`frontend/app/view/agent/open-agent-panes.ts`](../../frontend/app/view/agent/open-agent-panes.ts), unit-tested). A pane in this window wins over one elsewhere, and the
   local map wins for a pane srv hasn't reported yet. My agents uses it:
   - the active badge and the "already open" prompt say where the pane is ("open in another window", or "open in another
     pane (Tab 3)");

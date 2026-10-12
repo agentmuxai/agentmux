@@ -4,11 +4,11 @@
 
 **Scope.** State, not implementation plans. For active PR sequencing see [`frontend-reducer-implementation-plan-2026-05-03.md`](./frontend-reducer-implementation-plan-2026-05-03.md), [`SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md`](./SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md), and [`srv-phase-e4b-implementation-plan-2026-05-03.md`](./srv-phase-e4b-implementation-plan-2026-05-03.md).
 
-**Status:** historical — point-in-time snapshot, last code-verified 2026-05-29 (§0). Restamped 2026-09-06 per `docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §5.2: the "Authority" claim this line used to carry is withdrawn. For the reducer stack's current shape, read `REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` first, then spot-verify against code.
+**Status:** historical — point-in-time snapshot, last code-verified 2026-05-29 (§0). Restamped 2026-09-06 per [`docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md`](../reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md) §5.2: the "Authority" claim this line used to carry is withdrawn. For the reducer stack's current shape, read `REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` first, then spot-verify against code.
 
 **Authority (withdrawn 2026-09-06).** This file no longer wins for *current status* — see the Status line above. Source specs still win for *design*.
 
-> **Staleness note (2026-08-03):** this file hasn't been updated since its own 2026-05-29 correction (§0) — now ~9 weeks stale. A later, independently-scoped pass exists — `docs/specs/REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` — covering the same subsystem without referencing or updating this file. Check both before trusting either as "current status"; this file's own "Authority" claim above no longer holds uncontested.
+> **Staleness note (2026-08-03):** this file hasn't been updated since its own 2026-05-29 correction (§0) — now ~9 weeks stale. A later, independently-scoped pass exists — [`docs/specs/REPORT_REDUCER_STACK_AUDIT_2026_07_26.md`](REPORT_REDUCER_STACK_AUDIT_2026_07_26.md) — covering the same subsystem without referencing or updating this file. Check both before trusting either as "current status"; this file's own "Authority" claim above no longer holds uncontested.
 
 ---
 
@@ -23,7 +23,7 @@ The original §2–§9 snapshot is **~3.5 weeks / ~280 merges stale** and materi
 | Layer | 2026-05-05 said | Code-verified 2026-05-29 |
 |---|---|---|
 | **Launcher (L1)** | ✅ done | ✅ done (unchanged) |
-| **Srv reducer (Phase E)** | 🟨 mostly | ✅ **E.2c.5b + E.6 shipped** — renderer-side typed-event subscriber (`frontend/util/srv-events.ts`) + multi-source dispatcher with saga buffer (`frontend/util/event-buffer.ts`); `srv_event_bridge.rs` (PR #618). E.5.x UpdateWindowMeta through reducer (#856). |
+| **Srv reducer (Phase E)** | 🟨 mostly | ✅ **E.2c.5b + E.6 shipped** — renderer-side typed-event subscriber ([`frontend/util/srv-events.ts`](../../frontend/util/srv-events.ts)) + multi-source dispatcher with saga buffer ([`frontend/util/event-buffer.ts`](../../frontend/util/event-buffer.ts)); `srv_event_bridge.rs` (PR #618). E.5.x UpdateWindowMeta through reducer (#856). |
 | **Srv layout (E.4.B)** | 🟨 Phase 5 "❌ next" | 🟨 **Phase 5 SHIPPED** (`reducer/layout.rs` + `Command::Layout{Clear,SetTree,InsertNode,DeleteNode}` arms + tests). **Open: Phase 6** (persist arms — `persist_subscriber` doesn't consume `Event::Layout*`; LayoutState still persists wcore-direct) **+ Phase 7** (legacy `pendingbackendactions`/rootnode writers in `server/app_api.rs:339,798` still bypass the reducer — multi-side migration). |
 | **Host reducer (Phase F)** | 🟨 6/7; H.6 dormant | 🟨 **+1 slice**: `pane_window_states` (Phase 0 #1154, Phase 1 #1157). H.6 top-level-creation still dormant by design (works via direct path). |
 | **Cross-process dispatch** | ❌ open / `IssueCmd::Host` log-only | ✅ **DONE — CPD-1→5.** Schema/HostFrame (CPD-1); `host_pipe/` launcher wrapper (CPD-2); live saga dispatch via `HostPipe::send_command` (CPD-3, "no longer log-only", integration-tested); per-saga `saga_id` correlation, evict-and-replace retired (CPD-4); host-side reader + idempotency LRU `(saga_id,kind)` in `agentmux-cef/src/launcher_ipc.rs:196+` (CPD-5). Only `PipeTarget::Srv`/`LauncherSelf` remain — reserved `#[allow(dead_code)]`, **no consumer**, dormant by design (spec §5 risk 4 flags preemptive activation as rot). |
@@ -295,11 +295,11 @@ These came out of the multi-reducer proposal sessions and have been reaffirmed a
 
 12. **Phase G go/no-go deferred until F.6+F.7+cross-process dispatch.** Phase E validated the pattern for one reducer; need fuller system validation before committing to event-sourced everywhere. (phase-fg-roadmap §4.3)
 
-13. **Doc-only PRs are noise.** `docs/retro/*.md` are local working notes; don't open PRs for them. **This master spec is in `docs/specs/` precisely because it's intended for review.** (phase-b-status memory note)
+13. **Doc-only PRs are noise.** `docs/retro/*.md` are local working notes; don't open PRs for them. **This master spec is in [`docs/specs/`](.) precisely because it's intended for review.** (phase-b-status memory note)
 
 14. **Launcher event subscribers MUST be idempotent under `(event_kind, label, version)`.** Duplicates may legally arrive from re-dispatch, resync (Phase D `GetSnapshot`), or replay; the contract is that subscribers fold them into a no-op past the first application. The three subscriber sites and their property-test coverage:
-    - **Renderer-side bridge guard** (`shouldDispatchLauncherEvent` in `frontend/util/launcher-events.ts`) — `(event, label, hwnd) → max_version_seen` map. Property tests in PR #709 (`launcher-events.test.ts`).
-    - **Renderer-side reducer** (`frontend/app/store/launcher-event/reducer.ts`) — pure reducer; per-event-kind idempotency. Property tests in PR #709 (`reducer.test.ts`).
+    - **Renderer-side bridge guard** (`shouldDispatchLauncherEvent` in [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts)) — `(event, label, hwnd) → max_version_seen` map. Property tests in PR #709 (`launcher-events.test.ts`).
+    - **Renderer-side reducer** ([`frontend/app/store/launcher-event/reducer.ts`](../../frontend/app/store/launcher-event/reducer.ts)) — pure reducer; per-event-kind idempotency. Property tests in PR #709 (`reducer.test.ts`).
     - **Host shadow projection** (`apply_shadow_projection` in `agentmux-cef/src/launcher_ipc.rs`, extracted from `apply_event_to_shadow`) — `HashMap::insert`/`remove` keyed by `label`, idempotent by construction. Property tests in this PR (`shadow_projection_tests`).
 
     **Drift-storm motivation:** prior to PR #708 the renderer-side dispatcher was idempotent only via the tracker's global monotonic-version drop, which fails when a fresh JS context resets `lastVersion=0` (pool window bootstrap) — same launcher event re-dispatched ~600× → V8 stack exhaustion → Crashpad. See [`ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`](./ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md).
@@ -359,9 +359,9 @@ Roadmap defers *Phase G* until F.6+F.7+cross-process dispatch. But the decision 
 **Three-layer defense-in-depth shipped:**
 - **Launcher (PR #708, #721):** per-window monotonic `*_emitted: bool` storm caps on `HiddenSinceOpen`, `OffMonitor`, `CorrectiveWindowMove`. PR #722 round 4 extended the `OffMonitor` cap to `apply_monitor_topology_changed` so display hot-plug doesn't bypass it.
 - **Host bridge (PR #722):** `launcher_event_bridge::DedupCache` (FIFO-evicting, 4096-key cap) on `(variant_kind, label, hwnd, version)` — same gate the renderer used (§8.14), promoted to host so a cold V8 context post-crash can't replay older versions.
-- **Renderer (PR #708):** `shouldDispatchLauncherEvent` per-key dedup in `frontend/util/launcher-events.ts`.
+- **Renderer (PR #708):** `shouldDispatchLauncherEvent` per-key dedup in [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts).
 
-**But the actual root cause was downstream of all three caps.** PR #724 (2026-05-07) found the storm crashes that #708/#721/#722 chased were caused by an unintentional SolidJS reactive-dep leak in `recordDispatch` (`frontend/app/store/command-source.ts`). The function read `recordsAtom()` and wrote `setRecordsAtom(...)` in the same call. The launcher-event reducer's `createEffect` (`launcher-event-reducer.ts:148`) called `dispatch → recordDispatch`; the bare getter inside the reactive context registered `recordsAtom` as a tracked dep, and the subsequent set re-fired the effect → infinite loop.
+**But the actual root cause was downstream of all three caps.** PR #724 (2026-05-07) found the storm crashes that #708/#721/#722 chased were caused by an unintentional SolidJS reactive-dep leak in `recordDispatch` ([`frontend/app/store/command-source.ts`](../../frontend/app/store/command-source.ts)). The function read `recordsAtom()` and wrote `setRecordsAtom(...)` in the same call. The launcher-event reducer's `createEffect` (`launcher-event-reducer.ts:148`) called `dispatch → recordDispatch`; the bare getter inside the reactive context registered `recordsAtom` as a tracked dep, and the subsequent set re-fired the effect → infinite loop.
 
 **Diagnostic recipe** (worked on v0.33.695): instrument `__agentmux_launcher_event` bridge call count + `createEffect` re-run count; if effect-runs ≫ bridge-calls for the same event, the bug is renderer-side reactive, not host-side fan-out. On the failing repro: 1 bridge call → 3230+ effect re-runs → 463 console.warn → V8 stack exhaustion → Crashpad. Post-fix: 1 bridge call → 1 effect run.
 

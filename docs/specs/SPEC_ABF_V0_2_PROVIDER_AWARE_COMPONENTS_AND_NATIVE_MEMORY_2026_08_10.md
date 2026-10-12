@@ -16,9 +16,9 @@ credited inline below, matching this repo's own `Codex P1, PR #NNNN`
 citation convention) — not disputed, all four were correct and are folded
 into the design as shipped in this revision. — PRs touching this work, newest first: #3144
 **Relationship to prior work:** builds on
-`docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` (the
+[`docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md`](REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md) (the
 original ABF proposal, §5) and
-`docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md` (the
+[`docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md`](SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md) (the
 shipped v0.1 exporter/importer, `.abf` packaging decision). Does not
 re-litigate what those got right — the composition-not-invention posture,
 the credential-requirements-not-secrets design, `.abf` zip packaging all
@@ -137,7 +137,7 @@ none is worth adopting wholesale. That reasoning is sound and unchanged by
 this spec.
 
 It does not, however, block bundling AgentMux's *own* representation.
-`docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` shipped
+[`docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md) shipped
 `db_agent_native_memory(agent_id, filename, content, metadata_type,
 size_bytes, updated_at, last_seen_path)` — a durable, per-agent,
 per-file mirror of exactly the memory files an agent autonomously writes

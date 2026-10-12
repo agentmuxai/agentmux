@@ -187,7 +187,7 @@ SEPARATE queries exist, and only one needs new design:
 
 Checked directly (not assumed) before writing §3.2's rule:
 
-- `frontend/app/view/settings/settings.scss` and
+- [`frontend/app/view/settings/settings.scss`](../../frontend/app/view/settings/settings.scss) and
   `frontend/app/view/armory/armory-view.scss` both already establish
   their own `container-type: inline-size` + named container (`settings`,
   `armory` respectively — same technique `AgentStashModal.scss` already
@@ -197,7 +197,7 @@ Checked directly (not assumed) before writing §3.2's rule:
   just "narrower than default." Settings additionally has a 767px tier
   (`settings.scss:544`) and a wide-screen 1024px cap (`settings.scss:537`).
 - **Toolchain has no container query or media query at all** (grep across
-  `frontend/app/view/toolchain` — zero hits). It is a real gap relative
+  [`frontend/app/view/toolchain`](../../frontend/app/view/toolchain) — zero hits). It is a real gap relative
   to the rule this spec now states, but auditing/fixing it is not this
   spec's job (§7) — flagged here so the gap is recorded, not silently
   discovered later.
@@ -276,7 +276,7 @@ Per direct follow-up: Stash should read as data-dense, low-padding —
 currently uses. Checked directly rather than eyeballed:
 
 **Composer's actual measured density**
-(`frontend/app/view/agent/styles/_composer-strip.scss`): 9-11px font
+([`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss)): 9-11px font
 sizes throughout (lines 49, 184, 228, 257, 276, 293, 309), 1-2px vertical
 padding (e.g. `padding: 1px var(--space-1-5)` at lines 185, 311, `padding:
 2px var(--space-1-5)` at line 231), row-gaps of 2px (lines 46, 118), and

@@ -3,7 +3,7 @@
 **Date:** 2026-07-12
 **Author:** AgentY
 **Type:** Verified audit + implementation-ready completion plan. No code shipped yet.
-**Purpose:** `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`'s Phase 4 — drop `db_identity_bundles`/`db_identity_bindings`, rename `db_identity_accounts`→`db_accounts` and `db_memory_bundles`→`db_bundles` — has been "gated on a backfill soak period" since 2026-07-10 with no concrete blocker list. This spec replaces that vague gate with a verified, file:line-level account of exactly what's blocking each table and what has to happen first. Tracked at issue #2024.
+**Purpose:** [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md)'s Phase 4 — drop `db_identity_bundles`/`db_identity_bindings`, rename `db_identity_accounts`→`db_accounts` and `db_memory_bundles`→`db_bundles` — has been "gated on a backfill soak period" since 2026-07-10 with no concrete blocker list. This spec replaces that vague gate with a verified, file:line-level account of exactly what's blocking each table and what has to happen first. Tracked at issue #2024.
 
 ---
 
@@ -117,6 +117,6 @@ Verified via `cargo test -p agentmux-srv` (1456 unit + 4 integration + 7 subproc
 - `agentmux-srv/src/backend/storage/migrations.rs` — current schema, all 4 tables' `CREATE TABLE` blocks (lines cited per-table above).
 - `agentmux-srv/src/identity/resolver.rs:450-510` — `resolve_bindings_for_instance`, the verified sole credential-resolution path (direct links only).
 - `agentmux-srv/src/migrations/m0013_agent_direct_bindings.rs`, `m0014_agent_direct_bindings_rerun.rs` — the already-applied, idempotent backfill.
-- `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` — originating spec, Phase 4 definition.
-- `docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md` — the Phase 3 work this Phase 4 builds on.
+- [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) — originating spec, Phase 4 definition.
+- [`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`](SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md) — the Phase 3 work this Phase 4 builds on.
 - Issue #2024 — consolidated tracking for the whole Armory/Identity family.

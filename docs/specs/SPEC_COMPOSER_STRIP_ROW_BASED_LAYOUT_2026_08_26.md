@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-26
 **Status:** Proposed — not yet implemented. This document is written BEFORE any code change, per explicit user direction, so the design can be reviewed against the stated requirement before another revision ships wrong.
-**Supersedes (for the left/right slot layout only):** the zone-based model described in `docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` Rev 1-6. That document's history is preserved for the record; this spec is the direct answer to the defect its own Rev 6 shipped.
+**Supersedes (for the left/right slot layout only):** the zone-based model described in [`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`](SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) Rev 1-6. That document's history is preserved for the record; this spec is the direct answer to the defect its own Rev 6 shipped.
 **Trigger:** direct user correction, verbatim: *"for every line X there are 2X sections from which you must evenly distribute the elements... there are only 2 sections. the elements on 2 lines would need to be evenly distributed across 4 sections. but the screenshot only has 2 sections."*
-**Read first:** `docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md` — why six prior revisions missed this exact requirement.
+**Read first:** [`docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md`](../retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md) — why six prior revisions missed this exact requirement.
 
 ---
 
@@ -104,13 +104,13 @@ Same principle as Rev 6: when measurement isn't available (first paint, or JSDOM
    - Degenerate single-slot-total case (only `hostShell` exists): one row, left empty, right = `[hostShell]`.
 2. **A new, explicit invariant test** — the one thing missing from every prior revision's test suite: given an arbitrary-ish set of slot widths, assert that the number of one-sided rows never exceeds the mathematically-justified maximum (1 if the total count is odd, 0 if even, and only the fully-degenerate case allows a one-sided row when total count is 1). This is the test that would have caught Rev 6's bug — write it FIRST, watch it fail against the OLD zone-based code path (if feasible to run against), then confirm it passes against the new implementation.
 3. **Component-level regression tests** — the existing dropdown-identity-stability test (reagent P1 on PR #2808) and the live-ctx-text-reactivity test must still pass unmodified against the new row-based rendering (both exercise the `slotByKey` + `untrack()` mechanism, which is unchanged).
-4. **Required: real-screenshot verification at BOTH a wide (≥482px, single-row) AND a narrow (<482px, multi-row) pane width before calling this shipped** — explicitly listed as a checklist item because the retro's root cause was exactly this check being skipped for the narrow tier in Rev 6. Use direct Win32 `PrintWindow` capture (not `CaptureWindow`, not `CopyFromScreen` alone — see the retro and `docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`'s "How the fix was verified" section for the established, hazard-free method), and manually count filled sections against the invariant in §1 — not just eyeball "does it look okay."
+4. **Required: real-screenshot verification at BOTH a wide (≥482px, single-row) AND a narrow (<482px, multi-row) pane width before calling this shipped** — explicitly listed as a checklist item because the retro's root cause was exactly this check being skipped for the narrow tier in Rev 6. Use direct Win32 `PrintWindow` capture (not `CaptureWindow`, not `CopyFromScreen` alone — see the retro and [`docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`](../status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md)'s "How the fix was verified" section for the established, hazard-free method), and manually count filled sections against the invariant in §1 — not just eyeball "does it look okay."
 
 ## 8. Acceptance criteria
 
 1. At every pane width tested, count the number of rendered composer-strip rows (`N`) and the number of non-empty left/right sections across them; the count must equal `2N` minus at most 1 (odd-count singleton) minus at most 1 more only if total slot count is exactly 1 (degenerate case). No other one-sided rows permitted.
 2. `hostShell` (the Shell toggle) always renders as the rightmost element of the LAST row.
-3. The ≥482px single-line behavior already verified in Rev 6 (real screenshot, `docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`) is unchanged — this spec does not regress the case that was already correct.
+3. The ≥482px single-line behavior already verified in Rev 6 (real screenshot, [`docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`](../status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md)) is unchanged — this spec does not regress the case that was already correct.
 4. All existing `AgentComposerStrip.test.tsx` tests pass unmodified (fallback path preserves current JSDOM behavior).
 5. New pure-function tests (§7.1-7.2) pass, including the explicit no-one-sided-rows invariant test.
 6. Real screenshots at both a wide and a narrow pane width, taken AFTER implementation, are attached to the PR and manually verified against §1 before requesting review.
@@ -126,7 +126,7 @@ Same principle as Rev 6: when measurement isn't available (first paint, or JSDOM
 
 | Phase | Status | Notes |
 |---|---|---|
-| 1. Retro: why 6 revisions missed this | ✅ Done | `docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md` |
+| 1. Retro: why 6 revisions missed this | ✅ Done | [`docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md`](../retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md) |
 | 2. This spec | ✅ Done | Written before any code change, per explicit user direction |
 | 3. Implement `ResizeObserver` + `stripWidth` signal | ✅ Done | |
 | 4. Implement row-builder pure function + single-row delegation | ✅ Done | `computeComposerRows` |

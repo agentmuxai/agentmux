@@ -1,6 +1,6 @@
 # PLAN: Browser-pane DOM API implementation
 
-Companion to `docs/specs/SPEC_BROWSER_DOM_API.md`. The spec says
+Companion to [`docs/specs/SPEC_BROWSER_DOM_API.md`](SPEC_BROWSER_DOM_API.md). The spec says
 **what** to build; this plan says **how**, in the order an
 implementor should actually tackle it.
 
@@ -11,7 +11,7 @@ leaves the repo in a working state.
 
 ## Phase 0 — prerequisites (done in spec PR)
 
-- ✅ Spec committed at `docs/specs/SPEC_BROWSER_DOM_API.md`.
+- ✅ Spec committed at [`docs/specs/SPEC_BROWSER_DOM_API.md`](SPEC_BROWSER_DOM_API.md).
 - ✅ Spec auth header corrected to `Authorization: Bearer <ipc_token>`
   (matches `agentmux-cef/src/ipc.rs:131-136`).
 - ✅ Confirmed dep chain already carries `tokio-tungstenite` + `reqwest`
@@ -228,7 +228,7 @@ pub async fn query(
    (response `id` matches request `id`). Gated behind
    `--features test-cdp` so it doesn't run by default.
 
-2. **Integration** (`tools/tests/dom-smoke.ps1`):
+2. **Integration** ([`tools/tests/dom-smoke.ps1`](../../tools/tests/dom-smoke.ps1)):
    ```powershell
    # setup: assume task dev is up + layout-smoke creates the layout
    $auth = Get-AgentMuxAuthFile
@@ -319,7 +319,7 @@ CDP domains; no new client infrastructure.
 - Extend `dom-smoke.ps1`: click the search box, type "hello",
   read back its `value` via `eval("...")`.
 - **Hook into existing tests** — the hand-off goal from the user:
-  rewrite `tools/tests/pane-focus-stress.ps1` to swap pixel
+  rewrite [`tools/tests/pane-focus-stress.ps1`](../../tools/tests/pane-focus-stress.ps1) to swap pixel
   `mouse_event` + `SendKeys` for `browser.focus_element` +
   `browser.dispatch_key`. Terminal pane clicks stay pixel-based
   (terminal isn't a browser), so keep `Click-Pixel` as a fallback
@@ -339,7 +339,7 @@ CDP domains; no new client infrastructure.
 
 This phase is where the DOM API earns its keep. A single PR that:
 
-1. Adds PowerShell wrapper helpers in `tools/tests/authfile.ps1`:
+1. Adds PowerShell wrapper helpers in [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1):
    ```powershell
    function Invoke-AgentMuxBrowserApi {
        param($Auth, [string]$Method, [hashtable]$Body)
@@ -357,7 +357,7 @@ This phase is where the DOM API earns its keep. A single PR that:
      pane's DOM — those stay pixel-based or, if we want end-to-end
      DOM, add a parallel `browser.main_dom.query` against the main
      window's CDP target. Simpler: leave address-bar clicks as-is.
-3. Updates `tools/tests/README.md` to document the DOM API path.
+3. Updates [`tools/tests/README.md`](../../tools/tests/README.md) to document the DOM API path.
 
 **Success criterion for this phase**: `pwsh pane-focus-stress.ps1
 -CreateLayout` returns `PASS (24/24)` consistently. If it doesn't,
@@ -418,6 +418,6 @@ Front-load it.
 - [ ] `pane-focus-smoke.ps1` still passes (regression)
 - [ ] Version bumped (`bump patch`), lockfile synced
 - [ ] PR opened with explicit test-plan checkboxes + reagent LGTM
-- [ ] Docs updated: `tools/tests/README.md` gains a section as new
+- [ ] Docs updated: [`tools/tests/README.md`](../../tools/tests/README.md) gains a section as new
       endpoints come online; `SPEC_BROWSER_DOM_API.md` edited only
       if a design decision changes mid-implementation

@@ -41,8 +41,8 @@ Re-measure after every phase-1–3 step, write the result in the PR description,
 ### Phase 1 — quick wins (each a small PR)
 
 **1. Run the bindings check on the main `cargo test`.**
-- The ubuntu job's `cargo test` already runs the `export_bindings_*` tests, so `frontend/types/rpc` has already been regenerated when it ends.
-- Split `check-rpc-bindings.sh` into "regenerate" (what it does today, kept for local use) and `--check-only` (only the `git status --porcelain` test on `frontend/types/rpc`). Have `ci-pr.yml` call `--check-only` after `cargo test`.
+- The ubuntu job's `cargo test` already runs the `export_bindings_*` tests, so [`frontend/types/rpc`](../../frontend/types/rpc) has already been regenerated when it ends.
+- Split `check-rpc-bindings.sh` into "regenerate" (what it does today, kept for local use) and `--check-only` (only the `git status --porcelain` test on [`frontend/types/rpc`](../../frontend/types/rpc)). Have `ci-pr.yml` call `--check-only` after `cargo test`.
 - Saves about 3.4 min.
 - *Done when:* CI still fails on a deliberately stale binding (verify once on a throwaway branch), and the job is 3 min or more shorter.
 
@@ -52,7 +52,7 @@ Re-measure after every phase-1–3 step, write the result in the PR description,
 - *Done when:* a nightly run has at least 15 min of headroom.
 
 **3. Fix the 11 broken doc links and report link breakage nightly.**
-- Fix the 11 relative links in 6 `docs/` files that broke in the `crates/` move (`node scripts/check-doc-links.mjs --all` lists them).
+- Fix the 11 relative links in 6 [`docs/`](..) files that broke in the [`crates/`](../../crates) move (`node scripts/check-doc-links.mjs --all` lists them).
 - Have the nightly also run `check-doc-links.mjs --all` and `check-comment-hygiene.mjs --dead-refs` and post the result to the standing docs-stale issue that `docs-stale-sweep.yml` keeps. It reports and does not fail the build, which keeps the earlier decision against repo-wide gates (`ci-nightly-build.yml`). A break merged today is then visible tomorrow.
 - *Done when:* `--all` reports zero, and the nightly posts its findings.
 
@@ -60,7 +60,7 @@ Re-measure after every phase-1–3 step, write the result in the PR description,
 
 **4. Switch to cargo-nextest in the ubuntu job.** (Depends on step 1, so the bindings check doesn't need its own `cargo test` again.)
 - Replace `cargo test … -- --test-threads=1` with `cargo nextest run`. nextest runs each test in its own process, so tests that share in-process globals (the in-memory FileStore, `set_var`, static locks) no longer collide, and the suite can use every core.
-- Add `.config/nextest.toml` with:
+- Add [`.config/nextest.toml`](../../.config/nextest.toml) with:
   - `retries = 1`, so a test that passes on retry is reported as FLAKY instead of hidden;
   - JUnit output;
   - a `[test-groups]` serial group for any test that still shares *outside* state (fixed ports, fixed paths).
@@ -70,7 +70,7 @@ Re-measure after every phase-1–3 step, write the result in the PR description,
 - *Done when:* the srv run takes about 45 s or less, and three consecutive main runs are green.
 
 **5. Remove wall-clock sleeps from Rust tests.**
-- There are 90 real `sleep(` calls in test-only files. `crates/srv/src/server/tests.rs` alone sleeps about 30 s, including a 15 s sleep meant for Windows that also runs on Linux.
+- There are 90 real `sleep(` calls in test-only files. [`crates/srv/src/server/tests.rs`](../../crates/srv/src/server/tests.rs) alone sleeps about 30 s, including a 15 s sleep meant for Windows that also runs on Linux.
 - Switch to `#[tokio::test(start_paused = true)]` / `tokio::time::advance` where the code under test uses tokio time, and to waiting for the state otherwise.
 - Start with the largest sleeps.
 - *Done when:* no test sleeps 1 s or more, except documented OS waits limited to their OS.
@@ -138,7 +138,7 @@ If vitest is still above 3 min after step 7, add a two-way `--shard` matrix in t
 - In srv, move `update_object_meta` into a backend service the server layer re-exports, so backend code stops reaching into `server`.
 
 **16. A settings consistency test.**
-- One test reads `schema/settings.json` and checks each key's default against `settings-template.jsonc`, the settings section's control default, and srv's read.
+- One test reads [`schema/settings.json`](../../schema/settings.json) and checks each key's default against `settings-template.jsonc`, the settings section's control default, and srv's read.
 - Today a new setting touches 6–7 places, with its default in four.
 
 **17. Split the files the ratchet holds.**
@@ -157,7 +157,7 @@ If vitest is still above 3 min after step 7, add a two-way `--shard` matrix in t
 - tests that tie `tab-presets.ts` and `agent-color.ts` to their Rust sources.
 
 **20. A weekly web-link report.**
-- lychee over `docs/` and code comments (about 562 web URLs, 466 on github.com), restricted to github.com and our own domains, posting to the docs-stale issue.
+- lychee over [`docs/`](..) and code comments (about 562 web URLs, 466 on github.com), restricted to github.com and our own domains, posting to the docs-stale issue.
 - Non-blocking on purpose: a gate on outside URLs makes CI depend on other people's servers.
 
 ## 5. Where it landed (2026-10-09)

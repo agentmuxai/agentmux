@@ -5,12 +5,12 @@
 **Author:** AgentY
 **Related:**
 `Cargo.toml` (`[patch.crates-io]`, the single pin this spec is about),
-`docs/cef-build/CEF_FORK_MAINTENANCE.md` (the *libcef* fork's carry-set
+[`docs/cef-build/CEF_FORK_MAINTENANCE.md`](../cef-build/CEF_FORK_MAINTENANCE.md) (the *libcef* fork's carry-set
 practice — a different repo, `agentmuxai/cef`, already org-owned and already
-CI-gated by `scripts/cef-verify.sh`),
-`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` (§Phase C
+CI-gated by [`scripts/cef-verify.sh`](../../scripts/cef-verify.sh)),
+[`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) (§Phase C
 is where the pin first moved to a personal fork "pending" an upstream PR),
-`docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §5 (why the
+[`docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md`](SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) §5 (why the
 binding needs a patch at all)
 
 ---
@@ -66,7 +66,7 @@ able to merge them. Waiting on them was never going to resolve this.
    repo ships — and nothing else; a git source is identified by rev, and
    the rev's content is unchanged.
 
-3. The two live build docs under `docs/cef-build/` that told a developer to
+3. The two live build docs under [`docs/cef-build/`](../cef-build) that told a developer to
    fetch the binding from `AgentU-asaf` now name the org fork. Historical
    specs, reports, and retros that mention the personal forks are left as
    written — they record what was true when they were written.
@@ -87,7 +87,7 @@ able to merge them. Waiting on them was never going to resolve this.
   long-term move is a PR against `tauri-apps/cef-rs` itself, from the org
   fork, which is now possible.
 - **The libcef fork.** `agentmuxai/cef` and the carry-set gate
-  (`scripts/cef-verify.sh`, run on every PR by `ci-pr.yml`) are the
+  ([`scripts/cef-verify.sh`](../../scripts/cef-verify.sh), run on every PR by `ci-pr.yml`) are the
   answer to the *other* CEF risk — silently losing patches across a
   milestone upgrade — and were already in place. This spec closes the
   ownership gap on the binding side only.

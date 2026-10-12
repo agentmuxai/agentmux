@@ -3,20 +3,20 @@
 **Every spec lives here.** There is no second spec tree — a doc's lifecycle
 state is its `**Status:**` line (below), not the directory it sits in.
 
-`archive/` is the one subdirectory, and it means "not worth reading unless you
+[`archive/`](archive) is the one subdirectory, and it means "not worth reading unless you
 are doing history", not a lifecycle stage. Status still applies inside it.
 
 ### Why there is no `specs/` tree anymore
 
 There used to be a top-level `specs/` for "approved / being implemented", with
-`docs/specs/` as drafts and `specs/archive/` as done. That worked as a promotion
+[`docs/specs/`](.) as drafts and `specs/archive/` as done. That worked as a promotion
 workflow and then quietly inverted itself. Measured before the trees were
 merged (2026-09-01):
 
 | Tree | Documented as | Actually held |
 |---|---|---|
 | `specs/` | active and approved | 51 `draft`, 2 `implemented` |
-| `docs/specs/` | drafts, not approved | **126 `implemented`**, 14 `active` |
+| [`docs/specs/`](.) | drafts, not approved | **126 `implemented`**, 14 `active` |
 | `specs/archive/` | completed or superseded | 7 `draft`, 3 `ready` |
 
 An agent trusting those descriptions looked in exactly the wrong tree. Worse,
@@ -25,7 +25,7 @@ promoting a file between trees broke every code comment citing it, silently:
 pointing at `specs/X` for a file that had already moved to `docs/specs/X`.
 
 Directory-as-status and the `Status:` field were two answers to the same
-question, and only one of them is enforced (`scripts/check-doc-status.sh`) or
+question, and only one of them is enforced ([`scripts/check-doc-status.sh`](../../scripts/check-doc-status.sh)) or
 kept current. So the directories stopped being an answer.
 
 **Do not reintroduce a second tree** to mean approved, active, or done. Set the
@@ -71,8 +71,8 @@ any checkable claim in it (a file path, "Phase N done", "PR merged") —
 **spot-verify against current code.** A Status line is a claim about the
 code; nothing re-verifies it automatically once written — but as of
 2026-09-07 something does *flag* the likely-stale ones: the weekly
-docs stale-sweep (`scripts/docs-stale-sweep.mjs`, run by
-`.github/workflows/docs-stale-sweep.yml`) lists every doc that claims to be
+docs stale-sweep ([`scripts/docs-stale-sweep.mjs`](../../scripts/docs-stale-sweep.mjs), run by
+[`.github/workflows/docs-stale-sweep.yml`](../../.github/workflows/docs-stale-sweep.yml)) lists every doc that claims to be
 current, has not been touched in more than 8 weeks, and cites a file that
 has changed since or no longer exists, and keeps that list on one standing
 issue (label `docs-stale-sweep`). A doc on that list is a candidate, not a

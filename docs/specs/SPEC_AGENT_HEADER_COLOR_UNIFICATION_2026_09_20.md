@@ -3,14 +3,14 @@
 **Date:** 2026-09-20
 **Status:** implemented in #3452 — see §4 for exactly what shipped
 **Author:** Camper
-**Related:** `docs/specs/SPEC_AGENT_COLOR_2026_08_08.md` (the persisted per-agent
+**Related:** [`docs/specs/SPEC_AGENT_COLOR_2026_08_08.md`](SPEC_AGENT_COLOR_2026_08_08.md) (the persisted per-agent
 `ui:color`/`frame:activebordercolor` system this now also feeds the header),
-`docs/specs/SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md` (Draft, 2026-06-23
+[`docs/specs/SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md`](SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md) (Draft, 2026-06-23
 — documents `AGENTMUX_AGENT_COLOR` as part of its original design; that
 assumption is now stale, see §5). A larger, not-yet-implemented follow-up
 (persisting explicit picks to agent identity, unifying the tab-select
 indicator) exists as local notes only — not committed yet, so not cited by
-path here (`docs/specs/README.md`'s no-dangling-pointer rule).
+path here ([`docs/specs/README.md`](README.md)'s no-dangling-pointer rule).
 
 ---
 
@@ -20,22 +20,22 @@ Investigating a user report ("agent panes get a unique border color, but
 their header remains black") surfaced three independent color mechanisms,
 not two:
 
-1. **Per-agent identity color** — `frontend/app/view/agent/agent-color.ts`
+1. **Per-agent identity color** — [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts)
    / `agentmux-srv/src/backend/agent_color.rs`. FNV-1a hash of the agent id
    onto a 14-color palette, persisted as `ui:color` (agent_content) and
    seeded into `frame:activebordercolor`/`frame:bordercolor` block meta at
    launch (`SPEC_AGENT_COLOR_2026_08_08.md`). **Border only** — never fed
    the header.
-2. **The "Pane Color" right-click picker** — `frontend/app/block/pane-color-menu.ts`.
+2. **The "Pane Color" right-click picker** — [`frontend/app/block/pane-color-menu.ts`](../../frontend/app/block/pane-color-menu.ts).
    12 hues, writes `frame:hue` block meta, drives both header bg
    (`hueToHeaderBg`) and border (`hueToActiveBorder`/`hueToBorder`).
    Explicit, user-chosen, already correctly touched both surfaces.
 3. **An undocumented, older env-var-driven system** —
-   `frontend/app/block/autotitle.ts`'s `detectAgentColor`/`detectAgentTextColor`.
+   [`frontend/app/block/autotitle.ts`](../../frontend/app/block/autotitle.ts)'s `detectAgentColor`/`detectAgentTextColor`.
    Read `AGENTMUX_AGENT_COLOR`/`AGENTMUX_AGENT_TEXT_COLOR` from the block's
    `cmd:env` (populated by the OSC-16162 shell-integration prompt hook —
    `agentmux-srv/src/backend/shellintegration/{bash,zsh,fish,pwsh}.{sh,fish,ps1}`
-   — see `frontend/app/view/term/termosc.ts`'s `E` command), falling back to
+   — see [`frontend/app/view/term/termosc.ts`](../../frontend/app/view/term/termosc.ts)'s `E` command), falling back to
    a hardcoded table for the legacy fixed agent names (`Agent1`–`Agent5`,
    `AgentA`, `AgentX`, `AgentY`, `AgentG`). **Header only.** Predates system
    #1 and was never reconciled with it — `SPEC_AGENT_COLOR_2026_08_08.md`
@@ -67,8 +67,8 @@ the two frontend functions:
 
 | Layer | What | File |
 |---|---|---|
-| Frontend detection | `detectAgentColor`, `detectAgentTextColor`, `AGENT_COLOR_ENV_VAR`, `AGENT_TEXT_COLOR_ENV_VAR`, `DEFAULT_AGENT_COLORS`, `DEFAULT_AGENT_TEXT_COLORS` | `frontend/app/block/autotitle.ts` |
-| Frontend consumption | `agentColor`/`agentTextColor` memos (header); `blockAgentColor`'s `detectAgentColor` call (border) | `frontend/app/block/blockframe.tsx` |
+| Frontend detection | `detectAgentColor`, `detectAgentTextColor`, `AGENT_COLOR_ENV_VAR`, `AGENT_TEXT_COLOR_ENV_VAR`, `DEFAULT_AGENT_COLORS`, `DEFAULT_AGENT_TEXT_COLORS` | [`frontend/app/block/autotitle.ts`](../../frontend/app/block/autotitle.ts) |
+| Frontend consumption | `agentColor`/`agentTextColor` memos (header); `blockAgentColor`'s `detectAgentColor` call (border) | [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) |
 | Backend env passthrough | `AGENTMUX_AGENT_COLOR`/`AGENTMUX_AGENT_TEXT_COLOR` removed from the pane env allowlist | `agentmux-srv/src/backend/pane_env.rs` |
 | Backend cleanup | `env_remove` calls for the same two keys (now removing an unset var — dead) | `agentmux-srv/src/backend/blockcontroller/shell/lifecycle.rs` |
 | Shell integration | `COLOR:` field dropped from the change-detection string; the conditional `AGENTMUX_AGENT_COLOR` JSON payload field removed | `bash.sh`, `zsh.sh`, `fish.fish`, `pwsh.ps1` under `agentmux-srv/src/backend/shellintegration/` |

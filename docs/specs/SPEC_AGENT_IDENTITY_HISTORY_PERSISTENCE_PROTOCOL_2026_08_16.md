@@ -13,12 +13,12 @@ what remains genuinely open is their systematic application, not their adoption.
 **Ground truth basis:** `agentmuxai/agentmux` local checkout at `3705f83c3`
 (`agent3/bashwrap-persist-cwd-across-calls`), cross-checked against `origin/main` at `72aefad4d`.
 **Related:**
-`docs/specs/REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md` (this agent's own root-cause report,
+[`docs/specs/REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`](REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md) (this agent's own root-cause report,
 written earlier the same day — background for §1-2 below),
-`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` (PR #2587, merged 2026-08-15 — the "every
+[`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) (PR #2587, merged 2026-08-15 — the "every
 agent gets its own dedicated, portable bundle" work this doc builds on),
-`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`,
-`docs/specs/SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md`.
+[`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md),
+[`docs/specs/SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md`](SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md).
 **Motivation:** the operator, after reading the root-cause report, asked three questions: (1) does this
 indicate the system is mid-migration and needs cleanup, (2) should there be a formal spec canonizing the
 correct protocol, and (3) could the just-shipped Mandatory ABF work be the right place to anchor conversation

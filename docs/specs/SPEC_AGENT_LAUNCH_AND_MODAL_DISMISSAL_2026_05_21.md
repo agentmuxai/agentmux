@@ -3,7 +3,7 @@
 **Status:** Draft / for review
 **Date:** 2026-05-21
 **Author:** AgentA
-**Area:** `frontend/app/view/agent/components/AgentLaunchModal.tsx`,
+**Area:** [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx),
 `frontend/app/element/modal-v2.tsx` (+ `.scss`)
 
 Three related UX changes around the agent launch / edit modals. They are

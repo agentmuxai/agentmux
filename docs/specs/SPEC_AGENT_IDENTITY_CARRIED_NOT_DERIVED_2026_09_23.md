@@ -53,7 +53,7 @@ treats it as one.
 Revision 1's table asserted it is the slug. It depends on the launch path:
 
 - `server/agent_handlers/input.rs:341-353` — the **display name**.
-- `frontend/app/view/agent/agent-model.ts:545` — the **slug**.
+- [`frontend/app/view/agent/agent-model.ts:545`](../../frontend/app/view/agent/agent-model.ts#L545) — the **slug**.
 
 One variable, two meanings, two launch paths. `AGENTMUX_AGENT_SLUG` also
 already exists in `pane_env.rs:74` and revision 1 never reconciled it. Any plan
@@ -1786,7 +1786,7 @@ changes two things at once.
   **Shipped in #3563.** §5.1's entry point exists
   (`backend/name_resolution.rs::resolve_name_to_uid`), reachable only
   through `POST /agentmux/agents/resolve`, with
-  `scripts/check-name-resolver-callers.sh` as §9.3's grep gate. `agentmux-mcp`
+  [`scripts/check-name-resolver-callers.sh`](../../scripts/check-name-resolver-callers.sh) as §9.3's grep gate. `agentmux-mcp`
   resolves `WorkEnqueue.target_agent` and `CronCreate.to` at the boundary,
   carries the UID, and hands an ambiguous name back to the model with the
   candidates (§5.2). A cron job with a captured UID fires by UID; a

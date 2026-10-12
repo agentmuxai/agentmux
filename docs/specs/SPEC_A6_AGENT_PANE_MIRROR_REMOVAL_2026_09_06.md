@@ -1,10 +1,10 @@
 # SPEC: A6 — remove the agent-pane `AgentAtoms` mirror; render from the reducer stores
 
-**Status:** implemented — this PR. A6 of issue #1549 (`docs/analysis/TRACKING_ARCHITECTURE_REFACTOR_A1_A15_2026_06_18.md`). Rides with the code per the no-doc-only-PR rule.
+**Status:** implemented — this PR. A6 of issue #1549 ([`docs/analysis/TRACKING_ARCHITECTURE_REFACTOR_A1_A15_2026_06_18.md`](../analysis/TRACKING_ARCHITECTURE_REFACTOR_A1_A15_2026_06_18.md)). Rides with the code per the no-doc-only-PR rule.
 **Date:** 2026-09-06
 **Author:** Korp
 **Baseline:** `main` @ `c45721354`
-**Related:** `SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md` (the reducer this exposes), `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md` (the cascade contract preserved here), `REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §3.1 (why now: `agent-view.tsx` grew 1,282 → 2,730 lines while this sat open), `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` (the scroll/expansion half of A6, **not** in scope here — see §5).
+**Related:** `SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md` (the reducer this exposes), [`docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`](../analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md) (the cascade contract preserved here), `REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §3.1 (why now: `agent-view.tsx` grew 1,282 → 2,730 lines while this sat open), `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` (the scroll/expansion half of A6, **not** in scope here — see §5).
 
 ---
 
@@ -12,7 +12,7 @@
 
 The agent pane had **four parallel state systems** for one pane (the A6 board entry). This PR collapses the one that was pure duplication:
 
-`agent-view.tsx` created a bundle of **19 Solid signals** (`createAgentAtoms`, `frontend/app/view/agent/state.ts`), handed **17 of their setters** to the pane-state store through a hand-maintained `AgentPaneProjections` interface plus the document store's `documentSetter`, and the stores wrote each changed field back through the matching setter. The view then rendered from the atoms.
+`agent-view.tsx` created a bundle of **19 Solid signals** (`createAgentAtoms`, [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts)), handed **17 of their setters** to the pane-state store through a hand-maintained `AgentPaneProjections` interface plus the document store's `documentSetter`, and the stores wrote each changed field back through the matching setter. The view then rendered from the atoms.
 
 Consequences, all observed in the tree at the baseline:
 
@@ -71,5 +71,5 @@ The board's A6 also says "unify the dual scroll/expansion bridged by `expansion-
 ## 6. Verification
 
 - `tsc --noEmit`: 0 errors (baseline on `main` also 0).
-- vitest over `frontend/app/store`, `frontend/app/view/agent`, `frontend/app/view/swarm`: 168 files / 2,713 tests green; full suite run recorded in the PR.
+- vitest over [`frontend/app/store`](../../frontend/app/store), [`frontend/app/view/agent`](../../frontend/app/view/agent), [`frontend/app/view/swarm`](../../frontend/app/view/swarm): 168 files / 2,713 tests green; full suite run recorded in the PR.
 - ESLint could not be run on this checkout (pre-existing config-load failure, see #3044).

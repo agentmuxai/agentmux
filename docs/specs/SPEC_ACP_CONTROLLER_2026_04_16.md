@@ -4,8 +4,8 @@
 **Author:** Agent1
 **Status:** Draft
 **Priority:** High — strategic differentiator
-**Supersedes:** `docs/specs/openclaw-agent-runtime.md` (TUI/PTY approach)
-**Related:** `docs/specs/integration-vision.md`, `docs/specs/openclaw-widget.md`
+**Supersedes:** [`docs/specs/openclaw-agent-runtime.md`](openclaw-agent-runtime.md) (TUI/PTY approach)
+**Related:** [`docs/specs/integration-vision.md`](integration-vision.md), [`docs/specs/openclaw-widget.md`](openclaw-widget.md)
 
 ---
 
@@ -488,8 +488,8 @@ At that point, all providers use the same controller and translator. Adding a ne
 | File | Purpose |
 |------|---------|
 | `agentmux-srv/src/backend/blockcontroller/acp.rs` | ACP controller (Rust) — JSON-RPC client over stdio |
-| `frontend/app/view/agent/providers/acp-translator.ts` | Universal ACP event translator |
-| `frontend/app/view/agent/commands/providers/openclaw.ts` | OpenClaw slash commands (initially empty) |
+| [`frontend/app/view/agent/providers/acp-translator.ts`](../../frontend/app/view/agent/providers/acp-translator.ts) | Universal ACP event translator |
+| [`frontend/app/view/agent/commands/providers/openclaw.ts`](../../frontend/app/view/agent/commands/providers/openclaw.ts) | OpenClaw slash commands (initially empty) |
 
 ### Modified Files
 
@@ -498,9 +498,9 @@ At that point, all providers use the same controller and translator. Adding a ne
 | `agentmux-srv/src/backend/blockcontroller/mod.rs` | Add `Acp` variant, route to `AcpController` |
 | `agentmux-srv/src/backend/providers.rs` | Add `ControllerType::Acp`, add OpenClaw + Pi + Kiro providers |
 | `agentmux-cef/src/commands/providers.rs` | Add OpenClaw + Pi + Kiro npm packages, versions, auth checks |
-| `frontend/app/view/agent/providers/index.ts` | Add OpenClaw + Pi + Kiro `ProviderDefinition` entries |
-| `frontend/app/view/agent/providers/translator-factory.ts` | Add `"acp"` case returning `AcpTranslator` |
-| `frontend/app/view/agent/commands/providers/index.ts` | Register OpenClaw slash commands |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Add OpenClaw + Pi + Kiro `ProviderDefinition` entries |
+| [`frontend/app/view/agent/providers/translator-factory.ts`](../../frontend/app/view/agent/providers/translator-factory.ts) | Add `"acp"` case returning `AcpTranslator` |
+| [`frontend/app/view/agent/commands/providers/index.ts`](../../frontend/app/view/agent/commands/providers/index.ts) | Register OpenClaw slash commands |
 | `frontend/app/view/forge/forge-constants.ts` | Add OpenClaw + Pi + Kiro to Forge provider list |
 
 ---

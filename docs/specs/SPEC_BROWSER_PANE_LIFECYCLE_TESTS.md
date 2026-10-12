@@ -88,7 +88,7 @@ real `AppState` + `cef::Browser`; tests pass a `Vec<Event>`-recording bridge.
 
 ## 4. Layer 2 — Frontend state gating (vitest)
 
-File: `frontend/app/view/browser/browser-model.test.ts` (new).
+File: [`frontend/app/view/browser/browser-model.test.ts`](../../frontend/app/view/browser/browser-model.test.ts) (new).
 
 ### 4.1 What we test
 

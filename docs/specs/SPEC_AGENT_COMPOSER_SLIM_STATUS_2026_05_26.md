@@ -195,7 +195,7 @@ De-duplicated, sorted by first use, with `(×N)` suffix for N > 1. Click a tool 
 
 ### 5.1 New components
 
-- `frontend/app/view/agent/components/AgentComposerStrip.tsx` — the slim status row. Replaces `AgentStatusLine`. Receives the latest log line via a new prop `latestLogLine?: string`.
+- [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) — the slim status row. Replaces `AgentStatusLine`. Receives the latest log line via a new prop `latestLogLine?: string`.
 - `frontend/app/view/agent/components/AgentComposerDetails.tsx` — the expandable details panel. Absorbs `AgentControlBar` AND the full `ActivityLogPanel` content.
 
 ### 5.2 Deleted / replaced
@@ -206,7 +206,7 @@ De-duplicated, sorted by first use, with `(×N)` suffix for N > 1. Click a tool 
 
 ### 5.3 Modified
 
-- `frontend/app/view/agent/agent-view.tsx` (lines ~824–891 — the composer region JSX) — replace the stacked AgentStatusLine + ActivityLogPanel + AgentControlBar + AgentFooter pattern with:
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (lines ~824–891 — the composer region JSX) — replace the stacked AgentStatusLine + ActivityLogPanel + AgentControlBar + AgentFooter pattern with:
 
 ```tsx
 <div class="agent-composer-region">
@@ -242,7 +242,7 @@ De-duplicated, sorted by first use, with `(×N)` suffix for N > 1. Click a tool 
 
 #### 5.4.1 New fields on `AgentPaneState`
 
-`frontend/app/store/agent-pane-state/types.ts`:
+[`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts):
 
 ```ts
 export interface AgentPaneState {
@@ -299,7 +299,7 @@ export type AgentPaneCommand =
 
 #### 5.4.3 Reducer arms
 
-In `frontend/app/store/agent-pane-state/reducer.ts`:
+In [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts):
 
 | Command | Transition | Side-effect events |
 |---|---|---|
@@ -346,7 +346,7 @@ it("TurnStart auto-collapses the details panel", () => {
 
 #### 5.4.5 Atom projection
 
-`frontend/app/view/agent/state.ts` (where `createAgentAtoms` lives) gets two new atoms projected from the slice — same pattern as the existing `turnPhaseAtom`, `currentToolAtom`, `sessionStatsAtom`:
+[`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) (where `createAgentAtoms` lives) gets two new atoms projected from the slice — same pattern as the existing `turnPhaseAtom`, `currentToolAtom`, `sessionStatsAtom`:
 
 ```ts
 detailsOpenAtom: atomFromSelector((s) => s.detailsOpen),
@@ -394,7 +394,7 @@ Mirrors how `turnPhase` displaced the legacy `turnActive` / `stopping` / `stream
 
 ### 5.5 SCSS
 
-- `frontend/app/view/agent/styles/_composer-strip.scss` — new file for the strip layout (flex row, spinner SVG keyframes, chevron rotation, button reset).
+- [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) — new file for the strip layout (flex row, spinner SVG keyframes, chevron rotation, button reset).
 - `frontend/app/view/agent/styles/_composer-details.scss` — new file for the details panel (slide-in animation, dropdown styling that matches the old control-bar, button row).
 - `_control-bar.scss` — keep for now as the source of dropdown chrome (referenced from `_composer-details.scss`), delete in a follow-up once the details panel is verified visually.
 

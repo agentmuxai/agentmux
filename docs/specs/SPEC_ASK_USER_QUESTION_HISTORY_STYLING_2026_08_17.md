@@ -55,7 +55,7 @@ Two related complaints about the same rendering gap:
 
 ### Answered-question rendering
 
-`frontend/app/view/agent/hooks/useAgentQuestions.ts:109-138` (`handleAnswer`) flips
+[`frontend/app/view/agent/hooks/useAgentQuestions.ts:109-138`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts#L109-L138) (`handleAnswer`) flips
 the node on answer:
 
 ```ts
@@ -83,13 +83,13 @@ the flattened text loses real newlines (`\n` → `; `).
 
 ### User-input color
 
-`frontend/app/theme.scss:81`:
+[`frontend/app/theme.scss:81`](../../frontend/app/theme.scss#L81):
 
 ```scss
 --user-input-color: #e07832; // warm amber, complementary to --accent-color
 ```
 
-`frontend/app/view/agent/styles/_document-nodes.scss:975-980`:
+[`frontend/app/view/agent/styles/_document-nodes.scss:975-980`](../../frontend/app/view/agent/styles/_document-nodes.scss#L975-L980):
 
 ```scss
 .agent-user-message {
@@ -169,7 +169,7 @@ already a light-on-dark-or-dark-on-light mix toward one of these same two tokens
 
 Add a field that survives the answer, holding the real (un-flattened) text:
 
-`frontend/app/view/agent/types.ts` — `ToolNode`:
+[`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) — `ToolNode`:
 
 ```ts
 /** Set alongside `summary` when an AskUserQuestion is answered
@@ -187,7 +187,7 @@ answerText?: string;
 timeoutNote?: string;
 ```
 
-`frontend/app/view/agent/hooks/useAgentQuestions.ts` (`handleAnswer`) — set it
+[`frontend/app/view/agent/hooks/useAgentQuestions.ts`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts) (`handleAnswer`) — set it
 alongside `summary`, using `outcome.answer_text` directly (real newlines intact,
 not the `; `-flattened `flatText` used for the log-line `summary`):
 
@@ -201,7 +201,7 @@ updated.push({
 });
 ```
 
-`frontend/app/view/agent/components/ToolBlock.tsx` — branch before the generic
+[`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — branch before the generic
 collapsed-row rendering:
 
 ```tsx
@@ -212,7 +212,7 @@ const isAnsweredQuestion = () =>
 ```
 
 When true, render a small presentational component (`AnsweredQuestionMessage`,
-new file `frontend/app/view/agent/components/AnsweredQuestionMessage.tsx`, or
+new file [`frontend/app/view/agent/components/AnsweredQuestionMessage.tsx`](../../frontend/app/view/agent/components/AnsweredQuestionMessage.tsx), or
 inlined in `ToolBlock.tsx` if it stays this small) reusing the exact
 `.agent-user-message` / `.agent-user-message-content` DOM shape and CSS classes
 `UserMessageBlock` uses for regular (non-startup) input — always expanded,
@@ -332,10 +332,10 @@ size (this spec never asked to enlarge *that*).
 
 ## Related
 
-- `docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md` — original `AskUserQuestion`
+- [`docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md`](SPEC_ASK_USER_QUESTION_2026_06_15.md) — original `AskUserQuestion`
   panel.
-- `docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md` — 30s countdown.
-- `docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md` — hover-pause.
-- `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md` —
+- [`docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`](SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md) — 30s countdown.
+- [`docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md`](SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md) — hover-pause.
+- [`docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) —
   introduced `--user-input-color` and the current `.agent-user-message` styling
   this spec revises.

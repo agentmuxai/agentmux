@@ -16,15 +16,15 @@ Q&A, §8.1/§8.2 resolved.
 Duplicate action reuses), `agentmux-srv/src/backend/storage/managed.rs`
 (the `PRAGMA foreign_keys` caveat §5.1 depends on), `agentmux-srv/src/backend/
 storage/migrations.rs` (schema — cascade-declared and loose-reference tables,
-§5.1), `frontend/app/store/rpc-api/agent.ts` (`DeleteAgentDefinitionCommand`,
+§5.1), [`frontend/app/store/rpc-api/agent.ts`](../../frontend/app/store/rpc-api/agent.ts) (`DeleteAgentDefinitionCommand`,
 `ForkAgentDefinitionCommand`, `ForkAgentDefinitionSuggestCommand`,
 `RenameAgentDefinitionTitleCommand`), `frontend/app/view/agent/components/
 MyAgentsList.tsx` (the picker's "My Agents" row list this spec's menu attaches
 to — already has an inline-expand precedent, the fork prompt, §1),
-`frontend/app/view/agent/components/AgentPicker.tsx` (`handleFork`, the
+[`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) (`handleFork`, the
 existing duplicate-and-launch flow this spec's Duplicate action reuses),
-`frontend/app/element/confirm-modal.tsx` (`ConfirmModal`, the confirm-dialog
-component Delete reuses), `frontend/app/view/agent/components/AgentCard.tsx`
+[`frontend/app/element/confirm-modal.tsx`](../../frontend/app/element/confirm-modal.tsx) (`ConfirmModal`, the confirm-dialog
+component Delete reuses), [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx)
 (documents the "hide is templates-only, deleteagent is the real removal path"
 split this spec completes; also the Templates-tier card this spec's menu does
 **not** extend to — My Agents only).

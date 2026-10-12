@@ -5,10 +5,10 @@ where the shipped code departs from §2–§4 as first written.
 **Date:** 2026-09-23.
 **Requested by:** repo owner (asafebgi).
 **Author:** Agent2.
-**Related:** `docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md` (the tones
-this complements), `docs/specs/SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md`
+**Related:** [`docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md`](SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md) (the tones
+this complements), [`docs/specs/SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md)
 (the same "which thing is busy?" question, one level up at the OS taskbar),
-`docs/specs/SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md` (color rules).
+[`docs/specs/SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md`](SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md) (color rules).
 
 ---
 
@@ -83,7 +83,7 @@ This revision **replaces** §2.1 (routing), the color and envelope parts of
 
 Tool-call tones play for **every** agent pane in the window by default
 (`notify:tooltones:scope` defaults to `"all"`,
-`frontend/app/notification/sound/sound-service.ts:317`), including panes in
+[`frontend/app/notification/sound/sound-service.ts:317`](../../frontend/app/notification/sound/sound-service.ts#L317)), including panes in
 tabs you are not looking at. When several agents are working, you hear a
 steady stream of tones and have no way to tell which pane or tab they come
 from. Nothing on screen changes, because the source is usually in a
@@ -128,7 +128,7 @@ as a table (§6).
 A flash fires **exactly when a tool tone passes its policy gates**: the master
 sound switch, `notify:tooltones:enabled`, and `notify:tooltones:scope`.
 The hook point is `playToolToneIfAllowed()`
-(`frontend/app/notification/sound/sound-service.ts:311-335`). The flash is
+([`frontend/app/notification/sound/sound-service.ts:311-335`](../../frontend/app/notification/sound/sound-service.ts#L311-L335)). The flash is
 emitted right after the scope check at `:318-326`, **before** the
 `ctx`/`isAttached()` check at `:329`. That way it still works before the
 AudioContext is primed, and at volume 0.
@@ -138,10 +138,10 @@ Consequences, all intended:
   their flashes together. The two stay in sync.
 - A new `notify:tooltones:flash` setting (default `true`) turns off only the
   visual. It sits next to the existing tool-tone controls in
-  `frontend/app/view/settings/sections/sounds-section.tsx` (the section around
+  [`frontend/app/view/settings/sections/sounds-section.tsx`](../../frontend/app/view/settings/sections/sounds-section.tsx) (the section around
   `:211-235`).
 - Replaying old history never flashes. Tones only come from live `tool_call`
-  events (`frontend/app/view/agent/useAgentStream.ts:746`), so neither the
+  events ([`frontend/app/view/agent/useAgentStream.ts:746`](../../frontend/app/view/agent/useAgentStream.ts#L746)), so neither the
   tone nor the flash is triggered by a history reload. See §7.3 for a
   pre-existing gap in the tone side of this.
 
@@ -159,8 +159,8 @@ depends on it.
 - **Shape:** an overlay across the whole tab (or pane header) surface, not a
   border or dot. A tab is small, and a fill reads at a glance where a 1–2 px
   line does not.
-- **Color:** `var(--accent-color)` (`frontend/app/theme.scss:71`), the same
-  token as the active-tab top stripe (`frontend/app/tab/tab.scss:72-80`). No
+- **Color:** `var(--accent-color)` ([`frontend/app/theme.scss:71`](../../frontend/app/theme.scss#L71)), the same
+  token as the active-tab top stripe ([`frontend/app/tab/tab.scss:72-80`](../../frontend/app/tab/tab.scss#L72-L80)). No
   raw hex/rgba; `color-no-hex` in `.stylelintrc.json` and the theme-token
   rules would reject it anyway.
 - **Envelope:** jump to peak opacity **0.22**, hold for **80 ms**, then fade
@@ -170,13 +170,13 @@ depends on it.
 - **Layering:** a pseudo-element **overlay** with an animated `opacity`, not a
   change to `background`. Two reasons:
   1. User-colored tabs force their background with `!important`
-     (`frontend/app/tab/tab.scss:142-155`), so a background-based flash would
+     ([`frontend/app/tab/tab.scss:142-155`](../../frontend/app/tab/tab.scss#L142-L155)), so a background-based flash would
      be invisible on exactly the tabs people color to track agents. An
      overlay composites on top of any fill.
   2. `opacity` on its own layer is compositor-only: no layout, no paint of
      the tab contents. This matters because agent-pane typing latency is an
      active performance workstream
-     (`docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`),
+     ([`docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`](TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md)),
      and a flash that fires on every tool call must not cost the main thread
      anything.
 - **Pseudo-element choice:** `.tab-inner::after` is already the active-tab
@@ -208,9 +208,9 @@ Guard rails:
 ### 3.3 Reduced motion
 
 The app already has two reduced-motion paths: the `.prefers-reduced-motion`
-class (`frontend/app/app.scss:193`, set from `frontend/app/app.tsx:418`) and
+class ([`frontend/app/app.scss:193`](../../frontend/app/app.scss#L193), set from [`frontend/app/app.tsx:418`](../../frontend/app/app.tsx#L418)) and
 an OS-level `@media (prefers-reduced-motion: reduce)` block
-(`frontend/app/app.scss:306`). The class path only zeroes `transition-*`, not
+([`frontend/app/app.scss:306`](../../frontend/app/app.scss#L306)). The class path only zeroes `transition-*`, not
 `animation-*` or the Web Animations API (the comment at `app.scss:298-305`
 explains this), so it won't suppress this flash by itself.
 
@@ -224,7 +224,7 @@ survives; only the motion goes. Check this in JS from the same signal
 
 ### 4.1 One signal, emitted from the sound path
 
-Add a small module, `frontend/app/notification/activity-flash.ts`:
+Add a small module, [`frontend/app/notification/activity-flash.ts`](../../frontend/app/notification/activity-flash.ts):
 
 ```ts
 /** Fired once per tool tone that passed its policy gates. */
@@ -247,7 +247,7 @@ their own target and return early when it isn't them.
 
 ### 4.2 Tab side
 
-`frontend/app/tab/tab.tsx` already reads the tab object
+[`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) already reads the tab object
 (`useMuxObjectValue<Tab>`, `:118`), which carries `blockids`. On mount, each
 `Tab` subscribes. When `flashTargetFor(...)` returns `{kind: "tab", tabId}`
 matching `props.id`, it runs:
@@ -266,7 +266,7 @@ the cost the recent agent-pane performance work removed (PR #3599). Keep the
 previous `Animation` handle and `cancel()` it before starting the next one.
 Unsubscribe in `onCleanup`.
 
-Styles in `frontend/app/tab/tab.scss`: `.tab-inner::before { content: "";
+Styles in [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss): `.tab-inner::before { content: "";
 position: absolute; inset: 0; background: var(--accent-color); opacity: 0;
 pointer-events: none; }`. `.tab-inner` must be (or already is) a positioning
 context. Confirm the overlay stacks **under** the name text and close button.
@@ -275,10 +275,10 @@ A dimmed label would be a regression.
 ### 4.3 Pane-header side
 
 The generic header is `.block-frame-default-header`
-(`frontend/app/block/blockframe.tsx:725`). Agent panes may render hoisted
+([`frontend/app/block/blockframe.tsx:725`](../../frontend/app/block/blockframe.tsx#L725)). Agent panes may render hoisted
 chrome through `renderPaneChrome` instead
-(`frontend/app/tab/pane-leaf-chrome.tsx`, see its header comment and
-`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`). The
+([`frontend/app/tab/pane-leaf-chrome.tsx`](../../frontend/app/tab/pane-leaf-chrome.tsx), see its header comment and
+[`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md)). The
 implementer must confirm which element is actually visible as an agent pane's
 header and attach the overlay there. Same animation, same throttle, same
 reduced-motion rule.
@@ -294,7 +294,7 @@ reduced-motion rule.
   window that renders the pane. If so, the flashing tab is always in the
   window that made the sound, and there's nothing to do across windows.
 - **Overflowed tab bar:** the tab bar scrolls horizontally
-  (`frontend/app/tab/tabbar.scss:32-44`). A flash on a tab scrolled out of
+  ([`frontend/app/tab/tabbar.scss:32-44`](../../frontend/app/tab/tabbar.scss#L32-L44)). A flash on a tab scrolled out of
   view is invisible. A follow-up could flash the overflow edge. Don't
   auto-scroll the bar; that would move things under the user's cursor.
 
@@ -318,7 +318,7 @@ reduced-motion rule.
 8. Clicking or dragging a tab mid-pulse behaves exactly as it does without
    one.
 9. No change in the agent-pane typing benchmark (the CDP scripts under
-   `scripts/ui-screenshots/`, `typing-under-load-experiment.mjs`) with two
+   [`scripts/ui-screenshots/`](../../scripts/ui-screenshots), `typing-under-load-experiment.mjs`) with two
    background agents streaming tool calls. Measure before and after.
 
 ## 6. Tests
@@ -326,13 +326,13 @@ reduced-motion rule.
 - `flashTargetFor`: a table test covering every row of §2.1, plus an unknown
   `sourceBlockId` (a pane in no tab, returns `null`).
 - Sound service: extend the tests in
-  `frontend/app/notification/sound/__tests__/`. A `tool-started` event that
+  [`frontend/app/notification/sound/__tests__/`](../../frontend/app/notification/sound/__tests__). A `tool-started` event that
   passes the gates calls `pulseBlockActivity` once. Master off, tool tones
   off, focused scope with a non-focused source, and `notify:tooltones:flash =
   false` each call it zero times. It still fires when the AudioContext is not
   primed.
 - Throttle: three pulses to the same target within 150 ms start one animation.
-- Tab: extend `frontend/app/tab/tab.test.tsx` so a pulse for a block in this
+- Tab: extend [`frontend/app/tab/tab.test.tsx`](../../frontend/app/tab/tab.test.tsx) so a pulse for a block in this
   tab's `blockids` calls `animate` with `pseudoElement: "::before"`, a pulse
   for a block elsewhere does not, and unmount unsubscribes.
 
@@ -355,7 +355,7 @@ source is in a background tab where there is no pane body on screen.
 
 `sound-service.ts` has a `replayMode` guard (`:42`, checked at `:172`, `:248`,
 `:312`) meant to mute sounds during history replay, but nothing in
-`frontend/` ever calls `setReplayMode(true)`. Its only export was removed as
+[`frontend/`](../../frontend) ever calls `setReplayMode(true)`. Its only export was removed as
 unused in #2407. It is harmless today, because history reload never
 dispatches `ToolStart`. If a future change routes replayed history through
 the live event path, every past tool call would replay a tone, and with this
@@ -364,11 +364,11 @@ Tracked separately.
 
 ## 8. What shipped (2026-09-23)
 
-Code: `frontend/app/notification/activity-flash.ts` (routing rule, bus,
+Code: [`frontend/app/notification/activity-flash.ts`](../../frontend/app/notification/activity-flash.ts) (routing rule, bus,
 `flashElement`), with the hook in `playToolToneIfAllowed()` (sound-service.ts)
-and subscribers in `frontend/app/tab/tab.tsx` and
-`frontend/app/element/PaneTabStrip.tsx`. Setting: `notify:tooltones:flash`
-(Rust `wconfig/types.rs`, `schema/settings.json`, `srv-types.d.ts`,
+and subscribers in [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) and
+[`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx). Setting: `notify:tooltones:flash`
+(Rust `wconfig/types.rs`, [`schema/settings.json`](../../schema/settings.json), `srv-types.d.ts`,
 `settings-template.jsonc`, and a toggle under Settings → Sounds → Tool-call
 tones). The §2.2 open question was answered with the recommended default: no
 flash when sounds are off.
@@ -379,7 +379,7 @@ Departures from §2–§4 as first written (as of Revision 2):
    The pill target comes from every pane header now rendering its members
    as pills through the shared `PaneChrome` → `PaneHeaderTabStrip` →
    `PaneTabStrip`
-   (`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`), one
+   ([`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md)), one
    pill per blockId. That also covers §4.4's first gap: a background member
    of a pane stack flashes its own pill. `PaneTabStrip` gets an opt-in
    `flashOnActivity` prop, set only by `PaneHeaderTabStrip`, because the
@@ -401,7 +401,7 @@ Departures from §2–§4 as first written (as of Revision 2):
 5. **Per-keyframe easing**: the hold segment is linear and the decay uses
    `ease-out`.
 
-Tests: `frontend/app/notification/__tests__/activity-flash.test.ts` (the bus,
+Tests: [`frontend/app/notification/__tests__/activity-flash.test.ts`](../../frontend/app/notification/__tests__/activity-flash.test.ts) (the bus,
 the envelope, the base-color variable, and the throttle), a new "activity
 flash" suite in `sound/__tests__/sound-service.test.ts` (one event per tone,
 including from the focused pane, plus every gate, with the player unprimed),

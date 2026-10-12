@@ -2,11 +2,11 @@
 
 **Date:** 2026-07-20 (corrected 2026-07-21, extended 2026-07-21 §7)
 **Status:** implemented — PR #2253 including §7 (horizontal-scroll elimination); modal since renamed Stash (#2314). Verified 2026-08-10.
-**Scope:** `frontend/app/view/agent/agent-model.ts`,
+**Scope:** [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts),
 `frontend/app/view/agent/components/AgentSetupModal.tsx` / `.scss`,
-`frontend/app/view/agent/components/AgentNativeMemoryModal.tsx` / `.scss`,
-`frontend/app/view/agent/agent-native-memory-model.ts`,
-`frontend/app/view/agent/components/AgentIdentityModal.tsx` /
+[`frontend/app/view/agent/components/AgentNativeMemoryModal.tsx`](../../frontend/app/view/agent/components/AgentNativeMemoryModal.tsx) / `.scss`,
+[`frontend/app/view/agent/agent-native-memory-model.ts`](../../frontend/app/view/agent/agent-native-memory-model.ts),
+[`frontend/app/view/agent/components/AgentIdentityModal.tsx`](../../frontend/app/view/agent/components/AgentIdentityModal.tsx) /
 `_identity-panel.scss`
 
 ---
@@ -63,7 +63,7 @@ this.endIconButtons = () => {
 
 Hidden until an agent is loaded (empty array on the picker screen). Icons are
 rendered through the shared `IconButton` component
-(`frontend/app/element/iconbutton.tsx:12`) via the declarative `IconButtonDecl`
+([`frontend/app/element/iconbutton.tsx:12`](../../frontend/app/element/iconbutton.tsx#L12)) via the declarative `IconButtonDecl`
 type — `icon: "vault"` resolves to `fa fa-solid fa-vault fa-fw` via
 `makeIconClass`. Changing the icon is a one-line edit; the click handler,
 gating, and everything else about the button stays exactly as-is.
@@ -226,7 +226,7 @@ been misread twice.
 
 This modal opens **pane-scoped** (`useModalLayer()` inside a per-agent-pane
 component, `agent-view.tsx:194-218`) — its root sits inside the originating
-pane's own mount node (`frontend/app/element/ModalLayer.tsx:104-107`,
+pane's own mount node ([`frontend/app/element/ModalLayer.tsx:104-107`](../../frontend/app/element/ModalLayer.tsx#L104-L107),
 `.modal-layer-mount`), not the whole browser window. `92vw`/`85vh` are
 computed against the **viewport**, not that mount node — so on a narrow pane
 inside a wide window, `92vw` evaluates to something far larger than the
@@ -365,7 +365,7 @@ fix.
 
 MCP Servers and Skills tabs already solved this exact "list + detail, must
 work at any width" shape properly, via a shared, already-adopted component:
-`PrimitiveListDetail` (`frontend/app/element/primitive-list-detail.tsx`,
+`PrimitiveListDetail` ([`frontend/app/element/primitive-list-detail.tsx`](../../frontend/app/element/primitive-list-detail.tsx),
 from `SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`) — shows
 **exactly one** of {list, detail} at a time, no side-by-side split, no fixed
 widths anywhere. Memories never adopted it (predates it, or was just missed).

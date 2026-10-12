@@ -12,7 +12,7 @@ The desktop's AgentMux Cloud (MuxBus) settings are compiled in:
 
 | Setting | Where | Consumed by |
 |---|---|---|
-| Cognito hosted-UI domain | `frontend/.env.production` `VITE_MUXBUS_COGNITO_DOMAIN`; legacy fallback in `AgentMuxConnectPanel.tsx:32-36` | the frontend sends it in `MuxBusLoginReq`; srv's PKCE flow (`muxbus/pkce.rs`) builds the authorize URL and exchanges the code with it |
+| Cognito hosted-UI domain | [`frontend/.env.production`](../../frontend/.env.production) `VITE_MUXBUS_COGNITO_DOMAIN`; legacy fallback in `AgentMuxConnectPanel.tsx:32-36` | the frontend sends it in `MuxBusLoginReq`; srv's PKCE flow (`muxbus/pkce.rs`) builds the authorize URL and exchanges the code with it |
 | Cognito desktop client id | `VITE_MUXBUS_CLIENT_ID` (a production build fails without it, `vite.config.ts:68-96`) | the same |
 | Relay REST URL | `cloud_subscriber.rs:48` `MUXBUS_REST_URL`, env override `AGENTMUX_MUXBUS_REST_URL` (`relay.rs:49-54`) | login relay, agent provisioning, WAN keys, leases, inject |
 | Relay WebSocket URL | `cloud_subscriber.rs:47` `MUXBUS_WS_URL` (no override) | the cloud subscriber |

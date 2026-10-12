@@ -122,7 +122,7 @@ the caller's `gh-agent` (the agent's own GitHub identity; srv holds no GitHub cr
 `<Agent>@<host>:` title prefix that CI already requires. Results are cached for 2 minutes.
 
 Phase 3b as built:
-- **`WhoIsWorkingOn` reads open PRs in the agent's own MCP process** (`crates/mcp/src/tools/open_prs.rs`): `gh-agent pr
+- **`WhoIsWorkingOn` reads open PRs in the agent's own MCP process** ([`crates/mcp/src/tools/open_prs.rs`](../../crates/mcp/src/tools/open_prs.rs)): `gh-agent pr
   list --json number,title,headRefName,files` for the repository srv resolved, killed after 20 s, cached 2 minutes
   per repository. A PR is credited to the agent its `<Agent>@<host>: ` title prefix names; one without it (a person's or a
   bot's, which the prefix rule exempts) is credited to its GitHub author, with no host. The caller's own PRs (same agent and host) are left out. A match is kind `pr`: it joins the local agent of that

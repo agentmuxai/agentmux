@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-20  
 **Status:** Implemented (same PR as the dead-terminal-pane spec (since removed from the tree)) — #951
-**Affected tooling:** `tools/tests/bench-term-echo.mjs`, `tools/tests/authfile.ps1`  
+**Affected tooling:** [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs), [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1)\
 **Affected host:** `agentmux-cef/src/main.rs`, `agentmux-cef/src/dev_authfile.rs`
 
 ---
@@ -145,8 +145,8 @@ A future CI step could fail if p95 exceeds a threshold, giving early warning.
 
 ## Related
 
-- `docs/specs/SPEC_TEST_API_ACCESS.md` §5–§6 — auth file format and security model
-- `docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md` — benchmark design
+- [`docs/specs/SPEC_TEST_API_ACCESS.md`](SPEC_TEST_API_ACCESS.md) §5–§6 — auth file format and security model
+- [`docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) — benchmark design
 - the dead-terminal-pane spec (added in 62d50cb, since removed from the tree) — failure modes this workflow targets
 - `agentmux-cef/src/dev_authfile.rs` — auth file writer
 - `agentmux-cef/src/main.rs` — write gate (the `if is_dev {` block)

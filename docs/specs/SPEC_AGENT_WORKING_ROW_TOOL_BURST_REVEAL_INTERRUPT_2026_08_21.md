@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-21
 **Status:** proposed
-**Related:** `docs/retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md`
+**Related:** [`docs/retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md`](../retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md)
 (root-cause investigation this spec formalizes into a fix design),
-`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`
+[`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`](SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md)
 (the shimmer/type-out design this bug lives in)
 
 ---
@@ -15,7 +15,7 @@ Reported symptom (operator, reproduced live in an agent pane): "sometimes
 (not often) tool calls will interrupt agent thinking dialog." Confirmed via
 code reading (retro above) to be the footer's `AgentWorkingRow`
 ("Working…" / current-tool-name row below the transcript,
-`frontend/app/view/agent/components/AgentFooter.tsx`): during a burst of
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx)): during a burst of
 tool-related transitions — parallel tool calls in one assistant turn, or
 several tool calls arriving close together — the row's type-out reveal
 restarts from the first character multiple times in quick succession
@@ -40,7 +40,7 @@ the row's final settled text — not one restart per intermediate value.
 
 Three pieces compose the bug, none of which is itself wrong in isolation:
 
-1. **`frontend/app/view/agent/useAgentStream.ts:352-628`** — the
+1. **[`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts#L352-L628)** — the
    `fileSubject.subscribe(...)` callback body. One "append" notification
    can carry several newline-delimited raw lines (`lineBuffer.split("\n")`,
    line 360); `for (const line of lines)` (line 371) processes all of them
@@ -52,7 +52,7 @@ Three pieces compose the bug, none of which is itself wrong in isolation:
    outer, per-line level, not the inner per-event level** — see the §2.1
    revision note for why this distinction matters for the fix.
 
-2. **`frontend/app/store/agent-pane-state-store.ts`** — `dispatch()`
+2. **[`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts)** — `dispatch()`
    (from line 222) applies each dispatched change via its own signal
    setter (`proj("currentTool", ...)` at line 337,
    `proj("currentToolArg", ...)` at line 351) with **no `batch()`
@@ -63,7 +63,7 @@ Three pieces compose the bug, none of which is itself wrong in isolation:
    comment, lines 17–35) specifically to avoid this class of bug for
    document nodes; that discipline was never extended to `dispatchPane`.
 
-3. **`frontend/app/view/agent/components/AgentFooter.tsx`** —
+3. **[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx)** —
    `loadingLeftText()` (lines 113–128) returns the current tool
    name/arg whenever `currentTool` is set and not yet `toolPromoted`; the
    `leftText` memo (line 155) recomputes on every change to those fields;
@@ -205,17 +205,17 @@ fix, to keep the initial change small and easy to verify in isolation.
 
 ## 5. Sources
 
-- `frontend/app/view/agent/useAgentStream.ts:352-628` (the
+- [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts#L352-L628) (the
   `fileSubject.subscribe` callback), `:371` (outer per-line loop — the
   correct batch boundary), `:540` (inner per-event loop — insufficient
   boundary, see §2.1 revision note), `:581–592`
   (`ToolStart`/`ToolEnd` dispatch sites), `:17–35`
   (existing `StreamFlushQueue`/`batch()` precedent for document nodes)
-- `frontend/app/store/agent-pane-state-store.ts:222` (`dispatch()`),
+- [`frontend/app/store/agent-pane-state-store.ts:222`](../../frontend/app/store/agent-pane-state-store.ts#L222) (`dispatch()`),
   `:337`, `:351` (unbatched `proj(...)` signal writes)
-- `frontend/app/view/agent/components/AgentFooter.tsx:113–128`
+- [`frontend/app/view/agent/components/AgentFooter.tsx:113–128`](../../frontend/app/view/agent/components/AgentFooter.tsx#L113-L128)
   (`loadingLeftText`), `:155` (`leftText` memo), `:181–202` (reveal effect)
-- `docs/retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md`
+- [`docs/retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md`](../retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md)
   (full investigation, including what was ruled out)
-- `docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`
+- [`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`](SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md)
   (existing shimmer/type-out design this bug lives in)

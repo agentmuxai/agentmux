@@ -3,7 +3,7 @@
 **Date:** 2026-08-01
 **Status:** implemented — backend/bundle_import.rs + bundle.import RPC; extended by the Phase-3 UI (PR #2382). Verified 2026-08-10.
 **Relationship to prior work:** refines and partially supersedes
-`docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` §5 (the
+[`docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md`](REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md) §5 (the
 original ABF proposal). That report's research (§1–§4, §7) stands unchanged —
 this doc only revises the packaging decision in its §5.4 and specifies the
 importer its §6 Phase 2 left as a one-paragraph sketch. Do not re-litigate the

@@ -1,16 +1,16 @@
 # SPEC — Agent tool-call tones (subliminal "talking" voice)
 
-**Status:** implemented — core feature shipped in #1301 ("sound notifications + per-tool subliminal voice", commit `4bda9ce88`), with several follow-up settings/UI fixes since (#2668, #2669, #2689). Verified 2026-08-23: `frontend/app/notification/sound/tool-tones.ts` implements the exact G-major-pentatonic design this spec specifies; the `notify:tooltones:scope` setting (`all`/`focused`) matches §3.3's design. (First pass of this status correction cited only the bare commit hash, not a PR number — Codex correctly flagged that as insufficient per this repo's own lifecycle rule; #1301 found on a second search.)
+**Status:** implemented — core feature shipped in #1301 ("sound notifications + per-tool subliminal voice", commit `4bda9ce88`), with several follow-up settings/UI fixes since (#2668, #2669, #2689). Verified 2026-08-23: [`frontend/app/notification/sound/tool-tones.ts`](../../frontend/app/notification/sound/tool-tones.ts) implements the exact G-major-pentatonic design this spec specifies; the `notify:tooltones:scope` setting (`all`/`focused`) matches §3.3's design. (First pass of this status correction cited only the bare commit hash, not a PR number — Codex correctly flagged that as insufficient per this repo's own lifecycle rule; #1301 found on a second search.)
 **Date:** 2026-06-05
 **Author:** agent2
-**Builds on:** `docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md` (v1 sound subsystem — bus, player, settings plumbing)
+**Builds on:** [`docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md`](SPEC_SOUND_NOTIFICATIONS_2026_06_05.md) (v1 sound subsystem — bus, player, settings plumbing)
 
 **Related:**
-- `frontend/app/store/agent-pane-state/types.ts` (line 535 — existing `tool-started` event we hook off)
-- `frontend/app/store/agent-pane-state/reducer.ts` (line 451 — `ToolStart` arm that emits it)
-- `frontend/app/view/agent/stream-parser.ts` (line 476 — `normalizeToolName` — the canonical name set the parser surfaces to us today)
-- `frontend/app/notification/sound/` (the v1 subsystem we extend)
-- `frontend/app/store/focusManager.ts` (per-pane focus signal — central to the §3.3 scoping decision)
+- [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) (line 535 — existing `tool-started` event we hook off)
+- [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) (line 451 — `ToolStart` arm that emits it)
+- [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) (line 476 — `normalizeToolName` — the canonical name set the parser surfaces to us today)
+- [`frontend/app/notification/sound/`](../../frontend/app/notification/sound) (the v1 subsystem we extend)
+- [`frontend/app/store/focusManager.ts`](../../frontend/app/store/focusManager.ts) (per-pane focus signal — central to the §3.3 scoping decision)
 - MDN — `BiquadFilterNode` lowpass + `OscillatorNode` envelope shape
 
 ---
@@ -324,13 +324,13 @@ frontend/app/notification/sound/__tests__/tool-tones.test.ts
 
 | File | Change |
 |---|---|
-| `frontend/app/notification/sound/sound-player.ts` | Add `getAudioContext()` and `getMasterGain()` accessors. |
-| `frontend/app/notification/sound/sound-service.ts` | Wire `tool-started` event into `ToolTonesPlayer`; attach the player on prime; reactively thread the tool-tones volume + scope settings. |
-| `frontend/app/notification/sound/index.ts` | Re-export `__getToolTonesPlayer` for tests. |
+| [`frontend/app/notification/sound/sound-player.ts`](../../frontend/app/notification/sound/sound-player.ts) | Add `getAudioContext()` and `getMasterGain()` accessors. |
+| [`frontend/app/notification/sound/sound-service.ts`](../../frontend/app/notification/sound/sound-service.ts) | Wire `tool-started` event into `ToolTonesPlayer`; attach the player on prime; reactively thread the tool-tones volume + scope settings. |
+| [`frontend/app/notification/sound/index.ts`](../../frontend/app/notification/sound/index.ts) | Re-export `__getToolTonesPlayer` for tests. |
 | `agentmux-srv/src/backend/wconfig/types.rs` | Three new `notify:tooltones:*` fields. |
 | `frontend/types/gotypes.d.ts` | Three new TS keys. |
 | `settings-template.jsonc` | Three new commented lines. |
-| `schema/settings.json` | Three new schema entries. |
+| [`schema/settings.json`](../../schema/settings.json) | Three new schema entries. |
 
 ### 8.3 Files NOT changed
 

@@ -22,7 +22,7 @@ to click through each option individually.
 ## 1. Current behavior (confirmed by reading the code)
 
 `AskUserQuestion` renders via `AgentQuestionPanel.tsx`
-(`frontend/app/view/agent/components/AgentQuestionPanel.tsx`), reached from a
+([`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx)), reached from a
 `ToolNode` in `status: "awaiting_answer"`. Two actions exist today, in
 `.agent-question-panel-actions` (lines 640–656):
 
@@ -199,7 +199,7 @@ that... in fact we want a way to exit out." See §7.
 
 ## 6. Implementation surface
 
-Landed in `frontend/app/view/agent/components/AgentQuestionPanel.tsx` and its
+Landed in [`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) and its
 `.scss` sibling, exactly as scoped here:
 
 - `acceptRecommended()` (§2) inside `AgentQuestionPanel`.

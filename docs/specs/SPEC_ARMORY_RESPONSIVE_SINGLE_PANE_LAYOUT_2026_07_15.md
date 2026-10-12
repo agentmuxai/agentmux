@@ -1,8 +1,8 @@
 # SPEC — Armory: eliminate split-screen list+detail layouts, single-pane at every width
 
-**Status:** implemented — `frontend/app/element/primitive-list-detail.tsx` (+ its `.scss`) is
+**Status:** implemented — [`frontend/app/element/primitive-list-detail.tsx`](../../frontend/app/element/primitive-list-detail.tsx) (+ its `.scss`) is
 
-> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> **Implementing PR not recoverable (checked 2026-09-17).** [`docs/specs/README.md`](README.md)
 > requires an `implemented` Status to cite its PR. This one cannot, and a guess would
 > be worse than the gap: the only commit that set this Status was a bulk restamp
 > (or predates the PR-squash convention), so git alone does not identify who
@@ -233,12 +233,12 @@ investigation. Flagging only so a future pass doesn't assume it's already covere
 
 - `frontend/app/view/armory/armory-view.tsx`, `armory-view.scss`
 - `frontend/app/view/memory/memory-manager.tsx`, `memory-model.ts`, `memory-view.scss`
-- `frontend/app/view/skill/skill-manager.tsx`
-- `frontend/app/view/mcp/mcp-manager.tsx`
-- `frontend/app/view/agent/components/AgentPrimitiveModal.scss`
+- [`frontend/app/view/skill/skill-manager.tsx`](../../frontend/app/view/skill/skill-manager.tsx)
+- [`frontend/app/view/mcp/mcp-manager.tsx`](../../frontend/app/view/mcp/mcp-manager.tsx)
+- [`frontend/app/view/agent/components/AgentPrimitiveModal.scss`](../../frontend/app/view/agent/components/AgentPrimitiveModal.scss)
 - `frontend/app/view/brain/global-brain-manager.tsx`, `global-brain.scss`
-- `frontend/app/view/accounts/AccountsGallery.tsx`, `accounts-manager.tsx`
-- `docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md` (current Armory
+- [`frontend/app/view/accounts/AccountsGallery.tsx`](../../frontend/app/view/accounts/AccountsGallery.tsx), `accounts-manager.tsx`
+- [`docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) (current Armory
   tab set/order this spec assumes)
 - GitHub issue #2024 (Armory consolidation tracker — confirmed no open item covers this;
   independent scope)

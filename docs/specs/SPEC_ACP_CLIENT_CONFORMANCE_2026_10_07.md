@@ -8,7 +8,7 @@
 
 Copilot, OpenClaw and Pi are ACP harnesses (`controllerType: "acp"`). None of
 them can hold a conversation in AgentMux today. Make the ACP client, the
-`AcpController` in `crates/srv/src/backend/blockcontroller/acp.rs` and the
+`AcpController` in [`crates/srv/src/backend/blockcontroller/acp.rs`](../../crates/srv/src/backend/blockcontroller/acp.rs) and the
 paths that start it and send it messages, follow ACP v1, so all three work.
 
 ## What happens today

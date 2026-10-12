@@ -4,7 +4,7 @@
 **Status:** Draft
 **Author:** AgentA
 **Related:**
-- `docs/specs/SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md` — the naming/layout/introspection surface this extends; same conventions apply (self-context defaulting, capability tiers, MCP→REST→gateway layering).
+- [`docs/specs/SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md`](SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md) — the naming/layout/introspection surface this extends; same conventions apply (self-context defaulting, capability tiers, MCP→REST→gateway layering).
 - Incident that triggered this: 2026-07-04 session — `sysinfo`/`swarm` panes were pruned from a live layout tree (cause still unconfirmed) leaving a stale-rendered empty cell, and the operator had **no remote way to reload the window** or **query renderer/process counts** to diagnose it. Both had to be improvised: renderer counts via an ad-hoc `Get-CimInstance Win32_Process` PowerShell shellout, no path at all for a remote reload.
 - Also motivated by verifying PR #1957 (`fix(browser-pane): app-owned wrapper HWND fixes Windows renderer leak on pane close`) — its own test plan flagged renderer-process-count verification as the one item it couldn't independently confirm; a first-class RPC for this would have made that trivial instead of ad-hoc.
 
@@ -77,7 +77,7 @@ None of `window`/`workspace`'s more powerful verbs (`CloseWindow`, `DeleteWorksp
 
 - **`GET /agentmux/diag/sagas`** — durable saga log + in-flight count (`mod.rs`, "operator visibility into the durable saga log"). No MCP tool, no `/api/v1` alias. HTTP-reachable with the auth key, undocumented for agent use.
 - **`agentmux-launcher --diag {sagas,wrr,srv}`** — CLI-only, pipe-IPC, not reachable over HTTP/MCP at all (would require shelling out to the launcher binary with the right working directory).
-- **GPU status indicator** (PR #1337, `frontend/app/statusbar/GpuStatus.tsx`) — frontend-only, reads host state directly; no backend RPC surfaces it.
+- **GPU status indicator** (PR #1337, [`frontend/app/statusbar/GpuStatus.tsx`](../../frontend/app/statusbar/GpuStatus.tsx)) — frontend-only, reads host state directly; no backend RPC surfaces it.
 - **`sysinfo` pane/widget** — same: a frontend view, not backed by an agent-queryable RPC.
 - **Renderer/subprocess process info** — CEF's own `--type=renderer|gpu-process|utility` subprocess tagging is read once at each child's own startup (`agentmux-cef/src/lib.rs:304-307`) purely to decide "am I a subprocess," and is **never aggregated or exposed** anywhere — not to the frontend, not over RPC. Tonight's renderer-count check had to shell out externally (`Get-CimInstance Win32_Process -Filter "Name='agentmux-0.50.0.exe'"` + regex the command line for `--type=`) because nothing in-process tracks this.
 - **Window reload** — grepped the entire repo (`agentmux-cef`, `frontend`, `docs`): there is no "reload the window/view" command anywhere — no RPC, no documented keybinding, no host IPC command. `browser_api/types.rs` has a `reload` **for browser-pane content** (i.e. reload the web page inside a `browser` view), which is a completely different thing from reloading the app's own chrome/frontend. Toggling DevTools (`dev:devtools`, native-menu-only, `agentmux-cef/src/macos_menu.rs`) is the closest adjacent capability and is also not RPC-reachable.

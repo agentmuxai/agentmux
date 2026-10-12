@@ -17,10 +17,10 @@ scroll position — the view no longer sits at the true bottom after the resize
 settles.
 
 **Related (read first — same bug class, twice before):**
-- `docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`
-- `docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`
-- `docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`
-- `docs/specs/SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md` (most recent change to
+- [`docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`](SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md)
+- [`docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md)
+- [`docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`](REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md)
+- [`docs/specs/SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md`](SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md) (most recent change to
   the resize hot path — 2 days before this report)
 
 ## 1. Current mechanism (verified against `main` @ `9692f8633`)
@@ -41,7 +41,7 @@ Three independent layers keep `.agent-document` (the scroll container,
    change (e.g. late syntax-highlight reflow).
 
 Pane-splitter drag is renderer-driven JS (not a host-native pointer-capture
-loop — `docs/specs/SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md`
+loop — [`docs/specs/SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md`](SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md)
 §4 explicitly deferred moving gutter-resize to the host; it's still v1 JS).
 `layoutResize.ts:157-260` (`onResizeMove`) runs on a `throttle(10, …)` pointer-move
 handler (~100 Hz) and writes new sizes into a Solid signal via
@@ -163,7 +163,7 @@ cause before any code changes.
 ## 3.5. Empirical validation — real component, simulated resize (done)
 
 Rather than only reasoning about ordering by hand, added
-`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.resize.test.tsx`.
+[`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.resize.test.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.resize.test.tsx).
 It mounts the **actual, unmodified** `AgentDocumentVirtualList` component (not
 a re-implementation of its logic) via `@solidjs/testing-library`, with small
 deterministic fakes for the two things jsdom doesn't implement at all
@@ -252,11 +252,11 @@ growth → content-reflow → now resize). Two structural gaps let this recur:
 
 1. **Zero automated coverage** for `AgentDocumentVirtualList.tsx` — no
    `AgentDocumentVirtualList.test.tsx` exists anywhere in
-   `frontend/app/view/agent/virtualization/`, unlike its sibling modules
+   [`frontend/app/view/agent/virtualization/`](../../frontend/app/view/agent/virtualization), unlike its sibling modules
    (`anchor.test.ts`, `state.test.ts`, `streaming-buffer.test.ts`, etc). The
    pure math (`isNearBottom`, `captureTopmostAnchor`) is tested; the DOM/RO
    wiring that actually drives the bug class is not.
-2. **jsdom doesn't implement `ResizeObserver`** (`test/vitest-setup.ts` has no
+2. **jsdom doesn't implement `ResizeObserver`** ([`test/vitest-setup.ts`](../../test/vitest-setup.ts) has no
    polyfill or mock for it) — so even a naive test attempt would silently no-op
    on the exact code path this bug lives in.
 
@@ -268,7 +268,7 @@ left for whoever picks up the H4/live-repro follow-up, since it requires
 deciding H4's fix shape first. Gap 1 (zero coverage) is closed for this file;
 gap 2 (no shared RO polyfill) is closed locally in this one test file — if a
 second test in this directory needs `ResizeObserver`, extract the fake into
-`test/vitest-setup.ts` or a shared test helper instead of duplicating it.
+[`test/vitest-setup.ts`](../../test/vitest-setup.ts) or a shared test helper instead of duplicating it.
 
 This is the same "whack-a-mole vs. systemic fix" tradeoff
 `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.3 already

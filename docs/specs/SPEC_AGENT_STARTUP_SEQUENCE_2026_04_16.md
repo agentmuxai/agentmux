@@ -1,7 +1,7 @@
 # SPEC: Agent Startup Sequence
 
 **Date:** 2026-04-16
-**Status:** implemented — shipped in #408 ("structured agent startup sequence from Forge + Identity"). Verified 2026-08-23: `frontend/app/view/agent/startup/buildStartupPayload.ts` exists and implements this. Note: "Forge" (this spec's own terminology for the agent-config system) was later renamed/refactored elsewhere in the codebase (see ABF/bundle terminology in `CLAUDE.md`) — the underlying startup-injection mechanism this spec designed is live, but some of this doc's Forge-specific naming is no longer current. Not re-verified against a possibly-newer "Brief" terminology doc (commit `ea5c711da`, "pin down Brief = what-loads-at-startup") — flagging that as a related doc worth checking, not confirming a supersession relationship without reading it.
+**Status:** implemented — shipped in #408 ("structured agent startup sequence from Forge + Identity"). Verified 2026-08-23: [`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts) exists and implements this. Note: "Forge" (this spec's own terminology for the agent-config system) was later renamed/refactored elsewhere in the codebase (see ABF/bundle terminology in `CLAUDE.md`) — the underlying startup-injection mechanism this spec designed is live, but some of this doc's Forge-specific naming is no longer current. Not re-verified against a possibly-newer "Brief" terminology doc (commit `ea5c711da`, "pin down Brief = what-loads-at-startup") — flagging that as a related doc worth checking, not confirming a supersession relationship without reading it.
 
 ---
 
@@ -120,7 +120,7 @@ onReady()
 
 ### 4. New Module: `buildStartupPayload.ts`
 
-Create `frontend/app/view/agent/startup/buildStartupPayload.ts`:
+Create [`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts):
 
 ```typescript
 interface StartupPayloadOpts {
@@ -216,10 +216,10 @@ existing guard in `onReadyFn`.
 
 ### PR 1: `buildStartupPayload` + account resolution
 
-1. Create `frontend/app/view/agent/startup/buildStartupPayload.ts`
+1. Create [`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts)
    - Pure function, Markdown templating
    - Account resolution helper
-2. Create `frontend/app/view/agent/startup/buildStartupPayload.test.ts`
+2. Create [`frontend/app/view/agent/startup/buildStartupPayload.test.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.test.ts)
    - Unit tests with mock ForgeAgent + Account data
 3. Export `resolveAccounts()` from the startup module
 

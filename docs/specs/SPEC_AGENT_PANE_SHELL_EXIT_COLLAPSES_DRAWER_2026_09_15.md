@@ -4,14 +4,14 @@
 **Status:** implemented — §3's design shipped in the same PR as this document.
 §5's first open question is resolved (clean exits only; see §6). — #3253
 **Related:**
-`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` (close-on-exit for
+[`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md`](SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md) (close-on-exit for
 top-level panes, and §11's deliberate exclusion of sub-blocks — read that
 before implementing this),
-`docs/specs/SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md` (where the drawer
+[`docs/specs/SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md`](SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md) (where the drawer
 shell renders),
-`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md` (its mount
+[`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`](SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) (its mount
 sequence — the zoom seed the exit subscription now sits alongside),
-`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell
+[`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) (PtyShell
 attach/reuse and the agent lease that shares this same shell).
 
 ---

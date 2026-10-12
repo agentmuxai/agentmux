@@ -21,7 +21,7 @@ Every AgentMux instance started CEF with a remote-debugging (CDP) TCP server —
 | Browser API `/agentmux/browser/*` (browser-pane control, #3445) — in the host process | Used it, over a WebSocket to itself. **No longer** (§3). |
 | Agents' `UIQuery`/`UIClick`/`UIScreenshot` — srv → host route → browser API Path 2 | Indirectly, via the browser API. **No longer.** |
 | In-app "Inspect Element" | No — CEF native DevTools (`show_dev_tools`). |
-| Dev tooling: `scripts/ui-screenshots`, instance discovery (`authkey.dev`), `chrome://inspect` | Yes — and keeps it (§4). |
+| Dev tooling: [`scripts/ui-screenshots`](../../scripts/ui-screenshots), instance discovery (`authkey.dev`), `chrome://inspect` | Yes — and keeps it (§4). |
 
 ## 3. Design
 
@@ -59,7 +59,7 @@ A target is now a browser label, not a `/json` target id:
 | `0`/`off`/`false`/`no` | off | off |
 | anything else | on, default port, with a warning | same |
 
-Off means `Settings.remote_debugging_port = 0` (CEF: no server), `debug_port = 0` in state and in `authkey.dev`, no `--remote-allow-origins`, and `"devtools": "off"` in the host popover. When on, the existing bind-probe fallback to an OS-assigned port is unchanged. It is the same variable `scripts/ui-screenshots/capture.mjs` already reads, so one setting serves both sides.
+Off means `Settings.remote_debugging_port = 0` (CEF: no server), `debug_port = 0` in state and in `authkey.dev`, no `--remote-allow-origins`, and `"devtools": "off"` in the host popover. When on, the existing bind-probe fallback to an OS-assigned port is unchanged. It is the same variable [`scripts/ui-screenshots/capture.mjs`](../../scripts/ui-screenshots/capture.mjs) already reads, so one setting serves both sides.
 
 ## 4. Behavior changes to know
 

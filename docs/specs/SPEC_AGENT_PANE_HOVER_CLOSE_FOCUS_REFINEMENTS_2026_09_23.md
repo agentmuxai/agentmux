@@ -8,12 +8,12 @@ below.
 rebased onto main @ `934b335` — see §6 "Rebase onto #3519"; rebased again
 onto main @ `06d1b76` (2026-09-26) — see §6 "Rebase onto `commitLaunch`"
 **Related:**
-`docs/reports/REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md` (#2972 — the decision §1 reverses),
-`docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`,
-`docs/specs/SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md`,
-`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` (line 262 — "closing the last/only tab closes the pane", which §2 amends for agent panes),
-`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`,
-`docs/specs/SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md` (already requires focus to land on the agent input — §3 is what finally makes that true).
+[`docs/reports/REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md`](../reports/REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md) (#2972 — the decision §1 reverses),
+[`docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md),
+[`docs/specs/SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md`](SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md),
+[`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) (line 262 — "closing the last/only tab closes the pane", which §2 amends for agent panes),
+[`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md),
+[`docs/specs/SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md`](SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md) (already requires focus to land on the agent input — §3 is what finally makes that true).
 
 Three independent agent-pane UX refinements. Each has its own section,
 root cause, design, and tests; they can ship as one PR or three.
@@ -34,7 +34,7 @@ way to read the full call.
 
 ### 1.2 Root cause — one JSX condition
 
-`frontend/app/view/agent/components/ToolBlock.tsx:498`:
+[`frontend/app/view/agent/components/ToolBlock.tsx:498`](../../frontend/app/view/agent/components/ToolBlock.tsx#L498):
 
 ```tsx
 <Show when={cmdText() && !expanded()}>
@@ -127,12 +127,12 @@ pick another agent.
 ### 2.2 Current behavior
 
 The agent pane overrides the shared `PaneChrome` close handler through
-`buildAgentPaneChromeModel` in `frontend/app/view/agent/agent-view.tsx`:
+`buildAgentPaneChromeModel` in [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx):
 
 - `handleTabClose` is at `439-443`.
 - It is wired as `onClose` at `471-474`.
 
-It calls `closeBlockInStack` (`frontend/layout/lib/layoutStack.ts:162-202`),
+It calls `closeBlockInStack` ([`frontend/layout/lib/layoutStack.ts:162-202`](../../frontend/layout/lib/layoutStack.ts#L162-L202)),
 which behaves as follows:
 
 | Case | Today |
@@ -189,7 +189,7 @@ where closing it still closes the pane.
 Implementation notes:
 
 - Put this in a small, testable helper, for example
-  `frontend/app/view/agent/close-agent-tab.ts` →
+  [`frontend/app/view/agent/close-agent-tab.ts`](../../frontend/app/view/agent/close-agent-tab.ts) →
   `closeAgentTab(layoutModel, blockId)`, and call it from
   `handleTabClose`. `closeBlockInStack` itself must stay generic: every
   pane type shares it, and `quick-fork.ts:153` relies on its exact
@@ -457,7 +457,7 @@ either. Today's non-last-tab close doesn't move focus either. Left as is;
 the picker filter stays un-autofocused (Q2) regardless.
 
 **§2 — where it lives.**
-- The code is `frontend/app/view/agent/close-agent-tab.ts`
+- The code is [`frontend/app/view/agent/close-agent-tab.ts`](../../frontend/app/view/agent/close-agent-tab.ts)
   (`closeAgentTab({ layoutModel, ownNodeId, blockId })`), called from
   `buildAgentPaneChromeModel`'s `handleTabClose`.
 - The replacement tab uses the `defwidget@agent` blockdef from widget
@@ -468,7 +468,7 @@ the picker filter stays un-autofocused (Q2) regardless.
   `node.data.blockStack` directly, as `open-history-tab.ts` does.
 
 **§3 Part B — per-block request registry, not a model field.**
-- The code is `frontend/app/view/agent/composer-focus.ts`.
+- The code is [`frontend/app/view/agent/composer-focus.ts`](../../frontend/app/view/agent/composer-focus.ts).
 - `launchAgentDefinition` may target a *different* block than its own
   model's (`quickForkAgent` passes `targetBlockId`), and that block has
   its own `AgentViewModel`. So the request is keyed by block id in a
@@ -517,7 +517,7 @@ The behavior is covered through `composer-focus.test.ts` (16 cases) and
 `AgentFooter.test.tsx` → "AgentFooter keyboard focus" (4 cases).
 
 **Local test runs on Windows.** At the first rebase, every suite under
-`frontend/app/view/agent/` failed to *load* on Windows with
+[`frontend/app/view/agent/`](../../frontend/app/view/agent) failed to *load* on Windows with
 `ERR_INVALID_ARG_VALUE … 'file:///@solid-refresh'`
 (`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`), and local
 runs needed an uncommitted `vite-plugin-solid` `hot: false` config. As of
@@ -537,7 +537,7 @@ later, two conflicts, both in `agent-model.ts`:
   had changed `giveFocus()` to `ta.focus({ preventScroll: true })`.
   `giveFocus()` delegates to `focusComposer()`, which already passes
   `preventScroll`. The report's comment moved there with it. Its grep guard
-  (`frontend/layout/tests/tileLayoutFocusScroll.test.ts`) now follows the
+  ([`frontend/layout/tests/tileLayoutFocusScroll.test.ts`](../../frontend/layout/tests/tileLayoutFocusScroll.test.ts)) now follows the
   delegation: either `giveFocus()` passes `preventScroll` itself, or it calls
   `focusComposer()`, whose only `focus()` call does. `composer-focus.test.ts`
   adds a behavioral check (`focus` called once, with `{ preventScroll: true }`).

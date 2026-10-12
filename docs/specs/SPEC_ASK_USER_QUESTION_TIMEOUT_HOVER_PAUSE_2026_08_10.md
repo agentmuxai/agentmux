@@ -8,12 +8,12 @@ is replaced by a quiet window that restarts on every real pointer move
 (`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md` §4). A parked cursor still can't hold the
 timeout: entering the panel and layout-shift moves aren't activity (§4.3
 there). The countdown now lives in `store/question-timer.ts`.
-**Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`
+**Builds on:** [`docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`](SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md)
 (implemented, PR #2441, verified in code 2026-08-10). This spec amends only
 that spec's *timer-arming* logic (§2.3). Its recommended-option detection
 (§2.2), merge-at-zero semantics (§2.3's merge rule, §2.5), audit trail
 (`autoFilledCount`), and all backend/wire behavior are unchanged — see §2.
-**Reuses:** `docs/specs/SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md`'s
+**Reuses:** [`docs/specs/SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md)'s
 already-resolved "resume fresh, not mid-count" call (§5 point 2) instead of
 re-deriving one, per the DRY ask.
 
@@ -32,7 +32,7 @@ re-deriving one, per the DRY ask.
 
 ## 1. Current behavior (audited against source, 2026-08-10)
 
-`frontend/app/view/agent/components/AgentQuestionPanel.tsx`, confirmed
+[`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx), confirmed
 against the live file (matches its own spec exactly, no drift):
 
 - `AUTO_TIMEOUT_MS = 30_000` (line 31), hardcoded per the original spec's
@@ -62,7 +62,7 @@ against the live file (matches its own spec exactly, no drift):
 
 **Closest existing precedent for the requested behavior**, found via audit
 rather than designed fresh (per the DRY ask):
-`docs/specs/SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md` gives a Swarm
+[`docs/specs/SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) gives a Swarm
 row's own 60s auto-retire countdown the same shape being asked for here —
 "Hovering/interacting with a row pauses its countdown... Resume the
 countdown (fresh 60s, not resumed mid-count) on mouse-leave" (§5 point 2 of
@@ -74,7 +74,7 @@ means* that surfaced only once this spec was actually implemented and
 tested against the Swarm spec's own "resume fresh, not mid-count" call,
 which is reused verbatim (§5 point 2 below).
 
-`frontend/app/hook/useTick.ts` exists as a shared, ref-counted `setInterval`
+[`frontend/app/hook/useTick.ts`](../../frontend/app/hook/useTick.ts) exists as a shared, ref-counted `setInterval`
 primitive and is what the Swarm spec migrated its own countdown onto — noted
 for completeness, but `AgentQuestionPanel`'s existing raw `setInterval` isn't
 being touched by this spec; see §6.
@@ -221,7 +221,7 @@ const onPanelPointerEnter = () => {
 Wire `onPanelPointerEnter` as `onMouseEnter` on the root
 `<div class="agent-question-panel">` (line 358) — same prop-naming
 convention already used for `NotificationItem`'s `onMouseEnter`/
-`onMouseLeave` (`frontend/app/notification/notificationitem.tsx`), though
+`onMouseLeave` ([`frontend/app/notification/notificationitem.tsx`](../../frontend/app/notification/notificationitem.tsx)), though
 this spec only needs the enter half (§9). `clearHideTimer` also needs a
 top-level `onCleanup` (it's a raw `setTimeout`, not owned by a reactive
 effect, so it must be disposed on unmount independently).
@@ -352,19 +352,19 @@ own "show nothing," not a bug.
 - `AgentDecisionPanel` remains explicitly out of scope, same as the
   original spec (§6 there) — different tool, different risk profile.
 - No migration of the existing raw `setInterval` to the shared `useTick`
-  hook (`frontend/app/hook/useTick.ts`) that the Swarm countdown uses —
+  hook ([`frontend/app/hook/useTick.ts`](../../frontend/app/hook/useTick.ts)) that the Swarm countdown uses —
   orthogonal refactor, not needed to implement this feature, not requested.
 
 ---
 
 ## 7. Files touched
 
-- `frontend/app/view/agent/components/AgentQuestionPanel.tsx` — `hidden`
+- [`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) — `hidden`
   signal + hide-timeout handling, extended reset effect, extended
   timer-arm effect (gated on `hidden()`), `onMouseEnter` on the panel root,
   `defer()` forces an unhide, countdown span wrapped in
   `<Show when={!hidden()}>`.
-- `frontend/app/view/agent/components/AgentQuestionPanel.test.tsx` — new
+- [`frontend/app/view/agent/components/AgentQuestionPanel.test.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.test.tsx) — new
   test cases per §8.
 - No `.scss` changes required — `<Show>` removes the element outright, no
   new class/state needed for the hidden case itself.

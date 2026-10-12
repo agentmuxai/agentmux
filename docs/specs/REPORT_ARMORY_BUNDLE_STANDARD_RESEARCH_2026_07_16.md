@@ -43,8 +43,8 @@ the Armory's actual schemas on `main` @ `e6ec3c42`.
 Where a later pass refuted an earlier claim, the correction is applied below
 and called out explicitly. No claim below is from model memory alone.
 **Related:** `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`,
-`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
-`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`.
+[`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md),
+[`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`](archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md).
 
 ---
 
@@ -134,8 +134,8 @@ solved either.
 ### 3a. Skills — a real, won standard exists: Agent Skills (SKILL.md)
 
 - **[verified]** A skill is a directory with a required `SKILL.md` (YAML
-  frontmatter + Markdown instructions) and optional `scripts/`, `references/`,
-  `assets/` dirs. It standardizes the on-disk format — not an archive,
+  frontmatter + Markdown instructions) and optional [`scripts/`](../../scripts), `references/`,
+  [`assets/`](../../assets) dirs. It standardizes the on-disk format — not an archive,
   registry, or distribution mechanism. (agentskills.io; github.com/agentskills/agentskills; anthropics/skills spec)
 - **[verified]** Created by Anthropic, released as an open standard (announced
   2025-12-18), now governed in a vendor-neutral GitHub org
@@ -310,7 +310,7 @@ pattern AgentMux already implements (`SecretRef` pointers):
   via direct fetch of Anthropic's own docs
   (code.claude.com/docs/en/plugins-reference): manifest fields, component
   directories (`skills/`, `agents/`, `hooks/hooks.json`, `.mcp.json`,
-  `.lsp.json`, `scripts/`), namespacing, and the dependency-array schema all
+  `.lsp.json`, [`scripts/`](../../scripts)), namespacing, and the dependency-array schema all
   verbatim-match the primary source.
   - Credentials: a limited but real mechanism — `userConfig` entries flagged
     `sensitive:true` route to the OS keychain or a local credentials file,

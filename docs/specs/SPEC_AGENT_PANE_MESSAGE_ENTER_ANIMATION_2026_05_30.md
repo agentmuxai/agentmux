@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Status:** proposed — Ready to implement
-**Area:** `frontend/app/view/agent/styles/_document.scss` + `_document-nodes.scss`
+**Area:** [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) + `_document-nodes.scss`
 **Goal:** New nodes that stream into the agent pane should enter with the same swift fade-in as the tool-panel collapse, instead of snapping in instantly.
 
 ---
@@ -166,12 +166,12 @@ due to the history-animation gate (§4.2):
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_document.scss` | `@starting-style` + `transition` rulesets (§4.1–4.3); no `@keyframes` |
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | `animateEnabled` signal; `createEffect` with forced reflow + `historyReady()` gate; `[data-animate]` on streaming-buffer container |
-| `frontend/app/view/agent/virtualization/state.ts` | `historyReady: Accessor<boolean>` + `markHistoryReady: () => void` added to `AgentViewState` |
-| `frontend/app/view/agent/hooks/useHistoryPagination.ts` | `onHistoryReady?: () => void` option; called at every terminal init point (HistoryRestored, HistoryLoaded, total=0, InitFailed) |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | `registerHistoryReadyCallback` prop; wires `viewState.markHistoryReady` to the parent |
-| `frontend/app/view/agent/agent-view.tsx` | `historyReadyFn` bridge variable; passes `onHistoryReady` to `useHistoryPagination` and `registerHistoryReadyCallback` to `AgentDocumentView` |
+| [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) | `@starting-style` + `transition` rulesets (§4.1–4.3); no `@keyframes` |
+| [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) | `animateEnabled` signal; `createEffect` with forced reflow + `historyReady()` gate; `[data-animate]` on streaming-buffer container |
+| [`frontend/app/view/agent/virtualization/state.ts`](../../frontend/app/view/agent/virtualization/state.ts) | `historyReady: Accessor<boolean>` + `markHistoryReady: () => void` added to `AgentViewState` |
+| [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts) | `onHistoryReady?: () => void` option; called at every terminal init point (HistoryRestored, HistoryLoaded, total=0, InitFailed) |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | `registerHistoryReadyCallback` prop; wires `viewState.markHistoryReady` to the parent |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | `historyReadyFn` bridge variable; passes `onHistoryReady` to `useHistoryPagination` and `registerHistoryReadyCallback` to `AgentDocumentView` |
 
 ---
 
@@ -189,9 +189,9 @@ due to the history-animation gate (§4.2):
 
 ## 9. Related
 
-- `docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md` — pane reflow animation
+- [`docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`](../analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md) — pane reflow animation
   (separate, harder problem; this spec is independent of it)
-- `frontend/app/view/agent/styles/_document-nodes.scss:253-298` — existing tool-panel
+- [`frontend/app/view/agent/styles/_document-nodes.scss:253-298`](../../frontend/app/view/agent/styles/_document-nodes.scss#L253-L298) — existing tool-panel
   collapse animation (the reference implementation)
-- `frontend/layout/lib/tilelayout.scss:201-231` — placeholder enter/exit (another
+- [`frontend/layout/lib/tilelayout.scss:201-231`](../../frontend/layout/lib/tilelayout.scss#L201-L231) — placeholder enter/exit (another
   reference for `@keyframes` enter patterns in this codebase)

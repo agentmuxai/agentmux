@@ -88,7 +88,7 @@ slow part on a schedule, not on every push.
   display + the full packaged bundle and **cannot run on a standard GitHub-hosted runner** (no GPU /
   driving a live AgentMux — see the unused `input-bench` self-hosted job). The lifecycle reducer
   *logic* is covered by `agentmux-cef` unit tests (Lane B); the end-to-end "tree exits" check stays a
-  **local-only smoke** (`tools/tests/`), as recorded in Discussion #1680. This spec does not try to
+  **local-only smoke** ([`tools/tests/`](../../tools/tests)), as recorded in Discussion #1680. This spec does not try to
   make e2e a CI gate.
 
 ---

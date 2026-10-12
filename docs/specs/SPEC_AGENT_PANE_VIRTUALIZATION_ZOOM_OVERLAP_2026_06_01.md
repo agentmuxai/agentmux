@@ -30,7 +30,7 @@ in/out it appears and grows.
 ## 2. Architecture recap (where the bug lives)
 
 The agent document is rendered by a **hybrid virtualized + streaming-buffer**
-list (`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`):
+list ([`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx)):
 
 - History (the bulk of the scrollback) is **virtualized** via TanStack Virtual:
   off-screen rows are not in the DOM; on-screen rows are absolutely positioned
@@ -356,11 +356,11 @@ priority; do only if jank-on-scroll-in remains visible after 4.1/4.2.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | **(Phase 1)** `measureElement` ÷ `zoomFactor`; new `zoomFactor` prop. **(Phase 1.5)** set `data-index` synchronously in the row `ref` before `measureElement` (fixes the never-observed-stuck-at-estimate race, §3.4/§4.4) |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | pass `zoomFactor` through; (Phase 2) optional `expandedNodes` in `documentState` |
-| `frontend/app/view/agent/agent-view.tsx` | pass `zoomFactor` (line 640) into `AgentDocumentView` |
-| `frontend/app/view/agent/components/MarkdownBlock.tsx` | (Phase 2) route canceled-thinking `expanded` into `documentState`, or rely on the row ResizeObserver |
-| `frontend/app/view/agent/virtualization/renderers.ts` | (Phase 3, optional) thinking/markdown estimate buffer; perf-probe records CSS-px measured |
+| [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) | **(Phase 1)** `measureElement` ÷ `zoomFactor`; new `zoomFactor` prop. **(Phase 1.5)** set `data-index` synchronously in the row `ref` before `measureElement` (fixes the never-observed-stuck-at-estimate race, §3.4/§4.4) |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | pass `zoomFactor` through; (Phase 2) optional `expandedNodes` in `documentState` |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | pass `zoomFactor` (line 640) into `AgentDocumentView` |
+| [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) | (Phase 2) route canceled-thinking `expanded` into `documentState`, or rely on the row ResizeObserver |
+| [`frontend/app/view/agent/virtualization/renderers.ts`](../../frontend/app/view/agent/virtualization/renderers.ts) | (Phase 3, optional) thinking/markdown estimate buffer; perf-probe records CSS-px measured |
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-07  
 **Status:** Draft  
-**Area:** `frontend/app/store/`, `frontend/app/view/agent/`
+**Area:** [`frontend/app/store/`](../../frontend/app/store), [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 
 ---
 

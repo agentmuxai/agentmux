@@ -498,7 +498,7 @@ phase changes one resource kind behind the same entry point.
   (`process_tracker::cgroup_linux`), High confidence, replacing process
   groups as the baseline (§6.4): sessions can't hold an agent's tree, since
   Claude Code and bashwrap each start new ones
-  (`docs/analysis/agent-spawned-process-tracking-2026-10-07.md` §3).
+  ([`docs/analysis/agent-spawned-process-tracking-2026-10-07.md`](../analysis/agent-spawned-process-tracking-2026-10-07.md) §3).
   - srv puts itself in a delegated systemd user scope at startup
     (`agentmux-srv-<pid>.scope`) and gives each agent block a cgroup.
   - Agent spawns join it before exec (`registry::place_spawn`), the Codex

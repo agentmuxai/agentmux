@@ -5,18 +5,18 @@
 Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3
 implemented in #3419, #3421, #3422 (§10).
 **Author:** AgentA@Area54
-**Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
+**Related:** [`docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md)
 (the continuity guarantee this spec protects),
-`docs/specs/persistent-process-mode.md` (the persistent controller this spec
-changes), `docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md` (already
+[`docs/specs/persistent-process-mode.md`](persistent-process-mode.md) (the persistent controller this spec
+changes), [`docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) (already
 names the backend half of the stack-orphan bug and tracks it as issue #3202),
-`docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md` ("tracked ⇒
+[`docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md`](SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md) ("tracked ⇒
 dies with the pane" — preserved here),
-`docs/specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md` (the
+[`docs/specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (the
 in-turn "backgrounding" family — a different concern, see §6),
-`docs/specs/SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` (app-level
+[`docs/specs/SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) (app-level
 shutdown — out of scope here, see §6),
-`docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md` (why every agent tab in
+[`docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md`](SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) (why every agent tab in
 a pane is now mounted at once — relevant to §4.7).
 **Tracks:** the frontend half of the bug has no issue yet; the backend half is
 #3202.
@@ -81,8 +81,8 @@ changed.
 
 | Action | Path | Backend gets | Every agent stopped? |
 |---|---|---|---|
-| A tab's own × | `closeBlockInStack` (`frontend/layout/lib/layoutStack.ts:162`) removes that member from the stack, then deletes its block; last member falls through to the pane path | `DeleteBlock` for that tab | Yes, for that tab |
-| **The pane's ×** | `closeNode` (`frontend/layout/lib/layoutMagnify.ts:41-76`) removes the whole leaf, then calls `onNodeDelete(nodeToDelete.data)` **once**; `onNodeDelete` (`frontend/app/tab/tabcontent.tsx:55-65`) deletes `data.blockId` only | `DeleteBlock` for the **visible tab only** | **No — every other tab is orphaned** |
+| A tab's own × | `closeBlockInStack` ([`frontend/layout/lib/layoutStack.ts:162`](../../frontend/layout/lib/layoutStack.ts#L162)) removes that member from the stack, then deletes its block; last member falls through to the pane path | `DeleteBlock` for that tab | Yes, for that tab |
+| **The pane's ×** | `closeNode` ([`frontend/layout/lib/layoutMagnify.ts:41-76`](../../frontend/layout/lib/layoutMagnify.ts#L41-L76)) removes the whole leaf, then calls `onNodeDelete(nodeToDelete.data)` **once**; `onNodeDelete` ([`frontend/app/tab/tabcontent.tsx:55-65`](../../frontend/app/tab/tabcontent.tsx#L55-L65)) deletes `data.blockId` only | `DeleteBlock` for the **visible tab only** | **No — every other tab is orphaned** |
 | Close a window tab | `delete_tab` saga (`agentmux-srv/src/sagas/delete_tab.rs`) | `CloseTab` | Yes, loops over the tab's `block_ids` (sequentially, hard kill) |
 | `ClosePane` MCP tool | `agentmux-srv/src/server/app_api/pane.rs:416-481` → `delete_block` saga, whose `LayoutDeleteNodeByBlock` step removes the whole leaf (`find_node_id_by_block`, `agentmux-srv/src/backend/layout/mod.rs:145`) | one block | **No** — issue #3202 |
 
@@ -137,13 +137,13 @@ exists.
 
 ### 3.5 The close confirmation is bypassed and too narrow
 
-`useAgentCloseConfirm` (in `frontend/app/view/agent/hooks/`, removed in Phase 3 — §10.3)
+`useAgentCloseConfirm` (in [`frontend/app/view/agent/hooks/`](../../frontend/app/view/agent/hooks), removed in Phase 3 — §10.3)
 replaces `onClose` on the agent's own `nodeModel`. That object is a spread copy
-made by `PaneLeafChrome` (`frontend/app/tab/pane-leaf-chrome.tsx:181`, or `:238`
+made by `PaneLeafChrome` ([`frontend/app/tab/pane-leaf-chrome.tsx:181`](../../frontend/app/tab/pane-leaf-chrome.tsx#L181), or `:238`
 for kept-alive tabs, which agent panes use since
 `SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md`); the
 pane header's × calls `onClose` on the pane's `nodeModel`
-(`frontend/app/block/blockframe.tsx:251-256`). The replacement is never reached.
+([`frontend/app/block/blockframe.tsx:251-256`](../../frontend/app/block/blockframe.tsx#L251-L256)). The replacement is never reached.
 Even when it was, it counted only the visible tab's tracked processes and
 ignored other tabs and a turn in progress. (Verified by reading the code, not
 yet reproduced live.)
@@ -154,7 +154,7 @@ yet reproduced live.)
   seeds no session id — the agent starts fresh (continuity lost, but
   announced) (`agent_open.rs:524-545`).
 - The My Agents picker's reattach (`handleReattach`,
-  `frontend/app/view/agent/components/AgentPicker.tsx:390-437`) passes
+  [`frontend/app/view/agent/components/AgentPicker.tsx:390-437`](../../frontend/app/view/agent/components/AgentPicker.tsx#L390-L437)) passes
   `continueSessionId: row.session_id` with no such check. Reopening an orphan
   from there starts a second `claude --resume` on the same session.
 
@@ -163,7 +163,7 @@ yet reproduced live.)
 The existing prunes run in the other direction — they drop layout references to
 blocks that no longer exist (`prune_dangling_block_refs` /
 `prune_dangling_stack_members`, `agentmux-srv/src/backend/layout/mod.rs:189,281`;
-the frontend's equivalent in `frontend/layout/lib/layoutPersistence.ts`).
+the frontend's equivalent in [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts)).
 Nothing handles a block that exists in a tab but in no layout.
 
 ## 4. Design
@@ -218,7 +218,7 @@ After all members: prune the layout leaf once.
   instead of assuming.
 - **Turn in progress at close:** closing a pane is the user choosing to stop,
   so interrupt the turn (the control protocol's interrupt, see
-  `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`), wait for the
+  [`docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md)), wait for the
   turn's `result` event, then send EOF. Phase 0 (§5.1) showed EOF alone does
   **not** end a running turn: the CLI finishes the turn first, so with a 5s
   grace every mid-turn close would end in a force-kill.
@@ -240,7 +240,7 @@ Keep removing the pane from the UI immediately; a 5s wait before the pane
 disappears would feel broken. The backend saga owns completion:
 
 - A failed or rejected close is reported to the user, not swallowed (today
-  `onClose` runs `closeNode` through `fireAndForget`, `frontend/util/util.ts:87`,
+  `onClose` runs `closeNode` through `fireAndForget`, [`frontend/util/util.ts:87`](../../frontend/util/util.ts#L87),
   which catches the error, logs it to the console, and shows the user nothing).
 - If the saga cannot complete, the reaper (§4.9) finishes the job.
 
@@ -327,7 +327,7 @@ steps 1, 4–7), pane × wired to it, `ClosePane` MCP routed through it (#3202).
 - A closing block is refused by `resync_controller`
   (`blockcontroller::mark_closing`), so nothing can respawn it between the
   stop and the record delete.
-- Frontend: `onNodeDelete` (`frontend/app/tab/tabcontent.tsx`) sends
+- Frontend: `onNodeDelete` ([`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx)) sends
   `ObjectService.ClosePane(effectiveStack(data))`.
 - `ClosePane` MCP (`agentmux-srv/src/server/app_api/pane.rs`) expands the
   target to its leaf's members (`backend::layout::find_leaf_containing_block`).
@@ -364,7 +364,7 @@ Tests (each must fail on today's code):
 - Reaper: reaps an unplaced block past the minimum age; leaves a fresh
   `skip_placement` block, a sub-block and a floating-window block alone.
 
-Note for local verification: most test suites under `frontend/app/view/agent/`
+Note for local verification: most test suites under [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 don't load on a machine whose Node is older than the repo's pin
 (`ERR_INVALID_ARG_VALUE … @solid-refresh`, recorded in
 `TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md` §3.2). CI is the
@@ -385,7 +385,7 @@ authoritative run.
 - **Making pane tabs reducer commands.** The reducer stores each leaf's
   `block_stack` but has no command that changes it: every add, switch and
   remove is a frontend edit followed by a whole-tree `LayoutSetTree` push
-  (`frontend/layout/lib/layoutStack.ts`, header comment). So "a block exists"
+  ([`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts), header comment). So "a block exists"
   and "a block is in a pane" are two separate writes that can come apart —
   another way to produce the orphan this spec's reaper backstops. Stack
   commands in the reducer (push / set-active / remove, and create-and-place as
@@ -611,7 +611,7 @@ their sessions still resume (§5.1).
 - **Pane ×:** the pane disappears at once, as now (§4.5). The backend finishes
   within the deadline.
 - **Window tab ×:** the tab strip hides the tab optimistically on confirm, as
-  now (`frontend/app/tab/tabbar.tsx`, `handleClose`); `CloseTab` now takes up
+  now ([`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx), `handleClose`); `CloseTab` now takes up
   to about 5s to resolve instead of milliseconds. The hide already survives an
   in-flight RPC; no UI change is needed. Its `holdRevealGate` has its own 800ms
   cap and does not depend on the RPC.
@@ -752,7 +752,7 @@ to do instead.
   through `TileLayoutContents`, the same way `onNodeDelete` is.
 - **What it checks:** `tabcontent` probes every member of the closing leaf:
   `turn_active` from `GetControllerStatus`, and tracked processes from
-  `AgentProcessListCommand` (`frontend/app/tab/pane-close-guard.ts`,
+  `AgentProcessListCommand` ([`frontend/app/tab/pane-close-guard.ts`](../../frontend/app/tab/pane-close-guard.ts),
   `busyMembers`).
 - **What the user sees:**
   - If any member is busy, one `ConfirmModal` lists each agent, for example

@@ -34,7 +34,7 @@ Specifically, as of PR #2300:
 
 - **Not** touching the pre-launch modal's `AuthState` reducer (`SPEC_LAUNCH_AUTH_STATE_MACHINE`) — that machine governs bundle/identity selection *before* a pane exists. This spec's reducer governs *after* a pane exists, mount → ready. They stay siblings.
 - **Not** wiring against `agentmux-srv/src/broker/state.rs`'s `CredentialState` scheduler. Per `REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`, CLI-provider credentials are explicitly out of scope for that system until its "Phase C+" — this spec's reducer is frontend-only and provider-agnostic on purpose, so it doesn't need to be unwound when that phase eventually lands.
-- **Not** addressing the unrelated ~9-10 minute dev-instance crash (tracked in `docs/retro/retro-agentmux-srv-9min-crash-2026-07-26.md`, PR #2301).
+- **Not** addressing the unrelated ~9-10 minute dev-instance crash (tracked in [`docs/retro/retro-agentmux-srv-9min-crash-2026-07-26.md`](../retro/retro-agentmux-srv-9min-crash-2026-07-26.md), PR #2301).
 - **Not** blocking the expired-token relogin on user confirmation — decided in §8 Q2 to notify-then-proceed, matching the rest of this work's "automatic but never silent" approach rather than adding a confirmation gate.
 
 ## 4. Current flow (baseline)
@@ -172,8 +172,8 @@ Every row has a notification column filled in and a stated reason when it's inte
 ## 10. References
 
 - PR #2300 — deterministic login UX, `LaunchPhase`, `onLoginSuccess`. This doc intentionally cites no line numbers for code on that PR's branch (still under active review, so any number would go stale the next commit) — the quoted condition/function text is the stable reference instead.
-- `frontend/app/view/agent/agent-view.tsx` — `onMount`'s `status.startLaunchFlow()` call (mount site) and the `onLoginSuccess` handler passed into `useAgentControllerStatus`.
-- `frontend/app/view/agent/flows/launch-flow.ts` — Phase 2's `if (needsLogin) {...}` block and Phase 3's `status === "init"`/`"done"`/`"running"` branch (see §5's update — `"running"` was missing from the original draft, reagent P1 on PR #2303).
-- `frontend/app/view/agent/components/AgentDocumentView.tsx` — header comment documenting the log()-to-hidden-channel routing this spec works around.
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — `onMount`'s `status.startLaunchFlow()` call (mount site) and the `onLoginSuccess` handler passed into `useAgentControllerStatus`.
+- [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) — Phase 2's `if (needsLogin) {...}` block and Phase 3's `status === "init"`/`"done"`/`"running"` branch (see §5's update — `"running"` was missing from the original draft, reagent P1 on PR #2303).
+- [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) — header comment documenting the log()-to-hidden-channel routing this spec works around.
 - `frontend/app/view/agent/auth/auth-state.ts` — the sibling reducer pattern this spec's `LaunchAuthState` mirrors.
-- `docs/retro/retro-agentmux-srv-9min-crash-2026-07-26.md` — lands via PR #2301 (sibling PR, not yet merged to `main` as of this spec's own review — it exists on that PR's branch).
+- [`docs/retro/retro-agentmux-srv-9min-crash-2026-07-26.md`](../retro/retro-agentmux-srv-9min-crash-2026-07-26.md) — lands via PR #2301 (sibling PR, not yet merged to `main` as of this spec's own review — it exists on that PR's branch).

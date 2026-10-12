@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-14
 **Status:** active — Part A implemented (this PR); Parts B–D proposed — #2153
-**Motivation:** `docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md`
+**Motivation:** [`docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md`](../analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md)
 §4 — Anthropic's own docs (`code.claude.com/docs/en/sessions`) state the JSONL
 transcript format "is internal to Claude Code and changes between versions, so
 scripts that parse these files directly can break on any release."
@@ -26,9 +26,9 @@ The Claude CLI pin lived in **four places, already drifted three ways**:
 | Site | Pin (pre-PR) | Consumer |
 |---|---|---|
 | `agentmux-srv/src/backend/providers.rs` | 2.1.198 | srv-side npm install (`install_handlers.rs`) |
-| `frontend/app/view/agent/providers/index.ts` | 2.1.198 | install modal display + request |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | 2.1.198 | install modal display + request |
 | `agentmux-cef/src/commands/providers.rs` | **2.1.185** (stale) | host-side installer |
-| `.github/workflows/container-image.yml` | **2.1.197** (stale) | Docker agent-image default |
+| [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml) | **2.1.197** (stale) | Docker agent-image default |
 
 The 2026-07-02 bump updated the first two, missed the last two — exactly the
 drift trap that spec's follow-up item predicted. Additionally, the pin only
@@ -41,7 +41,7 @@ guarantee.
 - Bump `agentmux-cef` `CLAUDE_VERSION` 2.1.185 → 2.1.198 and
   `container-image.yml` default 2.1.197 → 2.1.198.
 - Cross-referencing keep-in-sync comments at all four sites.
-- **Drift guard:** `frontend/app/view/agent/providers/pin-consistency.test.ts`
+- **Drift guard:** [`frontend/app/view/agent/providers/pin-consistency.test.ts`](../../frontend/app/view/agent/providers/pin-consistency.test.ts)
   — reads all four sites (TS registry by import, the two Rust registries and
   the workflow YAML by source regex) and asserts equality for claude (all
   four) and codex/gemini (the three registries). Also asserts pins are

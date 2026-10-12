@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date:** 2026-05-18
 **Author:** AgentA
-**Related:** `SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md` (the live-update plumbing), `frontend/app/store/browser-pane-state/reducer.ts`
+**Related:** `SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md` (the live-update plumbing), [`frontend/app/store/browser-pane-state/reducer.ts`](../../frontend/app/store/browser-pane-state/reducer.ts)
 
 ---
 
