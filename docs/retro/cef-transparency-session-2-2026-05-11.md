@@ -53,7 +53,7 @@ These live in `~/cef-build/chromium_git/chromium/src/` and survive locally becau
 ### AgentMux (`agentu/cef-transparency`)
 
 `60d7c1fd` — **fix(transparency): :root --window-opacity + disable-lcd-text**
-- `frontend/app/app.tsx` `AppSettingsUpdater` — set `--window-opacity` on `documentElement`, not `body`. See the CSS-substitution-at-compute-time analysis above.
+- [`frontend/app/app.tsx`](../../frontend/app/app.tsx) `AppSettingsUpdater` — set `--window-opacity` on `documentElement`, not `body`. See the CSS-substitution-at-compute-time analysis above.
 - `agentmux-cef/src/app.rs` — pass `--disable-lcd-text` Chromium switch. LCD subpixel AA requires opaque backgrounds and Chromium force-sets `contents_opaque=true` on layers with LCD text.
 
 ---
@@ -193,7 +193,7 @@ If full transparency is needed:
 
 - CEF fork patches: `~/cef-build/chromium_git/cef/libcef/browser/views/{window_impl.cc,window_view.cc,browser_view_impl.cc}`
 - Chromium patches (NOT yet in CEF patch system): `~/cef-build/chromium_git/chromium/src/third_party/blink/renderer/core/exported/web_view_impl.cc`, `~/cef-build/chromium_git/chromium/src/third_party/blink/renderer/platform/graphics/compositing/content_layer_client_impl.cc`
-- AgentMux: `frontend/app/app.tsx`, `agentmux-cef/src/app.rs`
+- AgentMux: [`frontend/app/app.tsx`](../../frontend/app/app.tsx), `agentmux-cef/src/app.rs`
 - Settings: `~/.agentmux/versions/settings.json` has `window:transparent=true, window:opacity=0.45`
 - Test artifacts: `/tmp/transparency-test/v792-FINAL-CLEAN.png` (latest)
 

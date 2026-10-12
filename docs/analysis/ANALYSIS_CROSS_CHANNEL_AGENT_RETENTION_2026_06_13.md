@@ -120,6 +120,6 @@ The migration is fragile precisely because the global store is *secondary* to pe
 - `agentmux-srv/src/registry/paths.rs:37-56` — `resolve_shared_definitions_dir` / `resolve_global_shared_root`.
 - `agentmux-srv/src/server/agent_handlers.rs:117-133` — My Agents RPC filter (correct).
 - `agentmux-srv/src/main.rs:~502` — startup wiring (`migrate_definitions_global_once` + store attach).
-- Spec: `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (§9 AC5).
+- Spec: [`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](../specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md) (§9 AC5).
 
 *Written 2026-06-13 by AgentX. Analysis only — no code changed.*

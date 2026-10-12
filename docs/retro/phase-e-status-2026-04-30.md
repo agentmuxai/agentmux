@@ -203,7 +203,7 @@ stores. Two recommended approaches.
 Source is a function of the variant.
 
 - **Pros**: zero wire-format change; matches the convention since B.3;
-  `frontend/util/launcher-events.ts` already uses this pattern.
+  [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts) already uses this pattern.
 - **Cons**: convention-dependent; future ambiguous variants would need a
   retroactive fix.
 

@@ -106,7 +106,7 @@ handler's name and its position in the WS loop without checking what actually
 calls it. Verified afterwards, in the frontend:
 
 - **Keystrokes go through the `blockinput` WS command, not this handler.**
-  `frontend/app/view/term/termViewModel.ts:407`, `termsticker.tsx:86`, and the
+  [`frontend/app/view/term/termViewModel.ts:407`](../../frontend/app/view/term/termViewModel.ts#L407), `termsticker.tsx:86`, and the
   agent pane's drawer shell `AgentShellSubblock.tsx:365` all send
   `wscommand: "blockinput"`. `termViewModel.ts:412` says so explicitly: "Use
   the blockinput wscommand, not the controllerinput RPC."
@@ -146,7 +146,7 @@ Two consequences worth carrying forward:
 
 - **Egress fan-out** (09-04's root cause): unregressed, see §1.
 - **Frontend main-thread blocking** (09-04 §3.5, the streaming-markdown
-  fix): `frontend/app/view/agent/components/MarkdownBlock.tsx`'s
+  fix): [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx)'s
   `STREAM_RENDER_MS = 90` throttle is still in place, unmodified.
 - **Background-lane starvation / coalescing** (`coalesce_background`,
   `websocket.rs:368-385`): unchanged.
@@ -182,7 +182,7 @@ Two consequences worth carrying forward:
    per the 09-04 report's §2) instead of round-tripping to `Store` on every
    keystroke regardless. This removes the `Store` contention entirely for
    the overwhelmingly common case instead of just making it non-blocking.
-3. **Bench coverage gap:** `tools/tests/bench-term-cross-pane.mjs` (built to
+3. **Bench coverage gap:** [`tools/tests/bench-term-cross-pane.mjs`](../../tools/tests/bench-term-cross-pane.mjs) (built to
    validate the 09-04 fix) measures pane B's echo latency while pane A
    floods raw PTY *output* (`yes`) — it does not exercise concurrent
    `controllerinput`/`PtyShellInput` traffic, so it would not have caught

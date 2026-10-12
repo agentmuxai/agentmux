@@ -22,7 +22,7 @@ unresponsive.
 
 ## Root cause
 
-In `frontend/app/view/agent/useAgentStream.ts:164`:
+In [`frontend/app/view/agent/useAgentStream.ts:164`](../../frontend/app/view/agent/useAgentStream.ts#L164):
 
 ```typescript
 try {
@@ -140,7 +140,7 @@ it happens on every retry attempt, the UI freezes.
 
 ## Related
 
-- `frontend/log/log-pipe.ts` — synchronous `fe_log_structured` IPC is the
+- [`frontend/log/log-pipe.ts`](../../frontend/log/log-pipe.ts) — synchronous `fe_log_structured` IPC is the
   amplifier. Making it async would mitigate many classes of issues.
 - `useAgentStream.ts` already has the console.log debug that was disabled
   in the silky-smooth typing PR — make sure we're not accidentally re-enabling

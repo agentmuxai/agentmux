@@ -11,7 +11,7 @@
 
 Three agents (Windows, macOS, Linux) all edit the same files:
 - `frontend/app/window/window-header.scss` — single file, shared width/zoom rules
-- `frontend/app/store/zoom.ts` — `applyChromeZoomCSS()` has platform branching in JS
+- [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) — `applyChromeZoomCSS()` has platform branching in JS
 - `frontend/layout/lib/TileLayout.tsx` — `dragHandle` logic with platform branching
 
 Each agent fixes their platform and breaks others because:

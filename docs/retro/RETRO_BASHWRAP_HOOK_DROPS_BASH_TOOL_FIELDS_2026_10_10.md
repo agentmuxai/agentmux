@@ -28,7 +28,7 @@ base64-encoded inside it.
 
 AgentMux streams Bash output by rewriting each Bash call in a `PreToolUse`
 hook (`SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`). `build_response` in
-`crates/bashwrap/src/hook.rs` returns:
+[`crates/bashwrap/src/hook.rs`](../../crates/bashwrap/src/hook.rs) returns:
 
 ```json
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
@@ -89,7 +89,7 @@ It reproduced live while this retro was being written: a scan given
 `timeout: 300000` was cut at 120 s and moved to the background.
 
 The CLI builds the summary from the description when it has one. srv's own
-fixture for the background-task feed (`crates/srv/src/backend/background_task_feed.rs`,
+fixture for the background-task feed ([`crates/srv/src/backend/background_task_feed.rs`](../../crates/srv/src/backend/background_task_feed.rs),
 test near line 450) records
 `"summary": "Background command \"Background wait for agents\" completed (exit code 0)"`,
 the description of that call.
@@ -139,7 +139,7 @@ the description of that call.
 
 ## 6. Fix
 
-1. **The hook** (`crates/bashwrap/src/hook.rs`): start `updatedInput` from a
+1. **The hook** ([`crates/bashwrap/src/hook.rs`](../../crates/bashwrap/src/hook.rs)): start `updatedInput` from a
    copy of `tool_input` and replace only `command`, so `description`,
    `timeout`, `run_in_background` and any field added later pass through
    unchanged. Add a test that feeds a payload with all four fields and asserts

@@ -5,10 +5,10 @@
 §6 fixes shipped in #3826; §8.3 in #3834; §8.1–§8.2 in #3837; §9 (keeping
 AgentMux responsive under agent load) lists further proposals.
 **Author:** AgentY, at the request of the repo owner
-**Related:** `docs/specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md` (the
-liveness probe that recycled srv), `docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`
-(the recycle path), `docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md` and
-`docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md` (the banner system §8.2 reuses).
+**Related:** [`docs/specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md`](../specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md) (the
+liveness probe that recycled srv), [`docs/specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`](../specs/SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md)
+(the recycle path), [`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`](../specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) and
+[`docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md`](../specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md) (the banner system §8.2 reuses).
 
 ---
 

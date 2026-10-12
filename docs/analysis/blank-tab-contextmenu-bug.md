@@ -112,7 +112,7 @@ This lets clicks pass through to the parent when the container has no children. 
 
 | File | Line | Role |
 |------|------|------|
-| `frontend/app/tab/tabcontent.tsx` | 80-94 | Context menu handler + guard clause |
-| `frontend/layout/lib/TileLayout.win32.tsx` | 129-151 | Display container that may intercept events |
-| `frontend/layout/lib/tilelayout.scss` | 12-27 | Absolute positioning + z-index on display-container |
+| [`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx) | 80-94 | Context menu handler + guard clause |
+| [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) | 129-151 | Display container that may intercept events |
+| [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) | 12-27 | Absolute positioning + z-index on display-container |
 | `agentmux-srv/src/backend/wcore/block.rs` | 36-46 | Backend delete_block removes from tab.blockids |

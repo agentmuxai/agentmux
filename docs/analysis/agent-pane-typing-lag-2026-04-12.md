@@ -30,7 +30,7 @@ The root cause was **controlled input**: `<textarea value={message()}>` with a s
 
 ## Primary Fix (shipped 0.33.91)
 
-`frontend/app/view/agent/components/AgentFooter.tsx`
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx)
 
 **Before:**
 ```tsx
@@ -175,7 +175,7 @@ SolidJS `value={signal()}` bindings on inputs require the signal to update on ev
 
 ## Prevention Checklist
 
-When writing or reviewing code in `frontend/app/view/agent/`:
+When writing or reviewing code in [`frontend/app/view/agent/`](../../frontend/app/view/agent):
 
 - [ ] No `value={signal()}` on inputs — use refs
 - [ ] No plain-function derived values — use `createMemo`
@@ -202,6 +202,6 @@ Found during this analysis but not typing-lag related. Tracking here to avoid lo
 
 **Architecture:**
 - Two launch paths: frontend `SetMetaCommand` flow vs backend `agent.open` handler. Metadata keys duplicated across 5+ files.
-- 26 `as any` type casts in `frontend/app/view/agent/` hide runtime bugs
+- 26 `as any` type casts in [`frontend/app/view/agent/`](../../frontend/app/view/agent) hide runtime bugs
 
 These should become their own fix PRs. Not merging them into the typing-lag fix to keep the scope clean.

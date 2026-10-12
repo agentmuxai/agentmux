@@ -3,7 +3,7 @@
 **Status:** analysis — Complete — empirically verified against the live dev build via CDP
 **Author:** AgentX
 **Date:** 2026-06-10
-**Companion spec:** `docs/specs/SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10.md`
+**Companion spec:** [`docs/specs/SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10.md`](../specs/SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10.md)
 **PR:** #1330 (`agentx/fix-xterm-dead-space`)
 **Method:** Chrome DevTools Protocol (port 9223, dev build PID 116308), live DOM
 measurement + diagnostic layer colorization + composited-pixel sampling + screenshots.

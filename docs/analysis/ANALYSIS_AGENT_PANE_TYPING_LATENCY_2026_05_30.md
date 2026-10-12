@@ -32,7 +32,7 @@ long-task         52 → 68 → 118 → 263 → 465 → 850 → 1507 → 1754 ms
 
 ## 2. Root cause
 
-`frontend/app/element/markdown.tsx:466-540` — the `renderedMarkdown` `createMemo` re-runs the **entire** pipeline from scratch on every change of its text input:
+[`frontend/app/element/markdown.tsx:466-540`](../../frontend/app/element/markdown.tsx#L466-L540) — the `renderedMarkdown` `createMemo` re-runs the **entire** pipeline from scratch on every change of its text input:
 
 ```js
 const renderedMarkdown = createMemo(() => {
@@ -46,7 +46,7 @@ const renderedMarkdown = createMemo(() => {
 });
 ```
 
-`MarkdownBlock` (`frontend/app/view/agent/components/MarkdownBlock.tsx:42`) feeds it `props.node.content`, which the streaming reducer **replaces with a longer string on every frame** (~60×/s, RAF-batched). So a streaming response re-parses + re-syntax-highlights + rebuilds the **whole growing message every frame** → **O(n²)** over the turn. The cost climbs with message length → the escalating long-tasks → keystroke RAFs can't fire → typing lags. It compounds the longer/larger the response.
+`MarkdownBlock` ([`frontend/app/view/agent/components/MarkdownBlock.tsx:42`](../../frontend/app/view/agent/components/MarkdownBlock.tsx#L42)) feeds it `props.node.content`, which the streaming reducer **replaces with a longer string on every frame** (~60×/s, RAF-batched). So a streaming response re-parses + re-syntax-highlights + rebuilds the **whole growing message every frame** → **O(n²)** over the turn. The cost climbs with message length → the escalating long-tasks → keystroke RAFs can't fire → typing lags. It compounds the longer/larger the response.
 
 ---
 

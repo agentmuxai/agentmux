@@ -19,7 +19,7 @@
 The three-word hyphenated string (`hazy-mapping-alpaca`, or the real example
 already documented elsewhere as `quizzical-tumbling-valiant`) is **not**
 produced by any word-list/petname generator inside this codebase. There is no
-such generator anywhere in `agentmux-srv` or `frontend/app` — confirmed by
+such generator anywhere in `agentmux-srv` or [`frontend/app`](../../frontend/app) — confirmed by
 grepping both trees and `Cargo.toml`/`Cargo.lock`/`package.json` for
 `petname`, `random-word`, `unique-names-generator`, `docker-names`, and
 similar, with zero hits.
@@ -31,7 +31,7 @@ first line of a subagent's JSONL transcript:
 > subagent's own JSONL first line's `"slug"` field
 > (`subagent_watcher.rs:1004-1012`); if the CLI didn't write one, it falls
 > back to the raw `agentId` hash (`:1013-1027`)."
-> — `docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md:45-48`
+> — [`docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md:45-48`](../specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md)
 
 AgentMux reads this field (`agentmux-srv/src/backend/subagent_watcher/parse.rs`)
 but does not invent it. So "remove the generator" is not an available fix —
@@ -41,7 +41,7 @@ not in another.
 
 ## 3. There are two independent ways to view a subagent's detail — only one was ever fixed
 
-**Swarm pane row** (`frontend/app/view/swarm/`) — **fixed**, 2026-07-07
+**Swarm pane row** ([`frontend/app/view/swarm/`](../../frontend/app/view/swarm)) — **fixed**, 2026-07-07
 onward. Clicking a Swarm-pane row expands inline and shows the Haiku-resolved
 `display_name` (`subagent.GenerateName` RPC,
 `agentmux-srv/src/server/app_api/session.rs`), falling back to the raw slug
@@ -74,7 +74,7 @@ the raw slug unconditionally:**
   **completely separate code path** from the Swarm pane — clicking a link in
   a transcript never goes anywhere near `swarm-model.ts`.
 - The view is still fully registered and reachable:
-  `frontend/app/block/block-registry.ts:34` —
+  [`frontend/app/block/block-registry.ts:34`](../../frontend/app/block/block-registry.ts#L34) —
   `blockViewRegistry.set("subagent", SubagentViewModel as any)` — and
   `blockutil.tsx:21` gives it the label `"Subagent"`.
 
@@ -87,7 +87,7 @@ shipped for the Swarm pane.
 This is not a case of nobody noticing. It was raised and consciously deferred
 **twice**:
 
-**2026-07-07** — `docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`,
+**2026-07-07** — [`docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`](../specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md),
 "Resolution of the open questions," §1:
 
 > "**Standalone `SubagentView` pane: kept, not retired.** Discovered during
@@ -104,7 +104,7 @@ This same document, ten lines earlier in its analysis section, had explicitly
 inline expand — the "kept, not retired" line is a deliberate reversal made
 mid-implementation, not an oversight.
 
-**2026-07-17** — `docs/specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md`,
+**2026-07-17** — [`docs/specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md`](../specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md),
 §6, raised it again and again declined to resolve it:
 
 > "`frontend/app/view/subagent/subagent-model.ts` (the older, non-workflow-
@@ -114,7 +114,7 @@ mid-implementation, not an oversight.
 > product-surface call, not a schema one."
 
 The follow-up work that actually shipped from that spec chain
-(`docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md`, landed
+([`docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md`](../specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md), landed
 via PR #2231 / #2232 — eager per-dispatch Haiku naming + the two-bucket
 Agent-Tool/Workflow row model) only touched Swarm-pane code
 (`swarm-model.ts`, `swarm-view.tsx`, `swarm-model.test.ts`). It never
@@ -193,8 +193,8 @@ there. Documenting this option for completeness only; **not recommended.**
    - `frontend/app/view/subagent/subagent-view.scss`
    - `frontend/app/store/subagent-pane-manager.ts`
    - the `"subagent"` view registration:
-     `frontend/app/block/block-registry.ts:34` and the `VIEW_LABELS["subagent"]`
-     entry in `frontend/app/block/blockutil.tsx:21`
+     [`frontend/app/block/block-registry.ts:34`](../../frontend/app/block/block-registry.ts#L34) and the `VIEW_LABELS["subagent"]`
+     entry in [`frontend/app/block/blockutil.tsx:21`](../../frontend/app/block/blockutil.tsx#L21)
    - `handleSubagentClick`'s now-dead imports (`isSubagentPaneOpen`,
      `openSubagentPane`) in `agent-view.tsx`
 3. **Correct `CLAUDE.md`'s "Not widgets" table** — either delete the
@@ -258,13 +258,13 @@ Deleted:
 - `frontend/app/view/agent/hooks/useSubagentEvents.ts`
 
 Edited (removed all references to the above, end to end):
-- `frontend/app/block/block-registry.ts`, `blockutil.tsx` — `"subagent"` view registration + icon/label
-- `frontend/app/view/agent/agent-view.tsx` — `handleSubagentClick`, `useSubagentEvents` call, `onSubagentClick` prop
+- [`frontend/app/block/block-registry.ts`](../../frontend/app/block/block-registry.ts), `blockutil.tsx` — `"subagent"` view registration + icon/label
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — `handleSubagentClick`, `useSubagentEvents` call, `onSubagentClick` prop
 - `frontend/app/view/agent/components/{AgentDocumentView,ToolBlock}.tsx` — prop threading; the "⧉" button entirely
 - `frontend/app/view/agent/virtualization/{AgentDocumentVirtualList,DocumentRow,renderers,expansion-source,index}.ts(x)` — `subagent_link` `DocumentNode` variant removed from the estimator/streaming-capability/expansion registries end to end
-- `frontend/app/view/agent/types.ts` — `SubagentLinkNode` interface and its `DocumentNode` union member deleted
-- `frontend/app/view/agent/hooks/useInSessionSearch.ts` — search-text case
-- `frontend/app/view/agent/styles/_document-nodes.scss` — `.agent-subagent-link` and `.agent-tool-open-pane` style blocks
+- [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) — `SubagentLinkNode` interface and its `DocumentNode` union member deleted
+- [`frontend/app/view/agent/hooks/useInSessionSearch.ts`](../../frontend/app/view/agent/hooks/useInSessionSearch.ts) — search-text case
+- [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) — `.agent-subagent-link` and `.agent-tool-open-pane` style blocks
 - Test files (`renderers.test.ts`, `expansion-source.test.ts`, `perf-probe.test.ts`) updated to drop subagent-link-specific fixtures/assertions
 - `CLAUDE.md`'s stale "Subagent" row in the "Not widgets" table — deleted (the surface it described no longer exists)
 
@@ -276,12 +276,12 @@ change).
 
 ## 9. Related docs
 
-- `docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md` — first
+- [`docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`](../specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md) — first
   "kept, not retired" decision (§1 resolution).
-- `docs/specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md` — second,
+- [`docs/specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md`](../specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) — second,
   still-unresolved flag (§6).
-- `docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md` — the
+- [`docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md`](../specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) — the
   naming/row-model work that fixed the Swarm pane but never revisited this.
-- `docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md`
+- [`docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md`](../analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md)
 - `CLAUDE.md` ("Not widgets" table, "Subagent" row) — needs correction per §6
   step 3 regardless of which removal option is implemented.

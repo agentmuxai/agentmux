@@ -30,7 +30,7 @@ AgentMux has a **distributed test infrastructure** spanning three platforms:
 | E2E Playwright tests | Written for Tauri — reference `_electron`, `tauri-driver`, removed paths |
 | WebdriverIO configs | `wdio.conf.cjs` + `wdio.macos.conf.cjs` — target dead Tauri architecture |
 | npm E2E scripts | `test:e2e`, `test:e2e:macos`, `test:e2e:debug` — all broken |
-| CI/CD | No `.github/workflows/` — zero automated test runs on push/PR |
+| CI/CD | No [`.github/workflows/`](../../.github/workflows) — zero automated test runs on push/PR |
 | Shell copytests | 48 bash scripts in `tests/copytests/cases/` — not integrated into any runner |
 
 ---

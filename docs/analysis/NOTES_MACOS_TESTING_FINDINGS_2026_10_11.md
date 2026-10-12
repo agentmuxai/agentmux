@@ -12,7 +12,7 @@ Every entry says what was done, what was seen, whether it reproduced, and what i
 
 ## F1. Tearing off a tab that holds a browser pane crashes the host (existing bug)
 
-**Root cause (found 2026-10-12): the test Mac's local CEF framework predates agentmuxai/cef#11; the app code is right.** Fixed for dev and local packaging by making `scripts/verify-cef-framework-darwin.sh` check for #11.
+**Root cause (found 2026-10-12): the test Mac's local CEF framework predates agentmuxai/cef#11; the app code is right.** Fixed for dev and local packaging by making [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh) check for #11.
 
 - Since #4599 (2026-10-10) a browser pane in the default jar keeps the default Profile in every window. A secondary window's own page runs on a unique off-the-record Profile (`commands::create_isolated_request_context`). So a pane in a secondary window puts two Profiles in one widget. A tear-off lands the tab in a pool window, which is a secondary window.
 - In stock CEF, `CefWidgetImpl::AddAssociatedProfile` adds the widget as an observer of `ThemeServiceFactory::GetForProfile(profile)` once per new `Profile*`. `ThemeServiceFactory` redirects an off-the-record Profile to its original's service (`kRedirectedToOriginal`), so the second Profile adds the same observer again: `Observers can only be added once!`. The stack names `ModalDialogHostObserver` only because identical `ObserverList::AddObserver` instantiations are folded into one symbol.
@@ -145,4 +145,4 @@ After the tear-off crash (F1) the app restarted itself and restored its windows.
 - **A scripted drag that grabs the wrong thing can tear off a tab.** The header's draggable area and the tab strip are close together; move the press point into the empty strip beside the tabs, and never run synthetic drags on a window someone is using.
 - **A dev window started as a background job of an agent shell is killed after ~30 minutes.** Start it detached, but never with `< /dev/null`: Vite exits when its stdin closes (F6). Use `tail -f /dev/null | nohup task dev > log 2>&1 &` and, for a window that must stay up for hours, also run Vite alone in its own session with `CI=true` (F6 has the details).
 - **Fast drags matter.** A 30 pt/frame drag showed pane lag (300 pt p90) that a 4 pt/frame drag (60 pt p90) understated.
-- The probes (`scripts/perf/macos-paint/`) and the numbers behind F3 are in #4615.
+- The probes ([`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint)) and the numbers behind F3 are in #4615.

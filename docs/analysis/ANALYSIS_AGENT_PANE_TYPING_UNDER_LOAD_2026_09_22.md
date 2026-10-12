@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-22
 **Author:** Manoz
-**Status:** analysis — **§2 measured and confirmed** (see §6, `tools/tests/bench-markdown-parse.mjs`). §4's pane multiplier is still code-reading only and needs the in-app check in §6.4.
+**Status:** analysis — **§2 measured and confirmed** (see §6, [`tools/tests/bench-markdown-parse.mjs`](../../tools/tests/bench-markdown-parse.mjs)). §4's pane multiplier is still code-reading only and needs the in-app check in §6.4.
 **Symptom (user-reported):** "when there is a lot of activity in the agent pane, typing becomes extremely slow."
 **Umbrella:** Discussion #1161 · `TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`
 **Follow-up (2026-09-23):** §2 and §4 shipped as #3521 / #3536 and hold under
@@ -134,7 +134,7 @@ not doing the thing that makes it slow.
 
 ## 6. Measurements
 
-`tools/tests/bench-markdown-parse.mjs` replays the **real** pipeline from
+[`tools/tests/bench-markdown-parse.mjs`](../../tools/tests/bench-markdown-parse.mjs) replays the **real** pipeline from
 `markdown.tsx:230-286` — same plugins, same order, including the two app-local
 remark plugins — against synthetic agent output (25% code blocks). Run it with
 `npx tsx tools/tests/bench-markdown-parse.mjs`.

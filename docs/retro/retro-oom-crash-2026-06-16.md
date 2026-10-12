@@ -166,7 +166,7 @@ resumed, so recovery was partial at best.
 ## 6. Recommendations (prioritized)
 
 > These are now designed in
-> **`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`** (host/instance-level
+> **[`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`](../specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md)** (host/instance-level
 > memory-pressure supervision + graceful degradation), which complements the
 > existing renderer-level `SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`.
 

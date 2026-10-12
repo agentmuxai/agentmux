@@ -1,7 +1,7 @@
 # Ultra-Long Sessions — Verification Report & Retrospective
 
 **Date:** 2026-04-12
-**Plan:** `docs/plans/ultra-long-sessions.md`
+**Plan:** [`docs/plans/ultra-long-sessions.md`](../plans/ultra-long-sessions.md)
 **Status:** retro — COMPLETE — all four phases shipped to `main`
 **Version at completion:** 0.33.100
 **PRs:** #336, #338, #340, #341, #342
@@ -42,8 +42,8 @@ Four phases as defined in the plan:
 
 | Item                                     | Status | Anchor                                                                  |
 |------------------------------------------|:------:|-------------------------------------------------------------------------|
-| 2.1 Virtualization via `content-visibility: auto` | ✅ | `frontend/app/view/agent/components/AgentDocumentView.tsx:208`         |
-| 2.2 Paginated history loading on mount   | ✅     | `frontend/app/view/agent/agent-view.tsx` (history load + prepend)       |
+| 2.1 Virtualization via `content-visibility: auto` | ✅ | [`frontend/app/view/agent/components/AgentDocumentView.tsx:208`](../../frontend/app/view/agent/components/AgentDocumentView.tsx#L208)         |
+| 2.2 Paginated history loading on mount   | ✅     | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (history load + prepend)       |
 | 2.2 Scroll-top "load older" with RAF position restore | ✅ | same                                                             |
 | 2.3 Reconnect recovery via history reload| ✅     | same                                                                    |
 | 2.4 Timeline minimap w/ 30-bucket density| ✅     | `frontend/app/view/agent/components/TimelineMinimap.tsx`                |
@@ -53,7 +53,7 @@ Four phases as defined in the plan:
 
 | Item                                           | Status | Anchor                                                                |
 |------------------------------------------------|:------:|-----------------------------------------------------------------------|
-| 3.1 In-session search (Ctrl+F, pane-scoped)    | ✅     | `frontend/app/view/agent/components/AgentSearchBar.tsx`              |
+| 3.1 In-session search (Ctrl+F, pane-scoped)    | ✅     | [`frontend/app/view/agent/components/AgentSearchBar.tsx`](../../frontend/app/view/agent/components/AgentSearchBar.tsx)              |
 | 3.3 Session archival (gzip → `~/.agentmux/archives/`) | ✅ | `agentmux-srv/src/backend/session_archive.rs` + archiver sweep in `main.rs` |
 | 3.3 Archive / Restore / Export RPCs            | ✅     | `agentmux-srv/src/server/app_api.rs` (register_session_*)             |
 | 3.3 Frontend buttons in `AgentControlBar`      | ✅     | `frontend/app/view/agent/components/AgentControlBar.tsx`              |

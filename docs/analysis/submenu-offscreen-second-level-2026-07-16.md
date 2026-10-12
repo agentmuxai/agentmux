@@ -14,7 +14,7 @@ two lines of hand-rolled CSS from before the framework existed.
 
 ## 1. What the framework guarantees (and to whom)
 
-`frontend/app/util/menu-position.ts` (SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20) is
+[`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) (SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20) is
 opt-in per call site. A surface that calls `computeMenuPosition(request, el)` gets the
 floating-ui pipeline — `offset → flip → shift → size` against an explicit boundary
 (paintable area or viewport) — and can call `assertMenuInPaintableArea(el, label)` to
@@ -130,8 +130,8 @@ parent menu and stay fully visible; in dev, no `[menu-guard]` console errors.
 
 ## 5. Sources
 
-- `frontend/util/cef-api.ts` :199–220 (broken submenu branch), :244–260 (compliant top level)
-- `frontend/app/element/flyoutmenu.tsx` :77–92 (L1), :395–414 (compliant SubMenu pattern)
-- `frontend/app/util/menu-position.ts` (framework), `flyoutmenu.scss` :7–23 (`.menu`, `.sub-menu`)
-- `frontend/app/block/pane-actions.ts` :101–136 ("Replace With..." def), `store/contextmenu.ts` :45–46 (submenu conversion)
-- `docs/specs/SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md` (framework spec; Phase 3 "manual-math surfaces" is where this site was missed)
+- [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) :199–220 (broken submenu branch), :244–260 (compliant top level)
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) :77–92 (L1), :395–414 (compliant SubMenu pattern)
+- [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) (framework), `flyoutmenu.scss` :7–23 (`.menu`, `.sub-menu`)
+- [`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts) :101–136 ("Replace With..." def), `store/contextmenu.ts` :45–46 (submenu conversion)
+- [`docs/specs/SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md`](../specs/SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md) (framework spec; Phase 3 "manual-math surfaces" is where this site was missed)

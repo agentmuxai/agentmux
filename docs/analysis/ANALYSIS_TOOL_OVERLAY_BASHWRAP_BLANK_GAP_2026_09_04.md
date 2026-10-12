@@ -10,7 +10,7 @@
 
 ## This is a distinct bug from the broader "scroll oscillation" investigation
 
-`docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md` and its
+[`docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`](ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md) and its
 two follow-up `FINDINGS_*` docs analyze a **different, still-open** problem
 (un-eased shrink-then-regrow of the outer scroll container across several
 independent DOM-shape-swap mechanisms — issues #2648/#2718, not touched
@@ -110,8 +110,8 @@ still pass); restored, diff clean. Full frontend suite: 3620/3620 passing.
 
 | File | Role |
 |---|---|
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` | `hasChunks()` — the fixed gate; `ToolOverlayResult`'s "⏳ Thinking..." fallback |
-| `frontend/app/view/agent/components/output-cap.ts` | `dropBashwrapStartingChunk` — the render-layer filter `ChunkList` already applied |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | `autoExpanded()` — why the panel is visible at all during this window |
-| `frontend/app/view/agent/components/PersistentShellBlock.tsx` | Has the same filter, not the same bug (manual-pin-only expansion) |
-| `docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md` | The broader, still-open, unrelated scroll-oscillation investigation |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) | `hasChunks()` — the fixed gate; `ToolOverlayResult`'s "⏳ Thinking..." fallback |
+| [`frontend/app/view/agent/components/output-cap.ts`](../../frontend/app/view/agent/components/output-cap.ts) | `dropBashwrapStartingChunk` — the render-layer filter `ChunkList` already applied |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | `autoExpanded()` — why the panel is visible at all during this window |
+| [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx) | Has the same filter, not the same bug (manual-pin-only expansion) |
+| [`docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`](ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md) | The broader, still-open, unrelated scroll-oscillation investigation |

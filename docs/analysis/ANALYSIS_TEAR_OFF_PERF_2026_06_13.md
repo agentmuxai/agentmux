@@ -141,21 +141,21 @@ True "instant" needs a shared-renderer multi-window model to re-parent DOM inste
 
 ## 9. Key file references
 **Pane path (prioritize):**
-- `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` — `performTearOff` `dragType:"pane"` → `TearOffBlock` + `open_floating_pane_window` (L241-320); `.darwin.tsx` / `.linux.tsx` mirror it.
-- `frontend/app/drag/tear-off-pool-helper.ts` — `openTearOffWindow`, `measureSourcePaneSize`.
+- [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) — `performTearOff` `dragType:"pane"` → `TearOffBlock` + `open_floating_pane_window` (L241-320); `.darwin.tsx` / `.linux.tsx` mirror it.
+- [`frontend/app/drag/tear-off-pool-helper.ts`](../../frontend/app/drag/tear-off-pool-helper.ts) — `openTearOffWindow`, `measureSourcePaneSize`.
 - `agentmux-cef/src/commands/floating_pane.rs` — `open_floating_pane_window` IPC (L81); non-Windows `post_create_window(frameless)` (L218).
 - `agentmux-cef/src/floating_pane.rs` — `post_create_floating_window` (L246); `create_owned_popup` + **`ShowWindow(SW_SHOWNOACTIVATE)` L629** (blank-before-paint).
-- `frontend/app/workspace/floating-pane-workspace.tsx` + App.tsx `floatingPaneId` branch — chromeless shell.
+- [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) + App.tsx `floatingPaneId` branch — chromeless shell.
 
 **Tab path:**
-- `frontend/app/tab/tabbar.tsx` — `performTabTearOff`.
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — `performTabTearOff`.
 - `agentmux-cef/src/commands/window_pool.rs` — `promote_pool_window` (L484), show (~L789), `pool:promote` (~L796), refill (L806).
 - `agentmux-cef/src/commands/drag.rs` — `tear_off_pool_promote` (L314), cold fallback `open_window_at_position` (L374), `tear_off_sc_move_handshake` (L509).
 
 **Shared bootstrap / reveal / brain:**
-- `frontend/app-init.ts` — body hidden (L483); pool short-circuit (L526-538); `initHostNewWindow` 3 RPCs (L371/383/388) + `initWaveWrap` (L417); `initWaveWrap` finally `scheduleRevealLift` (L622) + body un-hide (L623); **`#startup-loading` removal (L922)**.
-- `frontend/app/init/pool.ts` — `isPoolMode`, `awaitPoolPromote`.
-- `frontend/app/store/tab-reveal.ts` — reveal gate (SETTLE_MS 80, MAX_GATE_MS 800).
+- [`frontend/app-init.ts`](../../frontend/app-init.ts) — body hidden (L483); pool short-circuit (L526-538); `initHostNewWindow` 3 RPCs (L371/383/388) + `initWaveWrap` (L417); `initWaveWrap` finally `scheduleRevealLift` (L622) + body un-hide (L623); **`#startup-loading` removal (L922)**.
+- [`frontend/app/init/pool.ts`](../../frontend/app/init/pool.ts) — `isPoolMode`, `awaitPoolPromote`.
+- [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts) — reveal gate (SETTLE_MS 80, MAX_GATE_MS 800).
 - `index.html` — `#startup-loading` brain (`visibility: visible !important; z-index: 99999`) + `startup-pulse`.
 - `agentmux-cef/src/client/mod.rs` — main window shown in `on_load_end` (L1274) — the show-after-paint pattern P0(a) should reuse for floaters.
 

@@ -5,7 +5,7 @@
 **Date:** 2026-05-07  
 **Symptom:** When dragging the title bar to move the window, the cursor's position on the bar drifts — it does not stay at the point where the user originally clicked.  
 **Severity:** P2 — noticeable UX regression, not a crash  
-**Area:** `frontend/app/hook/useWindowDrag.win32.ts`, `agentmux-cef/src/commands/window.rs`
+**Area:** [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts), `agentmux-cef/src/commands/window.rs`
 
 ---
 
@@ -191,7 +191,7 @@ If latency is a concern, the initial position can be pre-fetched on title-bar `m
 
 | File | Change |
 |------|--------|
-| `frontend/app/hook/useWindowDrag.win32.ts` | Switch to absolute positioning (await initial pos, fixed click origin) |
+| [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts) | Switch to absolute positioning (await initial pos, fixed click origin) |
 | `agentmux-cef/src/commands/window.rs` | Add `set_window_position(x, y)` |
 | `agentmux-cef/src/ipc.rs` | Register `set_window_position` in the command router |
 | `agentmux-cef/src/ui_tasks.rs` (if it exists) | Add `post_set_window_position` for non-Windows paths |
@@ -215,7 +215,7 @@ const tx = initWinX + (e.screenX - clickScreenX);
 
 At Win11 125% (`dpr = 1.25`), the window moves 80% of the cursor distance — the same visible drift the original bug had, with a different mechanism.
 
-Fixed in PR following `docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md`. The spec also adds:
+Fixed in PR following [`docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md`](../specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md). The spec also adds:
 
 1. **DPR multiplier + `Math.round`** in the frontend hook (the core fix).
 2. **Re-read `devicePixelRatio` per mousemove** so cross-monitor mid-drag at different scales picks up the new value.

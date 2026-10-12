@@ -2,10 +2,10 @@
 
 > **§6'S LIVE REPRO HAS SINCE HAPPENED — read the follow-ups before acting
 > on this document** (added 2026-08-29, docs-cleanup Phase 4):
-> 1. `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md` —
+> 1. [`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`](FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md) —
 >    correlated a single dev-branch repro's 8 `[wave-scroll-shrink]` events
 >    against this doc's three theorised sources.
-> 2. `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`
+> 2. [`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`](FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md)
 >    — two running instances, hours of real usage, ~2 orders of magnitude
 >    more data. Surfaced **two distinct anomalies**: a recurring ~251px
 >    shrink, and multiple panes' `scrollHeight` dropping to exactly
@@ -97,7 +97,7 @@ three pin mechanisms already funnel through, so it catches a shrink from
 or something not yet identified) without needing per-source instrumentation.
 Reachable live via `muxlog fe grep wave-scroll-shrink` against a running
 instance — see the branch `loap/fix-tool-call-scroll-shrink-oscillation`.
-121/121 existing tests in `frontend/app/view/agent/virtualization` still
+121/121 existing tests in [`frontend/app/view/agent/virtualization`](../../frontend/app/view/agent/virtualization) still
 pass (no logic changed, only a diagnostic branch added inside an existing
 function).
 
@@ -128,7 +128,7 @@ see §4.
 mechanisms, all missing a "never shrink visibly" guarantee, sitting under
 scroll-pin machinery that only ever *snaps*, never eases
 
-The agent pane (`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`)
+The agent pane ([`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx))
 keeps `viewState.stickToBottom()` pinned to true bottom via three
 independent triggers — verified directly in the current file:
 
@@ -178,7 +178,7 @@ independent sources of that shrink:
 
 ## 2. Source A (primary suspect) — the running→terminal DOM-shape swap, only half-mitigated
 
-`mergeReplacement()` (`frontend/app/store/agent-document/reducer.ts:906-926`)
+`mergeReplacement()` ([`frontend/app/store/agent-document/reducer.ts:906-926`](../../frontend/app/store/agent-document/reducer.ts#L906-L926))
 flips a tool's `status` out of `"running"` **and** force-clears
 `log.open` to `false` in the same reducer tick when a `tool_result` lands:
 
@@ -210,7 +210,7 @@ on that same tick:
   independent sibling `<Show>` blocks with **no shared box, no cross-fade,
   no height reservation** — the row's own height can change too.
 
-**This was diagnosed once already** (`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`)
+**This was diagnosed once already** ([`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`](ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md))
 and **partially fixed** in PR #1975 (`fix(agent): smooth the running ->
 completed tool-preview transition`): `ToolOverlayLog.tsx:238-289` now runs a
 FLIP-style height transition (`flipHeight()`, `:342-363`, 150ms
@@ -245,7 +245,7 @@ direct read of the current file:**
 
 ## 3. Source B — retroactive spinner-run reclassification (real, continuous, lower-confidence as the *dominant* cause here)
 
-`frontend/app/view/agent/components/output-cap.ts`'s `createSpinnerCollapser()`
+[`frontend/app/view/agent/components/output-cap.ts`](../../frontend/app/view/agent/components/output-cap.ts)'s `createSpinnerCollapser()`
 (`:362-433`) folds consecutive terminal redraw frames (progress bars,
 spinners) into a single updating DOM node, to avoid one `<pre>` per frame.
 Its own doc comment (`:349-360`) states the mechanism explicitly:
@@ -279,7 +279,7 @@ identical-length `spinnerSlot` entry), so on its own it's a weaker fit for
 
 ## 4. Source C — MarkdownBlock's throttled highlight re-render (documented, unfixed, still live)
 
-`frontend/app/view/agent/components/MarkdownBlock.tsx:64-80` — confirmed by
+[`frontend/app/view/agent/components/MarkdownBlock.tsx:64-80`](../../frontend/app/view/agent/components/MarkdownBlock.tsx#L64-L80) — confirmed by
 direct read, unchanged since `REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`
 §2.1 flagged it (no commits to this file touch this logic since; `git log`
 confirms). During streaming, markdown re-parses render a cheap intermediate
@@ -429,20 +429,20 @@ scroll alone already reads as "no scrollback" to a user.
 | File | Role |
 |---|---|
 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx:167-171, 464-565` | The three pin mechanisms + the un-eased `scrollToTrueBottom()` |
-| `frontend/app/store/agent-document/reducer.ts:906-926` | `mergeReplacement()` — couples `status` + `log.open` on one tick |
+| [`frontend/app/store/agent-document/reducer.ts:906-926`](../../frontend/app/store/agent-document/reducer.ts#L906-L926) | `mergeReplacement()` — couples `status` + `log.open` on one tick |
 | `frontend/app/view/agent/components/ToolOverlayLog.tsx:91-108, 202-289, 310-323, 328-363` | The `<Switch>` DOM-shape swap + its partial FLIP mitigation + the `heightStale` bypass |
 | `frontend/app/view/agent/components/ToolBlock.tsx:227-279, 390-434` | `resultPill()` / live-tail — unmitigated sibling-swap in the summary row |
-| `frontend/app/view/agent/components/output-cap.ts:343-433` | `createSpinnerCollapser` — retroactive reclassification |
+| [`frontend/app/view/agent/components/output-cap.ts:343-433`](../../frontend/app/view/agent/components/output-cap.ts#L343-L433) | `createSpinnerCollapser` — retroactive reclassification |
 | `frontend/app/view/agent/components/MarkdownBlock.tsx:32, 64-80` | Throttled streaming re-parse/highlight commit |
-| `frontend/app/view/agent/virtualization/anchor.ts:66-85` | `isNearBottom` / `STICK_TO_BOTTOM_THRESHOLD_PX = 200` |
+| [`frontend/app/view/agent/virtualization/anchor.ts:66-85`](../../frontend/app/view/agent/virtualization/anchor.ts#L66-L85) | `isNearBottom` / `STICK_TO_BOTTOM_THRESHOLD_PX = 200` |
 
 ## Related prior docs (read in full, not just referenced)
 
 | Path | Relevance |
 |---|---|
-| `docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md` | Diagnosed Source A originally; its recommended FLIP fix landed (#1975) but only for `ToolOverlayLog`'s body, not `ToolBlock`'s summary row |
-| `docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md` | Diagnosed the *lag* half of this bug class (content grows, pin doesn't follow) and correctly identified "itemized dependency whack-a-mole" as the root pattern; its RO #2 recommendation has since landed and is confirmed present in the current file |
-| `docs/specs/PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md` | Same bug class, splitter-resize trigger; methodology model for this doc (disproved its own leading hypothesis via a real-component test rather than reasoning alone) — its H4 (overlay-lag) and the general "no visible motion should ever come from a hard snap" theme are adjacent to §7 here |
+| [`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`](ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md) | Diagnosed Source A originally; its recommended FLIP fix landed (#1975) but only for `ToolOverlayLog`'s body, not `ToolBlock`'s summary row |
+| [`docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`](../specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md) | Diagnosed the *lag* half of this bug class (content grows, pin doesn't follow) and correctly identified "itemized dependency whack-a-mole" as the root pattern; its RO #2 recommendation has since landed and is confirmed present in the current file |
+| [`docs/specs/PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md`](../specs/PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md) | Same bug class, splitter-resize trigger; methodology model for this doc (disproved its own leading hypothesis via a real-component test rather than reasoning alone) — its H4 (overlay-lag) and the general "no visible motion should ever come from a hard snap" theme are adjacent to §7 here |
 
 No prior doc connects the running→terminal shrink (Source A), the spinner
 reclassification (Source B), and the markdown re-highlight (Source C) as

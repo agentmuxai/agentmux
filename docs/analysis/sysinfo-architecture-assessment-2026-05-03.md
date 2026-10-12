@@ -4,12 +4,12 @@
 
 **Date:** 2026-05-03
 **Files reviewed:**
-- `frontend/app/view/sysinfo/sysinfo-plot.tsx` (159 LOC)
-- `frontend/app/view/sysinfo/sysinfo-model.ts` (259 LOC)
-- `frontend/app/view/sysinfo/sysinfo-view.tsx` (108 LOC)
-- `frontend/app/view/sysinfo/sysinfo-types.ts` (113 LOC)
-- `frontend/app/view/sysinfo/sysinfo-util.ts` (36 LOC)
-- `frontend/app/view/sysinfo/sysinfo.tsx` (17 LOC)
+- [`frontend/app/view/sysinfo/sysinfo-plot.tsx`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx) (159 LOC)
+- [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) (259 LOC)
+- [`frontend/app/view/sysinfo/sysinfo-view.tsx`](../../frontend/app/view/sysinfo/sysinfo-view.tsx) (108 LOC)
+- [`frontend/app/view/sysinfo/sysinfo-types.ts`](../../frontend/app/view/sysinfo/sysinfo-types.ts) (113 LOC)
+- [`frontend/app/view/sysinfo/sysinfo-util.ts`](../../frontend/app/view/sysinfo/sysinfo-util.ts) (36 LOC)
+- [`frontend/app/view/sysinfo/sysinfo.tsx`](../../frontend/app/view/sysinfo/sysinfo.tsx) (17 LOC)
 - **Total: 692 LOC**
 
 **Triggering question:** is the original sysinfo architecture worth improving or replacing?

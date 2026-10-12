@@ -6,9 +6,9 @@
 **Status:** analysis — Diagnostic report, no patch — macOS tear-off is intentionally unimplemented and needs Phase 7 / Phase C1 work to make any drag-initiating gesture safe.
 **Related issue:** [#1138](https://github.com/agentmuxai/agentmux/issues/1138) (initial crash filing — same root cause; this expands it with code-path evidence)
 **Related specs:**
-- `docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md` — explicit "Out of scope: Floater on macOS / Linux. Windows-only initially."
-- `docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md` — "Scope: Win32 only. macOS / Linux defer to Phase 2."
-- `docs/specs/RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md` — confirms there is no portable tear-off path; each OS needs a bespoke drag loop.
+- [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) — explicit "Out of scope: Floater on macOS / Linux. Windows-only initially."
+- [`docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md`](../specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) — "Scope: Win32 only. macOS / Linux defer to Phase 2."
+- [`docs/specs/RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md`](../specs/RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md) — confirms there is no portable tear-off path; each OS needs a bespoke drag loop.
 
 ---
 
@@ -101,7 +101,7 @@ So the Rust side neither initiates a drag loop nor talks to AppKit. The IPC cont
 
 ### 2. Frontend uses HTML5 drag + pointer capture; CEF handles the rest
 
-`frontend/app/tab/droppable-tab.tsx` sets up the drag handlers; the comments mention the "cross-window tear-off path" but the actual native window-positioning is delegated to CEF / the host. On Windows, `tear_off_hook` takes over with `SetWindowPos` per `RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md` §3.2 (path-2, the Win32 custom drag loop). On macOS, with the host stub doing nothing, the drag operation falls through to **Chromium's own macOS code path** — which is where the unrecognized-selector throw happens.
+[`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) sets up the drag handlers; the comments mention the "cross-window tear-off path" but the actual native window-positioning is delegated to CEF / the host. On Windows, `tear_off_hook` takes over with `SetWindowPos` per `RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md` §3.2 (path-2, the Win32 custom drag loop). On macOS, with the host stub doing nothing, the drag operation falls through to **Chromium's own macOS code path** — which is where the unrecognized-selector throw happens.
 
 ### 3. CEF's macOS implementation expects an `NSWindow` subclass with drag/pasteboard delegate methods
 

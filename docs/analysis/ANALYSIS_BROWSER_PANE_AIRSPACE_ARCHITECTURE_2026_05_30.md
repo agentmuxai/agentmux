@@ -148,7 +148,7 @@ pane). The principled fix is to **stop putting the pane in its own airspace**:
 | **0. Fix coordinate units** *(do now)* | Multiply overlay rects by `devicePixelRatio` before the clip IPC (or send CSS px + scale on the host using the pane's DPI). Mirrors what `browser-view.tsx` already does for pane resize. | Tiny, surgical; almost certainly resolves the report; no architecture change. | Leaves (2)/(3) residuals (shadows, fast-hover flicker). |
 | **0b. Tighten the existing model** | Outset rects by shadow extent; apply the clip synchronously on menu-open (skip first rAF); audit #1178 cache for wrong-skips during gestures. | Cheap; reduces residual artifacts + flicker. | Still rectangles; still trailing; growing special-case surface. |
 | **1. Native overlay popups** | Render menus/tooltips/context-menus in their own borderless top-most child HWND so they share the pane's airspace and stack above it by Z-order — no punching. | Eliminates airspace for the worst offenders without re-architecting panes. | Fragments rendering — DOM menu content must live in a separate native surface (effectively OSR-for-menus); input/focus plumbing. |
-| **2. Off-screen / shared-texture rendering (OSR)** *(principled, long-term)* | Render the pane to a GPU texture (CEF windowless + `OnAcceleratedPaint`, D3D11 shared handle) and composite it as a layer the **main** Chromium compositor draws. | Removes airspace **entirely, on all platforms**; DOM overlays stack by z-index; no hole math, no DPI mismatch, no lag; unifies the Windows HWND path with the macOS/Linux Views hack. | Largest change: input/IME routing, per-frame texture compositing, perf tuning. Historically slower, but shared-texture OSR is production-grade today (Chrome embedders, OBS). Team already has `docs/research/cef-transparency-research-2026-05-10.md` as a starting point. |
+| **2. Off-screen / shared-texture rendering (OSR)** *(principled, long-term)* | Render the pane to a GPU texture (CEF windowless + `OnAcceleratedPaint`, D3D11 shared handle) and composite it as a layer the **main** Chromium compositor draws. | Removes airspace **entirely, on all platforms**; DOM overlays stack by z-index; no hole math, no DPI mismatch, no lag; unifies the Windows HWND path with the macOS/Linux Views hack. | Largest change: input/IME routing, per-frame texture compositing, perf tuning. Historically slower, but shared-texture OSR is production-grade today (Chrome embedders, OBS). Team already has [`docs/research/cef-transparency-research-2026-05-10.md`](../research/cef-transparency-research-2026-05-10.md) as a starting point. |
 
 **Recommendation:** Option **0 now** (verify scale → apply DPR), Option **0b** as fast-follow for
 residual polish, and **scope a spike for Option 2 (shared-texture OSR)** as the real end state —
@@ -169,7 +169,7 @@ explicitly framed as "retire the airspace workaround on all platforms," not just
 3. **POLISH (0b):** outset rects by computed shadow extent; apply the first clip synchronously on
    overlay open; confirm #1178's cache can't wrong-skip mid-gesture.
 4. **DECIDE (2):** open a discussion / spike for shared-texture OSR as the cross-platform airspace
-   retirement. Reference `docs/research/cef-transparency-research-2026-05-10.md`.
+   retirement. Reference [`docs/research/cef-transparency-research-2026-05-10.md`](../research/cef-transparency-research-2026-05-10.md).
 
 ## 6. Bearing on #1178
 
@@ -182,9 +182,9 @@ airspace correctness work is steps 1–4 above and is independent of #1178.
 
 ### File references
 - `agentmux-cef/src/browser_panes.rs` — `set_pane_overlay_clip` (Win32 `SetWindowRgn`), `pane_clip_cache`, non-Windows hide-whole-pane path
-- `frontend/app/platform/pane-overlay.ts` — overlay rect collection, `rectFromElement` (CSS px), rAF coalesce + dispatch
-- `frontend/app/platform/pane-overlay-auto.ts` — `data-pane-overlay` auto-discovery observers
-- `frontend/app/platform/pane-rect-registry.ts` — CSS-px pane registry + intersection gate (documents the no-DPR contract)
-- `frontend/app/element/flyoutmenu.tsx` / `flyoutmenu.scss` — context-menu DOM, `data-pane-overlay` tagging, square/opaque styling
-- `frontend/app/view/browser/browser-view.tsx` — the only `devicePixelRatio` user (pane resize, not overlays)
-- `docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`, `docs/research/cef-transparency-research-2026-05-10.md`
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) — overlay rect collection, `rectFromElement` (CSS px), rAF coalesce + dispatch
+- [`frontend/app/platform/pane-overlay-auto.ts`](../../frontend/app/platform/pane-overlay-auto.ts) — `data-pane-overlay` auto-discovery observers
+- [`frontend/app/platform/pane-rect-registry.ts`](../../frontend/app/platform/pane-rect-registry.ts) — CSS-px pane registry + intersection gate (documents the no-DPR contract)
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) / `flyoutmenu.scss` — context-menu DOM, `data-pane-overlay` tagging, square/opaque styling
+- [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx) — the only `devicePixelRatio` user (pane resize, not overlays)
+- [`docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`](../specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md), [`docs/research/cef-transparency-research-2026-05-10.md`](../research/cef-transparency-research-2026-05-10.md)

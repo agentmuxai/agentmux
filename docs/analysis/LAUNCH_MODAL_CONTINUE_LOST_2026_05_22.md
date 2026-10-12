@@ -6,7 +6,7 @@
 **Author:** AgentA
 **Severity:** High (functional) — a continued agent silently falls out of Continue
 mode and is incorrectly re-prompted to authenticate.
-**Area:** `frontend/app/view/agent/components/AgentLaunchModal.tsx`,
+**Area:** [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx),
 `frontend/app/store/launch-flow-state.ts` (the `SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`
 reducer slice).
 

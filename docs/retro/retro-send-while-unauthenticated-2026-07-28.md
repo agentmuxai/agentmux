@@ -107,11 +107,11 @@ ordinary send path.
 
 ## 6. Related docs
 
-- `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md` — the
+- [`docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`](../specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md) — the
   original investigation this session's `retryAfterLogin`/`TurnStartFailed` work
   came out of; describes a different "stuck Working…" mechanism (optimistic
   `TurnStart` never reverted) that this retro's bug is a sibling of, not a repeat.
-- `docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md` — the
+- [`docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md`](retro-my-agents-fresh-channel-regression-2026-07-27.md) — the
   immediately preceding retro this session, which found a structurally similar
   pattern (a signal that already exists — the registry's validation state there,
   the CLI auth-check here — not being consulted at the point where it would have

@@ -93,7 +93,7 @@ would clobber the first).
 There is a known trap one block down in the same function: the MachPort peer
 policy is read **before** `FeatureList` init, so the runtime flag for it can't
 apply in time and a *source patch* was required instead (see
-`docs/cef-patches/agentmux_disable_mach_rendezvous_validation.patch`).
+[`docs/cef-patches/agentmux_disable_mach_rendezvous_validation.patch`](../cef-patches/agentmux_disable_mach_rendezvous_validation.patch)).
 
 `MacAppCodeSignClone` is a genuine `base::Feature` (evaluated *after* FeatureList
 init, like the other working entries), so the `--disable-features` switch *should*

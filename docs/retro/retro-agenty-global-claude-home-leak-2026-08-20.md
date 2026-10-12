@@ -8,7 +8,7 @@ memory of prior work, no "New session started" divider, no visible warning of an
 live-investigating its own pane.
 **Status:** retro — Symptom (§1) fully confirmed with direct forensic evidence and still stands.
 **The root-cause hypothesis chain in §3/§4/§5 below turned out to be a wrong turn** —
-see `docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md` §8 for the
+see [`docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`](../status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md) §8 for the
 actual resolution: the credential-isolation gate is not broken; §4's "0 identity
 links" finding queried the wrong (per-channel) database, and the account
 actually bound to AgentY (`"Claude (personal)"`) genuinely points at the
@@ -70,12 +70,12 @@ is searching the isolated dir for a session that was actually written to the glo
 and — more seriously than the continuity nuisance — this agent's traffic has been
 commingling with the operator's own personal Claude Code account/config for over two
 weeks, which is exactly the isolation boundary
-`docs/specs/SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s **INV-A** ("never the user's global
+[`docs/specs/SPEC_PROVIDER_ISOLATION_2026_06_20.md`](../specs/SPEC_PROVIDER_ISOLATION_2026_06_20.md)'s **INV-A** ("never the user's global
 `~/.<P>` dir") exists to prevent.
 
 ## 2. What this is *not*
 
-Not the gap `docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md` Part B
+Not the gap [`docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md`](../specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) Part B
 (rehydrate-before-resume) targets — that's about a session file existing somewhere but not
 in the *current instance's* isolated home (a cross-version/cross-machine problem). Here the
 file is in the *correct* isolated home; the live process just isn't looking there anymore.
@@ -86,7 +86,7 @@ All three were found already written up in this repo, independently, by differen
 investigations at different times — none of them, as far as I can tell, has been
 conclusively tied to *this* specific symptom before:
 
-1. **`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`** — a
+1. **[`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`](retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md)** — a
    five-commit arc (2026-05-22 → 2026-07-14) accidentally orphaned the "auto-isolate an
    unbound agent" behavior that used to satisfy INV-A implicitly. Today's gate
    (`inject_identity_env_with_broker` / `gate_oauth_failure`, `inject.rs:265+`) has only two
@@ -95,7 +95,7 @@ conclusively tied to *this* specific symptom before:
    all**. A migration grandfathered pre-existing linkless agents onto
    `use_ambient_login=true`, believing it preserved their old (actually isolated) behavior.
 
-2. **`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`** — written
+2. **[`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`](../specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md)** — written
    by a prior instance of this same agent, at the operator's own request, after a near-
    identical complaint. Root cause there: `db_agent_identity_links`/`db_accounts` (the
    "agent X uses account Y" binding row) is looked up via `id_store`, which resolves to a

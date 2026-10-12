@@ -149,12 +149,12 @@ These remain as known edge cases. Saga timeouts + `claim_terminal` + `cancel_sag
 
 ## Reference
 
-- Architecture target: `docs/specs/SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md`
-- CPD spec: `docs/specs/SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md`
-- LSD spec: `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`
-- Execution plan: `docs/specs/SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md`
-- Phase F+G batch-2 status: `docs/retro/phase-fg-status-2026-05-01.md`
-- Phase F+G roadmap: `docs/retro/phase-fg-roadmap-2026-05-01.md`
+- Architecture target: [`docs/specs/SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md`](../specs/SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md)
+- CPD spec: [`docs/specs/SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md`](../specs/SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md)
+- LSD spec: [`docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`](../specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md)
+- Execution plan: [`docs/specs/SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md`](../specs/SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md)
+- Phase F+G batch-2 status: [`docs/retro/phase-fg-status-2026-05-01.md`](phase-fg-status-2026-05-01.md)
+- Phase F+G roadmap: [`docs/retro/phase-fg-roadmap-2026-05-01.md`](phase-fg-roadmap-2026-05-01.md)
 
 ---
 

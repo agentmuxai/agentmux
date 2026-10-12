@@ -5,7 +5,7 @@
 **Date:** 2026-07-04
 **Author:** AgentA
 **Severity:** High — `state.windows` (the reducer's canonical window map) is effectively write-only in current production usage; the user-visible "(N)" window-count chip and its expanded panel drift upward and never recover; directly relevant to the pagefile/memory-growth investigation that prompted the test that surfaced this.
-**Area:** `agentmux-cef/src/client/lifecycle.rs` (`on_before_close`), `agentmux-cef/src/client/helpers.rs` (`backend_close_window`), `agentmux-srv/src/server/service/window.rs` (`CloseWindow`), the launcher's `WindowOpened`/`WindowClosed` ledger (`launcher-ipc`), `frontend/app/statusbar/InstancePanel.tsx`.
+**Area:** `agentmux-cef/src/client/lifecycle.rs` (`on_before_close`), `agentmux-cef/src/client/helpers.rs` (`backend_close_window`), `agentmux-srv/src/server/service/window.rs` (`CloseWindow`), the launcher's `WindowOpened`/`WindowClosed` ledger (`launcher-ipc`), [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx).
 
 ---
 
@@ -30,7 +30,7 @@ Investigating live: `Layout(query=windows)` (reading directly from the srv reduc
 
 - The status-bar window-count chip and expanded panel drift upward indefinitely and never self-correct — every window ever opened in a session appears to remain "open" from the reducer's point of view.
 - `workspace.DeleteWorkspace`'s cascade-cleanup (tabs, blocks) is gated inside the same `window.CloseWindow` service handler (`window.rs:355-368`) and never runs for any window closed this way — meaning **closed windows' workspaces, tabs, and blocks are never cleaned up server-side either**, not just the window entry itself.
-- Directly relevant to the pagefile/OOM investigation (`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`) that motivated the user's test: orphaned workspace/tab/block state accumulating in the reducer for the life of the process is exactly the kind of unbounded growth that investigation was looking for, separate from (and in addition to) the CEF renderer-process leak PR #1957 fixed today.
+- Directly relevant to the pagefile/OOM investigation ([`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`](../specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md)) that motivated the user's test: orphaned workspace/tab/block state accumulating in the reducer for the life of the process is exactly the kind of unbounded growth that investigation was looking for, separate from (and in addition to) the CEF renderer-process leak PR #1957 fixed today.
 
 ## Root cause
 
@@ -40,7 +40,7 @@ Two distinct, compounding bugs — one universal (affects every window close), o
 
 `state.windows` is only ever pruned by the srv `window.CloseWindow` service method (`agentmux-srv/src/server/service/window.rs:308-379`), which correctly dispatches `Command::CloseWindowInternal` and cascades to `delete_workspace` when appropriate. Across the whole codebase there are exactly two callers:
 
-- One frontend JS call site (`frontend/app-init.ts:361`), fired only inside a narrow app-init self-heal path (recreating a window whose workspace is missing) — never during normal use.
+- One frontend JS call site ([`frontend/app-init.ts:361`](../../frontend/app-init.ts#L361)), fired only inside a narrow app-init self-heal path (recreating a window whose workspace is missing) — never during normal use.
 - `backend_close_window` (`agentmux-cef/src/client/helpers.rs:53`) — a fire-and-forget raw-TCP POST to `/agentmux/service` with `service=window, method=CloseWindow`. This is called from `on_before_close` (`agentmux-cef/src/client/lifecycle.rs`, ~line 887), **only if** a `backend_window_id` lookup for that window's label succeeds. When it misses, the call is skipped entirely — logged only as a warning (`"no backend window ID registered for label={:?} — shells may orphan"`), no retry, no fallback, no user-facing signal.
 
 This session reproduced the miss 3 times (19:12, pre-promote pool churn). But even the 4 *clean* closes at 19:43–19:44 (no warning logged, launcher ledger perfectly paired) never produced a `window.CloseWindow` call in the srv log either — `dlog()`-level tracing inside `backend_close_window` (which would show the actual TCP attempt) isn't captured in the log surface available for this investigation, so it's unconfirmed whether those 4 attempted the call and failed silently (it's fire-and-forget with no response check — a wrong port, stale auth key, or srv-side rejection would be invisible), or didn't attempt it at all. Either way, the observable fact holds: zero `CloseWindow` calls reached srv across the entire session.
@@ -65,7 +65,7 @@ Separately, and probably the more user-visible contributor here: the main window
 3. **Investigate the main-window version-increment-without-close pattern.** A window reload (DevTools toggle, close/reopen) registering as a brand-new `WindowOpened` without pairing off the prior version is a separate, concrete bug worth its own trace — tie to the earlier "refresh the window" request in this session if that's confirmed as the trigger.
 4. **Add an open→close→count-returns-to-baseline test at the window level**, mirroring what `SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md` already does for panes — this class of bug keeps recurring one level of the hierarchy at a time (browser panes today, whole windows here) and each level has needed its own dedicated validation protocol to catch it.
 5. **Cross-reference `SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`.** This orphaned-workspace/tab/block accumulation is a plausible independent contributor to that investigation's memory-growth findings, separate from the CEF-renderer-process leak PR #1957 addressed. Worth checking whether that spec's data already shows this pattern or needs a fresh look with this mechanism in mind.
-6. **Add a `SystemProcessInfo`/window-reconciliation surface**, per the still-undecided `docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` proposal from earlier today — this entire investigation was only possible because I could manually cross-reference `Layout(query=windows)` against raw log greps; there's no first-class way for an agent (or a human) to ask "does srv's window count match reality" without this kind of manual archaeology.
+6. **Add a `SystemProcessInfo`/window-reconciliation surface**, per the still-undecided [`docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`](../specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) proposal from earlier today — this entire investigation was only possible because I could manually cross-reference `Layout(query=windows)` against raw log greps; there's no first-class way for an agent (or a human) to ask "does srv's window count match reality" without this kind of manual archaeology.
 
 ## Open questions / not yet resolved
 
@@ -115,7 +115,7 @@ unbounded-growth class the rest of this retro is about.
 connection/session id, so `handle_goodbye` can find and synthetically close (or otherwise mark)
 windows orphaned by a host disconnect before a respawned host's fresh `WindowOpened` silently
 overwrites them. This is a real schema addition to `agentmux-launcher`, not a small patch — scoped as
-a follow-up, not implemented in this pass. See `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`
+a follow-up, not implemented in this pass. See [`docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`](../specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md)
 §2.3 for where this was previously deferred.
 
 ## Remediation of the current live session
@@ -124,7 +124,7 @@ Not attempted in this session — closing/pruning the 8 orphaned window entries 
 
 ## Code fix
 
-Action items 1–2 (make `backend_close_window` observable, fix the silent-skip gate via a bounded retry) are implemented in **PR #1965** (`fix(window): retry backend_window_id lookup on close so CloseWindow reliably reaches srv`), design in `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`. Action items 3–6 remain open, tracked as tasks #8–#10 in this session (main-window reload/version bug, window-level test coverage, pagefile-spec cross-reference) plus the still-undecided `SystemProcessInfo`/reconciliation proposal (task #4).
+Action items 1–2 (make `backend_close_window` observable, fix the silent-skip gate via a bounded retry) are implemented in **PR #1965** (`fix(window): retry backend_window_id lookup on close so CloseWindow reliably reaches srv`), design in [`docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`](../specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md). Action items 3–6 remain open, tracked as tasks #8–#10 in this session (main-window reload/version bug, window-level test coverage, pagefile-spec cross-reference) plus the still-undecided `SystemProcessInfo`/reconciliation proposal (task #4).
 
 ## Code fix, round 2 — PR #1965 was necessary but NOT sufficient (2026-07-05)
 

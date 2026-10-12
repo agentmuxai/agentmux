@@ -100,7 +100,7 @@ Also fixed today (not yet in reagent review):
 
 Steps:
 1. Rebase onto current main (after today's merges): `git fetch origin main && git rebase origin/main`
-2. Resolve any conflicts in `scripts/package-macos.sh` (likely minor — take theirs for version files)
+2. Resolve any conflicts in [`scripts/package-macos.sh`](../../scripts/package-macos.sh) (likely minor — take theirs for version files)
 3. Push; reagent will re-review the fixed issues and the new commits
 4. Once reagent approves → merge
 5. Rebuild notarized DMG and upload to the 0.40.1 release assets
@@ -110,7 +110,7 @@ Steps:
 ## Not macOS / not closing — context only
 
 ### #1132 feat(floating-pane): resize + maximize support (2026-05-28)
-Not purely macOS but related. P0 version downgrade (0.39.3 → 0.39.2) from stale rebase. Needs `git rebase origin/main` taking main's version files + all `.changesets/` kept. Separate triage.
+Not purely macOS but related. P0 version downgrade (0.39.3 → 0.39.2) from stale rebase. Needs `git rebase origin/main` taking main's version files + all [`.changesets/`](../../.changesets) kept. Separate triage.
 
 ---
 

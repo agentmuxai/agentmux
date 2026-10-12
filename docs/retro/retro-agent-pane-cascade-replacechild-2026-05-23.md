@@ -38,7 +38,7 @@ boundary — which was the workspace's. The boundary's fallback replaced the
 whole subtree, so the layout + every sibling block (which were not broken) all
 disappeared.
 
-The `BlockFrame_Default_Component` (`frontend/app/block/blockframe.tsx`) had
+The `BlockFrame_Default_Component` ([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)) had
 two narrow `<ErrorBoundary>` instances inside it — one wrapping the title-bar
 `headerElem` and one wrapping the view's child `Suspense`-fallback content
 inside `block.tsx`'s `BlockFull`/`BlockSubBlock`. Both of those caught errors
@@ -52,7 +52,7 @@ boundary.
 ## 3. The cascade source (covered by separate PRs)
 
 The exact root cause was the cascade-during-dispatch class documented in
-`docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md` and partially fixed in
+[`docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`](../analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md) and partially fixed in
 PR #878 (soft-dispatch variant for async sites). The remaining work to fully
 prevent the cascade is tracked separately as cascade follow-ups PR-3 + PR-4.
 

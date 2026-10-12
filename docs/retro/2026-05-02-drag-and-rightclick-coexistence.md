@@ -152,8 +152,8 @@ CEF fork (`agentmux/7680-drag-rightclick-and-transparency` branch on `github.com
 
 agentmux:
 - `agentmux-cef/src/ui_tasks.rs` — `StartWindowDragTask` + `post_start_drag` (Linux/macOS)
-- `frontend/app/hook/useWindowDrag.linux.ts` — JS-driven mousedown threshold + IPC dispatch
-- `frontend/app/window/window-header.linux.scss` — removed `.tab-bar-fill { -webkit-app-region: drag }`, replaced with explanatory comment pointing to this approach
+- [`frontend/app/hook/useWindowDrag.linux.ts`](../../frontend/app/hook/useWindowDrag.linux.ts) — JS-driven mousedown threshold + IPC dispatch
+- [`frontend/app/window/window-header.linux.scss`](../../frontend/app/window/window-header.linux.scss) — removed `.tab-bar-fill { -webkit-app-region: drag }`, replaced with explanatory comment pointing to this approach
 
 ## Next steps
 

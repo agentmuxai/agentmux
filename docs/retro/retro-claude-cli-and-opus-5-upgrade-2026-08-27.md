@@ -8,11 +8,11 @@ model-catalog bump was done as a scoped, retro'd exercise instead of an
 incidental side effect of other work; logged so the *next* one benefits from
 what this one found.
 **Observed by:** Manoz (Claude agent)
-**Related:** `docs/spec-claude-code-versioning.md` (the pre-existing pin
-checklist this exercise followed and corrected), `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`
+**Related:** [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) (the pre-existing pin
+checklist this exercise followed and corrected), [`docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`](../specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md)
 (the forward-looking process this retro's findings feed into),
-`frontend/app/view/agent/providers/pin-consistency.test.ts` (extended here),
-`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` (original
+[`frontend/app/view/agent/providers/pin-consistency.test.ts`](../../frontend/app/view/agent/providers/pin-consistency.test.ts) (extended here),
+[`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md`](../specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) (original
 pin-consistency-test proposal), PR TBD.
 
 ---
@@ -23,7 +23,7 @@ Bumped the pinned `@anthropic-ai/claude-code` CLI from `2.1.198` → `2.1.247`
 (verified against the real npm registry) and relabeled the `opus` model-family
 alias from "Opus 4.8" to "Opus 5" in the UI catalog. The mechanical part of
 the bump was uneventful. The valuable finding was procedural: **a written,
-human-maintained checklist (`docs/spec-claude-code-versioning.md`) had already
+human-maintained checklist ([`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md)) had already
 drifted** — it named a source file (`providers/index.ts`) that had been split
 into `catalog.ts`/`types.ts`/`model-overlay.ts` weeks earlier, and it had
 correctly *documented* a known gap (the Dockerfile `ARG` isn't covered by the
@@ -39,7 +39,7 @@ one is now enforced, not just written down.
    Claude Code CLI, plus write a report and a forward-looking process spec —
    explicitly framed as "the first time we've really done this, but it will
    be the first of many."
-2. Research pass found the model catalog's real shape: `frontend/app/view/agent/providers/catalog.ts`,
+2. Research pass found the model catalog's real shape: [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts),
    a curated static fallback overlaid at runtime by a live `GET /v1/models`
    fetch (`model-overlay.ts` + `agentmux-srv/src/backend/model_catalog.rs`).
    `ProviderModel.value` is a stable family alias (`opus`/`sonnet`/`haiku`)
@@ -52,9 +52,9 @@ one is now enforced, not just written down.
    registry (checked via `WebFetch`) doesn't know about a fictional-future
    "Opus 5" — asked both via `AskUserQuestion` rather than fabricating either.
 4. Made the code change: `catalog.ts` (pin + label), `agentmux-srv/src/backend/providers.rs`,
-   `agentmux-cef/src/commands/providers.rs`, `.github/workflows/container-image.yml`
+   `agentmux-cef/src/commands/providers.rs`, [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml)
    — the four locations `pin-consistency.test.ts` already covered.
-5. **While updating `docs/spec-claude-code-versioning.md` to record the bump**
+5. **While updating [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) to record the bump**
    (not part of the original plan — the file was found only because it
    showed up in a broader grep for stale "2.1.198" references), two gaps
    surfaced that the automated test had never caught:
@@ -79,7 +79,7 @@ one is now enforced, not just written down.
 ## Root Cause (of the process gap, not a bug)
 
 **A checklist that lives only in prose has no enforcement mechanism of its
-own.** `docs/spec-claude-code-versioning.md` did everything a good runbook
+own.** [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) did everything a good runbook
 should: it named all the pin locations, it explained *why* the Dockerfile
 `ARG` existed as a separate case, and it even flagged its own blind spot in
 writing. None of that stopped the blind spot from persisting for over a
@@ -124,7 +124,7 @@ central finding this retro exists to hand off to `SPEC_DEPENDENCY_UPGRADE_PROCES
 
 ReAgent's review of the PR this retro describes (P2, non-blocking) found that
 step 6 above was incomplete: the Dockerfile `ARG` gap was closed in the
-*test*, but the prose paragraph in `docs/spec-claude-code-versioning.md` that
+*test*, but the prose paragraph in [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) that
 had originally warned about the gap was left unedited — still stating, after
 the fix, that `pin-consistency.test.ts` "does not cover the Dockerfile ARG...
 double check it by hand." A doc describing behavior the code no longer had.
@@ -165,7 +165,7 @@ no matter how many more times this paragraph gets edited by hand.
 
 ## What Would Help Next Time
 
-- See `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md` for the full
+- See [`docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`](../specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) for the full
   proposal. Headline items: prefer a single script/test over a
   human-maintained checklist wherever the check can be mechanized (this
   retro's own Dockerfile fix is the template); track a per-model-alias

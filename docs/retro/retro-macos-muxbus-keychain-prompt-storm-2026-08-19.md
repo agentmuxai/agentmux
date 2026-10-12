@@ -38,7 +38,7 @@ reappearing.
   exists because Windows Credential Manager caps a single entry's blob at
   1280 real characters (`CRED_MAX_CREDENTIAL_BLOB_SIZE / 2`, confirmed via
   two rounds of live Cognito-token testing,
-  `docs/specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md`) — but
+  [`docs/specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md`](../specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md)) — but
   the same comment says macOS/Linux have **no comparable cap**, and the
   chunked layout was applied to every platform uniformly anyway, purely for
   code-path consistency.

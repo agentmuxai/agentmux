@@ -78,10 +78,10 @@ Currently sagas in srv emit `IssueCmd::Host` events that go nowhere — they're 
 
 ## Roadmap docs
 
-- `docs/retro/phase-fg-roadmap-2026-05-01.md` — pre-session plan
-- `docs/retro/reducer-architecture-gaps-2026-05-01.md` — gap analysis
-- `docs/retro/next-steps-architecture-completeness-2026-05-01.md` — sprint ordering
-- `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` — F-series scope
-- `docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — E.4 spec
-- `docs/specs/SPEC_SAGA_DURABILITY_2026-05-01.md` — saga durability scope
+- [`docs/retro/phase-fg-roadmap-2026-05-01.md`](phase-fg-roadmap-2026-05-01.md) — pre-session plan
+- [`docs/retro/reducer-architecture-gaps-2026-05-01.md`](reducer-architecture-gaps-2026-05-01.md) — gap analysis
+- [`docs/retro/next-steps-architecture-completeness-2026-05-01.md`](next-steps-architecture-completeness-2026-05-01.md) — sprint ordering
+- [`docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](../specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) — F-series scope
+- [`docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`](../specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) — E.4 spec
+- [`docs/specs/SPEC_SAGA_DURABILITY_2026-05-01.md`](../specs/SPEC_SAGA_DURABILITY_2026-05-01.md) — saga durability scope
 - **this doc** — end-of-session snapshot

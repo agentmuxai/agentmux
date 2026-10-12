@@ -93,7 +93,7 @@ This is **not** the orphaned-Bash-tool-call theory from the first pass of
 this retro (that data is real and does sit in Lzop's history, but the
 settled document state correctly clamps it out — confirmed separately, see
 "What this is NOT" below). It's the subagent source,
-`frontend/app/view/agent/activity/subagent-source.ts`'s `allSubagentsAtom`,
+[`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts)'s `allSubagentsAtom`,
 fed by `subagent.ListActive`.
 
 ## Why this exact shape, on this exact agent
@@ -176,14 +176,14 @@ implementing §4 as specified there — not inventing a new approach.
 
 ## Sources
 
-- `docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md` —
+- [`docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md`](../reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md) —
   the direct answer to "how did it come back": §4 was always still open.
-- `docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md`,
-  `docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`,
-  `docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md`
+- [`docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md`](retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md),
+  [`docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`](../reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md),
+  [`docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md`](retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md)
   — the three earlier fixes in this family, all still intact, none of them
   claiming to fully close the flicker class.
-- `frontend/app/view/agent/activity/subagent-source.ts`,
+- [`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts),
   `hooks/useSubagentBackfillGate.ts`, `activity/backfill-tracker.ts`,
   `activity/debounced-refresh.ts` — the four still-live, still-approximate
   mechanisms.

@@ -6,9 +6,9 @@
 **Current version:** 0.33.532
 
 This doc consolidates and supersedes:
-- `docs/retro/phase-e-status-2026-04-30.md` (pre-E.2c, now stale)
-- `docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md` (analysis that motivated E.5)
-- Sub-phase rows in `docs/retro/multi-reducer-status-2026-04-29.md`
+- [`docs/retro/phase-e-status-2026-04-30.md`](phase-e-status-2026-04-30.md) (pre-E.2c, now stale)
+- [`docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`](phase-e-tear-off-and-remaining-2026-04-30.md) (analysis that motivated E.5)
+- Sub-phase rows in [`docs/retro/multi-reducer-status-2026-04-29.md`](multi-reducer-status-2026-04-29.md)
 
 It's the single authoritative read for "where Phase E stands and what's next."
 
@@ -75,7 +75,7 @@ It's the single authoritative read for "where Phase E stands and what's next."
 - New wire types: `Command::MoveTab`, `Command::MoveBlock`, `Event::TabMoved` (with `new_src_active_tab_id` + `new_dst_active_tab_id`), `Event::BlockMoved`.
 - Reducer's `handle_move_tab` made migration-tolerant (lazy-imports unknown tabs, drops workspace_id check) since wcore-direct paths could leave reducer state stale.
 - `MoveTabToWorkspace` migrated through the reducer to keep `state.tabs` in sync (was the codex P1 trigger that revealed the staleness gap).
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — coordinator-location decision (Path A: srv) + full robustness audit + gap analysis.
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](saga-coordinator-location-analysis-2026-04-30.md) — coordinator-location decision (Path A: srv) + full robustness audit + gap analysis.
 
 ### 3.4 Final wcore migrations (#622)
 - `MoveBlockToTab` → `Command::MoveBlock` + auto-close via `Command::DeleteTab`.
@@ -132,7 +132,7 @@ HTTP/WS RPC handlers (server/service.rs)
 
 These mutate SQLite first, then dispatch the reducer command (silent on missing). Acceptable trade-off; tightening them is a Phase F+ cleanup if it surfaces as a problem.
 
-**Saga coordinator location:** srv-side (Path A). The launcher's E.1a coordinator framework is a labeled stub. Full reasoning: `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`.
+**Saga coordinator location:** srv-side (Path A). The launcher's E.1a coordinator framework is a labeled stub. Full reasoning: [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](saga-coordinator-location-analysis-2026-04-30.md).
 
 ---
 
@@ -247,13 +247,13 @@ If smoke is clean, the natural next user-visible work is **E.2c.5b** (renderer d
 
 ## 9. Cross-references
 
-- `docs/retro/multi-reducer-status-2026-04-29.md` — sub-phase table (the row-by-row record); use §1-§4 for high-level vision.
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — Path A vs B decision + robustness audit + gap analysis. Read before any saga work.
-- `docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md` §13 — what E.5 explicitly does NOT close.
-- `docs/specs/PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30.md` §9b — F1.A / F1.B follow-ups (now both done).
-- `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` — original Phase E spec; §13 sketches Phase F.
-- `docs/retro/multi-reducer-proposal-2026-04-28.md` — long-form vision doc.
-- `docs/retro/phase-e-status-2026-04-30.md` — superseded by this doc; keep for history.
+- [`docs/retro/multi-reducer-status-2026-04-29.md`](multi-reducer-status-2026-04-29.md) — sub-phase table (the row-by-row record); use §1-§4 for high-level vision.
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](saga-coordinator-location-analysis-2026-04-30.md) — Path A vs B decision + robustness audit + gap analysis. Read before any saga work.
+- [`docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md`](../specs/SPEC_PHASE_E_SAGAS_2026-04-30.md) §13 — what E.5 explicitly does NOT close.
+- [`docs/specs/PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30.md`](../specs/PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30.md) §9b — F1.A / F1.B follow-ups (now both done).
+- [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](../specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) — original Phase E spec; §13 sketches Phase F.
+- [`docs/retro/multi-reducer-proposal-2026-04-28.md`](multi-reducer-proposal-2026-04-28.md) — long-form vision doc.
+- [`docs/retro/phase-e-status-2026-04-30.md`](phase-e-status-2026-04-30.md) — superseded by this doc; keep for history.
 
 ---
 
@@ -273,7 +273,7 @@ Built `0.33.533` portable, ran preliminary automated smoke + handed off for huma
 **Drag UX: ⚠️ pre-existing limitation, NOT a regression from this session.** User test surfaced "tear-off works, but reconnecting a torn-off tab doesn't show a drop zone." Investigation showed:
 
 - Current behaviour: drag a tab, get an HTML5 ghost-tab, release, *then* the torn window appears and follows the cursor via Win32 `SC_MOVE`.
-- Original requirement (per `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`): Chrome-faithful flow where the entire window detaches and follows the cursor from the moment of threshold-cross — no ghost tab.
+- Original requirement (per [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md)): Chrome-faithful flow where the entire window detaches and follows the cursor from the moment of threshold-cross — no ghost tab.
 - Spec status: Phase 1 (threshold detection) shipped in PR #559; Phases 2-7 unstarted.
 - The current half-HTML5 / half-`SC_MOVE` hybrid is the in-between state the spec replaces wholesale. The cross-window drag mechanism (`start_cross_drag` / `update_cross_drag` / `complete_cross_drag` + `cross-drag-update` / `cross-drag-end` events) is the code path that gets deleted when SC_MOVE drives the drag from threshold-cross.
 
@@ -287,4 +287,4 @@ What this session DID validate: the reducer/saga foundation is correct under any
 
 ## 12. What's next
 
-See `docs/retro/next-steps-2026-05-01.md`.
+See [`docs/retro/next-steps-2026-05-01.md`](next-steps-2026-05-01.md).

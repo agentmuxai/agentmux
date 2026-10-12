@@ -13,9 +13,9 @@ implemented and are covered by tests on both sides:
   an exact 0.5/0.2 fraction instead of the old `None`/`Some(3)` guess) —
   `cargo test -p agentmux-srv layout_helpers` passes (2 new tests covering all 8 directions'
   fraction/actiontype/position mapping, plus the Center/unknown fallback).
-- Frontend: `frontend/layout/lib/types.ts` (`sizeFraction` on both split actions),
-  `frontend/layout/lib/layoutPersistence.ts` (threads `action.nodesizefraction` through),
-  `frontend/layout/lib/layoutTree.ts` (`applySizeFraction` — a single helper applied
+- Frontend: [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts) (`sizeFraction` on both split actions),
+  [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts) (threads `action.nodesizefraction` through),
+  [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) (`applySizeFraction` — a single helper applied
   uniformly to both the wrap and splice branches, computed from the target's live
   `.size` at split time, run *before* the wrap branch's group-node construction so the
   group still inherits the target's correct pre-split footprint) — `vitest run` passes
@@ -54,12 +54,12 @@ was computed only in the target window's renderer and never reached the backend 
 always landed via a generic `InsertNode` at `DefaultNodeSize` regardless of which zone was
 highlighted. That gap is closed:
 
-- `frontend/app-init.ts:263-270` — after computing `dir` and the hovered leaf's `blockId`, the
+- [`frontend/app-init.ts:263-270`](../../frontend/app-init.ts#L263-L270) — after computing `dir` and the hovered leaf's `blockId`, the
   target renderer pushes `{ window_label, block_id, dir }` to the CEF host via
   `set_floating_redock_target`.
 - `agentmux-cef/src/commands/window/motion.rs` — hosts a `floating_redock_ghost` map keyed by
   window label (per the 06-23 doc's "push-then-store" design).
-- `frontend/app/workspace/floating-pane-workspace.tsx:512-519` — the floater queries
+- [`frontend/app/workspace/floating-pane-workspace.tsx:512-519`](../../frontend/app/workspace/floating-pane-workspace.tsx#L512-L519) — the floater queries
   `get_floating_redock_target` at drop time and threads `target_block_id` + `direction` into
   `RedockFloatingPane`.
 - `agentmux-srv/src/server/service/layout_helpers.rs:109-148` (`queue_target_layout_split`) —
@@ -114,7 +114,7 @@ size.
 
 ### The rendering model treats `size` as a shared-pool flex ratio
 
-`frontend/layout/lib/layoutGeometry.ts`, `updateTreeHelper()`:
+[`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts), `updateTreeHelper()`:
 
 ```ts
 // line 139-140
@@ -132,7 +132,7 @@ every other sibling in that array, proportionally, by construction.
 
 ### The split code has two branches, and only one of them exposes this pool to sibling panes
 
-`frontend/layout/lib/layoutTree.ts`, `splitHorizontal()` (lines 462-502, `splitVertical` mirrors
+[`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts), `splitHorizontal()` (lines 462-502, `splitVertical` mirrors
 it at 506-544):
 
 ```ts
@@ -179,7 +179,7 @@ everyone's shared pool."
 "isn't available server-side" — true, but the frontend handler that actually *applies* the
 split already has it, unused:
 
-`frontend/layout/lib/layoutPersistence.ts`, `handleBackendAction()`, `SplitHorizontal` case
+[`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts), `handleBackendAction()`, `SplitHorizontal` case
 (lines 215-242, `SplitVertical` mirrors at 243-270):
 
 ```ts
@@ -273,21 +273,21 @@ splice and wrap branches.
 
 | File | Role |
 |---|---|
-| `frontend/app-init.ts:113-273` | Ghost geometry + push-then-store hand-off (Phase 4b, already shipped) |
+| [`frontend/app-init.ts:113-273`](../../frontend/app-init.ts#L113-L273) | Ghost geometry + push-then-store hand-off (Phase 4b, already shipped) |
 | `frontend/app/workspace/floating-pane-workspace.tsx:491-577, 889-1006` | Drop-time ghost query + `RedockFloatingPane` call |
 | `agentmux-srv/src/server/service/layout_helpers.rs:94-148` | Server-side direction→split-action mapping + hardcoded `nodesize` approximation (Root Cause 1) |
-| `frontend/layout/lib/layoutPersistence.ts:105-274` | Frontend action handler — has `targetNode` with live size, currently unused for sizing (fix location for A) |
-| `frontend/layout/lib/layoutTree.ts:462-544` | `splitHorizontal`/`splitVertical` — wrap vs. splice branches (Root Cause 2, fix location for B) |
-| `frontend/layout/lib/layoutGeometry.ts:88-197` | `updateTreeHelper` — the shared-pool flex-ratio rendering model that makes splice-branch dilution mechanical, not incidental |
-| `frontend/layout/lib/layoutNode.ts:16-34` | `newLayoutNode` — confirms `size` defaults to flat `DefaultNodeSize=10` when omitted |
+| [`frontend/layout/lib/layoutPersistence.ts:105-274`](../../frontend/layout/lib/layoutPersistence.ts#L105-L274) | Frontend action handler — has `targetNode` with live size, currently unused for sizing (fix location for A) |
+| [`frontend/layout/lib/layoutTree.ts:462-544`](../../frontend/layout/lib/layoutTree.ts#L462-L544) | `splitHorizontal`/`splitVertical` — wrap vs. splice branches (Root Cause 2, fix location for B) |
+| [`frontend/layout/lib/layoutGeometry.ts:88-197`](../../frontend/layout/lib/layoutGeometry.ts#L88-L197) | `updateTreeHelper` — the shared-pool flex-ratio rendering model that makes splice-branch dilution mechanical, not incidental |
+| [`frontend/layout/lib/layoutNode.ts:16-34`](../../frontend/layout/lib/layoutNode.ts#L16-L34) | `newLayoutNode` — confirms `size` defaults to flat `DefaultNodeSize=10` when omitted |
 
 ## Related prior docs
 
 | Path | Relevance |
 |---|---|
-| `docs/analysis/ANALYSIS_FLOATING_PANE_REDOCK_SIZE_2026_06_23.md` | Diagnosed the process-boundary direction-loss gap and designed the push-then-store fix this doc confirms is shipped; flagged (but did not solve) the size-approximation gap this doc addresses as Root Cause 1. |
-| `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` | Broader tear-off/redock/browser-pane architecture reference; predates Phase 4b. |
-| `docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md` | Original Phase 4 spec (ghost + cross-window highlight goal). |
-| `docs/specs/SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md` | MVP scoping that deferred direction-aware landing to "Phase 4b" (now shipped; size accuracy still open — this doc's Root Cause 1/2). |
-| `docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md` | Argues point-fixes on this subsystem keep recurring; this doc's Fix B (carve-from-target) is a structural rather than symptomatic change, in that spirit. |
+| [`docs/analysis/ANALYSIS_FLOATING_PANE_REDOCK_SIZE_2026_06_23.md`](ANALYSIS_FLOATING_PANE_REDOCK_SIZE_2026_06_23.md) | Diagnosed the process-boundary direction-loss gap and designed the push-then-store fix this doc confirms is shipped; flagged (but did not solve) the size-approximation gap this doc addresses as Root Cause 1. |
+| [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) | Broader tear-off/redock/browser-pane architecture reference; predates Phase 4b. |
+| [`docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md`](../specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) | Original Phase 4 spec (ghost + cross-window highlight goal). |
+| [`docs/specs/SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md`](../specs/SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md) | MVP scoping that deferred direction-aware landing to "Phase 4b" (now shipped; size accuracy still open — this doc's Root Cause 1/2). |
+| [`docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md`](../specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) | Argues point-fixes on this subsystem keep recurring; this doc's Fix B (carve-from-target) is a structural rather than symptomatic change, in that spirit. |
 | `SPEC_PANE_COLOR_PANEL_TOPLEVEL_2026_07_01.md (no longer in this repo)` | Checked — unrelated (pane-header color popover anchoring, not drag/dock). |

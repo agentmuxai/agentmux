@@ -21,12 +21,12 @@ it starts partway down the pane instead of at the very top. Other pane types
 ## Root cause
 
 The selection ring is not a border on the pane's outer box — it's a separate
-overlay element, `.block-mask` (`frontend/app/block/block.scss:242-334`),
+overlay element, `.block-mask` ([`frontend/app/block/block.scss:242-334`](../../frontend/app/block/block.scss#L242-L334)),
 absolutely positioned (`inset: 0`) *relative to `.block`*
 (`.block { position: relative; ... }`, same file, line 13), and painted
 accent-colored via `.block-focused .block-mask { border-color:
 var(--accent-color); }` (lines 297-310). It is rendered as the last child of
-`.block`'s own root div by `BlockMask` (`frontend/app/block/blockframe.tsx`).
+`.block`'s own root div by `BlockMask` ([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)).
 
 For a normal pane, `.block-frame-default-header` renders *inside*
 `.block-frame-default-inner`, which is *inside* `.block` — so `.block-mask`'s
@@ -37,9 +37,9 @@ whole pane.
 `58a8c3e03`** ("fix(agent): stop the pane header/tab-strip flash on Agent <->
 History switch", PR #3136, merged 2026-09-09, implementing
 `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`). That change introduced
-`AgentPaneChrome` (`frontend/app/view/agent/agent-view.tsx`, `AgentPaneChrome`
+`AgentPaneChrome` ([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), `AgentPaneChrome`
 starting at line 349) and a new hoisting mechanism
-(`frontend/app/tab/pane-leaf-chrome.tsx`) so an agent pane's header/tab-strip
+([`frontend/app/tab/pane-leaf-chrome.tsx`](../../frontend/app/tab/pane-leaf-chrome.tsx)) so an agent pane's header/tab-strip
 survive a tab switch as a stable outer shell instead of remounting each time.
 The resulting DOM, from `agent-view.tsx:786-816`:
 
@@ -76,12 +76,12 @@ A follow-up commit, `cecd813a2` ("fix(agent): restore pane tab strip + header
 layout, and drop the remaining new-tab flash", PR #3151, 2026-09-10), fixed
 the hoisted header's *visual* styling (it initially rendered as unstyled
 stacked divs) by extracting a shared `block-frame-default-header-layout()`
-mixin (`frontend/app/mixins.scss`) and applying it to the hoisted header. It
+mixin ([`frontend/app/mixins.scss`](../../frontend/app/mixins.scss)) and applying it to the hoisted header. It
 did not touch `.block-mask`/`.block-focused` or add any equivalent border
 around `.agent-pane-stack` as a whole — the selection-ring gap was not part of
 what got restored, and nothing since has addressed it. A repo-wide search for
-`block-mask`/`block-focused` under `frontend/app/view/agent/` and
-`frontend/app/tab/` turns up no compensating rule.
+`block-mask`/`block-focused` under [`frontend/app/view/agent/`](../../frontend/app/view/agent) and
+[`frontend/app/tab/`](../../frontend/app/tab) turns up no compensating rule.
 
 ## Why this wasn't caught at the time
 
@@ -96,7 +96,7 @@ outside a positioned container) silently breaks a CSS rule that depends on
 containment, with no error, no test failure, and no visual difference unless
 you specifically compare a *focused* pane's border before and after.
 
-Also relevant: `TermPaneChrome` (`frontend/app/view/term/term.tsx`) does the
+Also relevant: `TermPaneChrome` ([`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx)) does the
 identical hoist for terminal panes with an in-pane tab strip (same
 `pane-leaf-chrome.tsx` mechanism, same `HOISTS_OWN_CHROME` gate). That path
 has the same latent structural gap — a stacked terminal pane's header/tab
