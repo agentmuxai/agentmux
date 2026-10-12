@@ -35,13 +35,13 @@ pub fn install_shutdown_handlers(watch_stdin: bool) -> tokio_util::sync::Cancell
             loop {
                 match stdin.read(&mut buf) {
                     Ok(0) => {
-                        eprintln!("stdin closed, shutting down");
+                        eprintln_lossy!("stdin closed, shutting down");
                         stdin_shutdown.cancel();
                         break;
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        eprintln!("stdin read error: {}, shutting down", e);
+                        eprintln_lossy!("stdin read error: {}, shutting down", e);
                         stdin_shutdown.cancel();
                         break;
                     }

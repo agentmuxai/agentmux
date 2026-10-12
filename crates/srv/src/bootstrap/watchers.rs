@@ -15,7 +15,7 @@ fn start_ppid_watchdog() {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let current_ppid = unsafe { libc::getppid() };
             if current_ppid != original_ppid {
-                eprintln!(
+                eprintln_lossy!(
                     "parent process died (ppid changed {} -> {}), shutting down",
                     original_ppid, current_ppid
                 );
@@ -34,7 +34,7 @@ fn start_parent_watcher(parent_pid: u32) {
         unsafe {
             let kq = libc::kqueue();
             if kq < 0 {
-                eprintln!(
+                eprintln_lossy!(
                     "kqueue() failed (errno={}), falling back to ppid watchdog",
                     *libc::__error()
                 );
@@ -68,13 +68,13 @@ fn start_parent_watcher(parent_pid: u32) {
                 libc::close(kq);
                 if errno == libc::ESRCH {
                     // Parent already dead
-                    eprintln!(
+                    eprintln_lossy!(
                         "parent process {} already exited (ESRCH during kqueue registration), shutting down",
                         parent_pid
                     );
                     std::process::exit(0);
                 }
-                eprintln!(
+                eprintln_lossy!(
                     "kevent() registration failed (errno={}), falling back to ppid watchdog",
                     errno
                 );
@@ -82,13 +82,13 @@ fn start_parent_watcher(parent_pid: u32) {
                 return;
             }
 
-            eprintln!("kqueue EVFILT_PROC registered for parent pid {}", parent_pid);
+            eprintln_lossy!("kqueue EVFILT_PROC registered for parent pid {}", parent_pid);
 
             // Race condition guard: check if the parent is still alive after registering.
             // If it died between our registration and this check, we might miss the event.
             if libc::kill(parent_pid as i32, 0) != 0 && *libc::__error() == libc::ESRCH {
                 libc::close(kq);
-                eprintln!(
+                eprintln_lossy!(
                     "parent process {} already exited (post-registration check), shutting down",
                     parent_pid
                 );
@@ -108,12 +108,12 @@ fn start_parent_watcher(parent_pid: u32) {
             libc::close(kq);
 
             if n > 0 {
-                eprintln!(
+                eprintln_lossy!(
                     "parent process {} exited (kqueue EVFILT_PROC), shutting down",
                     parent_pid
                 );
             } else {
-                eprintln!(
+                eprintln_lossy!(
                     "kevent() wait returned {} (errno={}), shutting down",
                     n,
                     *libc::__error()
@@ -137,14 +137,14 @@ fn start_parent_watcher(parent_pid: u32) {
                 let errno = *libc::__errno_location();
                 if errno == libc::ESRCH {
                     // Parent already dead
-                    eprintln!(
+                    eprintln_lossy!(
                         "parent process {} already exited (ESRCH from pidfd_open), shutting down",
                         parent_pid
                     );
                     std::process::exit(0);
                 }
                 // ENOSYS means kernel doesn't support pidfd_open — fall back
-                eprintln!(
+                eprintln_lossy!(
                     "pidfd_open() failed (errno={}), falling back to ppid watchdog",
                     errno
                 );
@@ -157,7 +157,7 @@ fn start_parent_watcher(parent_pid: u32) {
             // Race condition guard: verify parent is still alive
             if libc::kill(parent_pid as i32, 0) != 0 && *libc::__errno_location() == libc::ESRCH {
                 libc::close(pidfd);
-                eprintln!(
+                eprintln_lossy!(
                     "parent process {} already exited (post-pidfd check), shutting down",
                     parent_pid
                 );
@@ -175,12 +175,12 @@ fn start_parent_watcher(parent_pid: u32) {
             libc::close(pidfd);
 
             if ret > 0 {
-                eprintln!(
+                eprintln_lossy!(
                     "parent process {} exited (pidfd poll), shutting down",
                     parent_pid
                 );
             } else {
-                eprintln!(
+                eprintln_lossy!(
                     "poll() on pidfd returned {} (errno={}), shutting down",
                     ret,
                     *libc::__errno_location()
