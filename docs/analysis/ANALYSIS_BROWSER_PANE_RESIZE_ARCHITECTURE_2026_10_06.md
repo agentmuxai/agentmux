@@ -205,7 +205,7 @@ Implemented in the PR that adds this doc:
 
 Also fixed in this PR:
 
-- **`frontend/log/log-pipe.ts`** batches console lines into one `fe_log_batch` request every 100 ms, at most one in flight. It holds at most 2,000 lines and reports how many it dropped. A host without the command gets per-line requests as before.
+- **[`frontend/log/log-pipe.ts`](../../frontend/log/log-pipe.ts)** batches console lines into one `fe_log_batch` request every 100 ms, at most one in flight. It holds at most 2,000 lines and reports how many it dropped. A host without the command gets per-line requests as before.
 - **`client/display.rs`** sends a pane's favicon list only when it, or the page URL it belongs to, changed.
 - **`browser-model.ts`** has a pane log only the favicon and title events addressed to it.
 

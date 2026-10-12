@@ -132,7 +132,7 @@ New-Item -ItemType Directory -Force -Path "$staging/bin" | Out-Null
 Copy-Item "dist/bin/wsh-${VERSION}-windows.x64.exe" "$staging/bin/"
 ```
 
-Also remove the `schema/` copy — schema is bundled as a Tauri resource and loaded at runtime. Portable mode doesn't need a separate copy.
+Also remove the [`schema/`](../../schema) copy — schema is bundled as a Tauri resource and loaded at runtime. Portable mode doesn't need a separate copy.
 
 The filename and subdirectory structure should also match the local convention:
 - **Filename:** `AgentMux_<ver>_x64-portable.zip` (keep — matches other release assets)

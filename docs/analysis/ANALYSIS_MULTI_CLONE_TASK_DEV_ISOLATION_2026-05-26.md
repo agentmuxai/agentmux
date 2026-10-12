@@ -305,7 +305,7 @@ mechanism if path-based derivation has a corner case we miss.
 | Update `to_env_vars()` + `from_env()` for `AGENTMUX_CLONE_ID` | `agentmux-common/src/data_paths.rs` | 6 |
 | Update `resolve_channel_and_dir()` to nest under clone_id | same | 8 |
 | Tests: same-branch-different-clone-paths → distinct dirs; backward-compat when clone_id None | same | 25 |
-| `task dev` integration test (optional) | `tools/` or new | n/a |
+| `task dev` integration test (optional) | [`tools/`](../../tools) or new | n/a |
 | Total | | ~58 LOC + tests |
 
 Risk is low because the change is localized to path resolution —
@@ -331,7 +331,7 @@ clone — which is exactly the point).
 - `agentmux-srv/src/main.rs` — srv listener binds (`127.0.0.1:0`)
 - `agentmux-srv/src/backend/lan_discovery.rs:71` — mDNS service name
 - `Taskfile.yml:622`, `vite.config.ts:114-115` — Vite `--strictPort`
-- `docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md` — channels-design
+- [`docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md`](../specs/SPEC_DATA_CHANNELS_2026_05_24.md) — channels-design
   precedent for path-keyed isolation
 - CLAUDE.md `### Multiple Instances Run in Parallel` — design
   intent statement

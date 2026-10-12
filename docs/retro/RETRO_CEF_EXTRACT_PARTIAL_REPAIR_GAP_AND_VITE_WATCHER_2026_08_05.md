@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-05
 **Severity:** Low (self-heals with a manual `rm -rf` + rebuild; no data loss) but recurring and time-costly
-**Related:** `docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md` (original root cause: `download-cef`'s `fs::rename` chain races Windows Defender's real-time scan during extraction)
+**Related:** [`docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md`](RETRO_CEF_BUILD_RACE_2026_04_24.md) (original root cause: `download-cef`'s `fs::rename` chain races Windows Defender's real-time scan during extraction)
 
 ## What happened
 

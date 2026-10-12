@@ -40,7 +40,7 @@ if out.len() + 2 <= MAX_STAGE_ROWS {
 
 This whole block runs only inside `if let Some(ms) = total_ms { ... }` — and `total_ms` is only `Some` once `ready_at` is set, i.e. once the host has already signaled first paint and startup is effectively over. So the "other" row is computed **once**, from already-final numbers (`total_ms - accounted_ms`), and appended already at its final value. It was never designed to animate — it has no `started_at`, no "running" state, nothing to count from. Same pattern the pre-existing "total" row already used.
 
-The same PR added `docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md`, which investigated the *count-up* behavior as background research while diagnosing the total-vs-items gap — but the doc is explicit that this was investigation only:
+The same PR added [`docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md`](../analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md), which investigated the *count-up* behavior as background research while diagnosing the total-vs-items gap — but the doc is explicit that this was investigation only:
 
 > "Not implemented here — investigation only, per the ask."
 
@@ -75,7 +75,7 @@ A second, related defect from the same analysis: a row whose `End` event never a
 
 - The deferral was recorded in an analysis doc (`docs/analysis/...`), not in a follow-up task, issue, or a "known limitation" note in the PR description itself — so there was no forcing function to come back to it.
 - The PR title/description read as "splash screen work" broadly, which made "did that fix the counting?" a reasonable but wrong inference from the outside.
-- No `docs/retro/` entry existed for the splash counters before now — this is the first.
+- No [`docs/retro/`](.) entry existed for the splash counters before now — this is the first.
 
 ---
 

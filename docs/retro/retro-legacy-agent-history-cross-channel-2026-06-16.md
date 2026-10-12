@@ -119,7 +119,7 @@ Plus:
 
 ## References
 
-- `frontend/app/view/agent/agent-view.tsx:339–395` (`writeSnapshotNow`, `sourceBlockId = model.blockId`, foreign-block guard `snapshotIsForeignBlock`).
+- [`frontend/app/view/agent/agent-view.tsx:339–395`](../../frontend/app/view/agent/agent-view.tsx) (`writeSnapshotNow`, `sourceBlockId = model.blockId`, foreign-block guard `snapshotIsForeignBlock`).
 - `agentmux-srv/src/server/app_api.rs:1066` (`global_output_source` — local-block requirement) and `:1216` (`read_range` fallback).
 - `agentmux-srv/src/backend/agent_session.rs` (`agent_current_zone`, `SNAPSHOT_FILE`, snapshot global mirror L178–180, snapshot read fallback L223).
 - Evidence: `~/.agentmux/shared/agents/transcripts/filestore.db` zone `agent:f81f9785-6315-4d21-9a01-7f81a727bc17:current`.

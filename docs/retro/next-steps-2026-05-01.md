@@ -4,13 +4,13 @@
 
 **Context:** Phase E.5 + F1.A + F1.B shipped; smoke confirmed state-correctness; drag UX is governed by the Chrome-faithful tear-off spec, Phases 2-7 unstarted.
 
-This is the forward plan. Read `docs/retro/phase-e-status-2026-05-01.md` for the consolidated status; this doc is just *what to work on next*.
+This is the forward plan. Read [`docs/retro/phase-e-status-2026-05-01.md`](phase-e-status-2026-05-01.md) for the consolidated status; this doc is just *what to work on next*.
 
 ---
 
 ## 1. Top priority — Chrome-faithful tear-off, Phases 2-7
 
-**Spec:** `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`
+**Spec:** [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md)
 **Already shipped:** Phase 1 (threshold detection) in PR #559.
 **Why this is #1:** the original requirement was Chrome-style window-follows-cursor tear-off. We side-tracked into reducer/saga state-correctness because the existing tear-off pipeline made it impossible to fix the smoke regression without first fixing the underlying state divergence. Now state-correctness is solid; coming back to the drag UX is what makes the feature feel right.
 
@@ -44,7 +44,7 @@ These can run alongside the tear-off rewrite — no shared files, no design depe
 
 **Why now:** the host bridge has been forwarding events since #618 — they're currently being received but not consumed. Implementing the dispatcher unblocks E.6 (renderer multi-source + saga buffering) and gives the renderer a cleaner event-driven story than the current per-bespoke-channel pattern.
 
-**Spec:** `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §6.6.
+**Spec:** [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](../specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) §6.6.
 
 ### 2.2 E.4 — Layout state migration (medium, has design questions)
 
@@ -128,8 +128,8 @@ If wanting to defer drag work entirely and chip at the state migration:
 
 ## 6. Cross-references
 
-- `docs/retro/phase-e-status-2026-05-01.md` — full status doc; §11 has the smoke result + drag-UX deferral; this doc focuses on "what to do next."
-- `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md` — the tear-off spec (#1 priority above).
-- `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` — original Phase E spec; §13 sketches Phase F, §14 sketches Phase G.
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — saga decisions + robustness gaps; read before resuming Phase F+ work.
-- `docs/retro/next-steps-2026-04-29.md` — older "what's next" doc; superseded by this one.
+- [`docs/retro/phase-e-status-2026-05-01.md`](phase-e-status-2026-05-01.md) — full status doc; §11 has the smoke result + drag-UX deferral; this doc focuses on "what to do next."
+- [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md) — the tear-off spec (#1 priority above).
+- [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](../specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) — original Phase E spec; §13 sketches Phase F, §14 sketches Phase G.
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](saga-coordinator-location-analysis-2026-04-30.md) — saga decisions + robustness gaps; read before resuming Phase F+ work.
+- [`docs/retro/next-steps-2026-04-29.md`](next-steps-2026-04-29.md) — older "what's next" doc; superseded by this one.

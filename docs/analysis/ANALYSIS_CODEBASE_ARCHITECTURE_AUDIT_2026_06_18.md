@@ -30,7 +30,7 @@ The six systemic themes (each appears in 2–4 of the four audits):
 3. **Duplicated logic / near-clones** — the "is busy?" derivation repeated **17×**, three near-clone
    block controllers, four near-copy translator tool-call mappers, data-dir resolution in 3+ places.
 4. **Parallel / competing systems** — four agent-pane state systems, two backend ingress dispatchers,
-   dual scroll/expansion state, `specs/` vs `docs/specs/`.
+   dual scroll/expansion state, `specs/` vs [`docs/specs/`](../specs).
 5. **Dead / vestigial surface** — the dead watchdog family (StreamStalled now removed in #1542;
    submit/interrupt timeouts still dead), ~70 dead FE commands + ~66 unregistered backend constants,
    a 733-file doc graveyard.
@@ -66,7 +66,7 @@ Ranked by value ÷ (effort × risk). IDs are referenced from the per-area sectio
 | **A10** | **Consolidate data-dir resolution onto `DataPaths`**; reconcile `AGENTMUX_DATA_HOME` (srv) vs `AGENTMUX_DATA_DIR` (launcher). | ★★★ | Med | Med | area 4 P4 |
 | **A11** | **Use the real `BlockRegistry`** instead of the hardcoded map in `block.tsx`; make `ModalLayer` registry-driven instead of importing 9 concrete modals. | ★★★ | Low-Med | Low | area 1 P4/P5 |
 | **A12** | **Dead-code sweep.** Finish the watchdog family (submit/interrupt timeouts, after #1542); delete the ~66 unregistered RPC constants + ~70 dead FE command methods once A1 can prove they're dead. | ★★ | Low-Med | Low | area 2, area 4 |
-| **A13** | **Spec/doc hygiene.** Add `docs/specs/INDEX.md` (subsystem → authoritative spec); merge `retro`/`retros` + `analysis`/`analyses`; archive superseded per-incident specs. | ★★ | Med | Low | area 4 P6 |
+| **A13** | **Spec/doc hygiene.** Add [`docs/specs/INDEX.md`](../specs/INDEX.md) (subsystem → authoritative spec); merge `retro`/`retros` + `analysis`/`analyses`; archive superseded per-incident specs. | ★★ | Med | Low | area 4 P6 |
 | **A14** | **Shared FE event-name constants** (typed union for `WaveEvent.event`, mirrored from `wps.rs:22-54`). Folds into A1. | ★★ | Low | Low | area 4 P5 |
 | **A15** | **Harden srv error handling.** Poison-tolerant RPC mutex; guard the 3 `child.std*.take().unwrap()`; surface the ACP `let _ = tx.try_send` handshake drops. | ★★★ | Low | Low | area 3 #7 |
 
@@ -109,8 +109,8 @@ contract files say so in their own headers:
   next rename from shipping a silent runtime break.**
 
 **Drift prevention: none.** No codegen, no contract test, no CI step (grep of
-`Taskfile.yml`/`package.json`/`scripts/` for `gotypes`/`rpc_types`/`generatets` → zero;
-`.github/workflows` cover input-handler sync and release-version consistency but never the RPC
+`Taskfile.yml`/`package.json`/[`scripts/`](../../scripts) for `gotypes`/`rpc_types`/`generatets` → zero;
+[`.github/workflows`](../../.github/workflows) cover input-handler sync and release-version consistency but never the RPC
 surface). The guardrail is two prose comments.
 
 The same disease recurs **inside the workspace** at the mcp/bashwrap boundary (§5b): `bashwrap`'s
@@ -123,7 +123,7 @@ compile coupling** because neither client depends on `agentmux-common`.
 
 ## 3. Area 1 — Frontend app structure
 
-**Structure.** SolidJS app under `frontend/app/` with `store/`, `view/`, `element/`, `block/`,
+**Structure.** SolidJS app under [`frontend/app/`](../../frontend/app) with `store/`, `view/`, `element/`, `block/`,
 `layout/`, `util/`, `tab/`, `modals/`. The layering intent (leaf `util`/`layout` → `store` → `view`
 → `element`) is sound but violated in several places.
 
@@ -270,11 +270,11 @@ centralized in `agentmux-common::ipc` and not redefined. Two real smells:
 (`gotypes.d.ts:1670,1743`) and scatters ~25 bare event-name literals across 21+ files with no shared
 constant module. A typo on either side fails silently (A14).
 
-**(d) Docs — a 733-file graveyard.** `docs/specs/` = 373, `docs/analysis/` = 95, top-level `specs/` =
-90 (+ `specs/archive/` 27). Duplicate dir names: both `docs/retro/` **and** `docs/retros/`; both
-`docs/analysis/` **and** `docs/analyses/`. Per-incident proliferation (e.g. two competing
+**(d) Docs — a 733-file graveyard.** [`docs/specs/`](../specs) = 373, [`docs/analysis/`](.) = 95, top-level `specs/` =
+90 (+ `specs/archive/` 27). Duplicate dir names: both [`docs/retro/`](../retro) **and** `docs/retros/`; both
+[`docs/analysis/`](.) **and** `docs/analyses/`. Per-incident proliferation (e.g. two competing
 window-drag designs dated the same day; separate macOS/Linux/Windows tearoff specs). The
-`docs/specs` (draft) → `specs` (approved) → `specs/archive` lifecycle **stalled** (approved tree
+[`docs/specs`](../specs) (draft) → `specs` (approved) → `specs/archive` lifecycle **stalled** (approved tree
 newest 2026-06-15 while drafts grow to 06-17). **No index of record.** Demonstrable drift: execution
 plans reference `saga.rs` / `saga_coordinator.rs` that no longer exist (A13).
 
@@ -303,17 +303,17 @@ hand-synced mirrors with generated-or-tested contracts.
   `engine.rs` + `server/*_handlers.rs`.
 - **A2** — `agentmux-bashwrap/src/wps_client.rs:31-50`, `agentmux-srv/src/server/mod.rs:441-463`,
   `agentmux-srv/src/backend/wps.rs:72-82`, `agentmux-mcp/src/main.rs:356-782`.
-- **A3** — `frontend/app/store/global.ts:39`, `frontend/app/store/wos.ts:12`,
-  `frontend/util/logger.ts:4`, `frontend/layout/lib/layoutModel.ts:4-7`.
+- **A3** — [`frontend/app/store/global.ts:39`](../../frontend/app/store/global.ts), `frontend/app/store/wos.ts:12`,
+  [`frontend/util/logger.ts:4`](../../frontend/util/logger.ts), [`frontend/layout/lib/layoutModel.ts:4-7`](../../frontend/layout/lib/layoutModel.ts).
 - **A4 / A5 / A8** — `agentmux-srv/src/server/service.rs:275-2547`,
   `…/blockcontroller/{persistent,subprocess,acp,shell}.rs`, `…/server/websocket.rs:944-2348`.
-- **A6 / A9** — `frontend/app/view/agent/agent-view.tsx`, `…/store/agent-pane-state/`,
+- **A6 / A9** — [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), `…/store/agent-pane-state/`,
   `…/agent-pane-layout-store.ts`, `…/expansion-source.ts`.
 - **A7** — `frontend/app/view/agent/providers/{codex,gemini,kimi,acp,claude}-translator.ts`.
 - **A10** — `agentmux-common/src/data_paths.rs:4-7,271`, `agentmux-srv/src/backend/base.rs:16-154`.
-- **A11** — `frontend/app/block/block.tsx:47-61`, `frontend/app/element/ModalLayer.tsx:55-64`.
+- **A11** — [`frontend/app/block/block.tsx:47-61`](../../frontend/app/block/block.tsx), [`frontend/app/element/ModalLayer.tsx:55-64`](../../frontend/app/element/ModalLayer.tsx).
 - **A12** — `frontend/app/store/agent-pane-state/reducer.ts:343,568` (submit/interrupt watchdogs);
   `agentmux-srv/src/backend/rpc_types.rs` unregistered `COMMAND_*` consts.
-- **A13** — `docs/specs/`, `specs/`, `docs/retro(s)/`, `docs/analys(i/e)s/`.
+- **A13** — [`docs/specs/`](../specs), `specs/`, `docs/retro(s)/`, `docs/analys(i/e)s/`.
 - **A15** — `agentmux-srv/src/backend/rpc/engine.rs:214-530`,
   `…/blockcontroller/{subprocess.rs:491,persistent.rs:665,acp.rs:270,388,503-554}`.

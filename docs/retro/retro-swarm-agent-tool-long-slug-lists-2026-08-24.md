@@ -33,7 +33,7 @@ a subagent (`Agent`, formerly `Task`) is Claude Code CLI's own built-in tool
 — AgentMux's own MCP server (`agentmux-mcp/src/main.rs`) defines unrelated
 tools (`Shell`, `Loop`, cron, UI automation) and has no `Agent`/`Task`/
 `Workflow` tool definition at all. This is explicit, documented policy, not
-an oversight: `docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md:259-264`
+an oversight: [`docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md:259-264`](../analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md)
 states AgentMux is *"100%-observational by design, never triggering spawns
 itself"* — it only ever discovers a spawn by watching the JSONL transcript
 files Claude Code CLI writes to disk, after the fact.
@@ -55,7 +55,7 @@ something else, and thrown away.
 
 ## 2. Row count is already correct — this is a labeling problem, not a grouping problem
 
-Confirmed directly in `frontend/app/view/swarm/swarm-model.ts:213-288`
+Confirmed directly in [`frontend/app/view/swarm/swarm-model.ts:213-288`](../../frontend/app/view/swarm/swarm-model.ts)
 (`buildDispatchBuckets`): every solo `Agent`/`Task`-tool call gets a
 permanently unique `dispatch_id` of `solo:<agent_id>`
 (`swarm-model.ts:26-33`), and `agentToolRows` is literally
@@ -130,10 +130,10 @@ in `scan.rs:433-495`, `jsonl.rs:35` — these are the only files it reads).
 The frontend *does* already parse this, but only for its own, unrelated
 purpose (rendering the calling pane's own transcript, live, in-memory,
 never persisted):
-- `frontend/app/view/agent/stream-parser.ts:129-130` — `extractToolDetail`
+- [`frontend/app/view/agent/stream-parser.ts:129-130`](../../frontend/app/view/agent/stream-parser.ts) — `extractToolDetail`
   reads `params.description || params.prompt`.
-- `frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx` +
-  `frontend/app/view/agent/activity/dispatch-correlation.ts` correlate a
+- [`frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx`](../../frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx) +
+  [`frontend/app/view/agent/activity/dispatch-correlation.ts`](../../frontend/app/view/agent/activity/dispatch-correlation.ts) correlate a
   transcript `tool_use` node to a live `AgentDispatch` — but only by
   **ordinal position** (ordinal-matches this pane's Agent/Task/Workflow
   `tool_use` nodes against this pane's dispatches by transcript-order vs.
@@ -163,7 +163,7 @@ stores it instead of discarding it:
    (`agentmux-srv/src/server/service/misc.rs:129-152`) already serializes
    the whole `SubAgent`/`AgentDispatch` struct to JSON; a new field just
    starts appearing.
-5. `frontend/app/view/swarm/swarm-model.ts`: add `task_prompt: string | null`
+5. [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts): add `task_prompt: string | null`
    to `ActiveSubagent`/`AgentDispatch`; update `subagentDisplayLabel()`
    (lines 424-430, currently `display_name > slug > shortId`) and the
    `WorkflowDispatch.name` fallback (lines 224, 271) to prefer `task_prompt`
@@ -204,7 +204,7 @@ watch surface as a fast follow-up.
 
 ## 5. Secondary: port whichever fix lands here to the Activity Dock too
 
-`frontend/app/view/agent/activity/subagent-adapter.ts:116`
+[`frontend/app/view/agent/activity/subagent-adapter.ts:116`](../../frontend/app/view/agent/activity/subagent-adapter.ts)
 (`subagentToActivity`) has the exact same `display_name || slug || agent_id`
 fallback chain, confirmed still live today, with **no** disambiguation at
 all (not even the Swarm pane's old `${slug} · ${shortId}` suffix). Whatever
@@ -222,7 +222,7 @@ specifically), but the identical fix will eventually be wanted here too.
   is needed to satisfy "1 row per call"; that part already works.
 - **Not a backfill/retention issue.** Explicitly ruled out by the repo
   owner; not investigated further here. (An earlier draft of this retro
-  focused on retention — `docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`
+  focused on retention — [`docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`](../specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md)
   / PR #2677's "Clear completed" button and unchanged `BACKFILL_MAX_FILES`
   cap — that work is real but answers a different question than the one
   actually being asked here.)
@@ -248,22 +248,22 @@ specifically), but the identical fix will eventually be wanted here too.
 - `agentmux-srv/src/server/service/misc.rs:129-152` — `subagent.ListActive`/
   `GetInfo`, confirmed already serializing the whole struct (no RPC change
   needed for §4.1).
-- `frontend/app/view/agent/stream-parser.ts:129-130`,
+- [`frontend/app/view/agent/stream-parser.ts:129-130`](../../frontend/app/view/agent/stream-parser.ts),
   `frontend/app/view/agent/activity/dispatch-correlation.ts:5-9,12-77`,
-  `frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx` —
+  [`frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx`](../../frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx) —
   the frontend-only, ordinal-heuristic, never-persisted pipeline that
   already has `description`/`prompt` for its own unrelated purpose.
-- `frontend/app/view/swarm/swarm-model.ts:213-288` (`buildDispatchBuckets`),
+- [`frontend/app/view/swarm/swarm-model.ts:213-288`](../../frontend/app/view/swarm/swarm-model.ts) (`buildDispatchBuckets`),
   `:26-33` (`dispatch_id` doc comment), `:424-430` (`subagentDisplayLabel`),
   `:432-445` (`shallowEqualSubagent`) — the Swarm pane's current row-count
   correctness (§2) and label priority chain (§4.1's edit target).
-- `frontend/app/view/agent/activity/subagent-adapter.ts:116`,
+- [`frontend/app/view/agent/activity/subagent-adapter.ts:116`](../../frontend/app/view/agent/activity/subagent-adapter.ts),
   `frontend/app/view/agent/components/ActivityRow.tsx:198,282` — the
   Activity Dock's own, separate, still-unfixed instance of the same
   labeling gap (§5).
-- `docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md` —
+- [`docs/specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md`](../specs/SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) —
   the eager-Haiku-naming design this retro's §4 fix would sit alongside
   (not replace) in the label priority chain.
-- `docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`,
+- [`docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`](../specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md),
   PR #2677 — the retention/accumulation work from an earlier round of this
   same complaint thread, ruled out as the current ask (§6).

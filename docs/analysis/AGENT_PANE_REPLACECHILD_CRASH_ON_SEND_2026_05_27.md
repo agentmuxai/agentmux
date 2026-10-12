@@ -159,7 +159,7 @@ Built a debug-bundle portable with NODE_ENV=development to get source maps and r
 
 This is Solid's **`reconcileArrays`** — the child-array diff loop that `<For>` uses to reconcile its rendered items against the new array. `e` is the prior children, `n` is the new children. `t.replaceChild(n[a], e[o])` fails because **`e[o]` is no longer a child of `t`**.
 
-The For in question is in `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`:
+The For in question is in [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx):
 
 ```tsx
 <For each={virtualizer.getVirtualItems()}>
@@ -266,6 +266,6 @@ If for some reason DevTools doesn't resolve the maps (CEF can be quirky about th
 
 ## 18. References
 
-- `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md` — the original cascade-disposal class of bug. PR #878 added detection; the prevention contract was supposed to be `dispatchIfRegistered` for async paths. The current crash sneaks through because it's NOT async — the cascade is on a synchronous render throw.
+- [`docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`](LIFECYCLE_DISPATCH_LEAK_2026_05_15.md) — the original cascade-disposal class of bug. PR #878 added detection; the prevention contract was supposed to be `dispatchIfRegistered` for async paths. The current crash sneaks through because it's NOT async — the cascade is on a synchronous render throw.
 - Solid `replaceChild` family of crashes documented at https://github.com/solidjs/solid/issues — multiple matches.
 - TanStack Virtual `measureElement` contract: https://tanstack.com/virtual/latest/docs/api/virtualizer

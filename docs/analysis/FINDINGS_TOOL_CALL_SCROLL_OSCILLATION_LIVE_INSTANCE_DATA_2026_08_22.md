@@ -2,7 +2,7 @@
 
 **Status:** analysis
 
-Follow-up to `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`
+Follow-up to [`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`](FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md)
 (which correlated a single dev-branch repro's 8 events). That dataset was
 one pane, one short session. This one is two currently-running "shared"
 (local `task package` build) instances, each with hours of real usage, and
@@ -60,7 +60,7 @@ frozen copy.)
 Instance A's Camper pane alone accounts for 71% of that instance's total
 events — this is not evenly distributed across panes, and correlates with
 Camper likely running a workload with a lot of live-updating content
-(consistent with `docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`
+(consistent with [`docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`](../specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md)
 / background-task work landed the same week — not confirmed here, just the
 most plausible explanation for the skew; not chased down further in this
 pass).
@@ -198,9 +198,9 @@ Camper-heavy skew from §1) rather than a universal per-build defect.
 
 ## 6. Sources
 
-- `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`
+- [`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`](FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md)
   (the smaller prior dataset this doc builds on)
-- `docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`
+- [`docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`](ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md)
   (original `[wave-scroll-shrink]` diagnostic + three-source theory)
 - Instance A: `C:\Users\user\.agentmux\channels\local-main-b28b7a-697d25a4\versions\0.55.18\logs\agentmux-host-v0.55.18.log.2026-08-22`
 - Instance B: `C:\Users\user\.agentmux\channels\local-main-b28b7a-b966d418\versions\0.55.19\logs\agentmux-host-v0.55.19.log.2026-08-22`

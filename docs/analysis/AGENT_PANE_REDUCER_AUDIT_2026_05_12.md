@@ -174,8 +174,8 @@ The agent pane is, by the criterion that matters (every rendering-state write go
 
 - Session-replay spec: [`docs/specs/SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md`](../specs/SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md)
 - Slot store + `recordDispatch` audit: PR #764
-- agent-pane-state reducer: `frontend/app/store/agent-pane-state/reducer.ts`
-- agent-document reducer: `frontend/app/store/agent-document/`
+- agent-pane-state reducer: [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts)
+- agent-document reducer: [`frontend/app/store/agent-document/`](../../frontend/app/store/agent-document)
 - Phase-1 agent state machine refinements: PR #752
-- State module: `frontend/app/view/agent/state.ts` (read/render projection)
-- Stream consumer: `frontend/app/view/agent/useAgentStream.ts:87` (dispatch-only contract)
+- State module: [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) (read/render projection)
+- Stream consumer: [`frontend/app/view/agent/useAgentStream.ts:87`](../../frontend/app/view/agent/useAgentStream.ts) (dispatch-only contract)

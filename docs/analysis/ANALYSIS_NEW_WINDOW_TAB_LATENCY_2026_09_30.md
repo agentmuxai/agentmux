@@ -12,7 +12,7 @@ Code citations are against `main` @ `1ed3044e3`.
 
 ## 1. Summary
 
-A new window tab (Alt+T, the menu, or the title-bar menu, all of which call `createTab()` in `frontend/app/store/tab-actions.ts`) takes about **650 ms** before it is fully on screen. That is 400 ms of building it hidden, then an 80–150 ms settle gate, then a 120 ms fade.
+A new window tab (Alt+T, the menu, or the title-bar menu, all of which call `createTab()` in [`frontend/app/store/tab-actions.ts`](../../frontend/app/store/tab-actions.ts)) takes about **650 ms** before it is fully on screen. That is 400 ms of building it hidden, then an 80–150 ms settle gate, then a 120 ms fade.
 
 Most of the 400 ms is a bug. **The default preset's agent picker sends about 700 `install.check` RPCs every time it mounts.** Its "check every agent's CLI" effect re-subscribes to its own results, so each returning check re-issues the check for every agent still pending. About 700 round trips, each with its own microtasks and store update, keep the page's main thread busy for the whole build. Every other reply, such as the next pane's `CreateBlock` or a host IPC, waits behind them in the queue.
 
@@ -61,7 +61,7 @@ The 775 RPCs sent after Alt+T, by command:
 | 4–9 each | `install.check` for codex, antigravity, gemini, openclaw, copilot and pi |
 | about 25 | everything else: `eventsub`, `listagents`, `listrecentsessions`, sysinfo history and so on |
 
-**The bug**, `frontend/app/view/agent/components/AgentPicker.tsx`, "Refresh install state whenever the agent list changes":
+**The bug**, [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx), "Refresh install state whenever the agent list changes":
 
 ```ts
 createEffect(() => {

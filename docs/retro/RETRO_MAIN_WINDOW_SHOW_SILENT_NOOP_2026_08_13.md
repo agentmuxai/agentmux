@@ -16,7 +16,7 @@ rectangle. Confirmed via `agentmux-host-*.log`:
   "window-pool-<uuid>" }` — never `WindowOpened` for `"main"`.
 - `mem_attribution` heartbeats showed `panes_mb="0"` indefinitely.
 - The frontend logged `[initApp] pool mode — deferring init until
-  pool:promote or pool:new-window` (`frontend/app/init/pool.ts`) and sat
+  pool:promote or pool:new-window` ([`frontend/app/init/pool.ts`](../../frontend/app/init/pool.ts)) and sat
   there forever — no promote ever arrived, because nothing was supposed to
   promote a startup pool window; those exist purely as a pre-warmed reserve
   for future tab tear-off (`agentmux-cef/src/commands/window_pool.rs`'s

@@ -2,27 +2,27 @@
 
 **Status:** analysis — Root causes identified for all three issues; fixes described but not implemented (analysis-only per request).
 **Reported by:** user — "If we are interrupted with a rate limit, I see the error, but the prompt stays in 'Waiting'. There are also times where it says 'Rate Limiting' when it clearly is not. Finally, we want to get rid of the 'Send Now' — instead, just queue send the message."
-**Related prior analysis:** `docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md` (the `isInterruptibleTurn` selector that gates "Send now" today was itself a fix for an earlier flashing bug in this same button — see Issue 3 below), `docs/analysis/ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER_2026_06_17.md`, `docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`.
+**Related prior analysis:** [`docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md`](ANALYSIS_SEND_NOW_FLASH_2026_05_28.md) (the `isInterruptibleTurn` selector that gates "Send now" today was itself a fix for an earlier flashing bug in this same button — see Issue 3 below), [`docs/analysis/ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER_2026_06_17.md`](ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER_2026_06_17.md), [`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](../specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md).
 
 ---
 
 ## Files involved
 
 **Composer / input UI**
-- `frontend/app/view/agent/components/AgentFooter.tsx` — the composer textarea and `AgentWorkingRow`, the busy/status row above it (spinner + "Rate limited…"/"Stopping…" text).
-- `frontend/app/view/agent/components/PendingMessagesPanel.tsx` — the amber "queued" strip between the conversation and the composer, including the "Send now" button.
-- `frontend/app/view/agent/styles/_pending-footer.scss` — "Send now" button styling.
+- [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) — the composer textarea and `AgentWorkingRow`, the busy/status row above it (spinner + "Rate limited…"/"Stopping…" text).
+- [`frontend/app/view/agent/components/PendingMessagesPanel.tsx`](../../frontend/app/view/agent/components/PendingMessagesPanel.tsx) — the amber "queued" strip between the conversation and the composer, including the "Send now" button.
+- [`frontend/app/view/agent/styles/_pending-footer.scss`](../../frontend/app/view/agent/styles/_pending-footer.scss) — "Send now" button styling.
 
 **State / reducer**
-- `frontend/app/store/agent-pane-state/types.ts` — `TurnPhase` union (`Idle | Submitting | Streaming | Interrupting | Done | Disconnected`); `waitingReason`/`retryAfterMs` live on the `Streaming` variant; `workingFromPhase`/`isInterruptibleTurn` selectors; `LIVENESS_RECOVERY_MS`.
-- `frontend/app/store/agent-pane-state/reducer.ts` — pure reducer; `ProviderWaiting`, `StreamFlushObserved`, `bumpEvent`, `StreamWatchdogTick`, `TurnEnd` cases.
+- [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) — `TurnPhase` union (`Idle | Submitting | Streaming | Interrupting | Done | Disconnected`); `waitingReason`/`retryAfterMs` live on the `Streaming` variant; `workingFromPhase`/`isInterruptibleTurn` selectors; `LIVENESS_RECOVERY_MS`.
+- [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) — pure reducer; `ProviderWaiting`, `StreamFlushObserved`, `bumpEvent`, `StreamWatchdogTick`, `TurnEnd` cases.
 
 **Streaming / failure surfaces**
-- `frontend/app/view/agent/useAgentStream.ts` — dispatches `ProviderWaiting`/`StreamFlushObserved`/`TurnEnd`; owns the 1.5s process-exit grace timer.
-- `frontend/app/view/agent/providers/claude-translator.ts` — turns raw CLI `rate_limit_event` frames into `provider_waiting` stream events.
-- `frontend/app/view/agent/hooks/useAgentFailure.ts` + `frontend/app/view/agent/failure/failure-accessory.ts` — the **separate** failure-banner subsystem (retry/login/rate-limited/etc.), driven by its own `AgentFailure` wave event.
-- `frontend/app/view/agent/hooks/useAgentCommands.ts` — `sendMessage`, `heldQueue`, `flushHeldMessages`, `stopAgent`.
-- `frontend/app/view/agent/agent-view.tsx` — wires all of the above into JSX; owns the auto-flush `createEffect`.
+- [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) — dispatches `ProviderWaiting`/`StreamFlushObserved`/`TurnEnd`; owns the 1.5s process-exit grace timer.
+- [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts) — turns raw CLI `rate_limit_event` frames into `provider_waiting` stream events.
+- [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts) + [`frontend/app/view/agent/failure/failure-accessory.ts`](../../frontend/app/view/agent/failure/failure-accessory.ts) — the **separate** failure-banner subsystem (retry/login/rate-limited/etc.), driven by its own `AgentFailure` wave event.
+- [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) — `sendMessage`, `heldQueue`, `flushHeldMessages`, `stopAgent`.
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — wires all of the above into JSX; owns the auto-flush `createEffect`.
 
 ---
 

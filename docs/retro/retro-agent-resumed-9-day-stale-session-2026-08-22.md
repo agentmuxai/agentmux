@@ -13,7 +13,7 @@ responded with a summary of unrelated work (Warden Supervisor /
 harness-model-vendor-decoupling / a fabricated-sounding "Antigravity"
 provider) when the actual most recent conversation had been about the
 Agent Picker / Armory rename / CLAUDE.md ownership protection work.
-**Related:** `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
+**Related:** [`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`](../status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md)
 (root-caused the underlying mechanism two days before this incident),
 PR #2693 / #2699 (partial fix, merged the day before this incident), PR
 #1479 (introduced `session_backfill.rs`, whose intended cross-channel

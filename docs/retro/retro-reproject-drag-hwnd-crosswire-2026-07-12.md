@@ -24,7 +24,7 @@ visibly moved the third window instead.
   | Window 2 | `window-cc3cae59856d426c94057731952c8fa7` | `66866` |
   | Window 3 | `window-fbc0dc2faa5a4dd2bc52b0fd78a09bcf` | `66870` |
 
-- Read `frontend/app/hook/useWindowDrag.win32.ts` in full. The native drag
+- Read [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts) in full. The native drag
   path (default) is a single fire-and-forget `start_window_drag` IPC per
   drag gesture, carrying `label: ownWindowLabel()` — and `ownWindowLabel()`
   reads `windowLabel` from **that renderer's own URL**. Each renderer can
@@ -158,7 +158,7 @@ Not attempted yet; flagging the shape of the fix for a follow-up:
   (all read this session).
 - `agentmux-cef/src/commands/window/motion.rs` — `start_window_drag`.
 - `agentmux-cef/src/commands/window/creation.rs` — `reproject_from_snapshot`.
-- `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` §P1 —
+- [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) §P1 —
   prior documentation of the same EnumWindows-fallback hazard class.
 - `SPEC_PILLAR1_HOST_REPROJECT_DESIGN` / `SPEC_PILLAR1_STEP4` — the
   crash-reproject mechanism whose window-creation loop is the trigger.

@@ -51,8 +51,8 @@ anywhere in its frontend or backend; it is passed through verbatim from the CLI'
 `agentmux-srv` always installs a `PreToolUse:Bash` hook for every agent, unconditionally, on every
 platform (`agentmux-srv/src/backend/agent_config.rs:146-163`, `:359-390`, doc-commented "always
 includes a PreToolUse:Bash entry pointing at `agentmux-bashwrap hook` ... regardless"; mirrored in
-`frontend/app/view/agent/agent-config-builder.ts`). This exists to stream live Bash output into the
-agent pane (`docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`), not to manage cwd.
+[`frontend/app/view/agent/agent-config-builder.ts`](../../frontend/app/view/agent/agent-config-builder.ts)). This exists to stream live Bash output into the
+agent pane ([`docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`](../specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md)), not to manage cwd.
 
 What that hook actually does (`agentmux-bashwrap/src/hook.rs::build_response`):
 
@@ -64,7 +64,7 @@ What that hook actually does (`agentmux-bashwrap/src/hook.rs::build_response`):
 
 `agentmux-bashwrap exec` (`agentmux-bashwrap/src/bash_wrap.rs`) is confirmed, both by direct source
 read and by this repo's own prior investigation
-(`docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md` §1.1), to be a
+([`docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md`](../specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) §1.1), to be a
 **one-shot process, not a daemon**: "each `exec` invocation is scoped to exactly one tool call,
 runs for however long that call takes, and terminates. There is no `agentmux-bashwrap` daemon."
 
@@ -166,7 +166,7 @@ Two real issues surfaced during review of the PR that implemented §6, both fixe
 
 - **Wrong key scope (codex P1).** The first version keyed the state file by `AGENTMUX_AGENT_ID`,
   which is the agent *definition's* stable slug — shared by every named instance launched from the
-  same definition (`frontend/app/view/agent/agent-model.ts`). Two concurrently-running instances of
+  same definition ([`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts)). Two concurrently-running instances of
   one definition would have silently shared a single cwd file, so one instance's `cd` could redirect
   the other's next command into the wrong worktree. Fixed by preferring `AGENTMUX_INSTANCE_SLUG` (the
   per-launch slug that also seeds that instance's own unique working directory), falling back to
@@ -191,5 +191,5 @@ Two real issues surfaced during review of the PR that implemented §6, both fixe
 | `agentmux-bashwrap/src/hook.rs` | Rewrites every Bash tool call into `agentmux-bashwrap exec --b64-cmd=<original>`; doc comment confirms `cmd.exe /C` is the Win32 invocation shell |
 | `agentmux-bashwrap/src/bash_wrap.rs:723-725` | Seeds the one-shot inner bash's cwd from bashwrap's own inherited process cwd — the exact point where prior-call `cd` state is lost |
 | `agentmux-bashwrap/src/main.rs` | Confirms `hook`/`exec` are the only two subcommands; no daemon, no persistent state between invocations |
-| `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` | Original motivation for the always-on hook (live tool-output streaming), unrelated to cwd |
-| `docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md` | Independent prior confirmation that `agentmux-bashwrap exec` is one-shot, not a daemon |
+| [`docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`](../specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Original motivation for the always-on hook (live tool-output streaming), unrelated to cwd |
+| [`docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md`](../specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) | Independent prior confirmation that `agentmux-bashwrap exec` is one-shot, not a daemon |

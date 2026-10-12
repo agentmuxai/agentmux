@@ -9,9 +9,9 @@ reproduced live in AgentY's pane.
 ## 1. Summary
 
 The agent pane's footer "Working…" row (`AgentWorkingRow`,
-`frontend/app/view/agent/components/AgentFooter.tsx`) type-out-reveals its
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx)) type-out-reveals its
 text character by character, then shimmers once fully revealed
-(`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`).
+([`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`](../specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md)).
 When several tool-related events land in quick succession — parallel tool
 calls in one assistant turn, or fast back-to-back tools — the row's text
 resets to character 0 and restarts its reveal on **every** intermediate
@@ -32,7 +32,7 @@ footer's props are read from.
 ## 2. Root cause — confirmed via direct code reading
 
 1. **The event loop that fires tool transitions synchronously, unbatched:**
-   `frontend/app/view/agent/useAgentStream.ts:352-628` — the
+   [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts) — the
    `fileSubject.subscribe(...)` callback. One "append" notification can
    carry several newline-delimited raw lines; `for (const line of lines)`
    (line 371) processes all of them in one synchronous pass, and for each
@@ -46,7 +46,7 @@ footer's props are read from.
    raw lines, not together in one `streamEvents` array.
 
 2. **No batching in the pane-state store's dispatch path:**
-   `frontend/app/store/agent-pane-state-store.ts` — confirmed by direct
+   [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) — confirmed by direct
    grep: the file has **no `batch(` import or call anywhere**. Inside
    `dispatch()` (starting line 222), each changed field is applied via its
    own `proj(...)` call (e.g. `proj("currentTool", ...)` at line 337,
@@ -88,7 +88,7 @@ reads as the tool call interrupting the thinking-row text mid-reveal.
 
 ## 3. What this is NOT — ruled out
 
-- **Not document/transcript corruption.** `frontend/app/view/agent/stream-parser.ts`
+- **Not document/transcript corruption.** [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
   accumulates thinking deltas into `currentThinkingNode` (`thinkingToNode`,
   lines 411–438), and each delta is flushed as its own document-node write
   via `queue.pushNewNode`/`pushUpdatedNode` before a following `tool_call`
@@ -115,7 +115,7 @@ reads as the tool call interrupting the thinking-row text mid-reveal.
 - **Visual confirmation was not directly possible from this session**:
   `UIScreenshot`/`UIQuery` are scoped to "your own pane and shared app
   chrome" only (confirmed via tool description) — there is no cross-pane
-  capture capability today (see `docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md`,
+  capture capability today (see [`docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md`](../analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md),
   written the same day, for exactly why that boundary exists and isn't a
   quick widening).
   `GetAgentTranscript` only returns text, and only the tail (server-capped
@@ -141,7 +141,7 @@ lines** for Claude, not together in one `streamEvents` array. The real
 loop at `useAgentStream.ts:371` (inside the `fileSubject.subscribe`
 callback, `:352-628`), which can process several raw lines from one
 append notification in a single synchronous pass. See
-`docs/specs/SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md`
+[`docs/specs/SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md`](../specs/SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md)
 §2.1 for the corrected design — updated below to match.
 
 1. **Wrap the tool-transition dispatches in `batch()`** — around the outer
@@ -165,20 +165,20 @@ append notification in a single synchronous pass. See
 
 ## 6. Sources
 
-- `frontend/app/view/agent/useAgentStream.ts:352-628` (the
+- [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts) (the
   `fileSubject.subscribe` callback), `:371` (outer per-line loop — the
   actual burst boundary), `:540` (inner per-event loop — insufficient in
   isolation, see §5 correction note), `:581–592` (`ToolStart`/`ToolEnd`
   dispatch sites), `:17–35` (existing `StreamFlushQueue`/`batch()`
   precedent for document nodes)
-- `frontend/app/store/agent-pane-state-store.ts:222` (`dispatch()`),
+- [`frontend/app/store/agent-pane-state-store.ts:222`](../../frontend/app/store/agent-pane-state-store.ts) (`dispatch()`),
   `:337`, `:351` (`proj("currentTool"/"currentToolArg", ...)`) — no
   `batch(` anywhere in the file
-- `frontend/app/view/agent/components/AgentFooter.tsx:113–128`
+- [`frontend/app/view/agent/components/AgentFooter.tsx:113–128`](../../frontend/app/view/agent/components/AgentFooter.tsx)
   (`loadingLeftText`), `:155` (`leftText` memo), `:181–202` (reveal effect)
-- `frontend/app/view/agent/stream-parser.ts:340–343`, `:411–438`
+- [`frontend/app/view/agent/stream-parser.ts:340–343`](../../frontend/app/view/agent/stream-parser.ts), `:411–438`
   (thinking-node accumulation, ruled out as the cause)
-- `docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`
+- [`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`](../specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md)
   (existing shimmer/type-out design)
-- `docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md`
+- [`docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md`](../analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md)
   (why cross-pane visual capture isn't available to confirm this live)

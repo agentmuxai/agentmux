@@ -10,7 +10,7 @@ provider auth dir (`~/.agentmux/shared/providers/claude/`) turned out to
 have been silently logged out (empty tokens) 47 minutes earlier, with zero
 `muxlog auth` evidence of what caused it — see §4.
 **Audience:** anyone touching `run_cli_login`/`run_cli_login_pty`,
-`open_login_terminal`, `frontend/app/view/agent/commands/global/login.ts`,
+`open_login_terminal`, [`frontend/app/view/agent/commands/global/login.ts`](../../frontend/app/view/agent/commands/global/login.ts),
 or `force-login.ts`. Read this before changing how a login attempt picks
 its spawn strategy.
 **Follow-up:** the fix below (§5) initially covered `/login` and "Login
@@ -18,7 +18,7 @@ Again" only. Live verification found a THIRD, independent implementation
 of the same "spawn login, wait for URL" pattern in the gated launch flow —
 the one the "Retry Login" button actually triggers — that bypassed both
 the fix and the diagnosis here. See
-`docs/retro/retro-login-three-code-paths-2026-07-20.md` for that gap and
+[`docs/retro/retro-login-three-code-paths-2026-07-20.md`](retro-login-three-code-paths-2026-07-20.md) for that gap and
 its fix; read both before touching login flows.
 
 ---
@@ -44,8 +44,8 @@ a PTY with no attached visible console — and then scans its output for an
 
 For Claude Code v2.1.x, that scan finds nothing, ever, in any headless
 context. Per the prior investigation this retro builds on
-(`docs/retro/retro-claude-v2-1-auth-spawn-2026-06-23.md`,
-`docs/specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md:56-67`): the CLI's
+([`docs/retro/retro-claude-v2-1-auth-spawn-2026-06-23.md`](retro-claude-v2-1-auth-spawn-2026-06-23.md),
+[`docs/specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md:56-67`](../specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md)): the CLI's
 OAuth flow opens the browser **itself**, directly, via its own OS calls —
 it does not print a URL for a wrapper process to scrape. In a piped/PTY/
 detached spawn there is no attached console for the CLI's own browser-open
@@ -69,7 +69,7 @@ users never discover, and it is **Windows-only** —
 `platform.rs:1337-1342` returns `Err("open_login_terminal: not yet
 implemented on this platform")` on macOS/Linux.
 
-`/login`'s own handler (`frontend/app/view/agent/commands/global/login.ts:44-59`)
+`/login`'s own handler ([`frontend/app/view/agent/commands/global/login.ts:44-59`](../../frontend/app/view/agent/commands/global/login.ts))
 already knows this — when `forceProviderLogin` returns `"no-url"`, the error
 message it shows is literally:
 
@@ -88,7 +88,7 @@ is "why AgentMux has such a hard time."
   stdio on the "persistent" controller (`agentmux-srv/src/backend/blockcontroller/persistent.rs:674-690`)
   and the subprocess controller (`.../subprocess.rs:393-404`) exists to fix
   a **Windows Terminal window leak**
-  (`docs/retro/retro-windows-terminal-window-leak-2026-06-21.md`). That fix
+  ([`docs/retro/retro-windows-terminal-window-leak-2026-06-21.md`](retro-windows-terminal-window-leak-2026-06-21.md)). That fix
   is correct for its own problem — but its side effect is that every normal
   agent pane's long-running Claude process is permanently in exactly the
   spawn shape (§1) that defeats interactive OAuth. There's no cross-link
@@ -97,7 +97,7 @@ is "why AgentMux has such a hard time."
 - **`/login`'s no-url failure used to be silent**, not just unhelpful — the
   explicit error message quoted above (`login.ts:51-59`) and the equivalent
   branch in `useAgentControllerStatus.ts:299-306` were both added by
-  `docs/retro/retro-agent-auth-relogin-noop-2026-07-01.md` specifically to
+  [`docs/retro/retro-agent-auth-relogin-noop-2026-07-01.md`](retro-agent-auth-relogin-noop-2026-07-01.md) specifically to
   stop the *"no error, no browser, nothing happens"* failure mode from
   looking like success. That retro's fix made the dead end **visible**. It
   did not make the dead end **navigable** — the user still has to
@@ -167,8 +167,8 @@ retro's main finding and is not re-litigated further here.
    consequence, and the reverse: a future auth-capture change checks
    whether the window-leak fix still applies.
 4. **A standing test, not another spec note** — per the lesson already
-   written twice in `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`
-   and `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+   written twice in [`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](retro-provider-auth-isolation-regression-2026-06-05.md)
+   and [`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`](retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md)
    ("a written invariant is worthless if nothing re-checks it when the
    ground moves"): add a test asserting that for any provider whose login
    flow is known not to produce a scrapeable URL in a headless spawn (a
@@ -181,7 +181,7 @@ retro's main finding and is not re-litigated further here.
    `cli_handlers.rs` (`:426`, `:776`) as a specific, apparently
    well-understood repro, but is undocumented anywhere else in the repo. If
    it refers to the "Poal"/"Nark" divergence case in
-   `docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`, rename the
+   [`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`](../reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md), rename the
    comment to cite that doc directly; if it's a distinct case, write it up
    so the next person reading `cli_handlers.rs` doesn't have to guess.
 
@@ -190,7 +190,7 @@ retro's main finding and is not re-litigated further here.
 Items 1, 2, and 4 of §4 shipped immediately after this retro was written,
 without waiting for a second manual-recovery incident to justify them:
 
-- **`runProviderLogin`** (`frontend/app/view/agent/flows/run-provider-login.ts`,
+- **`runProviderLogin`** ([`frontend/app/view/agent/flows/run-provider-login.ts`](../../frontend/app/view/agent/flows/run-provider-login.ts),
   new) — the shared three-tier orchestrator: `forceProviderLogin` (URL
   capture) → `seedGlobalLogin` (Claude-only, copy a valid global login) →
   `openLoginTerminal` + poll (real terminal, up to 5 min). `/login`

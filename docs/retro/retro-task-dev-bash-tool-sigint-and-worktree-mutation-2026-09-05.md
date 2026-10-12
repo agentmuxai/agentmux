@@ -77,7 +77,7 @@ and the code says so unambiguously:
   controlling terminal**, with a long comment explaining that this exists
   precisely so the wrapped command survives its invoker's death or signals.
 - `Controller::stop_for_replace` preserves such tasks across session replacement.
-- `docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md:17-19`
+- [`docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md:17-19`](../status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md)
   records a successful Windows `task dev` launch using exactly that mode.
 
 **Why `&` defeats it anyway:** `cmd &` returns immediately, so the process that
@@ -219,7 +219,7 @@ All three shipped in the same PR as this retro (#2985):
   directly.** One 5-minute control run beats three 10-minute guesses.
 - **A bare `error:` with no `error[EXXXX]` diagnostic above it is a signal, not a
   compile failure.** Look for `^C` / signal evidence.
-- **Grep CLAUDE.md and `docs/retro/` before declaring an infrastructure problem
+- **Grep CLAUDE.md and [`docs/retro/`](.) before declaring an infrastructure problem
   novel.** Both the tool to use and two adjacent retros were already on disk.
 - **Isolate one variable before generalising from repeated failures.** Six
   attempts all carried an appended `&`; the conclusion drawn ("the Bash tool
@@ -228,7 +228,7 @@ All three shipped in the same PR as this retro (#2985):
 
 ### Possible follow-up (code)
 
-- `scripts/dev-agent.cmd` could detect it's been signalled and print a one-line
+- [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) could detect it's been signalled and print a one-line
   hint (`"interrupted — if launched from an agent, use mcp__agentmux__Shell"`)
   rather than letting go-task's generic `exit status 58` be the last word. Low
   effort, would have collapsed this whole episode into one attempt.

@@ -1,7 +1,7 @@
 # ANALYSIS — Open typing-perf tracking items + consolidation proposal
 
 **Status:** superseded — this was a snapshot of what was open as of 2026-05-29; that role is now `TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`, which has the current state.
-**Superseded-by:** `docs/specs/TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`
+**Superseded-by:** [`docs/specs/TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`](../specs/TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md)
 
 **Date:** 2026-05-29
 **Owner:** Agent1
@@ -33,7 +33,7 @@ These give a forward-looking contract for "what does a fast input path look like
 1. `gh issue list --state open` → 38 open issues; greped title + body for `typing|keystroke|input.*lag|latency|composer|textarea|echo|stutter|jitter|sluggish|perf|slow|hang|freez|smooth|responsive`.
 2. `gh api graphql` on Discussions → 11 open; same grep.
 3. Cross-referenced PRs via `timelineItems` GraphQL to know which issues already had merged work.
-4. Verified actual shipped state in main (`grep` for `term.type` in `agentmux-srv/src` — not present; spec files in `docs/specs/` — only stubs that copy the issue body).
+4. Verified actual shipped state in main (`grep` for `term.type` in `agentmux-srv/src` — not present; spec files in [`docs/specs/`](../specs) — only stubs that copy the issue body).
 
 ---
 
@@ -57,7 +57,7 @@ These give a forward-looking contract for "what does a fast input path look like
 - Phase 4 (hardening) — **no PR found**, may be open work
 
 **Overlap with new SPEC_INPUT_RESPONSIVENESS:**
-- The per-kind perf marks in PR #787 are the same `frontend/perf` / `markStart` / `markEnd` infrastructure our new `agent-keystroke` / `agent-input-raf*` marks plug into.
+- The per-kind perf marks in PR #787 are the same [`frontend/perf`](../../frontend/perf) / `markStart` / `markEnd` infrastructure our new `agent-keystroke` / `agent-input-raf*` marks plug into.
 - The virtualization itself directly relates to spec rule #1 (keystroke handler ≤16 ms) — a poorly-virtualized document above the composer is the main risk to that budget when the agent pane is long.
 - Our new SPEC adds the contract; #782's work provides the load-bearing implementation.
 
@@ -95,8 +95,8 @@ Plus six "Never-Fail Guarantees" (G1–G6).
 
 ### New SPEC + PLAN (just landed via PR #1151)
 
-- `docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md` — three structural rules + per-surface contracts
-- `docs/specs/PLAN_INPUT_RESPONSIVENESS_EXECUTION_2026_05_29.md` — 7-item action plan
+- [`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](../specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) — three structural rules + per-surface contracts
+- [`docs/specs/PLAN_INPUT_RESPONSIVENESS_EXECUTION_2026_05_29.md`](../specs/PLAN_INPUT_RESPONSIVENESS_EXECUTION_2026_05_29.md) — 7-item action plan
 
 Items 1–5 shipped via PRs #1146 / #1148 / #1150. Items 6 (terminal `targetFps` coalescer) and 7 (ACK-based PTY flow control) are profiling-gated and need data before code.
 
@@ -200,7 +200,7 @@ Possible future move: roll the menu hover discussion (#1097) into a broader "Age
 >
 > - PR #1146 — IME composition handling (real user-facing bug fix for CJK / IME users), `agent-keystroke` perf marks, slash-matcher TODO
 > - PR #1148 — CI lint guardrail against layout reads in `frontend/app/view/term/**` + `AgentFooter.tsx`
-> - PR #1150 — `tools/tests/bench-agent-keystroke.mjs` (CDP-driven P50/P95/P99 bench)
+> - PR #1150 — [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) (CDP-driven P50/P95/P99 bench)
 > - PR #1151 — SPEC + execution plan
 >
 > ## Open implementation children
@@ -223,7 +223,7 @@ Possible future move: roll the menu hover discussion (#1097) into a broader "Age
 >
 > ## Adjacent but distinct (NOT folded in)
 >
-> See `docs/analysis/ANALYSIS_TYPING_PERF_OPEN_TRACKING_2026_05_29.md` for the full list. Highlights:
+> See [`docs/analysis/ANALYSIS_TYPING_PERF_OPEN_TRACKING_2026_05_29.md`](ANALYSIS_TYPING_PERF_OPEN_TRACKING_2026_05_29.md) for the full list. Highlights:
 > - #1136 (pane-focus paint latency) — different interaction
 > - #789 (Markdown TOC streaming reactivity) — affects agent pane but not typing
 > - #258 (XPC OOM-kill → UI freeze) — memory, not typing

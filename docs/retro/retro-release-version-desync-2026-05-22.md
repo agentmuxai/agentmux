@@ -5,7 +5,7 @@
 **Date:** 2026-05-22
 **Author:** AgentA
 **Severity:** Medium — no data lost; caught before a regressed release shipped, but it blocked the release pipeline and risked publishing a version *below* the changelog's latest entry.
-**Area:** release workflow (`task release`, `scripts/bump-wrapper.sh`, `@a5af/bump-cli`), `VERSION_HISTORY.md`, reagent review gate.
+**Area:** release workflow (`task release`, [`scripts/bump-wrapper.sh`](../../scripts/bump-wrapper.sh), `@a5af/bump-cli`), `VERSION_HISTORY.md`, reagent review gate.
 
 ---
 

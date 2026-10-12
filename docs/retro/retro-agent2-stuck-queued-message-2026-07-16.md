@@ -118,12 +118,12 @@ the held-message flush finally fires.
 
 | File | Relevance |
 |------|-----------|
-| `frontend/app/view/agent/agent-view.tsx:704-713` | Held-message auto-flush, gated on `turnIdle` (Idle/Done) — never fires while phase stuck at Streaming (**primary symptom site**) |
-| `frontend/app/store/agent-pane-state/reducer.ts` (`ReconcileTurnActive`) | Reconciles Idle→Streaming only; needs the Streaming→Idle direction (**primary fix site**) |
-| `frontend/app/view/agent/hooks/useAgentCommands.ts` (`heldQueue`, `flushHeldMessages`) | Frontend-only held-message queue |
+| [`frontend/app/view/agent/agent-view.tsx:704-713`](../../frontend/app/view/agent/agent-view.tsx) | Held-message auto-flush, gated on `turnIdle` (Idle/Done) — never fires while phase stuck at Streaming (**primary symptom site**) |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) (`ReconcileTurnActive`) | Reconciles Idle→Streaming only; needs the Streaming→Idle direction (**primary fix site**) |
+| [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) (`heldQueue`, `flushHeldMessages`) | Frontend-only held-message queue |
 | `agentmux-srv/src/backend/blockcontroller/persistent.rs:293-356,845-867` | Persistent send writes straight to stdin + emits accepted immediately; `result` event flips backend `turn_active=false` and publishes it |
-| `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` | Agent1 incident — same root cause, other symptom |
-| `docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md` | Consolidation report; this strengthens its two-axis-status / reconciliation direction |
+| [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](retro-persistent-agent-working-status-stuck-2026-07-16.md) | Agent1 incident — same root cause, other symptom |
+| [`docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md`](../specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md) | Consolidation report; this strengthens its two-axis-status / reconciliation direction |
 
 ## Lessons
 

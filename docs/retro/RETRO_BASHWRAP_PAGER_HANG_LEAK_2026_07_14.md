@@ -5,7 +5,7 @@
 ## What happened
 
 While investigating an unrelated build failure (see
-`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`), a process
+[`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`](RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md)), a process
 count taken on this dev machine showed **12 `agentmux-bashwrap.exe`
 processes still running**, with creation timestamps spanning from
 **2026-07-12 12:58 PM to 2026-07-14 3:25 AM** — up to ~2 days old. Every one
@@ -45,7 +45,7 @@ systemic pattern across sessions, not one session's fluke.
 wrapped command through a **real PTY** (`run_via_pty`, the path used
 whenever `openpty()` succeeds — effectively always on this machine), so the
 child process sees `isatty(stdout) == true`. This is intentional: per
-`docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`, PTY-first was
+[`docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`](../specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md), PTY-first was
 specifically reinstated to avoid pipes causing block-buffering in wrapped
 tools.
 
@@ -87,7 +87,7 @@ Both mechanisms reduce to one structural gap: **nothing in the call chain
 exit path is gated behind cooperative I/O completion with no timeout or
 kill fallback anywhere in the wrapper.
 
-`docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md` §6 (Non-goals) already
+[`docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`](../specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md) §6 (Non-goals) already
 anticipated pagers as a risk — *"Not alt-buffer detection. Vim/less/top
 inside a tool overlay is undefined behavior for now... Out of scope for this
 spec."* — but framed it as a **rendering-corruption** risk, not a

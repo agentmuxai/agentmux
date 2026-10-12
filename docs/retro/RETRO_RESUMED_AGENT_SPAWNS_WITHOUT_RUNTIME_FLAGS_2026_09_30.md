@@ -3,7 +3,7 @@
 **Date:** 2026-09-30 (UTC; the evening of 2026-09-29 Pacific)
 **Found by:** the owner, on AgentX's pane in a local v0.58.3 portable build
 **Investigated by:** AgentX (narko)
-**Status:** retro — root cause identified; fixes 1, 2, 4 and 5 implemented (launch applies the runtime; srv fills missing flags at spawn; the menu shows when the process runs something else; the Sonnet label follows the pinned CLI), fix 3 mitigated (the menu detects a stale process and offers a restart rather than doing it silently) (see §5). Every binding and remaining gap: `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`
+**Status:** retro — root cause identified; fixes 1, 2, 4 and 5 implemented (launch applies the runtime; srv fills missing flags at spawn; the menu shows when the process runs something else; the Sonnet label follows the pinned CLI), fix 3 mitigated (the menu detects a stale process and offers a restart rather than doing it silently) (see §5). Every binding and remaining gap: [`docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`](../reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md)
 
 ## 1. What happened
 
@@ -40,7 +40,7 @@ The srv log for this instance (`agentmuxsrv-v0.58.3.log.2026-09-30`, block
 | 02:54:04.224 | first `AgentInput` (the owner's "u there"). The per-send rebuild now writes `--model sonnet --effort high` into `cmd:args`. The process is already running and never re-reads them. |
 
 The spawned argv is exactly the Claude provider's `persistentLaunchArgs`
-(`frontend/app/view/agent/providers/catalog.ts:150`), plus the resume and fork
+([`frontend/app/view/agent/providers/catalog.ts:150`](../../frontend/app/view/agent/providers/catalog.ts)), plus the resume and fork
 flags. By the time of the investigation the block's `cmd:args` did contain
 `--model sonnet --effort high`, written at the first send, after the spawn.
 
@@ -49,7 +49,7 @@ flags. By the time of the investigation the block's `cmd:args` did contain
 Three things combine.
 
 1. **The launch path writes `cmd:args` without the runtime flags.**
-   `launchAgentDefinition` (`frontend/app/view/agent/agent-model.ts:517-530`)
+   `launchAgentDefinition` ([`frontend/app/view/agent/agent-model.ts:517-530`](../../frontend/app/view/agent/agent-model.ts))
    builds `cliArgs` from `selectLaunchArgs(provider, mode)` + `provider_flags` +
    `--fork-session`. It never calls `buildRuntimeArgs`, even though a few lines
    later (`:794-822`) it writes `agent:runtime` (the model/effort/mode the strip
@@ -95,7 +95,7 @@ a mismatch, and it happens silently.
   same kind of mismatch the overlay's own comment warns about for concrete-id rows.
 
 We want Sonnet 5.5 as the default. Fixed in
-`docs/spec-claude-code-versioning.md`'s `2.1.285` bump: that CLI's embedded
+[`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md)'s `2.1.285` bump: that CLI's embedded
 model catalog lists `claude-sonnet-5-5`, and the curated `sonnet` label was
 updated to match.
 
@@ -127,7 +127,7 @@ updated to match.
 
 ## 6. Verification for the fix
 
-*Unit coverage for fix 1 is in `frontend/app/view/agent/pane-args-parity.test.ts`: every catalog provider, plus a guard that nothing else composes `cmd:args`. The srv and live checks below are still to do.*
+*Unit coverage for fix 1 is in [`frontend/app/view/agent/pane-args-parity.test.ts`](../../frontend/app/view/agent/pane-args-parity.test.ts): every catalog provider, plus a guard that nothing else composes `cmd:args`. The srv and live checks below are still to do.*
 
 - **Unit:** a `launchAgentDefinition` continuation launch (with
   `continueSid`/fork) commits `cmd:args` containing `--model <runtime.model>` and

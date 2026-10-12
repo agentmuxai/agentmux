@@ -3,8 +3,8 @@
 **Date:** 2026-09-23
 **Status:** analysis — Phase 0 baseline of `SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md`, measured on Windows. macOS and Linux baselines not yet recorded.
 **Author:** Manoz
-**Related:** `docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md` (§4 targets, §7 Phase 0),
-`docs/analysis/ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md` (§6 predicted these costs).
+**Related:** [`docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md`](../specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) (§4 targets, §7 Phase 0),
+[`docs/analysis/ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md`](ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md) (§6 predicted these costs).
 
 ---
 
@@ -32,7 +32,7 @@ This matches the spec's model:
 
 ## 2. Method
 
-`scripts/ui-screenshots/full-conversation-bench.mjs` (this PR) against a dev
+[`scripts/ui-screenshots/full-conversation-bench.mjs`](../../scripts/ui-screenshots/full-conversation-bench.mjs) (this PR) against a dev
 build of `main@8b69500` (`task dev`, CEF 148, Vite), Windows 10, window
 630 × 1077 CSS px, 3 visible agent panes (Mopeo, Poal, Oozp; the spec calls
 for 4 — a fourth split could not be opened programmatically, recorded as a

@@ -7,9 +7,9 @@
 
 Scope: three specs that govern the current agent pane surface:
 
-1. `docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md` — 12-step decomposition of `agent-view.tsx`
-2. `docs/specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` — 4-PR merge of Forge + Identity into the agent pane
-3. `docs/specs/SPEC_AGENT_PANE_FOLLOWUPS_2026_04_13.md` — 9 follow-up items raised after the consolidation landed
+1. [`docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md`](../specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) — 12-step decomposition of `agent-view.tsx`
+2. [`docs/specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md`](../specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) — 4-PR merge of Forge + Identity into the agent pane
+3. [`docs/specs/SPEC_AGENT_PANE_FOLLOWUPS_2026_04_13.md`](../specs/SPEC_AGENT_PANE_FOLLOWUPS_2026_04_13.md) — 9 follow-up items raised after the consolidation landed
 
 For each spec I walked its stated deliverables and checked the current code. Findings below are grouped by spec; each item is marked **✓ delivered**, **⚠ partial** (shipped but with a caveat), **⧗ pending** (work in progress), or **✗ missing**.
 
@@ -111,7 +111,7 @@ Spec §7.4: Remove `defwidget@forge` and `defwidget@identity` from `agentmux-srv
 
 ### 2.6 BlockRegistry cleanup
 
-Spec §7.4: Unregister `ForgeView` and `IdentityView` in `frontend/app/block/block.tsx`.
+Spec §7.4: Unregister `ForgeView` and `IdentityView` in [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx).
 
 - **On main:** registered views are `term`, `cpuplot`, `sysinfo`, `help`, `launcher`, `agent`, `subagent`, `swarm`. **✓ delivered.**
 
@@ -119,13 +119,13 @@ Spec §7.4: Unregister `ForgeView` and `IdentityView` in `frontend/app/block/blo
 
 Spec §7.4: "Saved panes with `view: \"forge\"` or `view: \"identity\"` now resolve to `view: \"agent\"`."
 
-- **On main (`frontend/app/block/block.tsx:55`):** `const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;` in `makeViewModel`. **✓ delivered.**
+- **On main ([`frontend/app/block/block.tsx:55`](../../frontend/app/block/block.tsx)):** `const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;` in `makeViewModel`. **✓ delivered.**
 
 ### 2.8 Command palette cleanup
 
 Spec §7.4: Remove `open:forge` and `open:identity` palette commands.
 
-- **On main (`frontend/app/store/command-registry.ts`):** neither command exists. **✓ delivered.**
+- **On main ([`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts)):** neither command exists. **✓ delivered.**
 
 ### 2.9 `ForgeViewModel` / `IdentityViewModel` survival for per-panel use
 

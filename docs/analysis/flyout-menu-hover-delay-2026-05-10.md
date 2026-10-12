@@ -13,7 +13,7 @@ This report walks the existing render pipeline, names the specific lines that co
 
 ## 1. Where the delay comes from — the hover-to-paint timeline
 
-File: `frontend/app/element/flyoutmenu.tsx`
+File: [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx)
 
 ```
 T+0   ms  mouseenter fires on parent .menu-item
@@ -206,8 +206,8 @@ Phases 1 + 3 alone should erase the user-reported "unusual delay" symptom. Phase
 
 ## 7. Cross-references
 
-- Source: `frontend/app/element/flyoutmenu.tsx`, `flyoutmenu.scss`
-- Caller: `frontend/app/tab/tabbar.tsx` (`tabBarMenuItems`)
+- Source: [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx), `flyoutmenu.scss`
+- Caller: [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) (`tabBarMenuItems`)
 - Submenu-using callers: `tabbar.tsx` is the sole `subItems` caller (the chat view, formerly the only other site, was removed 2026-06-13)
 - Related work: PR #791 (the Theme/Opacity hamburger menu that surfaced this) — the rendering issues exist regardless but were hidden when the menu only had top-level items
 - Floating-UI library: `@floating-ui/dom` — `autoUpdate` docs at https://floating-ui.com/docs/autoUpdate

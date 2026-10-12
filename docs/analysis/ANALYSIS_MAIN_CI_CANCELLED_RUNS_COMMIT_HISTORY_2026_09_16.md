@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-16
 **Status:** implemented — root-caused here; fix applied directly to
-`.github/workflows/ci-pr.yml` per this repo's own CI-fix exception (see
-`CLAUDE.md` §Git Workflow: `.github/workflows/` fixes may push straight to
+[`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml) per this repo's own CI-fix exception (see
+`CLAUDE.md` §Git Workflow: [`.github/workflows/`](../../.github/workflows) fixes may push straight to
 `main`, no PR).
 **Trigger:** user report, verbatim: *"take a look at the commit history in
 github. so many of them have failed tests. most had passing tests when
@@ -13,7 +13,7 @@ merged. why is that?"*
 
 ## TL;DR
 
-Nothing is actually broken. `.github/workflows/ci-pr.yml` runs on both
+Nothing is actually broken. [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml) runs on both
 `pull_request` and `push` (to `main`). Its `concurrency` group is correctly
 scoped per-PR for `pull_request` events, but falls back to the constant
 `github.ref` for `push` events — so **every** post-merge CI run on `main`
@@ -57,7 +57,7 @@ post-merge run to finish first.
 
 ## Root cause
 
-`.github/workflows/ci-pr.yml`:
+[`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml):
 
 ```yaml
 on:
@@ -124,6 +124,6 @@ longer cancel each other. A second push to the *same* commit can't happen
 cancellation behavior — the only case being removed is exactly the
 spurious one this analysis describes.
 
-Applied directly to `.github/workflows/ci-pr.yml` per this repo's
+Applied directly to [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml) per this repo's
 documented CI-fix exception (`CLAUDE.md` §Git Workflow) — no PR needed for
-a `.github/workflows/` change.
+a [`.github/workflows/`](../../.github/workflows) change.

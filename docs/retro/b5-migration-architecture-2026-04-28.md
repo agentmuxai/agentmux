@@ -9,10 +9,10 @@ direction was refined rather than replaced.
 **Author:** AgentA.
 **Date:** 2026-04-28, after PRs #579-#592.
 **Companions:**
-* `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
-* `docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` — pre-migration inventory
-* `docs/retro/migration-pattern.md` — the a→b→c→d→e ratchet
-* `docs/retro/phase-b-roadmap.md` — sub-PR sequencing
+* [`docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md`](../specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) — the driving spec
+* [`docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md`](../specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md) — pre-migration inventory
+* [`docs/retro/migration-pattern.md`](migration-pattern.md) — the a→b→c→d→e ratchet
+* [`docs/retro/phase-b-roadmap.md`](phase-b-roadmap.md) — sub-PR sequencing
 
 ---
 

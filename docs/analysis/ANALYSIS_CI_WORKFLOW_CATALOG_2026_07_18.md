@@ -3,7 +3,7 @@
 **Status:** analysis
 
 **Date:** 2026-07-18
-**Primary scope:** `agentmuxai/agentmux` `.github/workflows/` (12 registered workflows)
+**Primary scope:** `agentmuxai/agentmux` [`.github/workflows/`](../../.github/workflows) (12 registered workflows)
 **Also checked:** `agentmuxai/agentmux-builder`, `agentmuxai/agentmux-landing`,
 `agentmuxai/cef`, `a5af/shared-infrastructure` — cross-repo context needed to
 answer this doc's own open questions (see §5). Could not locate `a5af/dev-tools`
@@ -214,12 +214,12 @@ nothing to distill.
 
 ### 5.3 `agentmuxai/cef` (public)
 
-No CI workflows at all — checked both the Actions API and the `.github/`
+No CI workflows at all — checked both the Actions API and the [`.github/`](../../.github)
 directory contents directly. This is the source tree holding the
 `BeginWindowDrag`/transparency patches; the patched-framework release assets
 (`cef-macos-arm64-*`, `cef-linux-x86_64-*`) referenced throughout §2.1/§2.2 are
 cut **manually**, by running the build + `gh release create` commands locally
-per `docs/cef-build/build-patched-framework-macos.md` — not by any automated
+per [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md) — not by any automated
 pipeline. Nothing to catalog or distill here; flagging only because it was
 explicitly in scope for this pass.
 

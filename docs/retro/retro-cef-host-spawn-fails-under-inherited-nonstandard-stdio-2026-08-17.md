@@ -167,7 +167,7 @@ was doing — hits it every time.
   identically (channel `local-main-b28b7a-0e5d07ad`, confirmed via its
   `agentmux-host` log: full startup-bench trace, real `Chrome_WidgetWin_1`
   window creation)
-- `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`
+- [`docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`](retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md)
   — a different launcher-silent-exit failure mode (schema-version
   mismatch + no fatal dialog on that specific path) that looked similar at
   first glance but is unrelated; ruled out early since srv opened its

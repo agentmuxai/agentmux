@@ -202,8 +202,8 @@ Provider parity for Codex / Gemini in PR β is bandwidth-bounded — start with 
 - Existing MCP server injection: `agentmux-srv/src/backend/agent_config.rs:230-293`
 - Claude CLI spawn: `agentmux-srv/src/backend/providers.rs:100-107`, `agentmux-srv/src/backend/blockcontroller/subprocess.rs:250-281`
 - Subprocess output → WPS: `agentmux-srv/src/backend/blockcontroller/subprocess.rs:442-561` (stdout) + `563-586` (stderr — currently logged only)
-- ToolBlock rendering: `frontend/app/view/agent/components/ToolBlock.tsx`
-- DocumentRow: `frontend/app/view/agent/virtualization/DocumentRow.tsx:232-238`
+- ToolBlock rendering: [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)
+- DocumentRow: [`frontend/app/view/agent/virtualization/DocumentRow.tsx:232-238`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx)
 
 ## 9. Sources
 

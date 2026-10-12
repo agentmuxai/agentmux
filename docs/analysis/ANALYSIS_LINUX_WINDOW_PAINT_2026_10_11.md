@@ -6,7 +6,7 @@
 **Trigger:** Repo owner, 2026-10-11: *"take a look at the recent performance improvement work regarding window painting and quick responsiveness during window resize. we did a bunch of work on windows and macos. can any be used for performance gains on linux? take a look, write a report to file"*
 **Related:** `ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md` (Windows), `ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md` (macOS), `ANALYSIS_BROWSER_PANE_RESIZE_ARCHITECTURE_2026_10_06.md`, `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md`.
 
-Code citations are against `main` @ `cbb2837a8`. Measurements use the macOS analysis's scripts (`scripts/perf/macos-paint/`), which run unchanged on Linux with `--port`.
+Code citations are against `main` @ `cbb2837a8`. Measurements use the macOS analysis's scripts ([`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint)), which run unchanged on Linux with `--port`.
 
 ---
 
@@ -137,11 +137,11 @@ On Windows the tile layout calls `notifyPaneReflow()` on every leaf geometry cha
 ## 6. Side findings
 
 - **`--disable-features` is passed twice.** The renderer's command line (`env.mjs`) has `disable-features=GlicActorUi,AutofillActorMode,LensOverlay,KillOnInvalidNavigationHeaders` and then the host's own `--disable-features=CalculateNativeWinOcclusion,…`. When a switch repeats, Chromium's `CommandLine` keeps one value, so one of the two lists may not apply. Not a paint problem and not Linux-only; worth a check by whoever owns the switch setup (`app/mod.rs:645`).
-- **The measurement scripts are cross-platform** apart from the two Swift samplers: `env.mjs`, `resize-frames.mjs`, `setup-state.mjs`, `trace-cpu.mjs` and `scripts/ui-screenshots/trace-capture.mjs` ran unchanged on Linux. `setup-state.mjs` has 9223 hard-coded, so the dev build needs `AGENTMUX_CDP_PORT=9223`. They live under `scripts/perf/macos-paint/`; a neutral name would help the next person.
+- **The measurement scripts are cross-platform** apart from the two Swift samplers: `env.mjs`, `resize-frames.mjs`, `setup-state.mjs`, `trace-cpu.mjs` and [`scripts/ui-screenshots/trace-capture.mjs`](../../scripts/ui-screenshots/trace-capture.mjs) ran unchanged on Linux. `setup-state.mjs` has 9223 hard-coded, so the dev build needs `AGENTMUX_CDP_PORT=9223`. They live under [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint); a neutral name would help the next person.
 
 ## 7. Reproducing
 
-With a dev build on CDP port 9223 (`AGENTMUX_CDP_PORT=9223 task dev`), from `scripts/perf/macos-paint/`:
+With a dev build on CDP port 9223 (`AGENTMUX_CDP_PORT=9223 task dev`), from [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint):
 
 - `node env.mjs`: GPU backend, features, DPR and idle frame rate.
 - `node setup-state.mjs 4 4`: four tabs of four terminals (keep the total at 16 or fewer, §1).

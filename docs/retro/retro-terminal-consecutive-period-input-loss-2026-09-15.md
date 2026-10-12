@@ -30,7 +30,7 @@ substitution ran across an entire run: many blanks, one composed glyph at the
 end that can only draw 2–3 dots.
 
 **Fix:** `font-variant-ligatures: none` + `font-feature-settings: "calt" 0`,
-declared *outside* `@layer base` in `frontend/app/reset.scss`.
+declared *outside* `@layer base` in [`frontend/app/reset.scss`](../../frontend/app/reset.scss).
 
 ---
 
@@ -176,7 +176,7 @@ will silently do nothing on exactly the form controls that matter.
 ## Fix: remove the font, not the feature
 
 **Shipped fix — delete the bundled JetBrains Mono** (3 woff2 files + its
-loader in `frontend/util/fontutil.ts`). It was the only font we shipped
+loader in [`frontend/util/fontutil.ts`](../../frontend/util/fontutil.ts)). It was the only font we shipped
 carrying these `calt` rules; Hack, our actual mono default, has no `calt`
 table at all. With it unloaded, the CSS rules that merely *name* it in a
 fallback list fall through to system `monospace` (Consolas / DejaVu Sans

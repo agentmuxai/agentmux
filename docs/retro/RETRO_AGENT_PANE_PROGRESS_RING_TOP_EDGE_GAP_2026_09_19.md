@@ -3,7 +3,7 @@
 **Date:** 2026-09-19
 **Severity:** Low — cosmetic, reported on the agent pane's busy-indicator ring.
 **Status:** implemented — PR #3443, on the third attempt.
-`frontend/app/view/agent/agent-view.scss` was changed
+[`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) was changed
 (`.agent-pane-progress-bar-slot`); see "Fix v2" below for what actually
 shipped. Earlier revisions of this document described this as
 investigation-only with no fix applied (true for the first pass,
@@ -26,10 +26,10 @@ the gap.
 
 ## Relevant code
 
-- `frontend/app/element/PaneChrome.scss` `.pane-stack::after` — the pane's
+- [`frontend/app/element/PaneChrome.scss`](../../frontend/app/element/PaneChrome.scss) `.pane-stack::after` — the pane's
   selection/border ring: `position: absolute; inset: 0; border: 2px solid
   var(--pane-ring-color, var(--border-color));`.
-- `frontend/app/view/agent/agent-view.scss`:
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss):
   - `.agent-pane-progress-bar-slot` — `position: absolute; inset: 2px;` —
     explicitly inset by the ring's 2px border width so the bar nests inside
     it (`SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md`).
@@ -51,14 +51,14 @@ the gap.
 Rather than guess from reading CSS, I built an isolated static repro
 (`C:\Users\user\.agentmux\agents\agent1-06309\repro\ring-repro.html`) that
 reproduces the exact selector structure and computed values pulled from the
-real theme (`frontend/app/theme.scss`, `frontend/tailwindsetup.css`):
+real theme ([`frontend/app/theme.scss`](../../frontend/app/theme.scss), [`frontend/tailwindsetup.css`](../../frontend/tailwindsetup.css)):
 
 - `--block-border-radius: 0` (default theme value — square corners, not
   rounded, so corner-radius mismatch between the ring and the slot is not a
   factor)
 - `--header-height: 33px`, `--space-1: 4px` (real header sizing/padding)
 - `--zoomfactor: 1` (the default; only overridden per-pane by
-  `frontend/app/store/zoom.ts` when a pane is explicitly zoomed)
+  [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) when a pane is explicitly zoomed)
 - The real `.pane-stack::after` ring, `.agent-pane-progress-bar-slot`, and
   `.agent-pane-progress-bar` (mask technique included) rules, copied
   verbatim with variables substituted.
@@ -123,7 +123,7 @@ constantly present or constantly absent, is the signature of a
 either always-present or never-present, independent of scale level — as the
 DPR 1/1.25/1.5/1.75 tests above already showed for pure inset/padding math).
 
-`frontend/app/store/zoom.ts` draws a real distinction the first investigation
+[`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) draws a real distinction the first investigation
 pass missed:
 
 - **Per-pane content zoom** (`term:zoom` meta, `Ctrl+Scroll` on a
@@ -136,7 +136,7 @@ pass missed:
   per that file's own header comment) is a *different* mechanism:
   `applyChromeZoomCSS` sets `--zoomfactor` directly on
   `document.documentElement`, global and inherited by everything in the
-  window. `frontend/app/mixins.scss`'s `block-frame-default-header-layout()`
+  window. [`frontend/app/mixins.scss`](../../frontend/app/mixins.scss)'s `block-frame-default-header-layout()`
   — the mixin the agent pane's own hoisted header uses — applies
   `zoom: var(--zoomfactor, 1)` to itself. So the agent pane header scales
   with **chrome** zoom, a mechanism this retro's first pass never
@@ -195,7 +195,7 @@ adjacent to the zoomed element.
 
 ## Fix v1 (superseded) — uniform overlap on all four sides
 
-`frontend/app/view/agent/agent-view.scss`, two paired changes, applied
+[`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss), two paired changes, applied
 uniformly on all four sides:
 
 1. `.agent-pane-progress-bar-slot`: inset changed from `2px` to `1px`

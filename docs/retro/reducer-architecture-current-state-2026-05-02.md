@@ -368,7 +368,7 @@ This is a structural catalog, not a behavioral one. It does not document:
 - The actual correctness invariants each reducer enforces (only their type-system invariants — what `apply()` actually returns)
 - Drift between intent (specs) and implementation (this is hinted at in some spec references but not exhaustively audited)
 
-For those, the relevant docs are `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`, `docs/retro/saga-architecture-migration-complete-2026-05-02.md`, and individual saga PR descriptions.
+For those, the relevant docs are [`docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](../specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md), [`docs/retro/saga-architecture-migration-complete-2026-05-02.md`](saga-architecture-migration-complete-2026-05-02.md), and individual saga PR descriptions.
 
 ---
 

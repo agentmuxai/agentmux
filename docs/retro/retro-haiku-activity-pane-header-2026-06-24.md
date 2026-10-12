@@ -149,8 +149,8 @@ already does).
 | `agentmux-srv/src/server/app_api.rs:2010` | Reference implementation — `register_session_digest` reads FileStore correctly |
 | `agentmux-srv/src/backend/wps.rs:28,326` | `EVENT_BLOCK_FILE` constant; `publish()` only persists when `persist > 0` |
 | `agentmux-srv/src/backend/blockcontroller/shell.rs:1381` | Block file events published with `persist: 0` |
-| `frontend/app/view/agent/hooks/useAgentActivitySummary.ts` | Frontend hook — correct, waiting on a non-empty summary from the RPC |
-| `frontend/app/view/agent/agent-model.ts:115` | `viewText()` reads `term:activity` — correct, never reached |
+| [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts) | Frontend hook — correct, waiting on a non-empty summary from the RPC |
+| [`frontend/app/view/agent/agent-model.ts:115`](../../frontend/app/view/agent/agent-model.ts) | `viewText()` reads `term:activity` — correct, never reached |
 
 ---
 

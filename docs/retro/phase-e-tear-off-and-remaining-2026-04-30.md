@@ -286,4 +286,4 @@ Codex P2 from #613 (post-merge): ambiguous block-parent during bootstrap (multi-
 
 **Option D rollout planned as E.2c.6** — one PR after E.2c.5b lands.
 
-This document committed to `docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md` so the analysis survives the next session.
+This document committed to [`docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`](phase-e-tear-off-and-remaining-2026-04-30.md) so the analysis survives the next session.

@@ -66,10 +66,10 @@ The `nodes` signal grows monotonically during a session. No trimming or offloadi
 
 | File | Line | Role |
 |------|------|------|
-| `frontend/app/view/agent/agent-view.tsx` | 325–380 | `writeSnapshotNow` + 30 s interval |
-| `frontend/app/view/agent/agent-view.tsx` | 340–357 | `JSON.stringify(snapshot)` + `write_state` call |
-| `frontend/app/store/ws.ts` | 12–13 | `WarnWebSocketSendSize = 1 MB`, `MaxWebSocketSendSize = 5 MB` |
-| `frontend/app/store/ws.ts` | 230–239 | `sendMessage` — serializes, measures, drops if > 5 MB |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 325–380 | `writeSnapshotNow` + 30 s interval |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 340–357 | `JSON.stringify(snapshot)` + `write_state` call |
+| [`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) | 12–13 | `WarnWebSocketSendSize = 1 MB`, `MaxWebSocketSendSize = 5 MB` |
+| [`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) | 230–239 | `sendMessage` — serializes, measures, drops if > 5 MB |
 | `agentmux-srv/src/backend/rpc_types.rs` | 2033 | `CommandAgentSessionWriteStateData.content: String` |
 | `agentmux-srv/src/server/agent_handlers.rs` | 2027 | Backend handler — writes `output.state.json` |
 

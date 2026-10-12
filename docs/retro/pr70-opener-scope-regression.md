@@ -76,4 +76,4 @@ This correctly allows `openPath()` for any file path — needed for both:
 
 - [ ] Fix `default.json`: scope `opener:allow-open-path` with `{ "path": "**" }`
 - [ ] Add settings-button click to smoke test checklist
-- [ ] Document Tauri ACL scope semantics in `docs/` for future reference
+- [ ] Document Tauri ACL scope semantics in [`docs/`](..) for future reference

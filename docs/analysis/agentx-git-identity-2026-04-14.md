@@ -25,7 +25,7 @@ Launching the AgentX forge agent from the AgentMux agent picker:
    the host has no `user.name` / `user.email`.
 
 This is **not** AgentMux's message — a `grep -r "no git identity"`
-across `frontend/` and `agentmux-srv/src/` returns zero hits. The
+across [`frontend/`](../../frontend) and `agentmux-srv/src/` returns zero hits. The
 warning is produced by Claude Code itself on startup when the working
 directory is inside a git repo (or has a git parent) and no
 `user.name`/`user.email` can be resolved.

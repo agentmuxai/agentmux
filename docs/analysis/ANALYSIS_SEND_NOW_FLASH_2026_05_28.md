@@ -3,8 +3,8 @@
 **Author:** AgentA
 **Status:** analysis — Bug confirmed, root cause identified, fix proposed.
 **Reported by:** user (this session) — "it flashes a 'send now' panel even when the agent isn't busy."
-**Affected file:** `frontend/app/view/agent/agent-view.tsx:811-825`
-**Related spec:** `docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`
+**Affected file:** [`frontend/app/view/agent/agent-view.tsx:811-825`](../../frontend/app/view/agent/agent-view.tsx)
+**Related spec:** [`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](../specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md)
 
 ---
 
@@ -28,7 +28,7 @@ After a user types into the composer and hits Send from an idle pane, the "Send 
 />
 ```
 
-`workingFromPhase` (defined in `frontend/app/store/agent-pane-state/types.ts:288`) returns `true` for `{Submitting, Streaming, Interrupting}`:
+`workingFromPhase` (defined in [`frontend/app/store/agent-pane-state/types.ts:288`](../../frontend/app/store/agent-pane-state/types.ts)) returns `true` for `{Submitting, Streaming, Interrupting}`:
 
 ```ts
 export function workingFromPhase(phase: TurnPhase): boolean {
@@ -176,8 +176,8 @@ The `PendingMessagesPanel` itself (the queued-zone visibility) is unchanged — 
 
 ## Files touched by the fix
 
-- `frontend/app/store/agent-pane-state/types.ts` — add `isInterruptibleTurn` export.
-- `frontend/app/view/agent/agent-view.tsx` — swap predicate at line 819; update inline comment.
-- `frontend/app/view/agent/state.test.ts` (or sibling) — three unit tests.
+- [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) — add `isInterruptibleTurn` export.
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — swap predicate at line 819; update inline comment.
+- [`frontend/app/view/agent/state.test.ts`](../../frontend/app/view/agent/state.test.ts) (or sibling) — three unit tests.
 
 Total diff: ~30 lines added, 1 line changed.

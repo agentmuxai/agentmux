@@ -24,12 +24,12 @@ Plus a broader framing question: this is the *first* shipped agent → app callb
 | Capability | Status | Reference |
 |---|---|---|
 | `pane.open` RPC — high-level intent: open a pane with `view`, `file`, `cwd`, `title`, `tab_id`, `split_direction`, `focus` | ✅ implemented | `COMMAND_PANE_OPEN` const at `agentmux-srv/src/backend/rpc_types.rs:407`, `CommandPaneOpenData` struct at `:809`, handler in `agentmux-srv/src/server/app_api.rs` |
-| Editor pane backed by multi-tab state (`tabs[]`, `activeTabId`, `recentlyClosed[]`) | ✅ shipped | `frontend/app/store/editor-pane-state-store.ts:64-69` |
+| Editor pane backed by multi-tab state (`tabs[]`, `activeTabId`, `recentlyClosed[]`) | ✅ shipped | [`frontend/app/store/editor-pane-state-store.ts:64-69`](../../frontend/app/store/editor-pane-state-store.ts) |
 | `createblock` low-level RPC (returns `ORef`) | ✅ shipped | `frontend/app/store/rpc-api.ts:105` |
 | `open_agent` callback (CEF → frontend via `CustomEvent`) — proves the agent→app pattern works | ✅ shipped | `agentmux-cef/src/commands/palette.rs:60` |
 | `WshRpcEngine` handler registration framework on the sidecar | ✅ shipped | `agentmux-srv/src/backend/rpc/engine.rs:189` |
 | General-purpose terminal CLI for agent → app calls | ❌ none today | But see the next two rows — the transport and the precedent both exist. |
-| In-pane Rust binary that calls the sidecar over the local URL | ✅ shipped as `agentmux-bashwrap` | A streaming bash wrapper + Claude PreToolUse hook helper. Lives at `agentmux-bashwrap/`; reads `AGENTMUX_LOCAL_URL` and dials the sidecar via `reqwest`. Proves the in-pane → sidecar path. The `wsh*` files in `frontend/app/store/` are an unrelated **frontend** RPC client layer renamed `rpc-*` per `docs/specs/SPEC_RENAME_WSH_TO_RPC_2026_04_17.md`. |
+| In-pane Rust binary that calls the sidecar over the local URL | ✅ shipped as `agentmux-bashwrap` | A streaming bash wrapper + Claude PreToolUse hook helper. Lives at `agentmux-bashwrap/`; reads `AGENTMUX_LOCAL_URL` and dials the sidecar via `reqwest`. Proves the in-pane → sidecar path. The `wsh*` files in [`frontend/app/store/`](../../frontend/app/store) are an unrelated **frontend** RPC client layer renamed `rpc-*` per [`docs/specs/SPEC_RENAME_WSH_TO_RPC_2026_04_17.md`](../specs/SPEC_RENAME_WSH_TO_RPC_2026_04_17.md). |
 | Sidecar local URL injected into spawned PTYs | ✅ shipped | `AGENTMUX_LOCAL_URL` (an `http://<addr>` value) set at `agentmux-srv/src/main.rs:695`, passed through to shells at `agentmux-srv/src/backend/blockcontroller/shell.rs:527-528`. **Local terminal panes already have a working sidecar address.** |
 | MCP server inside AgentMux | ❌ none |   |
 | Path translation (container → host, WSL → host, SSH → host) | ❌ none |   |

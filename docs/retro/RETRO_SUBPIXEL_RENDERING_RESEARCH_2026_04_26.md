@@ -748,9 +748,9 @@ variable to switch between them in dev for A/B comparison.
 
 ### Prior internal retros (referenced)
 
-- `docs/retro/RETRO_TAB_SEPARATOR_DISTANCE_2026_04_26.md`
-- `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`
-- `docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`
+- [`docs/retro/RETRO_TAB_SEPARATOR_DISTANCE_2026_04_26.md`](RETRO_TAB_SEPARATOR_DISTANCE_2026_04_26.md)
+- [`docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`](RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md)
+- [`docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`](../specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md)
 
 [resig]: https://johnresig.com/blog/sub-pixel-problems-in-css/
 [brosset]: https://patrickbrosset.com/articles/2024-06-21-invasion-of-the-border-snappers/
