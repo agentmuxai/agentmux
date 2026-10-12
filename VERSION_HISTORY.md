@@ -1,5 +1,44 @@
 # AgentMux Version History
 
+## 0.59.21 — 2026-10-12
+
+- Terminals keep the window responsive while it is resized on machines where resizing a terminal is slow
+- macOS: browser panes keep up with the window edge while it is resized, and settle as soon as the drag stops
+- The Editor's document tabs now use the same tab bar, keys, saving and tab moves as Media's, so a tab feature works the same in both and is built once. Media's tab bar gains the Editor's single full-width line under the tabs.
+- Drag an Editor or Media tab near the edge of any pane to open it in a new pane on that side, or right-click a tab and choose Move to New Pane.
+- AgentMux now records which MCP servers each running Claude agent actually has (connected, failed or needing a sign-in, and where each comes from), ready for Connectors to show.
+- Connectors → MCP servers opens with In use now: every MCP server your running agents actually have, wherever it comes from (built in, the catalog, claude.ai connectors, account or project config), with each agent's status: connected, failed or needing a sign-in.
+- macOS: a window with a browser pane open can be resized from its edges again
+- WhoIsWorkingOn now lists other agents' open PRs that touch what you ask about, on any computer, and can check a PR's files; an agent opening a PR is told if other agents on this computer are working on the same files.
+- macOS: browser panes move with the window while it is resized, so a page no longer trails its pane
+- Windows: Escape while dragging a tab or pane tab out of the window now cancels the drag instead of opening a new window
+- fix(agent-pane): scrolling up stops paging older turns in once the pane holds its 1 MB live feed, and "Show agent history" appears right away instead of only after returning to the bottom
+- fix(dev): Linux task dev windows match their .desktop file again, and task dev warns when a snap-installed task hides the icon
+- A Grep call in the agent pane now shows where and how it searched (folder, file filter, flags, output mode and limit), not just its pattern
+- docs: macOS testing findings log
+- Agent pane: drop the "Woke up" line, which landed on the user's own turns and made the send flash; the status bar's token counts look like the other stats
+- docs(analysis): Linux window paint — what the Windows and macOS resize work gives Linux, measured, and what Linux still needs
+- Connectors → MCP servers says when a running agent should have a catalog server but doesn't: "Not loaded by AgentY and Korp. Restart them to apply." A server you bind, or switch on for all agents, reaches an agent only when it next starts.
+- Swarm: agents on this machine's other channels and on LAN hosts now show a status chip (working, question or idle), as your own agents do.
+- Esc now cancels a tab or pane-tab break-off on macOS and Linux too, not only on Windows: AgentMux reads the mouse button when the drag ends, and on Wayland, where it can't, the Escape key that ended it.
+- An agent restarted before its first message (for example by a model change right after switching its account) no longer shows "Agent encountered an error", and shows one "Given to the agent" card instead of two
+- After an account switch (or any fresh session that continues a pane's conversation), the agent pane now shows a short ambient note once the "Given to the agent" card is written: where things stand, then "How can I help?"
+- macOS: dragging a window tab onto a torn-off window's tab strip moves it there again; torn-off windows were invisible to the redock hit test.
+- The Windows portable download is now a .7z (solid LZMA2) instead of a .zip: 127 MiB instead of 205 MiB on 0.59.19. Windows 11 opens it directly; Windows 10 needs 7-Zip. task package now needs 7-Zip.
+- Linux: dragging a window tab onto another AgentMux window's tab strip moves it there, on X11 and Wayland, instead of tearing it off into a new window.
+- On Windows, dropping a pane onto another AgentMux window moves it into that window's active tab; the receiving window ignored such drops. A window tab merges only onto another window's tab strip and tears off anywhere else, as in Chrome.
+- fix(remotes): a dropped SSH terminal stays open and says so, two aliases for one account no longer share a login, and a host's status is what its connection is
+- In the Swarm, an agent that is working or waiting on a question now shows the same small ASCII spinner as the agent pane's status line, instead of a pulsing red dot. An idle agent keeps its still green dot.
+- perf(ws): send queued startup messages at once when the socket opens; GetFullConfig no longer waits 1.3-1.8 s behind them on macOS launches
+- perf(srv): cache the login-shell PATH so macOS launches no longer spend 1-2 s running the user's shell before the window can start
+- perf(cef): start the window and pane pools once the main window has loaded, not when its browser is created, so startup doesn't run three renderers at once
+- perf(macos): build the DMG with LZFSE instead of LZMA; launching from or copying out of a fresh mount reads the app about 10x faster (DMG 170 MB -> 223 MB)
+- perf(srv): re-read the disk list and free space every 30 s instead of every second; per-tick disk I/O rates are unchanged
+- fix(srv): shut down when the launcher exits even though its stderr is gone; macOS 'Quit & Reopen' no longer leaves srv running and the app unopenable
+- fix(launcher): on macOS, a Quit from AppKit (Dock, logout, System Settings' Quit & Reopen) now runs the launcher's teardown of the host and srv instead of exiting on the spot
+- fix(launcher): if an srv left behind by an earlier launch still holds the data dir, stop it and start fresh instead of failing to open
+- macOS builds check that the CEF framework has the fix for browser panes in a second window, which used to crash the app
+
 ## 0.59.20 — 2026-10-11
 
 - Your devices see this computer go offline at once when you quit AgentMux, sign out of MuxBus Cloud or turn off the new "Publish this computer to my devices" setting. Dev builds, headless installs and isolated homes no longer publish, and Settings says why.
