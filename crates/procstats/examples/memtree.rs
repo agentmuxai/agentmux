@@ -157,16 +157,18 @@ fn stem(name: &str) -> String {
     lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
 }
 
-/// CEF/Electron subprocess role from `--type=`, else "main".
-fn role(p: &ProcInfo) -> String {
-    command_line_of(p.key())
-        .and_then(|line| {
-            line.split_whitespace().find_map(|w| {
+/// CEF/Electron subprocess role from `--type=`, "main" without one, or
+/// `None` when the command line couldn't be read (try again next sample).
+fn role(p: &ProcInfo) -> Option<String> {
+    let line = command_line_of(p.key())?;
+    Some(
+        line.split_whitespace()
+            .find_map(|w| {
                 w.strip_prefix("--type=")
                     .map(|t| t.trim_matches('"').to_string())
             })
-        })
-        .unwrap_or_else(|| "main".into())
+            .unwrap_or_else(|| "main".into()),
+    )
 }
 
 /// One metric summed over a set of processes, with how many had it.
@@ -402,7 +404,21 @@ fn main() {
                 in_pane.insert(p.key());
             }
             let (pss, uss) = pss_uss(p.pid);
-            let role = roles.entry(p.key()).or_insert_with(|| role(p)).clone();
+            // Cached once read; an unreadable command line is retried. On
+            // Linux, a process the zygote forked keeps the zygote's
+            // `--type=zygote` command line, so it is labelled by its parent.
+            if !roles.contains_key(&p.key()) {
+                if let Some(r) = role(p) {
+                    roles.insert(p.key(), r);
+                }
+            }
+            let mut role = roles.get(&p.key()).cloned().unwrap_or_else(|| "?".into());
+            let parent_is_zygote = all.iter().any(|q| {
+                p.is_child_of(q) && roles.get(&q.key()).map(String::as_str) == Some("zygote")
+            });
+            if role == "zygote" && parent_is_zygote {
+                role = "zygote-forked".into();
+            }
             rows.push(Row {
                 pid: p.pid,
                 name: base_name(&p.name).to_string(),
