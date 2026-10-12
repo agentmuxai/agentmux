@@ -71,6 +71,8 @@ pub use macos::start_tab_drag_tracking;
 pub(crate) use macos::register_window_number as macos_register_window_number;
 #[cfg(target_os = "macos")]
 pub(crate) use macos::unregister_window_label as macos_unregister_window_label;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::replace_window_numbers as macos_replace_window_numbers;
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn start_tab_drag_tracking(

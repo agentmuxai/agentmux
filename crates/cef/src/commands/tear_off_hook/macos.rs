@@ -121,6 +121,12 @@ pub(crate) fn register_window_number(number: i64, label: String) {
     g.get_or_insert_with(HashMap::new).insert(number, label);
 }
 
+/// Replace the whole cache with `numbers`, read on the CEF UI thread by
+/// `app::macos_refresh_window_numbers` when a tab drag starts.
+pub(crate) fn replace_window_numbers(numbers: HashMap<i64, String>) {
+    *WINDOW_LABELS_BY_NUMBER.lock().unwrap() = Some(numbers);
+}
+
 pub(crate) fn unregister_window_label(label: &str) {
     if let Some(map) = WINDOW_LABELS_BY_NUMBER.lock().unwrap().as_mut() {
         map.retain(|_, v| v != label);
@@ -256,6 +262,20 @@ pub fn start_tab_drag_tracking(
 
     // One session at a time, same as Windows.
     stop_active_hook_session_locked();
+
+    // A window hidden when it was created (every pool window, so every
+    // torn-off window) had no window number to cache then, so re-read them
+    // all now that this drag may target one, and wait for it before the tap
+    // goes in, so even a quick release hit-tests against the fresh cache.
+    // This runs off the UI thread (IPC on spawn_blocking), so the wait can't
+    // block the task it waits for.
+    let refreshed = crate::ui_tasks::post_refresh_macos_window_numbers(&state);
+    if refreshed.recv_timeout(std::time::Duration::from_millis(250)).is_err() {
+        tracing::warn!(
+            target: "dnd:tabdrag:macos",
+            "[dnd:tabdrag:macos] window-number refresh didn't finish within 250 ms; using the cache as it is"
+        );
+    }
 
     if !accessibility_trusted() {
         tracing::warn!(
