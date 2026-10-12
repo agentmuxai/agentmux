@@ -230,7 +230,7 @@ selected":
 - Claude Code docs: Agent SDK reference, TypeScript (`setModel`, `applyFlagSettings`, `initializationResult`, `modelUsage`): https://code.claude.com/docs/en/agent-sdk/typescript
 - Control schema strings in the installed CLI (`claude.exe` 2.1.280): `set_model`, `apply_flag_settings`, `get_settings` with `applied: {model, effort}`; the `result` message's own schema (no top-level primary-model field) and its `modelUsage` field's internal description ("Subagents started through the Agent tool in this session, as running totals")
 - [`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`](../specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md) §6 item 3, flagging `modelUsage`'s multi-model-subagent shape as an open question independently of this report
-- [`frontend/app/view/agent/buildRuntimeArgs.ts:127-136`](../../frontend/app/view/agent/buildRuntimeArgs.ts#L127-L136), the existing `bypass` → CLI `--permission-mode default` translation for control-protocol agents this report's reconciler must not undo (Codex P2 on this PR)
+- [`frontend/app/view/agent/buildRuntimeArgs.ts:127-136`](../../frontend/app/view/agent/buildRuntimeArgs.ts), the existing `bypass` → CLI `--permission-mode default` translation for control-protocol agents this report's reconciler must not undo (Codex P2 on this PR)
 - Kubebuilder book: Good Practices: https://book.kubebuilder.io/reference/good-practices.html
 - Kubernetes status and conditions (observedGeneration, `kubectl wait`): https://www.golinuxcloud.com/kubernetes-status-and-conditions/
 - KEP-5067, Pod generation / observedGeneration: https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/5067-pod-generation

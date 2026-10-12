@@ -26,7 +26,7 @@ already shows for the identical call: `ls /c/Users/area54/ 2>/dev/null | head -5
 
 ## 2. Two implementations of the same idea
 
-**A — [`frontend/app/view/agent/stream-parser.ts:117`](../../frontend/app/view/agent/stream-parser.ts#L117), `extractToolDetail`.** Typed,
+**A — [`frontend/app/view/agent/stream-parser.ts:117`](../../frontend/app/view/agent/stream-parser.ts), `extractToolDetail`.** Typed,
 per-tool, covers 10 kinds, and picks the field a human actually wants:
 
 ```ts

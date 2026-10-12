@@ -463,10 +463,10 @@ Never glob for log files. Never guess paths. Use the pointer files.
 
 | # | What | Files | Lines | Priority |
 |---|------|-------|-------|----------|
-| 1 | Consolidate sidecar logs to `~/.agentmux/logs/` | [`crates/srv/src/main.rs:533`](../crates/srv/src/main.rs#L533) | 3 | P0 |
+| 1 | Consolidate sidecar logs to `~/.agentmux/logs/` | [`crates/srv/src/main.rs:533`](../crates/srv/src/main.rs) | 3 | P0 |
 | 2 | Inject `AGENTMUX_LOG_DIR` into shells | `shell.rs:486` | 5 | P0 |
-| 3 | Write `current-host.path` pointer | [`crates/cef/src/main.rs:306`](../crates/cef/src/main.rs#L306) | 3 | P0 |
-| 4 | Write `current-srv.path` pointer | [`crates/srv/src/main.rs:544`](../crates/srv/src/main.rs#L544) | 3 | P0 |
+| 3 | Write `current-host.path` pointer | [`crates/cef/src/main.rs:306`](../crates/cef/src/main.rs) | 3 | P0 |
+| 4 | Write `current-srv.path` pointer | [`crates/srv/src/main.rs:544`](../crates/srv/src/main.rs) | 3 | P0 |
 | 5 | Launcher file logging | [`crates/launcher/src/main.rs`](../crates/launcher/src/main.rs) | ~35 | P1 |
 | 6 | Heartbeat refreshes host pointer | `memory_heartbeat.rs:16` | 5 | P1 |
 | 7 | 7-day log retention on startup | Both `main.rs` init_logging | 15 | P2 |

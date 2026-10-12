@@ -280,7 +280,7 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 
 | # | Action | Evidence |
 |---|---|---|
-| 1 | Remove active BUG-TRACE logging | [`frontend/app/tab/tabcontent.tsx:62-68`](../../frontend/app/tab/tabcontent.tsx#L62-L68) |
+| 1 | Remove active BUG-TRACE logging | [`frontend/app/tab/tabcontent.tsx:62-68`](../../frontend/app/tab/tabcontent.tsx) |
 | 2 | `cargo fix --workspace` (49 mechanical warning fixes; skip in-flight files) | §2.1 |
 | 3 | Delete dead Taskfile/`package.json` entries: 11 `tsunami:*` tasks, `storybook`, `package:portable` script, phantom `docs` workspace; delete [`scripts/verify-package.sh`](../../scripts/verify-package.sh) | §4.5 |
 | 4 | Fix invalid SPDX `Apache-2.0s` (3 files) | §4.4 |

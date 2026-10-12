@@ -16,7 +16,7 @@ The operator, 2026-10-07:
 
 ## 1. Theme menu stays open after a choice
 
-**Where it closes.** The hamburger menu ([`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx)) is a `FlyoutMenu`. Every theme is a leaf item whose `onClick` writes `window:theme` (`hamburger-menu.tsx:44–52`). `FlyoutMenu.handleOnClick` ([`frontend/app/element/flyoutmenu.tsx:192`](../../frontend/app/element/flyoutmenu.tsx#L192)) closes the whole menu first, then runs the click:
+**Where it closes.** The hamburger menu ([`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx)) is a `FlyoutMenu`. Every theme is a leaf item whose `onClick` writes `window:theme` (`hamburger-menu.tsx:44–52`). `FlyoutMenu.handleOnClick` ([`frontend/app/element/flyoutmenu.tsx:192`](../../frontend/app/element/flyoutmenu.tsx)) closes the whole menu first, then runs the click:
 
 ```ts
 const handleOnClick = (e: MouseEvent, item: MenuItem) => {
@@ -27,7 +27,7 @@ const handleOnClick = (e: MouseEvent, item: MenuItem) => {
 };
 ```
 
-There's no way for an item to opt out. `MenuItem` ([`frontend/types/custom.d.ts:632`](../../frontend/types/custom.d.ts#L632)) has no such field.
+There's no way for an item to opt out. `MenuItem` ([`frontend/types/custom.d.ts:632`](../../frontend/types/custom.d.ts)) has no such field.
 
 **Precedent.** The app's other menu, `PopoverMenu` (`frontend/app/element/popover-menu.tsx:20, :131`), already has `keepOpen?: boolean` and skips its close for such an item (#1586, used by the title-bar menu at `titlebar-context-menu.tsx:97`). The runtime panel also stays open by decision (`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md` §9.2), and that spec names `FlyoutMenu`'s close-on-select as the behaviour it departs from.
 
@@ -53,11 +53,11 @@ There's no way for an item to opt out. `MenuItem` ([`frontend/types/custom.d.ts:
 
 | Section | Source | Longest today |
 |---|---|---|
-| Mode | `permissionModeText()` notes ([`frontend/app/view/agent/runtime-capabilities.ts:161`](../../frontend/app/view/agent/runtime-capabilities.ts#L161)) | 110 characters: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically" |
+| Mode | `permissionModeText()` notes ([`frontend/app/view/agent/runtime-capabilities.ts:161`](../../frontend/app/view/agent/runtime-capabilities.ts)) | 110 characters: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically" |
 | Model | each provider's `models[].description` ([`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts)) | 41 characters ("Anthropic's Sonnet, served by Antigravity"), next to a 28-character label ("Claude Sonnet 4.6 (Thinking)") |
 | Effort | `EFFORT_OPTIONS` (`AgentRuntimeDropup.tsx:66`) | none have a description |
 
-**Why it overflows.** `.menu.agent-runtime-dropup-panel` has `min-width: 180px` and no maximum ([`frontend/app/view/agent/styles/_composer-strip.scss:247`](../../frontend/app/view/agent/styles/_composer-strip.scss#L247)). `.agent-runtime-dropup-description` is `white-space: nowrap` with an ellipsis (`:315`). The row never constrains the description, so the ellipsis never applies: the panel grows to the longest single line and runs past the pane.
+**Why it overflows.** `.menu.agent-runtime-dropup-panel` has `min-width: 180px` and no maximum ([`frontend/app/view/agent/styles/_composer-strip.scss:247`](../../frontend/app/view/agent/styles/_composer-strip.scss)). `.agent-runtime-dropup-description` is `white-space: nowrap` with an ellipsis (`:315`). The row never constrains the description, so the ellipsis never applies: the panel grows to the longest single line and runs past the pane.
 
 **Fix, in two parts.**
 
@@ -95,7 +95,7 @@ There's no way for an item to opt out. `MenuItem` ([`frontend/types/custom.d.ts:
 
 | State | Where | Code |
 |---|---|---|
-| Output streaming | `ChunkList`, above the log lines | [`frontend/app/view/agent/components/ToolOverlayLog.tsx:505`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx#L505) (`bashCommand()`, `:125`) |
+| Output streaming | `ChunkList`, above the log lines | [`frontend/app/view/agent/components/ToolOverlayLog.tsx:505`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) (`bashCommand()`, `:125`) |
 | Waiting for the first output | `ToolOverlayResult`'s "Thinking…" fallback | `ToolOverlayLog.tsx:556` |
 | Finished | `BashOutputViewer`, above stdout / stderr | [`frontend/app/view/agent/components/BashOutputViewer.tsx`](../../frontend/app/view/agent/components/BashOutputViewer.tsx) (`<BashCommandView command={props.params.command} />`) |
 

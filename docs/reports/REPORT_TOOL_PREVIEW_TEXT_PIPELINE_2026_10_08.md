@@ -17,7 +17,7 @@ The concern is justified. There is no preview pipeline: each preview type takes 
 - **"2-space tabs don't work."** No code turns tabs into spaces. The only lever is one CSS rule, `tab-size: 2`, on one part of the tool panel. It doesn't reach jekts, the persistent shell or the activity dock. Where it does reach, tab stops are counted from the start of the line *including the line-number gutter*, so the first indent level of a tab-indented file comes out half as wide as the rest. Separately, the JS indent narrowing gives up the moment a file has a tab.
 - **"Lines wrap for no reason."** Three separate causes:
   1. Every plain-text result (Grep, Glob, MCP, Task, the default renderer, a Read that fell back) goes through a viewer that soft-wraps anywhere, mid-path and mid-token. Code previews (Read, Write, Edit, Bash) never wrap. So whether a line wraps depends on which tool produced it.
-  2. Every Bash command runs in an **80-column terminal** ([`crates/bashwrap/src/bash_wrap.rs:990`](../../crates/bashwrap/src/bash_wrap.rs#L990), `COLUMNS=80`). Programs that size their output to the terminal (tables, help text, column lists, progress bars) put real line breaks at column 80 before the preview ever sees the text. No CSS can undo that.
+  2. Every Bash command runs in an **80-column terminal** ([`crates/bashwrap/src/bash_wrap.rs:990`](../../crates/bashwrap/src/bash_wrap.rs), `COLUMNS=80`). Programs that size their output to the terminal (tables, help text, column lists, progress bars) put real line breaks at column 80 before the preview ever sees the text. No CSS can undo that.
   3. While a tool streams, each output chunk is its own block. bashwrap flushes at 4096 bytes or 50 ms of quiet, so a line can break mid-line while streaming and rejoin when the tool finishes.
 
 There are also defects nobody has reported yet:
@@ -69,7 +69,7 @@ The same jobs are done several times, differently:
 
 ### 3.2 Tabs: one CSS rule, partly applied, with the gutter in its tab stops
 
-- [`frontend/app/reset.scss:26`](../../frontend/app/reset.scss#L26) sets `tab-size: 4` everywhere, and Tailwind's preflight sets it again.
+- [`frontend/app/reset.scss:26`](../../frontend/app/reset.scss) sets `tab-size: 4` everywhere, and Tailwind's preflight sets it again.
 - The only override is `tab-size: 2` on `.agent-view .agent-tool-block .agent-tool-panel` (`styles/_document-nodes.scss:643`, PR #2785).
 - **Not reached (still 4):** jekt body and raw payload, context-delivery bodies, the persistent shell log (`PersistentShellBlock.tsx` renders `.agent-tool-panel` under `.agent-shell-block`, not `.agent-tool-block`), the activity dock log, message bodies, and the hover peek (portaled outside `.agent-view`).
 - **No JS converts tabs.** `normalizeIndentWidth` returns early if any leading run contains a tab (`dedent.ts:171`, "tab width is CSS's business"). A tab-indented file is therefore not narrowed at all, and a file mixing tabs and spaces keeps its space indentation at full width.
@@ -111,7 +111,7 @@ In the Shiki path, diff lines are therefore inline and their highlight covers on
 
 ### 3.5 Text that should never reach the screen
 
-- **`^[[1;1R` on every Bash result.** bashwrap pre-writes a cursor-position report into the terminal ([`crates/bashwrap/src/bash_wrap.rs:1149`](../../crates/bashwrap/src/bash_wrap.rs#L1149)). The terminal echoes it back as the printable characters `^[[1;1R`, which escape-code stripping can't recognise. It is the first text of every Bash tool result, in the preview and in what the model receives.
+- **`^[[1;1R` on every Bash result.** bashwrap pre-writes a cursor-position report into the terminal ([`crates/bashwrap/src/bash_wrap.rs:1149`](../../crates/bashwrap/src/bash_wrap.rs)). The terminal echoes it back as the printable characters `^[[1;1R`, which escape-code stripping can't recognise. It is the first text of every Bash tool result, in the preview and in what the model receives.
 - **Read's gutter goes into Shiki as code** (`tool-renderers/builtins.tsx:221`), so line numbers are tokenised by the file's grammar.
 - **Shebang detection doesn't work for Read.** It looks at the first line, which still has the gutter on it (`builtins.tsx:85`).
 - **The raw tab gutter comes back** whenever `splitNumberedGutter` declines (any line without a number), or when a Read has no `content` and falls back to `TerminalOutput`, which then wraps.

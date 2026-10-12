@@ -52,7 +52,7 @@ defaults render the scrollbar thumb with the **default arrow**; `cursor: pointer
 (the link hand) on a thumb is a category error — it tells the user "this navigates"
 when it scrolls. Two global rules force the hand:
 
-[`frontend/app/app.scss:68-73`](../../frontend/app/app.scss#L68-L73)
+[`frontend/app/app.scss:68-73`](../../frontend/app/app.scss)
 ```scss
 *::-webkit-scrollbar-thumb {
     cursor: pointer;                       /* ← BUG: link-hand on every scrollbar */
@@ -62,7 +62,7 @@ when it scrolls. Two global rules force the hand:
 }
 ```
 
-[`frontend/app/app.scss:103-105`](../../frontend/app/app.scss#L103-L105)
+[`frontend/app/app.scss:103-105`](../../frontend/app/app.scss)
 ```scss
 .os-scrollbar-handle {
     cursor: pointer;                       /* ← BUG: same, for OverlayScrollbars */

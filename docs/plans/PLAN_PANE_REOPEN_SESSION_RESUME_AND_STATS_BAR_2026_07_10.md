@@ -68,9 +68,9 @@ what the backend/session actually is at mount time.
 - Per-turn re-read of block meta: `agentmux-srv/src/server/agent_handlers/input.rs:256-269`, `agentmux-srv/src/server/app_api/agent_io.rs:189-201`
 - Cross-channel path with no meta → fresh controller: `agent_open.rs:47-70`, `blockcontroller/mod.rs:347-463` (`resync_controller`)
 - Registry-level `session_id` field declared but never written in production: `agentmux-srv/src/registry/schema.rs` (only in tests, per retro)
-- Stats bar component: [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx), wired at [`frontend/app/view/agent/agent-view.tsx:1080-1096`](../../frontend/app/view/agent/agent-view.tsx#L1080-L1096)
+- Stats bar component: [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx), wired at [`frontend/app/view/agent/agent-view.tsx:1080-1096`](../../frontend/app/view/agent/agent-view.tsx)
 - Stats atoms, live-only population: `frontend/app/view/agent/state.ts:69,173`; `frontend/app/view/agent/hooks/useAgentStream.ts:415-469,841`; `frontend/app/view/agent/claude-translator.ts:87-104`
-- Historical stats dropped during replay: [`frontend/app/view/agent/parseHistoryLines.ts:57-73`](../../frontend/app/view/agent/parseHistoryLines.ts#L57-L73)
+- Historical stats dropped during replay: [`frontend/app/view/agent/parseHistoryLines.ts:57-73`](../../frontend/app/view/agent/parseHistoryLines.ts)
 
 ## Proposed changes
 

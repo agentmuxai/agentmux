@@ -55,10 +55,10 @@ Concretely, on a 60 Hz display:
 
 | Site | What it defers | Real reason | Replacement |
 |---|---|---|---|
-| [`frontend/app/element/flyoutmenu.tsx:84`](../../frontend/app/element/flyoutmenu.tsx#L84) (`handleSubMenuPosition`) | Submenu position calc + visibility flip | Wait for the submenu portal's DOM to exist so `offsetWidth/Height` can be read | Compute position synchronously from parent rect + `max-content` width (no measurement needed). If measurement IS needed, use `queueMicrotask` (fires before next paint, ~0ms). |
-| [`frontend/app/block/blockframe.tsx:148`](../../frontend/app/block/blockframe.tsx#L148) | `.focus()` + `.select()` on a `ref` callback | Wait for element to be attached to the document before focusing | Solid `onMount` (fires after attachment) — synchronous, no macrotask hop |
-| [`frontend/app/view/agent/components/AgentSearchBar.tsx:58`](../../frontend/app/view/agent/components/AgentSearchBar.tsx#L58) | `.focus()` on a `ref` callback | Same as above | Same — Solid `onMount` |
-| [`frontend/app/store/command-source.test.ts:119`](../../frontend/app/store/command-source.test.ts#L119) | `await new Promise(r => setTimeout(r, 0))` in a test | Wait for an async store update to settle | `await Promise.resolve()` flushes the microtask queue, or use a deterministic event-based wait. Test-only; not user-facing. |
+| [`frontend/app/element/flyoutmenu.tsx:84`](../../frontend/app/element/flyoutmenu.tsx) (`handleSubMenuPosition`) | Submenu position calc + visibility flip | Wait for the submenu portal's DOM to exist so `offsetWidth/Height` can be read | Compute position synchronously from parent rect + `max-content` width (no measurement needed). If measurement IS needed, use `queueMicrotask` (fires before next paint, ~0ms). |
+| [`frontend/app/block/blockframe.tsx:148`](../../frontend/app/block/blockframe.tsx) | `.focus()` + `.select()` on a `ref` callback | Wait for element to be attached to the document before focusing | Solid `onMount` (fires after attachment) — synchronous, no macrotask hop |
+| [`frontend/app/view/agent/components/AgentSearchBar.tsx:58`](../../frontend/app/view/agent/components/AgentSearchBar.tsx) | `.focus()` on a `ref` callback | Same as above | Same — Solid `onMount` |
+| [`frontend/app/store/command-source.test.ts:119`](../../frontend/app/store/command-source.test.ts) | `await new Promise(r => setTimeout(r, 0))` in a test | Wait for an async store update to settle | `await Promise.resolve()` flushes the microtask queue, or use a deterministic event-based wait. Test-only; not user-facing. |
 
 The flyoutmenu site is the only one with user-visible impact, but the pattern shows up enough to warrant a codebase rule.
 

@@ -54,14 +54,14 @@ Cross-checked against the backend (`agentmuxsrv` log, `[health] turn_active flip
 
 ## 4. Why this became *permanent* instead of self-healing in ≤180s
 
-This class of stuck state is not supposed to be able to persist: `reducer.ts:331`'s `StreamWatchdogTick` handler unconditionally recovers **any** `Streaming` phase with `toolsActive === 0` back to `Idle` once `LIVENESS_RECOVERY_MS` (180s) of inactivity has elapsed — no exemption, no gating on `compacting` in this case (only rate-limit waits extend the threshold, and this pane wasn't rate-limited). This is dispatched by a 5-second `setInterval` armed inside `useTurnLifecycle` ([`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts#L233-L239)), itself invoked from `useAgentStream`'s `onMount` (`useAgentStream.ts:263`).
+This class of stuck state is not supposed to be able to persist: `reducer.ts:331`'s `StreamWatchdogTick` handler unconditionally recovers **any** `Streaming` phase with `toolsActive === 0` back to `Idle` once `LIVENESS_RECOVERY_MS` (180s) of inactivity has elapsed — no exemption, no gating on `compacting` in this case (only rate-limit waits extend the threshold, and this pane wasn't rate-limited). This is dispatched by a 5-second `setInterval` armed inside `useTurnLifecycle` ([`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts)), itself invoked from `useAgentStream`'s `onMount` (`useAgentStream.ts:263`).
 
 **If that interval were actually ticking for this pane, we would see it in the log — and we don't.** The frontend's own logging is edge-triggered but still decisive here: `stream-stuck` only logs once per stall episode (`agent-pane-state-store.ts`'s `slot.stuckLogged` gate), so a *ticking-but-quiet* watchdog would still have produced exactly one `watchdog: no recovery` line around `13:30:17Z` (45s after the stray flush) — and, since nothing ever refreshes `lastEventMs` again, an unconditional `watchdog: FIRED — force-recovered to Idle` line around `13:32:32Z` (180s bound; this branch has no exemption for `toolsActive: 0`). **Neither line exists anywhere in the rest of the day's log for this block.** The only explanation consistent with total silence for 29+ minutes (and counting, as of the last queried timestamp) is that `StreamWatchdogTick` was never dispatched for this pane during that entire window — the interval itself stopped ticking, or was never armed for this specific pane instance.
 
 ### Ruled out during this investigation
 
 - **Reducer logic bug** — ruled out; `reducer.ts:331`'s bound is unconditional for `Streaming`+`toolsActive===0`, correctly implemented, unit-tested.
-- **Pane component unmounted while backgrounded** (my initial hypothesis) — **ruled out directly**: [`frontend/app/workspace/workspace.tsx:22`](../../frontend/app/workspace/workspace.tsx#L22)'s own comment: *"Inactive tabs are hidden via `display:none` — no unmount/remount."* `useAgentStream`'s `onMount` (and therefore the watchdog `setInterval`) fires once when the pane is first opened and is never torn down by a tab switch.
+- **Pane component unmounted while backgrounded** (my initial hypothesis) — **ruled out directly**: [`frontend/app/workspace/workspace.tsx:22`](../../frontend/app/workspace/workspace.tsx)'s own comment: *"Inactive tabs are hidden via `display:none` — no unmount/remount."* `useAgentStream`'s `onMount` (and therefore the watchdog `setInterval`) fires once when the pane is first opened and is never torn down by a tab switch.
 - **A JS crash/exception around the trigger moment** — checked `[uncaught-error]` lines in the host log for the surrounding window; found only benign `ResizeObserver loop completed with undelivered notifications` warnings (a well-known harmless Chromium quirk) at `13:28:03-07Z`, before and unrelated to the `13:29:32Z` trigger. No crash evidence at or after the trigger.
 
 ### Leading hypothesis (not yet confirmed live)
@@ -110,14 +110,14 @@ Verified: `tsc --noEmit` (zero new errors — the 2 pre-existing errors were con
 | Concern | File |
 |---|---|
 | `[wave-turn]` transition + watchdog telemetry (shipped) | [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) |
-| `StreamWatchdogTick` / 180s liveness-recovery bound | [`frontend/app/store/agent-pane-state/reducer.ts:280-365`](../../frontend/app/store/agent-pane-state/reducer.ts#L280-L365) |
+| `StreamWatchdogTick` / 180s liveness-recovery bound | [`frontend/app/store/agent-pane-state/reducer.ts:280-365`](../../frontend/app/store/agent-pane-state/reducer.ts) |
 | `StreamFlushObserved` re-promotion rule (risk #7 source) | [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) (search `StreamFlushObserved`) |
-| Watchdog `setInterval` (5s tick) | [`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts#L233-L239) |
-| `onMount` call site | [`frontend/app/view/agent/useAgentStream.ts:249-263`](../../frontend/app/view/agent/useAgentStream.ts#L249-L263) |
-| Confirms tabs never unmount on background (`display:none`) | [`frontend/app/workspace/workspace.tsx:22`](../../frontend/app/workspace/workspace.tsx#L22) |
+| Watchdog `setInterval` (5s tick) | [`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts) |
+| `onMount` call site | [`frontend/app/view/agent/useAgentStream.ts:249-263`](../../frontend/app/view/agent/useAgentStream.ts) |
+| Confirms tabs never unmount on background (`display:none`) | [`frontend/app/workspace/workspace.tsx:22`](../../frontend/app/workspace/workspace.tsx) |
 | Global busy-panes aggregator (independent confirmation signal) | [`frontend/app/store/agentActivity.ts`](../../frontend/app/store/agentActivity.ts) |
 | Backend `[health] turn_active flip` telemetry (shipped) | `agentmux-srv/src/backend/blockcontroller/health.rs` |
-| `ReconcileTurnActive` — deliberately excludes `Submitting`, only covers `Streaming` | [`frontend/app/store/agent-pane-state/reducer.ts:367-436`](../../frontend/app/store/agent-pane-state/reducer.ts#L367-L436) |
+| `ReconcileTurnActive` — deliberately excludes `Submitting`, only covers `Streaming` | [`frontend/app/store/agent-pane-state/reducer.ts:367-436`](../../frontend/app/store/agent-pane-state/reducer.ts) |
 | `SUBMIT_TIMEOUT_MS` defined, dispatch-side wiring deferred and never landed | `frontend/app/store/agent-pane-state/types.ts:517-525,905`; commit `fa001eac` |
 | `INTERRUPT_TIMEOUT_MS` — same gap | commit `1e57efa6` |
 | Prior telemetry audit (source of the already-shipped `[wave-turn]`/`[health]` logging) | [`docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md`](REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md) |

@@ -73,7 +73,7 @@ tail case.**
 `#[cfg(target_os = "linux")]`:
 
 - The frontend fires a double-`requestAnimationFrame` at the very top of
-  `bootstrap.ts` ([`frontend/bootstrap.ts:40-46`](../../frontend/bootstrap.ts#L40-L46)) — the standard proxy for "the
+  `bootstrap.ts` ([`frontend/bootstrap.ts:40-46`](../../frontend/bootstrap.ts)) — the standard proxy for "the
   compositor actually presented a frame" — and reports it via the
   `report_first_paint` IPC command.
 - On Linux, `on_load_end` **arms a gate instead of showing the window**, with a
@@ -378,7 +378,7 @@ ways:
 - `agentmux-cef/src/client/navigation.rs` — `on_load_end`,
   `reveal_top_level_window`, `reveal_gated_window`, `handle_first_paint_signal`
 - `agentmux-cef/src/commands/backend.rs::report_first_paint`
-- [`frontend/bootstrap.ts:20-46`](../../frontend/bootstrap.ts#L20-L46) — the double-rAF signal
+- [`frontend/bootstrap.ts:20-46`](../../frontend/bootstrap.ts) — the double-rAF signal
 - [`frontend/app/init/startup-splash.ts`](../../frontend/app/init/startup-splash.ts), [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts)
 - `agentmux-launcher/src/supervisor/windows.rs:258-300,450-490` — splash spawn,
   `host` stage bounds

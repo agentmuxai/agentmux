@@ -52,7 +52,7 @@ From `package.json`:
 "@xterm/addon-fit": "^0.11.0",
 ```
 
-[`frontend/app/view/term/termwrap.ts:641-683`](../../frontend/app/view/term/termwrap.ts#L641-L683) (`loadRendererAddon`) chooses between the WebGL
+[`frontend/app/view/term/termwrap.ts:641-683`](../../frontend/app/view/term/termwrap.ts) (`loadRendererAddon`) chooses between the WebGL
 addon and xterm's built-in DOM renderer:
 
 ```ts
@@ -82,13 +82,13 @@ WebGL there.
 
 ## 2. The default-value bug that defeats that intent
 
-`useWebGl` is computed in [`frontend/app/view/term/term.tsx:188`](../../frontend/app/view/term/term.tsx#L188):
+`useWebGl` is computed in [`frontend/app/view/term/term.tsx:188`](../../frontend/app/view/term/term.tsx):
 
 ```ts
 useWebGl: !ts?.["term:disablewebgl"],
 ```
 
-`term:disablewebgl` has no configured default ([`schema/settings.json:35-37`](../../schema/settings.json#L35-L37) declares only
+`term:disablewebgl` has no configured default ([`schema/settings.json:35-37`](../../schema/settings.json) declares only
 `"type": "boolean"`, no `"default"`), and `settings-template.jsonc:16` ships it
 **commented out**. So for any user who has not explicitly set it, `ts?.["term:disablewebgl"]`
 is `undefined`, and `!undefined === true` — meaning **`useWebGl` is `true` by default on every

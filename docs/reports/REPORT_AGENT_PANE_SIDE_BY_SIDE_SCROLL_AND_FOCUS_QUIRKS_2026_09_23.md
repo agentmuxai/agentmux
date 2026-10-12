@@ -50,7 +50,7 @@ entirely. §4 proposes making it DRY.
 
 ### Mechanism
 
-[`frontend/app/view/agent/components/AgentCard.tsx:83-85`](../../frontend/app/view/agent/components/AgentCard.tsx#L83-L85)
+[`frontend/app/view/agent/components/AgentCard.tsx:83-85`](../../frontend/app/view/agent/components/AgentCard.tsx)
 
 ```ts
 onMount(() => {
@@ -58,7 +58,7 @@ onMount(() => {
 });
 ```
 
-[`frontend/app/view/agent/components/AgentPicker.tsx:1016-1039`](../../frontend/app/view/agent/components/AgentPicker.tsx#L1016-L1039) renders the
+[`frontend/app/view/agent/components/AgentPicker.tsx:1016-1039`](../../frontend/app/view/agent/components/AgentPicker.tsx) renders the
 template cards with `defaultFocus={index() === 0}`. The first template card
 sits directly under the **"New Agent"** header (`AgentPicker.tsx:1008-1010`).
 `HTMLElement.focus()` without `{ preventScroll: true }` scrolls the nearest
@@ -94,7 +94,7 @@ neither triggers nor sees. That matches "sometimes, not clear when."
   default" behaviour), but even that should not scroll, and should only
   happen when this pane is the active, selected one.
 
-`focusManager.claimFocusOnMount()` ([`frontend/app/store/focusManager.ts:75-81`](../../frontend/app/store/focusManager.ts#L75-L81))
+`focusManager.claimFocusOnMount()` ([`frontend/app/store/focusManager.ts:75-81`](../../frontend/app/store/focusManager.ts))
 exists for exactly this "focus on mount, but only if I'm the selected pane in
 the active tab" case. AgentFooter, the editor and the terminal all use it;
 AgentCard does not.
@@ -107,16 +107,16 @@ AgentCard does not.
 
 1. **mousedown** → the browser focuses pane B's Filter `<input>`
    (`AgentPickerFilterBar.tsx:55-63`).
-2. **focusin (capture)** → `handleChildFocus` ([`frontend/app/block/block.tsx:168-171`](../../frontend/app/block/block.tsx#L168-L171)):
+2. **focusin (capture)** → `handleChildFocus` ([`frontend/app/block/block.tsx:168-171`](../../frontend/app/block/block.tsx)):
    B is not selected, so `nodeModel.focusNode()` runs.
-3. → `focusNode` ([`frontend/layout/lib/layoutFocus.ts:152-170`](../../frontend/layout/lib/layoutFocus.ts#L152-L170)) dispatches
+3. → `focusNode` ([`frontend/layout/lib/layoutFocus.ts:152-170`](../../frontend/layout/lib/layoutFocus.ts)) dispatches
    `LayoutTreeActionType.FocusNode`.
 4. → `treeReducer` sets `shouldRequestFocus = true` for FocusNode
-   ([`frontend/layout/lib/layoutModel.ts:646-649`](../../frontend/layout/lib/layoutModel.ts#L646-L649)), commits state, then calls
+   ([`frontend/layout/lib/layoutModel.ts:646-649`](../../frontend/layout/lib/layoutModel.ts)), commits state, then calls
    `focusManager.requestNodeFocus()` (`:694-696`).
-5. → `requestNodeFocus()` → `refocusNode()` ([`frontend/app/store/focusManager.ts:37-61`](../../frontend/app/store/focusManager.ts#L37-L61)):
+5. → `requestNodeFocus()` → `refocusNode()` ([`frontend/app/store/focusManager.ts:37-61`](../../frontend/app/store/focusManager.ts)):
    `bcm.viewModel.giveFocus()`. `AgentViewModel.giveFocus()`
-   ([`frontend/app/view/agent/agent-model.ts:934-939`](../../frontend/app/view/agent/agent-model.ts#L934-L939)) returns `false` in picker
+   ([`frontend/app/view/agent/agent-model.ts:934-939`](../../frontend/app/view/agent/agent-model.ts)) returns `false` in picker
    mode because `focusTargetRef` (the composer textarea) doesn't exist yet.
    So it falls back to `document.getElementById(\`${blockId}-dummy-focus\`).focus()`.
    **The caret moves from the Filter input to the invisible 0×0 dummy input.**

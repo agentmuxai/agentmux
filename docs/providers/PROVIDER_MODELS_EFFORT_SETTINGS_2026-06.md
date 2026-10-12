@@ -22,7 +22,7 @@ reasoning/effort levels, and key settings for **every provider AgentMux ships**
 
 | Gap | Current AgentMux | Should be | Where |
 |---|---|---|---|
-| **Effort missing `xhigh`** | `EffortLevel = "low"\|"medium"\|"high"\|"max"` | add **`xhigh`** (between `high` and `max`) | [`frontend/app/view/agent/types.ts:209`](../../frontend/app/view/agent/types.ts#L209) |
+| **Effort missing `xhigh`** | `EffortLevel = "low"\|"medium"\|"high"\|"max"` | add **`xhigh`** (between `high` and `max`) | [`frontend/app/view/agent/types.ts:209`](../../frontend/app/view/agent/types.ts) |
 | **Effort is "Claude-only"** | effort flag only built for `claude` | effort/reasoning is now **common** — Codex (`-c model_reasoning_effort`), Gemini (`thinking_level`) all have it | `buildRuntimeArgs.ts`, providers |
 | **Codex default model stale** | `gpt-5.4` | `gpt-5.5` (current frontier; `gpt-5.1-codex-max`/`gpt-5.3-codex` for Codex-tuned) | `buildRuntimeArgs.ts:38` |
 | **Claude effort default** | `"medium"` | Anthropic default is **`high`**; **`xhigh`** is the Claude-Code coding/agentic default | `types.ts:236` |
@@ -198,7 +198,7 @@ present effort as a cross-provider concept (mapped per provider), not a Claude-o
 
 ## 11. Concrete AgentMux changes implied (for the doc/config update)
 
-1. **[`frontend/app/view/agent/types.ts:209`](../../frontend/app/view/agent/types.ts#L209)** — `EffortLevel`: add `"xhigh"` →
+1. **[`frontend/app/view/agent/types.ts:209`](../../frontend/app/view/agent/types.ts)** — `EffortLevel`: add `"xhigh"` →
    `"low" | "medium" | "high" | "xhigh" | "max"`. Update the `/effort` slash-command
    choices and `buildRuntimeArgs.ts` accordingly.
 2. **Claude effort default** — docs should state Anthropic's default is `high` and the

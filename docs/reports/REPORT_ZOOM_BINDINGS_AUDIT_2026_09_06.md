@@ -57,15 +57,15 @@ CSS `zoom` on the view root. This is the system to keep.
 
 | # | Binding | File |
 |---|---|---|
-| 1 | Global Ctrl+wheel → `zoomBlockIn/Out` | [`frontend/app/app.tsx:205-220`](../../frontend/app/app.tsx#L205-L220) |
-| 2 | Keyboard `Ctrl`/`Cmd` `+` `-` `0` | [`frontend/app/store/keymodel.ts:234-266`](../../frontend/app/store/keymodel.ts#L234-L266) |
-| 3 | Command palette / menu (`view:zoom:in|out|reset`) | [`frontend/app/store/command-registry.ts:350-368`](../../frontend/app/store/command-registry.ts#L350-L368) |
-| 4 | Terminal's own Ctrl+wheel | [`frontend/app/view/term/term.tsx:371-386`](../../frontend/app/view/term/term.tsx#L371-L386) |
-| 5 | Editor's own Ctrl+wheel | [`frontend/app/view/editor/editor-view.tsx:117-131`](../../frontend/app/view/editor/editor-view.tsx#L117-L131) |
+| 1 | Global Ctrl+wheel → `zoomBlockIn/Out` | [`frontend/app/app.tsx:205-220`](../../frontend/app/app.tsx) |
+| 2 | Keyboard `Ctrl`/`Cmd` `+` `-` `0` | [`frontend/app/store/keymodel.ts:234-266`](../../frontend/app/store/keymodel.ts) |
+| 3 | Command palette / menu (`view:zoom:in|out|reset`) | [`frontend/app/store/command-registry.ts:350-368`](../../frontend/app/store/command-registry.ts) |
+| 4 | Terminal's own Ctrl+wheel | [`frontend/app/view/term/term.tsx:371-386`](../../frontend/app/view/term/term.tsx) |
+| 5 | Editor's own Ctrl+wheel | [`frontend/app/view/editor/editor-view.tsx:117-131`](../../frontend/app/view/editor/editor-view.tsx) |
 | 6 | Armory's own Ctrl+wheel | `frontend/app/view/armory/armory-view.tsx:66-80` |
-| 7 | Warden's own Ctrl+wheel | [`frontend/app/view/warden/warden-view.tsx:43-57`](../../frontend/app/view/warden/warden-view.tsx#L43-L57) |
-| 8 | Swarm's own Ctrl+wheel **and** keyboard | [`frontend/app/view/swarm/swarm-view.tsx:30-71`](../../frontend/app/view/swarm/swarm-view.tsx#L30-L71) |
-| 9 | Agent shell sub-block's Ctrl+wheel | [`frontend/app/view/agent/components/AgentShellSubblock.tsx:219-234`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx#L219-L234) |
+| 7 | Warden's own Ctrl+wheel | [`frontend/app/view/warden/warden-view.tsx:43-57`](../../frontend/app/view/warden/warden-view.tsx) |
+| 8 | Swarm's own Ctrl+wheel **and** keyboard | [`frontend/app/view/swarm/swarm-view.tsx:30-71`](../../frontend/app/view/swarm/swarm-view.tsx) |
+| 9 | Agent shell sub-block's Ctrl+wheel | [`frontend/app/view/agent/components/AgentShellSubblock.tsx:219-234`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) |
 
 Sites 4-9 all write the same `term:zoom` meta key but each re-implements the
 step/clamp/apply logic locally instead of calling `zoom.platform`'s shared
@@ -91,7 +91,7 @@ different surface and doesn't conflict.
 
 | # | Binding | File |
 |---|---|---|
-| 11 | Ctrl+wheel over the preview body only | [`frontend/app/view/agent/components/ToolBlock.tsx:148-170`](../../frontend/app/view/agent/components/ToolBlock.tsx#L148-L170) |
+| 11 | Ctrl+wheel over the preview body only | [`frontend/app/view/agent/components/ToolBlock.tsx:148-170`](../../frontend/app/view/agent/components/ToolBlock.tsx) |
 
 - State: a **local, ephemeral** `createSignal(1.0)` (`ToolBlock.tsx:146`) —
   not persisted, not block meta.
@@ -106,7 +106,7 @@ different surface and doesn't conflict.
 
 | # | Binding | File |
 |---|---|---|
-| 12 | Own Ctrl+`+`/`-`/`0` and Ctrl+wheel | [`frontend/app/view/helpview/helpview.tsx:36-70`](../../frontend/app/view/helpview/helpview.tsx#L36-L70) |
+| 12 | Own Ctrl+`+`/`-`/`0` and Ctrl+wheel | [`frontend/app/view/helpview/helpview.tsx:36-70`](../../frontend/app/view/helpview/helpview.tsx) |
 
 A second, parallel copy of System 1 against a different meta key
 (`help:zoom`), with its own MIN/MAX/step — but it *does* use CSS `zoom` and
@@ -117,7 +117,7 @@ in scope for §4's consolidation if that's ever wanted.
 
 | # | Binding | File |
 |---|---|---|
-| 13 | Bare wheel (no Ctrl) pans/zooms the canvas | [`frontend/app/view/drone/drone-view.tsx:145-172`](../../frontend/app/view/drone/drone-view.tsx#L145-L172) |
+| 13 | Bare wheel (no Ctrl) pans/zooms the canvas | [`frontend/app/view/drone/drone-view.tsx:145-172`](../../frontend/app/view/drone/drone-view.tsx) |
 
 `transform: scale()` on in-memory viewport state. Legitimately different — a
 pannable canvas, not document zoom. **Leave alone.**

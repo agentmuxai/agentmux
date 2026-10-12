@@ -59,7 +59,7 @@ and rebuilds it, Pillar 1 just needs to fire that on crash." Verified instead:
 
 - Cold launch (`agentmux-cef/src/app.rs::on_context_initialized`) unconditionally creates **exactly
   one** native window; the frontend inside it reads only `Client.windowids[0]`
-  ([`frontend/app-init.ts:317-339`](../../frontend/app-init.ts#L317-L339)). A second FullInstance window or a Subwindow is **never**
+  ([`frontend/app-init.ts:317-339`](../../frontend/app-init.ts)). A second FullInstance window or a Subwindow is **never**
   automatically recreated today, on any relaunch — only by explicit user/agent action.
 - So Step 4 needs genuinely new code: enumerate `Client.windowids[1..]` (now durable and readable
   thanks to Step 3), resolve each one's `kind`/`parent_window_id`, and drive the equivalent of

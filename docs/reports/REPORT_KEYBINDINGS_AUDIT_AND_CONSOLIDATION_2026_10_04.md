@@ -26,7 +26,7 @@
 
 The help pane is [`frontend/app/view/helpview/helpview.tsx`](../../frontend/app/view/helpview/helpview.tsx), which renders `QuickTips` ([`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx)). Its key labels are hand-written. "All Keybindings" links to docs.agentmux.ai/keybindings.
 
-`Cmd` in a binding means ⌘ on macOS and **Alt** on Windows/Linux ([`frontend/util/keyutil.ts:50-56`](../../frontend/util/keyutil.ts#L50-L56)). The help pane draws it correctly as "Alt" there.
+`Cmd` in a binding means ⌘ on macOS and **Alt** on Windows/Linux ([`frontend/util/keyutil.ts:50-56`](../../frontend/util/keyutil.ts)). The help pane draws it correctly as "Alt" there.
 
 ### 2.1 Every shortcut the help pane lists
 
@@ -91,7 +91,7 @@ The help pane is [`frontend/app/view/helpview/helpview.tsx`](../../frontend/app/
 
 ### 3.1 Why a pane can't stop a global shortcut
 
-The global handler is a plain `document` keydown listener ([`frontend/app/app.tsx:193-194`](../../frontend/app/app.tsx#L193-L194)). Solid's `onKeyDown` handlers are *also* delegated to `document` (solid-js `delegateEvents`). A pane's `stopPropagation()` stops only Solid's own walk, not the second `document` listener, and `keydownWrapper` never checks `defaultPrevented`. Separately, the global map is checked **before** any "is the user typing?" test (`keymodel-dispatch.ts:128`); only dispatch to the focused pane is gated.
+The global handler is a plain `document` keydown listener ([`frontend/app/app.tsx:193-194`](../../frontend/app/app.tsx)). Solid's `onKeyDown` handlers are *also* delegated to `document` (solid-js `delegateEvents`). A pane's `stopPropagation()` stops only Solid's own walk, not the second `document` listener, and `keydownWrapper` never checks `defaultPrevented`. Separately, the global map is checked **before** any "is the user typing?" test (`keymodel-dispatch.ts:128`); only dispatch to the focused pane is gated.
 
 ### 3.2 The terminal hands every key to the global map first
 
@@ -130,7 +130,7 @@ The global handler is a plain `document` keydown listener ([`frontend/app/app.ts
 | M5 | Document-tab keys | `doc-tabs-controller.ts:214-255` | 7 literal-Ctrl keys | Live |
 | M6 | Ad-hoc `window`/`document` listeners | about 30 sites | perf HUD, diag panel, startup reload, many Escape-to-close, pane zoom | Live |
 | M7 | Component `onKeyDown` | 77 uses in 55 files | Files pane (about 30 keys), composer, modals, palette, F2 rename | Live |
-| M8 | Host `OnPreKeyEvent` (Rust) | [`crates/cef/src/client/handlers.rs:218-451`](../../crates/cef/src/client/handlers.rs#L218-L451) | browser pane Ctrl+L/R, Alt+arrows; lets Ctrl+P/G through to JS | Live |
+| M8 | Host `OnPreKeyEvent` (Rust) | [`crates/cef/src/client/handlers.rs:218-451`](../../crates/cef/src/client/handlers.rs) | browser pane Ctrl+L/R, Alt+arrows; lets Ctrl+P/G through to JS | Live |
 | M9 | Native keys | `macos_menu.rs`, tear-off drag hooks | macOS Edit/App menu; Escape during a tab drag | Live, macOS mostly |
 
 There are also four different meanings of "handled": return `true` (M1), return `false` (xterm), `preventDefault` + `stopPropagation` (DOM) and return `1` (host).
@@ -153,7 +153,7 @@ The command registry (`command-registry.ts`, about 33 ids) feeds the palette, th
    - Files: `keymodel-dispatch.ts:12,38-56,151-159`, `global.ts:64`, `blockframe.tsx:895,1072`.
    - It waits for a `control-shift-state-update` event that nothing in [`crates/`](../../crates) emits, so it is never on. Settings still advertises "Show numbered overlays for quick pane-jump shortcuts".
    - **Remove it, or rebuild it in the frontend:** show the overlay while Ctrl+Shift is held.
-2. **Chord-mode IPC:** `setKeyboardChordMode` → `set_keyboard_chord_mode` is a host stub ([`crates/cef/src/commands/stubs.rs:40`](../../crates/cef/src/commands/stubs.rs#L40)). The chord already works entirely in JS.
+2. **Chord-mode IPC:** `setKeyboardChordMode` → `set_keyboard_chord_mode` is a host stub ([`crates/cef/src/commands/stubs.rs:40`](../../crates/cef/src/commands/stubs.rs)). The chord already works entirely in JS.
 3. **`onReinjectKey` and `onMenuItemAbout`** (`cef-api.ts:617`, `global.ts:220`): no emitter, no caller.
 4. **Unused helpers:** `keyutil.ts` `keyMap`, `keymodel.ts` `getAllGlobalKeyBindings`. Also `isInputEvent`, which returns `undefined` on its last path.
 5. **`TermViewModel.keyDownHandler`:** always returns false.

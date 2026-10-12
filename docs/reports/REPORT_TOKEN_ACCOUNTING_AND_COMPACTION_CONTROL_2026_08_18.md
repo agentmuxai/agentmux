@@ -52,10 +52,10 @@ AgentMux makes **zero direct calls to the Anthropic API**. It spawns the real `c
 
 For the interactive pane, the raw JSON reaches the frontend close to verbatim. Two places independently parse the same usage fields off the wire:
 
-- [`frontend/app/view/agent/providers/claude-translator.ts:106-123`](../../frontend/app/view/agent/providers/claude-translator.ts#L106-L123)
-- [`frontend/app/view/agent/useAgentStream.ts:483-515`](../../frontend/app/view/agent/useAgentStream.ts#L483-L515)
+- [`frontend/app/view/agent/providers/claude-translator.ts:106-123`](../../frontend/app/view/agent/providers/claude-translator.ts)
+- [`frontend/app/view/agent/useAgentStream.ts:483-515`](../../frontend/app/view/agent/useAgentStream.ts)
 
-From there: `reducer.ts` ([`frontend/app/store/agent-pane-state/reducer.ts:688-757`](../../frontend/app/store/agent-pane-state/reducer.ts#L688-L757)) updates a live `turnTokens` value; `useTurnLifecycle.ts`'s `finalizeTurn` (`:73-127`) merges the terminal `result` event's totals (preferred, since it's authoritative) or the live value (fallback) into `SessionStats` on turn end, dispatches a `TurnEnd` that the reducer sums into a lifetime `sessionTotals` (`reducer.ts:1317-1357`), and separately calls `recordTurn()` into [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) — a third, app-session-wide, per-provider running total that only the status-bar `TokenUsageIndicator`/`TokenBreakdownPopover` read from.
+From there: `reducer.ts` ([`frontend/app/store/agent-pane-state/reducer.ts:688-757`](../../frontend/app/store/agent-pane-state/reducer.ts)) updates a live `turnTokens` value; `useTurnLifecycle.ts`'s `finalizeTurn` (`:73-127`) merges the terminal `result` event's totals (preferred, since it's authoritative) or the live value (fallback) into `SessionStats` on turn end, dispatches a `TurnEnd` that the reducer sums into a lifetime `sessionTotals` (`reducer.ts:1317-1357`), and separately calls `recordTurn()` into [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) — a third, app-session-wide, per-provider running total that only the status-bar `TokenUsageIndicator`/`TokenBreakdownPopover` read from.
 
 A second, more structured implementation also exists: `agentmux-srv/src/agents/{runner.rs, translator/claude.rs, types.rs}` parses the same raw usage into a proper 4-field `TokenCounts` struct (`types.rs:138`) and emits `AgentEvent::Cost{cost_usd, tokens}`. Per its own module doc (`agents/mod.rs:4-12`), **this is explicitly not yet wired to the interactive agent pane** — it currently only drives the headless drone Agent block executor. So the more-correct implementation exists in the codebase today; it's just not the one users see.
 

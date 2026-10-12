@@ -12,7 +12,7 @@
 
 ## 1. Skill content renders as plain text, not Markdown
 
-[`frontend/app/view/skill/skill-manager.tsx:75-84`](../../frontend/app/view/skill/skill-manager.tsx#L75-L84) renders `description`, `trigger`, and `content` as raw `<pre>` text nodes — no Markdown processing:
+[`frontend/app/view/skill/skill-manager.tsx:75-84`](../../frontend/app/view/skill/skill-manager.tsx) renders `description`, `trigger`, and `content` as raw `<pre>` text nodes — no Markdown processing:
 
 ```tsx
 <Show when={skill().description}>
@@ -39,7 +39,7 @@ Confirmed live (screenshot below) — the "Systematic Debugging" skill's `conten
 
 **Scope decision — `content` only, not `description`/`trigger`.** `description` and `trigger` are short, single-line-ish free text (a UI label + a trigger phrase, per the create/edit form's plain `<input type="text">` fields, `skill-manager.tsx:147-152` and `:138-145`) — there's no evidence they're meant to hold Markdown, and the create form doesn't offer a Markdown-authoring affordance for them (single-line inputs, not a textarea). Only `content` is authored via a multi-line `<textarea>` (`skill-manager.tsx:154-160`) and is the field the example skill's real body demonstrates is genuine prose Markdown. Recommend leaving `description`/`trigger` as `<pre>` (or even a plain `<span>`, since they're single-line) and converting only `content`.
 
-**Two render sites need this fix, not one.** [`frontend/app/view/agent/components/AgentSkillsModal.tsx:107-116`](../../frontend/app/view/agent/components/AgentSkillsModal.tsx#L107-L116) (the per-agent Skills tab, opened via the Stash modal) has the byte-for-byte identical `<pre>`-for-`content` pattern — it's effectively a duplicated detail view, not a shared component. Both need the same `<Markdown>` swap; there's no single shared "skill detail" component to fix once. (Extracting one is a reasonable follow-up but out of scope for this fix — matching the existing duplication rather than doing an unrelated refactor alongside a bug fix.)
+**Two render sites need this fix, not one.** [`frontend/app/view/agent/components/AgentSkillsModal.tsx:107-116`](../../frontend/app/view/agent/components/AgentSkillsModal.tsx) (the per-agent Skills tab, opened via the Stash modal) has the byte-for-byte identical `<pre>`-for-`content` pattern — it's effectively a duplicated detail view, not a shared component. Both need the same `<Markdown>` swap; there's no single shared "skill detail" component to fix once. (Extracting one is a reasonable follow-up but out of scope for this fix — matching the existing duplication rather than doing an unrelated refactor alongside a bug fix.)
 
 The Brain/Memories manager (`global-brain-manager.tsx:199-200`) has the same `<pre>`-for-user-content pattern independently — noted for awareness, but out of scope (not part of this request).
 
@@ -97,7 +97,7 @@ Add a **catalog-scoped bind command**, mirroring the existing `skill.catalog.lis
 - `agentmux-srv/src/backend/rpc_types/commands.rs`: new `COMMAND_SKILL_CATALOG_BIND = "skill.catalog.bind"`.
 - `agentmux-srv/src/server/app_api/skill.rs`: new `register_skill_catalog_bind`, same handler body as `register_skill_bind` minus the `check_s1` call (keep the existing "only global skills, or already-bound ones, may be bound" safety check — that's an ownership/data-integrity rule, unrelated to the auth gate being removed).
 - [`frontend/app/store/rpc-api/skill.ts`](../../frontend/app/store/rpc-api/skill.ts): new `SkillCatalogBindCommand`.
-- [`frontend/app/view/skill/skill-model.ts:112`](../../frontend/app/view/skill/skill-model.ts#L112): `bindToAgent` calls the new command instead of `SkillBindCommand`.
+- [`frontend/app/view/skill/skill-model.ts:112`](../../frontend/app/view/skill/skill-model.ts): `bindToAgent` calls the new command instead of `SkillBindCommand`.
 
 **Why a new command instead of just removing `check_s1` from `skill.bind`:** `skill.bind` may still be the intended future surface for an agent binding a skill to *itself* (self-service), and its `check_s1` gate (same-agent-only) is a real, meaningful restriction for that caller — removing it would silently widen what an authenticated agent connection can do (bind arbitrary skills to *other* agent ids), a security-relevant change nobody asked for. A catalog-tier sibling command is the same pattern already established for list/upsert/delete, costs one small mirrored handler, and leaves the existing command's contract untouched.
 

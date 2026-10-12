@@ -13,25 +13,25 @@ Status: analysis only. No source files were changed. Neither issue was reproduce
 On startup, while the splash is visible, a window that looks like a command terminal appears briefly and disappears.
 
 ### Mechanism
-- The launcher and CEF host are GUI-subsystem binaries in release ([`crates/launcher/src/main.rs:22-25`](../../crates/launcher/src/main.rs#L22-L25), [`crates/cef/src/main.rs:6-9`](../../crates/cef/src/main.rs#L6-L9)). Debug launcher builds are console-subsystem.
-- **srv is a console-subsystem binary.** It has no `windows_subsystem` attribute, and [`crates/srv/build.rs`](../../crates/srv/build.rs) only sets version info. The launcher hides it by spawning it with `CREATE_NO_WINDOW` ([`crates/launcher/src/srv_spawner.rs:248`](../../crates/launcher/src/srv_spawner.rs#L248), `:463-464`).
+- The launcher and CEF host are GUI-subsystem binaries in release ([`crates/launcher/src/main.rs:22-25`](../../crates/launcher/src/main.rs), [`crates/cef/src/main.rs:6-9`](../../crates/cef/src/main.rs)). Debug launcher builds are console-subsystem.
+- **srv is a console-subsystem binary.** It has no `windows_subsystem` attribute, and [`crates/srv/build.rs`](../../crates/srv/build.rs) only sets version info. The launcher hides it by spawning it with `CREATE_NO_WINDOW` ([`crates/launcher/src/srv_spawner.rs:248`](../../crates/launcher/src/srv_spawner.rs), `:463-464`).
 - Windows allocates a fresh console for any console-subsystem process started from a console-less parent without `CREATE_NO_WINDOW`. Redirecting stdio does not prevent it.
-- Almost every spawn site already sets the flag, via `agentmux_common::win32::CREATE_NO_WINDOW` ([`crates/common/src/win32.rs:27`](../../crates/common/src/win32.rs#L27)) and the helpers in [`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs#L24-L37) and [`crates/srv/src/util.rs:31-36`](../../crates/srv/src/util.rs#L31-L36). The flash comes from the sites that bypass it.
+- Almost every spawn site already sets the flag, via `agentmux_common::win32::CREATE_NO_WINDOW` ([`crates/common/src/win32.rs:27`](../../crates/common/src/win32.rs)) and the helpers in [`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs) and [`crates/srv/src/util.rs:31-36`](../../crates/srv/src/util.rs). The flash comes from the sites that bypass it.
 
 ### Culprit 1 (most likely, about 75%): launcher `schtasks.exe` at every startup
 Chain, all before the host window exists:
-1. [`crates/launcher/src/supervisor/windows.rs:456`](../../crates/launcher/src/supervisor/windows.rs#L456) calls `notify::start(...)` once srv is ready.
-2. srv sends an initial `config` event on WebSocket connect ([`crates/srv/src/server/websocket.rs:100-113`](../../crates/srv/src/server/websocket.rs#L100-L113)).
-3. The launcher parses it as `Frame::StartAtLogin` ([`crates/launcher/src/notify/mod.rs:317-319`](../../crates/launcher/src/notify/mod.rs#L317-L319)) and calls `start_at_login::observe`. The first frame always passes the dedupe check, so it spawns the thread `reconcile_latest`.
-4. `reconcile_latest` ([`crates/launcher/src/start_at_login.rs`](../../crates/launcher/src/start_at_login.rs)) calls `autostart::read_entry()` unconditionally, which runs `schtasks /Query /TN <id> /XML` ([`crates/launcher/src/autostart/mod.rs:612`](../../crates/launcher/src/autostart/mod.rs#L612)).
+1. [`crates/launcher/src/supervisor/windows.rs:456`](../../crates/launcher/src/supervisor/windows.rs) calls `notify::start(...)` once srv is ready.
+2. srv sends an initial `config` event on WebSocket connect ([`crates/srv/src/server/websocket.rs:100-113`](../../crates/srv/src/server/websocket.rs)).
+3. The launcher parses it as `Frame::StartAtLogin` ([`crates/launcher/src/notify/mod.rs:317-319`](../../crates/launcher/src/notify/mod.rs)) and calls `start_at_login::observe`. The first frame always passes the dedupe check, so it spawns the thread `reconcile_latest`.
+4. `reconcile_latest` ([`crates/launcher/src/start_at_login.rs`](../../crates/launcher/src/start_at_login.rs)) calls `autostart::read_entry()` unconditionally, which runs `schtasks /Query /TN <id> /XML` ([`crates/launcher/src/autostart/mod.rs:612`](../../crates/launcher/src/autostart/mod.rs)).
 
 Verified: none of the four `schtasks` spawns in `autostart/mod.rs` set `creation_flags` (lines 416, 453, 501, 612). Only the query at 612 runs on every startup. The others run only when the plan is Write or Remove.
 
 `schtasks.exe` is a console program started from a GUI process, so it gets a console that lives only as long as the query, which matches "runs quickly and disappears". The code arrived in `5f955e4e5` (#3788, 2026-09-25, start-at-login), so it is a recent regression. The earlier flash fixes (#2171, #2173, #2174) predate it.
 
 ### Culprit 2 (real gap, about 35% as the visible flash): srv `--crash-monitor` self-spawn
-- [`crates/srv/src/crash_monitor.rs:173-178`](../../crates/srv/src/crash_monitor.rs#L173-L178) runs `Command::new(current_exe).arg("--crash-monitor")` with null stdin/stdout and no creation flags.
-- It is called from `install_crash_guard()` ([`crates/srv/src/bootstrap/watchers.rs:235`](../../crates/srv/src/bootstrap/watchers.rs#L235)), essentially the first thing srv does, on Windows only.
+- [`crates/srv/src/crash_monitor.rs:173-178`](../../crates/srv/src/crash_monitor.rs) runs `Command::new(current_exe).arg("--crash-monitor")` with null stdin/stdout and no creation flags.
+- It is called from `install_crash_guard()` ([`crates/srv/src/bootstrap/watchers.rs:235`](../../crates/srv/src/bootstrap/watchers.rs)), essentially the first thing srv does, on Windows only.
 - Observed on this machine: the running monitor child has a `conhost.exe` child created in the same second, so a console was allocated for it.
 - It is ranked lower because the monitor lives for srv's whole lifetime, so a visible window would persist rather than flash, and no top-level window owned by either PID was found. It may be hidden by Windows Terminal's default-terminal setting, or only visible for the moment the console is created. This code dates from #246, so it is old.
 
@@ -57,12 +57,12 @@ To confirm before or after the fix, capture process creation during startup. Pro
 ## 2. "Given to the agent…" card is too large
 
 ### What renders it
-- Title string: [`frontend/app/view/agent/context-delivery.ts:67`](../../frontend/app/view/agent/context-delivery.ts#L67), "Given to the agent · session continued · N items" on a resume. Reason labels are at `:38-43`.
+- Title string: [`frontend/app/view/agent/context-delivery.ts:67`](../../frontend/app/view/agent/context-delivery.ts), "Given to the agent · session continued · N items" on a resume. Reason labels are at `:38-43`.
 - Component: [`frontend/app/view/agent/components/ContextDeliveryCard.tsx`](../../frontend/app/view/agent/components/ContextDeliveryCard.tsx). Title span at `:152-153`, item rows (`ItemHead`) at `:85-134`, expanded `<pre>` body at `:202`.
-- Mounted by [`frontend/app/view/agent/virtualization/DocumentRow.tsx:257-263`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx#L257-L263).
+- Mounted by [`frontend/app/view/agent/virtualization/DocumentRow.tsx:257-263`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx).
 
 ### Cause
-Styles are in [`frontend/app/view/agent/styles/_document-nodes.scss:1170-1293`](../../frontend/app/view/agent/styles/_document-nodes.scss#L1170-L1293). Verified: these selectors set no `font-size`, so they inherit the agent pane base of 15px (`--font-agent-size`, `agent-view.scss:420`, `theme.scss:390`):
+Styles are in [`frontend/app/view/agent/styles/_document-nodes.scss:1170-1293`](../../frontend/app/view/agent/styles/_document-nodes.scss). Verified: these selectors set no `font-size`, so they inherit the agent pane base of 15px (`--font-agent-size`, `agent-view.scss:420`, `theme.scss:390`):
 
 | Selector | Currently |
 |---|---|
@@ -91,7 +91,7 @@ Conventions:
 - Use CSS vars only (`--secondary-text-color`, `--main-text-color`, `--border-color`, `--warning-color`, `color-mix(...)`). `eslint.theme-colors.config.js` bans Tailwind palette utilities in class strings, so add none in the TSX.
 
 ### Must change together: virtualiser height estimates
-[`frontend/app/view/agent/virtualization/renderers.ts:169-172`](../../frontend/app/view/agent/virtualization/renderers.ts#L169-L172) hardcodes `CONTEXT_DELIVERY_TITLE_PX = 30`, `EXCERPT_PX = 22`, `ITEM_HEAD_PX = 24` and `ADVICE_PX = 40`. Shrinking the fonts without lowering these leaves the row estimates too tall until measured. Suggested starting values are about 24 for the title and about 20 for the item head. Check them in the UI.
+[`frontend/app/view/agent/virtualization/renderers.ts:169-172`](../../frontend/app/view/agent/virtualization/renderers.ts) hardcodes `CONTEXT_DELIVERY_TITLE_PX = 30`, `EXCERPT_PX = 22`, `ITEM_HEAD_PX = 24` and `ADVICE_PX = 40`. Shrinking the fonts without lowering these leaves the row estimates too tall until measured. Suggested starting values are about 24 for the title and about 20 for the item head. Check them in the UI.
 
 ### Tests
 - No test asserts font size or computed style, and there is no visual-regression convention here, so a CSS-only change breaks nothing.

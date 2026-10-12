@@ -21,7 +21,7 @@ units, and nothing connects them.
 
 ### 1. Chrome zoom scales the pane header in CSS only
 
-[`frontend/app/store/zoom.ts:235`](../../frontend/app/store/zoom.ts#L235) (`applyChromeZoomCSS`) sets one CSS variable,
+[`frontend/app/store/zoom.ts:235`](../../frontend/app/store/zoom.ts) (`applyChromeZoomCSS`) sets one CSS variable,
 `--zoomfactor`, on `<html>`. The pane header picks it up through the shared
 mixin:
 

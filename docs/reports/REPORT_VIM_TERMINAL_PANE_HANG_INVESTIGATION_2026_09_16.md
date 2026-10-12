@@ -73,7 +73,7 @@ blockcontroller::send_input(&req.shell_id, blockcontroller::BlockInputUnion::dat
 
 — the **exact same function** the WebSocket `blockinput` handler
 (`agentmux-srv/src/server/websocket.rs:711`, the real human-keystroke path
-per [`frontend/app/view/term/termViewModel.ts:412`](../../frontend/app/view/term/termViewModel.ts#L412)'s own comment) calls. The
+per [`frontend/app/view/term/termViewModel.ts:412`](../../frontend/app/view/term/termViewModel.ts)'s own comment) calls. The
 only difference is transport (HTTP POST vs. WS frame) and a lock-ownership
 check that doesn't apply to a standalone Terminal pane at all. So this test
 exercised the actual PTY-write code a keystroke uses, not a look-alike.
