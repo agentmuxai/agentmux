@@ -90,10 +90,13 @@ fn name_in_use(store: &crate::backend::storage::store::Store, defs: &[AgentDefin
 /// (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F4). A live fork's number is its
 /// name's trailing " #N", whatever its prefix, so renaming the root keeps the
 /// count; a deleted name counts under the root's current name, compared
-/// lowercased as it was tombstoned. A name `taken` says is in use is skipped.
+/// lowercased as it was tombstoned, and under each of the root's former names
+/// (`root_former`), so renaming the root after deleting forks keeps them
+/// counted too. A name `taken` says is in use is skipped.
 fn suggest_fork_name(
     defs: &[AgentDefinition],
     retired: &[String],
+    root_former: &[String],
     source: &AgentDefinition,
     taken: impl Fn(&str) -> bool,
 ) -> String {
@@ -104,8 +107,12 @@ fn suggest_fork_name(
         .iter()
         .filter(|a| a.is_seeded == 0 && !a.branch_label.is_empty() && fork_lineage_root_id(defs, &a.id) == root.id)
         .filter_map(|a| suffix(&a.name));
-    let retired_prefix = prefix.to_lowercase();
-    let deleted = retired.iter().filter_map(|n| n.to_lowercase().strip_prefix(&retired_prefix)?.trim().parse::<u32>().ok());
+    let retired_prefixes: Vec<String> =
+        std::iter::once(&root.name).chain(root_former).map(|n| format!("{n} #").to_lowercase()).collect();
+    let deleted = retired.iter().filter_map(|n| {
+        let n = n.to_lowercase();
+        retired_prefixes.iter().find_map(|p| n.strip_prefix(p.as_str())?.trim().parse::<u32>().ok())
+    });
     let highest = live.chain(deleted).max().unwrap_or(1);
     let mut n = highest.max(1) + 1;
     while taken(&format!("{prefix}{n}")) {
@@ -430,7 +437,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // When empty, auto-generate a flat, lineage-wide "Name #N"
                 // (see suggest_fork_name's doc comment).
                 let fork_name = if cmd.branch_label.is_empty() {
-                    suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &source, |n| {
+                    let root_former = mstore.agent_former_names(&fork_lineage_root(&all_defs, &source).id).unwrap_or_default();
+                    suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &root_former, &source, |n| {
                         name_in_use(&mstore, &all_defs, n)
                     })
                 } else {
@@ -446,7 +454,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 // The root's slug and this fork's label: never the source's
                 // slug, which chained every generation (`loap-loap-2-loap-3`).
-                let fork_slug = agentmux_common::slug::fork_slug(&fork_lineage_root(&all_defs, &source).slug, &branch_label);
+                let root = fork_lineage_root(&all_defs, &source);
+                let fork_slug = agentmux_common::slug::fork_slug(&root.slug, &root.name, &branch_label);
                 // Source's EFFECTIVE provider, from the shared resolver
                 // (#2594; same as the create-from-template clone site).
                 let effective_provider = id_store.resolve_effective_provider_id(&source);
@@ -562,8 +571,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .find(|a| a.id == cmd.source_id)
                     .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
 
-                let suggested_label =
-                    suggest_fork_name(&all, &mstore.retired_agent_names().unwrap_or_default(), source, |n| name_in_use(&mstore, &all, n));
+                let root_former = mstore.agent_former_names(&fork_lineage_root(&all, source).id).unwrap_or_default();
+                let suggested_label = suggest_fork_name(&all, &mstore.retired_agent_names().unwrap_or_default(), &root_former, source, |n| {
+                    name_in_use(&mstore, &all, n)
+                });
 
                 Ok(ForkAgentDefinitionSuggestResult { suggested_label })
             }
@@ -1017,9 +1028,9 @@ mod tests {
     #[test]
     fn a_fork_number_is_one_past_the_highest_not_a_count() {
         let defs = lineage(&[("f3", "Loap #3")]);
-        assert_eq!(suggest_fork_name(&defs, &[], &defs[0], |n| name_taken(&defs, n)), "Loap #4");
+        assert_eq!(suggest_fork_name(&defs, &[], &[], &defs[0], |n| name_taken(&defs, n)), "Loap #4");
         let first = lineage(&[]);
-        assert_eq!(suggest_fork_name(&first, &[], &first[0], |n| name_taken(&first, n)), "Loap #2");
+        assert_eq!(suggest_fork_name(&first, &[], &[], &first[0], |n| name_taken(&first, n)), "Loap #2");
     }
 
     /// A suggested name another agent already has is skipped.
@@ -1029,7 +1040,7 @@ mod tests {
         let mut other = crate::backend::storage::agents::test_agent_def("other", "Loap #2", "claude", "host", 3, "");
         other.is_seeded = 0;
         defs.push(other);
-        assert_eq!(suggest_fork_name(&defs, &[], &defs[0], |n| name_taken(&defs, n)), "Loap #3");
+        assert_eq!(suggest_fork_name(&defs, &[], &[], &defs[0], |n| name_taken(&defs, n)), "Loap #3");
         assert!(name_taken(&defs, "loap #2"), "case-insensitively");
     }
 
@@ -1038,7 +1049,7 @@ mod tests {
     #[test]
     fn a_deleted_forks_number_is_not_handed_out_again() {
         let defs = lineage(&[]);
-        assert_eq!(suggest_fork_name(&defs, &["loap #2".to_string()], &defs[0], |n| name_taken(&defs, n)), "Loap #3");
+        assert_eq!(suggest_fork_name(&defs, &["loap #2".to_string()], &[], &defs[0], |n| name_taken(&defs, n)), "Loap #3");
     }
 
     /// Renaming the root keeps the count: forks keep their old prefix, and
@@ -1047,7 +1058,7 @@ mod tests {
     fn renaming_the_root_keeps_the_fork_count() {
         let mut defs = lineage(&[("f2", "Loap #2"), ("f3", "Loap #3")]);
         defs[0].name = "Foo".to_string();
-        assert_eq!(suggest_fork_name(&defs, &[], &defs[0], |n| name_taken(&defs, n)), "Foo #4");
+        assert_eq!(suggest_fork_name(&defs, &[], &[], &defs[0], |n| name_taken(&defs, n)), "Foo #4");
     }
 
     /// A deleted non-ASCII name is tombstoned lowercased, and still counts (#4746).
@@ -1056,9 +1067,20 @@ mod tests {
         let mut defs = lineage(&[]);
         defs[0].name = "Ägent".to_string();
         assert_eq!(
-            suggest_fork_name(&defs, &["ägent #2".to_string()], &defs[0], |n| name_taken(&defs, n)),
+            suggest_fork_name(&defs, &["ägent #2".to_string()], &[], &defs[0], |n| name_taken(&defs, n)),
             "Ägent #3"
         );
+    }
+
+    /// A fork deleted before the root was renamed still counts, through the
+    /// root's former name (#4746).
+    #[test]
+    fn a_fork_deleted_before_the_root_was_renamed_still_counts() {
+        let mut defs = lineage(&[]);
+        defs[0].name = "Foo".to_string();
+        let retired = ["loap #2".to_string()];
+        let former = ["Loap".to_string()];
+        assert_eq!(suggest_fork_name(&defs, &retired, &former, &defs[0], |n| name_taken(&defs, n)), "Foo #3");
     }
 
     /// An automatic name another agent has in a way only the store knows (a
@@ -1066,7 +1088,7 @@ mod tests {
     #[test]
     fn an_automatic_name_the_taken_check_rejects_is_skipped() {
         let defs = lineage(&[]);
-        assert_eq!(suggest_fork_name(&defs, &[], &defs[0], |n| n == "Loap #2"), "Loap #3");
+        assert_eq!(suggest_fork_name(&defs, &[], &[], &defs[0], |n| n == "Loap #2"), "Loap #3");
     }
 
     /// A renamed fork shows its branch label, which a new fork must not take

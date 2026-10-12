@@ -343,6 +343,14 @@ impl Store {
         Ok(names)
     }
 
+    /// The names agent `id` had before its renames. A lineage root's former
+    /// names keep its deleted forks' numbers counted after it is renamed
+    /// (`suggest_fork_name`).
+    pub fn agent_former_names(&self, id: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        former_names(&conn, id)
+    }
+
     /// The slugs of every row whose slug equals `name` trimmed and folded
     /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
     /// "Aria" and "aria" are two rows).
