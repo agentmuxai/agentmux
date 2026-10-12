@@ -13,6 +13,10 @@ const WarnWebSocketSendSize = 1024 * 1024; // 1MB
 const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
 const reconnectHandlers: (() => void)[] = [];
 const StableConnTime = 2000;
+// Gap between queued `blockinput` chunks when the queue drains after a
+// reconnect. Mirrors PASTE_CHUNK_DELAY_MS in block-input-sender.ts (not
+// imported: that module imports this one).
+const QueuedInputPaceMs = 5;
 
 function addWSReconnectHandler(handler: () => void) {
     reconnectHandlers.push(handler);
@@ -30,6 +34,7 @@ class WSControl {
     opening: boolean = false;
     reconnectTimes: number = 0;
     msgQueue: any[] = [];
+    msgQueueTimer: ReturnType<typeof setTimeout> = null;
     tabId: string;
     messageCallback: WSEventCallback;
     watchSessionId: string = null;
@@ -170,14 +175,27 @@ class WSControl {
         this.runMsgQueue();
     }
 
-    /// Send everything queued while the socket was connecting, in order, at
-    /// once. It used to send one message per 100 ms: startup queues about 16
-    /// (event subscriptions, then the first RPCs), so an RPC queued behind
-    /// them, `GetFullConfig` in `initMux`, waited 1.3-1.8 s on launches where
-    /// the socket wasn't open yet.
+    /// Send what was queued while the socket wasn't open, in order. Control
+    /// messages (event subscriptions, RPCs) go out at once; after each queued
+    /// `blockinput` chunk the drain waits `QueuedInputPaceMs`, the pacing a
+    /// paste interrupted by a reconnect would have had. It used to send one
+    /// message per 100 ms whatever it was: startup queues about 16 messages,
+    /// so an RPC behind them, `GetFullConfig` in `initMux`, waited 1.3-1.8 s on
+    /// launches where the socket wasn't open yet.
     runMsgQueue() {
+        if (this.msgQueueTimer != null) {
+            return;
+        }
         while (this.open && this.msgQueue.length > 0) {
-            this.sendMessage(this.msgQueue.shift());
+            const msg = this.msgQueue.shift();
+            this.sendMessage(msg);
+            if (msg.wscommand == "blockinput" && this.msgQueue.length > 0) {
+                this.msgQueueTimer = setTimeout(() => {
+                    this.msgQueueTimer = null;
+                    this.runMsgQueue();
+                }, QueuedInputPaceMs);
+                return;
+            }
         }
     }
 
@@ -230,7 +248,8 @@ class WSControl {
     }
 
     pushMessage(data: WSCommandType) {
-        if (!this.open) {
+        // Behind a queue that is still draining, so order is kept.
+        if (!this.open || this.msgQueue.length > 0) {
             this.msgQueue.push(data);
             return;
         }

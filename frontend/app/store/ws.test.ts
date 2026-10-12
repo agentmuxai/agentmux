@@ -17,6 +17,8 @@ class FakeSocket {
 
 let lastSocket: FakeSocket = null;
 
+const cmd = (fields: Record<string, unknown>) => fields as unknown as WSCommandType;
+
 vi.mock("@/util/wsutil", () => ({
     newWebSocket: () => {
         lastSocket = new FakeSocket();
@@ -34,9 +36,9 @@ describe("WSControl message queue", () => {
         const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
         ws.connectNow("test");
         for (let i = 0; i < 16; i++) {
-            ws.pushMessage({ wscommand: "eventsub", n: i } as any);
+            ws.pushMessage(cmd({ wscommand: "eventsub", n: i }));
         }
-        ws.pushMessage({ wscommand: "rpc", command: "getfullconfig" } as any);
+        ws.pushMessage(cmd({ wscommand: "rpc", command: "getfullconfig" }));
         expect(lastSocket.sent).toHaveLength(0);
 
         lastSocket.onopen(new Event("open"));
@@ -49,11 +51,38 @@ describe("WSControl message queue", () => {
         expect(ws.msgQueue).toHaveLength(0);
     });
 
+    it("keeps queued paste chunks paced, and keeps order with messages pushed meanwhile", () => {
+        vi.useFakeTimers();
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        ws.pushMessage(cmd({ wscommand: "eventsub", tag: "sub" }));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "in1" }));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "in2" }));
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "rpc" }));
+        const tags = () => lastSocket.sent.map((m) => JSON.parse(m).tag);
+
+        lastSocket.onopen(new Event("open"));
+        expect(tags()).toEqual(["sub", "in1"]);
+
+        // Pushed while the drain is paused: queued behind, not sent ahead.
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "late" }));
+        expect(tags()).toEqual(["sub", "in1"]);
+
+        vi.advanceTimersByTime(5);
+        expect(tags()).toEqual(["sub", "in1", "in2"]);
+        vi.advanceTimersByTime(5);
+        expect(tags()).toEqual(["sub", "in1", "in2", "rpc", "late"]);
+        expect(ws.msgQueue).toHaveLength(0);
+
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "direct" }));
+        expect(tags().at(-1)).toBe("direct");
+    });
+
     it("sends directly once open", () => {
         const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
         ws.connectNow("test");
         lastSocket.onopen(new Event("open"));
-        ws.pushMessage({ wscommand: "rpc", command: "x" } as any);
+        ws.pushMessage(cmd({ wscommand: "rpc", command: "x" }));
         expect(lastSocket.sent.map((m) => JSON.parse(m).command)).toEqual(["x"]);
     });
 });
