@@ -122,6 +122,13 @@ function CrossWindowDragMonitor(): JSX.Element {
                 return;
             }
 
+            // The drag's own dragend may have arrived during that query and
+            // handled the release already; then it isn't this fallback's.
+            if (_currentDragPayload !== payload) {
+                Logger.debug("dnd:cross", "fallback: dragend handled the release meanwhile");
+                return;
+            }
+
             if (isButtonPressed) {
                 // User is still holding the button — just hovering, not dropping.
                 Logger.debug("dnd:cross", "fallback: button still pressed, rescheduling");
@@ -258,7 +265,12 @@ async function handleCrossWindowDragEnd(
     let dragId: string | null = null;
     try {
         dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
-        const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        const hitWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        // A window tab merges only onto another window's tab strip, which
+        // that window's hook handles (tabdrag:merge-direct); released anywhere
+        // else it tears off, as in Chrome. So the window under the cursor
+        // doesn't decide for a tab, only for a pane.
+        const targetWindow = dragType === "tab" ? null : hitWindow;
 
         if (targetWindow && targetWindow !== src) {
             // Brief delay to allow native drop handlers to run first. Only a

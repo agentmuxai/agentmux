@@ -14,7 +14,6 @@
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { deleteLayoutModelForTab } from "@/layout/index";
-import { wasTabRecentlyMerged } from "@/app/tab/tabbar-dnd";
 import { Logger } from "@/util/logger";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -63,9 +62,11 @@ function CrossWindowDropOverlay(): JSX.Element {
         let unlistenEnd: (() => void) | null = null;
         let unlistenStart: (() => void) | null = null;
 
-        api.listen("cross-drag-update", (event: { payload: CrossDragUpdateEvent }) => {
-            const data = event.payload;
-            if (data.targetWindow === wl && data.sourceWindow !== wl) {
+        // The host hands listeners the payload itself (platform/ipc.ts
+        // `listenEvent`), not an `{ payload }` wrapper.
+        api.listen<CrossDragUpdateEvent>("cross-drag-update", (data) => {
+            // Only a pane drops on a window's body; a tab merges only onto its strip.
+            if (data.targetWindow === wl && data.sourceWindow !== wl && data.dragType !== "tab") {
                 setIsTarget(true);
                 setDragType(data.dragType);
             } else {
@@ -74,8 +75,7 @@ function CrossWindowDropOverlay(): JSX.Element {
             }
         }).then((fn) => { unlistenUpdate = fn; });
 
-        api.listen("cross-drag-end", (event: { payload: CrossDragEndEvent }) => {
-            const data = event.payload;
+        api.listen<CrossDragEndEvent>("cross-drag-end", (data) => {
             Logger.info("dnd:overlay", "cross-drag ended", { dragId: data.dragId, result: data.result, targetWindow: data.targetWindow });
             setIsTarget(false);
             setDragType(null);
@@ -89,38 +89,30 @@ function CrossWindowDropOverlay(): JSX.Element {
                     return;
                 }
 
-                if (data.dragType === "pane" && data.payload.blockId) {
+                if (data.dragType === "pane" && data.payload.blockId && data.sourceTabId !== myActiveTabId) {
                     Logger.info("dnd:overlay", "cross-window drop: moving pane into this window", {
                         blockId: data.payload.blockId,
                         sourceTabId: data.sourceTabId,
                         destTabId: myActiveTabId,
                     });
-                    WorkspaceService.MoveBlockToTab(myWsId, data.payload.blockId, data.sourceTabId, myActiveTabId, true).catch((e) => {
-                        Logger.error("dnd:overlay", "MoveBlockToTab failed", { error: String(e) });
-                    });
-                } else if (data.dragType === "tab" && data.payload.tabId) {
-                    // Cross-window tab remount dedup: if the host mouse
-                    // hook already merged this tab at a strip-accurate
-                    // index (tabdrag:merge-direct, handled in tabbar.tsx),
-                    // this legacy append-merge for the same gesture must
-                    // not run — the backend would reject it anyway (the
-                    // tab already left its claimed source workspace), but
-                    // skipping avoids a guaranteed error log per merge.
-                    if (wasTabRecentlyMerged(data.payload.tabId)) {
-                        Logger.info("dnd:overlay", "cross-window drop: tab already merged via strip drop, skipping", {
-                            tabId: data.payload.tabId,
-                        });
-                        return;
-                    }
-                    Logger.info("dnd:overlay", "cross-window drop: moving tab into this window", {
-                        tabId: data.payload.tabId,
-                        sourceWsId: data.sourceWorkspaceId,
-                        destWsId: myWsId,
-                    });
-                    WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId).catch((e) => {
-                        Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
+                    // RedockFloatingPane, not MoveBlockToTab: the layouts live
+                    // in the windows, and only the redock queues the leaf for
+                    // this tab and the source tab's delete. A bare block move
+                    // left the pane drawn in neither window.
+                    WorkspaceService.RedockFloatingPane(
+                        data.payload.blockId,
+                        data.sourceTabId,
+                        data.sourceWorkspaceId,
+                        myActiveTabId,
+                        myWsId,
+                    ).catch((e) => {
+                        Logger.error("dnd:overlay", "RedockFloatingPane failed", { error: String(e) });
                     });
                 }
+                // A window tab is never moved here: it merges only onto this
+                // window's tab strip, through the strip's own merge (the
+                // hooks' tabdrag:merge-direct, or a Linux strip drop), and
+                // anywhere else it tears off, as in Chrome.
             }
 
             // Source window: clean up the LayoutModel for a tab that was successfully dragged out.

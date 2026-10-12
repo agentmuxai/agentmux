@@ -188,29 +188,12 @@ pub fn cancel_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
 /// Hit-test all open browser windows to find which one contains the cursor.
 #[cfg(target_os = "windows")]
 fn hit_test_windows(state: &Arc<AppState>, screen_x: f64, screen_y: f64) -> Option<String> {
-    use cef::ImplBrowserHost;
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
-
-    // Phase H.2.b — reducer-aware iteration with fallback.
-    for (label, browser) in state.list_browsers() {
-        if let Some(host) = browser.host() {
-            let hwnd = host.window_handle();
-            if hwnd.0.is_null() { continue; }
-            unsafe {
-                let mut rect: RECT = std::mem::zeroed();
-                GetWindowRect(hwnd.0 as *mut std::ffi::c_void, &mut rect);
-                let x = rect.left as f64;
-                let y = rect.top as f64;
-                let w = (rect.right - rect.left) as f64;
-                let h = (rect.bottom - rect.top) as f64;
-                if screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + h {
-                    return Some(label.clone());
-                }
-            }
-        }
-    }
-    None
+    // The tab-drag hook's own lookup: comparing each browser's host handle
+    // with the window rect never matched in CEF Views mode, where that
+    // handle is null or a child window, so every cross-window drop of a
+    // pane reported no target and tore off instead.
+    let browsers: std::collections::HashMap<String, cef::Browser> = state.list_browsers().into_iter().collect();
+    crate::commands::tear_off_hook::window_label_at(state, &browsers, screen_x.round() as i32, screen_y.round() as i32)
 }
 
 #[cfg(not(target_os = "windows"))]
