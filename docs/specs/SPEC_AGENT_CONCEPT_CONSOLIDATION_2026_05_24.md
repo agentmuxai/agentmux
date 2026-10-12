@@ -22,7 +22,7 @@ Today the codebase has SEVEN tables / concepts in the "agent" family. The forge 
 | **Content** | `db_agent_content` | Per-agent content blobs. FK to `db_agent_definitions(id)`. |
 | **History** | `db_agent_history` | Per-agent history (separate from session zone). |
 
-**125 source references** to `db_agent_instances` / `AgentInstance` across `agentmux-srv/` and `frontend/` (Rust + TS combined). The instance table is the heaviest of these by a wide margin.
+**125 source references** to `db_agent_instances` / `AgentInstance` across `agentmux-srv/` and [`frontend/`](../../frontend) (Rust + TS combined). The instance table is the heaviest of these by a wide margin.
 
 The user's question is correct: this *is* a lot, and Option E made it worse, not better.
 

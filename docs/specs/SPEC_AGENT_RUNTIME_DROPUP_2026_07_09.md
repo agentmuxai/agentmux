@@ -12,7 +12,7 @@
 
 Today `AgentComposerStrip` renders Mode, Model, and Effort as **three separate drop-up pills**, each an independent `FlyoutMenu` (`placement="top-start"`) — a `StripSelect` helper wraps each one (`AgentComposerStrip.tsx`, prior to this change). This already replaced the older `<select>`-based `AgentControlBar` UI (per `SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02`), so the "no more native chrome, opens upward" goal is done — but the user's actual ask, one consolidated control instead of three, is still open: three separate trigger pills sit side by side, each independently clickable, each with its own popup.
 
-This spec replaces those three pills with **one button that opens one floating panel** containing all three axes, grouped under labeled sections and keyboard-navigable — reusing the exact positioning primitives `FlyoutMenu` itself uses (so it looks and behaves like a native part of the app, not a bolted-on widget), but as a bespoke component, because `FlyoutMenu` only renders a flat `MenuItem[]` list and has no concept of grouped sections with headers (confirmed by reading `frontend/app/element/flyoutmenu.tsx` — no section/group field on `MenuItem`, no content-injection point besides the trigger).
+This spec replaces those three pills with **one button that opens one floating panel** containing all three axes, grouped under labeled sections and keyboard-navigable — reusing the exact positioning primitives `FlyoutMenu` itself uses (so it looks and behaves like a native part of the app, not a bolted-on widget), but as a bespoke component, because `FlyoutMenu` only renders a flat `MenuItem[]` list and has no concept of grouped sections with headers (confirmed by reading [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) — no section/group field on `MenuItem`, no content-injection point besides the trigger).
 
 **Prior art check:** `SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02.md` §3 sketches a "Tier TINY (<240px)" fallback where the three pills collapse into one combined chip (`⚙ Byp·Son·XHi ▴`) purely as a narrow-viewport degradation — the three-pill layout is otherwise kept at every wider tier in that spec. This spec supersedes that narrow-tier idea: the single consolidated control becomes the *only* form, at every width, not just a <240px fallback. Nothing else in either composer-strip spec proposes a universal single-button design.
 
@@ -113,7 +113,7 @@ The current implementation gates the **entire** controls zone on `providerId ===
 
 ### 4.3 Data-inconsistency check
 
-The original draft of this spec flagged `docs/specs/agent-pane-runtime-controls.md`'s "Effort defaults to High" line as stale against a `DEFAULT_RUNTIME_CONFIG.effort` of `"medium"`. On current `main`, `DEFAULT_RUNTIME_CONFIG.effort` is `"high"` (`types.ts`) — the doc line is now **accurate**, and no longer needs the fix this spec originally proposed. Confirmed by reading current `types.ts` before writing this revision; no doc change ships with this PR.
+The original draft of this spec flagged [`docs/specs/agent-pane-runtime-controls.md`](agent-pane-runtime-controls.md)'s "Effort defaults to High" line as stale against a `DEFAULT_RUNTIME_CONFIG.effort` of `"medium"`. On current `main`, `DEFAULT_RUNTIME_CONFIG.effort` is `"high"` (`types.ts`) — the doc line is now **accurate**, and no longer needs the fix this spec originally proposed. Confirmed by reading current `types.ts` before writing this revision; no doc change ships with this PR.
 
 ---
 
@@ -132,7 +132,7 @@ The original draft of this spec flagged `docs/specs/agent-pane-runtime-controls.
 
 ### 6.1 New
 
-- `frontend/app/view/agent/components/AgentRuntimeDropup.tsx` — the trigger button + floating panel. Positioning reuses the exact primitives `FlyoutMenu` uses (`@floating-ui/dom` `autoUpdate` + `computeMenuPosition` from `@/app/util/menu-position` + `Portal` + `data-pane-overlay`, `placement: "top-start"`, `avoidNativePanes: false`) rather than reinventing positioning — this keeps native-pane-HWND clipping and edge-avoidance behavior identical to every other popup in the app. Owns transient open/close + keyboard-selection-index state as local Solid signals (not reducer-owned — this is ephemeral UI state, same reasoning as `FlyoutMenu`'s own `isOpen` signal).
+- [`frontend/app/view/agent/components/AgentRuntimeDropup.tsx`](../../frontend/app/view/agent/components/AgentRuntimeDropup.tsx) — the trigger button + floating panel. Positioning reuses the exact primitives `FlyoutMenu` uses (`@floating-ui/dom` `autoUpdate` + `computeMenuPosition` from `@/app/util/menu-position` + `Portal` + `data-pane-overlay`, `placement: "top-start"`, `avoidNativePanes: false`) rather than reinventing positioning — this keeps native-pane-HWND clipping and edge-avoidance behavior identical to every other popup in the app. Owns transient open/close + keyboard-selection-index state as local Solid signals (not reducer-owned — this is ephemeral UI state, same reasoning as `FlyoutMenu`'s own `isOpen` signal).
 
 ### 6.2 Deleted (from `AgentComposerStrip.tsx`)
 
@@ -145,8 +145,8 @@ The original draft of this spec flagged `docs/specs/agent-pane-runtime-controls.
 
 ### 6.3 Modified
 
-- `frontend/app/view/agent/components/AgentComposerStrip.tsx` — replace the three `<StripSelect>` invocations inside `<Show when={showControls()}>` with one `<AgentRuntimeDropup blockId={...} blockAtom={...} providerId={...} />`.
-- `frontend/app/view/agent/styles/_composer-strip.scss` — replace `.agent-composer-strip-select*` and `.menu.strip-flyout*` rules with `.agent-runtime-dropup-trigger*` / `.menu.agent-runtime-dropup-panel` / `.agent-runtime-dropup-section` rules (same visual language: `border-radius: 0`, same border/color-mix conventions, same 10px font scale).
+- [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) — replace the three `<StripSelect>` invocations inside `<Show when={showControls()}>` with one `<AgentRuntimeDropup blockId={...} blockAtom={...} providerId={...} />`.
+- [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) — replace `.agent-composer-strip-select*` and `.menu.strip-flyout*` rules with `.agent-runtime-dropup-trigger*` / `.menu.agent-runtime-dropup-panel` / `.agent-runtime-dropup-section` rules (same visual language: `border-radius: 0`, same border/color-mix conventions, same 10px font scale).
 
 ---
 

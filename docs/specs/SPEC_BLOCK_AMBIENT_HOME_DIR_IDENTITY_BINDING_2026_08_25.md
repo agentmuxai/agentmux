@@ -45,7 +45,7 @@ A dispatched audit (full report not reproduced here) found:
   (`agent_handlers/identity.rs`) persisted `secret_ref` verbatim, with no
   containment check — unlike `auth.start`'s own account-creation path,
   which always mints an isolated dir.
-- **This is not hypothetical.** `docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`
+- **This is not hypothetical.** [`docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`](../status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md)
   §8 found a real, currently-linked account (`secret_ref.dir` = the
   literal ambient home) bound to two live agents. Independently, querying
   *this* machine's own live `~/.agentmux/shared/identity-store.db` during

@@ -6,17 +6,17 @@ robust-performance solution, engineering cost isn't important" — see §4.3
 and §5.1.
 **Date:** 2026-09-16
 **Author:** Manoz
-**Related:** `docs/specs/SPEC_AGENT_DELETE_2026_09_16.md` (the delete feature
+**Related:** [`docs/specs/SPEC_AGENT_DELETE_2026_09_16.md`](SPEC_AGENT_DELETE_2026_09_16.md) (the delete feature
 this animates — backend + wiring already shipped, verified clean end-to-end
 against a live instance the same day this spec was written, see §0),
-`frontend/app/view/agent/components/MyAgentsList.tsx` (`rows`/`createResource`
+[`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) (`rows`/`createResource`
 at line 336, the `"agents:changed"` subscription at 406-407, `sortedRows` at
 775-778, the `<For>` render at 837, `confirmDelete` at ~643-710),
-`frontend/app/view/agent/styles/_recent-sessions.scss` (`.agent-recent-sessions-list`
-at 89-103, `.agent-recent-sessions-row` at 105-112), `frontend/app/theme.scss`
-(`--motion-spring` at 417), `frontend/app/view/drone/drone-model.ts` (91-97,
-the `reconcile`-keyed-by-id precedent this spec's fix borrows), `frontend/app/store/global.ts`
-(`prefersReducedMotionAtom`, 83), `frontend/app/app.scss` (295-311, the
+[`frontend/app/view/agent/styles/_recent-sessions.scss`](../../frontend/app/view/agent/styles/_recent-sessions.scss) (`.agent-recent-sessions-list`
+at 89-103, `.agent-recent-sessions-row` at 105-112), [`frontend/app/theme.scss`](../../frontend/app/theme.scss)
+(`--motion-spring` at 417), [`frontend/app/view/drone/drone-model.ts`](../../frontend/app/view/drone/drone-model.ts) (91-97,
+the `reconcile`-keyed-by-id precedent this spec's fix borrows), [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts)
+(`prefersReducedMotionAtom`, 83), [`frontend/app/app.scss`](../../frontend/app/app.scss) (295-311, the
 documented `transition-*`-only gap in the app-wide reduced-motion class and
 the two-layer JS-gate + CSS-backstop fix already used for view transitions).
 

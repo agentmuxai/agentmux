@@ -3,8 +3,8 @@
 **Date:** 2026-08-14
 **Type:** Responsive layout fix
 **Status:** Implemented — #2577
-**Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx`,
-`frontend/app/view/agent/styles/_composer-strip.scss`
+**Scope:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx),
+[`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss)
 
 ## Related history
 
@@ -173,8 +173,8 @@ typos) has a record, matching this file's established pattern (see the
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_composer-strip.scss` | `.agent-composer-strip`: `justify-content: flex-start` → `space-between`. `-stats-zone`: default `flex-basis: 100%` + `text-align: center`; `flex-basis: auto` at ≥280px. `-right`: default `flex-basis: 100%` + `justify-content: flex-end` (both apply at every tier, not just ≥482px). `min-width: 12ch` added to `.agent-composer-strip-stats`. No change to `-controls` (an earlier `justify-content: center` addition was added then removed same day — see addendum). Comments updated throughout. |
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | No structural change — header comment updated to describe the edge-split design. |
+| [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) | `.agent-composer-strip`: `justify-content: flex-start` → `space-between`. `-stats-zone`: default `flex-basis: 100%` + `text-align: center`; `flex-basis: auto` at ≥280px. `-right`: default `flex-basis: 100%` + `justify-content: flex-end` (both apply at every tier, not just ≥482px). `min-width: 12ch` added to `.agent-composer-strip-stats`. No change to `-controls` (an earlier `justify-content: center` addition was added then removed same day — see addendum). Comments updated throughout. |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | No structural change — header comment updated to describe the edge-split design. |
 
 ## Verification performed
 

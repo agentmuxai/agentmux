@@ -3,13 +3,13 @@
 **Date:** 2026-09-19
 **Status:** proposed
 **Related:**
-`docs/specs/SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md` (where the drawer renders),
-`docs/specs/SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md` (drawer close on `exit`),
-`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (the agent shares this shell),
-`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md` (pane-close confirmation, which uses the same process list),
-`docs/specs/SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md` (the History tab),
-`docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md` (the strip's other panel, whose open/close and floating mechanics the stats popover mirrors),
-`docs/specs/SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md` (removed the strip stats that `sessionTotals` used to feed),
+[`docs/specs/SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md`](SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md) (where the drawer renders),
+[`docs/specs/SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md`](SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md) (drawer close on `exit`),
+[`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) (the agent shares this shell),
+[`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) (pane-close confirmation, which uses the same process list),
+[`docs/specs/SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md`](SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) (the History tab),
+[`docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) (the strip's other panel, whose open/close and floating mechanics the stats popover mirrors),
+[`docs/specs/SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) (removed the strip stats that `sessionTotals` used to feed),
 PR #3430 (process list now counts only agent-started processes; composer `⚙ N` badge removed).
 
 ---

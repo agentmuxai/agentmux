@@ -2,11 +2,11 @@
 
 **Date:** 2026-09-26
 **Status:** active — PR 1 (reader, writer, estimates, canceled thinking) implemented in #3906; PR 2 (remove `section`) in the PR stacked on #3906
-**Amended 2026-10-07:** a `jekt_message` is no longer open by default. It closes like a tool call: held open after arriving live until it scrolls off, pinned open by a click, and open by default only when `TIER=sensitive`. `expandedTools` is now `heldOpenNodes`. Operator's request; see `docs/reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md` §2.1.
-**Scope:** `frontend/app/view/agent/` — how every transcript row decides whether
+**Amended 2026-10-07:** a `jekt_message` is no longer open by default. It closes like a tool call: held open after arriving live until it scrolls off, pinned open by a click, and open by default only when `TIER=sensitive`. `expandedTools` is now `heldOpenNodes`. Operator's request; see [`docs/reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md`](../reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md) §2.1.
+**Scope:** [`frontend/app/view/agent/`](../../frontend/app/view/agent) — how every transcript row decides whether
 it is open, how the user toggles it, and how the virtualizer estimates it
 **Verified against:** `main` @ `ba9abe92f`
-**Source:** `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`
+**Source:** [`docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`](../reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md)
 items B1, B4
 **Builds on:** `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` (which introduced
 `currentExpansion`, phase 1 of that spec)

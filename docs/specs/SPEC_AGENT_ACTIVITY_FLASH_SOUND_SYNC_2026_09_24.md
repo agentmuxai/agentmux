@@ -6,7 +6,7 @@ See §8–§9 for what shipped and where it departs from §3.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi).
 **Author:** Clamk.
-**Builds on:** `docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md` (PR #3625, Revisions 2–3).
+**Builds on:** [`docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) (PR #3625, Revisions 2–3).
 It replaces that spec's single fixed envelope and its 100 ms throttle. Everything
 else stays: targets (window tab and pane pill), colors, overlay mechanics, the
 setting, and the gates.
@@ -23,7 +23,7 @@ timing**. They hear roughly three sounds: one is a **single hard knock**, anothe
 **three smaller knocks**. Both must be recognizable in the flash.
 
 Today every tool tone produces the same flash: an instant jump to full strength, a
-40 ms hold, then a 300 ms `ease-out` fade (`frontend/app/notification/activity-flash.ts:69-81`).
+40 ms hold, then a 300 ms `ease-out` fade ([`frontend/app/notification/activity-flash.ts:69-81`](../../frontend/app/notification/activity-flash.ts#L69-L81)).
 Every syllable looks identical, whether it has two strikes or three.
 
 ## 2. Exact timing of every sound
@@ -317,8 +317,8 @@ it carries the whole case, so update that comment:
 
 | File | Change |
 |---|---|
-| `frontend/app/notification/activity-flash.ts` | `FlashPattern`, `envelopeAt`, keyframe sampler, merge-per-element, `delayMs`, remove `FLASH_THROTTLE_MS`, new constants (`FLASH_STRIKE_HOLD_MS` 20, `FLASH_INTER_STRIKE_FLOOR` 0.15, `FLASH_TAIL_MS` 280, `FLASH_MIN_INTENSITY` 0.5, `FLASH_VISUAL_LEAD_MS` 16, sample step 8 ms), updated photosensitivity comment |
-| new `frontend/app/notification/sound/flash-patterns.ts` | `flashPatternForSyllable`, `flashPatternForCategory`, (P3) `flashPatternForWaitingCycle`, `strikeLevelDb` / `intensityFor`; imports player constants only |
+| [`frontend/app/notification/activity-flash.ts`](../../frontend/app/notification/activity-flash.ts) | `FlashPattern`, `envelopeAt`, keyframe sampler, merge-per-element, `delayMs`, remove `FLASH_THROTTLE_MS`, new constants (`FLASH_STRIKE_HOLD_MS` 20, `FLASH_INTER_STRIKE_FLOOR` 0.15, `FLASH_TAIL_MS` 280, `FLASH_MIN_INTENSITY` 0.5, `FLASH_VISUAL_LEAD_MS` 16, sample step 8 ms), updated photosensitivity comment |
+| new [`frontend/app/notification/sound/flash-patterns.ts`](../../frontend/app/notification/sound/flash-patterns.ts) | `flashPatternForSyllable`, `flashPatternForCategory`, (P3) `flashPatternForWaitingCycle`, `strikeLevelDb` / `intensityFor`; imports player constants only |
 | `tool-tones-player.ts` | export `ENVELOPE_PEAK`, the 6 ms attack; `claim(tool)`; `play` accepts params and returns `startAt` |
 | `synth-fallback.ts` | export category params and the 10 ms / 150 ms envelope constants; return `startAt` |
 | `sound-player.ts` | `play` returns `startAt \| null` |
@@ -383,7 +383,7 @@ Live verification in a dev build, both required before calling it done:
 
 Code:
 
-- `frontend/app/notification/activity-flash.ts`: `FlashStrike`/`FlashPattern`,
+- [`frontend/app/notification/activity-flash.ts`](../../frontend/app/notification/activity-flash.ts): `FlashStrike`/`FlashPattern`,
   `FlashTarget = { blockId, pattern, delayMs }`, the pure envelope
   (`patternEnvelopeAt`, `envelopeAt` for merges, `easeOut` = CSS
   `cubic-bezier(0, 0, 0.58, 1)`), `buildFlashKeyframes` (8 ms samples + hold ends
@@ -391,7 +391,7 @@ Code:
   baseColor?)` with per-element merging. `FLASH_THROTTLE_MS` and the fixed
   40/300 ms envelope are gone. The photosensitivity comment now rests on the
   small-area exemption (§3.8).
-- New `frontend/app/notification/sound/flash-patterns.ts`:
+- New [`frontend/app/notification/sound/flash-patterns.ts`](../../frontend/app/notification/sound/flash-patterns.ts):
   `flashPatternForSyllable`, `intensityForLevel`, `syllableStrikeLevelDb`,
   `categoryStrikeLevelDb` (the level reference, and Phase 2's input),
   `audibleFlashDelayMs`, `FLASH_MIN_INTENSITY`, `FLASH_MAX_AUDIO_DELAY_MS`.

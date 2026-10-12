@@ -12,7 +12,7 @@
 
 - **Comments are over a third of what an agent reads.** Excluding tests and generated code, comments are 27.7% of lines and ~37% of characters (§1). In the hottest files the share is 45–68% of characters: `agent-view.tsx`, `useAgentCommands.ts`, `server/mod.rs`.
 - **Most of the content is worth keeping; the length is the problem.** In a 100-block sample, 85% of comment lines are kinds worth keeping (invariants, why-nots, interface docs, spec links). Review narration, restating, essays and stale text make up the other ~15% (§2). Nearly half of all comment lines sit in blocks of 10+ lines.
-- **Rule: state the constraint and its consequence in ≤3 lines, and cite the PR once as `(#NNNN)`.** No reviewer names, severity tags, round counts or "an earlier version" stories. Explain a rule once, where it is enforced. Move essays over 8 lines to `docs/`, leaving a one-line pointer (§4).
+- **Rule: state the constraint and its consequence in ≤3 lines, and cite the PR once as `(#NNNN)`.** No reviewer names, severity tags, round counts or "an earlier version" stories. Explain a rule once, where it is enforced. Move essays over 8 lines to [`docs/`](..), leaving a one-line pointer (§4).
 - **Condense file by file, in comment-only PRs.** Check each PR mechanically: the code token stream, with comments stripped, must be identical before and after (§5, §7). Never condense inside a move-only refactor.
 - **Stop regrowth with one cheap CI gate.** Fail on review-history markers in *added* comment lines. Report comment density per touched file, but don't fail on it. Put the rules in `CONTRIBUTING.md` (§6).
 - **Expected savings (estimates):** 35–50% of comment tokens in condensed files. That is about 13–18% of all tokens an agent reads from non-test source, and 19–34% for the hottest files. `agent-view.tsx`: ~5.6–8.0k tokens per full read.
@@ -22,7 +22,7 @@
 
 ### 1.1 Method
 
-- **Files:** every tracked `*.ts`, `*.tsx` and `*.rs` on `main`, taken from `git archive main`. Excluded: `node_modules/`, `target/`, `dist/`, `build/`, the ts-rs bindings under `frontend/types/rpc/` (374 generated files) and `agentmux-launcher/src/splash_font.rs` (`@generated`). The hand-maintained `.d.ts` files stay in. Lockfiles are not TS/RS, so they are out by construction.
+- **Files:** every tracked `*.ts`, `*.tsx` and `*.rs` on `main`, taken from `git archive main`. Excluded: `node_modules/`, `target/`, `dist/`, [`build/`](../../build), the ts-rs bindings under [`frontend/types/rpc/`](../../frontend/types/rpc) (374 generated files) and `agentmux-launcher/src/splash_font.rs` (`@generated`). The hand-maintained `.d.ts` files stay in. Lockfiles are not TS/RS, so they are out by construction.
 - **Test files:** `*.test.ts(x)`, `*.spec.ts(x)`, `tests/` dirs, `*_test(s).rs`. Rust inline `#[cfg(test)] mod tests` blocks count as non-test (not separable without parsing).
 - **Counter:** a small lexer, not committed. §6 proposes committing it as the gate's counter. It skips strings, template literals (including `${}` nesting), Rust raw strings, char literals and nested `/* */`, so `//` inside a URL is not a comment.
   - A **comment line** has comment characters and no code characters. A code line with a trailing comment counts as code (TS 920, Rust 689 such lines), but its comment characters still count toward comment tokens.
@@ -72,26 +72,26 @@ TS/TSX:
 
 | # | File | Lines | Comment lines | Ratio | Comment tok (est.) | File tok (est.) | Comment tok share | Commits since 08-01 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | `frontend/app/view/agent/hooks/useAgentCommands.ts` | 1,934 | 1,308 | 68% | 18,856 | 27,877 | 68% | 15 |
-| 2 | `frontend/app/view/agent/agent-view.tsx` | 2,111 | 968 | 46% | 16,037 | 29,380 | 55% | 121 |
-| 3 | `frontend/app/view/agent/components/AgentComposerStrip.tsx` | 1,526 | 927 | 61% | 14,384 | 21,929 | 66% | 26 |
-| 4 | `frontend/app/view/swarm/swarm-model.ts` | 2,086 | 886 | 42% | 14,047 | 26,416 | 53% | 17 |
-| 5 | `frontend/app/store/agent-pane-state/types.ts` | 1,213 | 859 | 71% | 11,600 | 14,729 | 79% | 22 |
-| 6 | `frontend/app/view/agent/hooks/useAgentControllerStatus.ts` | 1,442 | 804 | 56% | 11,591 | 20,225 | 57% | 12 |
-| 7 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | 1,586 | 747 | 47% | 11,992 | 22,500 | 53% | 14 |
-| 8 | `frontend/app/store/agent-pane-state/reducer.ts` | 1,732 | 713 | 41% | 9,923 | 22,189 | 45% | 16 |
-| 9 | `frontend/app/view/agent/hooks/useAgentCommands.test.ts` | 3,338 | 665 | 20% | 10,268 | 41,174 | 25% | 10 |
-| 10 | `frontend/app/view/agent/components/AgentFooter.tsx` | 1,310 | 574 | 44% | 8,936 | 17,042 | 52% | 21 |
+| 1 | [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) | 1,934 | 1,308 | 68% | 18,856 | 27,877 | 68% | 15 |
+| 2 | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 2,111 | 968 | 46% | 16,037 | 29,380 | 55% | 121 |
+| 3 | [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | 1,526 | 927 | 61% | 14,384 | 21,929 | 66% | 26 |
+| 4 | [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) | 2,086 | 886 | 42% | 14,047 | 26,416 | 53% | 17 |
+| 5 | [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | 1,213 | 859 | 71% | 11,600 | 14,729 | 79% | 22 |
+| 6 | [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts) | 1,442 | 804 | 56% | 11,591 | 20,225 | 57% | 12 |
+| 7 | [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) | 1,586 | 747 | 47% | 11,992 | 22,500 | 53% | 14 |
+| 8 | [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | 1,732 | 713 | 41% | 9,923 | 22,189 | 45% | 16 |
+| 9 | [`frontend/app/view/agent/hooks/useAgentCommands.test.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.test.ts) | 3,338 | 665 | 20% | 10,268 | 41,174 | 25% | 10 |
+| 10 | [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | 1,310 | 574 | 44% | 8,936 | 17,042 | 52% | 21 |
 | 11 | `frontend/app/store/agent-pane-state/reducer.test.ts` | 3,519 | 567 | 16% | 8,040 | 45,151 | 18% | 13 |
-| 12 | `frontend/app/view/agent/types.ts` | 995 | 485 | 49% | 6,361 | 9,491 | 67% | 26 |
-| 13 | `frontend/app/view/agent/components/MyAgentsList.tsx` | 1,286 | 459 | 36% | 7,406 | 18,311 | 40% | 12 |
-| 14 | `frontend/app/view/agent/components/AgentPicker.tsx` | 1,128 | 445 | 39% | 6,277 | 14,471 | 43% | 25 |
-| 15 | `frontend/app/view/agent/agent-model.ts` | 961 | 442 | 46% | 6,229 | 12,745 | 49% | 46 |
-| 16 | `frontend/app/view/agent/useAgentStream.ts` | 954 | 439 | 46% | 6,106 | 13,225 | 46% | 23 |
-| 17 | `frontend/app/view/editor/editor-model.ts` | 1,407 | 434 | 31% | 6,899 | 16,644 | 41% | 17 |
-| 18 | `frontend/app/view/agent/components/AgentShellSubblock.tsx` | 788 | 430 | 55% | 6,402 | 10,973 | 58% | 12 |
-| 19 | `frontend/app/view/agent/stream-parser.ts` | 895 | 388 | 43% | 5,061 | 10,061 | 50% | 10 |
-| 20 | `frontend/app/element/PaneTabStrip.tsx` | 816 | 384 | 47% | 6,258 | 10,894 | 57% | 23 |
+| 12 | [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | 995 | 485 | 49% | 6,361 | 9,491 | 67% | 26 |
+| 13 | [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) | 1,286 | 459 | 36% | 7,406 | 18,311 | 40% | 12 |
+| 14 | [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) | 1,128 | 445 | 39% | 6,277 | 14,471 | 43% | 25 |
+| 15 | [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | 961 | 442 | 46% | 6,229 | 12,745 | 49% | 46 |
+| 16 | [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | 954 | 439 | 46% | 6,106 | 13,225 | 46% | 23 |
+| 17 | [`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts) | 1,407 | 434 | 31% | 6,899 | 16,644 | 41% | 17 |
+| 18 | [`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) | 788 | 430 | 55% | 6,402 | 10,973 | 58% | 12 |
+| 19 | [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | 895 | 388 | 43% | 5,061 | 10,061 | 50% | 10 |
+| 20 | [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx) | 816 | 384 | 47% | 6,258 | 10,894 | 57% | 23 |
 
 Rust:
 
@@ -122,10 +122,10 @@ Rust:
 
 | File | Lines | Comment lines | File tok (est.) | Comment tok (est.) | Commits since 08-01 |
 |---|---:|---:|---:|---:|---:|
-| `frontend/app/view/agent/agent-view.tsx` | 2,111 | 968 (46%) | ~29,400 | ~16,000 (55%) | 121 |
-| `frontend/app/view/agent/hooks/useAgentCommands.ts` | 1,934 | 1,308 (68%) | ~27,900 | ~18,900 (68%) | 15 |
-| `frontend/app/store/agent-pane-state/reducer.ts` | 1,732 | 713 (41%) | ~22,200 | ~9,900 (45%) | 16 |
-| `frontend/app/store/agent-pane-state/types.ts` | 1,213 | 859 (71%) | ~14,700 | ~11,600 (79%) | 22 |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 2,111 | 968 (46%) | ~29,400 | ~16,000 (55%) | 121 |
+| [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) | 1,934 | 1,308 (68%) | ~27,900 | ~18,900 (68%) | 15 |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | 1,732 | 713 (41%) | ~22,200 | ~9,900 (45%) | 16 |
+| [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | 1,213 | 859 (71%) | ~14,700 | ~11,600 (79%) | 22 |
 | `agentmux-srv/src/bootstrap.rs` | 2,441 | 804 (33%) | ~30,000 | ~12,700 (42%) | 61 |
 | `agentmux-srv/src/server/mod.rs` | 3,328 | 1,179 (35%) | ~39,900 | ~18,600 (47%) | 81 |
 
@@ -140,7 +140,7 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
   - These counts are marker lines only; the narration around them adds more (§2.2).
 - **Stale file references:** comments reference file names 8,146 times. 326 of those, in 203 files, name one of 160 file names that exist nowhere in the tree. This excludes names AgentMux generates at runtime, such as `CLAUDE.md` and `GEMINI.md`.
   - The top misses are modules split into directories: `persistent.rs` (46), `app.rs` (12), `app_api.rs` (11), `browser_panes.rs` (10), `shell.rs` (9).
-  - Treat 326 as an upper bound. Some are deliberate history ("Split from the original rpc-api.ts.", `frontend/app/store/rpc-api/workspace.ts:5`).
+  - Treat 326 as an upper bound. Some are deliberate history ("Split from the original rpc-api.ts.", [`frontend/app/store/rpc-api/workspace.ts:5`](../../frontend/app/store/rpc-api/workspace.ts#L5)).
   - `check-spec-citations.sh` already catches dead `docs/**.md` paths, but only in changed files, and not source-file names.
 - **Verbatim duplication is small:** 1,127 duplicate comment lines of 60+ characters, mostly ruler lines. Paraphrased duplication is what costs, and a script cannot find it (§5.2).
 
@@ -150,33 +150,33 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
 
 **(a) Invariant / constraint: keep.**
 - `useAgentCommands.ts:697-699`: "This destructive action requires POSITIVE proof of idle, not just absence of proof of activity."
-- `frontend/layout/lib/TileLayout.core.tsx:327-330`: "Keeping them together is deliberate: the cursor grab-offset must be derived from the size the image actually has, and a separate nominal constant is exactly how the two drift and the ghost detaches from the cursor."
+- [`frontend/layout/lib/TileLayout.core.tsx:327-330`](../../frontend/layout/lib/TileLayout.core.tsx#L327-L330): "Keeping them together is deliberate: the cursor grab-offset must be derived from the size the image actually has, and a separate nominal constant is exactly how the two drift and the ghost detaches from the cursor."
 - `agentmux-srv/src/backend/layout/mod.rs:698-699`: "I2 — the `minimized` flag and the legacy minimizedSize/slipMinimize markers are leaf-only."
 
 **(b) Why-not / rejected alternative: keep, short.**
-- `frontend/app/util/pointer-drag-state.ts:35-41`: "Iterating the live Set on purpose, NOT a copy. … A defensive `[...releaseListeners]` copy would call it anyway, which is worse, not safer."
+- [`frontend/app/util/pointer-drag-state.ts:35-41`](../../frontend/app/util/pointer-drag-state.ts#L35-L41): "Iterating the live Set on purpose, NOT a copy. … A defensive `[...releaseListeners]` copy would call it anyway, which is worse, not safer."
 - `agentmux-common/src/runtime_mode.rs:95-97`: "sanitize it directly, do NOT call detect_branch (which has its own git fallback …"
 - `useAgentCommands.ts:691-692`: "Deliberately `!isBackendTurnConfirmedIdle()`, NOT `isBackendTurnActive()`".
 
 **(c) Review-history narration: move to git/PR.**
 - `useAgentCommands.ts:780`: "codex P1 on PR #2338 (sixteenth re-review) pins that flag"
-- `frontend/app/view/agent/hooks/useSubagentBackfillGate.ts:19`: "reagentx P1 + codex P1 (PR #2781, round 2): an earlier version defaulted"
+- [`frontend/app/view/agent/hooks/useSubagentBackfillGate.ts:19`](../../frontend/app/view/agent/hooks/useSubagentBackfillGate.ts#L19): "reagentx P1 + codex P1 (PR #2781, round 2): an earlier version defaulted"
 - `agentmux-srv/src/backend/blockcontroller/app_server_controller.rs:323`: "ReAgent P1 on PR #3215's second review: don't just log and"
 
 **(d) Restating the code: delete.**
 - `agentmux-srv/src/backend/blockcontroller/persistent/spawn.rs:502`: "// Create stdin writer channel"
 - `agentmux-srv/src/backend/reactive/sanitize.rs:83`: "// Keep printable characters and valid UTF-8"
-- `frontend/layout/lib/layoutResize.ts:264`: "Callback that is invoked when the TileLayout container is being resized."
+- [`frontend/layout/lib/layoutResize.ts:264`](../../frontend/layout/lib/layoutResize.ts#L264): "Callback that is invoked when the TileLayout container is being resized."
 
-**(e) Incident narrative / design essay: move to `docs/`, leave a pointer.**
+**(e) Incident narrative / design essay: move to [`docs/`](..), leave a pointer.**
 - `agentmux-srv/src/migrations/m0013_agent_direct_bindings.rs:4-23`: a 20-line module doc on a retired, no-op migration. Keep the one constraint ("the migration id stays registered") and the spec pointer.
 - `agent-view.tsx:1080-1107`: a 28-line essay on the focus re-poll, including "(removed per direct user request — …)".
-- `frontend/app/store/block-atom-cache.ts:51`: "Diagnostic-only snapshot — added while investigating a 2026-09-20 latency/memory report."
+- [`frontend/app/store/block-atom-cache.ts:51`](../../frontend/app/store/block-atom-cache.ts#L51): "Diagnostic-only snapshot — added while investigating a 2026-09-20 latency/memory report."
 
 **(f) Cross-reference to a spec: keep, one line.**
-- `frontend/app-init.ts:1015`: "Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3."
-- `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:736-739`: route through the CEF clipboard wrapper, then "SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3."
-- `frontend/app/store/agent-pane-state/types.ts:567`: "See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md."
+- [`frontend/app-init.ts:1015`](../../frontend/app-init.ts#L1015): "Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3."
+- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:736-739`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx#L736-L739): route through the CEF clipboard wrapper, then "SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3."
+- [`frontend/app/store/agent-pane-state/types.ts:567`](../../frontend/app/store/agent-pane-state/types.ts#L567): "See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md."
 
 **(g) Stale: fix.**
 - `agent-view.tsx:1103`: "persistent.rs's spawn_status_heartbeat". The function is now at `agentmux-srv/src/backend/blockcontroller/persistent/status.rs:65`.
@@ -186,7 +186,7 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
 **(h) Interface / contract doc: keep.** Added because about a third of the sample fits none of (a)–(g). It covers what a field, parameter or return value means.
 - `agentmux-srv/src/backend/storage/filestore/lines.rs:37-41`
 - `agentmux-srv/src/backend/gh_guard.rs:75-80`: "Never fails the spawn: if the directory can't be prepared the variable is still set …"
-- `frontend/app/view/agent/attachments/AttachmentLightbox.tsx:31`: "Still copying or processing (composer only): no id yet, but not gone."
+- [`frontend/app/view/agent/attachments/AttachmentLightbox.tsx:31`](../../frontend/app/view/agent/attachments/AttachmentLightbox.tsx#L31): "Still copying or processing (composer only): no id yet, but not gone."
 
 ### 2.2 Share by kind (sample)
 
@@ -233,7 +233,7 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
   - Rust's `///`/`//!` render through rustdoc, which shows the first paragraph as the item summary. A summary sentence first, detail after, is the convention.
   - Clippy's `undocumented_unsafe_blocks` requires a `// SAFETY:` comment. This repo has 34 of those for 333 `unsafe {` sites: an under-commented area, out of scope here.
 - **History belongs in version control.** Commit messages and PR descriptions record what changed and why at that moment; `git log -L` and `git blame` retrieve it per line. A comment should describe the code as it is now.
-- **Design rationale that spans modules goes in a design doc or ADR** (Nygard, "Documenting Architecture Decisions", 2011; Ousterhout, *A Philosophy of Software Design*, ch. 13 on cross-module design notes). This repo already has `docs/specs`, `docs/architecture` and `docs/retro` for it.
+- **Design rationale that spans modules goes in a design doc or ADR** (Nygard, "Documenting Architecture Decisions", 2011; Ousterhout, *A Philosophy of Software Design*, ch. 13 on cross-module design notes). This repo already has [`docs/specs`](.), [`docs/architecture`](../architecture) and [`docs/retro`](../retro) for it.
 
 ### 4.2 What is different when agents maintain the code
 
@@ -252,7 +252,7 @@ Each rule says how it is checked.
 | C2 | Cite the PR or issue once, as `(#NNNN)`, next to the constraint it justifies. Cite a spec as `SPEC_NAME.md §N`. | Review |
 | C3 | A why-comment states the constraint and the consequence of breaking it, in ≤3 lines. An interface doc may be longer, but its first sentence is the summary. | Report: added blocks >8 lines (§6) |
 | C4 | Explain a rule once, where it is enforced. Other sites get one line pointing there. | Review |
-| C5 | Rationale longer than ~8 lines that isn't interface doc goes to `docs/` (spec, architecture or retro), with a one-line pointer. | Report (C3) |
+| C5 | Rationale longer than ~8 lines that isn't interface doc goes to [`docs/`](..) (spec, architecture or retro), with a one-line pointer. | Report (C3) |
 | C6 | Never restate the code or the types (`@param node The node`). | Review |
 | C7 | Paths and symbols named in a comment must exist. Update them in the PR that moves the code. | `check-spec-citations.sh` for docs; proposed extension for source names (§6) |
 | C8 | Never remove `SAFETY:`, `TODO`/`FIXME`, lint or compiler directives (`eslint-disable`, `@ts-expect-error`, `/// <reference`) or doctest fences. | Condense-diff check (§7) |
@@ -268,7 +268,7 @@ Each rule says how it is checked.
    - (h): a summary sentence first; keep every field, unit, error and edge case.
    - (c): delete the narration and keep the PR number.
    - (d): delete.
-   - (e): move to `docs/`, leave a pointer.
+   - (e): move to [`docs/`](..), leave a pointer.
    - (f): one line.
    - (g): correct it against current code, or delete it if it has no referent.
 4. **De-duplicate:** where a rule is explained at a definition and repeated at call sites, keep the definition's version (C4).
@@ -570,20 +570,20 @@ Same length; the pointer now resolves.
 
 ## 6. Enforcement
 
-This repo deliberately has no agent-instructions file: #3403 removed `CLAUDE.md` on the principle that agent instructions belong in each agent's own provider configuration (`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md` §1). Its gates run on changed files only, because repo-wide gates were switched off in the past (`scripts/check-spec-citations.sh:19-27`). The options below follow both constraints.
+This repo deliberately has no agent-instructions file: #3403 removed `CLAUDE.md` on the principle that agent instructions belong in each agent's own provider configuration (`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md` §1). Its gates run on changed files only, because repo-wide gates were switched off in the past ([`scripts/check-spec-citations.sh:19-27`](../../scripts/check-spec-citations.sh#L19-L27)). The options below follow both constraints.
 
 | Option | What | For | Against |
 |---|---|---|---|
-| A. Density ratchet with an allow-list | Like `scripts/check-time-helpers.allow`: list files above 40% with their comment-line counts; fail if a count grows | Forces the backlog down | Every condensing PR edits the shared list, so parallel agent branches conflict. Adding one real invariant to a hot file fails CI. Likely to be switched off |
+| A. Density ratchet with an allow-list | Like [`scripts/check-time-helpers.allow`](../../scripts/check-time-helpers.allow): list files above 40% with their comment-line counts; fail if a count grows | Forces the backlog down | Every condensing PR edits the shared list, so parallel agent branches conflict. Adding one real invariant to a hot file fails CI. Likely to be switched off |
 | A′. Density ratchet against merge-base | Like `check-docs-lifecycle.mjs`: a touched file above 40% may not raise its ratio. No list | No shared file; blames only the branch's own change | Same false-fail risk as A on legitimate guardrails |
 | B. Narration gate | Fail on *added* comment lines matching `\bP[0-3]\b.{0,40}#\d{3,}`, `re-?review`, `\b(reagentx?\|ReAgent\|Codex) (P[0-3]\|review\|flagged\|caught)`, `\bround \d+\b` | Precise (30/30 spot-checked hits were narration); no backlog, since it only sees added lines; cheap | Doesn't shrink existing text; can be dodged by rewording (but rewording tends to drop the narration anyway) |
 | C. Written rules | §4.3 as a "Comments" subsection of `CONTRIBUTING.md` → Style Guide. The owner can also add a short Global Memory entry pointing at it, outside the repo | Reaches humans and agents; fits the #3403 policy | Advisory; relies on being read |
 | C′. `AGENTS.md` | Repo-level agent instructions | Read automatically by several agent CLIs | Reverses #3403's policy |
-| D. Review-bot instruction | Tell ReAgent to ask for "constraint + `(#PR)`" in fixes, and to flag C1 violations in diffs | Catches rewording that B misses | ReAgent's prompt lives outside this repo (`.github/workflows/reagent-review.yml` runs a pinned external image); a change there, not here |
+| D. Review-bot instruction | Tell ReAgent to ask for "constraint + `(#PR)`" in fixes, and to flag C1 violations in diffs | Catches rewording that B misses | ReAgent's prompt lives outside this repo ([`.github/workflows/reagent-review.yml`](../../.github/workflows/reagent-review.yml) runs a pinned external image); a change there, not here |
 
 **Recommendation: B (fail) + A′ (report only) + C + D.**
 
-- Implement B and A′ as one script, `scripts/check-comment-hygiene.mjs`, wired into `ci-pr.yml` next to `check-time-helpers.mjs`. It uses the §1.1 lexer, so strings are never mistaken for comments.
+- Implement B and A′ as one script, [`scripts/check-comment-hygiene.mjs`](../../scripts/check-comment-hygiene.mjs), wired into `ci-pr.yml` next to `check-time-helpers.mjs`. It uses the §1.1 lexer, so strings are never mistaken for comments.
   - Default mode fails on B, and prints A′ plus C3 (added blocks over 8 lines) as `::warning`s.
   - `--report` prints the §1.3 tables.
   - `--code-equal <base>` is the §7.3 check.
@@ -598,7 +598,7 @@ Rank = comment tokens × commits since 2026-08-01 (a proxy for how often agents 
 
 | # | File | Comment tok (est.) | Commits | Note |
 |---|---|---:|---:|---|
-| 1 | `frontend/app/view/agent/agent-view.tsx` | 16,037 | 121 | After the remaining split steps (large-file spec §3) |
+| 1 | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 16,037 | 121 | After the remaining split steps (large-file spec §3) |
 | 2 | `agentmux-srv/src/server/mod.rs` | 18,554 | 81 | After its split (large-file spec item 6), per file |
 | 3 | `agentmux-srv/src/backend/storage/agents.rs` | 20,736 | 39 | |
 | 4 | `agentmux-srv/src/bootstrap.rs` | 12,712 | 61 | Condense the `bootstrap/*` files after the open split lands |
@@ -643,11 +643,11 @@ The churn column is bent by the recent split: `useAgentCommands.ts` shows 15 com
 ## 8. Open questions
 
 - Should test files get a lighter pass later? They are 12–15% comments, and many of those comments name the bug each test pins, which is the guardrail case.
-- Should the §1.1 lexer stay in `scripts/` as the only comment counter, so the gate and `--report` can never disagree? Recommended: yes.
+- Should the §1.1 lexer stay in [`scripts/`](../../scripts) as the only comment counter, so the gate and `--report` can never disagree? Recommended: yes.
 
 ## 9. Phase 0 as built
 
-Phase 0 (§7.2) is `scripts/check-comment-hygiene.mjs`, its tests (`scripts/check-comment-hygiene.test.mjs`), a CI step in the `docs` job of `ci-pr.yml`, and the "Comments" section of `CONTRIBUTING.md`. The measurement and the cost/benefit analysis are in [`REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02`](../reports/REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md). Differences from the design above:
+Phase 0 (§7.2) is [`scripts/check-comment-hygiene.mjs`](../../scripts/check-comment-hygiene.mjs), its tests ([`scripts/check-comment-hygiene.test.mjs`](../../scripts/check-comment-hygiene.test.mjs)), a CI step in the `docs` job of `ci-pr.yml`, and the "Comments" section of `CONTRIBUTING.md`. The measurement and the cost/benefit analysis are in [`REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02`](../reports/REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md). Differences from the design above:
 
 - **Gate (option B).** It lexes each changed file and checks the comment text of added lines only (diff against the merge-base, working tree included), so a marker word inside a string or in code never fires. A comment the same diff also removes elsewhere (a split, a move into another file, a re-indent) is not new, so a move-only PR passes: `git diff -M` follows only whole-file renames, and without this every moved line would count as added. It fails on six narration patterns: a severity tag next to a PR number; "re-review"; "round N"; a review bot named next to a PR number, a severity tag, or a verdict (asked, flagged, caught, …). The severity pattern is case-sensitive (`P1`, not `p1`), because `p1` is a point variable and `#333` a colour. The severity tag is matched on either side of the PR number. Before shipping I sampled 12 random hits per pattern on `main` (60 in total) and every one was review history; the reverse-order match, added after review, found 96 more lines on `main` and all 25 I sampled were too.
 - **Opt-out.** A comment containing `comment-hygiene: allow` is skipped, for the rare comment whose subject is the review bot itself. Without it the gate would have no way out of a false positive.

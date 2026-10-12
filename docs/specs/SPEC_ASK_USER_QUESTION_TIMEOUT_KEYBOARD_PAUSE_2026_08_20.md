@@ -6,12 +6,12 @@
 pane, the composer included, restarts the quiet window, except auto-repeat;
 the §8 single-window gate is replaced by that (`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md`
 §4, §8). The countdown now lives in `store/question-timer.ts`.
-**Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md`
+**Builds on:** [`docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md`](SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md)
 (implemented). This spec adds a *second trigger* for that spec's existing
 `hidden`/hide-timer mechanism — it does not change what "paused" means, how
 long a pause lasts, how it resumes, or anything about §2's "live but
 strictly bounded" safety argument. It also does not reopen
-`docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`'s original
+[`docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`](SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md)'s original
 "merge, no disarm" decision, for the same reason the hover-pause spec's own
 §2 already established: a bounded, self-resuming pause is a different kind
 of mechanism than a permanent one-shot disarm, and this spec doesn't touch
@@ -30,7 +30,7 @@ already-bounded pause state.
 
 ## 1. Current behavior (audited against source, 2026-08-20)
 
-`frontend/app/view/agent/components/AgentQuestionPanel.tsx`, confirmed
+[`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx), confirmed
 against the live file directly (not from the hover-pause spec's own prose,
 which predates one change noted below):
 
@@ -252,11 +252,11 @@ has to reconcile against `handleKey`'s existing branches. Not worth it.
 
 ## 6. Files touched (implementation, not this spec)
 
-- `frontend/app/view/agent/components/AgentQuestionPanel.tsx` — one new
+- [`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) — one new
   call (`onPanelPointerEnter()`) inside the existing `handleKey` function,
   gated on the existing `inPanel` check. No new signals, no new timers, no
   new listener registration.
-- `frontend/app/view/agent/components/AgentQuestionPanel.test.tsx` — new
+- [`frontend/app/view/agent/components/AgentQuestionPanel.test.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.test.tsx) — new
   test cases per §7. No changes to existing mouse-hover tests expected;
   this is purely additive.
 - No `.scss` changes — the countdown's hidden state already renders via the

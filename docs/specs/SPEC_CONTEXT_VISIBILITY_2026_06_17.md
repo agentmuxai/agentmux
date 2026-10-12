@@ -104,7 +104,7 @@ Codex / Gemini / Kimi each compact differently and report usage in their own sha
 
 Two separate surfaces exist:
 
-- **Session spend counter** — `frontend/app/store/token-usage.ts`: a session-wide `{input, output}` tally **per provider** (no cache fields, no per-agent split, no context %). `recordTurn()` adds each turn's totals from the `result` event; the status bar (`StatusBar.tsx`) shows `↑Xk ↓Yk`, popover shows per-provider breakdown.
+- **Session spend counter** — [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts): a session-wide `{input, output}` tally **per provider** (no cache fields, no per-agent split, no context %). `recordTurn()` adds each turn's totals from the `result` event; the status bar (`StatusBar.tsx`) shows `↑Xk ↓Yk`, popover shows per-provider breakdown.
 - **Per-agent context meter** — `frontend/app/view/agent/components/ContextWindowBar.tsx`, rendered in the composer strip's aux bar above the text input (`AgentComposerStrip.tsx:265`). It shows `<tokens> / <contextWindow>` as a banded bar. `tokens` is fed live per turn from `message_start.usage` (`useAgentStream.ts:689-703`) as `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` (the real prompt size), dispatched as `TokensIn` and **overwritten, not accumulated** (`reducer.ts:481`). `contextWindow` comes from `provider().contextWindow` (`agent-view.tsx:1207`).
 
 The meter's *source* is correct (current-context, overwrite — it would drop on compaction). The bugs are in the **denominator** and the **presentation** — §4.1.
@@ -174,12 +174,12 @@ Only if there's appetite: locally estimate tokens for big tool outputs and think
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/providers/index.ts` | **P1:** replace per-provider `contextWindow: 200_000` (Claude) with a model→window map; resolve by the agent's model. Optional `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` wiring. |
-| `frontend/app/view/agent/agent-view.tsx` | **P1:** pass `contextWindow` resolved from the agent's **model** (`block.meta["agent:model"]`), not `provider().contextWindow`; pass the compaction threshold. |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | **P1:** replace per-provider `contextWindow: 200_000` (Claude) with a model→window map; resolve by the agent's model. Optional `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` wiring. |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | **P1:** pass `contextWindow` resolved from the agent's **model** (`block.meta["agent:model"]`), not `provider().contextWindow`; pass the compaction threshold. |
 | `frontend/app/view/agent/components/ContextWindowBar.tsx` | **P1:** meter against the compaction threshold; never imply >100%; mark the threshold; explicit over/compacting state (Bug B). |
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | **P1/P3:** thread the threshold + cache-hit indicator through to the bar. |
-| `frontend/app/view/agent/providers/claude-translator.ts` | **P3/P4:** preserve the cache split + `context_management` from per-message usage (currently the `result` path drops the cache split). |
-| `frontend/app/store/token-usage.ts` | **P4:** extend `ServiceUsage` with cache fields for the spend popover. |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | **P1/P3:** thread the threshold + cache-hit indicator through to the bar. |
+| [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts) | **P3/P4:** preserve the cache split + `context_management` from per-message usage (currently the `result` path drops the cache split). |
+| [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) | **P4:** extend `ServiceUsage` with cache fields for the spend popover. |
 | transcript reducer / `stream-parser.ts` | **P2:** compaction marker node. |
 | `codex/gemini-translator.ts` + provider model maps | per-provider/per-model window + usage parity. |
 

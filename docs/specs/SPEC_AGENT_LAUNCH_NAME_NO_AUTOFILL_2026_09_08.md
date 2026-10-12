@@ -69,7 +69,7 @@ for itself on every subsequent glance at a multi-agent workspace.
 
 ## Files touched
 
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx` — remove the
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) — remove the
   autofill `createEffect` and its `defaultNameApplied` flag; change
   `placeholder={displayName()}` to `placeholder="Descriptive nickname"`;
   drop the now-unused `defaultAgentName` import.

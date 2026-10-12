@@ -5,10 +5,10 @@
 Branch: `agenta/oauth-prelaunch-modal` (PR #847)
 
 Uncommitted changes:
-- `frontend/app/view/agent/auth/auth-flow-controller.ts`
+- [`frontend/app/view/agent/auth/auth-flow-controller.ts`](../../frontend/app/view/agent/auth/auth-flow-controller.ts)
   - Diagnostic `console.log("[auth-diag] …")` calls throughout (selected, connect, schedulePoll, pollOnce, dispose)
   - `dispatch()` now wrapped in `untrack()` — defense-in-depth so callers in a reactive scope don't auto-subscribe to `_state` via dispatch's read
-- `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`
+- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx)
   - Diagnostic `console.log` in PreLaunchAuthPanel MOUNT, selection-effect, dispose
   - **Root-cause fix:** the selection `createEffect` now wraps `controller.selected(…)` in `untrack()` — breaks the dispatch → re-fire loop that was wiping in-flight sessions
 - `agentmux-srv/src/server/identity_handlers.rs`
@@ -99,9 +99,9 @@ the agent. **This piece is what makes "log in once, reuse" actually work.**
 
 ## Files referenced
 
-- Spec: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` (§10 PR C, §12 acceptance criteria)
-- Storage spec: `docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`
-- Diagnostic report: `docs/specs/OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md`
+- Spec: [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) (§10 PR C, §12 acceptance criteria)
+- Storage spec: [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md)
+- Diagnostic report: [`docs/specs/OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md`](OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md)
 - WStore identity methods: `agentmux-srv/src/backend/storage/store.rs:2013` (`bundle_identity_upsert`), `:2052` (`bundle_identity_bind`), `:1460` (`identity_upsert`)
 - Auth session manager: `agentmux-srv/src/identity/auth_session.rs`
 - Existing handlers: `agentmux-srv/src/server/identity_handlers.rs`

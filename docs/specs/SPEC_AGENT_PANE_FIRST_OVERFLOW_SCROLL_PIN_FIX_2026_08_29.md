@@ -5,11 +5,11 @@
 *first* implementation pass; see the addendum immediately below for three
 corrections found in code review before merge.
 **Verified against:** `main` @ `4573d0d34`.
-**Related:** `docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`,
-`docs/specs/PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md`,
-`docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`,
-`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`,
-`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`.
+**Related:** [`docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`](REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md),
+[`docs/specs/PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md`](PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md),
+[`docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`](../analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md),
+[`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`](../analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md),
+[`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`](../analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md).
 
 ## Addendum 2026-08-29 (same day) — three corrections from code review, before merge
 
@@ -134,7 +134,7 @@ resolve what causes the 0px collapse.
 
 ## 3. Current mechanism, as verified in code
 
-All in `frontend/app/view/agent/virtualization/`, unless noted.
+All in [`frontend/app/view/agent/virtualization/`](../../frontend/app/view/agent/virtualization), unless noted.
 
 - `state.ts:111` — `const [stickToBottom, setStickToBottom] = createSignal(true);`
   defaults to `true`, so a fresh pane starts "following."
@@ -233,7 +233,7 @@ no memory of prior state.
 ### 5.1 Primary — make the first-overflow transition un-disengageable (root-cause-agnostic)
 
 Add a `hasOverflowedOnce` boolean to `AgentViewState`
-(`frontend/app/view/agent/virtualization/state.ts`), defaulting `false`:
+([`frontend/app/view/agent/virtualization/state.ts`](../../frontend/app/view/agent/virtualization/state.ts)), defaulting `false`:
 
 ```ts
 // state.ts — new signal alongside stickToBottom (:111)

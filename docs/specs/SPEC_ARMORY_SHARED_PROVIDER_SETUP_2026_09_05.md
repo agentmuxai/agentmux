@@ -395,7 +395,7 @@ no second concept.)*
 
 ## 9. Related
 
-- `docs/reports/REPORT_SHARED_PROVIDER_CONFIG_STATE_AND_BUILDOUT_2026_09_05.md` — current-state audit
+- [`docs/reports/REPORT_SHARED_PROVIDER_CONFIG_STATE_AND_BUILDOUT_2026_09_05.md`](../reports/REPORT_SHARED_PROVIDER_CONFIG_STATE_AND_BUILDOUT_2026_09_05.md) — current-state audit
 - `SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md` — versioning pattern to mirror
 - `SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md` + `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` — the §4.3 invariant
 - `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` — managed marker / `@import` opt-out

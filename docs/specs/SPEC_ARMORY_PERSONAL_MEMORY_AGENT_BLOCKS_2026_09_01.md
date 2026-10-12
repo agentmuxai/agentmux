@@ -57,7 +57,7 @@ memories" would drag launch semantics, install-state fetching and session-zone
 logic into a read-only browser, and would make a future `AgentCard` change
 silently alter this tab.
 
-Instead add a small `MemoryAgentCard` in `frontend/app/view/native-memory/`
+Instead add a small `MemoryAgentCard` in [`frontend/app/view/native-memory/`](../../frontend/app/view/native-memory)
 that **mirrors the visual language** (icon, name, provider hint, same card
 metrics from the shared SCSS tokens) and carries only what this tab needs:
 `agent`, `fileCount`, `state`, `onSelect`. If the two drift visually later,
@@ -118,12 +118,12 @@ at a glance), but it needs one `agent:memory:list` call per agent. So:
 
 ### Files
 
-- `frontend/app/view/native-memory/native-memory-manager.tsx` — grid/detail
+- [`frontend/app/view/native-memory/native-memory-manager.tsx`](../../frontend/app/view/native-memory/native-memory-manager.tsx) — grid/detail
   split; keep the file `<select>` + `NativeMemoryHistoryPanel` verbatim in the
   detail view, including the `keyed` remount guard that panel's own doc comment
   requires.
-- `frontend/app/view/native-memory/MemoryAgentCard.tsx` — new.
-- `frontend/app/view/native-memory/native-memory-manager.scss` — grid layout +
+- [`frontend/app/view/native-memory/MemoryAgentCard.tsx`](../../frontend/app/view/native-memory/MemoryAgentCard.tsx) — new.
+- [`frontend/app/view/native-memory/native-memory-manager.scss`](../../frontend/app/view/native-memory/native-memory-manager.scss) — grid layout +
   card styles, using existing design tokens (no raw hex — the repo's stylelint
   `color-no-hex` rule is enforced).
 

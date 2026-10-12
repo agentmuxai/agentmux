@@ -4,8 +4,8 @@
 **Scope:** `agentmux-srv/src/backend/tool_store.rs` (new),
 `agentmux-srv/src/backend/blockcontroller/shell.rs`,
 `agentmux-srv/src/server/` (new RPC handler),
-`frontend/app/view/agent/hooks/useAgentCommands.ts`,
-`frontend/app/view/agent/commands/` (new `/tools` slash command),
+[`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts),
+[`frontend/app/view/agent/commands/`](../../frontend/app/view/agent/commands) (new `/tools` slash command),
 `agentmux-srv/src/config/tool-catalog.json` (new)
 
 ---
@@ -138,7 +138,7 @@ fn bundled_tools_dir() -> Option<PathBuf> {
 This is the same pattern the launcher already uses to find `runtime/`.
 
 **Packaging steps** (per platform):
-- `scripts/package-portable.sh` — add a `copy_bundled_tools_windows` step
+- [`scripts/package-portable.sh`](../../scripts/package-portable.sh) — add a `copy_bundled_tools_windows` step
   that downloads (at build time) `jq.exe` and `rg.exe` into `$PORTABLE/runtime/tools/bin/`
 - macOS packaging (future) — same, `tools/bin/jq` + `tools/bin/rg` (arm64 or x64 based on build target)
 - Linux packaging (future) — musl-static builds of jq + rg
@@ -585,7 +585,7 @@ entry that omits a platform key simply isn't available on that platform —
 | `task dev` (dev mode) | ✗ (no bundled dir in dev) | ✓ | Dev users typically have tools installed; no bundle needed |
 
 **Dev mode note:** `bundled_tools_dir()` returns `None` in `task dev` because
-the srv binary is at `target/debug/agentmux-srv` with no `tools/` sibling.
+the srv binary is at `target/debug/agentmux-srv` with no [`tools/`](../../tools) sibling.
 That's intentional — dev users manage their own tools. The user-managed store
 (`~/.agentmux/tools/bin/`) still works in dev mode.
 
@@ -598,7 +598,7 @@ That's intentional — dev users manage their own tools. The user-managed store
 | Step | File | Notes |
 |------|------|-------|
 | 1a | `scripts/tool-versions.json` | Pin exact URLs + SHA-256s for jq + rg, all 6 platform variants |
-| 1b | `scripts/package-portable.sh` | At package time: download + verify jq.exe + rg.exe into `$PORTABLE/runtime/tools/bin/` |
+| 1b | [`scripts/package-portable.sh`](../../scripts/package-portable.sh) | At package time: download + verify jq.exe + rg.exe into `$PORTABLE/runtime/tools/bin/` |
 | 1c | `backend/tool_store.rs` | `bundled_tools_dir()` — walk up from srv exe to find `tools/bin/` sibling |
 | 1d | `backend/blockcontroller/shell.rs` | Append both store dirs to subprocess PATH |
 

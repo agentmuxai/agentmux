@@ -1,7 +1,7 @@
 # Agent Busy Animation — Aurora Bar
 
 **Date:** 2026-06-21
-**Scope:** `frontend/app/view/agent/styles/_control-bar.scss`
+**Scope:** [`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/view/agent/styles/_control-bar.scss)
 **Replaces:** current `agent-gradient-sweep` + `agent-pane-progress-bar::before` implementation
 
 ---

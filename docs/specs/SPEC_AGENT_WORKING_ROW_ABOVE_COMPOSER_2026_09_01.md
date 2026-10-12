@@ -36,8 +36,8 @@ is.
 >
 > `workingRowSupersededByDock` and its test are deleted. The row, the bar and the
 > composer strip now share one predicate whose single meaning is *"a message typed
-> now will be queued"* — see `frontend/app/view/agent/working-indicator.ts` and
-> `docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md`
+> now will be queued"* — see [`frontend/app/view/agent/working-indicator.ts`](../../frontend/app/view/agent/working-indicator.ts) and
+> [`docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md`](../reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md)
 > §2.3.
 >
 > **§2 (the row sits above the composer) is unaffected and still current.** The
@@ -174,4 +174,4 @@ contradicting it.
   no-promotion case, all five keep-the-row exceptions, and two guards on
   reading the optional `waitingReason` off a non-`Streaming` variant.
 - `npx tsc --noEmit` clean.
-- Full `frontend/app/view/agent` suite green.
+- Full [`frontend/app/view/agent`](../../frontend/app/view/agent) suite green.

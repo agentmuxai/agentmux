@@ -3,19 +3,19 @@
 **Date:** 2026-07-06
 **Author:** Agent2
 **Status:** Draft
-**Scope:** `frontend/app/store/agent-pane-state/` (the turn-phase reducer), `frontend/app/view/agent/hooks/useAgentFailure.ts`, `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/view/agent/hooks/useControllerStatusEvents.ts`. This spec **builds on** existing work — it is not a green-field design.
+**Scope:** [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state) (the turn-phase reducer), [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts), [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts), [`frontend/app/view/agent/hooks/useControllerStatusEvents.ts`](../../frontend/app/view/agent/hooks/useControllerStatusEvents.ts). This spec **builds on** existing work — it is not a green-field design.
 **Related (must-read first):**
-`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md` (the `TurnPhase` discriminated union this spec extends),
-`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md` (the liveness-recovery watchdog this spec's fix intersects with),
-`docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` (the failure-recovery banner UI this spec's hook currently drives — kept presentation-only by design at the time),
-`docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` (the backend `AgentFailure` classifier),
-`docs/analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md` (the bug report that motivated this spec — read first for the concrete symptom).
+[`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) (the `TurnPhase` discriminated union this spec extends),
+[`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`](SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) (the liveness-recovery watchdog this spec's fix intersects with),
+[`docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the failure-recovery banner UI this spec's hook currently drives — kept presentation-only by design at the time),
+[`docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`](SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md) (the backend `AgentFailure` classifier),
+[`docs/analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md`](../analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md) (the bug report that motivated this spec — read first for the concrete symptom).
 
 ---
 
 ## 1. Summary
 
-The agent pane's turn lifecycle is already reducer-based and, per its own header comment, is meant to be **the single source of truth** for "is the agent working" (`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`, `types.ts` line 99: *"Since PR G this is the only place where 'is the agent working'... is encoded"*). In practice it isn't quite that, because there is a second, fully independent state machine covering agent **failures**: `useAgentFailure.ts` — a Solid hook with its own local signals (`failure`, `expanded`, `retrying`, `autoRetryIn`) that never writes back into `AgentPaneState`.
+The agent pane's turn lifecycle is already reducer-based and, per its own header comment, is meant to be **the single source of truth** for "is the agent working" ([`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md), `types.ts` line 99: *"Since PR G this is the only place where 'is the agent working'... is encoded"*). In practice it isn't quite that, because there is a second, fully independent state machine covering agent **failures**: `useAgentFailure.ts` — a Solid hook with its own local signals (`failure`, `expanded`, `retrying`, `autoRetryIn`) that never writes back into `AgentPaneState`.
 
 This spec proposes folding that hook's *correctness-relevant* state (which failure is active, whether the turn actually ended because of it, the auto-retry countdown/budget) into `AgentPaneState` and the reducer's `update()` function, as new fields and commands following the exact same `caller-schedules-a-timeout, reducer-owns-the-transition` pattern already used for `SubmitTimeoutElapsed`/`InterruptTimeoutElapsed`. The hook keeps existing only for pure view wiring (subscribing to the wave event, calling the passed-in recovery effects) — it stops holding any state that the turn-phase machine needs to agree with.
 

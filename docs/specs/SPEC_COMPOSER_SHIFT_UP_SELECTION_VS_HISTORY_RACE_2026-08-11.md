@@ -85,7 +85,7 @@ already evaluates `true`. The very next ArrowUp then satisfies line 879's
 browser ever gets to extend the selection the rest of the way to column 0.
 
 This is a distinct bug from the one the 2026-06-23 retro
-(`docs/retro/RETRO_COMPOSER_ARROWKEY_HISTORY_SOFT_WRAP_2026_06_23.md`) fixed
+([`docs/retro/RETRO_COMPOSER_ARROWKEY_HISTORY_SOFT_WRAP_2026_06_23.md`](../retro/RETRO_COMPOSER_ARROWKEY_HISTORY_SOFT_WRAP_2026_06_23.md)) fixed
 in this exact function: that retro corrected line-vs-line detection (soft-wrapped
 visual rows vs. physical `\n`), not line-vs-column. Its own "What Went Well"
 section notes "the existing guard structure... was correct in intent — the

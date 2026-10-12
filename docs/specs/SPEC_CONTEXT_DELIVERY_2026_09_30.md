@@ -3,7 +3,7 @@
 **Status:** active — CD1 (#4037) and CD2a (#4041) implemented; CD2b (srv-composed fallback, `memorydelivery:compose`) implemented; CD3–CD5 proposed (CD3 awaits the owner's decision on storing bodies).
 **Date:** 2026-09-30
 **Verified against:** `agentmux` `main` @ `49ad410b8`. Paths are relative
-to the repo root; `frontend/…/agent/` means `frontend/app/view/agent/`.
+to the repo root; `frontend/…/agent/` means [`frontend/app/view/agent/`](../../frontend/app/view/agent).
 **Related:**
 - `SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`: the delivery paths this
   spec changes the display of. D6 there ("the user sees a label only") is
@@ -57,7 +57,7 @@ becomes an item in a context delivery (`backend/continuity_state.rs:51,
 |---|---|
 | model calls AgentMux makes itself | `ambient/`, `term:ambient_summary`, the `__ambient__` token bucket |
 | the host's own CLI login and home dir | `use_ambient_login` (189 occurrences), `AmbientHomeDirNotAllowed` (`identity/resolver/errors.rs:47`) |
-| a sound | "looping ambient tone" (`frontend/app/view/settings/sections/sounds-section.tsx:99`) |
+| a sound | "looping ambient tone" ([`frontend/app/view/settings/sections/sounds-section.tsx:99`](../../frontend/app/view/settings/sections/sounds-section.tsx#L99)) |
 
 None of the mechanisms that send content to the agent is called ambient
 today. Between them they use four names instead: "hidden turn",
@@ -440,6 +440,6 @@ User docs live in the public `agentmuxai/agentmux-docs` repo
 | `memory.md`, "How Memory bundles are reached" (:38) | Add delivery after launch: `/clear`, compaction and a fresh session after a failed resume re-deliver memory; normal resume doesn't. Describe the card and its per-item rows. | CD2 (CD3 adds expanding rows) |
 | `glossary.md` | Add **ambient** (model calls AgentMux makes on its own, never content sent to the agent) and **context delivery** (content the agent is given without the user typing it, shown as a card). | CD1 |
 | `armory.md:51` | "Ambient provider credentials" uses the third meaning of ambient (§1.2). Leave it until the follow-up rename (§7, Q4), then say "host login". | follow-up |
-| `agentmux` `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` | Amend D6 ("label only") to point here once CD3 lands; point its notice section at the card. | CD2, CD3 |
-| `agentmux` `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md` | State that "ambient" names how a call is made, and that content sent to the agent is a context delivery. | CD5 |
-| `agentmux` `docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md` | Point its label-node section at the card. | CD2 |
+| `agentmux` [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Amend D6 ("label only") to point here once CD3 lands; point its notice section at the card. | CD2, CD3 |
+| `agentmux` [`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md) | State that "ambient" names how a call is made, and that content sent to the agent is a context delivery. | CD5 |
+| `agentmux` [`docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Point its label-node section at the card. | CD2 |

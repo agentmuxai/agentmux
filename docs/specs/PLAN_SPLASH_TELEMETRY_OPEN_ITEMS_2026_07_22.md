@@ -9,9 +9,9 @@ source of truth for what's left — that section undercounted (named 3 open item
 a full read of its own body names 7).
 
 **Sources consolidated:**
-1. `docs/specs/SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md` — original design spec, 7 open items buried across §A.4/§B.4/§B.7.
-2. `docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md` — the count-up race, found and deferred the same day as PR #2244.
-3. `docs/retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md` — retro explaining why #2244 didn't fix the count-up bug.
+1. [`docs/specs/SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) — original design spec, 7 open items buried across §A.4/§B.4/§B.7.
+2. [`docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md`](../analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md) — the count-up race, found and deferred the same day as PR #2244.
+3. [`docs/retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md`](../retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md) — retro explaining why #2244 didn't fix the count-up bug.
 
 ---
 
@@ -51,7 +51,7 @@ Exhaustive grep across `agentmux-cef/src/**`, `agentmux-launcher/src/ipc/**`, an
 - The only two stages ever reported over this IPC path are **`"dlopen"`** and **`"cef_init"`** (`agentmux-cef/src/lib.rs:577-578, 884, 953`) — both CEF sub-stages of what the spec calls the `"host"` stage.
 - **No** distinct top-level `"cef"` or `"frontend"` stage exists.
 - **No** channel-pruner stage exists anywhere in the current tree — `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`'s concept, if implemented at all, was never wired into splash telemetry.
-- `frontend/` has zero references to startup-stage reporting of any kind.
+- [`frontend/`](../../frontend) has zero references to startup-stage reporting of any kind.
 
 **Conclusion:** confirmed a real, still-open gap (item #7/"host" stage below), not a documentation error — anyone building on top of "the splash shows frontend-load timing" would be wrong to assume that.
 

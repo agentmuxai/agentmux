@@ -50,14 +50,14 @@ can't silently break history continuity again.
 
 ### 1.1 Every local/dev/portable build mints a new channel — by design
 
-`scripts/package.sh:99-103`:
+[`scripts/package.sh:99-103`](../../scripts/package.sh#L99-L103):
 
 ```
 BUILD_ID=$(printf '%s' "$LABEL" | sha1sum | cut -c1-8)
 CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"
 ```
 
-with the comment at `scripts/package.sh:27-31` stating plainly: *"PER-BUILD: the build-id ... makes each
+with the comment at [`scripts/package.sh:27-31`](../../scripts/package.sh#L27-L31) stating plainly: *"PER-BUILD: the build-id ... makes each
 build its own data dir ... so a freshly-built binary launches as its own instance."* Confirmed by a passing
 test, `agentmux-launcher/src/hash.rs:147-163`
 (`per_build_channels_isolate_data_dir_even_at_same_version`): two builds of the *same branch, same semver*
@@ -161,11 +161,11 @@ intended architecture, and each one is a different way that principle silently r
 
 | Date | Doc | What silently broke |
 |---|---|---|
-| 2026-06-13 | `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` | Agent registry was rooted per-`(channel,version)`; a new build showed an empty roster. Fixed by re-rooting to a global `shared/agents/registry/`. |
-| 2026-06-16 | `docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md` | The global history mirror's `sourceBlockId` field leaked a channel-local block id, breaking cross-channel resolution even after the above fix. |
-| 2026-06-16 | `docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md` | The global registry's `session_id` field was declared but never written by production code (only tests), so a fresh channel had nothing to `--resume`, silently starting and then "latching in" a new session that orphaned the original. |
-| 2026-06-13 | `docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md` | Instance-registry backfill anchored `working_directory` per-channel instead of globally, so `strip_prefix` failed for every real row and "My Agents" came up empty after a channel/version update. |
-| 2026-07-27 | `docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md` | `COMMAND_LIST_RECENT_SESSIONS` aborts its *entire* result on the first error from any of 6 sequential cross-store calls; frontend can't distinguish "fetch failed" from "genuinely zero agents." Explicitly logged as the **third-plus** occurrence of this class, with the recommendation (per-source error degradation, distinct UI error state, e2e test) never implemented. |
+| 2026-06-13 | [`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md) | Agent registry was rooted per-`(channel,version)`; a new build showed an empty roster. Fixed by re-rooting to a global `shared/agents/registry/`. |
+| 2026-06-16 | [`docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md`](../retro/retro-legacy-agent-history-cross-channel-2026-06-16.md) | The global history mirror's `sourceBlockId` field leaked a channel-local block id, breaking cross-channel resolution even after the above fix. |
+| 2026-06-16 | [`docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md`](../retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md) | The global registry's `session_id` field was declared but never written by production code (only tests), so a fresh channel had nothing to `--resume`, silently starting and then "latching in" a new session that orphaned the original. |
+| 2026-06-13 | [`docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md`](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md) | Instance-registry backfill anchored `working_directory` per-channel instead of globally, so `strip_prefix` failed for every real row and "My Agents" came up empty after a channel/version update. |
+| 2026-07-27 | [`docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md`](../retro/retro-my-agents-fresh-channel-regression-2026-07-27.md) | `COMMAND_LIST_RECENT_SESSIONS` aborts its *entire* result on the first error from any of 6 sequential cross-store calls; frontend can't distinguish "fetch failed" from "genuinely zero agents." Explicitly logged as the **third-plus** occurrence of this class, with the recommendation (per-source error degradation, distinct UI error state, e2e test) never implemented. |
 
 This report's finding (§1) is the same class again, via a fifth, different mechanism: a *credential-testing*
 change with a narrow, well-reasoned intent had an unreviewed blast radius into *history storage*, because the
@@ -182,8 +182,8 @@ enforced by convention and code review, not by an automated invariant — so it 
   the isolation was scoped to "the Armory account list / explicitly-bound identity dirs" and did not intend
   to isolate conversation transcripts. The bug is that those two things are the same directory tree today.
 - **Not fixable by reverting PR #2431 outright.** Its actual goal (real login/relogin testing coverage on
-  dev/local builds) is legitimate and already referenced by `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`
-  and `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`. The fix is to narrow its scope, not
+  dev/local builds) is legitimate and already referenced by [`docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`](SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md)
+  and [`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md). The fix is to narrow its scope, not
   undo it (§4.1).
 
 ---

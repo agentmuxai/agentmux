@@ -4,8 +4,8 @@
 **Type:** Two asks bundled in one doc — (1) a small presentational fix, ready to
 implement; (2) a design exploration for a bigger feature, **not yet approved
 for implementation**.
-**Status:** implemented — #2730 (2026-08-22), the PR this doc was added in. The store is `agentmux-srv/src/backend/bookmarks_store.rs`, exposed through `server/app_api/bookmarks.rs` and `frontend/app/store/rpc-api/bookmarks.ts`. The v1 non-goals are still out of scope.
-**Scope:** `frontend/app/view/browser/` (nav bar, view model), `frontend/app/store/browser-pane-state/`, potentially `settings.json`/`agentmux-srv` config plumbing for part 2.
+**Status:** implemented — #2730 (2026-08-22), the PR this doc was added in. The store is `agentmux-srv/src/backend/bookmarks_store.rs`, exposed through `server/app_api/bookmarks.rs` and [`frontend/app/store/rpc-api/bookmarks.ts`](../../frontend/app/store/rpc-api/bookmarks.ts). The v1 non-goals are still out of scope.
+**Scope:** [`frontend/app/view/browser/`](../../frontend/app/view/browser) (nav bar, view model), [`frontend/app/store/browser-pane-state/`](../../frontend/app/store/browser-pane-state), potentially `settings.json`/`agentmux-srv` config plumbing for part 2.
 
 ---
 
@@ -13,7 +13,7 @@ for implementation**.
 
 ### Current state
 
-`BrowserNavBar` (`frontend/app/view/browser/browser-nav-bar.tsx:117-193`) renders
+`BrowserNavBar` ([`frontend/app/view/browser/browser-nav-bar.tsx:117-193`](../../frontend/app/view/browser/browser-nav-bar.tsx#L117-L193)) renders
 four controls: Back (`←`), Forward (`→`), Reload (`↻`) — all single-glyph,
 icon-only, with a `title=` tooltip for accessibility — and then a text-labeled
 `Go` button (line 190):
@@ -69,7 +69,7 @@ PR, independent of Part 2 below.
 ### Why this section is "explore," not "build"
 
 This exact repo already tried a bookmark feature once and removed it —
-`docs/specs/SPEC_REMOVE_BOOKMARKS_2026_06_11.md` (2026-06-11), a "bookmark
+[`docs/specs/SPEC_REMOVE_BOOKMARKS_2026_06_11.md`](SPEC_REMOVE_BOOKMARKS_2026_06_11.md) (2026-06-11), a "bookmark
 this message" feature in the agent-pane feed. It was deleted for two
 reasons: (1) it hijacked a right-click surface users expected to show the
 standard pane context menu (split/float/close), silently hiding those
@@ -84,10 +84,10 @@ the proposal below.
 ### Relevant current architecture
 
 - **The nav bar is real DOM**; the page content area is not. Per
-  `docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`, a browser pane's
+  [`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md), a browser pane's
   content is a native `CefBrowserView` overlay, not a DOM subtree — that's
   why right-clicking *inside a page* still shows Chromium's own native menu
-  today (`docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md`
+  today ([`docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md)
   is a still-unimplemented Draft proposing to fix that). A bookmark toggle
   belongs in the nav bar, which is ordinary DOM (`browser-nav-bar.tsx`) —
   no native-overlay complications, unlike anything scoped to page content.
@@ -98,7 +98,7 @@ the proposal below.
   no bookmark UI on those panes, consistent with hiding back/forward/reload
   there today.
 - **Multi-tab state already exists in the reducer** but not yet in the UI.
-  `frontend/app/store/browser-pane-state/types.ts` defines a full
+  [`frontend/app/store/browser-pane-state/types.ts`](../../frontend/app/store/browser-pane-state/types.ts) defines a full
   `BrowserTab` (`url`, `title`, `faviconUrl`, per-tab loading/history state)
   and the reducer already handles `OpenTab`/`CloseTab`/`SwitchTab`/etc. —
   but `browser-view.tsx` renders no tab strip yet (per comments in
@@ -123,7 +123,7 @@ the lightest-weight precedent for "an ordered list of small records," via
 `"widget:pinned"` (`frontend/app/window/action-widgets-config.ts:37,109`,
 written through the generic `RpcApi.SetConfigCommand`). But `settings.json`
 isolation is **whole-file, not per-key** — per
-`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` §6, per-key
+[`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) §6, per-key
 tiering ("some settings global, some isolated") was explicitly considered
 and rejected: *"the whole-file isolation the auth precedent uses is
 simpler, has no 'did we remember to list this key' failure mode."* There is
@@ -144,7 +144,7 @@ isolation flag touches it, because it isn't reached through
 things in this app that are deliberately global no matter what channel or
 isolation setting is active:
 
-- Agent registry — `~/.agentmux/shared/agents/registry/<uuid>.json` (`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`)
+- Agent registry — `~/.agentmux/shared/agents/registry/<uuid>.json` ([`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md))
 - Conversation transcripts (same doc)
 - Provider auth — `provider_auth_dir()` (`data_paths.rs:445`, `shared_dir.join("providers").join(...)`) — CLAUDE.md notes this "always resolves auth... regardless of isolation," the same guarantee bookmarks want
 
@@ -192,21 +192,21 @@ containing:
    title → label, click → `model.navigate(url)` + close the menu).
 
 **Reuse `FlyoutMenu` directly — do not build a new menu component.**
-`frontend/app/element/flyoutmenu.tsx` is the same primitive already behind
+[`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) is the same primitive already behind
 the hamburger menu, the widget bar's "More" dropdown, and right-click
 context menus, so using it here is a DRY win, not just a style match:
 
-- Its `MenuItem` shape (`frontend/types/custom.d.ts:463-477`) already
+- Its `MenuItem` shape ([`frontend/types/custom.d.ts:463-477`](../../frontend/types/custom.d.ts#L463-L477)) already
   supports `icon`, `label`, `onClick`, `divider` (for the separator above),
   and `checked` (could show a check/star state on the pinned first row) —
   no new prop shape to invent.
 - **"Expands to the bottom of the window, then scrolls" is already built
   in, not something to implement.** `FlyoutMenu`'s positioning goes through
-  `computeMenuPosition` (`frontend/app/util/menu-position.ts:228-296`),
+  `computeMenuPosition` ([`frontend/app/util/menu-position.ts:228-296`](../../frontend/app/util/menu-position.ts#L228-L296)),
   whose `size()` middleware measures `availableHeight` down to the window's
   paintable-area boundary and returns it as `maxHeight`
   (`menu-position.ts:279`); `styleToString`
-  (`frontend/app/element/flyoutmenu.tsx:38-44`) applies that as
+  ([`frontend/app/element/flyoutmenu.tsx:38-44`](../../frontend/app/element/flyoutmenu.tsx#L38-L44)) applies that as
   `max-height:${maxHeight}px; overflow-y:auto` on the menu's own root. Every
   existing `FlyoutMenu` consumer already gets "grow until it hits the
   window edge, then scroll internally" for free — the bookmarks menu needs
@@ -249,7 +249,7 @@ answers the layout/scrolling questions but not the data/state ones:
 | **Bookmarks file exists but is corrupt/unparseable JSON** | Fail loud on `bookmarks.list` (surface the parse error) rather than silently discarding the user's saved list — matches this codebase's general preference for warning over silent data loss (e.g. the ABF import path's warning-budget conventions) over quietly resetting to empty, which would look like the data vanished. |
 | **Active tab has no URL yet** (blank/fresh pane) | Originally planned as "disabled, not hidden" — reverted during implementation once it turned out `MenuItem` has no `disabled` field at all. The row is omitted entirely in this case instead (falls back to "No bookmarks yet" if the list is also empty); rare and brief in practice since panes navigate to `DEFAULT_BROWSER_URL` almost immediately. |
 | **Menu open, then the pane itself closes/navigates away underneath it** | `FlyoutMenu`'s existing outside-click-to-close (`flyoutmenu.tsx:126-133`) and Solid's unmount-on-dispose already tear the menu down; no bookmarks-specific handling needed, but worth a manual check during implementation since this menu is anchored inside a per-pane component, unlike the window-global hamburger menu. |
-| **Keyboard-only user** | `FlyoutMenu` itself has no `Escape`-to-close handler today (only outside-click) — confirmed by grepping for `Escape` handling in `frontend/app/element/`, which turns up `modal.tsx` and `popover-menu.tsx` but not `flyoutmenu.tsx`. This is a pre-existing gap shared by every current `FlyoutMenu` consumer (hamburger menu, widget bar, context menus) — not something to silently fix as a side effect of adding bookmarks, but worth flagging explicitly since a keyboard user has no way to dismiss this menu without a mouse click today. Candidate follow-up, not a v1 blocker.
+| **Keyboard-only user** | `FlyoutMenu` itself has no `Escape`-to-close handler today (only outside-click) — confirmed by grepping for `Escape` handling in [`frontend/app/element/`](../../frontend/app/element), which turns up `modal.tsx` and `popover-menu.tsx` but not `flyoutmenu.tsx`. This is a pre-existing gap shared by every current `FlyoutMenu` consumer (hamburger menu, widget bar, context menus) — not something to silently fix as a side effect of adding bookmarks, but worth flagging explicitly since a keyboard user has no way to dismiss this menu without a mouse click today. Candidate follow-up, not a v1 blocker.
 
 ### Non-goals for v1 (explicitly out of scope)
 
@@ -268,17 +268,17 @@ answers the layout/scrolling questions but not the data/state ones:
 dev` + clicking through the feature) — typecheck/unit-test coverage only.
 
 1. ~~Ship Part 1 (Go-button icon).~~ Done —
-   `frontend/app/view/browser/browser-nav-bar.tsx`,
-   `frontend/app/view/browser/browser-view.scss`.
+   [`frontend/app/view/browser/browser-nav-bar.tsx`](../../frontend/app/view/browser/browser-nav-bar.tsx),
+   [`frontend/app/view/browser/browser-view.scss`](../../frontend/app/view/browser/browser-view.scss).
 2. ~~Backend: `~/.agentmux/shared/browser-bookmarks.json` read/write helper
    + `bookmarks.list`/`bookmarks.set` RPC commands.~~ Done —
    `agentmux-srv/src/backend/bookmarks_store.rs`,
    `agentmux-srv/src/server/app_api/bookmarks.rs`, constants in
    `rpc_types/commands.rs`, registered in `app_api/mod.rs`.
 3. ~~Frontend: RPC wrapper, bookmarks button + `FlyoutMenu` wiring.~~ Done —
-   `frontend/app/store/rpc-api/bookmarks.ts`, spliced into `RpcApi`
+   [`frontend/app/store/rpc-api/bookmarks.ts`](../../frontend/app/store/rpc-api/bookmarks.ts), spliced into `RpcApi`
    (`rpc-api/index.ts`); toggle/dedupe logic extracted to the pure, unit-
-   tested `frontend/app/view/browser/browser-bookmarks-logic.ts`
+   tested [`frontend/app/view/browser/browser-bookmarks-logic.ts`](../../frontend/app/view/browser/browser-bookmarks-logic.ts)
    (`toggleBookmark`/`findBookmark`); wired into `browser-nav-bar.tsx`.
 
 **Deviations from the plan above, decided during implementation:**
@@ -324,25 +324,25 @@ dev` + clicking through the feature) — typecheck/unit-test coverage only.
 
 ## References
 
-- `frontend/app/view/browser/browser-nav-bar.tsx`
-- `frontend/app/view/browser/browser-model.ts`
-- `frontend/app/view/browser/browser-view.scss`
-- `frontend/app/store/browser-pane-state/types.ts`
-- `frontend/app/window/action-widgets-config.ts` (`widget:pinned` precedent — superseded for this feature, see persistence section)
-- `frontend/app/element/flyoutmenu.tsx`, `frontend/app/element/popover-menu.tsx`
-- `frontend/app/util/menu-position.ts` (`computeMenuPosition` — the grow-to-window-edge-then-scroll primitive `FlyoutMenu` already uses)
-- `frontend/types/custom.d.ts` (`MenuItem` shape)
-- `frontend/util/util.ts` (FontAwesome icon-class helper)
+- [`frontend/app/view/browser/browser-nav-bar.tsx`](../../frontend/app/view/browser/browser-nav-bar.tsx)
+- [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts)
+- [`frontend/app/view/browser/browser-view.scss`](../../frontend/app/view/browser/browser-view.scss)
+- [`frontend/app/store/browser-pane-state/types.ts`](../../frontend/app/store/browser-pane-state/types.ts)
+- [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) (`widget:pinned` precedent — superseded for this feature, see persistence section)
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx), [`frontend/app/element/popover-menu.tsx`](../../frontend/app/element/popover-menu.tsx)
+- [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) (`computeMenuPosition` — the grow-to-window-edge-then-scroll primitive `FlyoutMenu` already uses)
+- [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) (`MenuItem` shape)
+- [`frontend/util/util.ts`](../../frontend/util/util.ts) (FontAwesome icon-class helper)
 - `agentmux-srv/src/server/providers_handlers.rs` (`DataPaths::from_env()` best-effort fallback precedent)
 - `agentmux-srv/src/config/widgets.json`
 - `agentmux-common/src/data_paths.rs` (`shared_dir`/`AGENTMUX_SHARED_DIR`, `provider_auth_dir()` — the recommended persistence precedent)
 - `agentmux-srv/src/backend/storage/migrations.rs`, `memory_bundles.rs`,
   `agentmux-srv/src/server/app_api/bundle.rs` (ABF/`db_bundles` — fallback route only)
-- `docs/specs/SPEC_REMOVE_BOOKMARKS_2026_06_11.md` (prior-art / lesson learned)
-- `docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`
-- `docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md`
-- `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` (why settings.json doesn't fit — whole-file-only isolation, no per-key tiering)
-- `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (`shared_dir` precedent for agent registry/transcripts)
+- [`docs/specs/SPEC_REMOVE_BOOKMARKS_2026_06_11.md`](SPEC_REMOVE_BOOKMARKS_2026_06_11.md) (prior-art / lesson learned)
+- [`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md)
+- [`docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md)
+- [`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) (why settings.json doesn't fit — whole-file-only isolation, no per-key tiering)
+- [`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md) (`shared_dir` precedent for agent registry/transcripts)
 - Web research: NN/g on magnifying-glass-vs-label search affordances
   (nngroup.com/articles/magnifying-glass-icon); browser bookmarks-bar UX
   critique (bookmarker.cc/blog/browser-bookmark-bar-alternative)

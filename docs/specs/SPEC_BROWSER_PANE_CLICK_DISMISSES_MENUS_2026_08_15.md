@@ -3,7 +3,7 @@
 **Date:** 2026-08-15
 **Type:** Bug fix (design proposal — not yet implemented)
 **Status:** Draft
-**Scope:** Frontend (`frontend/app/window/action-widgets.tsx` and, if the
+**Scope:** Frontend ([`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) and, if the
 recommended fix is taken, every other "outside click" dismiss listener in the
 app) + reuse of the existing `browser-pane-clicked` backend event
 (`agentmux-cef/src/browser_pane/hwnd.rs` on Windows,
@@ -39,14 +39,14 @@ createEffect(() => {
 ```
 
 This is a real DOM `mousedown` listener. Per
-`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`, a browser pane's content
+[`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md), a browser pane's content
 is **not** in the DOM — it's a second, sibling `CefBrowserView` layered on top
 of the main window via CEF's Views `AddOverlayView`. Once a page is loaded,
 clicks on it are handled entirely by a separate native Chromium instance and
 never become a DOM `mousedown`/`click` event in the host window. The listener
 above simply never fires for those clicks — exactly the same root cause
 already diagnosed and fixed (for pane *selection*, not menu dismissal) in
-`docs/specs/SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md`.
+[`docs/specs/SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md`](SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md).
 
 **This is not unique to the widget "More" menu.** The same
 `document.addEventListener("mousedown"/"pointerdown", ..., true)`
@@ -87,7 +87,7 @@ never saw it":
 - **Linux**: not implemented yet (tracked as follow-up in the click-to-select
   spec). This fix inherits that same gap — see Scope/Caveats below.
 
-Today the only consumer is `frontend/app/view/browser/browser-model.ts`,
+Today the only consumer is [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts),
 which listens per-pane (filtering on its own `block_id`) and dispatches
 `PaneClicked` to drive pane *selection* (the focus border). It does not do
 anything else with the event.

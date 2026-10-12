@@ -5,7 +5,7 @@
 **Author:** agent1
 **Scope:**
 - `frontend/app/element/markdown*.ts(x)` (the shared renderer)
-- `frontend/app/view/agent/components/MarkdownBlock.tsx` (the agent's own messages)
+- [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) (the agent's own messages)
 - `agentmux-srv/operator-config-seed.json` (telling agents it exists)
 **Verified against:** `main` @ `0fc4123b8`
 **Trigger:** the repo owner, 2026-09-27: "if we built out the rendered markdown
@@ -69,7 +69,7 @@ restricted to `/ws` on purpose. srv's `handle_stream_local_file`
 (`agentmux-srv/src/server/files.rs:199`) serves any regular file up to 500 MB,
 with no extension check.
 
-**Colour tokens already in the theme** (`frontend/app/theme.scss`):
+**Colour tokens already in the theme** ([`frontend/app/theme.scss`](../../frontend/app/theme.scss)):
 - `--success-text-color`, `--warning-text-color`, `--error-text-color`
 - `--info-color`, `--accent-color`, `--secondary-text-color`
 
@@ -163,7 +163,7 @@ turns a blockquote whose first paragraph starts with `[!KIND]` into
 sanitizer allows `div` with exactly those classes. Unknown kinds stay plain
 blockquotes. This works in every `<Markdown>` consumer.
 
-**As built (P2).** `frontend/app/element/remark-github-alerts.ts`. As on
+**As built (P2).** [`frontend/app/element/remark-github-alerts.ts`](../../frontend/app/element/remark-github-alerts.ts). As on
 GitHub, the marker must be alone on the blockquote's first line and is
 case-insensitive; a marker followed by text on the same line, or mid-sentence,
 stays a plain blockquote. While streaming, a callout whose body hasn't arrived
@@ -211,7 +211,7 @@ The existing dead `resolveOpts` / `resolveRemoteFile` / `/stream-file` path is
 **Loading.** Reuse the Media pane's path: fetch `stream-local-file` with
 `X-AuthKey`, then a blob object URL, revoked on unmount.
 - Move `fetchMediaBlob` out of `media.tsx` into a shared module
-  (`frontend/app/element/local-media.ts`) that both use.
+  ([`frontend/app/element/local-media.ts`](../../frontend/app/element/local-media.ts)) that both use.
 - Loading is lazy: the fetch starts when the row nears the viewport, via an
   `IntersectionObserver` on the placeholder.
 - The client caps images at **25 MB**. Above that, the pane shows a link card
@@ -251,7 +251,7 @@ keeps the feature and removes the silent part.
 
 ### 4.4 As built (P3)
 
-- `frontend/app/element/local-media.ts` holds what the Media pane and inline
+- [`frontend/app/element/local-media.ts`](../../frontend/app/element/local-media.ts) holds what the Media pane and inline
   media share: the extension lists, `fetchMediaBlob` (now with `maxBytes`,
   checked against `Content-Length` before the body is read), `describeMediaError`,
   and `resolveMediaPath`. `markdown-media.tsx` renders images; the agent pane

@@ -3,13 +3,13 @@
 **Date:** 2026-07-10
 **Author:** AgentY
 **Type:** Research + proposal. No code shipped yet.
-**Purpose:** Give the Armory's **MCP Servers** tab a curated, one-click "preloaded servers" gallery for popular creative/production software — flagship cases: **Ableton Live** and **TouchDesigner** — instead of the generic name/transport/JSON-textarea form it has today. Generalizes the single-app `AppConnector` catalog schema already proposed in `docs/specs/SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md` §4.7 into an actual multi-app catalog, and scopes what it takes to ship Ableton Live + TouchDesigner as the first two real entries.
+**Purpose:** Give the Armory's **MCP Servers** tab a curated, one-click "preloaded servers" gallery for popular creative/production software — flagship cases: **Ableton Live** and **TouchDesigner** — instead of the generic name/transport/JSON-textarea form it has today. Generalizes the single-app `AppConnector` catalog schema already proposed in [`docs/specs/SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md`](SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md) §4.7 into an actual multi-app catalog, and scopes what it takes to ship Ableton Live + TouchDesigner as the first two real entries.
 
 ---
 
 ## 0. Status update (2026-07-10, post-write): reconciled with Agent1's governing spec
 
-While implementing this, discovered `docs/specs/SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md` (Agent1, 2026-07-08) — a broader, earlier spec whose **Phase A already shipped** (`mcp.probe`/`mcp.catalog.probe(id)` protocol-level probe + `mcp-capabilities.ts`, PR #2030) and whose **Phase B is this exact feature** (catalog/one-click-install UI), with an explicit recommendation: ship Ableton MCP alone first, expand only after the pattern validates (§7/§8 Q1).
+While implementing this, discovered [`docs/specs/SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) (Agent1, 2026-07-08) — a broader, earlier spec whose **Phase A already shipped** (`mcp.probe`/`mcp.catalog.probe(id)` protocol-level probe + `mcp-capabilities.ts`, PR #2030) and whose **Phase B is this exact feature** (catalog/one-click-install UI), with an explicit recommendation: ship Ableton MCP alone first, expand only after the pattern validates (§7/§8 Q1).
 
 Coordinated with Agent1 over muxbus — confirmed Phase B was open, no collision, took it. **The actual implementation diverges from §3's design below in three ways**, in favor of Agent1's simpler, already-partially-shipped shape:
 
@@ -17,13 +17,13 @@ Coordinated with Agent1 over muxbus — confirmed Phase B was open, no collision
 2. **No Tier A/B / `AppConnector` checklist UI.** Replaced by Agent1's flat `{name, transport, config, prereqNote, docsUrl}` catalog-entry shape (`mcp-preload-catalog.ts`) — a single static remediation string shown next to the live probe status, not a multi-step guided checklist with per-step manual/TCP verification.
 3. **Scope cut to Ableton Live only for this PR.** TouchDesigner and ComfyUI (§2.2/§2.3 below) remain real, researched candidates for the *next* catalog entries once the Ableton pattern is validated in production — exactly per the governing spec's own phasing — but are not shipped in this PR.
 
-§2's research (Ableton, TouchDesigner, ComfyUI ecosystem findings) and §4's supply-chain/version-pinning policy discussion remain accurate and useful for those follow-on entries. §3's design section and §5/§7's phased-plan/open-questions are **historical** — they describe the first draft's approach, superseded by the above. See the implementation itself (`frontend/app/view/mcp/mcp-preload-catalog.ts`, `McpCatalogPicker.tsx`, `mcp-model.ts`, `mcp-manager.tsx`) for what actually shipped.
+§2's research (Ableton, TouchDesigner, ComfyUI ecosystem findings) and §4's supply-chain/version-pinning policy discussion remain accurate and useful for those follow-on entries. §3's design section and §5/§7's phased-plan/open-questions are **historical** — they describe the first draft's approach, superseded by the above. See the implementation itself ([`frontend/app/view/mcp/mcp-preload-catalog.ts`](../../frontend/app/view/mcp/mcp-preload-catalog.ts), `McpCatalogPicker.tsx`, `mcp-model.ts`, `mcp-manager.tsx`) for what actually shipped.
 
 ---
 
 ## 1. Problem statement
 
-The Armory's MCP Servers tab (`frontend/app/view/mcp/mcp-manager.tsx`, backed by `McpCatalogModel` in `mcp-model.ts`) is live and functional — a user can already create/edit/delete **global** `McpServer` catalog rows (`mcp.catalog.upsert`/`mcp.catalog.delete`, `agentmux-srv/src/server/app_api/mcp.rs`). But it is pure generic CRUD: three raw fields — Name, Transport, and a freeform Config JSON textarea (`mcp-manager.tsx:94-118`). Registering any real-world server today means hand-typing something like:
+The Armory's MCP Servers tab ([`frontend/app/view/mcp/mcp-manager.tsx`](../../frontend/app/view/mcp/mcp-manager.tsx), backed by `McpCatalogModel` in `mcp-model.ts`) is live and functional — a user can already create/edit/delete **global** `McpServer` catalog rows (`mcp.catalog.upsert`/`mcp.catalog.delete`, `agentmux-srv/src/server/app_api/mcp.rs`). But it is pure generic CRUD: three raw fields — Name, Transport, and a freeform Config JSON textarea (`mcp-manager.tsx:94-118`). Registering any real-world server today means hand-typing something like:
 
 ```json
 {"command": "uvx", "args": ["ableton-mcp"], "env": {}}
@@ -31,7 +31,7 @@ The Armory's MCP Servers tab (`frontend/app/view/mcp/mcp-manager.tsx`, backed by
 
 with no guidance on what `command`/`args` should actually be, no indication that the target app has to already be running, and no warning if the server carries real code-execution risk. This is the same gap `SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md` §5 Phase 1 flagged for Blender specifically ("the actual remaining Phase 1 UX gap, not the plumbing itself") and §4.7 designed a general `AppConnector`/`ConnectorSetupStep` schema to close — but deferred building for a second connector, calling it open question #3 ("does Phase 1 build to that schema from day one... or is a hardcoded single-purpose UI acceptable to ship faster").
 
-The Accounts tab already proves the "curated tile gallery in front of generic CRUD" shape works well in this codebase: `frontend/app/view/accounts/accounts-catalog.ts` defines a static `SERVICE_CATALOG: ServiceTile[]` (GitHub, Google, AWS, Slack, etc.) rendered as clickable tiles in `AccountsGallery.tsx`; picking a tile pre-fills the underlying add-account form instead of leaving the user to construct a raw credential record by hand. This spec asks the MCP Servers tab to get the equivalent: a data-driven preload catalog, seeded with real, verified entries for Ableton Live and TouchDesigner, with a short list of other creative apps as the immediate follow-on.
+The Accounts tab already proves the "curated tile gallery in front of generic CRUD" shape works well in this codebase: [`frontend/app/view/accounts/accounts-catalog.ts`](../../frontend/app/view/accounts/accounts-catalog.ts) defines a static `SERVICE_CATALOG: ServiceTile[]` (GitHub, Google, AWS, Slack, etc.) rendered as clickable tiles in `AccountsGallery.tsx`; picking a tile pre-fills the underlying add-account form instead of leaving the user to construct a raw credential record by hand. This spec asks the MCP Servers tab to get the equivalent: a data-driven preload catalog, seeded with real, verified entries for Ableton Live and TouchDesigner, with a short list of other creative apps as the immediate follow-on.
 
 ---
 
@@ -189,7 +189,7 @@ This spec and `SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md` both propose the
 
 ## 8. References
 
-- Internal: `docs/specs/SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md` (source of the `AppConnector`/`ConnectorSetupStep` schema this spec reuses), `agentmux-srv/src/backend/storage/mcp_servers.rs`, `agentmux-srv/src/server/app_api/mcp.rs`, `frontend/app/view/mcp/mcp-manager.tsx`, `frontend/app/view/mcp/mcp-model.ts`, `frontend/app/view/accounts/accounts-catalog.ts` (the tile-gallery-in-front-of-CRUD precedent), `src/content/docs/armory.md` (Armory MCP Servers tab description, agentmux-docs repo).
+- Internal: [`docs/specs/SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md`](SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md) (source of the `AppConnector`/`ConnectorSetupStep` schema this spec reuses), `agentmux-srv/src/backend/storage/mcp_servers.rs`, `agentmux-srv/src/server/app_api/mcp.rs`, [`frontend/app/view/mcp/mcp-manager.tsx`](../../frontend/app/view/mcp/mcp-manager.tsx), [`frontend/app/view/mcp/mcp-model.ts`](../../frontend/app/view/mcp/mcp-model.ts), [`frontend/app/view/accounts/accounts-catalog.ts`](../../frontend/app/view/accounts/accounts-catalog.ts) (the tile-gallery-in-front-of-CRUD precedent), `src/content/docs/armory.md` (Armory MCP Servers tab description, agentmux-docs repo).
 - [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp)
 - [jpoindexter/ableton-mcp](https://github.com/jpoindexter/ableton-mcp)
 - [uisato/ableton-mcp-extended](https://github.com/uisato/ableton-mcp-extended)

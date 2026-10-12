@@ -18,17 +18,17 @@ create it, send it input (including control characters/signals), read its
 current screen state, resize it, stop it — entirely through backend RPC,
 with no dependency on window/pane focus or even the shell being visually
 mounted anywhere.
-**Related:** `docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md` (the
+**Related:** [`docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md`](SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md) (the
 existing agent-facing `Shell`/`ShellInput` tools — explicitly non-PTY, see
-§1), `docs/specs/SPEC_MODULARIZE_SHELL_2026_07_02.md`,
-`docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md`,
+§1), [`docs/specs/SPEC_MODULARIZE_SHELL_2026_07_02.md`](SPEC_MODULARIZE_SHELL_2026_07_02.md),
+[`docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md),
 `agentmux-srv/src/backend/shell_node.rs` (pipe-based ShellNodeRunner),
 `agentmux-srv/src/backend/blockcontroller/shell/` (the real PTY
 `ShellController`, already shared by the `term` widget and the agent's own
 CLI subprocess), `agentmux-srv/src/backend/blockcontroller/mod.rs`
 (`send_input`, `BlockInputUnion`), `agentmux-srv/src/server/app_api/blockfile.rs`
 (`blockfile:read_range`/`line_count`/`read_state`),
-`frontend/app/view/agent/components/AgentShellSubblock.tsx` (the "shell
+[`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) (the "shell
 under the agent pane" this spec starts from).
 
 ---

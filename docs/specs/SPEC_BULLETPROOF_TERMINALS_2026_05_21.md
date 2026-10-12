@@ -8,7 +8,7 @@ Three interlocking problems found during the 2026-05-21 terminal input investiga
 2. **The echo-latency benchmark used internal RPC plumbing directly** — `controllerinput` + seq is the private keyboard wire format; agents must not touch it; flooding it with 220 concurrent fire-and-forget RPCs overflowed the 32-slot reorder buffer and permanently froze those terminals
 3. **Agents need a real typing API** — `seq` is an internal mechanism; the agent app API must expose an opaque `term.type` command that delivers input through the same code path as keyboard input, with no seq exposure to callers
 
-Full spec: `docs/specs/SPEC_BULLETPROOF_TERMINALS_2026_05_21.md`
+Full spec: [`docs/specs/SPEC_BULLETPROOF_TERMINALS_2026_05_21.md`](SPEC_BULLETPROOF_TERMINALS_2026_05_21.md)
 
 ---
 
@@ -78,7 +78,7 @@ A single, stable command for agent-driven terminal input:
 - [ ] Add `term.type` command handler in backend (routes to `send_input(..., None)`)
 - [ ] Return structured error if controller not running
 - [ ] Rewrite `bench-term-echo.mjs` to use `term.type` exclusively (no raw seq RPCs)
-- [ ] Update `docs/specs/app-api-extension.md` with `term.type` documentation
+- [ ] Update [`docs/specs/app-api-extension.md`](app-api-extension.md) with `term.type` documentation
 
 ### Phase 3 — Terminal opening reliability
 - [ ] 5-second open timeout watchdog in `ShellController::start()`
@@ -108,6 +108,6 @@ A terminal pane satisfies the contract if:
 ## Related
 
 - PR #938 — seq session reset (fixes `input_seq_next` desync on session boundary, resets on `start()`)
-- `tools/tests/bench-term-echo.mjs` — benchmark that needs rewriting
-- `docs/specs/SPEC_BULLETPROOF_TERMINALS_2026_05_21.md` — full spec
-- `docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md` — existing benchmark spec (to be updated)
+- [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs) — benchmark that needs rewriting
+- [`docs/specs/SPEC_BULLETPROOF_TERMINALS_2026_05_21.md`](SPEC_BULLETPROOF_TERMINALS_2026_05_21.md) — full spec
+- [`docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) — existing benchmark spec (to be updated)

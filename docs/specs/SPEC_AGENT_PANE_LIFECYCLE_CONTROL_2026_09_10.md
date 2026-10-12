@@ -9,7 +9,7 @@
 `agentmux-srv/src/server/ui_handlers.rs` (the `verified_block_id` signed-identity
 mechanism §5.0 adopts), `agentmux-srv/src/sagas/delete_block.rs`,
 `agentmux-srv/src/sagas/tear_off_block.rs`, `agentmux-srv/src/sagas/redock_floating_pane.rs`,
-`frontend/layout/lib/layoutMagnify.ts`, `frontend/layout/lib/layoutMinimize.ts`,
+[`frontend/layout/lib/layoutMagnify.ts`](../../frontend/layout/lib/layoutMagnify.ts), [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts),
 `agentmux-cef/src/commands/floating_pane.rs`
 **Tracked prerequisite:** [agentmuxai/agentmux#3192](https://github.com/agentmuxai/agentmux/issues/3192)
 (§1.2/§9 — confirm `delete_block` preserves conversation history)
@@ -145,7 +145,7 @@ for this spec, not an implementation detail to discover later.
 Today, adding one new capability that needs to be callable from the frontend
 UI, the WS RPC engine, and an MCP tool means hand-writing it **three times**:
 a `register_handler`/`register_typed` call in srv, a hand-written TS stub in
-`frontend/app/store/rpc-api/`, and a hand-written JSON schema + `match` arm in
+[`frontend/app/store/rpc-api/`](../../frontend/app/store/rpc-api), and a hand-written JSON schema + `match` arm in
 `agentmux-mcp/src/main.rs`/`tool_schemas.rs`. `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`
 is already fixing the first drift (srv ↔ frontend) via `register_typed` +
 codegen + a diff gate. It says nothing about MCP, because MCP is a separate
@@ -432,7 +432,7 @@ server-side. `LayoutState.magnifiednodeid` (`agentmux-srv/src/backend/obj.rs:441
 is a real, persisted column, round-tripped through `persist_subscriber.rs`
 and mirrored on `TabRecord`. Minimize is real too, if less directly: a
 minimized leaf is `node.minimized = true` — a **top-level** field on
-`LayoutNode` itself (`frontend/layout/lib/layoutMinimize.ts:111`), not
+`LayoutNode` itself ([`frontend/layout/lib/layoutMinimize.ts:111`](../../frontend/layout/lib/layoutMinimize.ts#L111)), not
 nested under its `.data`. **Codex P1 on PR #3195, a follow-up correction to
 this same paragraph:** `LayoutNode` and `LayoutNodeData` each carry their
 *own*, separate `extra` catch-all (`agentmux-common/src/layout_types.rs:90`
@@ -519,7 +519,7 @@ tries to describe it now) instead of trusting this list as a final word:
   implicit.
 - **Stacked panes (Codex P1, round 6+7) — affects shipped code, not just
   future work:** a layout leaf can host a `blockStack` of multiple
-  blockIds (`frontend/layout/lib/layoutStack.ts`), and
+  blockIds ([`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts)), and
   `getNodeByBlockId` matches ANY member — so anything that resolves a
   leaf this way and deletes it (`delete_block::run`'s
   `LayoutDeleteNodeByBlock` step, and therefore `pane.float`'s planned

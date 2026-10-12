@@ -121,7 +121,7 @@ export interface BrowserAuthRequest {
 }
 ```
 
-`TabModalLayer.tsx` dispatches this `kind` to a new `<BrowserAuthModalPanel>` component (`frontend/app/view/browser/components/BrowserAuthModal.tsx`).
+`TabModalLayer.tsx` dispatches this `kind` to a new `<BrowserAuthModalPanel>` component ([`frontend/app/view/browser/components/BrowserAuthModal.tsx`](../../frontend/app/view/browser/components/BrowserAuthModal.tsx)).
 
 ### 3.3 UI
 
@@ -165,7 +165,7 @@ User enters wrong creds → CEF gets the 401 again → fires `get_auth_credentia
 3. `agentmux-cef/src/commands/`: `browser_pane_auth_submit` + `browser_pane_auth_cancel` IPC commands.
 4. `frontend/app/tab/tab-modal.ts`: `BrowserAuthRequest` variant.
 5. `frontend/app/tab/TabModalLayer.tsx`: dispatch case for `kind: "browser-auth"`.
-6. `frontend/app/view/browser/components/BrowserAuthModal.tsx`: the modal panel (modal-v2 chrome).
+6. [`frontend/app/view/browser/components/BrowserAuthModal.tsx`](../../frontend/app/view/browser/components/BrowserAuthModal.tsx): the modal panel (modal-v2 chrome).
 7. `BrowserViewModel`: subscribe to `browser-pane-auth-required`, open modal, route submit/cancel.
 
 ### Phase β — Per-pane in-memory cache

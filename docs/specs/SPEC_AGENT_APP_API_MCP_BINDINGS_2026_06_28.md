@@ -53,8 +53,8 @@ contract: the security model intends agents to reach privileged surfaces
 > (`agentmux-srv/src/server/service/credential.rs` names it). What was *not*
 > documented anywhere until recently is the cross-instance consequence, and the
 > plan to remove the ambient credential altogether:
-> `docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md` §2.4
-> and `docs/specs/SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md`.
+> [`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`](../retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md) §2.4
+> and [`docs/specs/SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md`](SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md).
 
 ## 2. Goal
 
@@ -247,7 +247,7 @@ see §7.
 
 ## 9. Validation (already performed against 0.49.8)
 
-A raw-WS smoke client (`scripts/test-app-api.mjs`) exercised all twelve commands
+A raw-WS smoke client ([`scripts/test-app-api.mjs`](../../scripts/test-app-api.mjs)) exercised all twelve commands
 end to end as agent `AgentX`:
 
 - `identity.self.accounts` empty → `identity.account.upsert` (dummy, `validate:false`)

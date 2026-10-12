@@ -94,10 +94,10 @@ the agent grid that this change fixes for both.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/native-memory/MemoryFileCard.tsx` | **new** — the tile + its label helpers |
-| `frontend/app/view/native-memory/native-memory-manager.tsx` | detail view split into two screens; `sortedFiles` memo; one-level-back button + breadcrumb |
-| `frontend/app/view/native-memory/native-memory-manager.scss` | file grid + tile styles, breadcrumb, narrow-pane column collapse; dead `.native-memory-manager-field` (the `<select>`'s styles) removed |
-| `frontend/app/view/native-memory/native-memory-manager.test.tsx` | 6 combobox-driven tests migrated to tiles; 10 new |
+| [`frontend/app/view/native-memory/MemoryFileCard.tsx`](../../frontend/app/view/native-memory/MemoryFileCard.tsx) | **new** — the tile + its label helpers |
+| [`frontend/app/view/native-memory/native-memory-manager.tsx`](../../frontend/app/view/native-memory/native-memory-manager.tsx) | detail view split into two screens; `sortedFiles` memo; one-level-back button + breadcrumb |
+| [`frontend/app/view/native-memory/native-memory-manager.scss`](../../frontend/app/view/native-memory/native-memory-manager.scss) | file grid + tile styles, breadcrumb, narrow-pane column collapse; dead `.native-memory-manager-field` (the `<select>`'s styles) removed |
+| [`frontend/app/view/native-memory/native-memory-manager.test.tsx`](../../frontend/app/view/native-memory/native-memory-manager.test.tsx) | 6 combobox-driven tests migrated to tiles; 10 new |
 
 ## Tests
 

@@ -2,9 +2,9 @@
 
 **Date:** 2026-09-26
 **Status:** active — PR 1 (descriptors, status table) implemented in #3901, PR 2 (pills, CompactResult facts) in #3902, PR 3 (explicit renderer registration) in #3904
-**Scope:** `frontend/app/view/agent/` — tool rows, tool previews, the activity row
+**Scope:** [`frontend/app/view/agent/`](../../frontend/app/view/agent) — tool rows, tool previews, the activity row
 **Verified against:** `main` @ `ba9abe92f` (after #3871, #3874, #3877, #3883)
-**Source:** `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`
+**Source:** [`docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`](../reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md)
 items A1, A3, A4, A5, C4, C5
 **Companion:** `SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md` (the row
 open/closed model; it reads this spec's `presentation` field)

@@ -23,12 +23,12 @@ The component chain, found via the same Armory routing Global Memory uses
 (`armory-view.tsx`'s `MEMORY_SUBNAV`):
 
 `armory-view.tsx` (`"personal"` subsection) → `NativeMemoryManager`
-(`frontend/app/view/native-memory/native-memory-manager.tsx`) → agent card
+([`frontend/app/view/native-memory/native-memory-manager.tsx`](../../frontend/app/view/native-memory/native-memory-manager.tsx)) → agent card
 grid (`MemoryAgentCard.tsx`) → per-file tile grid (`MemoryFileCard.tsx`) → on
 file select → `NativeMemoryHistoryPanel`
 (`frontend/app/view/agent/components/NativeMemoryHistoryPanel.tsx`, shared
 with the Stash modal), backed by `NativeMemoryHistoryModel`
-(`frontend/app/view/agent/native-memory-history-model.ts`).
+([`frontend/app/view/agent/native-memory-history-model.ts`](../../frontend/app/view/agent/native-memory-history-model.ts)).
 
 **`NativeMemoryHistoryPanel` renders exactly two things, and neither is a
 file's current content:**
@@ -82,7 +82,7 @@ unrelated, already-fixed blank-`working_directory` bug), and is already
 wired end-to-end and working in the **other** surface that reads native
 memory: the Agent-pane Stash "Memory" tab
 (`AgentNativeMemoryModal.tsx` + `AgentNativeMemoryModel`,
-`frontend/app/view/agent/agent-native-memory-model.ts`). That model's
+[`frontend/app/view/agent/agent-native-memory-model.ts`](../../frontend/app/view/agent/agent-native-memory-model.ts)). That model's
 `contentAtom` (`:157-181`) is the reference implementation this spec reuses.
 
 ## 4. What Global Memory's fix reused, and what's different here

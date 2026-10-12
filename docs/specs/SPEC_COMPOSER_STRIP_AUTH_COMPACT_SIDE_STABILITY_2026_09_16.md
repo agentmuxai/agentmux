@@ -17,12 +17,12 @@ generic two-pointer pairs already have — an over-width pair would still
 `flex-wrap` into two physical one-sided lines despite the row's data
 formally having both sides filled (fixed: same capacity check, split into
 two one-sided rows preserving each member's own side when it doesn't fit). — #3282
-**Affects:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` —
+**Affects:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) —
 the `auth` slot ("Logged in" / "Not logged in") and the `ctx` slot's Compact
 button.
 **Read first:** `AgentComposerStrip.tsx`'s own file-header comment (Rev
 1-8 history — this is the 9th revision of this file's zone-balancing logic)
-and `docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md` (Rev 7,
+and [`docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) (Rev 7,
 the row-based model this spec builds on).
 **Trigger:** user report, verbatim: *"in the agent pane, when cross approx
 342 px width, the Logged in and Compact switch sides. Can you have them

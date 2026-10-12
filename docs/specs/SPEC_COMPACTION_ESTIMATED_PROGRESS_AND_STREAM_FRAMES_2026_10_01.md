@@ -19,7 +19,7 @@ So the honest progress display is an **estimate**: how long the previous compact
 
 ## 2. What the CLI emits on stream-json [verified live]
 
-I ran the real CLI 2.1.287 in the mode AgentMux uses (`-p --input-format stream-json --output-format stream-json --verbose`) against a local fake Anthropic API (`scripts/cli-probe/fake-anthropic.mjs` from #4189, extended with a delay on the summarizing call), in a throwaway HOME with a dummy key: no account, no cost. I sent `hello`, then `/compact`.
+I ran the real CLI 2.1.287 in the mode AgentMux uses (`-p --input-format stream-json --output-format stream-json --verbose`) against a local fake Anthropic API ([`scripts/cli-probe/fake-anthropic.mjs`](../../scripts/cli-probe/fake-anthropic.mjs) from #4189, extended with a delay on the summarizing call), in a throwaway HOME with a dummy key: no account, no cost. I sent `hello`, then `/compact`.
 
 | t (ms) | Frame on stdout |
 |---|---|
@@ -37,8 +37,8 @@ The `PreCompact` hook (already wired by AgentMux, `agent_config.rs`) gives the s
 The **stdout** `compact_boundary` frame uses snake_case, `compact_metadata` with `pre_tokens`, `post_tokens`, `cumulative_dropped_tokens`, `duration_ms`, and has **no `timestamp`**. The **transcript** (`~/.claude/projects/**.jsonl`) entry for the same boundary uses camelCase, `compactMetadata` with `preTokens`, `durationMs`, **has** a `timestamp`, and carries the same `uuid`.
 
 Both live parsers read only the camelCase form:
-- `crates/srv/src/agents/translator/claude.rs` `handle_system_message`: `frame.get("compactMetadata")`.
-- `frontend/app/view/agent/compact-boundary.ts` `parseCompactBoundaryFrame`: `e.compactMetadata`.
+- [`crates/srv/src/agents/translator/claude.rs`](../../crates/srv/src/agents/translator/claude.rs) `handle_system_message`: `frame.get("compactMetadata")`.
+- [`frontend/app/view/agent/compact-boundary.ts`](../../frontend/app/view/agent/compact-boundary.ts) `parseCompactBoundaryFrame`: `e.compactMetadata`.
 
 The unit tests use camelCase fixtures, copied from the transcript (the old spec's "live evidence" was a `.jsonl` file). AgentMux's own stored agent output (the `output` blockfiles in `filestore.db`, 0.59.1) contains the stdout form: 3 snake_case boundary lines. (The one camelCase hit in that store is prose in an agent's message quoting this spec, not a frame.) [verified by grep; not watched live in a pane]
 
@@ -61,7 +61,7 @@ The unit tests use camelCase fixtures, copied from the transcript (the old spec'
 
 ## 5. Design — Tier 4
 
-**Samples.** One sample per finished compaction: `{ uuid, preTokens, durationMs }`, from the stdout `compact_boundary` frame. A new small parser (`frontend/app/view/agent/compaction-estimate.ts`, `parseCompactionSample`) accepts both casings (`compact_metadata`/`compactMetadata`), so it also works if the CLI changes, and **does not** share code with `parseCompactBoundaryFrame` (R5). `useAgentStream` records the sample at the existing `compact_boundary` branch, before the unchanged parse.
+**Samples.** One sample per finished compaction: `{ uuid, preTokens, durationMs }`, from the stdout `compact_boundary` frame. A new small parser ([`frontend/app/view/agent/compaction-estimate.ts`](../../frontend/app/view/agent/compaction-estimate.ts), `parseCompactionSample`) accepts both casings (`compact_metadata`/`compactMetadata`), so it also works if the CLI changes, and **does not** share code with `parseCompactBoundaryFrame` (R5). `useAgentStream` records the sample at the existing `compact_boundary` branch, before the unchanged parse.
 - Kept in `localStorage` (`agentmux:compaction-samples:v1`), newest 10, global across panes and agents: compaction time depends on the summarizing model call and the context size, not on the agent.
 - De-duplicated by `uuid`, so a frame seen twice (a stream re-read) counts once.
 - Validated on read (JSON, shape, finite positive numbers); anything else is dropped. Storage that is unavailable or throws behaves as "no samples".
@@ -98,7 +98,7 @@ ones building on real timings; and the bar should be the colour of the status te
 - **Colour.** The fill was `--accent-color`, but the status text and spinner are the pane's identity colour
   (`var(--block-identity-color, var(--accent-color))`, SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02). The fill
   now uses the same, and the track is a 15 % tint of it instead of grey.
-- Report: `docs/reports/REPORT_COMPACTION_BAR_DEFAULT_AND_COLOR_2026_10_10.md`.
+- Report: [`docs/reports/REPORT_COMPACTION_BAR_DEFAULT_AND_COLOR_2026_10_10.md`](../reports/REPORT_COMPACTION_BAR_DEFAULT_AND_COLOR_2026_10_10.md).
 
 ## 6. Status frames (decision D2) — failure notice built (§10); the rest not built
 

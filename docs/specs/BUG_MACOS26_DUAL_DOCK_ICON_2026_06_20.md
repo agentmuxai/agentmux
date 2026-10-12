@@ -59,7 +59,7 @@ CEF then claims a `Regular` (Dock-visible) activation policy.
 
 ### 3. Info.plist — no `LSUIElement` declared
 
-**`scripts/package-macos.sh:210–241`** — the generated Info.plist contains:
+**[`scripts/package-macos.sh:210–241`](../../scripts/package-macos.sh#L210-L241)** — the generated Info.plist contains:
 ```xml
 <key>CFBundleExecutable</key><string>agentmux-launcher</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
@@ -87,7 +87,7 @@ its Dock slot indefinitely alongside CEF's own Regular slot, producing two icons
 ## Fix
 
 Add `<key>LSUIElement</key><true/>` to the main `Info.plist` in
-`scripts/package-macos.sh`. This prevents the launcher from ever being
+[`scripts/package-macos.sh`](../../scripts/package-macos.sh). This prevents the launcher from ever being
 registered as a Foreground app at the OS level — no runtime downgrade needed.
 CEF's `setActivationPolicy(.regular)` call then creates the sole Dock entry as
 intended.

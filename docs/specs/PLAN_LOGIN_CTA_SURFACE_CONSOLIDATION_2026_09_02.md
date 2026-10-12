@@ -8,7 +8,7 @@ blue "Log in" button, and a row of buttons that includes "Login Again". They
 should be one thing.
 
 **Scope note — this is about the CTA *surfaces*, not the login *implementations*.**
-`docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` covers the
+[`docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) covers the
 orthogonal, still-open work of collapsing the four *login flow implementations*
 (`runProviderLogin`, `useGlobalLogin`, `loginViaTerminal`, `AuthFlowController`)
 onto one core. That plan is about what happens *after* a click. This plan is
@@ -21,7 +21,7 @@ independently; neither blocks the other.
 
 Three distinct login call-to-action surfaces exist in the agent pane today, all
 three of which ultimately call the **same** function — `status.relogin()`
-(`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:499`). They differ
+([`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:499`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts#L499)). They differ
 only in chrome, placement, trigger condition, and one boolean argument.
 
 | # | Surface | Rendered at | Looks like | Gate |

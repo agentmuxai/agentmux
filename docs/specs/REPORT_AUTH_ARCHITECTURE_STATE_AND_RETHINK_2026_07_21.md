@@ -501,7 +501,7 @@ v2.1.183 (this report's basis, and `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md`'s
 pasted code on stdin, auto-completing on browser authorize with no paste needed in the happy path. That's
 not a device-flow shim (no new OAuth client, no endpoint AgentMux calls directly) — it's the CLI acting as
 its own OAuth client, same as it always has; AgentMux only needed to relay the URL it now prints. See
-`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md`, which revives the in-app URL+paste UI as the
+[`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md`](SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md), which revives the in-app URL+paste UI as the
 PRIMARY path for Claude, demoting the terminal-window fallback to an explicit secondary action. Per
 `SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md` §3.2, that fallback is still auto-launched on a genuine capture
 miss (tier 1 prints no URL at all — the pre-existing 1→2→3 fallthrough, unchanged); once a URL HAS been shown,

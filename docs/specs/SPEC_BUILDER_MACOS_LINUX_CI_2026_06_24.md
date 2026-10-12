@@ -47,7 +47,7 @@ on:
 
 `macos-latest` (GitHub-hosted, Apple Silicon arm64). GitHub's hosted macOS
 runners ship Xcode, `codesign`, `xcrun notarytool`, `hdiutil`, and `sips` —
-all required by `scripts/package-macos.sh`.
+all required by [`scripts/package-macos.sh`](../../scripts/package-macos.sh).
 
 ### 2.3 Steps
 
@@ -71,11 +71,11 @@ all required by `scripts/package-macos.sh`.
 > mirrors Linux: it downloads a **pre-built patched framework** from an
 > `agentmuxai/cef` release (`cef-macos-arm64-<ver>.tar.gz`), sets
 > `AGENTMUX_CEF_RUNTIME_DIR_DARWIN`, and `package-macos.sh` verifies the patch
-> before signing via `scripts/verify-cef-framework-darwin.sh`. The
+> before signing via [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh). The
 > `cef-runtime-tag` input (auto-detects the latest `cef-macos-arm64-*` when blank)
 > selects the release. See
 > `SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md` and
-> `docs/cef-build/build-patched-framework-macos.md`.
+> [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md).
 
 ### 2.4 Certificate Import (Step 5)
 
@@ -133,7 +133,7 @@ task package:macos -- "$OUTDIR"
 ```
 
 `task package:macos` runs `build:host`, `build:backend`, `build:frontend`,
-`bundle`, then `scripts/package-macos.sh`. Output:
+`bundle`, then [`scripts/package-macos.sh`](../../scripts/package-macos.sh). Output:
 `AgentMux_{VERSION}_arm64.dmg`.
 
 ### 2.7 Upload
@@ -289,7 +289,7 @@ rm "$HOME/cef-runtime"/*.tar.gz
 echo "AGENTMUX_CEF_RUNTIME_DIR=$HOME/cef-runtime" >> "$GITHUB_ENV"
 ```
 
-With `AGENTMUX_CEF_RUNTIME_DIR` set, `scripts/resolve-cef-runtime.sh` returns
+With `AGENTMUX_CEF_RUNTIME_DIR` set, [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) returns
 this path as its first candidate (explicit override) and skips the cargo cache
 fallback. The unstripped libcef.so passes `verify-cef-patch.sh`; the packager
 then strips it inside the AppDir.
@@ -402,14 +402,14 @@ using `AGENTMUX_RELEASE_TOKEN`.
 - **Building the patched macOS framework from source in CI**: like the Linux
   `libcef.so`, the arm64 framework is built out-of-band (multi-hour Chromium
   compile) and stored as an `agentmuxai/cef` release; CI only downloads + verifies
-  it. The build recipe is `docs/cef-build/build-patched-framework-macos.md`. (This
+  it. The build recipe is [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md). (This
   revises the original spec's implicit assumption that macOS used the stock
   `cef-dll-sys` framework — as of 2026-06-29 it consumes the patched framework,
   per `SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md`.)
 - **Intel Mac (x86_64)**: all builds target Apple Silicon (arm64). The patched CEF
   framework is built for arm64 only; x86_64 support would need a separate CEF build.
 - **Linux arm64**: `build-appimage-linux.sh` targets x86_64; arm64 AppImage deferred.
-- **Windows code signing** (SignPath): deferred per `docs/windows-code-signing.md`.
+- **Windows code signing** (SignPath): deferred per [`docs/windows-code-signing.md`](../windows-code-signing.md).
 - **macOS App Store**: direct distribution only; notarized Developer ID path.
 - **Auto-trigger on tag push**: the workflows are `workflow_dispatch` + 
   `repository_dispatch` only. A tag-push trigger (listen for `vX.Y.Z` tags on 

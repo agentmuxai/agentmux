@@ -25,7 +25,7 @@ across all queries in the session, resetting only when the pane/session resets.
 ## Root Cause
 
 There is exactly one piece of state involved, `AgentPaneState.sessionStats`
-(`frontend/app/store/agent-pane-state/types.ts:167`), and it is *correctly*
+([`frontend/app/store/agent-pane-state/types.ts:167`](../../frontend/app/store/agent-pane-state/types.ts#L167)), and it is *correctly*
 per-turn:
 
 - `TurnStart` nulls it (`reducer.ts:382`).
@@ -36,10 +36,10 @@ per-turn:
 
 Both consumers bind to the identical projected atom:
 
-- `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx:66-141`),
-  wired at `frontend/app/view/agent/agent-view.tsx:822-828` via
+- `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx:66-141`](../../frontend/app/view/agent/components/AgentFooter.tsx#L66-L141)),
+  wired at [`frontend/app/view/agent/agent-view.tsx:822-828`](../../frontend/app/view/agent/agent-view.tsx#L822-L828) via
   `sessionStats={agentAtoms().sessionStatsAtom[0]()}`.
-- `AgentComposerStrip` (`frontend/app/view/agent/components/AgentComposerStrip.tsx:97-160`),
+- `AgentComposerStrip` ([`frontend/app/view/agent/components/AgentComposerStrip.tsx:97-160`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx#L97-L160)),
   wired at `agent-view.tsx:984-985` via the same
   `sessionStats={agentAtoms().sessionStatsAtom[0]()}`.
 
@@ -47,7 +47,7 @@ Since only one such value exists in the whole pane, and both components read it 
 reference, they trivially always match. No cumulative accumulator was ever built —
 the composer strip's doc comment ("Final session totals") was aspirational, not
 implemented. (A genuine cross-turn accumulator does exist —
-`frontend/app/store/token-usage.ts` — but it feeds the global status-bar token
+[`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) — but it feeds the global status-bar token
 popover, not this pane-local composer strip, and it is keyed by provider/service,
 not by pane.)
 
@@ -62,7 +62,7 @@ per-turn data) untouched. Point `AgentComposerStrip` at the new field instead.
 
 ### 1. State shape
 
-`frontend/app/store/agent-pane-state/types.ts`
+[`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts)
 
 - Add `sessionTotals: SessionStats | null` to `AgentPaneState`, reusing the
   existing `SessionStats` shape (`cost_usd`, `duration_ms`, `num_turns`,
@@ -72,7 +72,7 @@ per-turn data) untouched. Point `AgentComposerStrip` at the new field instead.
 
 ### 2. Reducer accumulation
 
-`frontend/app/store/agent-pane-state/reducer.ts`
+[`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts)
 
 - Add an `accumulateStats(totals, merged)` helper next to `mergeStats`: returns
   a new `SessionStats` summing `cost_usd`, `duration_ms`, `input_tokens`,
@@ -92,12 +92,12 @@ per-turn data) untouched. Point `AgentComposerStrip` at the new field instead.
 
 ### 3. Atom + projection wiring
 
-`frontend/app/view/agent/state.ts`
+[`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts)
 
 - Add `sessionTotalsAtom: SignalPair<SessionStats | null>`, initialized to
   `createSignal<SessionStats | null>(null)`, mirroring `sessionStatsAtom`.
 
-`frontend/app/store/agent-pane-state-store.ts`
+[`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts)
 
 - Add `sessionTotals: (next: SessionStats | null) => void` to
   `AgentPaneProjections`.
@@ -105,7 +105,7 @@ per-turn data) untouched. Point `AgentComposerStrip` at the new field instead.
   slot.state.sessionTotals, slot.proj.sessionTotals);` line beside the
   existing `sessionStats` line (~line 190) in `dispatch()`.
 
-`frontend/app/view/agent/agent-view.tsx`
+[`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)
 
 - Register the new projection: `sessionTotals: a.sessionTotalsAtom[1]` in the
   `projections` object passed to `registerAgentPane` (~line 214, beside the
@@ -117,7 +117,7 @@ per-turn data) untouched. Point `AgentComposerStrip` at the new field instead.
 
 ### 4. Component prop rename (clarity)
 
-`frontend/app/view/agent/components/AgentComposerStrip.tsx`
+[`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx)
 
 - Rename the `sessionStats` prop to `sessionTotals: SessionStats | null` and
   update its doc comment to accurately describe cumulative totals (no
@@ -132,7 +132,7 @@ per-turn data) untouched. Point `AgentComposerStrip` at the new field instead.
 - No change to `AgentWorkingRow` / per-turn `sessionStats` — that display is
   already correct (resets to the just-finished turn's own numbers, not a
   running total).
-- No change to `frontend/app/store/token-usage.ts` (the global status-bar
+- No change to [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) (the global status-bar
   accumulator) — it's a separate, already-working mechanism at a different
   scope (cross-pane, per-provider) and out of scope here.
 - No backend changes — `AgentEvent::Cost` already carries correct per-run

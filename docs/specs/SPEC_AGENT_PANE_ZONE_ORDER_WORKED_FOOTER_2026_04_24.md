@@ -1,11 +1,11 @@
 # Spec: Agent Pane Zone Reorder + Enriched "Worked" Footer
 
 **Date:** 2026-04-24
-**Status:** implemented — shipped in #549 ("zone reorder + enriched Worked footer"). Verified 2026-08-23: `frontend/app/view/agent/agent-view.tsx` positions `<PendingMessagesPanel>` with a code comment explicitly citing this spec by filename; `AgentFooter.tsx` has the primary/secondary Worked-line split this spec designed.
+**Status:** implemented — shipped in #549 ("zone reorder + enriched Worked footer"). Verified 2026-08-23: [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) positions `<PendingMessagesPanel>` with a code comment explicitly citing this spec by filename; `AgentFooter.tsx` has the primary/secondary Worked-line split this spec designed.
 **Owner:** AgentA
-**Touches:** `frontend/app/view/agent/agent-view.tsx`,
-             `frontend/app/view/agent/components/AgentFooter.tsx`,
-             `frontend/app/view/agent/styles/_pending-footer.scss`
+**Touches:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx),
+             [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx),
+             [`frontend/app/view/agent/styles/_pending-footer.scss`](../../frontend/app/view/agent/styles/_pending-footer.scss)
 
 ---
 
@@ -233,11 +233,11 @@ the completed branch too.
 
 ## 8. Cross-references
 
-- `frontend/app/view/agent/agent-view.tsx` — JSX order
-- `frontend/app/view/agent/components/AgentFooter.tsx` —
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — JSX order
+- [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) —
   `AgentStatusLine` + `statsText()` + `tokenText()`
-- `frontend/app/view/agent/components/PendingMessagesPanel.tsx` —
+- [`frontend/app/view/agent/components/PendingMessagesPanel.tsx`](../../frontend/app/view/agent/components/PendingMessagesPanel.tsx) —
   moved component
-- `frontend/app/view/agent/styles/_pending-footer.scss` — queue CSS
+- [`frontend/app/view/agent/styles/_pending-footer.scss`](../../frontend/app/view/agent/styles/_pending-footer.scss) — queue CSS
 - `AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md` — governs the queue's
   colour transitions (not changed here)

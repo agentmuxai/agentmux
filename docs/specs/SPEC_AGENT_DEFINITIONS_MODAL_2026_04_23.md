@@ -97,7 +97,7 @@ The `ⓘ` popover is the highest-value addition on the card: one hover gives the
 
 ## 5. CLI catalog
 
-A single source of truth, seeded from discussion #493 and checked into source as `frontend/app/view/agent/defaults/cli-catalog.ts`. The Forge seed writes one `ForgeAgent` row per catalog entry on first run.
+A single source of truth, seeded from discussion #493 and checked into source as [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts). The Forge seed writes one `ForgeAgent` row per catalog entry on first run.
 
 ```typescript
 export interface CliCatalogEntry {
@@ -286,7 +286,7 @@ Small, independently landable PRs, gated.
 - **Gate:** none (visual-only).
 
 ### PR C — CLI catalog module
-- Add `frontend/app/view/agent/defaults/cli-catalog.ts` with the 7 entries.
+- Add [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts) with the 7 entries.
 - Hook `useCliCatalog()` returns the catalog; future: merge with backend-delivered catalog.
 - Backend Forge seed rewritten to use catalog entries → ensures card metadata and seed data agree.
 - **Gate:** PR B (so cards can display catalog values).
@@ -305,7 +305,7 @@ Small, independently landable PRs, gated.
 - **Gate:** PR D.
 
 ### PR F — Popovers everywhere
-- Reuse the existing popover primitive (check `frontend/app/element/` for the pane-header one, else add a tiny wrapper).
+- Reuse the existing popover primitive (check [`frontend/app/element/`](../../frontend/app/element) for the pane-header one, else add a tiny wrapper).
 - Add `ⓘ` on: card body, modal fields, working-dir preview.
 - Content sourced from catalog `popoverMarkdown` + short helper strings.
 - **Gate:** PRs B + D.

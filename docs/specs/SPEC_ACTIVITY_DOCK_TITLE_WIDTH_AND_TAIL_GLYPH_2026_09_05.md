@@ -8,13 +8,13 @@ long-running processes truncate their title too aggressively (leaving
 visible free space in the row), and a symbol renders as an invalid
 character near the elapsed time.
 **Related:**
-- `frontend/app/view/agent/components/ActivityRow.tsx` (the dock row)
-- `frontend/app/view/agent/components/PersistentShellBlock.tsx` (the
+- [`frontend/app/view/agent/components/ActivityRow.tsx`](../../frontend/app/view/agent/components/ActivityRow.tsx) (the dock row)
+- [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx) (the
   in-transcript persistent shell block — structurally identical chrome,
   see §3)
-- `frontend/app/view/agent/styles/_shell-node.scss` (both components'
+- [`frontend/app/view/agent/styles/_shell-node.scss`](../../frontend/app/view/agent/styles/_shell-node.scss) (both components'
   shared CSS section)
-- `docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md` (original
+- [`docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) (original
   dock spec, §4 chrome)
 
 ---

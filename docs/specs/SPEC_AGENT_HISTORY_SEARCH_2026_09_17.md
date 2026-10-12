@@ -249,7 +249,7 @@ Also out of scope:
 - `agentmux-srv/src/server/reactive.rs` (or a sibling handler module) — the HTTP route
 - `agentmux-mcp/src/tool_schemas.rs` — `SEARCH_HISTORY_TOOL`
 - `agentmux-mcp/src/main.rs` — dispatch arm, mirroring `GetAgentTranscript`
-- `docs/specs/ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md` — new route row, per that doc's own same-change rule
+- [`docs/specs/ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md`](ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md) — new route row, per that doc's own same-change rule
 
 ## 7. Testing
 

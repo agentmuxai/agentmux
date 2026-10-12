@@ -3,7 +3,7 @@
 **Status:** Living
 **Date:** 2026-09-06
 **Author:** Agent2
-**Origin:** `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §8
+**Origin:** [`docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md`](../reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md) §8
 
 Several distinct secrets appear across srv's network surface. Each has a real,
 well-documented reason to exist, and this document is **not** an argument to
@@ -91,7 +91,7 @@ that checking is optional.
 per-channel store, where the lookup silently finds nothing whenever the shared
 root resolves), and not `identity_store` (which `isolated_auth_enabled()` can
 redirect independently of `id_store`, so a reader using it can diverge from the
-writer). Enforced by `scripts/check-muxbus-credential-store.sh`; the regression
+writer). Enforced by [`scripts/check-muxbus-credential-store.sh`](../../scripts/check-muxbus-credential-store.sh); the regression
 that motivated the gate is PR #3023.
 
 ## Message authentication

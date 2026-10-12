@@ -119,7 +119,7 @@ arrival; if the host fans an event 600×, the renderer processes it
 **Proposal:** add §8.14: *"Launcher event subscribers MUST be idempotent
 under (event_kind, label, version) — duplicates may legally arrive from
 re-dispatch, resync, or replay; subscribers de-dup by (kind, label,
-version) before applying."* Then bake it into `frontend/util/launcher-events.ts`
+version) before applying."* Then bake it into [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts)
 and the host bridge.
 
 ### 4.2 No "state transitions on promote" spec for WRR

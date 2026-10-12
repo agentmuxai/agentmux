@@ -44,8 +44,8 @@ current tab, label, and position. This is a rename + reorder only, not a
 data-model unification: `Global Memory` and `Personal Memory` remain two
 separate backing systems under the hood (`is_global` Memory bundles vs.
 native memory files) — see
-`docs/reports/REPORT_ARMORY_STASH_MEMORY_SYNC_STATUS_2026_08_07.md` and
-`docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md` for why that
+[`docs/reports/REPORT_ARMORY_STASH_MEMORY_SYNC_STATUS_2026_08_07.md`](../reports/REPORT_ARMORY_STASH_MEMORY_SYNC_STATUS_2026_08_07.md) and
+[`docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md`](archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md) for why that
 separation itself stays as-is. Only the section ids stay stable
 internally (`memory`, `native_memory`) — they're persisted in
 `block.meta["armory:section"]`; renaming the *label* doesn't touch a

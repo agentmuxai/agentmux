@@ -8,7 +8,7 @@ row sometimes disappears just before a "Compact conversation" episode finishes,
 leaving the user with no visibility that the agent is still busy.
 
 **Relationship to prior art:** `SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
-is the feature this bug lives inside — `frontend/app/store/agent-pane-state/reducer.ts`'s
+is the feature this bug lives inside — [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts)'s
 `CompactionStarted` case has already been hardened across 11 rounds of race-condition
 fixes (see the inline `reagent`/`codex` round comments on that case), all of them
 about the ping arriving **too late** relative to some other transition. This spec

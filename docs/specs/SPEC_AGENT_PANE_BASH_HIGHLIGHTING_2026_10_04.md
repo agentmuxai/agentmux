@@ -6,7 +6,7 @@
 **Requested by:** the repo owner ("when hovering over agent pane tools, we get
 floating panels over the preview. A lot of them are Bash commands. Can we get
 robust highlighting for them?")
-**Scope:** `frontend/app/view/agent/components/` (the Bash result viewer, the
+**Scope:** [`frontend/app/view/agent/components/`](../../frontend/app/view/agent/components) (the Bash result viewer, the
 streaming chunk list, the tool row header) plus a new pure-TypeScript
 highlighting module. No backend change.
 **Builds on:** `SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md` (Shiki for
@@ -89,7 +89,7 @@ Specific gaps, each seen in real agent sessions:
 
 ## 3. Design
 
-A new module `frontend/app/view/agent/components/shell-highlight/` holds pure
+A new module [`frontend/app/view/agent/components/shell-highlight/`](../../frontend/app/view/agent/components/shell-highlight) holds pure
 functions (no DOM, no Solid). Components consume its output.
 
 ### 3.1 Command tokenizer

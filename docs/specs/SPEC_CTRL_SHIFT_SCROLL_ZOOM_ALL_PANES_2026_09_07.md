@@ -12,7 +12,7 @@ chrome, it just acts normal zoom."*
 Ctrl+Scroll already zooms exactly one target — whichever pane is under the
 cursor, or the chrome (title bar + status bar) as a single unit if the
 cursor is over `.window-header` / `.status-bar` / `.block-frame-default-header`
-(`AppZoomHandler`, `frontend/app/app.tsx:189-227`). There is no gesture that
+(`AppZoomHandler`, [`frontend/app/app.tsx:189-227`](../../frontend/app/app.tsx#L189-L227)). There is no gesture that
 zooms every pane in the window together. Doing that today means either
 repeatedly zooming each pane one at a time, or living with mismatched zoom
 levels across panes.
@@ -29,7 +29,7 @@ Add a second wheel handler, `Ctrl+Shift+Scroll`, alongside the existing
 - **Over chrome** (same hit-test `AppZoomHandler` already uses:
   `.window-header`, `.status-bar`, `.block-frame-default-header`): behaves
   exactly like plain Ctrl+Scroll over chrome does today — `chromeZoomIn`/
-  `chromeZoomOut` (`frontend/app/store/zoom.ts:151-157`). Shift changes
+  `chromeZoomOut` ([`frontend/app/store/zoom.ts:151-157`](../../frontend/app/store/zoom.ts#L151-L157)). Shift changes
   nothing here; this is "acts normal zoom" from the request.
 - **Everywhere else in the window**: step the zoom of **every pane in the
   current window**, each relative to its own current level — not to a
@@ -214,11 +214,11 @@ towards the smaller/pure-frontend option:
 
 | File | Change |
 |---|---|
-| `frontend/app/app.tsx` | new `AppAllPanesZoomHandler`; `AppZoomHandler`'s own gate gained `\|\| e.shiftKey` too (found during implementation, see above) |
-| `frontend/app/view/term/term.tsx`, `editor-view.tsx`, `armory-view.tsx`, `warden-view.tsx`, `swarm-view.tsx`, `frontend/app/view/agent/components/AgentShellSubblock.tsx`, `frontend/app/view/helpview/helpview.tsx` | add `!e.shiftKey`/`e.shiftKey` exclusion to each handler's existing Ctrl+Wheel gate — 7 files, the last found by Codex's review, not the original research |
-| `frontend/app/store/zoom.ts` | new `zoomAllPanesIn`/`zoomAllPanesOut`; `stepZoom`/`setBlockZoom` gained a `showIndicator` param and now return the computed value (stale-cache fix, see above); `getBlockZoom`'s allowlist gained `warden` (Codex review) |
-| `frontend/app/store/block-component-registry.ts` | new `getAllBlockComponentModelEntries()` |
-| `frontend/app/store/zoom.test.ts` (new), `armory-view.test.tsx`, `warden-view.test.tsx`, `frontend/app/view/helpview/helpview.test.tsx` (new) | test coverage, including the stale-cache regression test |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) | new `AppAllPanesZoomHandler`; `AppZoomHandler`'s own gate gained `\|\| e.shiftKey` too (found during implementation, see above) |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx), `editor-view.tsx`, `armory-view.tsx`, `warden-view.tsx`, `swarm-view.tsx`, [`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx), [`frontend/app/view/helpview/helpview.tsx`](../../frontend/app/view/helpview/helpview.tsx) | add `!e.shiftKey`/`e.shiftKey` exclusion to each handler's existing Ctrl+Wheel gate — 7 files, the last found by Codex's review, not the original research |
+| [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) | new `zoomAllPanesIn`/`zoomAllPanesOut`; `stepZoom`/`setBlockZoom` gained a `showIndicator` param and now return the computed value (stale-cache fix, see above); `getBlockZoom`'s allowlist gained `warden` (Codex review) |
+| [`frontend/app/store/block-component-registry.ts`](../../frontend/app/store/block-component-registry.ts) | new `getAllBlockComponentModelEntries()` |
+| [`frontend/app/store/zoom.test.ts`](../../frontend/app/store/zoom.test.ts) (new), `armory-view.test.tsx`, `warden-view.test.tsx`, [`frontend/app/view/helpview/helpview.test.tsx`](../../frontend/app/view/helpview/helpview.test.tsx) (new) | test coverage, including the stale-cache regression test |
 
 ## Tests
 
