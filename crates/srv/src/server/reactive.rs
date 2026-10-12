@@ -1680,15 +1680,13 @@ pub(super) struct RegisterRequest {
 
 pub(super) async fn handle_reactive_register(
     State(state): State<AppState>,
-    Json(req): Json<RegisterRequest>,
+    Json(mut req): Json<RegisterRequest>,
 ) -> Response {
-    tracing::info!(
-        agent_id = %req.agent_id,
-        block_id = %req.block_id,
-        "reactive register request"
-    );
+    req.agent_id = crate::backend::reactive::sanitize::route_name(&req.agent_id).unwrap_or_default();
+    tracing::info!(agent_id = %req.agent_id, block_id = %req.block_id, "reactive register request");
     // Identity M2 (spec §4.4.1 row 3): this is a presence signal keyed by
-    // block. The name the frontend sends becomes the display binding, but
+    // block. The name the frontend sends, as its route name (above), becomes
+    // the display binding (and the cross-instance registries' name), but
     // identity is NOT taken from it — it may be a stale meta value or an
     // id the agent process itself emitted over OSC. The UID comes from the
     // row the server created for this block, read on `spawn_blocking` like

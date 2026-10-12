@@ -18,7 +18,7 @@ import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-en
 import { Logger } from "@/util/logger";
 import { accountLabel, type Account } from "./identity-model";
 import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
-import { setBlockMeta } from "@/app/store/block-meta";
+import { mergeBlockEnv } from "@/app/store/block-meta";
 
 /** One agent's row-worth of binding context for the submenu. */
 export interface BindCandidate {
@@ -193,14 +193,7 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
     const envVar = getProvider(provider)?.authConfigDirEnvVar;
     if (!blockId || !dir || !envVar) return;
     try {
-        const envMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.["cmd:env"];
-        const prevEnv: Record<string, string> = {};
-        if (envMeta && typeof envMeta === "object") {
-            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
-                if (typeof v === "string") prevEnv[k] = v;
-            }
-        }
-        await setBlockMeta(blockId, { "cmd:env": { ...prevEnv, [envVar]: dir } });
+        await mergeBlockEnv(blockId, { [envVar]: dir });
         const tabId = findTabIdForBlock(blockId);
         if (tabId) {
             await RpcApi.ControllerResyncCommand(TabRpcClient, {

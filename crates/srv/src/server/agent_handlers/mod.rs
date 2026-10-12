@@ -13,6 +13,7 @@ mod bundle;
 mod bash_prefix;
 pub(crate) mod container_turn;
 pub(crate) mod input;
+mod identity_env;
 mod side_question;
 
 use std::sync::Arc;

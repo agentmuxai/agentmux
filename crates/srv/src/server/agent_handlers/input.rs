@@ -190,9 +190,10 @@ fn git_identity_env_vars(agent_id: &str) -> [(&'static str, String); 4] {
 /// **Why.** `AGENTMUX_AGENT_ID` means two different things depending on who
 /// spawned the agent (spec §0.2): the frontend's `launchAgentDefinition`
 /// writes the definition *slug* into it (`agent-model.ts`), while this
-/// server path's fallback writes the *display name*
-/// (`block.meta["agentName"]`, a few lines above the call site). Nothing
-/// downstream can tell which it got. The frontend path already sets
+/// server path's fallback wrote the *display name*
+/// (`block.meta["agentName"]`) until `carry_agent_id_env` (2026-10-12), which
+/// writes the slug too when the row has one. Nothing downstream could tell
+/// which it got. The frontend path already sets
 /// `AGENTMUX_AGENT_DISPLAY` and `AGENTMUX_AGENT_SLUG` alongside it; this
 /// path set neither, so a reader that wanted the unambiguous form had
 /// nothing to read. After this, both are always present when the server
@@ -605,28 +606,6 @@ pub(crate) async fn build_persistent_spawn_env(
     // per-block subscription doesn't receive them.
     env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.to_string());
 
-    // Agent display name for MuxBus self-identification. AGENTMUX_AGENT_ID
-    // is the canonical, app-wide agent-identity variable (used far beyond
-    // muxbus -- MCP tool routing, native memory, shell OSC titling, jekt
-    // auto-registration, etc; see this repo's CLAUDE.md Naming Conventions
-    // table). MUXBUS_AGENT_ID mirrors the same value so muxbus-client picks
-    // it up under the MUXBUS_* prefix it already checks first -- this does NOT
-    // make MUXBUS_AGENT_ID a second source of truth for agent identity
-    // app-wide, it's scoped to this one muxbus hand-off point (ARCH-002,
-    // 2026-07-28 architecture analyst report). Only set if not already
-    // present in cmd:env — user-provided values take precedence, unlike the
-    // two reserved variables above.
-    if !env_vars.contains_key("AGENTMUX_AGENT_ID") {
-        let agent_display_name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
-        if !agent_display_name.is_empty() {
-            env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
-        }
-    }
-    if !env_vars.contains_key("MUXBUS_AGENT_ID") {
-        if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
-            env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
-        }
-    }
     // Identity M0 + M1. M0: name and slug as two explicit variables, on this
     // path too — the frontend's `launchAgentDefinition` already sets both;
     // this path never did, so a reader could only get at either by guessing
@@ -675,6 +654,7 @@ pub(crate) async fn build_persistent_spawn_env(
             identity.as_ref().and_then(|i| i.slug.as_deref()),
         );
         carry_agent_uid_env(&mut env_vars, identity.as_ref());
+        super::identity_env::carry_agent_id_env(&mut env_vars, &display_name, identity.as_ref().and_then(|i| i.slug.as_deref()));
     }
     carry_agent_workdir_env(&mut env_vars, block_meta);
     crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);

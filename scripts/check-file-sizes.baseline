@@ -36,12 +36,12 @@
 2426 crates/srv/src/persist_subscriber.rs
 3284 crates/srv/src/reducer/layout.rs
 1509 crates/srv/src/registry/migrate.rs
-2276 crates/srv/src/server/agent_handlers/input.rs
+2256 crates/srv/src/server/agent_handlers/input.rs
 1883 crates/srv/src/server/app_api/agent_open.rs
 1572 crates/srv/src/server/editor_handlers.rs
 2118 crates/srv/src/server/muxspect_handlers.rs
 1665 crates/srv/src/server/native_memory_handlers.rs
-2821 crates/srv/src/server/reactive.rs
+2819 crates/srv/src/server/reactive.rs
 1598 crates/srv/src/server/ui_handlers.rs
 2298 crates/srv/src/server/websocket.rs
 2036 frontend/app/store/agent-pane-state/reducer.ts

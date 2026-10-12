@@ -591,8 +591,25 @@ fn test_handler_list_agents() {
 #[test]
 fn test_handler_invalid_agent_id() {
     let mut handler = Handler::new();
-    let result = handler.register_agent("invalid agent!", "block1", None);
-    assert!(result.is_err());
+    assert!(handler.register_agent("  ", "block1", None).is_err(), "no name at all is refused");
+}
+
+/// A display name that isn't a valid id (a fork's automatic "Loap #3")
+/// registers under its route name instead of failing, and a message to that
+/// display name reaches it (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F3).
+#[tokio::test]
+async fn test_handler_fork_display_name_registers_and_is_reachable() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    handler.register_agent("Loap #3", "block1", None).unwrap();
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "Loap #3".to_string(),
+        message: "hello".to_string(),
+        request_id: Some("req-fork".to_string()),
+        ..Default::default()
+    });
+    assert!(resp.success, "{:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block1"));
 }
 
 #[test]

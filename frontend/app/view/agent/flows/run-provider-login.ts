@@ -80,7 +80,7 @@ import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as MOS from "@/app/store/mos";
+import { mergeBlockEnv } from "@/app/store/block-meta";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
 import { loginBackend } from "./login-backend";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
@@ -205,11 +205,7 @@ async function finalizeAccount(
     // account's dir fresh regardless of this pane-local cache.
     if (!p.linkTarget.blockId) return;
     try {
-        const oref = MOS.makeORef("block", p.linkTarget.blockId);
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref,
-            meta: { "cmd:env": { ...p.authEnv, [p.provider.authConfigDirEnvVar]: dir } },
-        });
+        await mergeBlockEnv(p.linkTarget.blockId, { ...p.authEnv, [p.provider.authConfigDirEnvVar]: dir });
     } catch {
         // Best-effort — the account is linked either way; the next full
         // resolve (relaunch, or the resolver's own per-turn injection) will

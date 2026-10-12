@@ -31,6 +31,7 @@ const hub = vi.hoisted(() => ({
     getCapability: vi.fn(),
     muxEventSubscribe: vi.fn(),
     getMuxObjectAtom: vi.fn(),
+    getObjectValue: vi.fn(),
 }));
 
 vi.mock("@/app/errors/translate", () => ({
@@ -56,6 +57,7 @@ vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { InstallProgress: "install
 vi.mock("@/app/store/mos", () => ({
     makeORef: (kind: string, id: string) => `${kind}:${id}`,
     getMuxObjectAtom: (...args: unknown[]) => hub.getMuxObjectAtom(...args),
+    getObjectValue: (...args: unknown[]) => hub.getObjectValue(...args),
 }));
 vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: (...args: unknown[]) => hub.getControllerStatus(...args) },
@@ -315,6 +317,11 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             secret_ref: { backend: "oauth_config_dir", dir: "/per-account/acct-1" },
         });
         hub.checkCliAuth.mockResolvedValue({ authenticated: true, email: "user@example.com" });
+        // What the launch put in cmd:env (agent-model.ts): kept, not replaced
+        // (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F2).
+        hub.getObjectValue.mockReturnValueOnce({
+            meta: { "cmd:env": { AGENTMUX_AGENT_ID: "loap-loap-2-loap-3", CLAUDE_CONFIG_DIR: "/stale" } },
+        });
 
         const result = await runLaunchFlow({
             blockId: "block-1",
@@ -336,7 +343,9 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
         expect(hub.setMeta).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
-                meta: expect.objectContaining({ "cmd:env": { CLAUDE_CONFIG_DIR: "/per-account/acct-1" } }),
+                meta: expect.objectContaining({
+                    "cmd:env": { AGENTMUX_AGENT_ID: "loap-loap-2-loap-3", CLAUDE_CONFIG_DIR: "/per-account/acct-1" },
+                }),
             }),
         );
         expect(hub.checkCliAuth).toHaveBeenCalledWith(

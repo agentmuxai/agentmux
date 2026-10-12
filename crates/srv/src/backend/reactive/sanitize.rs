@@ -129,14 +129,18 @@ pub fn sanitize_message(msg: &str) -> String {
 
 /// Validate an agent ID.
 ///
-/// Must be 1-64 characters, only letters, digits, underscore, and hyphen.
+/// Must be 1-64 characters, only letters, digits, underscore, and hyphen
+/// (`agentmux_common::slug::is_agent_id`). A display name that isn't one is
+/// turned into one by `agentmux_common::slug::agent_route_name`.
 pub fn validate_agent_id(agent_id: &str) -> bool {
-    if agent_id.is_empty() || agent_id.len() > 64 {
-        return false;
-    }
-    agent_id
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    agentmux_common::slug::is_agent_id(agent_id)
+}
+
+/// The route name of a name arriving at the registry (a registration, an
+/// unregistration, a message's target), `None` for a blank one. A fork's
+/// display name "Loap #3" is "Loap-3" (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F3).
+pub fn route_name(name: &str) -> Option<String> {
+    (!name.trim().is_empty()).then(|| agentmux_common::slug::agent_route_name(name))
 }
 
 /// Format a message with optional source agent prefix.
