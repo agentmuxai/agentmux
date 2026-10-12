@@ -21,7 +21,7 @@
 //      `task dev` enables this by default.
 //   3. An agent pane open and visible (the bench finds it via
 //      `document.querySelector('.agent-input')`). Use `pane.open` from
-//      the App API or open one manually before running.
+//      MuxAPI or open one manually before running.
 //   4. The textarea must accept input. The bench does NOT submit — it
 //      types into the textarea and clears it at the end, never firing
 //      an agent invocation (zero token cost).

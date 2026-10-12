@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! App API handlers for the v1 standalone Skill primitive.
+//! MuxAPI handlers for the v1 standalone Skill primitive.
 //! skill.list / skill.get / skill.upsert / skill.delete / skill.bind / skill.unbind
 //!
 //! Plus the Armory-level catalog (skill.catalog.*): global skills only,

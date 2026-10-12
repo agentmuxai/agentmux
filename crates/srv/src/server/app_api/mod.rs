@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! App API — high-level commands for programmatic control of AgentMux.
+//! MuxAPI — high-level commands for programmatic control of AgentMux.
 //!
 //! These commands orchestrate multiple low-level operations (CreateBlock, SetMeta,
 //! ControllerResync) behind stable, intent-based interfaces. Callers express what
@@ -62,7 +62,7 @@ mod identity;
 pub(crate) mod bundle;
 mod memory;
 mod global_memory;
-// The App API bodies live with the submodule that registers them; these
+// MuxAPI bodies live with the submodule that registers them; these
 // re-exports keep every `app_api::…` path unchanged.
 pub use pane::{open_pane};
 pub(crate) use pane::{move_tab};
@@ -90,7 +90,7 @@ pub(crate) mod viewer;
 mod presence;
 pub(crate) mod tower_pane;
 
-/// Register all App API handlers on the RPC engine.
+/// Register all MuxAPI handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     agent_open::register(engine, state);
     agent_io::register(engine, state);
@@ -410,8 +410,8 @@ fn check_s1_resolved(
 /// what `db_agent_identity_links.agent_id` stores (== `AgentDefinition.id`;
 /// see m0013 and `identity/resolver/inject.rs::resolve_bindings_for_instance`).
 ///
-/// Every link-table operation reached from the App API must go through
-/// this: App API callers authenticate with the slug, but writing the slug
+/// Every link-table operation reached from MuxAPI must go through
+/// this: MuxAPI callers authenticate with the slug, but writing the slug
 /// into the link table either trips the per-channel schema's
 /// `FOREIGN KEY (agent_id) REFERENCES db_agents(id)` (v30, #3088 — was
 /// `db_agent_definitions(id)`; a definition id still always satisfies it,

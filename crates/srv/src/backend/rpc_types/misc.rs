@@ -220,7 +220,7 @@ pub struct RpcContext {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub conn: String,
     /// Slug of the authenticated agent from `bus:register`. Empty for non-agent
-    /// connections (plain WebSocket, CEF UI). App API handlers use this for S1
+    /// connections (plain WebSocket, CEF UI). MuxAPI handlers use this for S1
     /// enforcement — reject if empty (unauthenticated), reject if ≠ request agent_id.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub agent_id: String,

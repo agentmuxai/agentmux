@@ -75,7 +75,7 @@ agentmux/
 │   ├── launcher/         # Portable launcher (325 KB)
 │   ├── srv/              # Rust async backend server (Tokio + Axum)
 │   ├── common/           # Shared utilities across the Rust crates
-│   ├── mcp/              # MCP server each agent talks to (the App API)
+│   ├── mcp/              # MCP server each agent talks to (MuxAPI)
 │   └── bashwrap/         # Streaming bash wrapper for agent shell calls
 ├── frontend/             # SolidJS + TypeScript UI (Vite)
 ├── docs/                 # Architecture docs, specs, guides

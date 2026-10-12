@@ -30,7 +30,7 @@
  *     handler (dead Wave-inherited binding surface; see A12). Shrinks as
  *     dead methods are deleted.
  *   • registeredUndeclared — backend handlers with no FE binding:
- *     App API verbs (`agent.*`, `bundle.*`, `identity.*`, `memory.*`),
+ *     MuxAPI verbs (`agent.*`, `bundle.*`, `identity.*`, `memory.*`),
  *     `pane.open`/`pane.moveTab` (called via a direct `rpcCall`, not an
  *     `RpcApi` method), and the RPC engine's `#[cfg(test)]` stubs
  *     (`echo`/`failme`/`slow`/`checkctx` and the typed-registry ones).

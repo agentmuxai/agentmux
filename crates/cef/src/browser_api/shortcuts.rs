@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The shortcut table's App API routes: `list_shortcuts`, `run_command` and
+//! The shortcut table's MuxAPI routes: `list_shortcuts`, `run_command` and
 //! `press_keys` (docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md
 //! §4). srv sends the caller's own, verified block; these resolve the window
 //! whose page holds it and call the frontend's `window.__agentmux_shortcuts`

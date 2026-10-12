@@ -125,7 +125,7 @@ that makes the editor pane feel incomplete as a file-management surface.
 
 ### Open in Terminal flow
 
-1. Backend: `pane.open { view: "term", cwd: folder_path }` via the existing App API.
+1. Backend: `pane.open { view: "term", cwd: folder_path }` via the existing MuxAPI.
 2. The terminal opens in a split-right position by default.
 
 ---

@@ -1,6 +1,6 @@
-# Getting Started with the AgentMux App API
+# Getting Started with MuxAPI
 
-The App API lets agents and local tools control a running AgentMux: open
+MuxAPI, AgentMux's own API (formerly called the App API), lets agents and local tools control a running AgentMux: open
 agent and other panes, send messages, read output, arrange tabs and
 windows, run shells, and more. It has three faces over one server:
 

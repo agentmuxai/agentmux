@@ -4,7 +4,7 @@
 /**
  * McpManager — the Armory's "MCP Servers" tab body. Context-free
  * list/create/edit/delete over the global MCP Server catalog
- * (mcp.catalog.* App API via McpCatalogModel). Every row here is global —
+ * (mcp.catalog.* MuxAPI via McpCatalogModel). Every row here is global —
  * per-agent private servers live in the Agent-setup modal (AgentMcpModal),
  * not here.
  */

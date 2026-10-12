@@ -127,7 +127,7 @@ This section is normative. Each of these is already correct under §3.
 | Surface | Why it stays |
 |---|---|
 | MCP tools `MemoryList/Read/Write/History/Diff/Revert` (`agentmux-mcp/src/tool_schemas.rs:596-664`) | native-memory-only; verified none touch `db_bundles`. Agent-facing — renaming breaks running agents for zero gain. |
-| WS RPC `agent:memory:*` (`commands.rs:561-568`), App API `memory.list/read/write` (`:430-432`) | native memory. Correct. |
+| WS RPC `agent:memory:*` (`commands.rs:561-568`), MuxAPI `memory.list/read/write` (`:430-432`) | native memory. Correct. |
 | Tables `db_agent_native_memory`, `db_agent_native_memory_versions` | correct. |
 | Rust `NativeMemory*` types, `native_memory_handlers.rs`, `agent_native_memory*.rs` | correct. |
 | Frontend `NativeMemoryManager`, `view/native-memory/*`, `AgentNativeMemoryModal`, `native-memory-history-model.ts` | correct. **Note:** an earlier draft wrongly flagged `NativeMemoryManager` as misnamed. It is not. |

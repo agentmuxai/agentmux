@@ -54,7 +54,7 @@ So the requirement has three parts:
 
 | Tier | What it is | Store | Written by |
 |---|---|---|---|
-| **Operator Config** | AgentMux-maintained Global Memory entries (e.g. "App API", "Environment & Gotchas") | `db_bundles`, `is_global=1, is_system=1` | seeded from `agentmux-srv/operator-config-seed.json` at every startup (`operator_config_seed.rs`), unless a human edited the row |
+| **Operator Config** | AgentMux-maintained Global Memory entries (e.g. "MuxAPI", "Environment & Gotchas") | `db_bundles`, `is_global=1, is_system=1` | seeded from `agentmux-srv/operator-config-seed.json` at every startup (`operator_config_seed.rs`), unless a human edited the row |
 | **Global Memory** | Workspace-wide notes, shared by every agent in the workspace | `db_bundles`, `is_global=1, is_system=0` | humans (Armory) and agents (`GlobalMemoryWrite`) |
 | **Personal Memory** | One agent's own provider-native memory files (e.g. Claude's `projects/<dir>/memory/*.md`) | provider files + `db_agent_native_memory` mirror | the agent |
 | **Provider Config** | The provider's own global config (e.g. `~/.claude/CLAUDE.md`) | the host | the user; isolated from spawned agents (#2854) |

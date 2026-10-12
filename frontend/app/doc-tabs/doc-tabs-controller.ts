@@ -359,7 +359,7 @@ export function handleDocTabKey<P>(e: KeyboardEvent, ctl: DocTabsModel<P>, onRef
     return true;
 }
 
-/** Carry out a document-tab action on `ctl`: a key's, or the App API's RunCommand. */
+/** Carry out a document-tab action on `ctl`: a key's, or MuxAPI's RunCommand. */
 export function runDocTabAction<P>(action: DocTabKeyAction, ctl: DocTabsModel<P>, onRefused?: () => void): void {
     const id = ctl.activeId();
     switch (action.kind) {

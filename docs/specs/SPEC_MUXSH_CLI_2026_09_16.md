@@ -1,4 +1,4 @@
-# SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API
+# SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI
 
 **Author:** Vmer
 **Date:** 2026-09-16
@@ -20,7 +20,7 @@ First cut, two subcommands, both thin wrappers over the already-existing, alread
 
 This is deliberately narrow. Per the linked research report §4: don't import Wave Terminal's `wsh` wholesale (its SSH/WSL deployment, OSC hijacking, and bolt-on-AI subcommands don't map to AgentMux, exactly as the 2026-04-12 retirement spec found and nothing has changed there). Close the one specific, real gap instead — nothing on the command line can open a pane today; everything else goes through the GUI or an agent's MCP tool call.
 
-## 2. Why through the Agent App API, and why this exact route
+## 2. Why through MuxAPI, and why this exact route
 
 `agentmux-docs/.../agent-app-api.md` already draws the two-layer distinction this spec relies on: MCP tools are for agent/LLM callers going through `agentmux-mcp`'s stdio session; a terminal CLI is the *other* documented category — "scripts or tooling that run with explicit access to the auth key." `muxopen.mjs`'s own header comment states the precedent directly: *"authenticated exactly the way muxspect and agentmux-mcp already are... No new IPC, no new auth scheme."* `muxsh` reuses that same trust tier, not MCP, not a new WebSocket client.
 

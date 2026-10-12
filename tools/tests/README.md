@@ -30,7 +30,7 @@ $client = Invoke-AgentMuxService -Auth $auth -Service client -Method GetClientDa
 ## `bench-term-echo.mjs`
 
 Node.js benchmark for **terminal input echo latency** — the interval from
-sending a command into a PTY via the App API until its echo appears in
+sending a command into a PTY via MuxAPI until its echo appears in
 the PTY output stream. Uses the sentinel-echo pattern to avoid false
 matches from concurrent output.
 

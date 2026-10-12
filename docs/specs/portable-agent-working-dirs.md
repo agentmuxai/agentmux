@@ -128,7 +128,7 @@ below.
 | [`docs/specs/portable-data-dir.md`](portable-data-dir.md) | Cross-reference this spec from the "What Does NOT Change" table (remove agents from scope or link here). |
 | `README.md` | Agents section's slug claim (`Drives ~/.agentmux/agents/<slug>/`) gains a note: portable instances use `<portable>/data/agents/<slug>/`. |
 
-No backend (Rust) handler changes. No rpc_types changes. No App API surface
+No backend (Rust) handler changes. No rpc_types changes. No MuxAPI surface
 changes.
 
 ---
@@ -140,13 +140,13 @@ changes.
    agent's working state.
 3. Confirm `%USERPROFILE%\.agentmux\agents\<slug>\` is **not** created.
 4. `GH_CONFIG_DIR` env (inspect via `/cmd env` slash command or
-   `agent.status` App API) points at `<portable>/data/config/gh-<slug>`.
+   `agent.status` MuxAPI) points at `<portable>/data/config/gh-<slug>`.
 5. Installed build (MSI or `task dev`) unchanged: `~/.agentmux/agents/<slug>/`
    still used.
 6. Two portable instances side-by-side each get independent `data/agents/`.
 
 A future harness test under [`tools/tests/`](../../tools/tests) could assert (1)-(3)
-programmatically via the App API (`agent.open` → `agent.status` to read the
+programmatically via MuxAPI (`agent.open` → `agent.status` to read the
 resolved `cmd:cwd`).
 
 ---

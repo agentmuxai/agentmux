@@ -61,7 +61,7 @@ human at the Armory UI from an agent's own shell.** The single instance-wide
 `X-AuthKey` (`state.auth_key`) is injected into both the frontend/host
 process **and** every agent's own PTY environment
 (`AGENTMUX_AUTH_KEY`/`AGENTMUX_LOCAL_URL`) so that agents can legitimately
-call the App API themselves. `RpcContext.agent_id` (`rpc_types/misc.rs:210`)
+call MuxAPI themselves. `RpcContext.agent_id` (`rpc_types/misc.rs:210`)
 is populated only for connections that explicitly `bus:register`; the
 existing Global-Memory RPC handlers (`agent_handlers/memory.rs`) and the
 sibling `bundle.upsert`/`bundle.delete` handlers (`app_api/bundle.rs`)

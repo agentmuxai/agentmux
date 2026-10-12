@@ -96,7 +96,7 @@ at the keyboard and no agent tokens needed.
 |---|---|---|
 | **ACK-based PTY flow control** (`SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md`) | Draft, pre-implementation, unchanged since 2026-05-30 | Discussion #1161's 2026-05-30 update rejected predictive/local echo *at that point* (optimizes a round-trip that doesn't exist locally, security hazard over password prompts) in favor of flow control. **Correction (added 2026-09-22): predictive echo was un-shelved the very next day** — see the shipped row below; this flow-control item is the one that's still undelivered, not both. Gated on a profiling step (PLAN §7: "promote to an issue only if P95 keystroke echo > 100ms under sustained output") that was never run — until #3286 existed, nothing could drive the load needed to run it. |
 | Virtualization Phase 4 (hardening) | No PR | Issue #782 still open on this alone. |
-| `term.type` agent App API (issue #950 Phases 2–4) | Only Phase 1 equivalent (#951, seq-reorder-buffer) shipped | Different surface (terminal transport reliability / agent-side typing API), same umbrella. |
+| `term.type` agent MuxAPI (issue #950 Phases 2–4) | Only Phase 1 equivalent (#951, seq-reorder-buffer) shipped | Different surface (terminal transport reliability / agent-side typing API), same umbrella. |
 | Terminal `targetFps` coalescer for non-input writes (PLAN §6) | Not promoted | Profiling-gated on a ≥10°C thermal delta; profiling never run. Lower priority than item 7 above. |
 
 ### 2.3 Cross-pane lag — real fixes shipped, original symptom still open

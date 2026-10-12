@@ -19,7 +19,7 @@ The operator, 2026-10-06:
 
 The word currently covers six different things, and the code, UI and docs use them inconsistently.
 
-| Meaning | What it is | Where it lives | App API |
+| Meaning | What it is | Where it lives | MuxAPI |
 |---|---|---|---|
 | **Global Memory** | Entries composed into every agent's startup instructions file (CLAUDE.md, GEMINI.md, …) at launch | Knowledge → Global (`GlobalBundleManager`, global bundle rows) | `GlobalMemoryList/Read/Write/Remove/History/Diff/Revert` |
 | **Personal Memory** | One agent's own memory files, the provider's native memory folder (`<config>/projects/<name>/memory`, its `MEMORY.md` index), versioned by AgentMux | Knowledge → Personal (`NativeMemoryManager`) **and** the agent Stash's Memory tab. Same `agent:memory:*` data, live in both | `MemoryList/Read/Write/History/Diff/Revert` |
@@ -95,7 +95,7 @@ The form opened from a template card in the agent picker (`AgentCreateFromTempla
 | D | A Drone node's bundle | the Drone graph's `agent_ref.memoryId` | Nothing: the runner ignores it |
 | G | Global Memory (`is_global` bundles) | `db_bundles.is_global` | Composed into the startup file (`format_global_bundle_block`) |
 
-Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers a bundle's MCP servers, only the App API's `agent.open` does; and deleting a bundle leaves its id on agents.
+Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers a bundle's MCP servers, only MuxAPI's `agent.open` does; and deleting a bundle leaves its id on agents.
 
 **The design: one ordered Bundles list per agent.** What the user picks is what the agent gets.
 
@@ -134,11 +134,11 @@ Operator, 2026-10-07: the identity-bundle and memory-bundle concepts are over, s
 - The README's alpha warning, which listed identity and memory bundles among the moving interfaces.
 - The seeded "AgentMux Development" bundle's own text ("Select this Memory bundle"). It is seeded once, so only new installs get the new text.
 - The comments about an `identitybundlebindings:changed` event that nothing publishes.
-- The App API docs' identity-bundle RPC row, whose commands no longer exist.
+- MuxAPI docs' identity-bundle RPC row, whose commands no longer exist.
 
 ### 3.7 What does not change
 
-- The App API tool names (`MemoryWrite`, `GlobalMemoryWrite`, …), the `agent:memory:*` RPCs, and the Personal Memory storage.
+- MuxAPI tool names (`MemoryWrite`, `GlobalMemoryWrite`, …), the `agent:memory:*` RPCs, and the Personal Memory storage.
 - Historical docs: dated specs, retros, reports, analyses and `VERSION_HISTORY.md` stay as written (§4.1).
 - Unrelated uses of the word "knowledge" (about 70 lines in code, more in docs): "acknowledge", "knowledge cutoff", "to my knowledge", third-party "knowledge graph".
 

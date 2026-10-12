@@ -158,7 +158,7 @@ What counts as committing, as built: a click on an element that submits its form
 2. **Ownership is server-side.** `browser:owner_agent` is written only by srv from a verified identity and checked on every call, the same model as #2662.
 3. **The secret-field guard is a guard, not a boundary.** `BrowserEval` can still type anywhere a page lets it. The boundaries are: the agent's pane starts logged out (§6), the human approves committing actions in the pane, and hand-off refuses the agent's tools while the human is typing.
 4. **Uploads can exfiltrate.** That's why paths are limited to the agent's workspace or what the human approved, and every upload is shown in the pane.
-5. **Same OS user:** a process running as the user can still drive CEF directly; this is the same residual the rest of the App API accepts.
+5. **Same OS user:** a process running as the user can still drive CEF directly; this is the same residual the rest of MuxAPI accepts.
 
 ## 9. Acceptance test: the Microsoft false-positive report
 

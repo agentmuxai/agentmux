@@ -1,6 +1,6 @@
-# App API Extension Spec
+# MuxAPI Extension Spec
 
-**Status:** implemented — App API Tier 1 in PR #332, grown since into [`crates/srv/src/server/app_api/`](../../crates/srv/src/server/app_api), the `/api/v1` routes and the MCP tools in [`crates/mcp`](../../crates/mcp). Kept for its history.
+**Status:** implemented — MuxAPI Tier 1 in PR #332, grown since into [`crates/srv/src/server/app_api/`](../../crates/srv/src/server/app_api), the `/api/v1` routes and the MCP tools in [`crates/mcp`](../../crates/mcp). Kept for its history.
 **Date:** 2026-04-10
 **Motivation:** CEF webview content is inaccessible to external automation tools
 (Windows MCP, AppleScript, etc.). The only reliable way to programmatically
@@ -580,7 +580,7 @@ Auth: Bearer token from `AGENTMUX_AUTH_KEY` env var (same as WSH auth).
 
 ### Phase 4 — MCP Server Integration
 
-Expose App API commands as MCP tools in the `agentmux` MCP server so agents
+Expose MuxAPI commands as MCP tools in the `agentmux` MCP server so agents
 can programmatically manage their own workspace:
 
 ```json
@@ -668,7 +668,7 @@ Format: `[app-api] agent.open agentId=agentx blockId=abc123 created=true 12ms`
 4. **Phase 4:** Ship MCP integration — unblocks agent self-management
 
 Existing low-level commands (`CreateBlock`, `SetMeta`, etc.) remain available.
-The App API is a convenience layer, not a replacement.
+MuxAPI is a convenience layer, not a replacement.
 
 ---
 

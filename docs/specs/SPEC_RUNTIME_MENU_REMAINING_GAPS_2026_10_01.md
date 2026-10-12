@@ -97,7 +97,7 @@ Mechanics:
 ### 2.5 The hard problem: prompts nobody can answer
 
 A parked request blocks the turn until someone answers. Several callers have no human watching:
-`agent.send` over the App API, jekt delivery, cron, the work queue, a pane closed mid-turn, a window that isn't
+`agent.send` over MuxAPI, jekt delivery, cron, the work queue, a pane closed mid-turn, a window that isn't
 focused. Today none of them can hang on a prompt. After this change they could.
 
 Required behaviour, in this order of preference:

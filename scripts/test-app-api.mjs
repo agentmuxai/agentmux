@@ -1,4 +1,4 @@
-// Ad-hoc App API smoke test — exercises identity.*, bundle.*, memory.* as AgentX.
+// Ad-hoc MuxAPI smoke test — exercises identity.*, bundle.*, memory.* as AgentX.
 // Run: node scripts/test-app-api.mjs
 import WebSocket from "ws";
 

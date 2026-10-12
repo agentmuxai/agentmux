@@ -352,7 +352,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // never a lock.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
-        // Agent App API — identity / preset / memory namespaces, the MCP-facing
+        // MuxAPI — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
         // AGENTMUX_AGENT_ID env. Host agents do hold the instance key, so the

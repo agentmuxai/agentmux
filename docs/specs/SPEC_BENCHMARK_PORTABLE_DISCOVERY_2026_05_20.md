@@ -10,7 +10,7 @@
 ## Motivation
 
 `bench-term-echo.mjs` measures terminal echo latency end-to-end through the WS
-App API. Its primary use case is long-running session diagnostics: run the
+MuxAPI. Its primary use case is long-running session diagnostics: run the
 benchmark before and after a suspected regression (e.g. memory pressure
 accumulating over hours) to catch latency degradation.
 

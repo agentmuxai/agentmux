@@ -386,7 +386,7 @@ pub const COMMAND_DELETE_DRONE: &str = "deletedrone";
 pub const COMMAND_RUN_DRONE: &str = "rundrone";
 pub const COMMAND_LIST_DRONE_RUNS: &str = "listdroneruns";
 
-// App API Tier 1 — agent lifecycle commands
+// MuxAPI Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";
 pub const COMMAND_AGENT_SEND: &str = "agent.send";
 pub const COMMAND_AGENT_STOP_API: &str = "agent.stop";
@@ -492,25 +492,25 @@ pub const COMMAND_TOWER_PEERS: &str = "tower.peers";
 pub const COMMAND_TOWER_PAIR: &str = "tower.pair";
 pub const COMMAND_TOWER_FORGET: &str = "tower.forget";
 
-// App API Tier 2 — pane lifecycle commands
+// MuxAPI Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
 /// Reorder a Pane Tab within its own pane, or move it into a different
 /// pane — `Command::LayoutStackMove`.
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
 pub const COMMAND_PANE_MOVE_TAB: &str = "pane.moveTab";
 
-// App API Tier 1 — blockfile pagination commands
+// MuxAPI Tier 1 — blockfile pagination commands
 pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";
 pub const COMMAND_BLOCKFILE_READ_RANGE: &str = "blockfile:read_range";
 pub const COMMAND_BLOCKFILE_READ_STATE: &str = "blockfile:read_state";
 pub const COMMAND_BLOCKFILE_WRITE_STATE: &str = "blockfile:write_state";
 
-// App API — identity/preset/memory namespaces
+// MuxAPI — identity/preset/memory namespaces
 pub const COMMAND_IDENTITY_SELF_ACCOUNTS: &str = "identity.self.accounts";
 pub const COMMAND_IDENTITY_ACCOUNT_UPSERT: &str = "identity.account.upsert";
 pub const COMMAND_IDENTITY_ACCOUNT_VALIDATE: &str = "identity.account.validate";
 pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
-// Bundle App API commands (Preset → Bundle, spec Phase 2). The `preset.*`
+// Bundle MuxAPI commands (Preset → Bundle, spec Phase 2). The `preset.*`
 // constants below are retained as wire aliases for one release.
 pub const COMMAND_BUNDLE_LIST: &str = "bundle.list";
 pub const COMMAND_BUNDLE_GET: &str = "bundle.get";
@@ -594,7 +594,7 @@ pub const COMMAND_BROWSER_START_PAGE_SET: &str = "browser_start_page.set";
 // docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §3.
 pub const COMMAND_VOICE_CHECK_PATH: &str = "voice.checkPath";
 
-// App API — v1 standalone Skill primitives
+// MuxAPI — v1 standalone Skill primitives
 pub const COMMAND_SKILL_LIST: &str = "skill.list";
 pub const COMMAND_SKILL_GET: &str = "skill.get";
 pub const COMMAND_SKILL_UPSERT: &str = "skill.upsert";
@@ -602,7 +602,7 @@ pub const COMMAND_SKILL_DELETE: &str = "skill.delete";
 pub const COMMAND_SKILL_BIND: &str = "skill.bind";
 pub const COMMAND_SKILL_UNBIND: &str = "skill.unbind";
 
-// App API — Armory-level Skill catalog (global skills only, window-scoped —
+// MuxAPI — Armory-level Skill catalog (global skills only, window-scoped —
 // no agent_id, no check_s1 — mirrors bundle.* auth shape).
 pub const COMMAND_SKILL_CATALOG_LIST: &str = "skill.catalog.list";
 pub const COMMAND_SKILL_CATALOG_UPSERT: &str = "skill.catalog.upsert";
@@ -641,7 +641,7 @@ pub const COMMAND_SKILL_CATALOG_LIST_FOR_BUNDLE: &str = "skill.catalog.list_for_
 // bundle-specific skill. See Store::bundle_skill_upsert_unique.
 pub const COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE: &str = "skill.catalog.upsert_for_bundle";
 
-// App API — v1 standalone MCP Server primitives
+// MuxAPI — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
 pub const COMMAND_MCP_GET: &str = "mcp.get";
 pub const COMMAND_MCP_UPSERT: &str = "mcp.upsert";
@@ -653,7 +653,7 @@ pub const COMMAND_MCP_UNBIND: &str = "mcp.unbind";
 // actually speaks the protocol, distinct from "does the JSON parse."
 pub const COMMAND_MCP_PROBE: &str = "mcp.probe";
 
-// App API — Armory-level MCP Server catalog (global servers only,
+// MuxAPI — Armory-level MCP Server catalog (global servers only,
 // window-scoped — no agent_id, no check_s1 — mirrors bundle.* auth shape).
 pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
 pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
@@ -684,7 +684,7 @@ pub const COMMAND_MCP_CATALOG_UNBIND: &str = "mcp.catalog.unbind";
 // answered before anything is spawned. See crate::backend::resume_preflight.
 pub const COMMAND_SESSION_RESUME_PREFLIGHT: &str = "session:resume_preflight";
 
-// App API Tier 1 — session archival commands
+// MuxAPI Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
 pub const COMMAND_SESSION_EXPORT: &str = "session:export";
