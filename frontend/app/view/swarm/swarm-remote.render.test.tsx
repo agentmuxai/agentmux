@@ -134,7 +134,8 @@ describe("OtherInstanceSections", () => {
         const chips = sections(container).map((s) =>
             [...s.querySelectorAll(".swarm-remote-agent")].map((row) => {
                 const chip = row.querySelector(".swarm-remote-agent-status");
-                return chip ? [chip.querySelector(".swarm-status-chip")!.textContent, chip.getAttribute("title")] : null;
+                // The label only: an active chip also holds the ASCII spinner, whose frame is text too.
+                return chip ? [chip.querySelector(".swarm-status-label")!.textContent, chip.getAttribute("title")] : null;
             })
         );
         expect(chips).toEqual([
