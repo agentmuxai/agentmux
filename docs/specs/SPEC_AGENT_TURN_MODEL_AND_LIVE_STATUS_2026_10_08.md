@@ -533,7 +533,7 @@ Reported 2026-10-09 on 0.59.17: the line "changes too often" and "resets right a
 
 **An end-to-end replay test** (`working-row.stream-replay.test.tsx`) now covers the gap both bugs fell through. Claude Code stream-json lines go in through the transcript subject, and the real `useAgentStream`, translator, pane model, reducer, presenter and `AgentWorkingRow` carry them to the screen; only the transcript feed and the backend are fakes. A turn with usage-report `rate_limit_event`s checks that no "Rate limited" appears, that no line already on screen is typed out again, and that the test run is named. With either bug put back, it fails: every 1 s "re-typed" for the row bug, a false "Rate limited" for the translator bug.
 
-**The dot became an ASCII spinner** (`components/AsciiSpinner.tsx`), at the operator's request: one character cycling `| / - \` every 120 ms in the pane's color, on its own signal so a frame never re-renders the text. Reduced motion shows a still `*`. The pending-messages header keeps its dot.
+**The dot became an ASCII spinner** (`element/AsciiSpinner.tsx`), at the operator's request: one character cycling `| / - \` every 120 ms in the pane's color, on its own signal so a frame never re-renders the text. Reduced motion shows a still `*`. The pending-messages header keeps its dot. The component lives in `element/AsciiSpinner.tsx` and every spinner shares one timer, so they all show the same frame; the Swarm's status chip uses it too, for its two animated states (working, question), in place of the pulsing red dot, while idle keeps a still dot.
 
 The presenter also had three causes of its own, none in the values of `TIMING`:
 

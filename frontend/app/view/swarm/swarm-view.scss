@@ -806,8 +806,10 @@
 
 // ── Status chip ──────────────────────────────────────────────────────────
 
-// Two states only (user, 2026-09-27): working = red and pulsing (mid-turn:
+// Two states only (user, 2026-09-27): working = red and animated (mid-turn:
 // generating, running tools, or stopping); idle = green (everything else).
+// The animated states show the composer's ASCII spinner (user, 2026-10-11),
+// not a pulsing dot; idle keeps a still dot.
 // swarm-view.tsx's chipStatus() does the collapsing.
 .swarm-status-chip {
     display: flex;
@@ -837,14 +839,19 @@
     border-radius: 50%;
     flex-shrink: 0;
     background: currentColor;
-
-    &--working,
-    &--question { animation: swarm-pulse 1.5s ease-in-out infinite; }
 }
 
-@keyframes swarm-pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.3; }
+// The chip's colour, in one fixed monospace cell so a frame never shifts the
+// label (the dot's slot is 6px; this is one character).
+.swarm-status-spinner {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 1ch;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    line-height: 1;
+    color: currentColor;
 }
 
 // ── Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) ───────────
