@@ -21,9 +21,9 @@ On Windows, tearing a pane off produces a **chromeless floating window**: just t
 
 The macOS pane tear-off never routes to the floating-pane rendering path. Tracing the chain:
 
-1. **`frontend/app/drag/CrossWindowDragMonitor.darwin.tsx:147-163`** — `performTearOff()` calls `openTearOffWindow()` for **both** panes and tabs. It never calls `open_floating_pane_window`. (Windows branches: panes → `open_floating_pane_window`, tabs → `openTearOffWindow` — see `CrossWindowDragMonitor.win32.tsx:275-355`.)
+1. **[`frontend/app/drag/CrossWindowDragMonitor.darwin.tsx:147-163`](../../frontend/app/drag/CrossWindowDragMonitor.darwin.tsx#L147-L163)** — `performTearOff()` calls `openTearOffWindow()` for **both** panes and tabs. It never calls `open_floating_pane_window`. (Windows branches: panes → `open_floating_pane_window`, tabs → `openTearOffWindow` — see `CrossWindowDragMonitor.win32.tsx:275-355`.)
 
-2. **`frontend/app/drag/tear-off-pool-helper.ts:43-64`** — `openTearOffWindow()` tries the warm pool (Windows-only; the pool init is `#[cfg(not(target_os = "windows"))] return` in `window_pool.rs:454-459`, so on macOS it's a no-op), then falls through to the cold path `api.openWindowAtPosition()`.
+2. **[`frontend/app/drag/tear-off-pool-helper.ts:43-64`](../../frontend/app/drag/tear-off-pool-helper.ts#L43-L64)** — `openTearOffWindow()` tries the warm pool (Windows-only; the pool init is `#[cfg(not(target_os = "windows"))] return` in `window_pool.rs:454-459`, so on macOS it's a no-op), then falls through to the cold path `api.openWindowAtPosition()`.
 
 3. **`agentmux-cef/src/commands/drag.rs:374-451`** — `open_window_at_position()` mints a `window-<uuid>` label and builds the URL with `ipc_port`, `ipc_token`, `windowLabel`, and (optionally) `workspaceId` — **never `floatingPaneId`**.
 
@@ -43,7 +43,7 @@ But macOS doesn't need that to satisfy the user's actual request, because of two
 
 1. **macOS secondary (tear-off) windows are ALREADY frameless.** They're created via CEF Views `window_create_top_level` with `frameless = true` (`commands/window/creation.rs:333` — *"true = frameless: secondary app windows use the same custom title bar as main"*; `app.rs:309-310`, `app.rs:140 fn is_frameless`). There is **no native macOS title bar** on a tear-off window. The chrome the user sees — the tab bar and widget bar — is **pure frontend**: `<Workspace>` renders `<WindowHeader>` (tab bar) + `<SystemStatus>` (action widgets).
 
-2. **The chromeless renderer is 100% platform-agnostic.** `frontend/app/workspace/floating-pane-workspace.tsx` has **zero** `#[cfg]`/platform branching. It renders `<TabContent>` only — no `WindowHeader`, no `SystemStatus` — purely off the `?floatingPaneId=` URL param. The pane/tab branch in the drag monitor, and the backend sagas (`TearOffBlock`, `RedockFloatingPane` in `agentmux-srv`), are also platform-agnostic.
+2. **The chromeless renderer is 100% platform-agnostic.** [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) has **zero** `#[cfg]`/platform branching. It renders `<TabContent>` only — no `WindowHeader`, no `SystemStatus` — purely off the `?floatingPaneId=` URL param. The pane/tab branch in the drag monitor, and the backend sagas (`TearOffBlock`, `RedockFloatingPane` in `agentmux-srv`), are also platform-agnostic.
 
 **Therefore: to give the user "just the pane" on macOS, all that's structurally required is for the torn-off window's URL to carry `?floatingPaneId=`.** The window is already frameless; the frontend already knows how to render chromeless. No AppKit. No NSPanel. No new native window primitive.
 

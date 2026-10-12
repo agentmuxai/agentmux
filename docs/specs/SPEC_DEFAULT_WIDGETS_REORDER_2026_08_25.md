@@ -49,7 +49,7 @@ code with each other:
 
 ### 1.2 New tab (existing window, "+" button) — frontend TS
 
-`frontend/app/tab/tab-presets.ts:47-59` — `DEFAULT_TAB_PRESET`, a fully
+[`frontend/app/tab/tab-presets.ts:47-59`](../../frontend/app/tab/tab-presets.ts#L47-L59) — `DEFAULT_TAB_PRESET`, a fully
 declarative `PresetNode` tree (arbitrary N children, no hardcoded pane
 count). Own doc comment: *"To change the defaults, edit **only** this
 constant — the applier and every consumer of `createTab()` pick it up
@@ -60,7 +60,7 @@ stacked) — same 3 widgets, different mechanism, no code sharing with §1.1.
 
 `agentmux-srv/src/config/widgets.json` — every widget entry carries
 `display:pinned` (bool) and `display:order` (int). Consumed by
-`frontend/app/window/action-widgets-config.ts`'s `getPinnedKeys()`
+[`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts)'s `getPinnedKeys()`
 (92-116), whose own doc comment states: *"Not set → derive from
 `display:pinned` in widget config... this is about **fresh-install
 defaults**"* — i.e. the widget-bar's pinned icon row before a user (via

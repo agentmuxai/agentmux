@@ -57,7 +57,7 @@ dissolve is possible (no adjacent column to accept them).
 
 ## Data model change
 
-Add to `LayoutNode` in `frontend/layout/lib/types.ts`:
+Add to `LayoutNode` in [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts):
 
 ```typescript
 /**
@@ -291,10 +291,10 @@ dissolve sets `_slipAnchor` on the parent Row, same as the existing slip path.
 
 | File | Change |
 |---|---|
-| `frontend/layout/lib/types.ts` | Add `columnDissolve` field to `LayoutNode` |
-| `frontend/layout/lib/layoutMinimize.ts` | Add `_dissolveColumn`, `_undissolveColumn`; trigger dissolve check after normal column collapse; check for dissolved parent at top of `minimizeNodeToggle`; extend `rebuildMinimizedSet` to restore `_slipAnchor` on dissolved column's owner |
-| `frontend/layout/lib/layoutNode.ts` | No change — `findNode`, `findParent`, `addIntermediateNode` reused as-is |
-| `frontend/app/block/blockframe.tsx` | No change — minimize button and caret behavior unchanged |
+| [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts) | Add `columnDissolve` field to `LayoutNode` |
+| [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts) | Add `_dissolveColumn`, `_undissolveColumn`; trigger dissolve check after normal column collapse; check for dissolved parent at top of `minimizeNodeToggle`; extend `rebuildMinimizedSet` to restore `_slipAnchor` on dissolved column's owner |
+| [`frontend/layout/lib/layoutNode.ts`](../../frontend/layout/lib/layoutNode.ts) | No change — `findNode`, `findParent`, `addIntermediateNode` reused as-is |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | No change — minimize button and caret behavior unchanged |
 
 ---
 

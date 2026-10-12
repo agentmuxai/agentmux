@@ -4,9 +4,9 @@
 **Status:** Draft — granularity decision pending review.
 **Author:** AgentA
 **Reads-this-first:**
-- `docs/retro/next-steps-architecture-completeness-2026-05-01.md` — step 3.
-- `docs/retro/reducer-architecture-gaps-2026-05-01.md` — §1 E.4 entry, §4 `handle_move_tab` migration tolerance.
-- `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` — original Phase E spec.
+- [`docs/retro/next-steps-architecture-completeness-2026-05-01.md`](../retro/next-steps-architecture-completeness-2026-05-01.md) — step 3.
+- [`docs/retro/reducer-architecture-gaps-2026-05-01.md`](../retro/reducer-architecture-gaps-2026-05-01.md) — §1 E.4 entry, §4 `handle_move_tab` migration tolerance.
+- [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) — original Phase E spec.
 
 ---
 

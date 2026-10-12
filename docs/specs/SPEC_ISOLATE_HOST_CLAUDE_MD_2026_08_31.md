@@ -37,7 +37,7 @@ in-app agents — see the block above for what they use."* That claim is
 > a controlled three-arm experiment — control (leaks the host file),
 > treatment (does not), sensitivity (instrument confirmed able to see this
 > surface). See
-> `docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md`,
+> [`docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md`](../reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md),
 > which also measures the *other* `~/.claude` surfaces: `settings.json` and
 > `skills/` turn out to be **properly isolated** already, making `CLAUDE.md`
 > the only confirmed leak. That report additionally records a methodological

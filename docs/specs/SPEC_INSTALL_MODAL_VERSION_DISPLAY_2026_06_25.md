@@ -16,7 +16,7 @@ before clicking "Install now".
 
 ## Current state
 
-`AgentInstallModalPanel` (`frontend/app/view/agent/components/AgentInstallModal.tsx`)
+`AgentInstallModalPanel` ([`frontend/app/view/agent/components/AgentInstallModal.tsx`](../../frontend/app/view/agent/components/AgentInstallModal.tsx))
 currently shows:
 
 ```
@@ -163,7 +163,7 @@ approach used for user-input bubbles, guaranteed to read correctly on any theme.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/components/AgentInstallModal.tsx` | +1 `const version` accessor; +3 JSX lines (`<Show>` + `<span>`) |
+| [`frontend/app/view/agent/components/AgentInstallModal.tsx`](../../frontend/app/view/agent/components/AgentInstallModal.tsx) | +1 `const version` accessor; +3 JSX lines (`<Show>` + `<span>`) |
 | `frontend/app/view/agent/styles/_install-modal.scss` (or colocated) | +10 lines new `.install-modal-version` rule |
 
 No backend changes needed — version is already available on the frontend at

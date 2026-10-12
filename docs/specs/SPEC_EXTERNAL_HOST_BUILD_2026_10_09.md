@@ -7,11 +7,11 @@
 
 ## 1. Problem
 
-The host seam made the UI host-independent, but its entry wasn't: `frontend/bootstrap.ts` imported the desktop (CEF) host's startup directly. It installed the CEF log pipe and error forwarder, sent CEF's first-paint signal, and called `setupCefApi()`. A different host (a test harness, a browser host for a headless srv, an embedding) could only be built by editing `bootstrap.ts`.
+The host seam made the UI host-independent, but its entry wasn't: [`frontend/bootstrap.ts`](../../frontend/bootstrap.ts) imported the desktop (CEF) host's startup directly. It installed the CEF log pipe and error forwarder, sent CEF's first-paint signal, and called `setupCefApi()`. A different host (a test harness, a browser host for a headless srv, an embedding) could only be built by editing `bootstrap.ts`.
 
 ## 2. Design
 
-**A host module** (`frontend/app/host/host-module.ts`) is the host's startup, as three hooks:
+**A host module** ([`frontend/app/host/host-module.ts`](../../frontend/app/host/host-module.ts)) is the host's startup, as three hooks:
 
 | Hook | When | Desktop host |
 |---|---|---|
@@ -21,7 +21,7 @@ The host seam made the UI host-independent, but its entry wasn't: `frontend/boot
 
 `bootstrap.ts` imports the build's module as `@host-module` and calls the hooks. It no longer imports anything of the desktop host's.
 
-**The desktop host is the default:** `tsconfig.json` maps `@host-module` to `frontend/cef-host-module.ts`. A build that sets nothing gets exactly the bundle it got before.
+**The desktop host is the default:** `tsconfig.json` maps `@host-module` to [`frontend/cef-host-module.ts`](../../frontend/cef-host-module.ts). A build that sets nothing gets exactly the bundle it got before.
 
 **Another host is chosen at build time:**
 

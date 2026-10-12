@@ -68,20 +68,20 @@ the original §3.1 text.
 >
 > The live symptom itself (5+ panes permanently blank,
 > backend data intact) is not in question — only this proposed mechanism for
-> it. See `docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §8 for
+> it. See [`docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`](SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) §8 for
 > the last time this codebase prematurely closed a theory about this exact
 > symptom class without a disproving test — this erratum exists so this spec
 > doesn't repeat that in the other direction (closing on an *unproven*
 > theory instead of a disproven one).
 **Related:**
-`docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
+[`docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`](../investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
 (same symptom class — dead layout space — different mechanism; its systemic write-path
 findings are re-verified as STILL OPEN in §7),
-`docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §8 (the 2026-07-04 incident
+[`docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`](SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) §8 (the 2026-07-04 incident
 that was prematurely closed — see §6),
-`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md` (the reveal-gate/latch
+[`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) (the reveal-gate/latch
 machinery this spec touches),
-`docs/specs/SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md` §4.5 (the
+[`docs/specs/SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md`](SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md) §4.5 (the
 duplicate-name `"X #N"` format implicated in §8's secondary finding).
 
 ---
@@ -141,12 +141,12 @@ Two distinct defects compose. §3.1 is why the pane renders nothing *and stays t
 
 **Space and content are decided in two different files, and only one of them can fail.**
 
-- `frontend/layout/lib/TileLayout.core.tsx:581-593` — the `.tile-node` carries the
+- [`frontend/layout/lib/TileLayout.core.tsx:581-593`](../../frontend/layout/lib/TileLayout.core.tsx#L581-L593) — the `.tile-node` carries the
   geometry transform **unconditionally**. `:521-525` wraps whatever `renderContent`
   returns in a `.tile-leaf`. The tile holds its rectangle whether or not anything renders
   into it. *This is the code that "determines the empty pane space".*
-- `frontend/app/tab/tabcontent.tsx:79-81` — `renderContent` → `<PaneLeafChrome/>`.
-- `frontend/app/tab/pane-leaf-chrome.tsx:419-430` — the branch that yields nothing:
+- [`frontend/app/tab/tabcontent.tsx:79-81`](../../frontend/app/tab/tabcontent.tsx#L79-L81) — `renderContent` → `<PaneLeafChrome/>`.
+- [`frontend/app/tab/pane-leaf-chrome.tsx:419-430`](../../frontend/app/tab/pane-leaf-chrome.tsx#L419-L430) — the branch that yields nothing:
 
 ```tsx
 <Show when={hoisted()} fallback={content}>
@@ -190,7 +190,7 @@ nothing" exactly.
 
 ### 3.2 Wrong-tab controller registration (the trigger)
 
-`frontend/app/store/window-identity.ts:19` — `staticTabId` is *"set once at init, never
+[`frontend/app/store/window-identity.ts:19`](../../frontend/app/store/window-identity.ts#L19) — `staticTabId` is *"set once at init, never
 change"*. Line 51-53 carries an explicit warning that it is the wrong value for backend
 calls:
 
@@ -371,7 +371,7 @@ The existing guard provably does not (§6). A new test must:
 **9.1 — Decisive diagnostic, not yet run.** Inspect a blank region in DevTools:
 
 - `.tile-node` with `visibility:hidden; opacity:0` ⇒ stuck reveal gate
-  (`TileLayout.core.tsx:573-579`, gate state in `frontend/app/store/tab-reveal.ts:252`,
+  (`TileLayout.core.tsx:573-579`, gate state in [`frontend/app/store/tab-reveal.ts:252`](../../frontend/app/store/tab-reveal.ts#L252),
   released only via rAF-driven `scheduleOnSettle`). Module-global and **not tab-scoped**.
 - Normal `.tile-node` containing an **empty `.tile-leaf`** ⇒ the §3.1 hoist deadlock.
 

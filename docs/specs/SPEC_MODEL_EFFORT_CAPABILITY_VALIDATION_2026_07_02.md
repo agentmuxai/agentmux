@@ -277,13 +277,13 @@ final guard, §4.3).
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/types.ts` | Add `EFFORT_ORDER`; keep `EffortLevel`. |
-| `frontend/app/view/agent/providers/index.ts` | Add `effort?` to `ProviderModel`; populate curated Claude entries. |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `EFFORT_ORDER`; keep `EffortLevel`. |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Add `effort?` to `ProviderModel`; populate curated Claude entries. |
 | `frontend/app/view/agent/agent-effort.ts` | **New** — `resolveEffortCapability`, `clampEffort`, defaults. |
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | Derive `effortOptions`; hide drop-up when empty; clamp on model switch. |
-| `frontend/app/view/agent/commands/global/runtime.ts` | `effortChoices` filters; `/effort` on unsupported model messages. |
-| `frontend/app/view/agent/buildRuntimeArgs.ts` | Replace `!== "haiku"` with `clampEffort`. |
-| `docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md` | Cross-link this spec as the implementation of §11.3. |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | Derive `effortOptions`; hide drop-up when empty; clamp on model switch. |
+| [`frontend/app/view/agent/commands/global/runtime.ts`](../../frontend/app/view/agent/commands/global/runtime.ts) | `effortChoices` filters; `/effort` on unsupported model messages. |
+| [`frontend/app/view/agent/buildRuntimeArgs.ts`](../../frontend/app/view/agent/buildRuntimeArgs.ts) | Replace `!== "haiku"` with `clampEffort`. |
+| [`docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md`](../providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md) | Cross-link this spec as the implementation of §11.3. |
 
 No backend/Rust changes. No `providers.models` RPC change. No `MenuItem`/FlyoutMenu change
 (unless §7 is taken).

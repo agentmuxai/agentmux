@@ -209,8 +209,8 @@ This can be a follow-on PR; the macOS/Linux CEF Views path is lower-risk.
 | `agentmux-cef/src/ui_tasks.rs` | Add `PromotePanePoolWindowTask` + `post_promote_pane_pool_window` (non-Windows) |
 | `agentmux-cef/src/client/mod.rs` | Add `init_pane_pool()` call after main window `on_load_end` |
 | `agentmux-cef/src/ipc.rs` | Route `pane_pool_window_ready` command |
-| `frontend/app-init.ts` | Handle `?pane-pool=1` flag + `pool:pane-promote` event |
-| `frontend/util/cef-api.ts` | Add `paneTearOffPoolReady()` API call |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts) | Handle `?pane-pool=1` flag + `pool:pane-promote` event |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | Add `paneTearOffPoolReady()` API call |
 
 ### 3.7 Expected latency improvement
 
@@ -366,7 +366,7 @@ Add an explicit API wrapper for completeness (mirrors `tearOffPoolPromote`). Not
 | `agentmux-cef/src/commands/window_pool.rs` | Add `promote_pool_window_for_new_window()` |
 | `agentmux-cef/src/ui_tasks.rs` | Add `PromoteNewWindowPoolWindowTask` + `post_promote_pool_window_for_new_window` (non-Windows) |
 | `agentmux-cef/src/commands/drag.rs` | Fix stale "pool not implemented" comment + error string |
-| `frontend/app-init.ts` | Handle `pool:new-window` event |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts) | Handle `pool:new-window` event |
 
 ### 4.6 Expected latency improvement
 
@@ -413,7 +413,7 @@ New-window pooling costs nothing (shares slots). Pane pooling adds ~75 MB RSS. B
 - `agentmux-cef/src/commands/window/creation.rs` — new-window creation (cold path reference)
 - `agentmux-cef/src/ui_tasks.rs` — `PromotePoolWindowTask` (Phase 7, CEF Views pattern)
 - `agentmux-cef/src/commands/drag.rs` — `tear_off_pool_promote` (tab pool promote entry point)
-- `frontend/app/drag/tear-off-pool-helper.ts` — frontend pool-first / cold fallback pattern
-- `frontend/app-init.ts` — `?pool=1` init branch (pattern for `?pane-pool=1`)
-- `docs/specs/SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md` — Phase 7 (tab pool macOS/Linux) — SHIPPED #1595
-- `docs/specs/linux-pool-startup-fill-2026-05-08.md` — startup fill analysis — RESOLVED by Phase 7
+- [`frontend/app/drag/tear-off-pool-helper.ts`](../../frontend/app/drag/tear-off-pool-helper.ts) — frontend pool-first / cold fallback pattern
+- [`frontend/app-init.ts`](../../frontend/app-init.ts) — `?pool=1` init branch (pattern for `?pane-pool=1`)
+- [`docs/specs/SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md`](SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md) — Phase 7 (tab pool macOS/Linux) — SHIPPED #1595
+- [`docs/specs/linux-pool-startup-fill-2026-05-08.md`](linux-pool-startup-fill-2026-05-08.md) — startup fill analysis — RESOLVED by Phase 7

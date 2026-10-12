@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-07
 **Status:** implemented — PR #2459 (db_agent_native_memory durable mirror); verified in code 2026-08-10.
-**Depends on:** `docs/reports/REPORT_ARMORY_STASH_MEMORY_SYNC_STATUS_2026_08_07.md`
+**Depends on:** [`docs/reports/REPORT_ARMORY_STASH_MEMORY_SYNC_STATUS_2026_08_07.md`](../reports/REPORT_ARMORY_STASH_MEMORY_SYNC_STATUS_2026_08_07.md)
 (history + current-state analysis; read that first for full context — this
 doc only restates what's load-bearing for the design below).
 

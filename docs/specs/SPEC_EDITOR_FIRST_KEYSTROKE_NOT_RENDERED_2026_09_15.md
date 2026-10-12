@@ -8,7 +8,7 @@ is **silent data loss**, not a rendering annoyance: the first character typed
 into any file is discarded outright, not merely unpainted. Typing one character
 and saving would have saved the file without it.
 **Reported by:** repo owner, on CEF 152 (v0.56.0).
-**Related:** `docs/retro/retro-terminal-consecutive-period-input-loss-2026-09-15.md`
+**Related:** [`docs/retro/retro-terminal-consecutive-period-input-loss-2026-09-15.md`](../retro/retro-terminal-consecutive-period-input-loss-2026-09-15.md)
 (unrelated cause — that one is font shaping; filed separately so the two are not
 conflated).
 
@@ -44,11 +44,11 @@ pointed at rendering rather than at a rebuild.)
 
 ## 2. What the code shows
 
-`frontend/app/view/editor/editor-view.tsx`:
+[`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx):
 
 - `setupEditor()` (~line 386) constructs `new EditorView({ state, parent: container })`.
 - **Nothing ever calls `cmView.focus()`.** A grep for `.focus()` across
-  `frontend/app/view/editor/` returns hits only in `editor-tab-strip.tsx:106`
+  [`frontend/app/view/editor/`](../../frontend/app/view/editor) returns hits only in `editor-tab-strip.tsx:106`
   (the rename input) and `file-tree.tsx:297` (the tree's rename input). The
   editor itself is focused only by the user's click.
 - A `createEffect` (~line 466) re-runs on `model.activeIdAtom()`,
@@ -57,7 +57,7 @@ pointed at rendering rather than at a rebuild.)
   **replaces the whole view state**, including anything typed since the snapshot
   was taken.
 
-`frontend/app/view/editor/editor-model.ts`:
+[`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts):
 
 - `dirtyAtom` (line 331) is `this.activeTabAtom()?.dirty ?? false`.
 - The **pane title itself is derived from it** (lines 360–369):

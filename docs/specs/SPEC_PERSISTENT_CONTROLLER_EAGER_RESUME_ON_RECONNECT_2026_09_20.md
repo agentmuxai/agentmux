@@ -5,7 +5,7 @@
 **Status:** implemented (2026-09-22, issue #3463) — with one addition beyond
 this spec's original scope; see the erratum after §3 and the correction to
 §5's "no new plumbing" claim.
-**Triggered by:** `docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md` — during that
+**Triggered by:** [`docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md`](../incident/INCIDENT_2026_09_20_APP_CLOSED.md) — during that
 investigation, 3 of 7 agent panes in one window (Clamk, Naki #2, Loap #2)
 turned out to have no live CLI process at all after the app's repeated
 restarts, silently, with no error and no visible difference in the UI's
@@ -62,7 +62,7 @@ way, which is what surfaced this during the incident investigation.
 
 ## 2. Why the lazy-spawn design exists at all — and why it doesn't apply here
 
-`docs/specs/persistent-process-mode.md` (the original spec for this
+[`docs/specs/persistent-process-mode.md`](persistent-process-mode.md) (the original spec for this
 controller type) specifies the state machine as `INIT ─(first message)─>
 SPAWNING` from the start (line 73) — lazy spawn is deliberate, and it is
 the RIGHT behavior for the case it was designed for: a freshly created pane
@@ -74,7 +74,7 @@ question: *"set status to CRASHED and either auto-respawn or show a
 'reconnect'"* — **not a decision that auto-respawn was rejected**, just one
 that was never made either way. No spec, retro, or comment found anywhere
 in this codebase records a deliberate choice against eagerly resuming an
-existing session (searched `docs/specs/`, `docs/retro/` for
+existing session (searched [`docs/specs/`](.), [`docs/retro/`](../retro) for
 "eager"/"auto-respawn"/"resume" near "persistent"/"agent"/"cost"/"token" —
 nothing). Per this repo's own house rule about treating an undocumented
 claim of a *rejected* idea with skepticism (see `CLAUDE.md`'s Jekt section

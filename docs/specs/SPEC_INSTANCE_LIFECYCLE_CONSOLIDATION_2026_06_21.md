@@ -7,10 +7,10 @@
 - **Author:** AgentA
 - **Tracking:** TBD (open a Discussion for long-term lifecycle work; link PRs here)
 - **Supersedes/absorbs:** the scattered "Phase B.9.3 / F.6 / H.5" quit-path commentary;
-  folds in the unfixed `docs/specs/window-close-process-cleanup.md`
-- **Related:** `docs/retro/b9-3-quit-thread-analysis.md`,
-  `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`,
-  `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` (I1–I6)
+  folds in the unfixed [`docs/specs/window-close-process-cleanup.md`](window-close-process-cleanup.md)
+- **Related:** [`docs/retro/b9-3-quit-thread-analysis.md`](../retro/b9-3-quit-thread-analysis.md),
+  [`docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md),
+  [`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) (I1–I6)
 
 ---
 
@@ -321,7 +321,7 @@ global-agent processes.
   keystone is a **host-reducer integration test** (§7.2), not the e2e "tree exits" test
   (§7.1, which is infeasible as a CI gate — there is no CI test runner and CI cannot
   launch CEF). Stage 0 = (a) **add a CI job that actually runs `cargo test` + `vitest`**
-  (none exists today — `.github/workflows/` has zero test runners, so "stays green" is
+  (none exists today — [`.github/workflows/`](../../.github/workflows) has zero test runners, so "stays green" is
   currently meaningless); (b) the reducer-gate tests that reproduce **both** races —
   last close with a `TabPool` promotion in flight, **and** last close racing an in-flight
   *user-window* creation (the §10.2 corner) — red→green against the minimal targeted fix.
@@ -485,7 +485,7 @@ the first-draft prose in §3–§7 where they conflict.** Severity: 🔴 Critica
 
 ### 10.4 Test feasibility & sidecar — the safety-net premise needed rework
 
-- 🔴 **C1: no CI test gate exists.** `.github/workflows/` (5 files) runs **zero**
+- 🔴 **C1: no CI test gate exists.** [`.github/workflows/`](../../.github/workflows) (5 files) runs **zero**
   `cargo test`/`vitest`/`task test`. The only CDP harness (`input-bench-report.yml`) is
   `workflow_dispatch`-only and needs a self-hosted runner that **does not exist**.
   CI cannot launch CEF (no Chromium/display/binaries); the CDP port is dynamic

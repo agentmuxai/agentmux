@@ -6,11 +6,11 @@
 **Branch base:** `main` HEAD `48ad4e58`
 
 **Companion docs:**
-- `docs/retro/reducer-architecture-current-state-2026-05-02.md` — verified current-state catalog (what IS in reducers, what isn't)
+- [`docs/retro/reducer-architecture-current-state-2026-05-02.md`](../retro/reducer-architecture-current-state-2026-05-02.md) — verified current-state catalog (what IS in reducers, what isn't)
 - `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)` — 2026-05-02 freeze investigation, dump analysis, why per-window-isolated RequestContext + browser panes triggers it
 - `SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02` — superseded by this spec; PR #651 to be closed. The file is no longer in the repo.
-- `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` — original F.1 spec; this is its successor
-- `docs/retro/migration-pattern.md` — the a→b→c→d→e ratchet used in B.5 and reused here
+- [`docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) — original F.1 spec; this is its successor
+- [`docs/retro/migration-pattern.md`](../retro/migration-pattern.md) — the a→b→c→d→e ratchet used in B.5 and reused here
 
 ---
 

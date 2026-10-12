@@ -2,8 +2,8 @@
 
 **Date:** 2026-04-30
 **Status:** proposed — Specification (not yet implemented)
-**Supersedes the "Option D register-after" plan in** `docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`.
-**Replaces spec §7 of** `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` **with concrete per-saga state machines.**
+**Supersedes the "Option D register-after" plan in** [`docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`](../retro/phase-e-tear-off-and-remaining-2026-04-30.md).
+**Replaces spec §7 of** [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) **with concrete per-saga state machines.**
 
 ---
 
@@ -13,7 +13,7 @@ Eliminate the reducer/wcore inconsistency window by routing **every state mutati
 
 Sagas exist exactly for this shape. This spec describes the per-operation saga implementations and the RPC integration that sits in front of them.
 
-> **Coordinator location update (2026-04-30):** the existing E.1a coordinator framework (`agentmux-launcher::saga`) is **not** what E.5 will use. Every saga in this spec mutates only srv state — see `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` for the full reasoning. PR 3 builds a srv-side coordinator at `agentmux-srv/src/sagas/`; the launcher coordinator stays as a labeled stub for hypothetical future cross-process sagas.
+> **Coordinator location update (2026-04-30):** the existing E.1a coordinator framework (`agentmux-launcher::saga`) is **not** what E.5 will use. Every saga in this spec mutates only srv state — see [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) for the full reasoning. PR 3 builds a srv-side coordinator at `agentmux-srv/src/sagas/`; the launcher coordinator stays as a labeled stub for hypothetical future cross-process sagas.
 
 **End state when this spec ships:** the reducer is the sole writer of workspace / tab / block / layout state. Every wcore-direct path in service.rs §3 either becomes a reducer-dispatch handler (single-step) or a saga-driven RPC handler (multi-step). The persist subscriber writes SQLite for everything.
 
@@ -76,7 +76,7 @@ None yet.
 
 ### 4.1 Coordinator contract
 
-> **Note:** the trait shape below is similar to E.1a's `agentmux-launcher::saga::Saga` but is **not** the same type. PR 3 introduces `agentmux-srv::sagas::Saga` with the trait below. The E.1a launcher coordinator stays in place as a labeled stub. See `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` §3 for why.
+> **Note:** the trait shape below is similar to E.1a's `agentmux-launcher::saga::Saga` but is **not** the same type. PR 3 introduces `agentmux-srv::sagas::Saga` with the trait below. The E.1a launcher coordinator stays in place as a labeled stub. See [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) §3 for why.
 
 
 ```rust
@@ -464,10 +464,10 @@ E.4 (Layout) can also ship in parallel; saga integration with layouts is deferre
 
 ## 12. Cross-references
 
-- `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §7 — original (sketchy) saga spec; this doc supersedes.
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — coordinator-location decision (Path A: srv) + full robustness audit + gap analysis. Read this before implementing PR 3.
-- `docs/retro/phase-e-status-2026-04-30.md` — phase status snapshot
-- `docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md` — the bug analysis that motivated this spec
+- [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) §7 — original (sketchy) saga spec; this doc supersedes.
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) — coordinator-location decision (Path A: srv) + full robustness audit + gap analysis. Read this before implementing PR 3.
+- [`docs/retro/phase-e-status-2026-04-30.md`](../retro/phase-e-status-2026-04-30.md) — phase status snapshot
+- [`docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`](../retro/phase-e-tear-off-and-remaining-2026-04-30.md) — the bug analysis that motivated this spec
 
 ---
 
@@ -475,7 +475,7 @@ E.4 (Layout) can also ship in parallel; saga integration with layouts is deferre
 
 E.5 fixes the reducer/wcore divergence (the smoke regression cause) and adds saga_id correlation infrastructure for E.6. It is a **partial** robustness improvement, not a complete one.
 
-Four robustness gaps remain after E.5 ships. They are documented in `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` §4-§5, summarized here so anyone scoping future work doesn't miss them:
+Four robustness gaps remain after E.5 ships. They are documented in [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) §4-§5, summarized here so anyone scoping future work doesn't miss them:
 
 | Gap | Status | Cheapest fix |
 |---|---|---|
@@ -486,4 +486,4 @@ Four robustness gaps remain after E.5 ships. They are documented in `docs/retro/
 | Saga state lost on srv crash mid-saga | "Phase F or beyond" stub deferral | Disk-backed saga journal. Probably wait for Phase G's event-sourced model to subsume it. |
 
 Anyone reading this spec and inferring "tear-off becomes transactional after E.5" is mistaken: tear-off becomes srv-side-atomic. Cross-process orphans remain possible.
-- `docs/retro/multi-reducer-status-2026-04-29.md` — running phase progress
+- [`docs/retro/multi-reducer-status-2026-04-29.md`](../retro/multi-reducer-status-2026-04-29.md) — running phase progress

@@ -26,7 +26,7 @@ For terminal-failure states (`failed`, `denied`, `canceled`), skip the hold enti
 
 ### What to change
 
-**`frontend/app/view/agent/components/ToolBlock.tsx`**
+**[`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)**
 
 The `autoExpanded` memo (around line 124) currently expands when status is `running` or `pending_approval`. The expanded state is:
 
@@ -73,7 +73,7 @@ Use `—` (em-dash, U+2014) as the minimize glyph, matching platform conventions
 
 #### Where to add
 
-**`frontend/app/block/blockframe.tsx`**
+**[`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)**
 
 In `BlockFrame_Header()`, add a `minimizeButton` between `endIconButtons` and `magnifyButton`:
 
@@ -154,7 +154,7 @@ A subtle 1px vertical rule between the aux icon buttons (block-type-specific) an
 
 #### Implementation
 
-**`frontend/app/block/blockframe.tsx`** — in the `block-frame-end-icons` section, add a separator element conditionally:
+**[`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)** — in the `block-frame-end-icons` section, add a separator element conditionally:
 
 ```tsx
 <div class="block-frame-end-icons">
@@ -189,10 +189,10 @@ A subtle 1px vertical rule between the aux icon buttons (block-type-specific) an
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Add `isFailTerminal()`, short-circuit `heldOpen` in `expanded()` |
-| `frontend/app/block/blockframe.tsx` | Add `minimizeButton` JSX, separator, reactive `block-frame--minimized` class |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Add `isFailTerminal()`, short-circuit `heldOpen` in `expanded()` |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Add `minimizeButton` JSX, separator, reactive `block-frame--minimized` class |
 | `frontend/app/block/blockframemodel.tsx` (or equivalent) | Add `_minimized` signal, `minimizedAtom`, `toggleMinimized()`, meta hydration |
-| `frontend/app/block/block.scss` | Add `.block-frame--minimized`, `.block-frame-btn-separator` |
+| [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) | Add `.block-frame--minimized`, `.block-frame-btn-separator` |
 
 ---
 

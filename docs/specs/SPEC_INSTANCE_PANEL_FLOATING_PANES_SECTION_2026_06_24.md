@@ -205,7 +205,7 @@ communicates intent and allows each to evolve independently.
 
 ### 5.2 Label classifier addition
 
-Add alongside `isInstanceLabel` in `frontend/app/store/launcher-event/types.ts`:
+Add alongside `isInstanceLabel` in [`frontend/app/store/launcher-event/types.ts`](../../frontend/app/store/launcher-event/types.ts):
 
 ```ts
 export function isFloatingPaneLabel(label: string): boolean {
@@ -415,12 +415,12 @@ Add after the existing window-row rules:
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/global.ts` | Add `FloatingPaneEntry` type, `openFloatingPaneEntriesAtom` signal |
-| `frontend/app/store/launcher-event/types.ts` | Add `isFloatingPaneLabel()` |
-| `frontend/app/store/launcher-event-reducer.ts` | Route floating pane open/close events; seed from snapshot |
-| `frontend/app/statusbar/InstancePanel.tsx` | Import new atom; add floating pane section JSX |
-| `frontend/app/statusbar/_instance-panel.scss` | Add `.instance-panel-pane-row`, `.instance-panel-pane-empty` |
-| `frontend/util/window-title.ts` | Add `resolveFloatingPaneName()` helper |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | Add `FloatingPaneEntry` type, `openFloatingPaneEntriesAtom` signal |
+| [`frontend/app/store/launcher-event/types.ts`](../../frontend/app/store/launcher-event/types.ts) | Add `isFloatingPaneLabel()` |
+| [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) | Route floating pane open/close events; seed from snapshot |
+| [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx) | Import new atom; add floating pane section JSX |
+| [`frontend/app/statusbar/_instance-panel.scss`](../../frontend/app/statusbar/_instance-panel.scss) | Add `.instance-panel-pane-row`, `.instance-panel-pane-empty` |
+| [`frontend/util/window-title.ts`](../../frontend/util/window-title.ts) | Add `resolveFloatingPaneName()` helper |
 
 No Rust changes required. `listWindowInstances()` and `focusWindow()` already handle
 floating pane labels correctly.

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10
 **Status:** superseded — go to the successor for current policy, design and implementation status.
-**Superseded-by:** `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+**Superseded-by:** [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md)
 
 This document was never implemented; it is
 retained for its §2 root-cause analysis and the §4.2 ReAgent review history (four soundness gaps
@@ -19,12 +19,12 @@ delivery (`agentmux-srv/src/backend/blockcontroller/mod.rs::deliver_agent_messag
 `agentmux-srv/src/server/agent_handlers/input.rs:849-864`) — a human choosing to interrupt their own agent's in-progress turn by
 typing into its pane is intentional steering, not the problem this spec addresses.
 **Related:**
-- `docs/specs/SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md` — implemented the controller-aware
+- [`docs/specs/SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md`](SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md) — implemented the controller-aware
   mid-turn delivery this spec proposes narrowing. Its own evidence (§4) is the direct cause of
   the bug this spec fixes; see §2 below.
-- `docs/specs/jekt-inject-timing.md` — PTY keystroke mechanics (legacy `ject` path, unaffected —
+- [`docs/specs/jekt-inject-timing.md`](jekt-inject-timing.md) — PTY keystroke mechanics (legacy `ject` path, unaffected —
   see §5).
-- `docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md` — the mid-turn `tool_result` precedent this
+- [`docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md`](SPEC_ASK_USER_QUESTION_2026_06_15.md) — the mid-turn `tool_result` precedent this
   spec does **not** touch (it answers a question the model itself asked; it is not an
   externally-injected message racing the model's own output).
 - `agentmux/CLAUDE.md`'s "Jekt (agent-to-agent message) security rules" section — the marker
@@ -278,6 +278,6 @@ unaffected.
 | Turn-active tracking (reusable for idle-flush trigger) | `agentmux-srv/src/backend/blockcontroller/persistent.rs::mark_turn_active_returning_was_active` |
 | Reactive HTTP inject entry point | `agentmux-srv/src/backend/reactive/handler.rs::inject_message` |
 | Reactive HTTP + forwarding | `agentmux-srv/src/server/reactive.rs:18-143` |
-| Steering evidence (proves mid-turn abandonment, tool-call case only) | `docs/specs/evidence/steer-probe.py`, `steer-probe-claude-run1.txt`, `steer-probe-claude-run2.txt` |
+| Steering evidence (proves mid-turn abandonment, tool-call case only) | [`docs/specs/evidence/steer-probe.py`](evidence/steer-probe.py), `steer-probe-claude-run1.txt`, `steer-probe-claude-run2.txt` |
 | ACP prompt delivery (`send_input` → `session/prompt`) | `agentmux-srv/src/backend/blockcontroller/acp.rs:695-730` |
 | Human UI delivery path (unaffected) | `agentmux-srv/src/server/agent_handlers/input.rs:849-864` (dispatch), `agentmux-srv/src/backend/rpc_types/commands.rs:109` (`COMMAND_AGENT_INPUT`) |

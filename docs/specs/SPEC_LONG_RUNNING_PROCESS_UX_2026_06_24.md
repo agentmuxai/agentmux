@@ -145,7 +145,7 @@ When `StreamUnsubscribe` fires after a crash, the pane enters `Disconnected`. If
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/useAgentStream.ts` | Add `ControllerStatus: done` → 1.5s grace-period → `StreamUnsubscribe` |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Add `ControllerStatus: done` → 1.5s grace-period → `StreamUnsubscribe` |
 | `.changesets/…patch…` | Changeset for release tracking |
 
 ---

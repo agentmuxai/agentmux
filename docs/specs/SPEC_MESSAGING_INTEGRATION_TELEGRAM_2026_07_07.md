@@ -8,7 +8,7 @@
 
 ## 1. Goal / context
 
-The master plan (`docs/specs/SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md`) defines the two-layer pane+bridge architecture for embedding messaging apps in AgentMux: a CEF pane shows the real web app, an invisible background bridge lets an agent read/send through the platform's API. That plan's §2–§3 and §5–§6 cover the architecture, protocol research, common abstractions, and security posture in full — this spec does not repeat them, only what's specific to Telegram and to reconciling the plan with what actually shipped.
+The master plan ([`docs/specs/SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md`](SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md)) defines the two-layer pane+bridge architecture for embedding messaging apps in AgentMux: a CEF pane shows the real web app, an invisible background bridge lets an agent read/send through the platform's API. That plan's §2–§3 and §5–§6 cover the architecture, protocol research, common abstractions, and security posture in full — this spec does not repeat them, only what's specific to Telegram and to reconciling the plan with what actually shipped.
 
 Discord shipped in PR #1763 (merged 2026-06-24) as the first bridge (`agentmux-srv/src/messaging/discord/`). It validated the pane+bridge split end-to-end but diverged from the plan in three material ways this spec inherits:
 

@@ -5,7 +5,7 @@
 messages while the agent writes) was a misreading of the request and is replaced; its startup-race fix
 (§3.2.1: a message sent while the agent's process is still spawning is queued, not dropped) is kept.
 Before that: Phase 1 in #3557, Phase 2 (the `DeliverPolicy` queue) in #3562, Phase 4 (§4.7) later.
-**Superseded-by:** `docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`
+**Superseded-by:** [`docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md)
 **Author:** Maricon
 **Scope:** all non-human-initiated delivery into a running agent's live input —
 `agentmux-srv/src/backend/reactive/**`, `backend/blockcontroller/mod.rs::deliver_agent_message`,
@@ -21,7 +21,7 @@ design half of two earlier specs and absorbs the findings of one audit:
 | `SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md` | Shipped the mid-turn steering that caused this; its *reachability* work is kept, its *default policy* is reversed here | Partially superseded — see §6 |
 | `REPORT_JEKT_MIDTURN_INTERRUPT_AUDIT_2026_09_23.md` | Verification that the 09-10 design was never built, plus five findings the 09-10 spec did not cover (§3.2) | Retained as evidence |
 
-**Related, not superseded:** `docs/specs/jekt-inject-timing.md` (PTY keystroke mechanics — see
+**Related, not superseded:** [`docs/specs/jekt-inject-timing.md`](jekt-inject-timing.md) (PTY keystroke mechanics — see
 §6.3), `SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md` §6 (Phase 3 controller-aware delivery).
 
 ---
@@ -65,7 +65,7 @@ Never read, never true.
 
 ### 2.1 Proven, not theoretical
 
-`docs/specs/evidence/steer-probe-claude-run1.txt`:
+[`docs/specs/evidence/steer-probe-claude-run1.txt`](evidence/steer-probe-claude-run1.txt):
 
 ```
 [  5.915s] TOOL_USE start     #1 name=Bash
@@ -302,7 +302,7 @@ not recognise leaves the state unchanged, and the default is `Writing`. Because 
 delivers at the turn boundary, as before; both persistent Claude launch paths pass that flag.
 
 **Observed order (Claude Code 2.1.280).** In a probe with the persistent launch args
-(`docs/specs/evidence/tool-wait-frame-order-claude-2.1.280.txt`), every `tool_use` line, and for
+([`docs/specs/evidence/tool-wait-frame-order-claude-2.1.280.txt`](evidence/tool-wait-frame-order-claude-2.1.280.txt)), every `tool_use` line, and for
 AskUserQuestion the `control_request`, arrived before the `message_delta` that opens the wait; one
 `message_delta` closed a message holding two parallel calls. A message written at that
 `message_delta` was followed: both tools finished and the reply ended with the requested word.
@@ -313,7 +313,7 @@ comes from the tool call's own line and `pending_questions` is checked too.
 The next message goes out at the next tool wait or the turn boundary.
 
 **What this does not promise.** Steering still works, by design: the model reads the message when its
-tool returns and may change course (`docs/specs/evidence/steer-probe-claude-run1.txt`: an
+tool returns and may change course ([`docs/specs/evidence/steer-probe-claude-run1.txt`](evidence/steer-probe-claude-run1.txt): an
 interrupt written at the start of a tool call, and the agent abandoned 3 of 4 planned calls). The
 guarantee is that no explanation is cut, not that the plan is untouched. Anyone who needs the plan
 untouched can be told at the turn boundary instead — that is a per-sender policy, not built here.
@@ -369,7 +369,7 @@ disturbing ahead of Phase 2.
 
 ### 6.3 PTY keystroke delivery
 Out of scope: a running shell is not an LLM turn with an explanation to cut.
-`docs/specs/jekt-inject-timing.md` stands as-is. Note that the separate draft-destruction bug
+[`docs/specs/jekt-inject-timing.md`](jekt-inject-timing.md) stands as-is. Note that the separate draft-destruction bug
 (§3.2.3) lives on this path and is not addressed by anything here.
 
 ### 6.4 `SPEC_ASK_USER_QUESTION`'s `send_tool_result`
@@ -383,7 +383,7 @@ for non-human senders** is reversed, from `Immediate` to `NextIdle`.
 
 ## 7. Test coverage required
 
-Current jekt tests (`frontend/app/view/agent/stream-parser.test.ts:474-571`, 9 cases) all examine a
+Current jekt tests ([`frontend/app/view/agent/stream-parser.test.ts:474-571`](../../frontend/app/view/agent/stream-parser.test.ts#L474-L571), 9 cases) all examine a
 single well-formed or malformed block in isolation. Every interleaving case is untested, and
 `parseHistoryLines.test.ts` — the replay path, the only thing that reconstructs ordering from disk —
 has zero jekt tests.
@@ -425,4 +425,4 @@ so line references in the pre-09-22 specs are stale.
 | Codex accidental queue | `backend/blockcontroller/app_server_controller.rs:300-305`, `:211-222` |
 | ACP prompt delivery | `backend/blockcontroller/acp.rs:707` |
 | Human UI path (unaffected) | `server/agent_handlers/input.rs` |
-| Steering evidence | `docs/specs/evidence/steer-probe-claude-run1.txt` |
+| Steering evidence | [`docs/specs/evidence/steer-probe-claude-run1.txt`](evidence/steer-probe-claude-run1.txt) |

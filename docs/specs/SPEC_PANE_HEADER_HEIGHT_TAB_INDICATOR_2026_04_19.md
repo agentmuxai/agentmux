@@ -24,16 +24,16 @@ Three visual polish changes to align the UI:
 
 | Element | File | Line | Value |
 |---------|------|------|-------|
-| `.window-header` total height | `frontend/app/window/window-header.win32.scss` | 35 | `height: 33px` |
-| `.window-header` top padding | `frontend/app/window/window-header.win32.scss` | 28 | `padding-top: 6px` |
-| `.pane-title-bar` (browser pane header) | `frontend/app/block/titlebar.scss` | 9 | `height: 24px` |
-| `--header-height` (block frame header) | `frontend/app/theme.scss` | 42 | `--header-height: 30px` |
+| `.window-header` total height | [`frontend/app/window/window-header.win32.scss`](../../frontend/app/window/window-header.win32.scss) | 35 | `height: 33px` |
+| `.window-header` top padding | [`frontend/app/window/window-header.win32.scss`](../../frontend/app/window/window-header.win32.scss) | 28 | `padding-top: 6px` |
+| `.pane-title-bar` (browser pane header) | [`frontend/app/block/titlebar.scss`](../../frontend/app/block/titlebar.scss) | 9 | `height: 24px` |
+| `--header-height` (block frame header) | [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | 42 | `--header-height: 30px` |
 
 **On effective tab height:** The window-header is 33 px with `box-sizing: border-box` and `padding-top: 6px`, giving a CSS content height of 27 px. In theory, `height: 100%` on flex children should resolve to 27 px. In practice, Chromium resolves `height: 100%` on flex items against the border-box height (33 px) when `align-items` is not `stretch` — confirmed visually. The effective rendered tab height is **33 px**, not 27 px. Pane headers should therefore be 33 px to match.
 
 ### 2b. Active tab indicator
 
-File: `frontend/app/tab/tab.scss`, lines 56–65
+File: [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss), lines 56–65
 
 ```scss
 &.active {
@@ -70,7 +70,7 @@ The `left: 4px` / `right: 4px` insets leave a visible gap between the indicator 
 
 ### Change 1 — `.pane-title-bar` height
 
-**File:** `frontend/app/block/titlebar.scss`
+**File:** [`frontend/app/block/titlebar.scss`](../../frontend/app/block/titlebar.scss)
 
 ```scss
 // Before
@@ -84,7 +84,7 @@ padding: 0 8px;   // remove vertical padding — flex centering handles it
 
 ### Change 2 — `--header-height` CSS variable
 
-**File:** `frontend/app/theme.scss`
+**File:** [`frontend/app/theme.scss`](../../frontend/app/theme.scss)
 
 ```scss
 // Before
@@ -98,7 +98,7 @@ Drives `min-height` / `max-height` on `.block-frame-default-header` (block.scss 
 
 ### Change 3 — Active tab indicator edge-to-edge
 
-**File:** `frontend/app/tab/tab.scss`
+**File:** [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss)
 
 ```scss
 // Before
@@ -114,7 +114,7 @@ right: 0;
 
 ### Change 4 — Tab close button tighter
 
-**File:** `frontend/app/tab/tab.scss`
+**File:** [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss)
 
 ```scss
 // Before
@@ -134,9 +134,9 @@ padding: 0;
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/titlebar.scss` | `height: 24px → 33px`, `padding: 2px 8px → 0 8px` |
-| `frontend/app/theme.scss` | `--header-height: 30px → 33px` |
-| `frontend/app/tab/tab.scss` | indicator edge-to-edge, close button 20×20 → 16×16 |
+| [`frontend/app/block/titlebar.scss`](../../frontend/app/block/titlebar.scss) | `height: 24px → 33px`, `padding: 2px 8px → 0 8px` |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | `--header-height: 30px → 33px` |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | indicator edge-to-edge, close button 20×20 → 16×16 |
 
 No Rust, no backend, no data model changes.
 

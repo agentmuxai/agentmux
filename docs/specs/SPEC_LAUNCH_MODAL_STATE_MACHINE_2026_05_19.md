@@ -1,16 +1,16 @@
 # SPEC: Launch Modal — State Machine Hardening
 
-**Status:** implemented — both of §4's stages landed on 2026-05-19. Stage 1 (lifting `AuthFlowController` out of `PreLaunchAuthPanel`, removing the blank dropdown entry, the `identity-bindings-changed` event) shipped in #916, the PR this doc was added in; Stage 2's `frontend/app/store/launch-flow-state/` slice shipped in #917 and `AgentLaunchModal.tsx` now reads its form and submit state from it, down to two remaining `createSignal` calls. §7's out-of-scope items are all still out of scope.
+**Status:** implemented — both of §4's stages landed on 2026-05-19. Stage 1 (lifting `AuthFlowController` out of `PreLaunchAuthPanel`, removing the blank dropdown entry, the `identity-bindings-changed` event) shipped in #916, the PR this doc was added in; Stage 2's [`frontend/app/store/launch-flow-state/`](../../frontend/app/store/launch-flow-state) slice shipped in #917 and `AgentLaunchModal.tsx` now reads its form and submit state from it, down to two remaining `createSignal` calls. §7's out-of-scope items are all still out of scope.
 **Date:** 2026-05-19
 **Author:** AgentA
 **Related:**
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx` (form surface today)
-- `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx` (Connect UI today)
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) (form surface today)
+- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx) (Connect UI today)
 - `frontend/app/view/agent/auth/auth-state.ts` (pure reducer, currently panel-scoped)
-- `frontend/app/store/browser-pane-state/` (reference reducer slice — pattern to follow)
-- `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`
-- `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`
-- `docs/specs/archive/identity-forge-integration-and-vault-2026-05-08.md`
+- [`frontend/app/store/browser-pane-state/`](../../frontend/app/store/browser-pane-state) (reference reducer slice — pattern to follow)
+- [`docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md)
+- [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
+- [`docs/specs/archive/identity-forge-integration-and-vault-2026-05-08.md`](archive/identity-forge-integration-and-vault-2026-05-08.md)
 
 ---
 
@@ -127,7 +127,7 @@ UX implications:
 
 #### 3.2.1 Pattern to follow
 
-`frontend/app/store/browser-pane-state/` is the reference. Each reducer slice has:
+[`frontend/app/store/browser-pane-state/`](../../frontend/app/store/browser-pane-state) is the reference. Each reducer slice has:
 
 ```
 <slice>/
@@ -255,7 +255,7 @@ On first `Opened`, dispatch `BindingsChanged` for every loaded identity (single 
 
 ### Stage 2 — Full reducer (separate PR, 2-3 sub-PRs)
 
-1. New slice `frontend/app/store/launch-flow-state/` with types + store + tests, modeled on `browser-pane-state`.
+1. New slice [`frontend/app/store/launch-flow-state/`](../../frontend/app/store/launch-flow-state) with types + store + tests, modeled on `browser-pane-state`.
 2. Convert all `createSignal` calls in `AgentLaunchModal` to `useLaunchFlowStore()` reads.
 3. Convert all `PreLaunchAuthPanel` controller calls to dispatches on the launch-flow store.
 4. Move `selectedBundleBindings` resource to the store; replace with reactive `state.bindings` map.
@@ -275,7 +275,7 @@ On first `Opened`, dispatch `BindingsChanged` for every loaded identity (single 
 ### 5.2 Open questions
 
 1. **Continue dropdown.** If `continueOfId` is set, do `identityId` + `memoryId` lock to the prior agent's values? Today they auto-fill but stay editable. Reducer should make this explicit: either lock (commands rejected) or editable (commands accepted, breaking the "continue" semantic). Recommend: lock.
-2. **`pending-bundle-for-<sid>` ids.** These are placeholder ids the OAuth backend used before bundles persisted on disk. Per `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:208` they're already filtered before reaching the dropdown. With Stage 1, the OAuth flow always creates a real bundle row first — these placeholders disappear entirely.
+2. **`pending-bundle-for-<sid>` ids.** These are placeholder ids the OAuth backend used before bundles persisted on disk. Per [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:208`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx#L208) they're already filtered before reaching the dropdown. With Stage 1, the OAuth flow always creates a real bundle row first — these placeholders disappear entirely.
 3. **Memory bindings.** Memory bundles don't have a "binding" concept (unlike Identity which has provider bindings). The blank-removal for Memory is simpler — just enforce a non-blank `memoryId`. No auth gate involvement.
 4. **Multi-window Launch modals.** Two top-level windows can each have a Launch modal open simultaneously. The reducer should be per-tab (matching `TabModalLayer`'s scope), and the binding push event broadcasts to every window via `emit_event_to_top_level_windows` (the helper added in #906).
 

@@ -5,12 +5,12 @@
 **Status:** proposed — Ready to schedule. **Corrected 2026-09-20: this status
 line is stale for §B.5 specifically — it was NOT left unimplemented.** Tracked
 as issue #2218 and fixed by PRs #2220/#2221/#2222 (shipped v0.54.4), confirmed
-via `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`
+via [`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`](../status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md)
 §2 history entry ("Confirmed *not* a leak (07-16: closing AgentMux instantly
 released 43.6 GB) — it's a live floor that ratchets up because pooled
 renderers weren't torn down on pane close... fixed by PRs #2220/#2221/#2222").
 The shipped fix is **not** literally §B.5(a) as written below (destroy on
-pane close) — that approach was superseded once `docs/retro/retro-window-lifecycle-leak-2026-07-04.md`
+pane close) — that approach was superseded once [`docs/retro/retro-window-lifecycle-leak-2026-07-04.md`](../retro/retro-window-lifecycle-leak-2026-07-04.md)
 found CEF 148 Views parks the browser on every destroy sequence regardless
 (the renderer leaks no matter how the window dies), so destroy-on-close
 alone would not have worked. The shipped design instead demotes a closing
@@ -28,7 +28,7 @@ re-verified** — do not assume they shipped alongside §B.5 just because it
 did. This correction is scoped to §B.5's core mechanism only.
 **Owner:** asaf
 **Scope:** Corrects `SPEC_MEMORY_ANALYSIS_2026_06_26.md`'s attribution; specifies the AgentMux-side
-memory fixes that survive the correction. See `docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`
+memory fixes that survive the correction. See [`docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`](../retro/retro-commit-charge-pagefile-growth-2026-07-02.md)
 for the measured evidence.
 
 > **Headline:** The pagefile-growth symptom is driven by ~43 GB of committed page-file-backed shared
@@ -151,8 +151,8 @@ doesn't hold the full session (measured 23k nodes / ~15.8 MB in one block). Caps
   Bytes` snapshot before/after a long session, to catch any AgentMux-owned commit growth early.
 
 ## D. Sources
-- Retro with full measurements: `docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`.
-- Corrected: `docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md` (lines 8-15,25,32-46,84-120,143-153).
+- Retro with full measurements: [`docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`](../retro/retro-commit-charge-pagefile-growth-2026-07-02.md).
+- Corrected: [`docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`](SPEC_MEMORY_ANALYSIS_2026_06_26.md) (lines 8-15,25,32-46,84-120,143-153).
 - Code: `wps.rs:172,379,388`; `eventbus.rs:84-85`; `server/websocket.rs:196-229`;
   `subagent_watcher.rs:77,91,259-263,419,599`; `browser_panes.rs:365-387`; `sagas/delete_block.rs`;
   `commands/mod.rs:25-30`; `commands/window_pool.rs:149,1328`; `browser-view.tsx:390-427`.

@@ -3,7 +3,7 @@
 **Date:** 2026-10-07
 **Status:** implemented — PR #4461 (this document ships with its code). The one step it cannot do itself is making the new image package public (section 7). Verified 2026-10-07.
 **Author:** Agent1@narko
-**Related:** `docs/spec-claude-code-versioning.md` (how CLI pins are kept in step), `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md` (container is the default runtime), `docs/specs/container-agent-runtime.md` (history), `docs/specs/SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md` section 6.3 (the pane's CLI install row this reuses)
+**Related:** [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) (how CLI pins are kept in step), [`docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) (container is the default runtime), [`docs/specs/container-agent-runtime.md`](container-agent-runtime.md) (history), [`docs/specs/SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md`](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) section 6.3 (the pane's CLI install row this reuses)
 
 ---
 
@@ -16,15 +16,15 @@ Verified 2026-10-06:
 | Fact | Evidence |
 |---|---|
 | The GHCR package is private; an anonymous pull is refused with 401. | `curl` of the manifest without credentials. |
-| srv pulls anonymously, and the Docker daemon does not use the CLI's `docker login`. | `crates/srv/src/backend/container.rs` `pull_image` calls `create_image(..., None, None)`, so bollard sends no `X-Registry-Auth`. |
-| The failure reaches the user as a raw bollard error. | `crates/srv/src/server/agent_handlers/input.rs` (`container ensure_running failed: {e}`); `crates/srv/src/server/app_api/agent_io.rs` returns the same string with no pane frame at all. |
+| srv pulls anonymously, and the Docker daemon does not use the CLI's `docker login`. | [`crates/srv/src/backend/container.rs`](../../crates/srv/src/backend/container.rs) `pull_image` calls `create_image(..., None, None)`, so bollard sends no `X-Registry-Auth`. |
+| The failure reaches the user as a raw bollard error. | [`crates/srv/src/server/agent_handlers/input.rs`](../../crates/srv/src/server/agent_handlers/input.rs) (`container ensure_running failed: {e}`); [`crates/srv/src/server/app_api/agent_io.rs`](../../crates/srv/src/server/app_api/agent_io.rs) returns the same string with no pane frame at all. |
 | It is invisible internally because org members have the image cached. | `pull_image` skips the registry when `inspect_image` succeeds. |
-| Nothing tells users to log in, and nothing checks visibility. | No doc mentions it; `.github/workflows/container-image.yml` never pulls anonymously. |
-| The default is baked into three places. | `crates/srv/agent-seed.json`, `frontend/app/view/agent/defaults/cli-catalog.ts`, and the fallback string in `input.rs` and `agent_io.rs`. |
+| Nothing tells users to log in, and nothing checks visibility. | No doc mentions it; [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml) never pulls anonymously. |
+| The default is baked into three places. | [`crates/srv/agent-seed.json`](../../crates/srv/agent-seed.json), [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts), and the fallback string in `input.rs` and `agent_io.rs`. |
 
-Making the current image public is not an option. `docker/Dockerfile.agent-agentmux` installs `@anthropic-ai/claude-code` into it, a package under a proprietary license whose redistribution has not been cleared.
+Making the current image public is not an option. [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) installs `@anthropic-ai/claude-code` into it, a package under a proprietary license whose redistribution has not been cleared.
 
-Stored agents are a second constraint. `reseed_if_needed` in `crates/srv/src/backend/agent_seed.rs` does not rewrite an existing definition's `container_image`, and a pane copies the value into `agent:container_image` when it is opened. Changing the seed therefore fixes new installs only; every existing install keeps naming the private image, and those must keep working.
+Stored agents are a second constraint. `reseed_if_needed` in [`crates/srv/src/backend/agent_seed.rs`](../../crates/srv/src/backend/agent_seed.rs) does not rewrite an existing definition's `container_image`, and a pane copies the value into `agent:container_image` when it is opened. Changing the seed therefore fixes new installs only; every existing install keeps naming the private image, and those must keep working.
 
 ## 2. Decision
 
@@ -52,11 +52,11 @@ The old `agent-claude` package is no longer built. Machines that already have it
 Container turns are `docker exec` into one long-lived container per agent (`container_spawn.rs`: `sh -c '"$@" < prompt-file'`). The CLI is resolved by name, `claude`, on the image's `PATH`.
 
 - **Where.** `npm install --prefix /home/agent/.agentmux/cli <package>@<pin>` puts the binary at `/home/agent/.agentmux/cli/node_modules/.bin/claude`. The directory is a per-agent named volume, `agentmux-cli-<container-name>`, added at container creation. It is deliberately not in the set of mounts that trigger container recreation (`owned_mount_targets`): an existing container is never rebuilt for it, and an existing container whose image already has `claude` has no use for it. The directory also exists in the image, so a container without the volume still works, and loses only the install when it is recreated.
-- **Version.** The package and version come from `ProviderConfig` in `crates/srv/src/backend/providers.rs` (`npm_install_specs(pinned_version)`), the pin the host installer already uses and `pin-consistency.test.ts` already guards. The workflow input and the Dockerfile `ARG` that duplicated the pin go away, so a bump touches one fewer place.
+- **Version.** The package and version come from `ProviderConfig` in [`crates/srv/src/backend/providers.rs`](../../crates/srv/src/backend/providers.rs) (`npm_install_specs(pinned_version)`), the pin the host installer already uses and `pin-consistency.test.ts` already guards. The workflow input and the Dockerfile `ARG` that duplicated the pin go away, so a bump touches one fewer place.
 - **Idempotent.** A marker file, `.installed-<package>-<version>`, is written after the installed binary answers `--version`. A start that finds `claude` already on the image `PATH` (a legacy image) or the marker does nothing. A new pin changes the marker name, so the next start reinstalls. srv remembers a successful check per container in memory, so a running agent pays one extra `docker exec` per srv lifetime, not one per turn; the cache is dropped whenever the container is created or removed.
 - **Found at turn time.** The turn wrapper appends `/home/agent/.agentmux/cli/node_modules/.bin` to the end of `PATH`. A baked-in `claude` therefore still wins on a legacy image.
 - **A slow or interrupted install cannot corrupt the volume.** npm installs into a staging directory inside the volume, never into the live `node_modules`. Only a verified install replaces the live tree (the old marker goes first, the new one is written last), so a marker always means a complete install and a failed attempt leaves the previous install untouched. Two limits apply: npm runs under `timeout` inside the script (540 s, killing its whole process group), and the host gives up on the exec after 600 s as a backstop. On that backstop srv kills any `npm install` into the directory, waits until the exec is confirmed finished, and only then releases the per-container lock, so the retry the pane suggests cannot start a second install on top of the first. Every install also starts by killing and confirming the absence of an earlier one (for example after an srv restart), and refuses to start if one cannot be stopped.
-- **Progress and errors in the pane.** The install emits the existing `agentmux_cli_install` frames (`crates/srv/src/backend/cli_notice.rs`): "Installing Claude Code 2.1.288...", then "Installed ... (8 s)" or "Couldn't install ...", with the tail of npm's output as the detail. They are persisted like any other pane frame, so they survive a reload. No frontend change is needed for this part.
+- **Progress and errors in the pane.** The install emits the existing `agentmux_cli_install` frames ([`crates/srv/src/backend/cli_notice.rs`](../../crates/srv/src/backend/cli_notice.rs)): "Installing Claude Code 2.1.288...", then "Installed ... (8 s)" or "Couldn't install ...", with the tail of npm's output as the detail. They are persisted like any other pane frame, so they survive a reload. No frontend change is needed for this part.
 - **Isolation.** The install runs as `agent` inside the container, with the npm cache in `/tmp` and removed afterwards. Nothing is installed on the host.
 
 Measured against `node:24-slim` on 2026-10-07: install takes about 8 s and leaves 235 MB on disk; `claude --version` prints `2.1.288 (Claude Code)`.
@@ -91,7 +91,7 @@ The image name is user data (an imported or custom template can name any registr
 - The token response is read only up to 64 KiB, and every request and the whole check have a time limit.
 - A refused host is `unknown`, with no request sent, so it never takes the sandbox away. Corporate registries on private addresses therefore get the default path and the daemon's own pull decides.
 
-`AgentCreateFromTemplateModal` runs the check once Docker is known to be available, and `containerPreselect()` (new, in `frontend/app/view/agent/defaults/container-default.ts`) decides the default: container only if the template is a container template, the CLI supports containers, Docker answers, and the image is not `denied`/`not_found`. When it declines because of the image, the Runtime row says why and the host option is already selected: a one-click fallback is the existing dropdown. The container option stays selectable, since the user may know better.
+`AgentCreateFromTemplateModal` runs the check once Docker is known to be available, and `containerPreselect()` (new, in [`frontend/app/view/agent/defaults/container-default.ts`](../../frontend/app/view/agent/defaults/container-default.ts)) decides the default: container only if the template is a container template, the CLI supports containers, Docker answers, and the image is not `denied`/`not_found`. When it declines because of the image, the Runtime row says why and the host option is already selected: a one-click fallback is the existing dropdown. The container option stays selectable, since the user may know better.
 
 For a stored legacy image the check also tries the base image, mirroring the runtime fallback below, so a machine that can run the fallback is not told it cannot.
 
@@ -106,13 +106,13 @@ For a stored legacy image the check also tries the base image, mirroring the run
 
 - `IMAGE_NAME` becomes `agentmuxai/agent-base`; the `claude_version` input and the `build-args` go away.
 - A manual dispatch can now publish `:latest` (new boolean input, default off). Tags still publish `:latest` as before. Without this the first publish after merging could only be a release tag.
-- After the push, a step tries an anonymous pull and fails if it does not work. It runs `scripts/check-anonymous-pull.sh`, which fails with a message naming the exact UI step (section 7).
+- After the push, a step tries an anonymous pull and fails if it does not work. It runs [`scripts/check-anonymous-pull.sh`](../../scripts/check-anonymous-pull.sh), which fails with a message naming the exact UI step (section 7).
 
 ## 4. Phases
 
 1. **Pull errors and message mapping.** `ImagePull`, classification, `user_message()`, the shared turn-prepare helper, the muxspect prefix. Useful on its own.
 2. **Image check and create flow.** `container_image.rs`, `registry_probe.rs`, the RPC and its generated types, `container-default.ts`, the modal.
-3. **Base image and install.** Dockerfile, CLI provisioning (script builders, install, frames, cache), the `PATH` append, the legacy fallback, defaults in the seed and catalog, workflow and script, pin tests, `docs/spec-claude-code-versioning.md`.
+3. **Base image and install.** Dockerfile, CLI provisioning (script builders, install, frames, cache), the `PATH` append, the legacy fallback, defaults in the seed and catalog, workflow and script, pin tests, [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md).
 
 ## 5. Test plan
 
@@ -124,7 +124,7 @@ For a stored legacy image the check also tries the base image, mirroring the run
 | Rust unit | `classify_last_error_source` recognises the new prefix | `muxspect_handlers.rs` tests |
 | Frontend unit | `containerPreselect()` truth table; the Runtime row text per image state | `container-default.test.ts`, modal test |
 | Static | The Dockerfile no longer installs Claude Code and creates the CLI directory; the workflow publishes `agent-base` and has no Claude pin; the seed and catalog name the same default image | `pin-consistency.test.ts`, a new image-default test |
-| Script | `scripts/check-anonymous-pull.sh` exits non-zero for a private package and zero for a public one | run by hand against the real registry; recorded in the PR |
+| Script | [`scripts/check-anonymous-pull.sh`](../../scripts/check-anonymous-pull.sh) exits non-zero for a private package and zero for a public one | run by hand against the real registry; recorded in the PR |
 | Docker (local) | Build the base image; start a container from it; run the install script; one real container-agent turn | recorded in the PR with what could and could not be run |
 
 ## 6. Not doing

@@ -9,9 +9,9 @@ follow-up:** added a parallel Linux notice (status bar panel only) — see §6;
 claim was wrong for Linux, corrected there.
 **Repos touched:** `agentmuxai/agentmux` (desktop app) and `agentmuxai/agentmux-cloud`
 (hosted sign-in completion page). Cross-repo specs are kept in `agentmux`'s
-`docs/specs/` per existing precedent (see
+[`docs/specs/`](.) per existing precedent (see
 `SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`).
-**Related:** `docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md` —
+**Related:** [`docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md`](../retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md) —
 background on *why* macOS shows this prompt at all.
 
 ---
@@ -60,7 +60,7 @@ account), so the original claim stands for Windows specifically.
 
 ### 2.1 Status bar panel — "Sign in" button (agentmux repo)
 
-`frontend/app/statusbar/HostPopover.tsx`, the "MuxBus Cloud" row (~lines
+[`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx), the "MuxBus Cloud" row (~lines
 307–350) renders a **Sign in** button when not connected:
 
 ```tsx
@@ -84,7 +84,7 @@ account), so the original claim stands for Windows specifically.
 ```
 
 This is the app's own live platform, not a browser — platform detection is
-already solved: `isMacOS()` from `frontend/util/platformutil.ts` (already used
+already solved: `isMacOS()` from [`frontend/util/platformutil.ts`](../../frontend/util/platformutil.ts) (already used
 elsewhere in this file's sibling components, e.g. `tabbar.tsx`,
 `hamburger-menu.tsx`).
 
@@ -108,7 +108,7 @@ new minimal style if none fits.)
 
 The same `MuxBusController`-driven "Sign in" / "Connect" affordance also
 appears in two more places that share this component
-(`frontend/app/view/accounts/AgentMuxConnectPanel.tsx`'s
+([`frontend/app/view/accounts/AgentMuxConnectPanel.tsx`](../../frontend/app/view/accounts/AgentMuxConnectPanel.tsx)'s
 `MuxBusConnectSection` — the per-agent Identity tab — and
 `AgentMuxConnectPanel` — the Armory → Accounts gallery tile). The user's ask
 was specifically the status bar panel; whether to add the same note to those
@@ -206,11 +206,11 @@ needs to actually be seen, not blend into ordinary secondary copy.
 `.status-bar-popover-info-notice` — a bordered, tinted callout (border-left
 accent + `color-mix(..., var(--info-color) 10%, transparent)` background),
 mirroring the existing `.identity-delete-notice` pattern
-(`frontend/app/view/identity/styles/_accounts.scss`) but using `--info-color`
+([`frontend/app/view/identity/styles/_accounts.scss`](../../frontend/app/view/identity/styles/_accounts.scss)) but using `--info-color`
 instead of `--warning-color`, since this is informational, not a warning. A
 🔒 icon leads the text, matching the plain-unicode-icon convention already
 used by `.agent-disconnected-banner`/`.identity-delete-notice`
-(`frontend/app/statusbar/HostPopover.tsx`, `frontend/app/statusbar/StatusBar.scss`).
+([`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx), [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss)).
 Copy unchanged.
 
 **Login-relay page:** the appended-sentence approach is replaced with a
@@ -224,7 +224,7 @@ unchanged.
 ## 6. 2026-09-21 follow-up: parallel Linux notice (status bar panel only)
 
 Scope: exactly the surface the user reported the issue on — the status bar
-panel's "MuxBus Cloud" row (`frontend/app/statusbar/HostPopover.tsx`). The
+panel's "MuxBus Cloud" row ([`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx)). The
 sign-in completion page (§2.2) and the two other
 `MuxBusController` surfaces flagged in §4 (Identity tab's
 `MuxBusConnectSection`, Armory Accounts gallery tile) are **not** touched by
@@ -233,7 +233,7 @@ because the macOS notice's sibling was added.
 
 Added a second `<Show>` block immediately after the existing macOS one, same
 `.status-bar-popover-info-notice` styling, gated on the pre-existing
-`isLinux()` helper (`frontend/util/platformutil.ts` — already existed as a
+`isLinux()` helper ([`frontend/util/platformutil.ts`](../../frontend/util/platformutil.ts) — already existed as a
 sibling to `isMacOS()`, just unused in this file before now):
 
 ```tsx

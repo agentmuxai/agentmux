@@ -63,8 +63,8 @@ copy it.
 
 | Piece | Where | Use it for |
 |---|---|---|
-| `writeText` | `frontend/util/clipboard.ts:10` → IPC `write_clipboard` (`agentmux-cef/src/commands/clipboard.rs:15`) | The clipboard write. `navigator.clipboard` is blocked in CEF; #2535 fixed this path |
-| `<CopyButton>` | `frontend/app/element/copybutton.tsx:15` | Icon button with copied / failed states. Used by `blockframe.tsx:943`, `markdown-codeblock.tsx:65` |
+| `writeText` | [`frontend/util/clipboard.ts:10`](../../frontend/util/clipboard.ts#L10) → IPC `write_clipboard` (`agentmux-cef/src/commands/clipboard.rs:15`) | The clipboard write. `navigator.clipboard` is blocked in CEF; #2535 fixed this path |
+| `<CopyButton>` | [`frontend/app/element/copybutton.tsx:15`](../../frontend/app/element/copybutton.tsx#L15) | Icon button with copied / failed states. Used by `blockframe.tsx:943`, `markdown-codeblock.tsx:65` |
 | `CopyableErrorMessage` | `view/accounts/AgentMuxConnectPanel.tsx:165` (file-private) | The shape wanted for inline error text. Export it and generalize it |
 | Copy on highlight | `block/BlockErrorBoundary.tsx:160-181` | Its fallback order: `execCommand` first, then IPC, for surfaces whose bridge may be down |
 | Install page "Copy path" | `agentmux-cef/src/commands/window/creation.rs:~220`, test at :1105-1118 | The rule for CEF `data:` pages: wire the handler with `addEventListener` in a `<script>`, never an inline `onclick` |
@@ -92,7 +92,7 @@ Details:
 - Lines with nothing to say are omitted.
 - `Details` keeps the original line breaks.
 - The builder is one function, `formatErrorReport(fields)` in
-  `frontend/app/errors/error-report.ts`, with a unit test per surface type.
+  [`frontend/app/errors/error-report.ts`](../../frontend/app/errors/error-report.ts), with a unit test per surface type.
   Surfaces pass fields; they never format the text themselves.
 
 ### 4.2 One component: `<CopyErrorButton>`
@@ -176,7 +176,7 @@ The continuation packet's redaction (`agentmux-srv/src/backend/continuity.rs`,
 - PEM private keys.
 
 That isn't enough here, because this copies raw stderr and request details
-(Codex P1 on #3689). `frontend/app/errors/redact.ts` covers that set plus
+(Codex P1 on #3689). [`frontend/app/errors/redact.ts`](../../frontend/app/errors/redact.ts) covers that set plus
 structured forms. Each is replaced by its label and `[redacted]`:
 - `Authorization:` / `Proxy-Authorization:` header values, any scheme
   (`Bearer`, `Basic`, `Token`, …);
@@ -200,7 +200,7 @@ and one that must *not* redact (an ordinary word like `tokenizer`).
   userinfo is the likeliest leak.
 - **Frontend:** `redact.ts`, used by `formatErrorReport` and by every copy
   action that puts error or log text on the clipboard (below).
-- **One set of test vectors,** `docs/specs/fixtures/redaction-vectors.json`,
+- **One set of test vectors,** [`docs/specs/fixtures/redaction-vectors.json`](fixtures/redaction-vectors.json),
   run by both the Rust and TypeScript tests, so the two can't drift apart. This is still shape-based: a credential in an unrecognized form
 gets through. That's why G5 says "recognized".
 

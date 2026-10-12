@@ -27,7 +27,7 @@ code.**
 
 Tracing the actual call graph: `requestTearOff`'s `skipScMove`
 parameter has exactly one call site, `createTearOffTabAtRelease`
-(`frontend/app/tab/tab-tearoff-rpc.ts`), which always passes
+([`frontend/app/tab/tab-tearoff-rpc.ts`](../../frontend/app/tab/tab-tearoff-rpc.ts)), which always passes
 `skipScMove: true`. The `else` branch that calls
 `tearOffSCMoveHandshake` — and everything downstream of it
 (`start_tear_off_tracking`, `HookMode::TearOff`, the

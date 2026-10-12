@@ -25,7 +25,7 @@ So "drag a tab into another window's header" today means: **tear off into a temp
 
 ### 2.1 The tear-off state machine (Windows, shipped)
 
-Phases per `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md` (whose "Phases 2-7 not started" header is stale — Phases 2/4/5/6 are in code):
+Phases per [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md) (whose "Phases 2-7 not started" header is stale — Phases 2/4/5/6 are in code):
 
 - **Trigger** (`tabbar.tsx:196-310`): pragmatic-dnd monitor `onDrag`, latched by `tearOffFired`, fires `requestTearOff` when the cursor passes `TEAR_PAST_PX` below the strip.
 - **Host hook** (`tear_off_hook.rs`): installed by `tear_off_sc_move_handshake` (`drag.rs:634-643`) *before* the SC_MOVE post. `WH_MOUSE_LL` + `WH_KEYBOARD_LL` on a dedicated thread. Per mouse-move: `WindowFromPoint` → `GetAncestor(GA_ROOT)` → match against the host browser registry (`candidate_label_under_cursor_locked`, `tear_off_hook.rs:521-556`) → emit `tearoff:hover-changed`/`hover-cleared` to the right window via `emit_event_to_window` (`events.rs:84-105`). On `WM_LBUTTONUP`: `tearoff:merge` (over another window), `tearoff:cancel-back` (over source strip, or ESC), or `tearoff:standalone` (over nothing).
@@ -127,9 +127,9 @@ New branch alongside the `tearoff:merge` handler in `tabbar.tsx`, ~90% shared co
 |---|---|
 | `agentmux-cef/src/commands/tear_off_hook.rs` | New `start_tab_drag_tracking` entry (no dragged/dest window); `handle_button_up` branch emitting `tabdrag:merge-direct`; teardown-on-handover to `start_tear_off_tracking`; fix the stale `tearoff:finalize` header comment |
 | `agentmux-cef/src/commands/drag.rs` (or new command) | IPC command pair `start_tab_drag_tracking` / `stop_tab_drag_tracking` exposed to the frontend |
-| `frontend/app/tab/droppable-tab.tsx` | Tab-drag start/end: invoke start/stop tracking IPC |
-| `frontend/app/tab/tabbar.tsx` | `tabdrag:merge-direct` handler (shared core with `tearoff:merge`); `tabdrag:merged` source-side cleanup handler; single-tab → `RestoreTornOffTab` routing |
-| `frontend/app/tab/tabbar-dnd.ts` | Extract shared insertion-point→index conversion used by both merge handlers |
+| [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) | Tab-drag start/end: invoke start/stop tracking IPC |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | `tabdrag:merge-direct` handler (shared core with `tearoff:merge`); `tabdrag:merged` source-side cleanup handler; single-tab → `RestoreTornOffTab` routing |
+| [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts) | Extract shared insertion-point→index conversion used by both merge handlers |
 | `frontend/app/drag/DragOverlay.tsx` | darwin/linux interim: strip hit-test + `insertIndex` for the tab branch |
 | `agentmux-srv` | **No changes** (option (a) in §4.3) |
 
@@ -158,15 +158,15 @@ New branch alongside the `tearoff:merge` handler in `tabbar.tsx`, ~90% shared co
 
 ## 8. References
 
-- `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md` — master tear-off spec (phase model; header stale re: shipped phases).
-- `docs/specs/SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md` — why the window doesn't follow the cursor mid-drag (spec-only).
-- `docs/specs/SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md` — `TEAR_PAST_PX`, anchor math.
-- `docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` — warm-pool window creation.
+- [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md) — master tear-off spec (phase model; header stale re: shipped phases).
+- [`docs/specs/SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md`](SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md) — why the window doesn't follow the cursor mid-drag (spec-only).
+- [`docs/specs/SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md`](SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md) — `TEAR_PAST_PX`, anchor math.
+- [`docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`](SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md) — warm-pool window creation.
 - `agentmux-cef/src/commands/tear_off_hook.rs` — the WH_MOUSE_LL hook this spec extends.
 - `agentmux-srv/src/sagas/restore_torn_off_tab.rs`, `agentmux-srv/src/reducer/tab.rs` (`handle_move_tab`) — the move machinery reused as-is.
-- `frontend/app/tab/tabbar.tsx:437-679` — the Phase-4 event handlers the new events slot into.
+- [`frontend/app/tab/tabbar.tsx:437-679`](../../frontend/app/tab/tabbar.tsx#L437-L679) — the Phase-4 event handlers the new events slot into.
 - `specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` — the in-window sibling feature (pane→tab); its §7 payload-clearing rules also apply to any new drop consumption added here.
-- `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` — the quit/drain lifecycle this spec's window-close path now runs through (§9).
+- [`docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md) — the quit/drain lifecycle this spec's window-close path now runs through (§9).
 
 ---
 

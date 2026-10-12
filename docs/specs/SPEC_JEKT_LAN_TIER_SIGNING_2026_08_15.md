@@ -15,7 +15,7 @@ still cannot rotate.
 and general agent-to-agent WAN traffic"), scoped to the LAN half only per the
 issue's own suggested split — general agent-to-agent WAN signing is a separate
 future item blocked on the account-scoped Cognito M2M prerequisite.
-**Builds on:** `docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`
+**Builds on:** [`docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md)
 (host-tier HMAC — the pattern this mirrors, asymmetrically),
 `SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md` (Ed25519 verification —
 the pattern this mirrors, per-agent instead of one pinned service key), and

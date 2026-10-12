@@ -6,7 +6,7 @@
 
 > **2026-08-07 audit note:** Implemented — `README.md` directly cites and
 > implements this spec by name. Status field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Scope:** Top-of-README banner + Microsoft Store Partner Center listing copy
 
 ---
@@ -191,7 +191,7 @@ any other locales we publish):
 
 ## Surface 3 — `AppxManifest.xml.template` (consistency check)
 
-`packaging/msix/AppxManifest.xml.template` contains the `<Description>` element
+[`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template) contains the `<Description>` element
 that Microsoft Store falls back to if the Partner Center listing field is
 empty. Update it so the two surfaces cannot drift apart:
 
@@ -204,7 +204,7 @@ that fallback to still carry the warning.
 
 ### Acceptance
 
-- Re-running `packaging/msix/generate-assets.ps1` (or whatever step renders
+- Re-running [`packaging/msix/generate-assets.ps1`](../../packaging/msix/generate-assets.ps1) (or whatever step renders
   the manifest from the template) produces a manifest whose `<Description>`
   starts with the alpha warning.
 

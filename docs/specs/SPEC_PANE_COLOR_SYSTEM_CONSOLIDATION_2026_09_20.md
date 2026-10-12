@@ -8,11 +8,11 @@ window tab's color from its panes is not pursued (§2.3).
 **Trigger:** direct user request, same session as
 `SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md` (that spec's decommission
 work surfaced most of the inventory this one builds on)
-**Related:** `docs/specs/SPEC_AGENT_COLOR_2026_08_08.md`,
-`docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`,
-`docs/specs/SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md`,
-`docs/analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md`,
-`docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md` (Revision 3)
+**Related:** [`docs/specs/SPEC_AGENT_COLOR_2026_08_08.md`](SPEC_AGENT_COLOR_2026_08_08.md),
+[`docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`](SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md),
+[`docs/specs/SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md),
+[`docs/analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md`](../analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md),
+[`docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) (Revision 3)
 
 ---
 
@@ -64,10 +64,10 @@ is a different thing, the color of the *workspace tab*, not of any pane.
 ## 3. Remove the dead `bg:*` border tier (#3704)
 
 `bg:activebordercolor` / `bg:bordercolor` (inventory #4) are read by
-`computeFocusRingBorderColor` (`frontend/app/block/blockframe.tsx`) as the
+`computeFocusRingBorderColor` ([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)) as the
 highest-priority tier for the focused and unfocused border, and declared in
-`frontend/types/srv-types.d.ts`. Re-verified 2026-09-24 across the whole
-repo (frontend, `agentmux-srv`, `agentmux-common`, `schema/`, all JSON):
+[`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts). Re-verified 2026-09-24 across the whole
+repo (frontend, `agentmux-srv`, `agentmux-common`, [`schema/`](../../schema), all JSON):
 **no writer exists.** They are a leftover of the Wave-era tab *background
 presets* (`bg@…` presets that set `bg`, `bg:opacity`, `bg:activebordercolor`
 on a tab). AgentMux no longer applies any `bg@` preset to a tab, and nothing
@@ -98,7 +98,7 @@ function).
 - A tab that somehow still carries one of these keys just stops overriding
   its panes' borders. Nothing else reads them.
 
-**Tests:** `frontend/app/block/focus-ring-color.test.ts`, unit cases for
+**Tests:** [`frontend/app/block/focus-ring-color.test.ts`](../../frontend/app/block/focus-ring-color.test.ts), unit cases for
 `computeFocusRingBorderColor`:
 - focused: hue, then activebordercolor, then undefined; and it equals
   `computeBlockActiveBorderColor` (one rule for ring and pill)

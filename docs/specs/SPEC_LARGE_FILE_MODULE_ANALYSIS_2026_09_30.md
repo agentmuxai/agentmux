@@ -49,15 +49,15 @@ Ordered by benefit ÷ risk. Size: S ≈ under a day, M ≈ 1–2 days, L ≈ mul
 | §4 inline tests | Moved to their own files: `app_api/mod.rs` 4,985 → 2,292, `reactive.rs` 3,839 → 2,598, `native_memory_handlers.rs` 3,339 → 1,674 lines; test counts identical before and after | #4054, #4056 |
 | §4 Rust splits | `bootstrap.rs` 2,440 → `bootstrap/` (9 files, `mod.rs` 58); `server/mod.rs` 3,327 → 110 (state, routes, auth, `http_*` families); `app_api/mod.rs` 2,292 → 439 (each `*_impl` in the submodule that registers it); `agentmux-mcp/src/main.rs` 4,809 → 346 (helpers and tests out, then `call_tool`'s 71 arms into `tools/<family>.rs`, 14 families, with a test that every advertised tool has exactly one handler). Test counts identical before and after each move. **Left:** §4.2 (b), one `ToolDef` table per family, which changes some error wording | #4061, #4068, #4066, #4070, this PR |
 
-Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an OSC sequence with a space (or an ST terminator) through into the shell drawer (#4045); the progress ring's flicker and orphaned background-task rows (retro in `docs/retro/`, #4035, #4040).
+Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an OSC sequence with a space (or an ST terminator) through into the shell drawer (#4045); the progress ring's flicker and orphaned background-task rows (retro in [`docs/retro/`](../retro), #4035, #4040).
 
 ---
 
 ## 1. Method
 
 - **Inventory.** `git ls-files` filtered to `*.rs *.ts *.tsx *.scss *.mjs *.js *.cjs *.sh *.ps1`, then `wc -l`.
-- **Excluded as generated:** every file whose first five lines carry a generator marker (`This file was generated`, `DO NOT EDIT`, `@generated`, `auto-generated`). That matched the 374 ts-rs bindings in `frontend/types/rpc/` and `agentmux-launcher/src/splash_font.rs`, and nothing else. `*.d.ts` were excluded too.
-- **Excluded as not hand-written source:** `node_modules/`, `target/`, `dist/`, `build/`, `test/`, fixtures, snapshots, lockfiles.
+- **Excluded as generated:** every file whose first five lines carry a generator marker (`This file was generated`, `DO NOT EDIT`, `@generated`, `auto-generated`). That matched the 374 ts-rs bindings in [`frontend/types/rpc/`](../../frontend/types/rpc) and `agentmux-launcher/src/splash_font.rs`, and nothing else. `*.d.ts` were excluded too.
+- **Excluded as not hand-written source:** `node_modules/`, `target/`, `dist/`, [`build/`](../../build), [`test/`](../../test), fixtures, snapshots, lockfiles.
 - **Excluded as tests:** `*.test.*`, `*.spec.*`, `tests.rs`, `*_tests.rs`, any `tests/` directory. **Inline Rust test modules are subtracted**, not excluded: many large `.rs` files are a third to two-thirds `#[cfg(test)] mod … { }` (e.g. `app_api/mod.rs` is 4,985 lines of which 2,726 are tests). The "prod" column counts lines outside those modules, measured by matching each `#[cfg(test)]`-attributed top-level `mod x {` to its closing `}` at column 0.
 - **Churn:** commits touching the file since 2026-07-31 (60 days), `git log --since=2026-07-31 --name-only`. `main` merged 1,492 commits in that window. Files created by a rename in the window (e.g. `persistent/spawn.rs`, 2026-09-22) are undercounted, because `--follow` was not used.
 - **Priority signal:** prod lines × churn.
@@ -69,7 +69,7 @@ Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an O
 
 | # | Path | Total | Prod | Churn (60d) | Lang | Responsible for |
 |---|---|---:|---:|---:|---|---|
-| 1 | `frontend/app/view/agent/agent-view.tsx` | 3,001 | 3,001 | **110** | TSX | Agent pane content + chrome model: picker cross-fade, pane registration, turn reconciliation, auth/bind, live feed, working indicator, the whole JSX tree |
+| 1 | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 3,001 | 3,001 | **110** | TSX | Agent pane content + chrome model: picker cross-fade, pane registration, turn reconciliation, auth/bind, live feed, working indicator, the whole JSX tree |
 | 2 | `agentmux-srv/src/server/mod.rs` | 3,327 | 3,327 | **81** | Rust | `AppState`, the HTTP router (133 `.route(` calls), ~50 inline HTTP handlers, auth middleware |
 | 3 | `agentmux-mcp/src/main.rs` | 4,809 | 3,916 | 47 | Rust | MCP stdio server: `tools/list` and `call_tool` dispatch + HTTP call for all 75 tools (schemas live in `tool_schemas.rs`) |
 | 4 | `agentmux-srv/src/bootstrap.rs` | 2,440 | 2,402 | 61 | Rust | srv startup: logging, stores + migrations, background subsystems, listeners, delivery hooks |
@@ -77,27 +77,27 @@ Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an O
 | 6 | `agentmux-srv/src/backend/storage/agents.rs` | 3,829 | 3,158 | 38 | Rust | `AgentDefinition` / `AgentInstance` storage, slugs, name keys, purge |
 | 7 | `agentmux-srv/src/server/reactive.rs` | 3,839 | 2,565 | 38 | Rust | Jekt delivery: four signature verifiers, tiers, `deliver`, reactive HTTP handlers |
 | 8 | `agentmux-srv/src/backend/storage/migrations.rs` | 3,022 | 2,381 | 40 | Rust | SQL schema DDL for five databases (`run_object_schema` alone is 558–1396) |
-| 9 | `frontend/app/view/agent/styles/_document-nodes.scss` | 2,635 | 2,635 | 32 | SCSS | Every transcript node's styling |
+| 9 | [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | 2,635 | 2,635 | 32 | SCSS | Every transcript node's styling |
 | 10 | `agentmux-srv/src/server/websocket.rs` | 2,271 | 1,875 | 41 | Rust | WS envelope, event forwarding, handler registration |
 | 11 | `agentmux-srv/src/backend/reactive/handler.rs` | 2,368 | 2,324 | 31 | Rust | `ReactiveHandler` — agent registry, injection, supervisor nudges |
 | 12 | `agentmux-srv/src/backend/blockcontroller/persistent/spawn.rs` | 2,143 | 2,143 | 30 | Rust | `spawn_process` (Phase 3 of `SPEC_MONOLITH_MODULE_SPLITS`, still open) |
 | 13 | `agentmux-srv/src/server/native_memory_handlers.rs` | 3,339 | 1,668 | 30 | Rust | Native memory RPCs |
 | 14 | `agentmux-srv/src/backend/blockcontroller/shell/lifecycle.rs` | 2,831 | 2,257 | 22 | Rust | `impl Controller for ShellController` (kept whole deliberately) |
 | 15 | `agentmux-srv/src/server/app_api/agent_open.rs` | 1,750 | 1,210 | 41 | Rust | `agent.open` |
-| 16 | `frontend/app/view/agent/agent-model.ts` | 960 | 960 | 46 | TS | `AgentViewModel` |
+| 16 | [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | 960 | 960 | 46 | TS | `AgentViewModel` |
 | 17 | `agentmux-srv/src/server/agent_handlers/input.rs` | 2,129 | 1,461 | 30 | Rust | Agent input RPCs |
-| 18 | `frontend/app/view/agent/components/AgentComposerStrip.tsx` | 1,525 | 1,525 | 26 | TSX | Composer status strip |
-| 19 | `frontend/app/block/blockframe.tsx` | 1,400 | 1,400 | 28 | TSX | Block frame / header |
-| 20 | `frontend/app/view/swarm/swarm-model.ts` | 2,085 | 2,085 | 17 | TS | Swarm view model |
+| 18 | [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | 1,525 | 1,525 | 26 | TSX | Composer status strip |
+| 19 | [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | 1,400 | 1,400 | 28 | TSX | Block frame / header |
+| 20 | [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) | 2,085 | 2,085 | 17 | TS | Swarm view model |
 | 21 | `agentmux-srv/src/muxbus/cloud_subscriber.rs` | 2,012 | 1,511 | 23 | Rust | Cloud push subscription |
 | 22 | `agentmux-srv/src/server/app_api/session.rs` | 2,302 | 1,699 | 20 | Rust | Session App API (resume preflight etc.) |
 | 23 | `agentmux-srv/src/backend/blockcontroller/persistent/mod.rs` | 1,674 | 1,674 | 19 | Rust | Persistent controller core |
-| 24 | `frontend/app-init.ts` | 1,295 | 1,295 | 24 | TS | Frontend bootstrap |
+| 24 | [`frontend/app-init.ts`](../../frontend/app-init.ts) | 1,295 | 1,295 | 24 | TS | Frontend bootstrap |
 | 25 | `agentmux-srv/src/backend/blockcontroller/mod.rs` | 1,545 | 1,039 | 29 | Rust | Block controller registry |
-| 26 | `frontend/app/view/agent/components/AgentPicker.tsx` | 1,127 | 1,127 | 25 | TSX | My Agents picker |
+| 26 | [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) | 1,127 | 1,127 | 25 | TSX | My Agents picker |
 | 27 | `agentmux-cef/src/state/mod.rs` | 1,624 | 1,624 | 17 | Rust | CEF host shared state |
-| 28 | `frontend/app/view/agent/components/AgentFooter.tsx` | 1,309 | 1,309 | 21 | TSX | Composer |
-| 29 | `frontend/app/view/swarm/swarm-view.tsx` | 1,210 | 1,210 | 22 | TSX | Swarm view |
+| 28 | [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | 1,309 | 1,309 | 21 | TSX | Composer |
+| 29 | [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) | 1,210 | 1,210 | 22 | TSX | Swarm view |
 | 30 | `agentmux-srv/src/backend/rpc_types/block.rs` | 1,207 | 899 | 29 | Rust | block/pane RPC types |
 
 Observations:
@@ -122,7 +122,7 @@ Reasons to split, in order of weight:
 
 What splitting will *not* do: shrink the prose. 1,279 of 3,001 lines (43 %) are comment lines, much of it the rationale for past P1s. That text is valuable and should move *with* the code it explains, not be trimmed.
 
-What stops it regrowing: the 04-13 spec's own status line — seven extractions landed "and more than that went back in". Add a size ratchet test next to the existing grep-shaped guards (§3.5 step 0): fail if `agent-view.tsx` grows past its current line count, and lower the number with each extraction. The docs ratchet (`scripts/check-docs-lifecycle.mjs`) is the local precedent for a ratchet that only tightens.
+What stops it regrowing: the 04-13 spec's own status line — seven extractions landed "and more than that went back in". Add a size ratchet test next to the existing grep-shaped guards (§3.5 step 0): fail if `agent-view.tsx` grows past its current line count, and lower the number with each extraction. The docs ratchet ([`scripts/check-docs-lifecycle.mjs`](../../scripts/check-docs-lifecycle.mjs)) is the local precedent for a ratchet that only tightens.
 
 ### 3.2 Section map
 
@@ -169,7 +169,7 @@ What stops it regrowing: the 04-13 spec's own status line — seven extractions 
 
 - **Forward references bridged by mutable `let`.** `onReadyFn` (declared 821, assigned 2247), `historyReadyFn` (836, assigned in JSX 2650), `scrollToBottomFn` (1680, JSX 2646), `followingBottom` (977, JSX 2642), `composerIsEmptyFn` (1611, JSX 2935). `commands` is used inside `trackTurnJustEnded` (1233) and the focus poll (1577) before its `const` at 1803 — safe only because those run from async callbacks. `retryLastTurn` and `declareAuthHealthy` are likewise called before their declarations. Any extracted hook must take these as accessors or callbacks, never as values captured at call time.
 - **`wasTurnActive` is shared mutable state read and written from two directions.** `trackTurnJustEnded` writes it (1222); `useAgentCommands` reads it through `isBackendTurnActive` / `isBackendTurnConfirmedIdle` (1832, 1846). The ordering comment at 1212-1221 exists because getting that read/write order wrong was a Codex P1 on #2338. It needs one owner object that both sides receive.
-- **Two grep-shaped guard tests read this file by name.** `agent-view-dispatch-via-pane-model.test.ts:27` (no raw `dispatch*` calls; A9) and `frontend/app/store/agent-pane-view.test.ts:113` (no writes to reducer-owned signals; A6). Code moved into a new hook is no longer scanned. **Widen both to scan the new modules before the first extraction**, or each move quietly weakens the guard.
+- **Two grep-shaped guard tests read this file by name.** `agent-view-dispatch-via-pane-model.test.ts:27` (no raw `dispatch*` calls; A9) and [`frontend/app/store/agent-pane-view.test.ts:113`](../../frontend/app/store/agent-pane-view.test.ts#L113) (no writes to reducer-owned signals; A6). Code moved into a new hook is no longer scanned. **Widen both to scan the new modules before the first extraction**, or each move quietly weakens the guard.
 - **DOM placement is load-bearing.** The stash drawer must be a direct flex child of `.agent-view` (2471-2487); the loading cover and shell drawer must stay outside `.agent-view-zoomed` (2439-2447, 2948-2953). Extracted components must render their root element directly, with no wrapper `div`.
 - **Hook order inside the body is semantic.** Registration (648) must precede any hook whose `onMount` dispatches (600-605). `beginAgentOpenOnMount` must precede `useHistoryPagination` (866-868).
 
@@ -282,24 +282,24 @@ These come first because the drift is not hypothetical.
 | Location | Rule | Used for |
 |---|---|---|
 | `agentmux-srv/src/backend/storage/agents.rs:231-254` `derive_slug` | lowercase, ASCII alnum/`-`/`_`, else `-`, collapse dashes, cap 64, `"agent"` fallback | definition slug |
-| `frontend/app/view/agent/agent-config-builder.ts:173-180` `deriveSlug` | TS mirror of the above ("keep the two in sync", `:168-170`) | SKILL.md preview paths |
+| [`frontend/app/view/agent/agent-config-builder.ts:173-180`](../../frontend/app/view/agent/agent-config-builder.ts#L173-L180) `deriveSlug` | TS mirror of the above ("keep the two in sync", `:168-170`) | SKILL.md preview paths |
 | `agents.rs:218-225` `default_agent_working_dir` | lowercase, **Unicode** alnum/`-`/`_`, else `-`, no collapse | default work dir |
 | `agentmux-srv/src/server/app_api/agent_open.rs:534-536` | inline copy of the Unicode rule (`agent_slug`) | `agent.open` |
 | `agents.rs:2858-2863` `agent_open_fallback_id` | Unicode rule again | signing-key names |
-| `frontend/app/view/agent/startup/buildStartupPayload.ts:193` | lowercase, `/[^a-z0-9-_]/g` → `-`, **no collapse** | `AGENT_SLUG` template var when the agent has no slug |
+| [`frontend/app/view/agent/startup/buildStartupPayload.ts:193`](../../frontend/app/view/agent/startup/buildStartupPayload.ts#L193) | lowercase, `/[^a-z0-9-_]/g` → `-`, **no collapse** | `AGENT_SLUG` template var when the agent has no slug |
 | `agents.rs:2872-2882` `frontend_fallback_id` | Rust re-implementation of that uncollapsed regex, including JS's UTF-16 code-unit behaviour. Its comment (`:2866`) cites `agent-config-builder.ts`, whose `deriveSlug` *does* collapse; the only uncollapsed copy in the frontend today is `buildStartupPayload.ts:193`. Which one it means is unclear | signing-key names |
-| `frontend/app/view/agent/defaults/instance-slug.ts:24-30` `slugifyInstanceName` | lowercase, whitespace → `-`, **strips** (not replaces) the rest | instance slug |
+| [`frontend/app/view/agent/defaults/instance-slug.ts:24-30`](../../frontend/app/view/agent/defaults/instance-slug.ts#L24-L30) `slugifyInstanceName` | lowercase, whitespace → `-`, **strips** (not replaces) the rest | instance slug |
 | `agentmux-srv/src/backend/reactive/registry.rs:177` and `:335` | Unicode rule, else **`_`** (two copies in one file) | registry file names |
 
 History: PR #2901 — work dir derived two ways, "Personal Bundle broke for the common case" (`agent_open.rs:537-541`); #3633 — two Codex P1s on `frontend_fallback_id` / `key_names_of` (`agents.rs:2845-2847`, `:2869-2871`) because the key purge has to reproduce every rule ever used to name a key. A guard test already pins one pair (`native_memory_handlers.rs:3166-3176`). **Proposal:** not one rule — the rules differ on purpose (a path component and a display slug are different things) — but one named function per rule in one place (`agentmux-common` for the Rust ones), each existing site calling it, and one table-driven test that runs every function over the same inputs (`"Zed Bot"`, `"Ä"`, `"Agent 🚀"`, `"--x--"`) so the differences are stated rather than discovered. `registry.rs:177` and `:335` should become one call.
 
-**#3 — Persistent-vs-container controller rule.** `1bee61f6b` (#2867): "the same rule lives in two places and only srv's copy was right" — container agents had never launched. That fix extracted `frontend/app/view/agent/launch-args.ts`, used by `launchAgentDefinition` (`agent-model.ts:516`). Copies remain: the bare-provider `launchAgent` still inlines the pre-fix check (`agent-model.ts:313-316`, `:335`), and srv has it twice (`agent_open.rs:428-431` and `:523-526`). The `launchAgent` copy is harmless only if that path can never create a container agent — not verified here. **Home:** `launch-args.ts` on the TS side; one `fn controller_type_for(provider, agent_type)` in `agent_open.rs`.
+**#3 — Persistent-vs-container controller rule.** `1bee61f6b` (#2867): "the same rule lives in two places and only srv's copy was right" — container agents had never launched. That fix extracted [`frontend/app/view/agent/launch-args.ts`](../../frontend/app/view/agent/launch-args.ts), used by `launchAgentDefinition` (`agent-model.ts:516`). Copies remain: the bare-provider `launchAgent` still inlines the pre-fix check (`agent-model.ts:313-316`, `:335`), and srv has it twice (`agent_open.rs:428-431` and `:523-526`). The `launchAgent` copy is harmless only if that path can never create a container agent — not verified here. **Home:** `launch-args.ts` on the TS side; one `fn controller_type_for(provider, agent_type)` in `agent_open.rs`.
 
 **#4 — Claude launch args (live divergence).** `providers.rs:246-281` carries `--exclude-dynamic-system-prompt-sections` in both `launch_args` (`:265`) and `persistent_launch_args` (`:274`), added by `7f2f591f1` (#1964, 2026-07-04). The TS catalog's `launchArgs` (`catalog.ts:136`) and `persistentLaunchArgs` (`:150`) never got it, although `catalog.ts:145-146` says "Keep in sync with `static CLAUDE`". The persistent controller reads its argv from block meta `cmd:args` (e.g. `persistent/eager_resume.rs:87`); a pane launched from the UI writes that from the TS catalog (`agent-model.ts:346`, `:815` via `launch-args.ts:55-57`), while `agent.open` writes it from `providers.rs` (`agent_open.rs:528`). So the flag depends on how the pane was created. Not observed at runtime; inferred from those four sites. The only cross-language guard, `pin-consistency.test.ts`, compares `pinnedVersion` only. **Fix:** add the flag to the TS catalog and extend that test to compare `launchArgs`/`persistentLaunchArgs` against the Rust statics, the way it already reads Rust source for pins. Longer term the 09-06 audit's Phase 2 item 9 (backend owns the catalog, frontend receives it) removes the copy.
 
 **#5 — AgentMux root path in `agentmux-mcp` (live divergence).** `agentmux-mcp/src/window_capture.rs:25-43` "replicates [srv's] exact logic" — `AGENTMUX_DATA_HOME`, else `~/.agentmux`, else `/.agentmux`. The canonical resolver, `agentmux_common::data_paths::agentmux_root()` (`data_paths.rs:1019-1030`), also honours `AGENTMUX_HOME_OVERRIDE` first and errors instead of falling back to `/`. `402a1cc34` (#3372, "one resolver for the AgentMux root") removed exactly this behaviour from srv; the mcp copy was missed. `agentmux-mcp` already depends on `agentmux-common`. Other hand-built `~/.agentmux` paths that ignore both override variables, per the Rust sweep (not each re-read): `agentmux-launcher/src/logging.rs:16`, `agentmux-bashwrap/src/main.rs:112`, `agentmux-bashwrap/src/bash_wrap.rs:193`, `agentmux-cef/src/app/window_settings.rs:195-196`. **Fix:** call `agentmux_root()` at each.
 
-**#6 — Claude settings/skill builder, Rust and TS.** `agentmux-srv/src/backend/agent_config.rs` and `frontend/app/view/agent/agent-config-builder.ts` implement the same eight functions: `build_settings_with_hooks` :439 / `buildSettingsWithHooks` :326, `prepend_user_hook_array` :387 / `prependUserHookArray` :299, `expand_template` :648 / `expandTemplate` :158, `render_skill_md` :727 / `renderSkillMd` :204, `sanitize_trigger` :753 / `sanitizeTrigger` :221, `skill_name_slug` :769 / `skillNameSlug` :240, `unique_skill_slug` :796 / `uniqueSkillSlug` :261, `build_mcp_config` :212 / `buildMcpConfig` :462 (pairs from the Rust/TS sweep; spot-checked `deriveSlug`). History: `07846c989` (#2378) — Codex P1, the TS builder "still only injected" PreToolUse after Rust gained PreCompact; a UTF-16 vs byte truncation mismatch from #2322 is recorded at `agent_config.rs:691`. Guard: only `SESSION_START_HOOK_PARTS` is pinned across languages (`agent-config-builder.test.ts:326-330`). **Proposal:** decide which side owns config materialisation for UI launches (srv already does it for `agent.open`); until then, a shared JSON fixture of inputs → expected `settings.json`/`SKILL.md` read by both test suites, the pattern `docs/specs/fixtures/redaction-vectors.json` already uses for redaction.
+**#6 — Claude settings/skill builder, Rust and TS.** `agentmux-srv/src/backend/agent_config.rs` and [`frontend/app/view/agent/agent-config-builder.ts`](../../frontend/app/view/agent/agent-config-builder.ts) implement the same eight functions: `build_settings_with_hooks` :439 / `buildSettingsWithHooks` :326, `prepend_user_hook_array` :387 / `prependUserHookArray` :299, `expand_template` :648 / `expandTemplate` :158, `render_skill_md` :727 / `renderSkillMd` :204, `sanitize_trigger` :753 / `sanitizeTrigger` :221, `skill_name_slug` :769 / `skillNameSlug` :240, `unique_skill_slug` :796 / `uniqueSkillSlug` :261, `build_mcp_config` :212 / `buildMcpConfig` :462 (pairs from the Rust/TS sweep; spot-checked `deriveSlug`). History: `07846c989` (#2378) — Codex P1, the TS builder "still only injected" PreToolUse after Rust gained PreCompact; a UTF-16 vs byte truncation mismatch from #2322 is recorded at `agent_config.rs:691`. Guard: only `SESSION_START_HOOK_PARTS` is pinned across languages (`agent-config-builder.test.ts:326-330`). **Proposal:** decide which side owns config materialisation for UI launches (srv already does it for `agent.open`); until then, a shared JSON fixture of inputs → expected `settings.json`/`SKILL.md` read by both test suites, the pattern [`docs/specs/fixtures/redaction-vectors.json`](fixtures/redaction-vectors.json) already uses for redaction.
 
 **#7 — Two scans of every `objects.db`.** `agentmux-srv/src/registry/migrate.rs:385` `enumerate_sources` and `registry/def_migrate.rs:212` `collect_scan_dbs`, whose own doc comment says it must scan the same places. They differ: only `migrate.rs` tracks unreadable directories (`read_dir_tracking`, `incomplete`), and `def_migrate.rs:339` `is_missing_table` misses the `SqlInputError` shape that `migrate.rs:551` `is_missing_column_or_table` handles. `migrate.rs` already exports `enumerate_objects_dbs` (`:369`). **Home:** `migrate.rs`.
 
@@ -337,7 +337,7 @@ Counts are from grep over non-test code; the first four were re-counted for this
 | 9 | ANSI stripping, six implementations with different edge behaviour | TS: `agent-view.tsx:176`, `element/install/ansi.ts:19`; Rust: `bashwrap/src/bash_wrap.rs:1929`, `srv/backend/reactive/sanitize.rs:17`, `cef/commands/cli_login.rs` (~1073) (plus `ansiline.tsx:121`, which parses rather than strips) | 5–6 | one per language; they serve different inputs, so the gain is modest |
 | 10 | Secret keyword lists outside the shared redactor | `bundle_export.rs:117` `SECRET_NAMES` (already drifted once inside its own file, `02a9d7389` #2333), `cef/commands/platform.rs:103`, `reactive/sanitize.rs:166,177`, `cef/commands/cli_login.rs:987` (own `redact_secrets`) | 5 | `agentmux-common/src/redact.rs`, which already has a cross-language fixture |
 
-Also noted by the sweep and not re-verified: `X-AuthKey` as a string literal in ~140 places with no constant; `LOCAL_URL`/`AUTH_KEY` env reads duplicated between `agentmux-mcp/src/main.rs:72-88` and `agentmux-bashwrap/src/mps_client.rs:79-80`; layout-tree ops implemented in both `backend/layout/mod.rs` and `frontend/layout/lib/` with no shared fixtures; AskUserQuestion error strings matched in `useAgentQuestions.ts:64-70` against literals in `persistent/input.rs`.
+Also noted by the sweep and not re-verified: `X-AuthKey` as a string literal in ~140 places with no constant; `LOCAL_URL`/`AUTH_KEY` env reads duplicated between `agentmux-mcp/src/main.rs:72-88` and `agentmux-bashwrap/src/mps_client.rs:79-80`; layout-tree ops implemented in both `backend/layout/mod.rs` and [`frontend/layout/lib/`](../../frontend/layout/lib) with no shared fixtures; AskUserQuestion error strings matched in `useAgentQuestions.ts:64-70` against literals in `persistent/input.rs`.
 
 ### 5.4 SCSS
 
@@ -365,7 +365,7 @@ Also noted by the sweep and not re-verified: `X-AuthKey` as a string literal in 
 
 The lift created a home but nothing pointed new code at it. The nine self-computing copies: `agentmux-launcher/src/tray/linux.rs:33`, `tray/windows.rs:87`, `srv/backend/continuity_state.rs:207`, `backend/notify/router.rs:430`, `blockcontroller/persistent/segments.rs:28` (all five added 2026-09-24, after the lift), plus `muxbus/cloud_subscriber.rs:82`, `server/ui_handlers.rs:56`, `server/reactive.rs:316`, and `migrations/m0030_backfill_bundle_component_refs.rs:75` (added 2026-09-10, also after the lift, but deliberate — migrations freeze copies of live logic, per the policy in `agentmux-srv/src/migrations/mod.rs`). Dates are from `git log -S` on each definition.
 
-A gate in the style of `scripts/check-name-resolver-callers.sh` — fail on a new non-test `fn now_ms|now_secs|now_unix_secs` or `SystemTime::now().duration_since(UNIX_EPOCH)` outside `agentmux-common` and `src/migrations/` — turns the next copy into a CI error. Then migrate the existing eight, and let the 28 wrappers go whenever their files are next touched.
+A gate in the style of [`scripts/check-name-resolver-callers.sh`](../../scripts/check-name-resolver-callers.sh) — fail on a new non-test `fn now_ms|now_secs|now_unix_secs` or `SystemTime::now().duration_since(UNIX_EPOCH)` outside `agentmux-common` and `src/migrations/` — turns the next copy into a CI error. Then migrate the existing eight, and let the 28 wrappers go whenever their files are next touched.
 
 ---
 

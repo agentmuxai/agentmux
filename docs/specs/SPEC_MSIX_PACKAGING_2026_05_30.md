@@ -3,7 +3,7 @@
 **Date:** 2026-05-30 · **Author:** AgentX · **Target version:** 0.40.1 · **Status:** Draft (pre-implementation)
 
 > **Why this spec exists:** the only MSIX tooling in the org is **Tauri-era and non-functional** on
-> the current app — `agenty/msix-packaging` (`scripts/package-msix.ps1` + `src-tauri/AppxManifest.xml`,
+> the current app — `agenty/msix-packaging` ([`scripts/package-msix.ps1`](../../scripts/package-msix.ps1) + `src-tauri/AppxManifest.xml`,
 > v0.32.25) stages `src-tauri/`, `WebView2Loader.dll`, `agentmuxsrv-rs.exe`, `wsh.exe`, and the
 > `agentmuxai/agentmux-builder` repo only has a `tauri-build.yml`. None apply since the CEF rewrite
 > (no Tauri / WebView2 / wsh). `task package:msix` is a TODO stub. This spec defines MSIX packaging
@@ -21,11 +21,11 @@ a local-install validation path.
 
 | Fact | Verified value |
 |------|----------------|
-| Install image | `task package` portable: **root `agentmux.exe`** (the launcher) + **`runtime/`** = host `agentmux-0.40.1.exe`, `agentmux-srv-0.40.1-windows.x64.exe`, `libcef.dll`, `libEGL.dll`, `libGLESv2.dll`, `chrome_elf.dll`, `d3dcompiler_47.dll`, `*.pak`, `locales/`, `icudtl.dat`, `v8_context_snapshot.bin`, `frontend/`, `resources/`, `tools/` |
+| Install image | `task package` portable: **root `agentmux.exe`** (the launcher) + **`runtime/`** = host `agentmux-0.40.1.exe`, `agentmux-srv-0.40.1-windows.x64.exe`, `libcef.dll`, `libEGL.dll`, `libGLESv2.dll`, `chrome_elf.dll`, `d3dcompiler_47.dll`, `*.pak`, `locales/`, `icudtl.dat`, `v8_context_snapshot.bin`, [`frontend/`](../../frontend), `resources/`, [`tools/`](../../tools) |
 | Also in portable | `data/`, `agentmux-portable.marker`, `README.txt` — **must NOT be packaged** (see §4) |
 | Entry point | root **`agentmux.exe`** = the launcher (Job Object, single-instance named pipe, spawns host + srv from `runtime/`) |
 | Tooling | `makeappx.exe` + `signtool.exe` present at `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\` |
-| Icon sources | `assets/linux/icons/hicolor/{16,32,48,64,128,256,512}/apps/agentmux.png`, `agentmux-cef/resources/win/agentmux.ico`, `assets/agentmux-logo-brain-alternate.png` |
+| Icon sources | `assets/linux/icons/hicolor/{16,32,48,64,128,256,512}/apps/agentmux.png`, `agentmux-cef/resources/win/agentmux.ico`, [`assets/agentmux-logo-brain-alternate.png`](../../assets/agentmux-logo-brain-alternate.png) |
 | Current version | `0.40.1` → MSIX 4-part `0.40.1.0` |
 
 ## 3. Architecture note — why this is a FullTrust packaged desktop app
@@ -120,16 +120,16 @@ version → `0.40.1.0`, identity tokenized for the build script to patch.
 
 ## 6. Visual assets
 
-Generate the Store logo set from the 512×512 source (`assets/linux/icons/hicolor/512x512/apps/agentmux.png`):
+Generate the Store logo set from the 512×512 source ([`assets/linux/icons/hicolor/512x512/apps/agentmux.png`](../../assets/linux/icons/hicolor/512x512/apps/agentmux.png)):
 `StoreLogo.png` (50×50), `Square44x44Logo.png`, `Square71x71Logo.png`, `Square150x150Logo.png`,
 `Square310x310Logo.png`, `Wide310x150Logo.png` (logo centered on transparent/branded field).
-Commit the generated PNGs under `packaging/msix/assets/` so the build is reproducible without an
+Commit the generated PNGs under [`packaging/msix/assets/`](../../packaging/msix/assets) so the build is reproducible without an
 image toolchain on the build host. (Scale-variant `.scale-200` assets optional; single-scale is
 accepted by the Store.)
 
 ## 7. Build pipeline
 
-**`scripts/package-msix.ps1`** (rewrite of the stale script):
+**[`scripts/package-msix.ps1`](../../scripts/package-msix.ps1)** (rewrite of the stale script):
 - Params: `-PortableDir` (default: most recent `~/Desktop/agentmux-*-x64-portable/`, or build fresh
   via `task package` if absent), `-Name`, `-Publisher`, `-PublisherDisplayName`, `-OutputDir` (default `dist\msix`), `-Sign` (self-sign for local test).
 - Steps:
@@ -137,7 +137,7 @@ accepted by the Store.)
   2. Read version live from `package.json` → `X.Y.Z.0`.
   3. Stage portable into `dist\msix\staging\` per §4 exclusions.
   4. Copy `packaging/msix/assets/*` → `staging\Assets\`.
-  5. Render `packaging/msix/AppxManifest.xml.template` → `staging\AppxManifest.xml`, substituting Name/Publisher/Version/PublisherDisplayName.
+  5. Render [`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template) → `staging\AppxManifest.xml`, substituting Name/Publisher/Version/PublisherDisplayName.
   6. `makeappx pack /d staging /p dist\msix\AgentMux_<ver>_x64.msix /overwrite`.
   7. If `-Sign`: create/trust a self-signed cert whose subject == `Publisher`, `signtool sign /fd SHA256`.
 - Wire **`task package:msix`** → invoke this script (replace the TODO echo).
@@ -205,9 +205,9 @@ Other (non-blocking) confirmations:
 ## 11. Implementation plan (one PR)
 
 Branch `agentx/msix-packaging`:
-- `packaging/msix/AppxManifest.xml.template`
+- [`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template)
 - `packaging/msix/assets/*.png` (generated logos)
-- `scripts/package-msix.ps1` (rewritten)
+- [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1) (rewritten)
 - `Taskfile.yml`: wire `task package:msix`
 - this spec
 - changeset (`patch`)

@@ -3,7 +3,7 @@
 **Date:** 2026-06-17
 **Status:** Draft
 **Author:** naki
-**Components:** `frontend/app/view/editor/`, `frontend/app/store/keymodel.ts`, `frontend/app/element/search.tsx`, `agentmux-srv` (new search endpoint)
+**Components:** [`frontend/app/view/editor/`](../../frontend/app/view/editor), [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts), [`frontend/app/element/search.tsx`](../../frontend/app/element/search.tsx), `agentmux-srv` (new search endpoint)
 
 ---
 
@@ -15,7 +15,7 @@ It's not a missing engine — it's a routing collision.
   ```ts
   globalKeyMap.set("Cmd:f", activateSearch);
   ```
-  `activateSearch` (keymodel.ts:604) opens the focused block's `viewModel.searchAtoms` overlay, rendered by `frontend/app/element/search.tsx`. The **terminal** block implements this (`termViewModel.ts`), so Ctrl+F works there.
+  `activateSearch` (keymodel.ts:604) opens the focused block's `viewModel.searchAtoms` overlay, rendered by [`frontend/app/element/search.tsx`](../../frontend/app/element/search.tsx). The **terminal** block implements this (`termViewModel.ts`), so Ctrl+F works there.
 - **The editor never adopted it.** `EditorViewModel` exposes `viewType = "editor"` but **no `searchAtoms`** (and no `keyDownHandler`), so `activateSearch` returns `false` for an editor pane → nothing opens.
 - **CodeMirror's own search is present but unreached.** `editor-view.tsx` adds `search()` from `@codemirror/search`, and `basicSetup` bundles `searchKeymap` (Mod-f → `openSearchPanel`). But the document-level `Cmd:f` binding claims the keystroke for the universal path, so CM's panel doesn't open for the editor.
 
@@ -97,7 +97,7 @@ When we want to search files *not* open, add a "workspace files" provider backed
 
 - **Title-bar search affordance** (centered), opened by **Ctrl/Cmd+Shift+F** (mirror VS Code) or click. A dropdown/overlay renders grouped results beneath it.
 - Filters (case / whole-word / regex) as toggles; provider-scoping chips ("Editors", "Agents", …) so you can narrow.
-- Reuse `frontend/app/element/search.tsx` chrome where it fits.
+- Reuse [`frontend/app/element/search.tsx`](../../frontend/app/element/search.tsx) chrome where it fits.
 
 **Effort: ~2–3 days** for the title-bar UI + provider registry + the two in-memory providers (editors, agents). The ripgrep file provider is a later, additive ~2–3 days.
 
@@ -136,9 +136,9 @@ Phase 1 resolves the reported Ctrl+F bug; phases 2–4 deliver the title-bar "Fi
 
 | What | Location |
 |---|---|
-| Global `Cmd:f` → universal search | `frontend/app/store/keymodel.ts:626`, `activateSearch` @604 |
-| Universal search overlay | `frontend/app/element/search.tsx`; impl example `frontend/app/view/term/termViewModel.ts` |
-| Per-view key dispatch hook | `frontend/app/store/keymodel.ts:412` (`viewModel.keyDownHandler`) |
-| Editor CM setup (`search()`, `basicSetup`) | `frontend/app/view/editor/editor-view.tsx:315-317` |
-| Editor view model (no `searchAtoms` today) | `frontend/app/view/editor/editor-model.ts` |
+| Global `Cmd:f` → universal search | [`frontend/app/store/keymodel.ts:626`](../../frontend/app/store/keymodel.ts#L626), `activateSearch` @604 |
+| Universal search overlay | [`frontend/app/element/search.tsx`](../../frontend/app/element/search.tsx); impl example [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts) |
+| Per-view key dispatch hook | [`frontend/app/store/keymodel.ts:412`](../../frontend/app/store/keymodel.ts#L412) (`viewModel.keyDownHandler`) |
+| Editor CM setup (`search()`, `basicSetup`) | [`frontend/app/view/editor/editor-view.tsx:315-317`](../../frontend/app/view/editor/editor-view.tsx#L315-L317) |
+| Editor view model (no `searchAtoms` today) | [`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts) |
 | ripgrep crates | `ignore`, `grep-searcher`, `grep-regex` (crates.io) |

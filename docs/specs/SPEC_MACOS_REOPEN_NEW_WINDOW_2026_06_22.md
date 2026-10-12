@@ -4,7 +4,7 @@
 - **Status:** Proposed — open questions resolved with evidence (see §11)
 - **Author:** AgentO (Masty)
 - **Area:** `agentmux-launcher` (macOS), `agentmux-cef` (macOS)
-- **Related:** `docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md` (PR #1568); host reopen handler PR #1572; dock-click focus PR #1653
+- **Related:** [`docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md`](SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md) (PR #1568); host reopen handler PR #1572; dock-click focus PR #1653
 
 ---
 
@@ -44,7 +44,7 @@ has no handler, so LaunchServices times out and reports the app as unresponsive.
 
 ## 3. Process & single-instance model (facts)
 
-macOS packaged bundle (`scripts/package-macos.sh`):
+macOS packaged bundle ([`scripts/package-macos.sh`](../../scripts/package-macos.sh)):
 
 - **`CFBundleExecutable = agentmux-launcher`** (`package-macos.sh:228`). The
   **launcher is the process LaunchServices launches** for the bundle.
@@ -309,5 +309,5 @@ interaction and must be exercised by a real install + click.)
   dropping the host handler's `hasVisibleWindows` branch — intentionally **not** done,
   as it diverges from the platform norm.
 - **FU-1 — macOS stale-data-dir cleanup.** Unrelated but adjacent:
-  `scripts/wipe-old-data-dirs.sh` is still Windows-only; stale macOS data dirs
+  [`scripts/wipe-old-data-dirs.sh`](../../scripts/wipe-old-data-dirs.sh) is still Windows-only; stale macOS data dirs
   accumulate (tracked in `SPEC_MACOS_LAUNCH_COHERENCE` follow-ups).

@@ -5,7 +5,7 @@
 **Author:** Camper, at the operator's direction
 **Amends:** `SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md` (reverses it for MuxBus sign-in only),
 restoring the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` for every channel.
-**Related:** `docs/retro/RETRO_MUXBUS_SIGN_OUT_SHARED_KEYCHAIN_RACE_2026_10_08.md` (why),
+**Related:** [`docs/retro/RETRO_MUXBUS_SIGN_OUT_SHARED_KEYCHAIN_RACE_2026_10_08.md`](../retro/RETRO_MUXBUS_SIGN_OUT_SHARED_KEYCHAIN_RACE_2026_10_08.md) (why),
 `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` (who receives a WAN jekt),
 `SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`,
 `SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`.

@@ -9,13 +9,13 @@ scope) and `agentmuxai/agentmux-landing` (new downloads page, consequence of
 the first half, same relationship `SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md`
 §6 established between these two repos)
 **Related:**
-`docs/specs/SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md` (Phase B — now
+[`docs/specs/SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md`](SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md) (Phase B — now
 confirmed **implemented**, see §1.2 — is the nightly artifact pipeline this
-spec widens), `docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md` (the
+spec widens), [`docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md`](SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md) (the
 release→landing-page dispatch this spec's new formats ride on, unmodified),
-`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md` (the
+[`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) (the
 CEF-runtime-pin machinery `build-linux.yml` already uses),
-`docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md` (existing
+[`docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) (existing
 Linux packaging task conventions), `agentmux-landing/docs/download-button-refactor.md`
 (existing landing-page download-UX decisions this spec extends, not replaces)
 
@@ -25,14 +25,14 @@ Linux packaging task conventions), `agentmux-landing/docs/download-button-refact
 
 A prior agent apparently described writing a spec for "widening the Linux
 build targets on nightly" and "a downloads page like waveterm.dev/download."
-Before writing anything, this session searched thoroughly: `docs/specs/` and
+Before writing anything, this session searched thoroughly: [`docs/specs/`](.) and
 `specs/` in all four related repos (`agentmux`, `agentmux-cloud`,
 `agentmux-landing`, `shared-infrastructure`), full git history and every
 branch (`git log --all --grep`), and GitHub issues/discussions/code search
 across the whole `agentmuxai` org (`gh search issues/prs/code`,
 `gh api .../discussions`). **Nothing matches.** The closest adjacent material
 — `SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md`'s Phase B, the existing
-`#download` homepage section, and a stale `docs/linux.md` reference to a
+`#download` homepage section, and a stale [`docs/linux.md`](../linux.md) reference to a
 nonexistent `agentmuxai/agentmux-builder` repo — is real but scoped to
 neither of the two things asked for here (see §1 for exactly what exists
 today vs. what's missing). This document is written fresh, grounded in a
@@ -55,7 +55,7 @@ direct read of the current build/release pipeline and landing-page code
 claimed macOS also ships an Intel x64 `.dmg`. That was wrong — verified by
 direct inspection of `build-macos.yml` (a single `macos-latest` arm64 job,
 resolving only `cef-macos-arm64-*` CEF releases and globbing only
-`AgentMux_*_arm64.dmg`) and `scripts/package-macos.sh` (`ARCH="arm64"`
+`AgentMux_*_arm64.dmg`) and [`scripts/package-macos.sh`](../../scripts/package-macos.sh) (`ARCH="arm64"`
 hardcoded). **This is the same scaffolded-but-unproduced pattern §1.4
 describes for Linux `.deb`** — `Download.tsx`'s `Assets` type and
 `DownloadButton.tsx`'s fallback chain both already have an `x64` macOS slot
@@ -70,7 +70,7 @@ a wide margin, and the one the ask is specifically about.
 
 `SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md` (§3-4) described Phase B
 (full packaged nightly artifacts, not just a compile check) as **deferred**
-at the time it was written. That's stale: `.github/workflows/ci-nightly-artifacts.yml`
+at the time it was written. That's stale: [`.github/workflows/ci-nightly-artifacts.yml`](../../.github/workflows/ci-nightly-artifacts.yml)
 exists today (`schedule: '0 6 * * *' UTC`) and delegates to the *same*
 `build-windows.yml` / `build-macos.yml` / `build-linux.yml` reusable
 workflows `release.yml` calls, just with `release-tag: ""` (upload to Actions
@@ -88,8 +88,8 @@ instead of a Python default parameter.
 `agentmux-srv`, a patched `libcef.so` pulled from the private
 `agentmuxai/cef` release — see `SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`
 — GL/Vulkan libs, `.pak`/locale resources, bundled frontend), then
-`scripts/build-appimage-linux.sh` (invoked via `task package:release:linux` →
-`scripts/package-linux.sh`) wraps that tree into an AppImage with
+[`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) (invoked via `task package:release:linux` →
+[`scripts/package-linux.sh`](../../scripts/package-linux.sh)) wraps that tree into an AppImage with
 `appimagetool`. **The expensive part (compiling, CEF provisioning, staging
 the runtime tree) happens exactly once** — packaging is a separate,
 comparatively cheap final step over an already-staged directory. This matters
@@ -102,7 +102,7 @@ repackaging steps over the tree `build-appimage-linux.sh` already stages.
 This is the most concrete evidence of an intended-but-unfinished wider
 target list, found by direct inspection, not inference:
 
-- `docs/linux.md:119`: *"Linux .deb package | Produced by CI builder
+- [`docs/linux.md:119`](../linux.md): *"Linux .deb package | Produced by CI builder
   (`agentmuxai/agentmux-builder`) only, not by `task package:linux`"* —
   **`agentmuxai/agentmux-builder` does not exist** (`gh repo list agentmuxai`
   returns 8 repos, none named that). Stale since at least a 2026-06-06
@@ -162,7 +162,7 @@ unstable for it (§2.3's phase table).
 **Correction (Codex review, PR #3234):** an earlier revision of this section
 said `fpm`/`tar` could run directly over `dist/`, the flat directory
 `bundle:linux` populates. That's wrong, confirmed by reading
-`scripts/build-appimage-linux.sh` directly: `dist/` is raw build output, not
+[`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) directly: `dist/` is raw build output, not
 a runnable layout. The actual AppImage runtime input is
 **`build/AgentMux.AppDir`** — a separate directory the script wipes and
 reassembles on every run, relocating `dist/cef/agentmux-cef` →
@@ -205,7 +205,7 @@ Widening architecture (not just format) requires a patched-`libcef.so`
 **arm64 Linux** build from the private `agentmuxai/cef` repo — this spec's
 author did not check whether that exists today (no access to that private
 repo from this session), and building it if it doesn't is a substantial,
-separate effort (per `docs/cef-build/CEF_FORK_MAINTENANCE.md`'s general
+separate effort (per [`docs/cef-build/CEF_FORK_MAINTENANCE.md`](../cef-build/CEF_FORK_MAINTENANCE.md)'s general
 description of what maintaining a CEF fork build entails) unrelated to
 packaging-format work. **Recommendation: file this as its own tracking
 issue/spec once someone with `agentmuxai/cef` access confirms whether an
@@ -216,11 +216,11 @@ it into this spec's Phase 1-3 and discovering the blocker mid-implementation.
 
 | File | Repo | Action |
 |---|---|---|
-| `.github/workflows/build-linux.yml` | agentmux | **Modify** — add `fpm`-based `.deb` (Phase 1), `.rpm` (Phase 2), `.pacman` (Phase 3) packaging steps after the existing AppImage step; add a `tar czf` step (Phase 1) for `.tar.gz`; `actions/upload-artifact` for each new asset, mirroring the existing AppImage upload pattern |
-| `.github/workflows/release.yml` | agentmux | **Modify — required, not optional (Codex P1, PR #3234).** Its `publish` job's asset-flattening step (`find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" \)`, line ~338) is an **explicit extension allowlist** — a new format uploaded by `build-linux.yml` but not added to this `find` is silently excluded from the actual GitHub Release (and therefore from the landing-page deploy, which reads the Release's assets — `SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md` §6). Without this change, Phase 1 would ship `.deb`/`.tar.gz` as nightly-artifact-only, visible nowhere a real user downloads from. Add each new extension to this `find` in the same PR as the `build-linux.yml` change that starts producing it. |
-| `scripts/build-appimage-linux.sh`, and a new shared staging script (e.g. `scripts/stage-linux-appdir.sh`) | agentmux | **Modify + create** — factor the AppDir assembly steps (§2.1 correction) out of `build-appimage-linux.sh` into something a new `scripts/build-<format>-linux.sh` per format can also call; keep the existing AppImage script's own AppImage-specific logic (the `.DirIcon` real-file fix, the CEF-patch release gate, `appimagetool` invocation) where it is — don't risk regressing the one format that already works while extracting the shared part |
+| [`.github/workflows/build-linux.yml`](../../.github/workflows/build-linux.yml) | agentmux | **Modify** — add `fpm`-based `.deb` (Phase 1), `.rpm` (Phase 2), `.pacman` (Phase 3) packaging steps after the existing AppImage step; add a `tar czf` step (Phase 1) for `.tar.gz`; `actions/upload-artifact` for each new asset, mirroring the existing AppImage upload pattern |
+| [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | agentmux | **Modify — required, not optional (Codex P1, PR #3234).** Its `publish` job's asset-flattening step (`find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" \)`, line ~338) is an **explicit extension allowlist** — a new format uploaded by `build-linux.yml` but not added to this `find` is silently excluded from the actual GitHub Release (and therefore from the landing-page deploy, which reads the Release's assets — `SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md` §6). Without this change, Phase 1 would ship `.deb`/`.tar.gz` as nightly-artifact-only, visible nowhere a real user downloads from. Add each new extension to this `find` in the same PR as the `build-linux.yml` change that starts producing it. |
+| [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh), and a new shared staging script (e.g. `scripts/stage-linux-appdir.sh`) | agentmux | **Modify + create** — factor the AppDir assembly steps (§2.1 correction) out of `build-appimage-linux.sh` into something a new `scripts/build-<format>-linux.sh` per format can also call; keep the existing AppImage script's own AppImage-specific logic (the `.DirIcon` real-file fix, the CEF-patch release gate, `appimagetool` invocation) where it is — don't risk regressing the one format that already works while extracting the shared part |
 | `Taskfile.yml` | agentmux | **Modify** — new `task package:linux:deb` / `:rpm` (and `:tarball`) local-build tasks, mirroring `package:linux`'s existing per-build-channel isolation conventions (`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md`) so local testing doesn't require CI |
-| `docs/linux.md` | agentmux | **Modify** — correct the stale `agentmuxai/agentmux-builder` reference (§1.4); document each new format's install/run instructions once shipped |
+| [`docs/linux.md`](../linux.md) | agentmux | **Modify** — correct the stale `agentmuxai/agentmux-builder` reference (§1.4); document each new format's install/run instructions once shipped |
 | `agentmux-landing/scripts/fetch-release.mjs` | agentmux-landing | **Modify** — add `.rpm`/`.pacman`/`.tar.gz` to `UNVERSIONED_NAMES` and `CONTENT_TYPES`, and a categorization branch per format in the asset loop (mirrors the existing, already-working `.deb` branch) |
 | `agentmux-landing/src/components/Download.tsx` | agentmux-landing | **Modify** — extend the `Assets`/`ReleaseAsset` types and `getOptionsForOS`/`AllPlatformLinks` for the new formats (§3 folds this into the larger downloads-page work rather than doing it twice) |
 

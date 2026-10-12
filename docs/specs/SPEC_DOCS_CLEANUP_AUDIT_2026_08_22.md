@@ -3,18 +3,18 @@
 **Date:** 2026-08-22
 **Type:** Analysis + proposal (no files moved yet — this is the plan, not the execution)
 **Status:** proposed — nothing has shipped; see §5 for a phased execution plan
-**Scope:** `docs/specs/`, top-level `specs/`, `docs/retro/`, `docs/status/`,
-`docs/analysis/`, `docs/reports/`, `CLAUDE.md`'s own claims about these
+**Scope:** [`docs/specs/`](.), top-level `specs/`, [`docs/retro/`](../retro), [`docs/status/`](../status),
+[`docs/analysis/`](../analysis), [`docs/reports/`](../reports), `CLAUDE.md`'s own claims about these
 directories. No code changes anywhere — this is documentation hygiene only.
 
 ## Why this exists
 
 Asked to do a cleanup pass on the repo. This project already has a real,
 documented docs-lifecycle convention
-(`docs/specs/README.md`, `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`) — a
+([`docs/specs/README.md`](README.md), `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`) — a
 closed `Status:` enum (`draft | proposed | active | implemented | living |
 historical | superseded`) and a stated directory flow
-(`docs/specs/` → `specs/` → `specs/archive/`). The problem isn't missing
+([`docs/specs/`](.) → `specs/` → `specs/archive/`). The problem isn't missing
 process, it's that the process isn't being followed at scale, and the volume
 involved (see §1) means nobody can just eyeball their way to a fix. This spec
 quantifies the actual state and proposes a scoped, phased way to close the
@@ -25,16 +25,16 @@ worth.
 
 | Directory | File count |
 |---|---|
-| `docs/specs/` (top level) | **686** |
-| `docs/specs/archive/` | 26 |
-| `docs/specs/evidence/` | 3 |
+| [`docs/specs/`](.) (top level) | **686** |
+| [`docs/specs/archive/`](archive) | 26 |
+| [`docs/specs/evidence/`](evidence) | 3 |
 | top-level `specs/` (top level) | **102** |
 | top-level `specs/archive/` | **33** — missed in the first pass of this audit, caught by review; see §2.3 |
-| `docs/retro/` | 158 |
-| `docs/analysis/` | 132 |
-| `docs/reports/` | 40 |
-| `docs/status/` | 13 |
-| `.changesets/` (pending) | 18 |
+| [`docs/retro/`](../retro) | 158 |
+| [`docs/analysis/`](../analysis) | 132 |
+| [`docs/reports/`](../reports) | 40 |
+| [`docs/status/`](../status) | 13 |
+| [`.changesets/`](../../.changesets) (pending) | 18 |
 
 Total across just the spec/retro/analysis/report/status families: **~1,211
 files.** A full manual audit of all of them is not a reasonable ask of any
@@ -56,7 +56,7 @@ already shipped**, confirmed against actual code:
 - `SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md` — the "Worked"
   footer exists verbatim in `AgentFooter.tsx`.
 - `SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md` —
-  `frontend/app/notification/sound/tool-tones-player.ts` exists and is the
+  [`frontend/app/notification/sound/tool-tones-player.ts`](../../frontend/app/notification/sound/tool-tones-player.ts) exists and is the
   same system this session's own DnD/watchdog PRs touched adjacent settings
   for.
 - `SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md` — cumulative cost/token
@@ -122,25 +122,25 @@ pointers for these five pairs (originally in §5.1) is withdrawn.
 
 ### 2.3 Corrected: TWO archive directories are both active, not one "wrong" one
 
-**Original claim (wrong):** archived specs only land in `docs/specs/archive/`
+**Original claim (wrong):** archived specs only land in [`docs/specs/archive/`](archive)
 (26 files) despite the README saying `specs/archive/`, implying the README
 was simply never followed. **Corrected after Codex flagged this**: a
 top-level `specs/archive/` also exists, and holds **33 files** — more than
-`docs/specs/archive/`'s 26. Both are real, both are in active use. This
+[`docs/specs/archive/`](archive)'s 26. Both are real, both are in active use. This
 isn't "the README is wrong," it's two archive locations I hadn't fully
 checked.
 
 A closer look at both suggests (not yet confirmed) a two-tier explanation
 rather than a conflict: files across *both* directories carry the same
 `"> **Archived 2026-07-12.** ... Consolidated tracking: issue #2024."` banner
-— e.g. `docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md` and
+— e.g. [`docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md`](archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md) and
 `specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md` both
 have it. That reads like a single 2026-07-12 consolidation event (issue
 #2024) added archived-banners to specs wherever they already physically
 lived, rather than moving everything into one canonical folder — plausibly
 `specs/archive/` holds specs that had already been promoted to the approved
 `specs/` tier before being archived (matching the README's stated flow
-exactly), while `docs/specs/archive/` holds specs archived directly from
+exactly), while [`docs/specs/archive/`](archive) holds specs archived directly from
 draft stage, without ever going through the `specs/` promotion step. **This
 is a hypothesis, not a confirmed finding** — it would need reading issue
 #2024 itself or more of the consolidation's own history to confirm. Flagged
@@ -163,8 +163,8 @@ withdrawn along with it.
 
 ### 2.5 `docs/status/` has apparently-still-open items with no resolution marker
 
-Unlike `docs/retro/` (explicitly historical/append-only by design) or
-`docs/specs/`, `docs/status/` reads as "investigation in progress" — and at
+Unlike [`docs/retro/`](../retro) (explicitly historical/append-only by design) or
+[`docs/specs/`](.), [`docs/status/`](../status) reads as "investigation in progress" — and at
 least two files show that ambiguity concretely:
 `STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md` got a "LIVE_RECURRENCE"
 follow-up 11 days later (so the original wasn't actually resolved, or
@@ -176,9 +176,9 @@ unlike the 686/103-file spec directories.
 
 ### 2.6 Not everything here is actually a problem
 
-- `.changesets/`: 18 pending, all timestamped the same day — a normal,
+- [`.changesets/`](../../.changesets): 18 pending, all timestamped the same day — a normal,
   healthy backlog awaiting the next `task release`, not a cleanup target.
-- `docs/retro/` (158) and `docs/analysis/` (132): these are explicitly
+- [`docs/retro/`](../retro) (158) and [`docs/analysis/`](../analysis) (132): these are explicitly
   historical-record documents by design (retros/investigations), not living
   specs with a Status field expected to track current reality. Volume alone
   isn't a problem here — flagged as out of scope for status-correction work,
@@ -186,9 +186,9 @@ unlike the 686/103-file spec directories.
 
 ## 3. What this spec does NOT try to solve
 
-- **A full manual status-audit of all ~847 spec files** (`docs/specs/` +
-  `docs/specs/archive/` + top-level `specs/` + `specs/archive/`) — at a ~40%
-  stale rate on the (small, `docs/specs/`-only) sample, that's plausibly
+- **A full manual status-audit of all ~847 spec files** ([`docs/specs/`](.) +
+  [`docs/specs/archive/`](archive) + top-level `specs/` + `specs/archive/`) — at a ~40%
+  stale rate on the (small, [`docs/specs/`](.)-only) sample, that's plausibly
   300+ files needing a corrected Status line. That's not a "cleanup pass,"
   it's a multi-day project of its own. §5 scopes a bounded, high-value subset
   instead.
@@ -259,7 +259,7 @@ spec directories.
 > explicit note saying what was and was not checked.
 
 ### 5.4 Phase 4 (optional, lower priority) — one check on docs/analysis
-Spot-check whether any `docs/analysis/` findings docs describe a bug that
+Spot-check whether any [`docs/analysis/`](../analysis) findings docs describe a bug that
 has since been fixed without a resolution note (mirroring §5.3's method) —
 only worth doing if Phase 3 turns up a pattern suggesting this family has the
 same problem; not committing to it here without evidence.
@@ -267,7 +267,7 @@ same problem; not committing to it here without evidence.
 > **✅ TRIGGER MET, SPOT-CHECK EXECUTED 2026-08-29.** Phase 3's finding that
 > "RESOLVED" was under-propagated across *linked* docs is exactly the
 > evidence this phase was gated on, so it was run — as the spot-check this
-> section specifies, **not** a sweep. `docs/analysis/` holds **132 files**;
+> section specifies, **not** a sweep. [`docs/analysis/`](../analysis) holds **132 files**;
 > a full pass belongs with §5.5's deferred effort, not here.
 >
 > **Sample: 8 files**, chosen for relevance rather than at random — the
@@ -288,15 +288,15 @@ same problem; not committing to it here without evidence.
 >
 > **What this says about §5.5.** A 50% hit rate on a small relevance-weighted
 > sample is not a clean estimate for all 132 files, and shouldn't be quoted
-> as one. But it does confirm `docs/analysis/` has the same disease as
-> `docs/specs/`, and adds a failure mode the §2.1 sampling never looked for:
+> as one. But it does confirm [`docs/analysis/`](../analysis) has the same disease as
+> [`docs/specs/`](.), and adds a failure mode the §2.1 sampling never looked for:
 > **the doc that owns a bug and the doc that records its fix can both be
 > correct while nothing links them.** Any batch process for §5.5 needs to
 > check cross-document linkage, not just each file against code — three of
 > the four hits above were invisible to a file-vs-code check.
 
 ### 5.5 Explicitly deferred — the full ~847-file spec audit
-Given the ~40% stale rate found on a 15-file `docs/specs/`-only sample, a
+Given the ~40% stale rate found on a 15-file [`docs/specs/`](.)-only sample, a
 defensible estimate is several hundred specs need a corrected Status line
 across all four directories combined. Doing this by hand, spec-by-spec,
 doesn't scale, **and this spec's own track record in §2.2/§2.3/§2.4 is a
@@ -317,7 +317,7 @@ user wants to commit to that scale of effort, not started here.
 
 1. **Archive-location convention (§2.3)** — confirm the two-tier hypothesis
    (promoted-then-archived specs in `specs/archive/` vs. archived-from-draft
-   specs in `docs/specs/archive/`) before proposing any convention change —
+   specs in [`docs/specs/archive/`](archive)) before proposing any convention change —
    likely needs reading the issue #2024 consolidation history itself, not
    more file sampling.
 2. **Appetite for §5.5's full audit** — this spec deliberately scopes Phase
@@ -329,12 +329,12 @@ user wants to commit to that scale of effort, not started here.
 
 ## References
 
-- `docs/specs/README.md` — the stated directory-flow convention; §2.3's
+- [`docs/specs/README.md`](README.md) — the stated directory-flow convention; §2.3's
   corrected finding means this needs re-reading against the two-tier
   hypothesis, not treated as simply "wrong."
-- `docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` — origin of the
+- [`docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) — origin of the
   closed Status enum and its own warning about status rot.
-- `docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md` — corrected
+- [`docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`](SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md) — corrected
   earlier this session as a concrete single-file example of exactly the
   status-rot pattern §2.1 quantifies at scale.
 - PR review comments on the PR carrying this spec (Codex) — caught the

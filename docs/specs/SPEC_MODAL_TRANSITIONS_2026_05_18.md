@@ -238,7 +238,7 @@ None today. Future chained flows (install→auth, auth→launch) opt in by calli
 
 ## 5. Reduced motion
 
-Already honored by the existing animations via the `respect-reduced-motion` mixin (`frontend/app/mixins.scss:123`). Add the new `tab-modal-content-in` keyframe under the same gate:
+Already honored by the existing animations via the `respect-reduced-motion` mixin ([`frontend/app/mixins.scss:123`](../../frontend/app/mixins.scss#L123)). Add the new `tab-modal-content-in` keyframe under the same gate:
 
 ```scss
 @media (prefers-reduced-motion: reduce) {

@@ -31,7 +31,7 @@ Tracing the chain on Linux today:
 
 3. **`agentmux-cef/src/commands/drag.rs::open_window_at_position`** — mints `window-<uuid>`, builds URL with `ipc_port + ipc_token + windowLabel + workspaceId`. **No `floatingPaneId`.**
 
-4. **`frontend/app/app.tsx:375-381`** — `IS_FLOATING_PANE = new URLSearchParams(location.search).has("floatingPaneId")`. With no `floatingPaneId`, the render switch falls back to `<Workspace />` (full chrome) instead of `<FloatingPaneWorkspace />` (chromeless).
+4. **[`frontend/app/app.tsx:375-381`](../../frontend/app/app.tsx#L375-L381)** — `IS_FLOATING_PANE = new URLSearchParams(location.search).has("floatingPaneId")`. With no `floatingPaneId`, the render switch falls back to `<Workspace />` (full chrome) instead of `<FloatingPaneWorkspace />` (chromeless).
 
 So the Linux floater opens at the right backend window, just with the wrong frontend render mode. Same exact mechanism as the macOS gap pre-#1182.
 
@@ -43,7 +43,7 @@ So the Linux floater opens at the right backend window, just with the wrong fron
 |---|---|---|
 | Backend window creation | `agentmux-cef/src/commands/floating_pane.rs` non-Windows branch | ✅ **Already implemented.** #1182 widened the non-Windows branch from `"not yet implemented"` to a real implementation: it calls the SAME CEF Views `post_create_window(frameless=true)` path the legacy tear-off uses, but appends `&floatingPaneId=<pane_id>` to the URL. The branch is `#[cfg(not(target_os = "windows"))]` — runs on Linux identically to macOS. |
 | Secondary windows are frameless | `agentmux-cef/src/commands/window/creation.rs` — `frameless = true` for tear-off windows | ✅ **Already true on Linux.** Same code path as macOS — both go through `window_create_top_level(... frameless=true)`. |
-| Chromeless renderer | `frontend/app/workspace/floating-pane-workspace.tsx` | ✅ **Platform-agnostic.** Zero `cfg`/platform branches. Renders `<TabContent>` only — no `<WindowHeader>`, no `<SystemStatus>`. Switched in via `?floatingPaneId=` URL param. |
+| Chromeless renderer | [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) | ✅ **Platform-agnostic.** Zero `cfg`/platform branches. Renders `<TabContent>` only — no `<WindowHeader>`, no `<SystemStatus>`. Switched in via `?floatingPaneId=` URL param. |
 | Render switch | `frontend/app/app.tsx::IS_FLOATING_PANE` | ✅ **Platform-agnostic.** |
 | Backend tear-off saga | `agentmux-srv/src/server/service.rs::TearOffBlock` | ✅ **Platform-agnostic.** Was already correct before #1182. |
 | Source-pane size measurement | `measureSourcePaneSize()` helper | ✅ **Already ported into `.linux.tsx`** in the stashed work from May 28 (`stash@{1}`), and was independently added in this same PR's earlier commit on Linux. |
@@ -62,7 +62,7 @@ The only missing wire is in `CrossWindowDragMonitor.linux.tsx::performTearOff`.
 
 ## The change
 
-**One file:** `frontend/app/drag/CrossWindowDragMonitor.linux.tsx`.
+**One file:** [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx).
 
 Replace the current pane branch (lines ~135-138):
 
@@ -193,13 +193,13 @@ The `measureSourcePaneSize()` helper already exists in `.linux.tsx` from PR #113
 
 ## References
 
-- `frontend/app/drag/CrossWindowDragMonitor.linux.tsx` — file to change.
-- `frontend/app/drag/CrossWindowDragMonitor.darwin.tsx` — reference implementation, just landed in #1182.
-- `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` — original reference (Windows pane tear-off path).
-- `frontend/app/workspace/floating-pane-workspace.tsx` — chromeless renderer (platform-agnostic).
+- [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx) — file to change.
+- [`frontend/app/drag/CrossWindowDragMonitor.darwin.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.darwin.tsx) — reference implementation, just landed in #1182.
+- [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) — original reference (Windows pane tear-off path).
+- [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) — chromeless renderer (platform-agnostic).
 - `frontend/app/app.tsx::IS_FLOATING_PANE` — render switch (platform-agnostic).
 - `agentmux-cef/src/commands/floating_pane.rs` — backend IPC handler. Non-Windows branch is now a real implementation post-#1182.
 - `agentmux-cef/src/commands/window/creation.rs::window_create_top_level` — frameless CEF Views window creation (already used for tear-off on macOS+Linux).
-- `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md` — sibling macOS spec, deeper background.
-- `docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md` — original cross-platform recipes (Linux/GTK section is Phase B+ scope).
+- [`docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`](SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md) — sibling macOS spec, deeper background.
+- [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) — original cross-platform recipes (Linux/GTK section is Phase B+ scope).
 - `docs/analysis/ANALYSIS_FLOATING_PANE_LINUX_GAPS_2026-05-28.md` — earlier Linux-gaps analysis, called out exactly this routing.

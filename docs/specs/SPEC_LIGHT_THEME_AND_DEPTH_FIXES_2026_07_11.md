@@ -3,8 +3,8 @@
 **Date:** 2026-07-11
 **Author:** Agent1
 **Status:** implemented — Phases 1–3 implemented (this PR); Phase 4 (light theme) implemented (this PR); Phases 5–7 not started — #2104
-**Related:** `frontend/app/theme.scss`, `frontend/app/themes/`, `frontend/app/components/context-menu.scss`, `frontend/app/block/titlebar.scss`, `schema/settings.json`, `frontend/app/menu/base-menus.ts`
-**Governing context:** `docs/analysis/ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md` (the research pass this spec turns into concrete work), `SPEC_TERMINAL_THEME_PENETRATION_2026_07_07.md` (terminal penetration — separately proposed and already shipped in PR #2010, 2026-07-08)
+**Related:** [`frontend/app/theme.scss`](../../frontend/app/theme.scss), [`frontend/app/themes/`](../../frontend/app/themes), [`frontend/app/components/context-menu.scss`](../../frontend/app/components/context-menu.scss), [`frontend/app/block/titlebar.scss`](../../frontend/app/block/titlebar.scss), [`schema/settings.json`](../../schema/settings.json), [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts)
+**Governing context:** [`docs/analysis/ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md`](../analysis/ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md) (the research pass this spec turns into concrete work), `SPEC_TERMINAL_THEME_PENETRATION_2026_07_07.md` (terminal penetration — separately proposed and already shipped in PR #2010, 2026-07-08)
 
 ---
 
@@ -20,7 +20,7 @@ In scope (this PR):
 1. Phantom tokens (§2b of the analysis) — 7 CSS custom properties referenced via `var(--token, #fallback)` but never defined anywhere, so every consumer was permanently pinned to its own local fallback literal.
 2. Context menu (§2c) — fully hand-painted to literal Catppuccin Mocha hex values.
 3. Pane title bar (§2c) — hardcoded `rgba(0,0,0,0.6-0.8)` background that would render as an opaque black bar on a light pane body.
-4. A first light theme, `frontend/app/themes/light.scss`, following the existing 8-file override pattern.
+4. A first light theme, [`frontend/app/themes/light.scss`](../../frontend/app/themes/light.scss), following the existing 8-file override pattern.
 
 Explicitly out of scope (documented here as follow-ups, not started):
 5. `tab.scss`'s colored-tab white text (`rgba(255,255,255,...)`, lines 152/157/228) — a real but **separate** contrast issue against user-picked `TAB_COLORS` swatches (already borderline for yellow/lime today, in the all-dark-theme world), independent of `window:theme`/light-vs-dark. Doesn't block the light theme — deferred.
@@ -43,7 +43,7 @@ Both fixes generalize to the light theme with zero additional per-theme work, be
 
 ### 3.3 Light theme
 
-`frontend/app/themes/light.scss` follows the exact per-theme override pattern of the 8 existing files — same token list, same `[data-theme="light"]` selector shape, same Tailwind `--color-*` sync block. Registered in `themes/index.scss`, `schema/settings.json`'s `window:theme` enum, and `THEME_OPTIONS` in `base-menus.ts`.
+[`frontend/app/themes/light.scss`](../../frontend/app/themes/light.scss) follows the exact per-theme override pattern of the 8 existing files — same token list, same `[data-theme="light"]` selector shape, same Tailwind `--color-*` sync block. Registered in `themes/index.scss`, [`schema/settings.json`](../../schema/settings.json)'s `window:theme` enum, and `THEME_OPTIONS` in `base-menus.ts`.
 
 Design choice: light theme's `--hover-bg-color`/`--highlight-bg-color`/scrollbar tokens invert polarity from the dark themes (darkening tints instead of lightening ones) — e.g. `rgba(0,0,0,0.06)` instead of `rgba(255,255,255,0.1)` — since a lightening tint on an already-light surface is invisible. This is exactly the per-theme customization point the phantom-token and title-bar fixes above were built to make actually work.
 

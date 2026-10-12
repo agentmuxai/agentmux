@@ -1,7 +1,7 @@
 # SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle
 
 **Date:** 2026-06-16
-> **⚠ PARTIALLY SUPERSEDED (2026-09-23) by `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`.**
+> **⚠ PARTIALLY SUPERSEDED (2026-09-23) by [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).**
 > This spec's *reachability* work stands and is still live: mid-turn steering works, and the
 > reactive/MCP path can reach a stream-json pane's live stdin at all (it previously silently
 > missed it). What is reversed is its **default policy**. Making mid-turn steering the default for
@@ -25,9 +25,9 @@ cross-provider design below. — #1477
 reactive messaging (`agentmux-srv/src/backend/reactive/**`), MCP SendMessage tool
 (`agentmux-mcp/**`), provider registry (`frontend/app/view/agent/providers/**`),
 agent-pane turn state (`frontend/app/store/agent-pane-state/**`)
-**Evidence:** `docs/specs/evidence/steer-probe.py`,
-`docs/specs/evidence/steer-probe-claude-run1.txt`,
-`docs/specs/evidence/steer-probe-claude-run2.txt`
+**Evidence:** [`docs/specs/evidence/steer-probe.py`](evidence/steer-probe.py),
+[`docs/specs/evidence/steer-probe-claude-run1.txt`](evidence/steer-probe-claude-run1.txt),
+[`docs/specs/evidence/steer-probe-claude-run2.txt`](evidence/steer-probe-claude-run2.txt)
 **Related:**
 - `SPEC_ASK_USER_QUESTION_2026_06_15.md` (mid-turn `tool_result` injection on live persistent
   stdin — the existing precedent that already does mid-turn delivery)
@@ -127,7 +127,7 @@ dead scaffolding, never read); the wait is **structural**, imposed by one-shot e
 
 ## 4. Empirical resolution of the open questions (Claude Code)
 
-Harness `docs/specs/evidence/steer-probe.py`: start `claude --input-format stream-json
+Harness [`docs/specs/evidence/steer-probe.py`](evidence/steer-probe.py): start `claude --input-format stream-json
 --output-format stream-json --verbose --include-partial-messages
 --dangerously-skip-permissions`; send a task that forces **four sequential `sleep 4` Bash tool
 calls** then prints `FINISHED-ORIGINAL`; the **instant** the first tool call is observed,
@@ -342,7 +342,7 @@ already delivers via `agentinput → send_message`.
 | Concern | File:line |
 |---|---|
 | Per-provider controller type (subprocess default) | `frontend/app/view/agent/providers/index.ts:160,199,240,268,306,391` |
-| Claude persistent launch args | `frontend/app/view/agent/providers/index.ts:161` |
+| Claude persistent launch args | [`frontend/app/view/agent/providers/index.ts:161`](../../frontend/app/view/agent/providers/index.ts#L161) |
 | ACP controller types | `frontend/app/view/agent/providers/index.ts:359,424,452` |
 | Controller selection (meta → controller) | `agentmux-srv/src/backend/blockcontroller/mod.rs:301,349-407` |
 | Persistent stdin write (`send_message`) | `agentmux-srv/src/backend/blockcontroller/persistent.rs:148-168` |
@@ -358,7 +358,7 @@ already delivers via `agentinput → send_message`.
 | ACP prompt delivery (`session/prompt`) | `agentmux-srv/src/backend/blockcontroller/acp.rs:569-611` |
 | Tool-boundary parsing (claude) | `agentmux-srv/src/agents/translator/claude.rs:103-176` |
 | Translators (codex/gemini/kimi/acp) | `frontend/app/view/agent/providers/{codex,gemini,kimi,acp}-translator.ts` |
-| Frontend turn phases / `toolsActive` | `frontend/app/store/agent-pane-state/types.ts:118-152`, `reducer.ts:452-467` |
+| Frontend turn phases / `toolsActive` | [`frontend/app/store/agent-pane-state/types.ts:118-152`](../../frontend/app/store/agent-pane-state/types.ts#L118-L152), `reducer.ts:452-467` |
 
 ## Appendix B — reproducing the steering probe
 

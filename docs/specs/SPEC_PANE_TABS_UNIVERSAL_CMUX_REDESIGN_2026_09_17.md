@@ -3,7 +3,7 @@
 **Date:** 2026-09-17
 **Status:** active — design finalized, all open questions resolved (§7),
 implementation underway on a dedicated branch. See
-`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md` for the
+[`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) for the
 task-level breakdown. Not merged to main until tested locally and explicitly
 approved by the repo owner — this redesign is too far-reaching for the usual
 merge-on-approval default. — PRs touching this work, newest first: #3309
@@ -95,9 +95,9 @@ keeping them separate.
 
 | Term (this spec) | What it is | Existing code-level name(s) |
 |---|---|---|
-| **Pane** | A generic container — one leaf position in the split tree. Holds an ORDERED LIST of ≥1 Pane Tabs, exactly one of which is active/visible at a time. Owns pane-level chrome: the tab strip itself, and pane-level controls (minimize, magnify/restore, close-the-whole-pane) — see §4.1/§4.6. | `LayoutNode` (leaf) — `agentmux-common/src/layout_types.rs:71-91`, frontend mirror `frontend/layout/lib/types.ts:185`. Colloquially "pane" in existing docs/code, but historically also used loosely to mean a widget instance — this spec stops that usage. |
+| **Pane** | A generic container — one leaf position in the split tree. Holds an ORDERED LIST of ≥1 Pane Tabs, exactly one of which is active/visible at a time. Owns pane-level chrome: the tab strip itself, and pane-level controls (minimize, magnify/restore, close-the-whole-pane) — see §4.1/§4.6. | `LayoutNode` (leaf) — `agentmux-common/src/layout_types.rs:71-91`, frontend mirror [`frontend/layout/lib/types.ts:185`](../../frontend/layout/lib/types.ts#L185). Colloquially "pane" in existing docs/code, but historically also used loosely to mean a widget instance — this spec stops that usage. |
 | **Pane Tab** | One widget instance living inside a Pane's tab list — a `Block`, viewed from inside a Pane. **A widget IS a Pane Tab; it is never itself "a Pane."** Switching the active Pane Tab does not change which Pane you're in. | `Block` (`agentmux-srv/src/backend/obj.rs:480-495`) as referenced by a `LayoutNodeData.block_stack` entry (`agentmux-common/src/layout_types.rs:32-56`). "Widget" (`defwidget@X` in `widgets.json`) is the template used to CREATE the `Block` that becomes a Pane Tab; the template itself is never persisted. |
-| **Window Tab** | The OUTER, browser-style strip at the very top of the window. One Window Tab owns an entire split-pane tree (a whole arrangement of Panes, each with its own Pane Tabs) — one `LayoutModel`. A completely different layer from a Pane; out of scope for this spec, unchanged. | Existing code calls this object `Tab` (`agentmux-srv/src/backend/obj.rs:408-419`, `frontend/app/tab/tabbar.tsx`). This spec adopts **"Window Tab"** as the plain-language, UI-facing term to keep it unambiguously distinct from "Pane Tab" in prose and in any user-facing copy/settings this redesign introduces — it is NOT a proposal to rename the `Tab` struct/RPC/table itself (that is a much larger, unrelated migration; see §7). |
+| **Window Tab** | The OUTER, browser-style strip at the very top of the window. One Window Tab owns an entire split-pane tree (a whole arrangement of Panes, each with its own Pane Tabs) — one `LayoutModel`. A completely different layer from a Pane; out of scope for this spec, unchanged. | Existing code calls this object `Tab` (`agentmux-srv/src/backend/obj.rs:408-419`, [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx)). This spec adopts **"Window Tab"** as the plain-language, UI-facing term to keep it unambiguously distinct from "Pane Tab" in prose and in any user-facing copy/settings this redesign introduces — it is NOT a proposal to rename the `Tab` struct/RPC/table itself (that is a much larger, unrelated migration; see §7). |
 
 ### 2.2 Disambiguation: three different things could all plausibly be called "a tab"
 
@@ -105,7 +105,7 @@ keeping them separate.
 this naming collision when it shipped (Window Tab vs. the in-pane strip); this spec
 sharpens it further with the Pane/Pane-Tab split above:
 
-- **Window Tabs** (`frontend/app/tab/tabbar.tsx`) — the top-of-window browser-style
+- **Window Tabs** ([`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx)) — the top-of-window browser-style
   strip. Each one owns a whole split-pane tree. Out of scope for this spec; unchanged.
 - **Panes** (this spec) — the generic containers that make up a Window Tab's split
   tree. Always containers; never conflated with the widget(s) inside them.
@@ -144,12 +144,12 @@ agent/term/editor — see §2.4).
 
 ### 2.4 What already exists and what's still per-view-type-gated
 
-- **`frontend/layout/lib/layoutStack.ts`** — the mutation primitives this spec builds
+- **[`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts)** — the mutation primitives this spec builds
   on directly: `pushBlockOntoStack(model, nodeId, blockId)`, `setActiveBlockInStack`,
   `closeBlockInStack`. Deliberately bypass `treeReducer` (a stack mutation doesn't
   change the tree's shape). **View-agnostic already** — nothing here assumes a
   particular widget type.
-- **`frontend/app/tab/pane-leaf-chrome.tsx`** — the per-leaf router. Its fallback
+- **[`frontend/app/tab/pane-leaf-chrome.tsx`](../../frontend/app/tab/pane-leaf-chrome.tsx)** — the per-leaf router. Its fallback
   swap-one-at-a-time render path is **already fully view-agnostic**: it works for
   any `blockId` via `scopedNodeModel` overriding `NodeModel.blockId`, which flows into
   the ordinary `BlockFrame` header, which already shows the correct icon/title for
@@ -163,8 +163,8 @@ agent/term/editor — see §2.4).
     swaps one mounted block at a time.
 - **Today's chrome for a hoisted pane is TWO stacked rows, confirmed by direct
   reading of both implementations** — `AgentPaneChrome`
-  (`frontend/app/view/agent/agent-view.tsx:350-895`) and `TermPaneChrome`
-  (`frontend/app/view/term/term.tsx:442-751`) have the identical structure: a
+  ([`frontend/app/view/agent/agent-view.tsx:350-895`](../../frontend/app/view/agent/agent-view.tsx#L350-L895)) and `TermPaneChrome`
+  ([`frontend/app/view/term/term.tsx:442-751`](../../frontend/app/view/term/term.tsx#L442-L751)) have the identical structure: a
   `headerElem` built from the real `BlockFrame_Header` component (full icon/
   title/minimize/magnify/close chrome, `agent-view.tsx:427-435`) is rendered FIRST
   (`agent-view.tsx:840`, `term.tsx:699`), and only THEN, in a separate wrapping div
@@ -173,7 +173,7 @@ agent/term/editor — see §2.4).
   progress-bar slot sits between them for agent panes. This is the exact "tabs
   below the header, not replacing it" state this spec's §1 commits to collapsing
   into one row — not a detail to preserve, a structure to remove.
-- **`frontend/app/element/PaneTabStrip.tsx`** — the generic, `<T>`-typed tab-strip
+- **[`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx)** — the generic, `<T>`-typed tab-strip
   component. No drag-reorder, no tear-off, no pin (`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`
   §7 explicitly deferred these as v1 non-goals). Current consumers: agent
   (real `blockStack`), terminal (real `blockStack`), **and** the editor's file-tab
@@ -409,7 +409,7 @@ markBlockRecentlyCreated(blockId);
 pushBlockOntoStack(layoutModel, thisPanesNodeId, blockId);
 ```
 
-using `pushBlockOntoStack` (`frontend/layout/lib/layoutStack.ts:61`) against **the
+using `pushBlockOntoStack` ([`frontend/layout/lib/layoutStack.ts:61`](../../frontend/layout/lib/layoutStack.ts#L61)) against **the
 specific Pane whose own "+" was clicked** — always unambiguous, since a "+" only
 ever exists inside one Pane's strip. This is the whole mechanism §4.2 was missing a
 target for at the widget-bar level; a Pane's own strip has that target for free.
@@ -483,7 +483,7 @@ work) — directly applicable here, since switching a terminal or agent tab can 
 resuming a live session, not just toggling CSS visibility.
 
 **Resolved shortcuts** (§7 open question 4 — checked directly against the existing
-registry, `frontend/app/store/keymodel.ts`, to avoid collisions rather than guess).
+registry, [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts), to avoid collisions rather than guess).
 The existing registry already has a clean, consistent convention worth extending
 rather than inventing a new one: `Cmd:`-prefixed chords (translated per-platform by
 `keyutil.ts`) are Window-Tab/workspace-level actions (`Cmd:t` new Window Tab,
@@ -500,7 +500,7 @@ family one level deeper, adding a modifier per action type:
 | Reorder active Pane Tab left/right within its strip (§4.8's Phase 3 keyboard equivalent) | `Ctrl:Alt:[` / `Ctrl:Alt:]` | Free |
 | Close active Pane Tab in focused Pane | **Reuses existing `Cmd:w`** — no new chord | Not a new binding: `Cmd:w`'s handler (`keymodel.ts:88-91`) is redefined to close the ACTIVE Pane Tab, falling through to today's "close the whole pane" behavior only when it's the last remaining Pane Tab — the same semantic `Cmd+W` already has in every browser/editor that has both tabs and windows |
 
-`docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md` §9.1's own collision notes
+[`docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) §9.1's own collision notes
 (`Ctrl:K` taken, `Ctrl:P` is the command palette, `Ctrl:R` collides with browser
 reload) were also checked — none of the above touch those.
 
@@ -513,7 +513,7 @@ reload) were also checked — none of the above touch those.
   not a hard constraint — expose as a setting later if real usage shows a need for
   VS Code's alternative `wrapTabs` behavior (§3 point 6).
 - **Close button:** on-hover per-tab, matching the existing workspace tab bar's
-  established pattern (`frontend/app/tab/tab.tsx`) for visual consistency between the
+  established pattern ([`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx)) for visual consistency between the
   two "tab" layers despite them being structurally different (§2.2).
 - **Status/badge hook:** the tab-strip's per-tab data model includes an optional
   status field from day one (§4.6) even though no widget type populates it yet in
@@ -528,13 +528,13 @@ This is a vocabulary and mental-model correction, not just a UI change, and per 
 discussion that produced it, it touches more files than §4.1-4.10 individually cite.
 Listed here as one place to audit against, rather than scattered as asides:
 
-- **`NodeModel`** (`frontend/layout/lib/types.ts:325`) — already structurally
+- **`NodeModel`** ([`frontend/layout/lib/types.ts:325`](../../frontend/layout/lib/types.ts#L325)) — already structurally
   correct (a leaf-level `NodeModel` plus `blockId`/`activeBlockId`/`blockStack`), but
   its own doc comments and every place it's described in prose should read as "the
   Pane's model," not "the block's model" — several existing comments in
   `layoutStack.ts`/`pane-leaf-chrome.tsx` already drifted into "the block" language
   for what is properly "the Pane."
-- **`BlockFrame`/`BlockFrame_Header`** (`frontend/app/block/blockframe.tsx`) — under
+- **`BlockFrame`/`BlockFrame_Header`** ([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)) — under
   this spec's terminology, what this file renders is closer to "a Pane Tab's
   content frame," not "a block's frame" (the noun "Block" stays as the backend's
   durable-object name, §2.1 — this is about the frontend-facing component name and
@@ -679,10 +679,10 @@ defensible default rather than a coin-flip:
 - [Zellij — Pane and Tab Management](https://deepwiki.com/zellij-org/zellij/2.3-pane-and-tab-management)
 - [Warp — Vertical Tabs / Panes docs](https://docs.warp.dev/terminal/windows/vertical-tabs/)
 - [JetBrains — Drag & Drop Editor Tabs](https://www.jetbrains.com/guide/go/tips/drag-and-drop-editor-tabs/)
-- `docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` and its polish
+- [`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) and its polish
   cluster (see header block above)
-- `docs/specs/SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md`
-- `docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md`
-- `docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`
-- `docs/specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`
-- `docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md`
+- [`docs/specs/SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md`](SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md)
+- [`docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md`](SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md)
+- [`docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`](SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md)
+- [`docs/specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md)
+- [`docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md`](../architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md)

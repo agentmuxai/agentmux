@@ -3,7 +3,7 @@
 **Author:** Vmer
 **Date:** 2026-09-16
 **Status:** active — Phases 1, 2a, and 2b are implemented (Phase 2b's real scope corrected during implementation, see §5.5/§5.6 — two commands originally planned there turned out not to be buildable as designed). Phase 3 not started. — PRs touching this work, newest first: #3281, #3263
-**Related:** `docs/specs/SPEC_MUXSH_CLI_2026_09_16.md` (Phase 1 — shipped, PR #3255, `muxsh open`/`muxsh web`), `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (the research this builds on), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import `wsh`'s literal command set), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (`muxopen`), `agentmux-docs/.../internals/agent-app-api.md`
+**Related:** [`docs/specs/SPEC_MUXSH_CLI_2026_09_16.md`](SPEC_MUXSH_CLI_2026_09_16.md) (Phase 1 — shipped, PR #3255, `muxsh open`/`muxsh web`), [`docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md`](../reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md) (the research this builds on), [`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](archive/SPEC_RETIRE_WSH_2026_04_12.md) (why AgentMux doesn't import `wsh`'s literal command set), [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) (`muxopen`), `agentmux-docs/.../internals/agent-app-api.md`
 
 ---
 
@@ -108,7 +108,7 @@ Implementation note so the "one binary" goal doesn't become one giant file: `mux
 
 **Tier 2 — across the Rust/Node boundary. The real ask, and the harder one; propose a contract, not a rewrite.** Rather than generating Node code from Rust (a bigger investment than this CLI's current scale justifies, and a bigger single PR to get right), propose a **checked-in JSON manifest + two contract tests**, one per language:
 
-1. A manifest file (e.g. `docs/specs/app-api-manifest.json`, or `agentmux-common/app-api-manifest.json` if it should ship in a crate other tooling can read) listing, for every route this spec's subcommands touch: the REST path, method, request field names, and response field names — hand-authored once per route, from the real `rpc_types` structs, not invented.
+1. A manifest file (e.g. [`docs/specs/app-api-manifest.json`](app-api-manifest.json), or `agentmux-common/app-api-manifest.json` if it should ship in a crate other tooling can read) listing, for every route this spec's subcommands touch: the REST path, method, request field names, and response field names — hand-authored once per route, from the real `rpc_types` structs, not invented.
 2. A Rust test (alongside the existing `rpc_types`/`app_api` tests) that asserts each manifest entry's field names match the real `CommandXxxData`/`XxxResult` struct's `serde` field names — catching the case where a Rust field is renamed and the manifest wasn't updated.
 3. A Node test (`muxsh.contract.test.mjs`, same `vitest` setup as every other `muxsh` test) that asserts each subcommand's `buildRequestBody()` only emits field names present in the manifest for that route — catching the case where `muxsh` drifts from what the manifest (and therefore the real Rust struct) says is valid.
 
@@ -251,7 +251,7 @@ AgentMux has no SSH/WSL pane type and no remote-connection story — confirmed u
 
 ## 7. Open questions for the repo owner
 
-1. **Phase 2b as one PR or several?** Six independent additions (§4.1–4.7); each is small and independently testable, same as Phase 1. Recommend several small PRs over one large one (with Phase 2a, §2.8, landing first as its own PR regardless), for the same reviewability reasons `docs/specs/README.md`'s conventions generally favor — but sequencing is a judgment call.
+1. **Phase 2b as one PR or several?** Six independent additions (§4.1–4.7); each is small and independently testable, same as Phase 1. Recommend several small PRs over one large one (with Phase 2a, §2.8, landing first as its own PR regardless), for the same reviewability reasons [`docs/specs/README.md`](README.md)'s conventions generally favor — but sequencing is a judgment call.
 2. **`muxsh secret list`'s exact REST route** needs confirming against source (the one item in §4 not independently re-verified this pass) before implementation starts.
 3. **Priority order within Phase 3** (§5.1–5.4) — none are blocking Phase 2, but whoever scopes them next should decide which (if any) is worth the real backend work first. `getmeta`/`setmeta` seems the most clearly justified (closest `wsh` analogue with a real, if narrow, use case); `getvar`/`setvar` the least (no concrete use case identified yet).
 4. **Should `view`'s type-detection list (media extensions) live in `muxsh.mjs` or be fetched from something the frontend already uses** (if AgentMux has a canonical "is this a media file" check somewhere in the frontend/pane-type resolution code) — worth checking before hand-rolling a second list that can drift from the real one.

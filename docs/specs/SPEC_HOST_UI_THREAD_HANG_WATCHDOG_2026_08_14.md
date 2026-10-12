@@ -49,7 +49,7 @@ just not wired to cover this case:
    the probe ever fires.
 
 2. **`agentmux-srv` already has a working hang→recycle path; the host does
-   not.** `docs/specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md` +
+   not.** [`docs/specs/SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md`](SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md) +
    `srv_liveness.rs`: probes srv's HTTP health endpoint every 10s, and after
    `SRV_HANG_REQUIRED_MISSES=3` (~30s) force-kills and lets the existing
    crash-recycle path respawn it. This spec brings the equivalent pattern to

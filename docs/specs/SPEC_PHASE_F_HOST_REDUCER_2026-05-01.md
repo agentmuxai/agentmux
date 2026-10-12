@@ -4,11 +4,11 @@
 **Status:** Draft — architectural shape only, no implementation yet.
 **Supersedes:** Phase F sketches in `SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §13.
 **Reads-this-first:**
-- `docs/retro/multi-reducer-proposal-2026-04-28.md` — the long-term vision
-- `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` — Phase E (now mostly shipped)
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — coordinator-placement decisions
-- `docs/retro/phase-e-status-2026-05-01.md` — current status
-- `docs/retro/b5-migration-architecture-2026-04-28.md` — why some host state CAN'T migrate
+- [`docs/retro/multi-reducer-proposal-2026-04-28.md`](../retro/multi-reducer-proposal-2026-04-28.md) — the long-term vision
+- [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) — Phase E (now mostly shipped)
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) — coordinator-placement decisions
+- [`docs/retro/phase-e-status-2026-05-01.md`](../retro/phase-e-status-2026-05-01.md) — current status
+- [`docs/retro/b5-migration-architecture-2026-04-28.md`](../retro/b5-migration-architecture-2026-04-28.md) — why some host state CAN'T migrate
 
 ---
 
@@ -324,13 +324,13 @@ Same gaps as Phase E (per `saga-coordinator-location-analysis-2026-04-30.md` §6
 
 ## 13. Cross-references
 
-- `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §13 — Phase F preview (this spec supersedes).
-- `docs/retro/multi-reducer-proposal-2026-04-28.md` — long-form vision.
-- `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` — coordinator placement reasoning.
-- `docs/retro/b5-migration-architecture-2026-04-28.md` — why `browsers` resists the ratchet.
-- `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md` — Phase 2-7 unstarted; relevant to F.4.
-- `docs/retro/phase-e-status-2026-05-01.md` — current Phase E status.
-- `docs/retro/next-steps-2026-05-01.md` — forward plan listing this as deferred.
+- [`docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) §13 — Phase F preview (this spec supersedes).
+- [`docs/retro/multi-reducer-proposal-2026-04-28.md`](../retro/multi-reducer-proposal-2026-04-28.md) — long-form vision.
+- [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) — coordinator placement reasoning.
+- [`docs/retro/b5-migration-architecture-2026-04-28.md`](../retro/b5-migration-architecture-2026-04-28.md) — why `browsers` resists the ratchet.
+- [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md) — Phase 2-7 unstarted; relevant to F.4.
+- [`docs/retro/phase-e-status-2026-05-01.md`](../retro/phase-e-status-2026-05-01.md) — current Phase E status.
+- [`docs/retro/next-steps-2026-05-01.md`](../retro/next-steps-2026-05-01.md) — forward plan listing this as deferred.
 
 ---
 

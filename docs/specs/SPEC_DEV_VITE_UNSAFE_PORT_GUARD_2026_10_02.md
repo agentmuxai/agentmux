@@ -3,8 +3,8 @@
 **Date:** 2026-10-02
 **Status:** implemented — all three layers, in PR #4214.
 **Author:** AgentX (narko), at the owner's request
-**Affects:** `Taskfile.yml` (`dev:serve`, `dev:standalone:serve`), `scripts/vite-port.sh` (new), `scripts/vite-port.test.sh` (new), `.github/workflows/ci-pr.yml`, `.claude/skills/run/SKILL.md`, `crates/cef/src/client/error_catalog.rs`, `crates/cef/src/client/navigation.rs`
-**Builds on:** `.claude/skills/run/SKILL.md` (the dev-launch skill whose port step caused this), `docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md` (the earlier port-collision incident the skill was written from)
+**Affects:** `Taskfile.yml` (`dev:serve`, `dev:standalone:serve`), [`scripts/vite-port.sh`](../../scripts/vite-port.sh) (new), [`scripts/vite-port.test.sh`](../../scripts/vite-port.test.sh) (new), [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml), [`.claude/skills/run/SKILL.md`](../../.claude/skills/run/SKILL.md), [`crates/cef/src/client/error_catalog.rs`](../../crates/cef/src/client/error_catalog.rs), [`crates/cef/src/client/navigation.rs`](../../crates/cef/src/client/navigation.rs)
+**Builds on:** [`.claude/skills/run/SKILL.md`](../../.claude/skills/run/SKILL.md) (the dev-launch skill whose port step caused this), [`docs/retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md`](../retro/RETRO_AGENT_TASK_DEV_LIVENESS_AND_PORT_COLLISION_2026_09_27.md) (the earlier port-collision incident the skill was written from)
 
 ## 1. What happened
 
@@ -67,7 +67,7 @@ The check sits in the task's serve step, so it runs after the build steps (about
 
 ### 3.2 Layer 2 — the skill
 
-`.claude/skills/run/SKILL.md` §2 now says:
+[`.claude/skills/run/SKILL.md`](../../.claude/skills/run/SKILL.md) §2 now says:
 
 - Prefer no override at all. The Taskfile's per-clone port is deterministic, avoids the blocked list, and its own reaping handles an orphan of the same clone.
 - If a free port is needed (another agent holds the clone's port), run `bash scripts/vite-port.sh pick` and pass the result. The `/dev/tcp` recipe is removed, with a note on why.
@@ -93,18 +93,18 @@ Browser panes already get a manual Retry only and are unchanged apart from the n
 
 ## 5. Tests
 
-- `scripts/vite-port.test.sh`, run in CI next to the other script self-tests:
+- [`scripts/vite-port.test.sh`](../../scripts/vite-port.test.sh), run in CI next to the other script self-tests:
   - every port in the list is reported blocked, and the ports on either side of each are not;
   - `check` rejects empty, non-numeric, below 1024, above 65535, and a blocked port, and accepts 5173, 5300 and 5372;
   - every automatic port (5173 plus offset 0 to 199) is allowed;
   - `pick` skips a blocked port (starting at 5999 never returns 6000) and skips a port that is genuinely listening (a throwaway listener is opened for the test).
-- `crates/cef/src/client/navigation.rs`:
+- [`crates/cef/src/client/navigation.rs`](../../crates/cef/src/client/navigation.rs):
   - the error page for `ERR_UNSAFE_PORT` on the main window has no auto-retry and carries the `AGENTMUX_VITE_PORT` hint;
   - the page for `ERR_CONNECTION_REFUSED` on the main window still auto-retries;
   - a browser pane's page never auto-retries, for either code.
-- `crates/cef/src/client/error_catalog.rs`: `ERR_UNSAFE_PORT` is described, with a title that is neither blank nor the generic fallback.
+- [`crates/cef/src/client/error_catalog.rs`](../../crates/cef/src/client/error_catalog.rs): `ERR_UNSAFE_PORT` is described, with a title that is neither blank nor the generic fallback.
 
 ## 6. Out of scope
 
 - Reporting a load error from the host to the launcher or the terminal that ran `task dev`. It would be the better place to say this for someone who is not looking at the window, but it needs a new message across the launcher IPC. Left for a separate decision.
-- The blank window between the splash and first paint (`docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`). Unrelated: that is a timing gap on a working load; this is a load that cannot succeed.
+- The blank window between the splash and first paint ([`docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`](../reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md)). Unrelated: that is a timing gap on a working load; this is a load that cannot succeed.

@@ -2,7 +2,7 @@
 
 Date: 2026-10-01 · Author: Loap
 **Status:** active: §1 Proposals A and B shipped in #4183 and #4184, §3 steps 1-2 in #4188; remaining: §3 step 3 (estimator test), §2, and Option C (§1)
-Follows: `docs/reports/REPORT_STARTUP_CONSOLE_FLASH_AND_CONTEXT_CARD_SIZE_2026_10_01.md`
+Follows: [`docs/reports/REPORT_STARTUP_CONSOLE_FLASH_AND_CONTEXT_CARD_SIZE_2026_10_01.md`](../reports/REPORT_STARTUP_CONSOLE_FLASH_AND_CONTEXT_CARD_SIZE_2026_10_01.md)
 Context: the same-day PR fixed two instances (launcher `schtasks`, srv `--crash-monitor`) and the
 oversized context-delivery card by hand. Both are the third-or-later occurrence of a class of bug that
 a shared abstraction or an inventory guard would have prevented. This spec covers the cleanups.
@@ -12,7 +12,7 @@ a shared abstraction or an inventory guard would have prevented. This spec cover
 ## 1. One way to spawn a child without a console window
 
 ### Problem
-- `CREATE_NO_WINDOW` already has one definition (`crates/common/src/win32.rs`), but every call site still
+- `CREATE_NO_WINDOW` already has one definition ([`crates/common/src/win32.rs`](../../crates/common/src/win32.rs)), but every call site still
   re-writes the same wiring: `#[cfg(windows)] { use std::os::windows::process::CommandExt;
   cmd.creation_flags(CREATE_NO_WINDOW); }`.
   Measured on `main` @ `48f511ca9`: 44 `creation_flags(` calls and 26 `use ...CommandExt` imports
@@ -35,14 +35,14 @@ pub trait NoWindow { fn no_window(&mut self) -> &mut Self; }
 ```
 
 - Removes the per-site `cfg` block and the `CommandExt` import; a call site becomes `cmd.no_window()`.
-- `make_cli_cmd` (`crates/common/src/cli.rs:24-37`), `srv/src/util.rs`, and the launcher's new
+- `make_cli_cmd` ([`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs#L24-L37)), `srv/src/util.rs`, and the launcher's new
   `schtasks_command()` helper become one-liners.
 - Caveat to handle in the design: `creation_flags` overwrites, it does not OR. Sites that combine flags
   (`host_spawn.rs` uses `CREATE_SUSPENDED`; `cli_login.rs:1331` deliberately uses `CREATE_NEW_CONSOLE`)
   must stay explicit. The trait is for the common case only.
 
 ### Proposal B: extend the existing spawn-inventory guard
-`crates/srv/src/backend/pane_env.rs` (around lines 210-430) already pins every process spawn in srv with
+[`crates/srv/src/backend/pane_env.rs`](../../crates/srv/src/backend/pane_env.rs) (around lines 210-430) already pins every process spawn in srv with
 `SPAWN_INVENTORY: (file, program, count, classification)`, so a new spawn fails a test until someone
 classifies it. That mechanism already exists for env sanitising. Reuse it:
 - Add a classification, for example `no-window:`, and cross-check that those files call `no_window()` or
@@ -66,7 +66,7 @@ B first (cheap, catches regressions), then A (mechanical sweep), then decide on 
 ## 2. Startup does avoidable process spawns
 
 `start_at_login::reconcile_latest` runs on every startup, because the first `config` frame always passes the
-dedupe in `observe` (`crates/launcher/src/start_at_login.rs`), and it unconditionally calls
+dedupe in `observe` ([`crates/launcher/src/start_at_login.rs`](../../crates/launcher/src/start_at_login.rs)), and it unconditionally calls
 `autostart::read_entry()`, which spawns `schtasks /Query /TN <id> /XML`.
 
 - Opportunity: for the common case (setting off, no task registered) answer from the filesystem instead.

@@ -155,7 +155,7 @@ This keeps the backend dumb (just framing/routing) and the frontend's `lsp-clien
 
 ### Frontend
 
-New module: **`frontend/app/view/editor/lsp/`**
+New module: **[`frontend/app/view/editor/lsp/`](../../frontend/app/view/editor/lsp)**
 
 | File | Role |
 |---|---|
@@ -270,7 +270,7 @@ The banner is dismissible (closes for the session); it returns on the next launc
 
 #### Install hints per language
 
-A small static table backs the banner's "Install:" line. Source of truth lives in `frontend/app/view/editor/lsp/install-hints.ts`:
+A small static table backs the banner's "Install:" line. Source of truth lives in [`frontend/app/view/editor/lsp/install-hints.ts`](../../frontend/app/view/editor/lsp/install-hints.ts):
 
 | Language | Server binary | Install command (cross-platform default) | Docs link |
 |---|---|---|---|
@@ -317,9 +317,9 @@ Chip states: `gray` not-started · `yellow` starting · `green` ready · `red` c
 
 ### What's already in place
 
-AgentMux ships **9 themes** via SCSS files under `frontend/app/themes/`: `default`, `midnight`, `high-contrast`, `monokai`, `nord`, `dracula`, `catppuccin`, `tokyo-night`, `gruvbox`. Each defines a `[data-theme="<name>"]` block of CSS custom properties — `--main-bg-color`, `--accent-color`, `--border-color`, etc.
+AgentMux ships **9 themes** via SCSS files under [`frontend/app/themes/`](../../frontend/app/themes): `default`, `midnight`, `high-contrast`, `monokai`, `nord`, `dracula`, `catppuccin`, `tokyo-night`, `gruvbox`. Each defines a `[data-theme="<name>"]` block of CSS custom properties — `--main-bg-color`, `--accent-color`, `--border-color`, etc.
 
-Selection lives in the **hamburger menu (≡) → Theme submenu** (defined in `frontend/app/menu/base-menus.ts:THEME_OPTIONS`), persists as `window:theme` in `settings.json`, and applies via `document.documentElement.setAttribute("data-theme", …)` (see `frontend/app/app.tsx:185`). The enum is locked in the schema at `schema/settings.json`.
+Selection lives in the **hamburger menu (≡) → Theme submenu** (defined in `frontend/app/menu/base-menus.ts:THEME_OPTIONS`), persists as `window:theme` in `settings.json`, and applies via `document.documentElement.setAttribute("data-theme", …)` (see [`frontend/app/app.tsx:185`](../../frontend/app/app.tsx#L185)). The enum is locked in the schema at [`schema/settings.json`](../../schema/settings.json).
 
 **The editor currently ignores this.** CodeMirror uses a hardcoded `oneDark` theme, so switching AgentMux's theme leaves the editor stuck. That's the integration gap this section closes.
 
@@ -358,7 +358,7 @@ Two pieces of work:
 --editor-syntax-link:       #8be9fd;
 ```
 
-Defaults in `frontend/app/themes/index.scss` cover any theme that doesn't override (falls back to the same colors `oneDark` ships with today — no regression for incomplete coverage).
+Defaults in [`frontend/app/themes/index.scss`](../../frontend/app/themes/index.scss) cover any theme that doesn't override (falls back to the same colors `oneDark` ships with today — no regression for incomplete coverage).
 
 ### Runtime wiring
 

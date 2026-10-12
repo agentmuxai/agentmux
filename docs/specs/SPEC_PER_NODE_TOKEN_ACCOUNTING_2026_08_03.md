@@ -1,7 +1,7 @@
 # Spec: true per-node token accounting
 
 **Status:** proposed — verified unimplemented as of 2026-08-10 (no roundIndex/RoundRecord in frontend); base hover-peek shipped separately (PR #2392).
-**Relationship:** Phase 2 follow-up to `docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`, which deliberately deferred real per-node token/cost data (§1.4/§4.2/§6 there) in favor of a client-side chars÷4 estimate. This spec answers "can we do better than a guess?" — and the answer is **partially yes, with a real derivation**, not a heuristic, for the Claude provider specifically.
+**Relationship:** Phase 2 follow-up to [`docs/specs/SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md), which deliberately deferred real per-node token/cost data (§1.4/§4.2/§6 there) in favor of a client-side chars÷4 estimate. This spec answers "can we do better than a guess?" — and the answer is **partially yes, with a real derivation**, not a heuristic, for the Claude provider specifically.
 
 ## 1. The core insight
 
@@ -99,11 +99,11 @@ Builds directly on `SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md` §2.3/§2.4's
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/types.ts` | Add `roundIndex?: number` to `ToolNode`, `MarkdownNode` |
-| `frontend/app/view/agent/stream-parser.ts` | Accept/stamp `roundIndex` in `toolCallToNode()`/`thinkingToNode()` |
-| `frontend/app/view/agent/useAgentStream.ts` | New local round-tracking map (§4.1); derive + attach `toolResultTokens` on each new `message_start` (§4.3); pass current `roundIndex` into node-creation calls |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Tooltip content: prefer real `Result:`/`Generation this round:` figures over the base spec's estimate when available |
-| `frontend/app/view/agent/components/MarkdownBlock.tsx` | Same preference for thinking-clump tooltip |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `roundIndex?: number` to `ToolNode`, `MarkdownNode` |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | Accept/stamp `roundIndex` in `toolCallToNode()`/`thinkingToNode()` |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | New local round-tracking map (§4.1); derive + attach `toolResultTokens` on each new `message_start` (§4.3); pass current `roundIndex` into node-creation calls |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Tooltip content: prefer real `Result:`/`Generation this round:` figures over the base spec's estimate when available |
+| [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) | Same preference for thinking-clump tooltip |
 
 ## 6. Open questions — resolved
 
