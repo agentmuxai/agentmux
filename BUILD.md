@@ -72,7 +72,7 @@ AgentMux embeds Chromium via CEF — no system WebKitGTK or WebView2 required.
      libgdk-pixbuf2.0-dev libatk1.0-dev
    ```
    CMake and Ninja are required by `cef-dll-sys`, which builds CEF's C wrapper at compile time.
-   The remaining packages are CEF/GTK runtime dev headers — see `.github/workflows/build-linux.yml`
+   The remaining packages are CEF/GTK runtime dev headers — see [`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml)
    for the list this repo's own CI installs; keep this list in sync with it.
 
 2. **Install Rust**:
@@ -99,8 +99,8 @@ winget install Task.Task
 
 See full instructions: https://taskfile.dev/installation/
 
-**Starting from nothing?** `scripts/bootstrap.sh` (macOS/Linux, installs
-Task) and `scripts/bootstrap.ps1` (Windows, installs **Git and Task**) run
+**Starting from nothing?** [`scripts/bootstrap.sh`](scripts/bootstrap.sh) (macOS/Linux, installs
+Task) and [`scripts/bootstrap.ps1`](scripts/bootstrap.ps1) (Windows, installs **Git and Task**) run
 the commands above for you — see "Bootstrap and Initialize" below. On
 Windows specifically, `bootstrap.ps1` is the one entry point that works
 before you've cloned anything, since a stock Windows install has neither
@@ -163,12 +163,12 @@ npm install
 If you have build issues later, run `npm install` again to refresh dependencies.
 
 `npm install` also runs the `prepare` script which installs the project's git
-hooks (`.githooks/pre-commit`) by setting `core.hooksPath`. The pre-commit
+hooks ([`.githooks/pre-commit`](.githooks/pre-commit)) by setting `core.hooksPath`. The pre-commit
 hook runs `git diff --check` to block commits that contain unresolved merge
 conflict markers or whitespace errors in staged changes. To bypass for one
 commit (e.g. authoring prose that legitimately contains `<<<<<<< HEAD` as
 example text), use `git commit --no-verify`. See spec
-`docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md` §5 Phase 0
+[`docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md`](docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md) §5 Phase 0
 for rationale.
 
 ---
@@ -195,7 +195,7 @@ Rust changes are **not** auto-rebuilt — run `task build:backend` (or `task bui
 
 ### Backend Rebuild
 
-If you modify Rust backend code (`crates/srv/src/`):
+If you modify Rust backend code ([`crates/srv/src/`](crates/srv/src)):
 
 ```bash
 # Rebuild Rust binary
@@ -243,7 +243,7 @@ git commit -m "chore: release v<X.Y.Z>"
 git push -u origin agenta/release-vX.Y.Z
 ```
 
-See `.changesets/README.md` and `docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md` for rationale.
+See [`.changesets/README.md`](.changesets/README.md) and [`docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md`](docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md) for rationale.
 
 ---
 
@@ -458,7 +458,7 @@ git push origin main --tags
 
 ### Windows
 
-- Uses **Inno Setup** for the installer (`packaging/windows/agentmux.iss`)
+- Uses **Inno Setup** for the installer ([`packaging/windows/agentmux.iss`](packaging/windows/agentmux.iss))
 - CEF bundles its own Chromium runtime — no WebView2 required
 - No CGO / no Zig required (pure Rust)
 
@@ -474,7 +474,7 @@ git push origin main --tags
 - **AppImage** (universal) and **DEB** (Debian/Ubuntu) produced by CI.
 - CEF bundles Chromium — no system WebKitGTK required.
 - Default display: **native Wayland** (`--ozone-platform=wayland`) on Wayland sessions, X11 otherwise. Set `AGENTMUX_OZONE_PLATFORM=x11` to run under XWayland.
-- Window drag and right-click on title-bar require the patched `libcef.so` (included in all release AppImages). See `docs/cef-build/build-patched-libcef.md`.
+- Window drag and right-click on title-bar require the patched `libcef.so` (included in all release AppImages). See [`docs/cef-build/build-patched-libcef.md`](docs/cef-build/build-patched-libcef.md).
 
 ---
 

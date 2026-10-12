@@ -30,7 +30,7 @@ A comment says why the code is the way it is. The code says what it does. Commen
 2. **Cite once.** Put the PR or issue next to the constraint it justifies, as `(#NNNN)`. Cite a spec as `SPEC_NAME.md §N`.
 3. **Constraint and consequence, in about 3 lines.** State the rule and what breaks if it's violated. Interface docs (`///`, `/** */`) may be longer, but start with a one-sentence summary.
 4. **Say a rule once**, where it is enforced. Other sites get one line pointing there.
-5. **Over about 8 lines, it's a design note.** Put it in `docs/` and leave a one-line pointer.
+5. **Over about 8 lines, it's a design note.** Put it in [`docs/`](docs) and leave a one-line pointer.
 6. **Don't restate the code or the types.** `// Create the channel` and `@param node The node` add nothing.
 7. **Keep paths and symbols current.** A comment that names a file or function must still resolve; update it in the PR that moves the code. CI fails a new comment naming a doc or repo path that doesn't exist, and fails any comment still naming a file your PR deletes or renames away (a bare name like `foo.rs` only warns). `node scripts/check-comment-hygiene.mjs --dead-refs` lists every dead reference in the tree.
 8. **Never remove** `// SAFETY:` comments, `TODO`/`FIXME`, lint or compiler directives (`eslint-disable`, `@ts-expect-error`, `/// <reference`), or doctest fences when trimming comments.
@@ -84,7 +84,7 @@ agentmux/
 ```
 
 Each crate lives in `crates/<name>/` and its package (and binary) is named `agentmux-<name>`,
-so `crates/srv/` builds with `cargo build -p agentmux-srv`. A new crate follows the same rule.
+so [`crates/srv/`](crates/srv) builds with `cargo build -p agentmux-srv`. A new crate follows the same rule.
 Dated docs (specs, retros, reports) written before 2026-09-30 still say `agentmux-<name>/`;
 read that as `crates/<name>/`.
 
@@ -95,9 +95,9 @@ Written in **SolidJS + TypeScript**, bundled by Vite. Entry point is [`frontend/
 When running `task dev`, the frontend loads via Vite with Hot Module Reloading — most styling and component changes reload automatically. For state-level changes (reducer stack, layout), force-reload with `Ctrl+Shift+R`.
 
 Key subdirectories:
-- `frontend/app/view/` — pane view types (agent, terminal, webview, etc.)
-- `frontend/app/store/` — signals + 4-layer reducer stack state management
-- `frontend/app/element/` — reusable UI components
+- [`frontend/app/view/`](frontend/app/view) — pane view types (agent, terminal, webview, etc.)
+- [`frontend/app/store/`](frontend/app/store) — signals + 4-layer reducer stack state management
+- [`frontend/app/element/`](frontend/app/element) — reusable UI components
 
 ### CEF Host (`crates/cef/`)
 
@@ -125,7 +125,7 @@ The portable entry-point process (~325 KB). It owns process and single-instance
 lifecycle so the host and backend can stay focused on the app:
 
 - **Single-instance enforcement** keyed on `hash(data_dir + version)`
-  (`crates/launcher/src/hash.rs`, invariant I1) — a second launch of the same
+  ([`crates/launcher/src/hash.rs`](crates/launcher/src/hash.rs), invariant I1) — a second launch of the same
   instance forwards an "open new window" request to the running host instead of
   starting a duplicate.
 - **Job Object (Windows)** — the launcher creates the job that owns the whole

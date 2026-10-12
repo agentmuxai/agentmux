@@ -23,4 +23,4 @@ Copyright © 2025-2026 AgentMux Corp. Licensed under the Apache License 2.0.
 
 AgentMux is a fork of [Wave Terminal](https://github.com/wavetermdev/waveterm), originally developed by Command Line Inc., licensed under the Apache License 2.0.
 
-Full third-party attribution is available in [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md) and in the dependency manifests (`package.json`, `Cargo.toml`). The [NOTICE](./NOTICE) file at the repo root carries forward upstream attribution per Apache License 2.0 § 4(d).
+Full third-party attribution is available in [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md) and in the dependency manifests ([`package.json`](package.json), [`Cargo.toml`](Cargo.toml)). The [NOTICE](./NOTICE) file at the repo root carries forward upstream attribution per Apache License 2.0 § 4(d).

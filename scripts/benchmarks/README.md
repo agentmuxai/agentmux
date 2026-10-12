@@ -229,7 +229,6 @@ Add benchmarking to CI/CD:
 
 ## See Also
 
-- [TAURI_MIGRATION_STATUS.md](../../docs/TAURI_MIGRATION_STATUS.md) - Migration progress
 - [BUILD.md](../../BUILD.md) - Build instructions
 - [Taskfile.yml](../../Taskfile.yml) - Build tasks
 
