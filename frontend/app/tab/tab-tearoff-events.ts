@@ -14,7 +14,6 @@ import { WorkspaceService } from "../store/services";
 import {
     computeInsertionPoint,
     insertionPointToIndex,
-    markTabMerged,
     setBouncingTabId,
     setInsertionPoint,
 } from "./tabbar-dnd";
@@ -127,10 +126,6 @@ export function useTabTearOffEvents(
                         Logger.info("dnd", `${via} — declining last tab of main window`, payload);
                         return;
                     }
-                    // Mark BEFORE the awaits — CrossWindowDropOverlay's
-                    // cross-drag-end for the same gesture arrives while these
-                    // RPCs are in flight, and the mark is what makes it a no-op.
-                    markTabMerged(payload.tabId);
                     if (payload.isLastTab) {
                         await WorkspaceService.RestoreTornOffTab(payload.tabId, payload.fromWsId, ownWsId, insertIdx);
                         await getApi().closeWindowByLabel(payload.sourceWindowLabel);
