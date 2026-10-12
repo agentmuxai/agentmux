@@ -3,7 +3,7 @@
 **Date:** 2026-07-02
 **Status:** Proposed (analysis only — no code changes yet)
 **Area:** Launcher (macOS, cross-referenced against Windows/Linux)
-**Prior art:** `SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md`, `SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md` (Windows), `SPEC_SPLASH_TELEMETRY_LINUX_2026_06_27.md`, `SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md`, `SPEC_MACOS_PACKAGING_2026_05_30.md`, `docs/CEF_ARCHITECTURE.md`
+**Prior art:** `SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md`, `SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md` (Windows), `SPEC_SPLASH_TELEMETRY_LINUX_2026_06_27.md`, `SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md`, `SPEC_MACOS_PACKAGING_2026_05_30.md`, [`docs/CEF_ARCHITECTURE.md`](../CEF_ARCHITECTURE.md)
 
 ---
 
@@ -58,7 +58,7 @@ macOS-only overhead beyond that gate: the CEF-framework `dlopen` (hard constrain
 ### A.3 Hard constraints — explicitly out of scope for "fixing"
 
 - **Splash-on-main-thread / supervisor-on-worker-thread split** (`main.rs:105-143`) — the only way to paint anything before CEF's multi-second init; AppKit requires main-thread ownership. Do not "simplify" this away.
-- **CEF framework must be `dlopen`'d at runtime, and Seatbelt sandbox init must precede it** (`lib.rs:239-278`) — CEF's own documented requirement (`docs/CEF_ARCHITECTURE.md:963-965`). This dlopen is likely the largest fixed cost on macOS and is not addressable from the launcher side.
+- **CEF framework must be `dlopen`'d at runtime, and Seatbelt sandbox init must precede it** (`lib.rs:239-278`) — CEF's own documented requirement ([`docs/CEF_ARCHITECTURE.md:963-965`](../CEF_ARCHITECTURE.md)). This dlopen is likely the largest fixed cost on macOS and is not addressable from the launcher side.
 - **Renderer/GPU/utility subprocesses must run as a separate "AgentMux Helper.app," not a self-re-exec** (`lib.rs:76-100`) — the macOS process-identity model rejects re-execing the main bundle binary for subprocess roles (would crash-loop).
 - **Per-version `CFBundleIdentifier`** (`SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md` §4) — required for correct LaunchServices routing across multiple installed versions; bookkeeping cost at package time, not launch time.
 - **Reopen handler installed via raw ObjC runtime calls** (`splash_mac.rs:203-282`) — CEF re-registers its own Apple-Event handler, so the naive `NSAppleEventManager` hook is inert; this workaround is load-bearing for Finder/Dock double-click UX.
@@ -138,7 +138,7 @@ The "structurally different" framing from the Linux telemetry spec (§8 there) i
 
 ### B.7 Open items to verify before implementation (not confirmed by this pass)
 
-- Whether `cef`/`frontend`-stage events (S5/S6 in the original Windows telemetry spec) or a channel-pruner stage (S3, referencing `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`) were ever actually wired end-to-end via IPC from `agentmux-cef`/`frontend/app-init.ts` back to the launcher — no evidence found in the launcher-side files inspected. If a future spec/implementation assumes these exist, verify against `agentmux-cef/src/**`, `ipc/server.rs`, and `frontend/app-init.ts` first.
+- Whether `cef`/`frontend`-stage events (S5/S6 in the original Windows telemetry spec) or a channel-pruner stage (S3, referencing `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`) were ever actually wired end-to-end via IPC from `agentmux-cef`/[`frontend/app-init.ts`](../../frontend/app-init.ts) back to the launcher — no evidence found in the launcher-side files inspected. If a future spec/implementation assumes these exist, verify against `agentmux-cef/src/**`, `ipc/server.rs`, and [`frontend/app-init.ts`](../../frontend/app-init.ts) first.
 - Exact shipped value of Linux's `SUMMARY_HOLD_MS` (see §B.6).
 
 ---

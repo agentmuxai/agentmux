@@ -1,8 +1,8 @@
 # Fix Spec: Linux pane tear-off restricted to header only
 
 **Date:** 2026-06-20
-**Retro:** `docs/retro/2026-06-20-linux-pane-tearoff-anywhere.md`
-**File:** `frontend/layout/lib/TileLayout.linux.tsx`
+**Retro:** [`docs/retro/2026-06-20-linux-pane-tearoff-anywhere.md`](../retro/2026-06-20-linux-pane-tearoff-anywhere.md)
+**File:** [`frontend/layout/lib/TileLayout.linux.tsx`](../../frontend/layout/lib/TileLayout.linux.tsx)
 
 ---
 

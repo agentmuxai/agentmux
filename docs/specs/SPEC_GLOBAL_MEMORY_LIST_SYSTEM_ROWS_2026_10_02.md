@@ -3,8 +3,8 @@
 **Date:** 2026-10-02
 **Status:** implemented — PR #4219.
 **Author:** AgentX (narko), at the owner's request
-**Affects:** `crates/srv/src/server/app_api/global_memory.rs` (`global_memory_list_impl`), `crates/srv/src/server/app_api/tests/global_memory_impl_tests.rs`, `crates/mcp/src/tool_schemas.rs` (the tool text)
-**Builds on:** `docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (the system tier and why it is write-protected)
+**Affects:** [`crates/srv/src/server/app_api/global_memory.rs`](../../crates/srv/src/server/app_api/global_memory.rs) (`global_memory_list_impl`), [`crates/srv/src/server/app_api/tests/global_memory_impl_tests.rs`](../../crates/srv/src/server/app_api/tests/global_memory_impl_tests.rs), [`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs) (the tool text)
+**Builds on:** [`docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) (the system tier and why it is write-protected)
 
 ## 1. What the owner saw
 

@@ -4,7 +4,7 @@
 **Status:** Implemented (cross-channel only) — #2762
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-srv/src/server/app_api/fleet.rs`, `server/mod.rs`, `server/app_api/mod.rs`)
-**Diagnosis:** `docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md` §3.2
+**Diagnosis:** [`docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md`](../reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md) §3.2
 **Related:** `SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22.md` (the sibling fix this follows)
 
 ## 1. Problem

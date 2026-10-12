@@ -7,7 +7,7 @@ dock items," and neither `muxlog` nor any existing RPC could answer "what is
 this running instance doing right now, and which instance is even hosting
 this conversation." That gap is the direct motivation for this spec.
 **Status:** implemented — PRs #2380 (list/describe), #2390 (spawn/exec error surfacing), #2432 (dock); verified 2026-08-10.
-**Related:** `docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md`
+**Related:** [`docs/specs/REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md`](REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md)
 (names the same six-plus overlapping liveness mechanisms this tool would read
 from, not add an seventh to), `agentmux-srv/src/broker/process.rs` (Process
 Broker Phase A — the read-side consolidation this tool builds directly on),
@@ -291,7 +291,7 @@ more careful, separate scoping than a drive-by fixup:
    propagation to every plain terminal pane is a real scope-of-access
    change, not a documentation fix.
 
-Until one of these lands, `docs/MUXSPECT.md`, `CLAUDE.md`, and
+Until one of these lands, [`docs/MUXSPECT.md`](../MUXSPECT.md), `CLAUDE.md`, and
 `muxspect.mjs`'s own `--help` text all point users/agents at the
 direct-path invocation instead of overselling shell-function convenience
 that doesn't apply yet.

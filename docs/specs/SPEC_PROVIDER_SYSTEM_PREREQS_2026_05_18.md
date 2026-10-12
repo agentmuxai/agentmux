@@ -4,7 +4,7 @@
 **Date:** 2026-05-18
 **Author:** AgentA
 **Related:**
-- `frontend/app/view/agent/providers/index.ts` (provider definitions)
+- [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) (provider definitions)
 - `agentmux-cef/src/commands/providers.rs::check_nodejs_available` (existing single-tool check)
 - Anthropic Claude Code issue [#29898](https://github.com/anthropics/claude-code/issues/29898) (the runtime error this spec eliminates)
 
@@ -52,7 +52,7 @@ The pattern that fits AgentMux: check at **install / launch time** and surface a
 
 ### 3.1 Declare prereqs on the provider
 
-Add to `ProviderDefinition` (`frontend/app/view/agent/providers/index.ts`):
+Add to `ProviderDefinition` ([`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts)):
 
 ```ts
 export interface SystemPrereq {
@@ -148,7 +148,7 @@ The banner links use `getApi().openExternal(url)` (existing CEF IPC for opening 
 
 ### 3.4 Platform detection for the URL
 
-The `useSystemPlatform()` hook already exists in `frontend/app/store/global.ts` (returns `"win32" | "darwin" | "linux"`). The banner picks the matching URL from `installUrls.{windows,macos,linux}`.
+The `useSystemPlatform()` hook already exists in [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) (returns `"win32" | "darwin" | "linux"`). The banner picks the matching URL from `installUrls.{windows,macos,linux}`.
 
 ### 3.5 Banner copy
 
@@ -172,12 +172,12 @@ A "Refresh" button re-runs the RPC so a user who installs git in another termina
 
 ### Phase α — claude + openclaw only
 
-1. `frontend/app/view/agent/providers/index.ts` — add `SystemPrereq` interface + `systemPrereqs` field; populate for `claude` and `openclaw`.
+1. [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) — add `SystemPrereq` interface + `systemPrereqs` field; populate for `claude` and `openclaw`.
 2. `agentmux-srv/src/server/cli_handlers.rs` — new `resolve_prereqs` RPC handler.
 3. Auto-generated RPC bindings — re-run codegen (`task generate-ts`?).
-4. `frontend/app/view/agent/components/AgentPrereqModal.tsx` — new component using modal-v2 chrome. Reuses the same `useTabModal` pattern as install/launch.
+4. [`frontend/app/view/agent/components/AgentPrereqModal.tsx`](../../frontend/app/view/agent/components/AgentPrereqModal.tsx) — new component using modal-v2 chrome. Reuses the same `useTabModal` pattern as install/launch.
 5. `frontend/app/tab/tab-modal.ts` — new `kind: "agent-prereqs"` request shape.
-6. `frontend/app/view/agent/components/AgentPicker.tsx` — between card click and install-modal open, call `resolve_prereqs`; if anything missing + blocking, route to the prereq modal first.
+6. [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) — between card click and install-modal open, call `resolve_prereqs`; if anything missing + blocking, route to the prereq modal first.
 
 ### Phase β — extend
 

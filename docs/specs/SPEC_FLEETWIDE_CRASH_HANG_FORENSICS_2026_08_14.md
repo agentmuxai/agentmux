@@ -52,14 +52,14 @@ a separate decision is made to ship dumps off-machine.
   termination handling is **unconfirmed** — needs a follow-up check before
   Phase 4 is scoped precisely (open question below).
 - **Frontend JS already forwards uncaught errors to the host log**:
-  `frontend/log/error-forwarder.ts` hooks `window.onerror` (L172) and
+  [`frontend/log/error-forwarder.ts`](../../frontend/log/error-forwarder.ts) hooks `window.onerror` (L172) and
   `unhandledrejection` (L201), resolves source-mapped stacks, and ships them
   via `invokeCommand("fe_log_structured", …)` (L89, L115). This is
   logging-only — no dump, and it doesn't catch a hung (not throwing) JS main
   thread.
 - **WER LocalDumps is registered for the backend only**, keyed to the exact
-  versioned srv exe filename (`tools/enable-crash-dumps.reg:13`,
-  `scripts/register-crash-dumps.ps1:63`). Nothing registers the host/CEF
+  versioned srv exe filename ([`tools/enable-crash-dumps.reg:13`](../../tools/enable-crash-dumps.reg),
+  [`scripts/register-crash-dumps.ps1:63`](../../scripts/register-crash-dumps.ps1)). Nothing registers the host/CEF
   exe. The handful of `agentmux-cef.exe` `.dmp` files already found on this
   machine are Windows' own unconfigured default WER queuing — no guaranteed
   path, retention, or dump-type configuration behind them.

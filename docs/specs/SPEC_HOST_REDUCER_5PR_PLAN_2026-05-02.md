@@ -6,8 +6,8 @@
 **Branch base:** `main` HEAD `48ad4e58`
 
 **Companion docs:**
-- `docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md` — granular Phase H spec; this doc is its 5-PR compression. Reference the granular spec for full type definitions, reducer semantics, and decision log.
-- `docs/retro/reducer-architecture-current-state-2026-05-02.md` — verified factual catalog of what's in / out of reducers today.
+- [`docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md`](SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md) — granular Phase H spec; this doc is its 5-PR compression. Reference the granular spec for full type definitions, reducer semantics, and decision log.
+- [`docs/retro/reducer-architecture-current-state-2026-05-02.md`](../retro/reducer-architecture-current-state-2026-05-02.md) — verified factual catalog of what's in / out of reducers today.
 - `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)` — 2026-05-02 freeze investigation (dump analysis, root cause).
 
 ---
@@ -738,11 +738,11 @@ The compression is purely operational — fewer, larger PRs instead of 15-20 sma
 
 ## Cross-references
 
-- Granular Phase H spec: `docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md`
-- Current state catalog: `docs/retro/reducer-architecture-current-state-2026-05-02.md`
+- Granular Phase H spec: [`docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md`](SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md)
+- Current state catalog: [`docs/retro/reducer-architecture-current-state-2026-05-02.md`](../retro/reducer-architecture-current-state-2026-05-02.md)
 - Freeze investigation: `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)`
-- Original Phase F spec: `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`
-- Saga reducer migration retro: `docs/retro/saga-architecture-migration-complete-2026-05-02.md`
+- Original Phase F spec: [`docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md)
+- Saga reducer migration retro: [`docs/retro/saga-architecture-migration-complete-2026-05-02.md`](../retro/saga-architecture-migration-complete-2026-05-02.md)
 
 ---
 

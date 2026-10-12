@@ -3,7 +3,7 @@
 **Date:** 2026-06-17
 **Status:** Draft
 **Author:** naki
-**Component:** `agentmux-srv/src/server/websocket.rs` (`readeditorfile`/`writeeditorfile`), `frontend/app/view/editor/`
+**Component:** `agentmux-srv/src/server/websocket.rs` (`readeditorfile`/`writeeditorfile`), [`frontend/app/view/editor/`](../../frontend/app/view/editor)
 
 ---
 
@@ -135,6 +135,6 @@ Phase 1 alone fixes "my `.ini` won't open." Phases 2–3 make encodings first-cl
 |---|---|
 | Read path (strict UTF-8 today) | `agentmux-srv/src/server/websocket.rs:1559` (`readeditorfile`) |
 | Write path (always UTF-8 today) | `agentmux-srv/src/server/websocket.rs` (`writeeditorfile`, ~1571) |
-| Editor read/write callers | `frontend/app/view/editor/editor-model.ts` (`ReadEditorFileCommand`, `saveFile`/`WriteEditorFileCommand`) |
+| Editor read/write callers | [`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts) (`ReadEditorFileCommand`, `saveFile`/`WriteEditorFileCommand`) |
 | Crates | `encoding_rs`, `chardetng` (crates.io; pure Rust) |
 | Existing size/binary guards | `readeditorfile` 10 MB cap; editor-model binary-content refusal |

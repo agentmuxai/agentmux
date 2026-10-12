@@ -16,7 +16,7 @@ code against `SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md` found:
 
 ### 1. File-tree context menu — 90% done, one specific gap
 
-`buildContextMenuItems` (`frontend/app/view/editor/editor-view.tsx:559-630`)
+`buildContextMenuItems` ([`frontend/app/view/editor/editor-view.tsx:559-630`](../../frontend/app/view/editor/editor-view.tsx))
 already implements everything in the original spec **except** two Phase-1
 items on the file-node menu:
 
@@ -38,7 +38,7 @@ spec (rename, create, delete flows, tab sync on rename/delete) all shipped as
 specified.
 
 The menu already uses the shared `ContextMenu` primitive
-(`frontend/app/components/context-menu.tsx`) the original spec introduced —
+([`frontend/app/components/context-menu.tsx`](../../frontend/app/components/context-menu.tsx)) the original spec introduced —
 this is the file tree's own primitive and is distinct from the codebase's
 other two right-click/dropdown mechanisms (`ContextMenuModel`, a native-OS
 menu used by tabs/blocks/action-widgets; `FlyoutMenu`, a click-triggered DOM
@@ -51,10 +51,10 @@ dropdown used for the hamburger menu). This spec's new items stay on
 
 Live preview already exists as a complete, previously-shipped feature (fixed
 in PR #1743 after a regression documented in
-`docs/retro/retro-editor-markdown-preview-regression-2026-06-23.md`):
+[`docs/retro/retro-editor-markdown-preview-regression-2026-06-23.md`](../retro/retro-editor-markdown-preview-regression-2026-06-23.md)):
 
 - `.md` tabs default to `EditorMode = "preview"`
-  (`frontend/app/view/editor/editor-model.ts:845`); `"source"` and `"split"`
+  ([`frontend/app/view/editor/editor-model.ts:845`](../../frontend/app/view/editor/editor-model.ts)); `"source"` and `"split"`
   modes are also available via a toolbar and `Mod+Shift+V`
   (`editor-view.tsx:746-770`, `editor-model.ts:855-857`).
 - CodeMirror's `updateListener` calls `setLiveDoc(content)` on every
@@ -62,7 +62,7 @@ in PR #1743 after a regression documented in
   persisted-content memo, which does not update per-keystroke
   (see comment at `editor-view.tsx:99-104`).
 - The preview renders `<Markdown textAtom={() => liveDoc()} />`
-  (`editor-view.tsx:888`) — the same shared `frontend/app/element/markdown.tsx`
+  (`editor-view.tsx:888`) — the same shared [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx)
   component used for agent chat rendering, built on a full
   `unified`/`remark-gfm`/`rehype-*` pipeline (confirmed present in
   `package.json`).
@@ -155,7 +155,7 @@ Terminal" sibling action and widget-bar editor launches).
 
 There is no single RPC that creates a tab *and* opens a specific pane into it
 with no preset — `WorkspaceService.CreateTab` (used by `createTab()` in
-`frontend/app/store/global.ts:745-776`) is the primitive for creating a tab,
+[`frontend/app/store/global.ts:745-776`](../../frontend/app/store/global.ts)) is the primitive for creating a tab,
 but `createTab()` itself always layers on `applyTabPreset(tabId,
 DEFAULT_TAB_PRESET)` (agent + swarm + armory + sysinfo, as of
 `SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md`), which is wrong for this

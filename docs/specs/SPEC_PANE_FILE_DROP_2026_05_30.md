@@ -11,7 +11,7 @@
 
 Two facts make file DnD unusual in AgentMux:
 
-1. **The CEF browser sandbox hides full filesystem paths.** A drop event on a CEF/WebView2 pane exposes only `File` objects with bare filenames (e.g. `report.csv`). The host path (e.g. `C:\Users\me\Downloads\report.csv`) is *not* in the JS event — it has to be captured Rust-side by a `CefDragHandler` and surfaced through IPC. The current placeholder in `frontend/app/view/term/term.tsx:330–344` documents the gap explicitly.
+1. **The CEF browser sandbox hides full filesystem paths.** A drop event on a CEF/WebView2 pane exposes only `File` objects with bare filenames (e.g. `report.csv`). The host path (e.g. `C:\Users\me\Downloads\report.csv`) is *not* in the JS event — it has to be captured Rust-side by a `CefDragHandler` and surfaced through IPC. The current placeholder in [`frontend/app/view/term/term.tsx:330–344`](../../frontend/app/view/term/term.tsx) documents the gap explicitly.
 2. **The terminal's working directory may not live on the host.** For container/SSH/WSL-backed connections, "copy this file into the CWD" means cross-boundary file transport — not a `std::fs::copy`. The current `copy_file_to_dir` IPC (`agentmux-cef/src/commands/providers.rs:685`) is host-local-FS only.
 
 A spec that ignores either point produces a UI that "works" on a developer laptop and silently breaks the moment a real user drops a CSV onto a Dockerised agent.
@@ -180,10 +180,10 @@ For files > 8 MiB a progress toast replaces the success toast: a progress bar th
 
 | File | Change |
 |---|---|
-| `frontend/app/view/term/term.tsx` | Replace the placeholder branch in `onDrop` with a call to `invokeCommand("consume_drag_paths", ...)` then `handleFilesDropped(paths)`. Keep the existing CWD-missing toast. |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | Replace the placeholder branch in `onDrop` with a call to `invokeCommand("consume_drag_paths", ...)` then `handleFilesDropped(paths)`. Keep the existing CWD-missing toast. |
 | `frontend/app/view/agent/components/AgentDropZone.tsx` (new, ~80 LoC) | Mirrors the term DragOverlay flow. Owns the composer-token splice. |
-| `frontend/app/view/agent/hooks/useAgentDropAttach.ts` (new, ~120 LoC) | Wires DragOverlay + drop event + composer splice + queue-on-unmount. |
-| `frontend/util/dnd.ts` (new, ~60 LoC) | Shared `consume_drag_paths` invoke + multi-file iteration + de-collision result handling. Used by both term and agent. |
+| [`frontend/app/view/agent/hooks/useAgentDropAttach.ts`](../../frontend/app/view/agent/hooks/useAgentDropAttach.ts) (new, ~120 LoC) | Wires DragOverlay + drop event + composer splice + queue-on-unmount. |
+| [`frontend/util/dnd.ts`](../../frontend/util/dnd.ts) (new, ~60 LoC) | Shared `consume_drag_paths` invoke + multi-file iteration + de-collision result handling. Used by both term and agent. |
 
 ### CEF host (Rust)
 

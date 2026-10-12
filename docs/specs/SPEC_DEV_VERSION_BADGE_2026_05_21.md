@@ -3,8 +3,8 @@
 **Status:** Draft / for implementation
 **Date:** 2026-05-21
 **Author:** AgentA
-**Area:** `frontend/app/statusbar/StatusBar.tsx` + `.scss`,
-`frontend/app/statusbar/InstancePanel.tsx`, `frontend/types/custom.d.ts`,
+**Area:** [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) + `.scss`,
+[`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx), [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts),
 `agentmux-cef/src/commands/platform.rs`, `agentmux-cef/build.rs`
 
 Three small, related features. All make it possible to tell *which build* a
@@ -116,12 +116,12 @@ full year, 12-hour clock with no leading zero, 2-digit minute, `AM`/`PM` with
 
 ### Formatting note
 
-No date formatter exists in `frontend/util` today. `Intl.DateTimeFormat`
+No date formatter exists in [`frontend/util`](../../frontend/util) today. `Intl.DateTimeFormat`
 (`{month:"short", day:"numeric", year:"numeric", hour:"numeric",
 minute:"2-digit", hour12:true}`) yields `Jan 3, 2019, 8:12 AM` — close, but
 has a comma after the year and a space before `AM`. Strip both to match the
 exact `Jan 3, 2019 8:12AM` target (small helper, co-located with InstancePanel
-or a new `frontend/util` date helper).
+or a new [`frontend/util`](../../frontend/util) date helper).
 
 ---
 

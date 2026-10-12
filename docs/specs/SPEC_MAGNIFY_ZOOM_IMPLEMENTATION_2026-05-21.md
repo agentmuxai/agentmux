@@ -56,10 +56,10 @@ Independent of the refactor; ship first.
 
 | File | Change |
 |------|--------|
-| `frontend/layout/lib/TileLayout.win32.tsx:263` | `magnifiedBlockSizeAtom() ?? 0.9` → `?? 1.0` |
-| `frontend/layout/lib/TileLayout.linux.tsx:234` | same |
-| `frontend/layout/lib/TileLayout.darwin.tsx:232` | same |
-| `frontend/app/block/block.scss:308` | `--magnified-block-opacity: 0.95` → `1` |
+| [`frontend/layout/lib/TileLayout.win32.tsx:263`](../../frontend/layout/lib/TileLayout.win32.tsx) | `magnifiedBlockSizeAtom() ?? 0.9` → `?? 1.0` |
+| [`frontend/layout/lib/TileLayout.linux.tsx:234`](../../frontend/layout/lib/TileLayout.linux.tsx) | same |
+| [`frontend/layout/lib/TileLayout.darwin.tsx:232`](../../frontend/layout/lib/TileLayout.darwin.tsx) | same |
+| [`frontend/app/block/block.scss:308`](../../frontend/app/block/block.scss) | `--magnified-block-opacity: 0.95` → `1` |
 
 `window:magnifiedblocksize` / `window:magnifiedblockopacity` stay
 `Option<f64>` (default `None`) in `agentmux-srv/.../wconfig/types.rs` — the
@@ -156,7 +156,7 @@ magnify logic, `DisplayNodesWrapper` — are copy-pasted verbatim ×3.
 
 ### 5.4 Tests
 
-- Existing `frontend/layout/tests/layoutModel.test.ts` and drag/tile tests
+- Existing [`frontend/layout/tests/layoutModel.test.ts`](../../frontend/layout/tests/layoutModel.test.ts) and drag/tile tests
   pass with zero edits.
 
 ---
@@ -244,9 +244,9 @@ Two added guarantees:
 | File | Change |
 |------|--------|
 | `frontend/layout/lib/TileLayout.shared.tsx` | `MagnifiedPaneOverlay` → container-only; publishes mount node. `DisplayNode` → stable wrapper + reparent effect; remove `tile-hidden` twin |
-| `frontend/layout/lib/layoutModel.ts` | Add `magnifyMount` atom + `setMagnifyMount` (mount-node handoff) |
-| `frontend/layout/lib/tilelayout.scss` | Remove `.tile-node.tile-hidden` / `.magnify-pane`; keep `.magnify-container` |
-| `frontend/app/view/browser/browser-view.tsx` | Defensive recreate-if-`Closed`; confirm no close on reparent |
+| [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) | Add `magnifyMount` atom + `setMagnifyMount` (mount-node handoff) |
+| [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) | Remove `.tile-node.tile-hidden` / `.magnify-pane`; keep `.magnify-container` |
+| [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx) | Defensive recreate-if-`Closed`; confirm no close on reparent |
 | `frontend/layout/lib/TileLayout.{win32,linux,darwin}.tsx` | Drop now-shared magnify code (consumed from shared) |
 
 No host Rust change is expected — the reducer already de-dupes create and

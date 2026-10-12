@@ -17,9 +17,9 @@ Two refinements to the pane minimize button introduced in the prior spec:
 
 ## Background: current implementation
 
-The minimize button lives in `frontend/app/block/blockframe.tsx` (`OptMinimizeButton`, line 179). It is visible when `numLeafs() > 1` (more than one pane in the workspace) and the pane is not magnified or ephemeral.
+The minimize button lives in [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) (`OptMinimizeButton`, line 179). It is visible when `numLeafs() > 1` (more than one pane in the workspace) and the pane is not magnified or ephemeral.
 
-Collapse is implemented in `frontend/layout/lib/layoutMinimize.ts` (`minimizeNodeToggle`). It:
+Collapse is implemented in [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts) (`minimizeNodeToggle`). It:
 
 1. Finds the node's **parent** in the layout tree.
 2. Picks an **adjacent sibling** (right-neighbor preferred, else left).
@@ -95,7 +95,7 @@ The pane header appears pinned above the adjacent column's top pane during the m
 
 ### New type field
 
-Extend `LayoutNode` in `frontend/layout/lib/types.ts`:
+Extend `LayoutNode` in [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts):
 
 ```typescript
 export interface LayoutNode {
@@ -262,10 +262,10 @@ After this, `sibling.children` is defined and the `unshift` proceeds normally.
 
 | File | Change |
 |---|---|
-| `frontend/layout/lib/types.ts` | Add `slipMinimize` field to `LayoutNode` |
-| `frontend/layout/lib/layoutMinimize.ts` | Add `isSoloRowSlot` branch in `minimizeNodeToggle`; extend `minimizedNodeIds` update; extend `rebuildMinimizedSet` |
-| `frontend/layout/lib/layoutNode.ts` | No change — `addIntermediateNode`, `removeChild`, `findNode`, `findParent` are reused as-is |
-| `frontend/app/block/blockframe.tsx` | No change needed — caret toggle already implemented |
+| [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts) | Add `slipMinimize` field to `LayoutNode` |
+| [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts) | Add `isSoloRowSlot` branch in `minimizeNodeToggle`; extend `minimizedNodeIds` update; extend `rebuildMinimizedSet` |
+| [`frontend/layout/lib/layoutNode.ts`](../../frontend/layout/lib/layoutNode.ts) | No change — `addIntermediateNode`, `removeChild`, `findNode`, `findParent` are reused as-is |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | No change needed — caret toggle already implemented |
 
 ---
 

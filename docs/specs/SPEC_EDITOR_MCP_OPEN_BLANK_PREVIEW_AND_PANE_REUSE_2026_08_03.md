@@ -3,11 +3,11 @@
 **Status:** active — Part 2 pane reuse shipped (PR #2404) and Part 1 dead-meta cleanup shipped (PR #2403); Part 1's blank-preview root-cause fix remains open pending a live repro. Verified 2026-08-10.
 **Author:** AgentY
 **Date:** 2026-08-03
-**Related:** `docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md` (the original
+**Related:** [`docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md`](../analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md) (the original
 "Bug 3" analysis this plan's Part 1 re-investigates), `agentmux-srv/src/server/app_api/mod.rs`
 (`find_agent_block`, `resolve_tab_id` — the exact precedent Part 2's design
 mirrors), `agentmux-srv/src/backend/editor_file_watcher.rs` (the WPS
-push-event pattern Part 2 reuses), `docs/specs/SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md`
+push-event pattern Part 2 reuses), [`docs/specs/SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md`](SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md)
 (sibling MCP-tool spec from the same session, unrelated feature, same
 general area of the codebase).
 
@@ -33,7 +33,7 @@ a new pane.
 
 ## What's already known (verified, not assumed)
 
-An existing analysis, `docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md`
+An existing analysis, [`docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md`](../analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md)
 ("Bug 3"), described this exact symptom on 2026-06-20 and was marked
 "Analysis only — no code changed" at the time. A background investigation
 for this plan found that its root cause **was in fact fixed**, in commit
@@ -130,7 +130,7 @@ live repro**, not a speculative patch. Concretely:
      hits (since in that case the `EditorViewModel` instance and its content
      dispatch machinery already exist before the new tab is even added).
    - **(c) Reveal/staging jank, not a permanent blank state.** Ruled out as
-     the primary cause on inspection — `docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md`
+     the primary cause on inspection — [`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md`](SPEC_TAB_CONTENT_REVEAL_GATE.md)
      describes a *related-sounding but distinct* general staged-paint-jank
      issue (Status: Proposed, not implemented, and explicitly scoped to
      transient multi-frame flicker during tab switches, not a
@@ -153,7 +153,7 @@ finds:
 - Remove the `"editor:source_hidden": true` insert from
   `agentmux-srv/src/server/app_api/pane.rs:228-232`'s markdown branch of
   `build_pane_meta`.
-- Remove the matching dead write at `frontend/app/view/editor/editor-model.ts:1026`.
+- Remove the matching dead write at [`frontend/app/view/editor/editor-model.ts:1026`](../../frontend/app/view/editor/editor-model.ts).
 - Confirm no other reader was missed with one more repo-wide grep for
   `source_hidden`/`sourceHidden` immediately before removing, since this
   plan's own research is now ~a day old relative to a fast-moving repo.
@@ -191,7 +191,7 @@ sibling of that function, checking `meta.view == "editor"` instead of
 **Pushing "please open this file" into an already-mounted pane is also an
 established pattern.** `EditorViewModel`'s constructor already runs a scoped
 WPS subscription for live file-reload
-(`frontend/app/view/editor/editor-model.ts:214-221`):
+([`frontend/app/view/editor/editor-model.ts:214-221`](../../frontend/app/view/editor/editor-model.ts)):
 
 ```ts
 this._unsubFileChanged = waveEventSubscribe({
@@ -359,7 +359,7 @@ assumed correct from the finding alone:
    The original draft above triggered reuse whenever `cmd.meta.is_none()`
    (paired with `view == "editor"` and a `split_reference_block_id`). Both
    `EditorViewModel.openToTheSide` and `openInTerminal`
-   (`frontend/app/view/editor/editor-model.ts:958-984`) call the same
+   ([`frontend/app/view/editor/editor-model.ts:958-984`](../../frontend/app/view/editor/editor-model.ts)) call the same
    generic `pane.open` RPC with `split_reference_block_id: this.blockId` —
    their OWN block, used purely for split placement — and no `meta`. The
    original condition would have matched that shape too, silently
@@ -403,6 +403,6 @@ assumed correct from the finding alone:
 | `agentmux-srv/src/backend/rpc_types/block.rs`, `agentmux-common/src/api_types.rs` | New `reuse_editor_pane: Option<bool>` field on `CommandPaneOpenData`/`PaneOpenRequest` (§5) |
 | `agentmux-mcp/src/main.rs` | `OpenEditor` handler sets `reuse_editor_pane: Some(true)` — the only caller that does |
 | `frontend/app/store/wps-events.ts` | New `EditorOpenFileRequest` entry |
-| `frontend/app/view/editor/editor-model.ts:214-221` | New twin WPS subscription calling `this.openFile(path)`, alongside the existing `EditorFileChanged` one |
+| [`frontend/app/view/editor/editor-model.ts:214-221`](../../frontend/app/view/editor/editor-model.ts) | New twin WPS subscription calling `this.openFile(path)`, alongside the existing `EditorFileChanged` one |
 | `agentmux-srv/src/server/app_api/agent_open.rs:84` | Precedent this design's reuse-detection directly mirrors |
-| `docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md` | Part 1's starting point — re-investigated, its Bug 3 fix confirmed already shipped (commit `5c6bc11af`), current symptom's cause still open pending live repro |
+| [`docs/analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md`](../analysis/ANALYSIS_EDITOR_MD_BUGS_2026_06_20.md) | Part 1's starting point — re-investigated, its Bug 3 fix confirmed already shipped (commit `5c6bc11af`), current symptom's cause still open pending live repro |

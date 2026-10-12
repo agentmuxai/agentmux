@@ -4,10 +4,10 @@
 **Status:** Draft
 **Author:** oozp-0621f
 **Related:**
-- `docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md` §6 — tracked follow-up
-- `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` — I1–I6 invariants
-- `docs/analysis/ANALYSIS_SYSTEM_MEMORY_2026_06_25.md` — incident that prompted this spec
-- `docs/retro/` — no dedicated retro yet; see analysis above
+- [`docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) §6 — tracked follow-up
+- [`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) — I1–I6 invariants
+- [`docs/analysis/ANALYSIS_SYSTEM_MEMORY_2026_06_25.md`](../analysis/ANALYSIS_SYSTEM_MEMORY_2026_06_25.md) — incident that prompted this spec
+- [`docs/retro/`](../retro) — no dedicated retro yet; see analysis above
 
 ---
 

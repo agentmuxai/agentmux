@@ -4,11 +4,11 @@
 **Author:** AgentA
 **Date:** 2026-06-20
 **Extends / hardens:** `SPEC_PROVIDER_PINNED_AUTH_2026_06_05.md` (#1291), `provider-auth-isolation.md` (2026-03-21)
-**Diagnosis:** `docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`
+**Diagnosis:** [`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`](../reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md)
 **Related:** `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` (the login mechanism), retro `retro-provider-auth-isolation-regression-2026-06-05.md`
 
 **⚠ INV-A regressed once already, silently, via an unrelated refactor — read
-`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+[`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`](../retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md)
 before touching `identity/resolver.rs`'s credential-injection gate. The
 prior enforcement (auto-provisioning an isolated dir for every agent, even
 unbound ones) was cut by commit `e5ab2d09` (2026-07-08) and never restored;
@@ -120,7 +120,7 @@ If we ever want memory shared per-provider or kept per-agent separately from the
 auth dir, set `autoMemoryDirectory` in the agent's isolated `settings.json` rather
 than relying on the implicit `projects/<repo>/memory/` location. (Not required;
 a deliberate-control lever for the config half.) Full analysis:
-`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md` §10.
+[`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`](../reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md) §10.
 
 ## 6. Behaviour matrix (post-auth-half)
 

@@ -3,8 +3,8 @@
 - **Date:** 2026-05-29
 - **Author:** AgentX
 - **Status:** Design / implementation plan
-- **Area:** `frontend/layout/`, `frontend/app/block/`, `frontend/app/view/browser/` (+ reuses existing `agentmux-cef` IPC; **no new Rust required**)
-- **Supersedes the approach in:** PR #1156 (the `DefaultAnimationTimeS 0→0.15` one-liner — ineffective; see `docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`)
+- **Area:** [`frontend/layout/`](../../frontend/layout), [`frontend/app/block/`](../../frontend/app/block), [`frontend/app/view/browser/`](../../frontend/app/view/browser) (+ reuses existing `agentmux-cef` IPC; **no new Rust required**)
+- **Supersedes the approach in:** PR #1156 (the `DefaultAnimationTimeS 0→0.15` one-liner — ineffective; see [`docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`](../analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md))
 - **Goal:** When a pane opens/closes/splits/rebalances, **all** panes — DOM (terminal/agent/editor) **and** native browser panes — glide to their new geometry over ~150 ms instead of snapping.
 
 ---
@@ -87,12 +87,12 @@ This same signal/loop coordinates both the DOM-content sizing (§3.2) and the na
 ## 6. Files to touch
 | File | Change |
 |---|---|
-| `frontend/layout/lib/layoutModel.ts` | Enable `animationTimeS` (0.15); expose/host the `isAnimating` clock |
-| `frontend/layout/lib/layoutModelHooks.ts` | Open/close → immediate inner rect; debounce only on drag; feed coordinator |
-| `frontend/layout/lib/TileLayout.win32.tsx` (+ darwin/linux) | Drive/observe the rAF coordinator; expose `isAnimating` to children |
-| `frontend/layout/lib/tilelayout.scss` | `.tile-node` timing → ease-out; reduced-motion override (from PR #1156) |
-| `frontend/app/block/block.tsx` | Transition content width/height; consume immediate rect on open/close |
-| `frontend/app/view/browser/browser-view.tsx` | Per-frame `syncPosition()` while animating |
+| [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) | Enable `animationTimeS` (0.15); expose/host the `isAnimating` clock |
+| [`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts) | Open/close → immediate inner rect; debounce only on drag; feed coordinator |
+| [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) (+ darwin/linux) | Drive/observe the rAF coordinator; expose `isAnimating` to children |
+| [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) | `.tile-node` timing → ease-out; reduced-motion override (from PR #1156) |
+| [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) | Transition content width/height; consume immediate rect on open/close |
+| [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx) | Per-frame `syncPosition()` while animating |
 | *(no Rust changes)* | reuse `browser_pane_resize` / `SetWindowPos` |
 
 ---

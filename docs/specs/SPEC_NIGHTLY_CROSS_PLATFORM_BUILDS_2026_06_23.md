@@ -62,5 +62,5 @@ per-platform packaging tooling, artifact retention policy, and **macOS codesigni
 - Eventually: all three green + required, and Phase B publishes nightly artifacts.
 
 ## 6. Implementation note
-Ships as `.github/workflows/ci-nightly-build.yml` (Phase A) in a normal PR with this spec. Phase B is
+Ships as [`.github/workflows/ci-nightly-build.yml`](../../.github/workflows/ci-nightly-build.yml) (Phase A) in a normal PR with this spec. Phase B is
 a follow-up PR tracked on #1718.

@@ -3,8 +3,8 @@
 **Date:** 2026-09-23
 **Status:** proposed
 **Author:** Korp@narko
-**Related:** `docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md` §4.6
-(the confirmation this spec extends), `docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md`
+**Related:** [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) §4.6
+(the confirmation this spec extends), [`docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md)
 (already lists the same processes in the Shell drawer), #3430 (`agent_started`: count only
 processes the agent started through a shell).
 
@@ -30,8 +30,8 @@ dev server they want to keep, a stray `sleep`, or the agent's own tooling.
 
 | Step | Where |
 |---|---|
-| The pane × calls `beforeNodeDelete` | `frontend/app/tab/tabcontent.tsx:122` |
-| It collects busy members | `busyMembers()` in `frontend/app/tab/pane-close-guard.ts:39` |
+| The pane × calls `beforeNodeDelete` | [`frontend/app/tab/tabcontent.tsx:122`](../../frontend/app/tab/tabcontent.tsx) |
+| It collects busy members | `busyMembers()` in [`frontend/app/tab/pane-close-guard.ts:39`](../../frontend/app/tab/pane-close-guard.ts) |
 | The process probe keeps **only the length** | `paneCloseProbe.processCount` in `tabcontent.tsx:41-42`: `(await RpcApi.AgentProcessListCommand(...)).processes.length` |
 | Each agent is rendered as one line of text | `describeBusyMember()` in `pane-close-guard.ts:53` |
 | The backend list | `agent.process-list` in `agentmux-srv/src/server/app_api/agent_io.rs:15`, backed by `AgentProcessRegistry::list_block`, which calls `agent_started()` (`agentmux-srv/src/backend/process_tracker/mod.rs:94`) |
@@ -105,7 +105,7 @@ pub struct AgentProcessInfo {
 ```
 
 Map it in `register_agent_process_list` (`agent_io.rs`) and add `parent_pid: number | null` to
-the inline return type in `frontend/app/store/rpc-api/agent.ts:673`. The field is additive, so
+the inline return type in [`frontend/app/store/rpc-api/agent.ts:673`](../../frontend/app/store/rpc-api/agent.ts). The field is additive, so
 existing consumers (Shell drawer, Swarm) are unaffected.
 
 ### 4.2 Frontend: group each agent's processes into chains
@@ -172,7 +172,7 @@ Posa — 9 processes
   into `+ N more`, which expands in place.
 - **Memory** is shown only when `rss_bytes > 0`. **Started** is shown only when
   `started_at_ms > 0`. Reuse `formatBytes` from `AgentShellInfoPanel.tsx` (move it to
-  `frontend/util/` rather than duplicating it).
+  [`frontend/util/`](../../frontend/util) rather than duplicating it).
 - **Confidence:** if `confidence` isn't `"high"`, add one muted line under that agent:
   `Tracking is best-effort on this platform, so some processes may not be listed.`
 - **Mid-turn with 0 processes:** unchanged (`Korp — mid-turn`), with no rows.
@@ -209,7 +209,7 @@ written when a confirmation is actually shown.
 
 ## 5. Tests
 
-**`frontend/app/tab/pane-close-guard.test.ts`** (extend):
+**[`frontend/app/tab/pane-close-guard.test.ts`](../../frontend/app/tab/pane-close-guard.test.ts)** (extend):
 - The §1.2 wrapper chain (bash → bash → bash → bashwrap → bash → sleep) → one group, label
   `sleep 75`, 7 PIDs (conhost excluded).
 - Two independent roots → two groups, ordered by size, then age.
@@ -272,9 +272,9 @@ strategy, because a secret can sit at the start of a command.
 |---|---|
 | `agentmux-srv/src/backend/rpc_types/agent.rs` | `parent_pid` on `AgentProcessInfo` |
 | `agentmux-srv/src/server/app_api/agent_io.rs` | map `parent_pid`, and a serialization test |
-| `frontend/app/store/rpc-api/agent.ts` | `parent_pid: number \| null` in the return type |
-| `frontend/app/tab/pane-close-guard.ts` | `processes`/`groups` on `BusyMember`, `groupProcesses()`, redaction |
-| `frontend/app/tab/pane-close-guard.test.ts` | §5 cases |
-| `frontend/app/tab/tabcontent.tsx` | probe keeps the list, renders group rows, `[pane-close]` log line |
-| `frontend/util/` (new or existing) | shared `formatBytes`, moved out of `AgentShellInfoPanel.tsx` |
+| [`frontend/app/store/rpc-api/agent.ts`](../../frontend/app/store/rpc-api/agent.ts) | `parent_pid: number \| null` in the return type |
+| [`frontend/app/tab/pane-close-guard.ts`](../../frontend/app/tab/pane-close-guard.ts) | `processes`/`groups` on `BusyMember`, `groupProcesses()`, redaction |
+| [`frontend/app/tab/pane-close-guard.test.ts`](../../frontend/app/tab/pane-close-guard.test.ts) | §5 cases |
+| [`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx) | probe keeps the list, renders group rows, `[pane-close]` log line |
+| [`frontend/util/`](../../frontend/util) (new or existing) | shared `formatBytes`, moved out of `AgentShellInfoPanel.tsx` |
 | `.changesets/<ts>-pane-close-confirm-names-processes.md` | `type: patch` |

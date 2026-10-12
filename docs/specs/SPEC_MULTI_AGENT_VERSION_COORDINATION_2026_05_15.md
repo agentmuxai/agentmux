@@ -180,10 +180,10 @@ Adopted a lightweight, self-hosted changesets pattern (not the
 have needed adaptation for our mixed Cargo + npm workspace anyway):
 
 **Files added:**
-- `.changesets/README.md` — workflow + format docs
-- `.changesets/.gitkeep` — placeholder so the dir exists post-rm
-- `scripts/changeset.sh` — author tool (creates `.changesets/<ts>-<slug>.md`)
-- `scripts/release.sh` — consumer tool (aggregates, bumps, history, deletes,
+- [`.changesets/README.md`](../../.changesets/README.md) — workflow + format docs
+- [`.changesets/.gitkeep`](../../.changesets/.gitkeep) — placeholder so the dir exists post-rm
+- [`scripts/changeset.sh`](../../scripts/changeset.sh) — author tool (creates `.changesets/<ts>-<slug>.md`)
+- [`scripts/release.sh`](../../scripts/release.sh) — consumer tool (aggregates, bumps, history, deletes,
   stages; does NOT commit — caller commits + PRs)
 - `Taskfile.yml` — `task changeset` + `task release` wrappers
 - `CLAUDE.md` + `BUILD.md` — updated workflow docs

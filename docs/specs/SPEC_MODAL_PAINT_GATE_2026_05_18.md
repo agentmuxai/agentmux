@@ -234,7 +234,7 @@ The rAF×2 pattern is content-agnostic: it just guarantees one full paint cycle 
 
 1. `frontend/app/tab/TabModalLayer.tsx` — two new signals (`ready`, `contentReady`), two `createEffect`s wiring the rAF×2 + failsafe, `data-ready` and `data-content-ready` attrs on the overlay.
 2. `frontend/app/tab/tab-modal.scss` — visibility gate rules + animation gate; reduced-motion section unchanged (still suppresses keyframes).
-3. `docs/specs/SPEC_MODAL_PAINT_GATE_2026_05_18.md` — this file.
+3. [`docs/specs/SPEC_MODAL_PAINT_GATE_2026_05_18.md`](SPEC_MODAL_PAINT_GATE_2026_05_18.md) — this file.
 4. Changeset: `patch — fix(modal): paint-gate so entrance animations run after content settles`.
 
 ### 5.2 Test plan

@@ -125,7 +125,7 @@ drag.
 
 ### 3.1 New file
 
-`frontend/app/block/pane-size-badge.tsx` — SolidJS component:
+[`frontend/app/block/pane-size-badge.tsx`](../../frontend/app/block/pane-size-badge.tsx) — SolidJS component:
 
 ```tsx
 import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
@@ -172,7 +172,7 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
 
 ### 3.2 Mount point
 
-Add to `frontend/app/block/blockframe.tsx` (every pane renders through
+Add to [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) (every pane renders through
 `<BlockFrame>` regardless of view type). Conditional on
 `layoutModel.isResizing()` so the ResizeObserver isn't paying the cost
 when idle.
@@ -184,15 +184,15 @@ overlap.
 
 ### 3.3 SCSS
 
-Single file: `frontend/app/block/pane-size-badge.scss`, imported once
-from `frontend/app/app.scss` (next to the other block-level rules).
+Single file: [`frontend/app/block/pane-size-badge.scss`](../../frontend/app/block/pane-size-badge.scss), imported once
+from [`frontend/app/app.scss`](../../frontend/app/app.scss) (next to the other block-level rules).
 
 ### 3.4 No new state
 
 `layoutModel.isResizing()` already exists (see
-`frontend/layout/lib/types.ts:252` and `TileLayout.{win32,linux,darwin}.tsx`)
+[`frontend/layout/lib/types.ts:252`](../../frontend/layout/lib/types.ts) and `TileLayout.{win32,linux,darwin}.tsx`)
 and is flipped by `onResizeStart` / `onResizeEnd` in
-`frontend/layout/lib/layoutResize.ts`. No new reducer, no new event, no
+[`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts). No new reducer, no new event, no
 new IPC.
 
 For magnified-pane edge resize (RFC #404), that surface also has its own
@@ -252,12 +252,12 @@ through.
 
 ## 7. References
 
-- `frontend/layout/lib/layoutResize.ts` — `onResizeStart`,
+- [`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts) — `onResizeStart`,
   `onResizeMove`, `onResizeEnd`
-- `frontend/layout/lib/types.ts:252` — `isResizing: Accessor<boolean>`
+- [`frontend/layout/lib/types.ts:252`](../../frontend/layout/lib/types.ts) — `isResizing: Accessor<boolean>`
 - `frontend/layout/lib/TileLayout.{win32,linux,darwin}.tsx` — consumers of
   `isResizing()` for the `animate` class gating
-- `frontend/app/block/blockframe.tsx` — mount point for the badge
-- `docs/specs/SPEC_HARD_CORNERS_2026_05_26.md` — radius token guidance
-- `docs/specs/SPEC_AGENT_PANE_BOTTOM_BUTTONS_2026_04_22.md` — bottom-right
+- [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) — mount point for the badge
+- [`docs/specs/SPEC_HARD_CORNERS_2026_05_26.md`](SPEC_HARD_CORNERS_2026_05_26.md) — radius token guidance
+- [`docs/specs/SPEC_AGENT_PANE_BOTTOM_BUTTONS_2026_04_22.md`](SPEC_AGENT_PANE_BOTTOM_BUTTONS_2026_04_22.md) — bottom-right
   reservation, justifying bottom-left choice

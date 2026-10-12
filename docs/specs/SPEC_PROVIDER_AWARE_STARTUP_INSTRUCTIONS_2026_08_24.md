@@ -2,10 +2,10 @@
 
 **Date:** 2026-08-24
 **Status:** implemented — #2788 (2026-08-24), the PR this doc was added in, the same day as the system tier it builds on. `ProviderConfig::startup_instructions_filename` is in `providers.rs` citing §2, alongside the project-instructions read-path superset, and `agent-config-builder.ts` resolves the per-provider filename. §5's out-of-scope items are unchanged, and §6's two gaps (OpenClaw's working-directory mapping, Antigravity's circumstantial `GEMINI.md` inference) are carried forward exactly as flagged — surfaced by this spec, not introduced by it.
-**Current delivery state:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
-**Builds on:** `docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (system
+**Current delivery state:** [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
+**Builds on:** [`docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) (system
 tier, implemented same day) and
-`docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`
+[`docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md)
 (flagged this exact gap without fixing it).
 
 ---
@@ -33,7 +33,7 @@ which surfaced this gap directly.
 function that actually materializes instructions into a launched agent's
 working directory) takes no provider parameter and unconditionally writes
 `AgentConfigFile { filename: "CLAUDE.md".to_string(), .. }` (line 114) for
-every provider. `frontend/app/view/agent/agent-config-builder.ts`'s
+every provider. [`frontend/app/view/agent/agent-config-builder.ts`](../../frontend/app/view/agent/agent-config-builder.ts)'s
 `buildConfigFiles()` mirrors this exactly — `files.push({ path: "CLAUDE.md",
 ... })` (line 81), also provider-blind.
 
@@ -113,7 +113,7 @@ equally solid.
 | `pi` | `.pi/APPEND_SYSTEM.md` | confirmed | [pi-coding-agent npm docs](https://www.npmjs.com/package/@mariozechner/pi-coding-agent): `.pi/SYSTEM.md` *replaces* pi's default system prompt; `.pi/APPEND_SYSTEM.md` *appends* to it. AgentMux's Soul+AgentMD+Memory content is additive background, not a full system-prompt replacement (pi's own default prompt carries pi's own tool-usage instructions) — `APPEND_SYSTEM.md` is the correct target, not `SYSTEM.md`. |
 | `antigravity` | `GEMINI.md` | **inferred, not independently doc-confirmed** | Antigravity CLI's own settings live at `~/.gemini/antigravity-cli/settings.json` — same `~/.gemini/` namespace root as Gemini CLI itself, consistent with `providers.rs`'s own doc comment ("Emits the same stream-json NDJSON envelope as Gemini CLI (its sibling harness)"). No explicit Antigravity docs page confirms `GEMINI.md` context-file behavior independently of that shared-lineage inference. Flagged in §6. |
 | `muxcode` | `CLAUDE.md` | confirmed by design intent | AgentMux's own first-party CLI; `providers.rs`'s own doc comment for `MUX_CODE` explicitly states it "emits claude-compatible stream-json NDJSON... ClaudeTranslator handles it without modification" — a deliberate compatibility choice by the same team, not a guess. |
-| `kimi` | *(none — no file written)* | confirmed absence | `docs/specs/KIMI_PROVIDER_INTEGRATION_SPEC.md` §(system prompt injection) already researched this and found no auto-read markdown convention: *"Does Kimi read a system prompt file like CLAUDE.md? Answer: Unknown... does not appear to auto-read CLAUDE.md... For Phase 1, skip KIMI.md generation."* Re-verified 2026-08-24: Kimi CLI's only file-based prompt customization is `--agent-file <yaml>` with a `system_prompt_path` field — an explicit CLI flag AgentMux doesn't pass in `KIMI.launch_args` (`providers.rs:304-311`) — and an open, unshipped feature request ([kimi-cli#1856](https://github.com/MoonshotAI/kimi-cli/issues/1856)) for a project-level `system_prompt.md` override. Writing *any* markdown file for Kimi today would be inert output nobody reads; this spec keeps the prior decision (skip) rather than inventing a filename. |
+| `kimi` | *(none — no file written)* | confirmed absence | [`docs/specs/KIMI_PROVIDER_INTEGRATION_SPEC.md`](KIMI_PROVIDER_INTEGRATION_SPEC.md) §(system prompt injection) already researched this and found no auto-read markdown convention: *"Does Kimi read a system prompt file like CLAUDE.md? Answer: Unknown... does not appear to auto-read CLAUDE.md... For Phase 1, skip KIMI.md generation."* Re-verified 2026-08-24: Kimi CLI's only file-based prompt customization is `--agent-file <yaml>` with a `system_prompt_path` field — an explicit CLI flag AgentMux doesn't pass in `KIMI.launch_args` (`providers.rs:304-311`) — and an open, unshipped feature request ([kimi-cli#1856](https://github.com/MoonshotAI/kimi-cli/issues/1856)) for a project-level `system_prompt.md` override. Writing *any* markdown file for Kimi today would be inert output nobody reads; this spec keeps the prior decision (skip) rather than inventing a filename. |
 
 ---
 
@@ -371,7 +371,7 @@ against the registry, not a literal filename list to keep in sync by hand.
    content lands, not *whether* the content itself should differ by
    provider. Conflating the two would block this fix on a much larger,
    separately-scoped feature.
-4. **`.claude/`-namespaced files (skills, hooks, `.mcp.json`) — resolved:
+4. **[`.claude/`](../../.claude)-namespaced files (skills, hooks, `.mcp.json`) — resolved:
    out of scope, untouched.** No cross-provider equivalent researched;
    renaming those without equivalent research would be worse than leaving
    them as-is (silently wrong for non-Claude providers in a new way, rather
@@ -407,7 +407,7 @@ against the registry, not a literal filename list to keep in sync by hand.
 
 - Per-provider content divergence (`instructions_by_provider` wiring into
   `build_config_files`) — §4.3.
-- Renaming/translating `.claude/commands/`, `.claude/skills/`,
+- Renaming/translating `.claude/commands/`, [`.claude/skills/`](../../.claude/skills),
   `.claude/settings.json`, `.mcp.json` per provider — §4.4.
 - Resolving OpenClaw's exact ACP-Gateway-sandboxed working-directory mapping
   (§2's "unconfirmed path" row) — flagged, not blocked on.

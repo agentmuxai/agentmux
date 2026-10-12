@@ -13,7 +13,7 @@
 
 ## 1. What's there today
 
-The Help pane's keyboard list is generated from the shortcut table (`frontend/app/keybindings/defaults.ts` via `help.ts`), so it can't drift from the keys. Everything that isn't a table key is hand-written in `frontend/app/element/quicktips.tsx`:
+The Help pane's keyboard list is generated from the shortcut table ([`frontend/app/keybindings/defaults.ts`](../../frontend/app/keybindings/defaults.ts) via `help.ts`), so it can't drift from the keys. Everything that isn't a table key is hand-written in [`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx):
 - **One "Mouse" line:** "Resize a single border: Shift + drag" (`MOUSE_ENTRIES`). It is correct.
 - **Three "More Tips":**
   - "Right click any tab to change backgrounds or rename". Right-click opens a colour picker with Rename (`tab/tab.tsx`), so "backgrounds" is out of date.
@@ -21,7 +21,7 @@ The Help pane's keyboard list is generated from the shortcut table (`frontend/ap
 
 A sweep of the frontend and the host found about 45 gestures a user wouldn't guess: modifier + mouse, double- and middle-click, drag and drop, and keys a pane handles itself. Help mentions two of them.
 
-On the owner's example: the border modifier is **Shift**, not Ctrl. Shift+drag on a pane border moves only the border between the two panes beside it (`layout/lib/TileLayout.*.tsx`). On Windows, Shift while dragging the app window's edge gives all the size change to the panes along that edge (`crates/cef/src/client/wndproc.rs`, `layout/lib/windowEdgeResize.ts`).
+On the owner's example: the border modifier is **Shift**, not Ctrl. Shift+drag on a pane border moves only the border between the two panes beside it (`layout/lib/TileLayout.*.tsx`). On Windows, Shift while dragging the app window's edge gives all the size change to the panes along that edge ([`crates/cef/src/client/wndproc.rs`](../../crates/cef/src/client/wndproc.rs), `layout/lib/windowEdgeResize.ts`).
 
 ## 2. Goals
 
@@ -32,7 +32,7 @@ On the owner's example: the border modifier is **Shift**, not Ctrl. Shift+drag o
 
 ## 3. The tips table
 
-A new `frontend/app/keybindings/tips.ts`, next to the shortcut table:
+A new [`frontend/app/keybindings/tips.ts`](../../frontend/app/keybindings/tips.ts), next to the shortcut table:
 
 ```ts
 interface TipRow {
@@ -83,7 +83,7 @@ Ordered by how much they help. The list comes from a sweep of the code; §7 chec
 | Panes | mod + Shift + wheel | Zooms every pane in the window together | `app/app.tsx` | no |
 | Panes | Drag a pane onto a window tab | Hold to open that tab and place the pane, or drop on the tab to add it there | `tab/droppable-tab.tsx` | no |
 | Panes | Drag a pane or pane tab out of the window | Makes it a floating window; drag it back over the main window to dock it | `drag/pane-tab-tearoff.ts` | no |
-| Window | Shift while dragging the window's edge | All the size change goes to the panes along that edge (Windows) | `crates/cef/src/client/wndproc.rs` | no |
+| Window | Shift while dragging the window's edge | All the size change goes to the panes along that edge (Windows) | [`crates/cef/src/client/wndproc.rs`](../../crates/cef/src/client/wndproc.rs) | no |
 | Window | Double-click empty title-bar space | Maximizes the window | `hook/useWindowDrag.*` | no |
 | Tabs | Double-click a tab's name | Renames it (Enter saves, Esc cancels) | `tab/tab.tsx` | partly: F2 only |
 | Tabs | Right-click a tab | Colour and Rename | `tab/tab.tsx` | yes, but says "backgrounds" |
@@ -110,7 +110,7 @@ Ordered by how much they help. The list comes from a sweep of the code; §7 chec
 | Agent | Permission prompt keys | Enter allows; Shift+Enter denies; O / S / P / G set the scope; Esc minimizes | `agent/components/AgentDecisionPanel.tsx` | no |
 | Agent | Middle-click a link | Opens it in a browser pane (a plain click opens the system browser) | `element/link-open.ts` | no |
 | Find | Enter / Shift+Enter in a find bar | Next / previous match | `element/search.tsx` | tooltip only |
-| Browser | In a browser pane: mod+L, mod+R, Alt+←/→ | Address bar, reload, back/forward | `crates/cef/src/client/handlers.rs` | no |
+| Browser | In a browser pane: mod+L, mod+R, Alt+←/→ | Address bar, reload, back/forward | [`crates/cef/src/client/handlers.rs`](../../crates/cef/src/client/handlers.rs) | no |
 
 Left out of the first set, to add once checked in the app: the xterm defaults (Alt+click moves the cursor, Shift+click extends a selection) and the CodeMirror defaults (mod+click adds a cursor, Alt+drag makes a block selection). The repo doesn't configure them, so they aren't verified (§7). Also left out are niche views (the drone canvas, the memory editor's divider, bundle reordering): they can join their own pane's tips later.
 
@@ -168,7 +168,7 @@ The questions as asked:
   - The remaining in-page and agent tips aren't checked on Linux.
 - **Windows** (AgentA): inconclusive. The dev window was hidden, and CDP mouse events don't hit-test there. Needs a run with the window in front.
 
-**P3 (#4651).** `docs/keybindings.md` (and the docs site page built from it) gains a "Mouse and gestures" section, generated from the same table:
+**P3 (#4651).** [`docs/keybindings.md`](../keybindings.md) (and the docs site page built from it) gains a "Mouse and gestures" section, generated from the same table:
 - macOS and Windows/Linux columns;
 - keys inside a tip shown both ways where they differ (⌘Z / Ctrl+Z);
 - tips that only apply on some platforms marked.

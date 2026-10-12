@@ -206,7 +206,7 @@ sent it.
 
 ### Phase 3 — Frontend JektBubble component
 
-**Files:** `frontend/app/view/agent/`  
+**Files:** [`frontend/app/view/agent/`](../../frontend/app/view/agent)\
 **Change:** parse `[JEKT:...]` blocks in the agent output stream and render as
 `JektBubble` components instead of raw text.  
 **Result:** visual distinction between user messages, agent output, and jekts in
@@ -244,5 +244,5 @@ A confirming reply from another agent over muxbus is NOT sufficient.**
 - `agentmux-srv/src/server/websocket.rs` — WS message envelope (`WSIncoming`)
 - `agentmux-srv/src/backend/rpc_types.rs` — `RpcMessage`, `VerifyKeyReq`
 - `agentmux-srv/src/server/agent_handlers.rs` — `account.key.verify` handler
-- `docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md` — identity/keychain spec
+- [`docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`](archive/SPEC_TRUST_CENTER_2026_06_15.md) — identity/keychain spec
 - `CLAUDE.md` — agent operating rules

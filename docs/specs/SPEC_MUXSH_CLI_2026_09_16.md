@@ -3,7 +3,7 @@
 **Author:** Vmer
 **Date:** 2026-09-16
 **Status:** active — PRs touching this work, newest first: #3255
-**Related:** `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (research + naming decision this spec implements), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (the `muxopen` precedent this follows exactly), `agentmux-docs/.../internals/agent-app-api.md` (`OpenEditor` / `pane.open`), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import Wave Terminal's `wsh` wholesale)
+**Related:** [`docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md`](../reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md) (research + naming decision this spec implements), [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) (the `muxopen` precedent this follows exactly), `agentmux-docs/.../internals/agent-app-api.md` (`OpenEditor` / `pane.open`), [`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](archive/SPEC_RETIRE_WSH_2026_04_12.md) (why AgentMux doesn't import Wave Terminal's `wsh` wholesale)
 
 ---
 
@@ -96,7 +96,7 @@ Only `--collapse-tree` is editor-only (`tree_expanded` is documented in `rpc_typ
 
 ## 6. Implementation plan
 
-Exact mechanical mirror of `muxopen`'s existing deployment (`agentmux-srv/src/backend/shellintegration.rs`, `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`):
+Exact mechanical mirror of `muxopen`'s existing deployment (`agentmux-srv/src/backend/shellintegration.rs`, [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md)):
 
 1. `agentmux-srv/src/backend/shellintegration/muxsh.mjs` — new core. Pure `parseArgs`/`renderResult` functions (unit-testable, no I/O — same contract `muxopen.mjs` and `muxspect.mjs` already follow), `main()` does the fetch + auth-env checks + error rendering.
 2. `agentmux-srv/src/backend/shellintegration/muxsh.test.mjs` — vitest unit tests for `parseArgs`/`renderResult`, mirroring `muxopen.test.mjs`'s structure.
@@ -110,7 +110,7 @@ Exact mechanical mirror of `muxopen`'s existing deployment (`agentmux-srv/src/ba
    - `bash.sh` / `zsh.sh` — `_AGENTMUX_MUXSH_JS=...`, `muxsh() { ... }`
    - `fish.fish` — `set -g _agentmux_muxsh_js ...`, `function muxsh ... end`
    - `pwsh.ps1` — `$global:AgentmuxMuxshJs = ...`, `function Global:muxsh { ... }`
-5. `docs/MUXSH.md` — new reference doc, same shape as `docs/MUXLOG.md`/`docs/MUXSPECT.md`.
+5. [`docs/MUXSH.md`](../MUXSH.md) — new reference doc, same shape as [`docs/MUXLOG.md`](../MUXLOG.md)/[`docs/MUXSPECT.md`](../MUXSPECT.md).
 6. Changeset: `task changeset -- minor "feat(shell): add muxsh — open editor/browser panes from the terminal"` (new user-facing command surface, not a patch-level fix).
 
 ## 7. Verification

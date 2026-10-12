@@ -6,14 +6,14 @@ see "Post-implementation corrections" for what changed once real review
 (ReAgent + Codex) exercised the code.
 **Author:** Agent2
 **Date:** 2026-07-26
-**Related:** `docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md` (the
+**Related:** [`docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md`](SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md) (the
 closest existing precedent — this design explicitly reuses and generalizes
-its watcher pattern), `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`
+its watcher pattern), [`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md),
+[`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`](../analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md)
 (a UI-transition pitfall this design should not repeat), `CLAUDE.md`'s
 Widgets table (`agentmux-srv/src/config/widgets.json` is the canonical,
 closed widget list — adding this pane means adding a real entry there, not
-inventing one ad hoc), `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`
+inventing one ad hoc), [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)
 (confirmed while testing this pane: MP4/MOV playback fails on this app's
 CEF build for any standard H.264/AAC file — a whole-app build limitation,
 not a pane bug; see that report for the root cause and options).
@@ -71,22 +71,22 @@ Two layers, both need a new entry:
    exist here"). Each entry is `defwidget@<name>` with `display:order`,
    `display:pinned`, `icon`, `color`, `label`, `description`, and a
    `blockdef.meta.view` string that becomes the pane's `viewType`.
-2. **`frontend/app/block/block-registry.ts`** — the actual viewType →
+2. **[`frontend/app/block/block-registry.ts`](../../frontend/app/block/block-registry.ts)** — the actual viewType →
    `ViewModel` class map (`blockViewRegistry.set("agent", AgentViewModel)`,
    etc.). Per the file's own header comment, adding a pane never requires
    touching `block.tsx` — only a `registerBlockView()` call here, plus a
    `ViewModel` implementation (`viewType`, `viewIcon`, `viewName`,
-   `viewComponent`, `dispose` — `frontend/types/custom.d.ts:481-510`) and
+   `viewComponent`, `dispose` — [`frontend/types/custom.d.ts:481-510`](../../frontend/types/custom.d.ts)) and
    its Solid component.
 
-Secondary, low-cost additions: `frontend/app/block/blockutil.tsx`'s
+Secondary, low-cost additions: [`frontend/app/block/blockutil.tsx`](../../frontend/app/block/blockutil.tsx)'s
 `blockViewToIcon`/`VIEW_LABELS` maps (fallback icon/label before the
 ViewModel's own memo takes over), and a row in `CLAUDE.md`'s Widgets table
 (repo documentation convention, not code).
 
 ### The tool-preview precedent — proves the plumbing, not the media handling
 
-Tool-call previews (`frontend/app/view/agent/components/ToolBlock.tsx`,
+Tool-call previews ([`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx),
 `ToolOverlayLog.tsx`) already do "live-updating content tied to a running
 process, driven by push events" — but only for **text**. The renderer
 registry (`tool-renderers/registry.ts`) resolves to `DiffViewer`,
@@ -98,7 +98,7 @@ tested, but a Media pane needs its own content-rendering path (`<img>`/
 
 **One pitfall to explicitly avoid, already paid for elsewhere in the
 codebase:** the still-open "tool-preview running→completed jerk" bug
-(`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`)
+([`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`](../analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md))
 is caused by two independent UI signals (a status leaving `"running"`, and
 a content-shape change from log-tail to result-view) flipping in the same
 render tick with no transition, producing a visible snap. A Media pane's
@@ -110,10 +110,10 @@ the start rather than repeating the bug.
 ### Real-time update mechanism — three layers, one is close to a direct fit
 
 Everything live flows over one shared per-tab WebSocket
-(`frontend/app/store/ws.ts`), carrying:
+([`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts)), carrying:
 
 1. **RPC request/response and server-push commands**
-   (`frontend/app/store/rpc-client.ts` — `rpcCall`, plus a full-duplex
+   ([`frontend/app/store/rpc-client.ts`](../../frontend/app/store/rpc-client.ts) — `rpcCall`, plus a full-duplex
    `handleIncomingCommand` dispatch for server-initiated commands) and a
    **streaming-response generator**, `rpcStream()`, already used for file
    reads (`FileReadStreamCommand` etc., `rpc-api/file.ts`).
@@ -134,7 +134,7 @@ Everything live flows over one shared per-tab WebSocket
 3. **`getFileSubject`/`WSFileEventData`** (`wps.ts:107-124`) — a base64
    append/truncate byte-stream subscription, currently used only by the
    terminal pane to stream PTY output live
-   (`frontend/app/view/term/termwrap.ts`). This is the "genuinely
+   ([`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts)). This is the "genuinely
    incremental content" primitive explicitly ruled out by the Non-goals
    section above — noted here because it exists and is content-agnostic,
    in case a future genuinely-streaming use case (e.g. a live webcam/screen
@@ -151,11 +151,11 @@ Everything live flows over one shared per-tab WebSocket
   Media pane's watcher needs the same underlying `notify`-crate/debounce
   machinery generalized to directory-mode, not file-mode.
 - **The frontend already contains dead code that assumes arbitrary-local-
-  path media streaming exists**: `frontend/app/view/term/termsticker.tsx`
+  path media streaming exists**: [`frontend/app/view/term/termsticker.tsx`](../../frontend/app/view/term/termsticker.tsx)
   builds `.../agentmux/stream-local-file?path=<rawAbsolutePath>` directly —
   exactly the endpoint and query shape this design implements, confirmed by
   reading the call site. **Implementing `stream-local-file` fixes this dead
-  code for free.** `frontend/app/element/markdown-util.ts` /
+  code for free.** [`frontend/app/element/markdown-util.ts`](../../frontend/app/element/markdown-util.ts) /
   `frontend/util/waveutil.ts` are a *different*, larger scope: they hit
   `.../agentmux/stream-file?path=<uri>` where `<uri>` comes from
   `formatRemoteUri()` (`waveutil.ts:92-100`), which wraps the path as
@@ -196,7 +196,7 @@ Everything live flows over one shared per-tab WebSocket
    color per existing convention (something distinct from Editor/Browser —
    e.g. a picture/film icon).
 2. **`MediaViewModel` + `MediaView` component**
-   (`frontend/app/view/media/`, mirroring the Editor/Terminal pane file
+   ([`frontend/app/view/media/`](../../frontend/app/view/media), mirroring the Editor/Terminal pane file
    layout). Pane state: a target path (file or directory), set via a
    header input or a "pick file" action (reuse the Editor pane's existing
    file-tree/picker component rather than building a new one, if it's
@@ -379,14 +379,14 @@ the path string itself changed.
 | File | Relevance |
 |------|-----------|
 | `agentmux-srv/src/config/widgets.json` | Canonical widget list — new `defwidget@media` entry |
-| `frontend/app/block/block-registry.ts` | viewType → ViewModel registration point |
-| `frontend/app/block/blockutil.tsx` | Fallback icon/label maps |
-| `frontend/types/custom.d.ts:481-510` | `ViewModel` interface new `MediaViewModel` implements |
+| [`frontend/app/block/block-registry.ts`](../../frontend/app/block/block-registry.ts) | viewType → ViewModel registration point |
+| [`frontend/app/block/blockutil.tsx`](../../frontend/app/block/blockutil.tsx) | Fallback icon/label maps |
+| [`frontend/types/custom.d.ts:481-510`](../../frontend/types/custom.d.ts) | `ViewModel` interface new `MediaViewModel` implements |
 | `agentmux-srv/src/server/mod.rs:268-271` | Route table — `stream-local-file`'s current `stub_501` mapping to replace |
 | `agentmux-srv/src/server/files.rs:26-170` | `handle_wave_file`, `handle_docsite`/`handle_schema`, and `mime_from_path` — the patterns the new handler copies (MIME mapping, traversal guards) |
 | `agentmux-srv/src/backend/editor_file_watcher.rs` | Watcher pattern to generalize into `MediaFileWatcher` |
 | `frontend/app/store/wps.ts` | `waveEventSubscribe`, `getFileSubject` — the two push mechanisms considered (subscribe-and-reload chosen; byte-stream explicitly not used, see Non-goals) |
-| `frontend/app/view/term/termsticker.tsx`, `frontend/app/element/markdown-util.ts`, `frontend/util/waveutil.ts` | Existing dead code already assuming `stream-local-file`/`stream-file` work — fixed as a side effect of Phase 1 |
-| `frontend/app/view/agent/components/ToolBlock.tsx`, `ToolOverlayLog.tsx` | Tool-preview precedent for live-updating pane content; also the source of the running→completed jerk lesson to avoid repeating |
-| `docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md` | UI-transition pitfall this design should design around from the start |
-| `docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md` | Closest existing precedent; Phase 2 directly generalizes its watcher/event/subscribe pattern |
+| [`frontend/app/view/term/termsticker.tsx`](../../frontend/app/view/term/termsticker.tsx), [`frontend/app/element/markdown-util.ts`](../../frontend/app/element/markdown-util.ts), `frontend/util/waveutil.ts` | Existing dead code already assuming `stream-local-file`/`stream-file` work — fixed as a side effect of Phase 1 |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx), `ToolOverlayLog.tsx` | Tool-preview precedent for live-updating pane content; also the source of the running→completed jerk lesson to avoid repeating |
+| [`docs/analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md`](../analysis/ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md) | UI-transition pitfall this design should design around from the start |
+| [`docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md`](SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md) | Closest existing precedent; Phase 2 directly generalizes its watcher/event/subscribe pattern |

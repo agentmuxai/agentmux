@@ -2,9 +2,9 @@
 
 **Date:** 2026-09-17
 **Status:** Implemented — #3323; `task dev` app_id corrected 2026-10-11 (§3.3)
-**Area:** `agentmux-cef/src/app/window_settings.rs` · `scripts/install-linux-desktop.sh` ·
-`scripts/linux-apprun.sh` · `scripts/stage-linux-runtime.sh` · `scripts/build-appimage-linux.sh` ·
-`scripts/build-deb-linux.sh` · `scripts/build-rpm-linux.sh` · `assets/linux/agentmux.desktop`
+**Area:** `agentmux-cef/src/app/window_settings.rs` · [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) ·
+[`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) · [`scripts/stage-linux-runtime.sh`](../../scripts/stage-linux-runtime.sh) · [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) ·
+[`scripts/build-deb-linux.sh`](../../scripts/build-deb-linux.sh) · [`scripts/build-rpm-linux.sh`](../../scripts/build-rpm-linux.sh) · [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop)
 
 ---
 
@@ -28,7 +28,7 @@ Two independent, compounding bugs:
    isolated internally — was indistinguishable to the window manager.
 
 2. **Single shared `.desktop` file.** Even if two instances' windows had been
-   distinguishable, `scripts/install-linux-desktop.sh` always installed/overwrote the
+   distinguishable, [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) always installed/overwrote the
    same `~/.local/share/applications/agentmux.desktop`, with a fixed `Exec=` line. The
    last instance to start up would silently repoint the *other* instance's launcher
    entry at itself.
@@ -39,7 +39,7 @@ supported scenario (`SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`, a m
 later). Neither was revisited when that isolation work landed.
 
 (macOS already computes a per-`(channel, version)` `CFBundleIdentifier` —
-`scripts/package-macos.sh`, `agentmux-cef/src/macos_compat.rs` — per
+[`scripts/package-macos.sh`](../../scripts/package-macos.sh), `agentmux-cef/src/macos_compat.rs` — per
 `SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md`. This spec brings Linux to parity with
 that scheme. Windows has an analogous unfixed `AppUserModelID` gap
 (`agentmux-cef/src/lib.rs`) — out of scope here, tracked separately.)
@@ -66,14 +66,14 @@ too.
 
 - Installs `~/.local/share/applications/<app_id>.desktop` (was always `agentmux.desktop`).
 - Substitutes `StartupWMClass=<app_id>` into the template (was a static
-  `StartupWMClass=agentmux`; `assets/linux/agentmux.desktop` now carries a
+  `StartupWMClass=agentmux`; [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop) now carries a
   `__WMCLASS__` placeholder alongside the existing `__EXEC__` one).
 - Leaves `Icon=agentmux` and `Name=AgentMux` unchanged — icons are identical across
   builds, and the visible label doesn't need to change, only the WM-matching key and
   filename (so two instances' desktop entries don't overwrite each other).
 
-`scripts/linux-apprun.sh` computes the app_id to pass by reading two new build-time
-markers staged by `scripts/stage-linux-runtime.sh` alongside the existing `VERSION`
+[`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) computes the app_id to pass by reading two new build-time
+markers staged by [`scripts/stage-linux-runtime.sh`](../../scripts/stage-linux-runtime.sh) alongside the existing `VERSION`
 marker: `usr/share/agentmux/CHANNEL` (written from `AGENTMUX_BUILD_CHANNEL_DEFAULT`,
 default `stable`), combined with an `AGENTMUX_CHANNEL` env override check — the same
 two-input resolution as the Rust side, so the two can never disagree.
@@ -138,7 +138,7 @@ common development workflow.
 > can't rename a packaged build's windows). Separately, when `task` is a snap,
 > GNOME credits every dev window to that snap (its AppArmor label is inherited),
 > whatever the app_id; `task dev` now warns about that. Retro:
-> `docs/retro/retro-linux-dev-taskbar-icon-2026-10-11.md`.
+> [`docs/retro/retro-linux-dev-taskbar-icon-2026-10-11.md`](../retro/retro-linux-dev-taskbar-icon-2026-10-11.md).
 
 ### 3.4 Non-goals
 
@@ -152,12 +152,12 @@ common development workflow.
 | File | Change |
 |---|---|
 | `agentmux-cef/src/app/window_settings.rs` | `linux_app_id()` replaces the static `b"agentmux"` |
-| `assets/linux/agentmux.desktop` | `StartupWMClass=agentmux` → `StartupWMClass=__WMCLASS__` placeholder |
-| `scripts/install-linux-desktop.sh` | Accepts `[app-id]`; installs `<app_id>.desktop`, substitutes `__WMCLASS__` |
-| `scripts/linux-apprun.sh` | Resolves the app_id from `CHANNEL`/`VERSION` markers + `AGENTMUX_CHANNEL`, passes it to the installer |
-| `scripts/stage-linux-runtime.sh` | Writes the new `usr/share/agentmux/CHANNEL` marker |
-| `scripts/build-appimage-linux.sh` | Substitutes `__WMCLASS__` in the AppImage's own internal top-level `.desktop` |
-| `scripts/build-deb-linux.sh`, `scripts/build-rpm-linux.sh` | Substitute `__WMCLASS__` from `${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}` (the same fallback the compiled binary itself uses) |
+| [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop) | `StartupWMClass=agentmux` → `StartupWMClass=__WMCLASS__` placeholder |
+| [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) | Accepts `[app-id]`; installs `<app_id>.desktop`, substitutes `__WMCLASS__` |
+| [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) | Resolves the app_id from `CHANNEL`/`VERSION` markers + `AGENTMUX_CHANNEL`, passes it to the installer |
+| [`scripts/stage-linux-runtime.sh`](../../scripts/stage-linux-runtime.sh) | Writes the new `usr/share/agentmux/CHANNEL` marker |
+| [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) | Substitutes `__WMCLASS__` in the AppImage's own internal top-level `.desktop` |
+| [`scripts/build-deb-linux.sh`](../../scripts/build-deb-linux.sh), [`scripts/build-rpm-linux.sh`](../../scripts/build-rpm-linux.sh) | Substitute `__WMCLASS__` from `${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}` (the same fallback the compiled binary itself uses) |
 | `Taskfile.yml` | `dev:serve`/`dev:standalone:serve` (Linux): export `AGENTMUX_CHANNEL=dev-<branch>` and pass the matching app_id to the installer |
 
 ## 5. Acceptance

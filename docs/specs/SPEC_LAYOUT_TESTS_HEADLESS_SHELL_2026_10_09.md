@@ -4,7 +4,7 @@
 **Date:** 2026-10-09.
 **Requested by:** repo owner (asafebgi): "macOS sometimes will automatically pin icons to the launcher of certain apps … it appears to have docked 3 copies of a chrome shortcut"; "ok, lets stop it for good"; "write a spec to file, then implement".
 **Author:** Masty.
-**Related:** `frontend/app/view/agent/components/layout-browser.ts`, `PreviewLines.layout.test.tsx`, `MyAgentsList.layout.test.tsx`; `docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md` §7.
+**Related:** [`frontend/app/view/agent/components/layout-browser.ts`](../../frontend/app/view/agent/components/layout-browser.ts), `PreviewLines.layout.test.tsx`, `MyAgentsList.layout.test.tsx`; [`docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md`](../reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md) §7.
 
 ## 1. Problem
 

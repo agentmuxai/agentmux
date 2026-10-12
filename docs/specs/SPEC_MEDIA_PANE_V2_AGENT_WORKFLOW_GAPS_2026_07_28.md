@@ -3,10 +3,10 @@
 **Status:** proposed — verified unimplemented as of 2026-08-10 (docs-only commit #2344; no transcode/thumbnail/gallery code).
 **Author:** AgentY
 **Date:** 2026-07-28
-**Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented, PR #2299;
+**Related:** [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](SPEC_MEDIA_PANE_2026_07_26.md) (v1 — implemented, PR #2299;
 this spec extends it and resolves several of its own "Open questions" rather
-than re-deriving the architecture), `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`
-(directly hit by the case study below, not just theoretical), `docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md`.
+than re-deriving the architecture), [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)
+(directly hit by the case study below, not just theoretical), [`docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md`](SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md).
 
 ## Motivation — a concrete case study, not a speculative wishlist
 
@@ -242,7 +242,7 @@ that helps the multi-file-comparison case, not a full filesystem browser.
 |------|-----------|
 | `agentmux-srv/src/server/files.rs` | `stream-local-file` — add transcode-on-demand (§1) and a new `media-thumbnail`/waveform route (§3, §4) |
 | `agentmux-srv/src/backend/media_file_watcher.rs` | No structural change — §2's pin/follow split is a frontend-state and reload-gating change, not a watcher change |
-| `frontend/app/view/media/media.tsx` | Pin/follow toggle + non-destructive update affordance (§2), gallery grid view (§3), waveform display (§4), EDL playback mode (§5), picker entry point for §6 |
-| `frontend/app/view/media/` (new files) | New media-scoped tree component (§6), gallery grid component (§3), EDL playback controller (§5) |
-| `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` | v1 — this spec's open questions #2, #5, #1(picker), and Phase 3 are the items being resolved here |
-| `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md` | The codec gap §1 proposes resolving, now with a concrete forcing example |
+| [`frontend/app/view/media/media.tsx`](../../frontend/app/view/media/media.tsx) | Pin/follow toggle + non-destructive update affordance (§2), gallery grid view (§3), waveform display (§4), EDL playback mode (§5), picker entry point for §6 |
+| [`frontend/app/view/media/`](../../frontend/app/view/media) (new files) | New media-scoped tree component (§6), gallery grid component (§3), EDL playback controller (§5) |
+| [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](SPEC_MEDIA_PANE_2026_07_26.md) | v1 — this spec's open questions #2, #5, #1(picker), and Phase 3 are the items being resolved here |
+| [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md) | The codec gap §1 proposes resolving, now with a concrete forcing example |

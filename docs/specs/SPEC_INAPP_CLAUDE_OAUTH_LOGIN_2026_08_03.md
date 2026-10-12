@@ -2,28 +2,28 @@
 
 **Date:** 2026-08-03
 **Author:** Nark
-**Status:** implemented — #2410 (core session + launch surface) and #2414 (connect / re-login from Armory and Agent Stash), both 2026-08-04, one day after this spec was written. `frontend/app/view/agent/flows/run-provider-login.ts` is the implementation and `catalog.ts` cites this spec by name at three points.
+**Status:** implemented — #2410 (core session + launch surface) and #2414 (connect / re-login from Armory and Agent Stash), both 2026-08-04, one day after this spec was written. [`frontend/app/view/agent/flows/run-provider-login.ts`](../../frontend/app/view/agent/flows/run-provider-login.ts) is the implementation and `catalog.ts` cites this spec by name at three points.
 
 > **2026-08-07 audit note:** Implemented 4 days later —
-> `frontend/app/view/agent/providers/catalog.ts` directly cites and
+> [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) directly cites and
 > implements this spec's findings, wired into `runProviderLogin`. Status
 > field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
-**Supersedes/updates:** the "in-app OAuth is a DEAD END for Claude v2.1.x" verdict in `frontend/app/view/agent/providers/catalog.ts` and `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` §0's abandonment note; extends `REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` §8 with new evidence.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
+**Supersedes/updates:** the "in-app OAuth is a DEAD END for Claude v2.1.x" verdict in [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) and `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` §0's abandonment note; extends `REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` §8 with new evidence.
 **Related:** `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` (single-point enforcement stays; this spec fills the "richer per-account Connect UX" follow-up it deferred).
 
 ---
 
 ## 1. Problem
 
-Logging a Claude agent in today is unreliable and console-bound. The current tiered flow (`frontend/app/view/agent/flows/run-provider-login.ts`) skips tier 1 (in-app URL capture + paste-code) entirely for Claude — `skipTier1: true` at all call sites, `headlessLoginUrlUnsupported: true` in the provider catalog — leaving only:
+Logging a Claude agent in today is unreliable and console-bound. The current tiered flow ([`frontend/app/view/agent/flows/run-provider-login.ts`](../../frontend/app/view/agent/flows/run-provider-login.ts)) skips tier 1 (in-app URL capture + paste-code) entirely for Claude — `skipTier1: true` at all call sites, `headlessLoginUrlUnsupported: true` in the provider catalog — leaving only:
 
 - **Tier 2** (`seedGlobalLogin`): only works if a valid global `~/.claude` login already exists.
 - **Tier 3** (`openLoginTerminal`): opens a real terminal window and polls for up to 5 minutes. Requires a working shell/PTY/terminal stack, is visually jarring, and fails opaquely on headless or misconfigured hosts.
 
 Meanwhile the single-point-login spawn gate (`agentmux-srv/src/identity/resolver/inject.rs`) hard-blocks any Claude agent with no bound account — correct policy, but with no in-app way to create that account, users hit a dead-end "Agent encountered an error" (see `retro-agentu-0.54.9-stuck-error-2026-08-03`, the v0.54.9 stuck-instance incident).
 
-An in-app paste-code login UI **already exists and still works** — `AuthUrlBox` (`frontend/app/view/agent/components/AgentDocumentView.tsx:219-346`), fed by IPC `set_provider_auth` → `CliLoginStdin::write_line` (`agentmux-cef/src/commands/providers.rs:329`). It was built in #1277 and cut off for Claude by `35af4958f` because Claude Code **v2.1.183** never printed a login URL when host-spawned. That factual basis is now stale.
+An in-app paste-code login UI **already exists and still works** — `AuthUrlBox` ([`frontend/app/view/agent/components/AgentDocumentView.tsx:219-346`](../../frontend/app/view/agent/components/AgentDocumentView.tsx)), fed by IPC `set_provider_auth` → `CliLoginStdin::write_line` (`agentmux-cef/src/commands/providers.rs:329`). It was built in #1277 and cut off for Claude by `35af4958f` because Claude Code **v2.1.183** never printed a login URL when host-spawned. That factual basis is now stale.
 
 ## 2. New evidence (2026-08-03, live probes)
 
@@ -54,7 +54,7 @@ One reusable flow (backend-spawned, frontend-observed), extracted so all three s
 
 ### 3.2 Catalog/flag changes
 
-- `frontend/app/view/agent/providers/catalog.ts`: drop `headlessLoginUrlUnsupported: true` for Claude; add the login argv (`["auth", "login"]`) alongside the existing login metadata. Keep `requiresLoginTty` semantics for providers that truly need it.
+- [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts): drop `headlessLoginUrlUnsupported: true` for Claude; add the login argv (`["auth", "login"]`) alongside the existing login metadata. Keep `requiresLoginTty` semantics for providers that truly need it.
 - Remove the three `skipTier1: true` overrides (`useAgentControllerStatus.ts`, `commands/global/login.ts`, `PreLaunchAuthPanel.tsx`) for Claude; tier 1 becomes the revived in-app session (§3.1). Tier 2 (seed-from-global) stays as the fast path when a valid global login exists.
 - **Two distinct "reach tier 3" paths — do not conflate them** (codex flagged this pairing as apparently contradictory on PR #2410; it isn't, but needs spelling out):
   1. **Capture miss** — tier 1 prints no URL at all within its capture window (older CLI, e.g. ≤2.1.183 behavior). Falls through 1 → 2 → 3 **automatically**, exactly as today, unchanged — this is the behavior-gate, no CLI version check anywhere, and is why older CLIs keep working with zero regression.

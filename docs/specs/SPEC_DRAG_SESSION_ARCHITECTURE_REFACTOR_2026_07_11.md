@@ -232,13 +232,13 @@ must stop immediately.
 |---|---|
 | **New:** `frontend/layout/lib/dragSession.ts` | The FSM: state, derived signals, monitor wiring, `recordDrop`, `settle()` commit executor |
 | `frontend/layout/lib/TileLayout.{win32,darwin,linux}.tsx` | Delete module globals + `resetDragState` net; draggable callbacks feed the session; overlay style derives per §3.2; drop handlers → `recordDrop` |
-| `frontend/layout/lib/crossTabDrag.ts` | Shrinks to the redock RPC helper called by `settle()`; record moves into the session |
+| [`frontend/layout/lib/crossTabDrag.ts`](../../frontend/layout/lib/crossTabDrag.ts) | Shrinks to the redock RPC helper called by `settle()`; record moves into the session |
 | `frontend/layout/lib/dragInFlight.ts` | **Deleted** (subsumed by session state) |
-| `frontend/app/tab/tabbar-dnd.ts` | `hoveredDropTabId`/`dragActivatedTabIds` replaced by session signals; reorder-only state stays |
-| `frontend/app/tab/droppable-tab.tsx` | Spring timer moves into session (`session.armSpring(tabId)`); tile drop-target records intent |
-| `frontend/app/tab/tabbar.tsx` | Cleanup nets deleted; assertion-only pointerdown probe; strip drop target stays (cursor + payload) |
-| `frontend/app/store/global.ts` + `frontend/app/block/block.tsx` | §3.4 registry hardening |
-| `frontend/layout/lib/layoutPersistence.ts` | §3.5 prune triggers; §3.6 Phase A |
+| [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts) | `hoveredDropTabId`/`dragActivatedTabIds` replaced by session signals; reorder-only state stays |
+| [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) | Spring timer moves into session (`session.armSpring(tabId)`); tile drop-target records intent |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | Cleanup nets deleted; assertion-only pointerdown probe; strip drop target stays (cursor + payload) |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) + [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) | §3.4 registry hardening |
+| [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts) | §3.5 prune triggers; §3.6 Phase A |
 | `agentmux-srv` (Phase B only) | CAS on layout writes |
 
 ---
@@ -277,7 +277,7 @@ must stop immediately.
 
 - `specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` (+ addenda A1–A3) — feature spec and field
   incident log this refactor supersedes procedurally.
-- `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
+- [`docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`](../investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
   — the persistence clobber mechanism and srv-side pruning already landed.
 - `specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md` — adjacent feature; unaffected
   reader of the refactored state.

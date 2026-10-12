@@ -87,5 +87,5 @@ Hard to unit-test because the bug lives at the CEF/Win32 boundary. Options:
 
 - `agentmux-cef/src/commands/window_pool.rs` — pool spawn / enqueue / promote
 - `agentmux-cef/src/commands/drag.rs:308` — `tear_off_pool_promote` host handler
-- `frontend/app/drag/tear-off-pool-helper.ts` — frontend's try-pool-first wiring (PR #704)
+- [`frontend/app/drag/tear-off-pool-helper.ts`](../../frontend/app/drag/tear-off-pool-helper.ts) — frontend's try-pool-first wiring (PR #704)
 - v0.33.648 task dev smoke trace — `~/.agentmux/dev/agenta-tear-off-pool-path/logs/`

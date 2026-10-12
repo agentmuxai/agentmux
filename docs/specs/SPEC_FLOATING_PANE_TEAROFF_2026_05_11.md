@@ -8,7 +8,7 @@
 > building on it (`CrossWindowDragMonitor.*`, `DragOverlay.tsx`,
 > `tear-off-pool-helper.ts`; e.g. `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`).
 > Status field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Driving observation:** *"When tearing off panes, we don't create a new instance (no new taskbar icon). Instead it's a floating window owned by the mother instance. Panes currently tear off and create a new instance; instead they would tear to subpanels."*
 
 Today, tearing a tab off creates a new full AgentMux instance — own backend sidecar, own data dir, own taskbar entry. That's the right model for tabs (workspace-level isolation). For **panes** within a tab, the new ask is different: tear into a **floating subordinate window** owned by the source instance, like Photoshop's palettes or VSCode's "Move Editor into New Window".
@@ -109,7 +109,7 @@ The floating pane is a **view of the same workspace** the parent window owns:
 
 ### 3.4 The frontend Pane component is unchanged
 
-The pane's component (`<Block>` in `frontend/app/block/block.tsx`) is identical whether it renders inside a `<TileLayout>` or inside a floating window. Same RPC, same atoms, same focus handling. The DIFFERENCE is who owns the surrounding HWND:
+The pane's component (`<Block>` in [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx)) is identical whether it renders inside a `<TileLayout>` or inside a floating window. Same RPC, same atoms, same focus handling. The DIFFERENCE is who owns the surrounding HWND:
 
 - Docked: source window's main HWND, positioned via TileLayout's flex math.
 - Floating: a separate HWND owned by the source window, positioned via window manager.
@@ -259,15 +259,15 @@ Phases 1-3 give a working tear-off-to-float MVP. Phases 4-5 round out the same-i
 
 ## 12. Cross-references
 
-- Current tear-off: `frontend/app/drag/CrossWindowDragMonitor.win32.tsx`, `frontend/app/tab/tabbar.tsx::requestTearOff`
+- Current tear-off: [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx), `frontend/app/tab/tabbar.tsx::requestTearOff`
 - Host create-window: `agentmux-cef/src/commands/window.rs::open_window_at_position`, `agentmux-cef/src/commands/window_pool.rs::promote_pool_window`
 - Focus chain plumbing: `agentmux-cef/src/browser_pane/hwnd.rs`
-- Block renderer: `frontend/app/block/block.tsx`
+- Block renderer: [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx)
 - Existing similar pattern (cross-window state sync): modal-v2, DevTools secondary window
 - Win32 owned-window docs: [MSDN — Window Features](https://learn.microsoft.com/windows/win32/winmsg/window-features)
 - VSCode auxiliary windows precedent: [microsoft/vscode#10121](https://github.com/Microsoft/vscode/issues/10121)
 - CEF embed pattern: `CefWindowInfo::SetAsChild` (NOT `SetAsPopup`)
-- Tab tear-off behavior (unchanged): `docs/specs/SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md`
+- Tab tear-off behavior (unchanged): [`docs/specs/SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md`](SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md)
 
 ---
 

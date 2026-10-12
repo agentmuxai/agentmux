@@ -3,13 +3,13 @@
 **Date:** 2026-08-24
 **Status:** Implemented same day. — #3259
 **Precedent (same shape of decision, same author intent, already shipped):**
-`docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md` — this spec is
+[`docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) — this spec is
 the macOS follow-up that doc explicitly deferred: *"macOS gap (`task
 package:macos`) is out of scope here — tracked as a separate follow-up since
 macOS packaging involves notarization complexity."* Mechanism is copied
-almost verbatim, substituting `scripts/package-macos.sh` for
-`scripts/package-linux.sh`.
-**Related:** `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` — the
+almost verbatim, substituting [`scripts/package-macos.sh`](../../scripts/package-macos.sh) for
+[`scripts/package-linux.sh`](../../scripts/package-linux.sh).
+**Related:** [`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) — the
 per-channel `settings.json` isolation this spec now actually lets macOS use.
 That spec's own investigation found `network:lan_discovery` shipping "on" in
 fresh **portable** (Windows) builds; the same symptom reproduced on a local
@@ -45,15 +45,15 @@ isn't `stable`. macOS never produced one.
 (`agentmux-common/build.rs`, `option_env!`), falling back to `"stable"` when
 unset (`agentmux-common/src/data_paths.rs`).
 
-On **Windows** (`scripts/package.sh`) and **Linux**
-(`scripts/package-linux.sh`), the packaging script computes a per-build
+On **Windows** ([`scripts/package.sh`](../../scripts/package.sh)) and **Linux**
+([`scripts/package-linux.sh`](../../scripts/package-linux.sh)), the packaging script computes a per-build
 channel and `export`s `AGENTMUX_BUILD_CHANNEL_DEFAULT` **before** invoking
 the cargo builds itself — so the channel is stamped into every compiled
 crate.
 
 On **macOS**, `Taskfile.yml`'s `package:macos` task instead declares
 `build:host`, `build:backend`, and `build:frontend` as Taskfile **`deps:`**,
-which Task runs *before* `scripts/package-macos.sh` (the `cmds:` step) ever
+which Task runs *before* [`scripts/package-macos.sh`](../../scripts/package-macos.sh) (the `cmds:` step) ever
 gets a chance to set the env var. By the time the script runs, every binary
 is already compiled against whatever `AGENTMUX_BUILD_CHANNEL_DEFAULT` was
 ambient in the calling shell — normally unset, so `stable`. This is true for
@@ -82,7 +82,7 @@ plain local `task package:macos`.
 
 **macOS-specific tool note:** macOS ships `shasum` (Perl `Digest::SHA`
 wrapper), not GNU coreutils' `sha1sum` used by the Windows/Linux scripts.
-`scripts/package-macos.sh` uses `shasum -a 1` for the same hashes — same
+[`scripts/package-macos.sh`](../../scripts/package-macos.sh) uses `shasum -a 1` for the same hashes — same
 algorithm, portable to a stock macOS toolchain with no Homebrew coreutils
 dependency.
 
@@ -108,8 +108,8 @@ collide as *running instances*, which is the actual bug this spec fixes.
 
 ### 2.3 Orchestrator script
 
-`scripts/package-macos.sh` becomes self-contained, mirroring
-`scripts/package-linux.sh`:
+[`scripts/package-macos.sh`](../../scripts/package-macos.sh) becomes self-contained, mirroring
+[`scripts/package-linux.sh`](../../scripts/package-linux.sh):
 
 1. Parse `[--fresh] [output-dir]` (`--fresh` kept as an accepted no-op, matching Windows/Linux — every local build is already its own isolated dir).
 2. Compute `VERSION`, `BRANCH`, `SHA`, `DIRTY`, `STAMP`, `LABEL`, `CHANNEL`.
@@ -184,9 +184,9 @@ Match the Windows/Linux guarantees (`SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_202
 
 | File | Change |
 |---|---|
-| `scripts/package-macos.sh` | Self-contained orchestrator — computes/exports the channel and runs the full build pipeline itself, mirroring `scripts/package-linux.sh` |
+| [`scripts/package-macos.sh`](../../scripts/package-macos.sh) | Self-contained orchestrator — computes/exports the channel and runs the full build pipeline itself, mirroring [`scripts/package-linux.sh`](../../scripts/package-linux.sh) |
 | `Taskfile.yml` | `package:macos` → delegates to the script with no `deps:`; new `package:release:macos` task (guarded, bakes `stable`) |
-| `.github/workflows/build-macos.yml` | Release step now sets `RELEASE_CHANNEL=stable` explicitly (previously relied on the now-removed unconditional default) |
+| [`.github/workflows/build-macos.yml`](../../.github/workflows/build-macos.yml) | Release step now sets `RELEASE_CHANNEL=stable` explicitly (previously relied on the now-removed unconditional default) |
 | `CLAUDE.md` | New `task package:macos` / `task package:release:macos` rows in the Commands table; macOS folded into the existing per-build-channel + settings-isolation paragraph; explicit note for agents building local macOS DMGs |
 
 ---

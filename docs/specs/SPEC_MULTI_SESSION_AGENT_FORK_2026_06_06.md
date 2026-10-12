@@ -25,10 +25,10 @@ working directory and independent conversation history.
 
 ### 2.1 The Agent Pane Picker Has Two Lists
 
-**File:** `frontend/app/view/agent/components/AgentPicker.tsx`
+**File:** [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx)
 
 **List A — My Agents (session instances)**  
-Component: `MyAgentsList` (`frontend/app/view/agent/components/MyAgentsList.tsx`)  
+Component: `MyAgentsList` ([`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx))\
 Data: `ListRecentSessionsCommand` → `RecentSessionRow[]`  
 Each row represents a **session instance** — an `AgentInstance` (concrete run) joined with
 its definition. A single definition with two past runs appears as **two rows** (truly
@@ -320,9 +320,9 @@ the zone machinery.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/MyAgentsList.tsx` | Add context menu, active-instance badge, fork prompt inline UI |
-| `frontend/app/view/agent/agent-model.ts:276` | Add active-instance detection in `launchAgentDefinition()` |
-| `frontend/app/view/agent/components/AgentPicker.tsx` | Pass active-instance map to MyAgentsList |
+| [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) | Add context menu, active-instance badge, fork prompt inline UI |
+| [`frontend/app/view/agent/agent-model.ts:276`](../../frontend/app/view/agent/agent-model.ts) | Add active-instance detection in `launchAgentDefinition()` |
+| [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) | Pass active-instance map to MyAgentsList |
 | `agentmux-srv/src/server/agent_handlers.rs` | Add `AgentDefinitionForkCommand` handler |
 | `agentmux-srv/src/backend/storage/agents.rs` | Add `definition_active_instance()` helper |
 | `frontend/types/gotypes.d.ts` | Add `AgentDefinitionForkCommand` / `AgentDefinitionForkResponse` types |

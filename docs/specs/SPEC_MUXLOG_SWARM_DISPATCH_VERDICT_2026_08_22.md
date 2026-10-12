@@ -4,7 +4,7 @@
 **Status:** Implemented — #2750
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/backend/shellintegration/muxlog.mjs`)
-**Related:** Ext 6 of `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`
+**Related:** Ext 6 of [`docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`](../reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md)
 
 ## 1. Problem
 

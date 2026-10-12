@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-13
 **Status:** Implemented (this spec documents the change; code is in the same PR) — #2129
-**Follows:** `docs/specs/SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11.md` (the original light theme), the PR #2104 review cycle that fixed `--input-bg-color` and the `*-text-color` triad.
+**Follows:** [`docs/specs/SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11.md`](SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11.md) (the original light theme), the PR #2104 review cycle that fixed `--input-bg-color` and the `*-text-color` triad.
 
 **Trigger:** manual verification of PR #2104 on `task dev` surfaced that the window header (top bar, holding tabs + widgets) and the status bar (bottom) stayed dark under the Light theme, even though every other surface had correctly gone light.
 
@@ -36,7 +36,7 @@
 ### 2.3 Caption-button light detection: OS media query → app theme signal
 Introduced a generic **light/dark polarity marker**, independent of which specific theme is active:
 
-- `frontend/app/menu/base-menus.ts` — new `LIGHT_THEME_IDS: ReadonlySet<string>`, alongside the existing `THEME_OPTIONS` list (single source of truth for both).
+- [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) — new `LIGHT_THEME_IDS: ReadonlySet<string>`, alongside the existing `THEME_OPTIONS` list (single source of truth for both).
 - `app.tsx` — alongside the existing `data-theme="<id>"` attribute, now also sets `data-theme-polarity="light"` on `<html>` when the active theme id is in `LIGHT_THEME_IDS` (removed otherwise).
 - `window-controls.win32.scss` — the caption-button hover/press override moves from `@media (prefers-color-scheme: light)` to `[data-theme-polarity="light"] &` (SCSS nesting → `[data-theme-polarity="light"] .window-action-buttons`). Same values, correct gate.
 
@@ -59,9 +59,9 @@ Each new file (`frontend/app/themes/{catppuccin-latte,solarized-light,gruvbox-li
 **Solarized Light's `--term-*` table is Solarized's own canonical, widely-published 16-color ANSI mapping**, reproduced as-is rather than derived — unlike every other theme file (including this one's own UI tokens), that specific mapping is the palette's unchanged-for-over-a-decade signature. Catppuccin Latte's and Gruvbox Light's `--term-*` tables are derived from each theme's own core semantic colors (same approach `light.scss` itself uses), not a claimed reproduction of any one tool's exact ANSI export.
 
 ### 3.1 Registration (4 touchpoints, all existing themes already require these)
-- `frontend/app/themes/index.scss` — `@use` the 3 new files.
-- `frontend/app/menu/base-menus.ts` — 3 new `THEME_OPTIONS` entries + `LIGHT_THEME_IDS` (§2.3).
-- `schema/settings.json` — `window:theme` enum + description gain the 3 new ids.
+- [`frontend/app/themes/index.scss`](../../frontend/app/themes/index.scss) — `@use` the 3 new files.
+- [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) — 3 new `THEME_OPTIONS` entries + `LIGHT_THEME_IDS` (§2.3).
+- [`schema/settings.json`](../../schema/settings.json) — `window:theme` enum + description gain the 3 new ids.
 - `frontend/types/gotypes.d.ts` — no change needed; `window:theme` is typed as plain `string` there, no enum duplication to update.
 
 ---
@@ -77,13 +77,13 @@ Each new file (`frontend/app/themes/{catppuccin-latte,solarized-light,gruvbox-li
 
 | File | Change |
 |---|---|
-| `frontend/app/theme.scss` | new `--status-bar-bg` token at `:root` |
-| `frontend/app/statusbar/StatusBar.scss` | hardcoded status-bar background → `var(--status-bar-bg)` |
-| `frontend/app/window/action-widgets.scss` | `--hoverbg-color` typo → `--hover-bg-color` (×2); hardcoded `color: white` → `var(--widget-icon-hover-color)` |
-| `frontend/app/window/window-controls.win32.scss` | `@media (prefers-color-scheme: light)` → `[data-theme-polarity="light"] &` |
-| `frontend/app/menu/base-menus.ts` | new `LIGHT_THEME_IDS`; 3 new `THEME_OPTIONS` entries |
-| `frontend/app/app.tsx` | sets/clears `data-theme-polarity` alongside `data-theme` |
-| `frontend/app/themes/light.scss` | adds `--tab-strip-bg` / `--status-bar-bg` overrides |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | new `--status-bar-bg` token at `:root` |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | hardcoded status-bar background → `var(--status-bar-bg)` |
+| [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) | `--hoverbg-color` typo → `--hover-bg-color` (×2); hardcoded `color: white` → `var(--widget-icon-hover-color)` |
+| [`frontend/app/window/window-controls.win32.scss`](../../frontend/app/window/window-controls.win32.scss) | `@media (prefers-color-scheme: light)` → `[data-theme-polarity="light"] &` |
+| [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) | new `LIGHT_THEME_IDS`; 3 new `THEME_OPTIONS` entries |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) | sets/clears `data-theme-polarity` alongside `data-theme` |
+| [`frontend/app/themes/light.scss`](../../frontend/app/themes/light.scss) | adds `--tab-strip-bg` / `--status-bar-bg` overrides |
 | `frontend/app/themes/{catppuccin-latte,solarized-light,gruvbox-light}.scss` | new |
-| `frontend/app/themes/index.scss` | `@use` the 3 new files |
-| `schema/settings.json` | `window:theme` enum + description |
+| [`frontend/app/themes/index.scss`](../../frontend/app/themes/index.scss) | `@use` the 3 new files |
+| [`schema/settings.json`](../../schema/settings.json) | `window:theme` enum + description |

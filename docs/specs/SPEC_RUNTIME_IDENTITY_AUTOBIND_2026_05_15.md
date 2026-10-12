@@ -106,7 +106,7 @@ Two changes:
 
 **Backend (one-time fix):** Rebuild `agentmux-srv` with `cargo clean` to invalidate the stale object cache. The source already substitutes the sentinels — the deployed binary just needs to actually contain them. Documented in §9.1.
 
-**Frontend defensive fallback** at `frontend/app/view/agent/components/AgentLaunchModal.tsx:270`:
+**Frontend defensive fallback** at [`frontend/app/view/agent/components/AgentLaunchModal.tsx:270`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx):
 
 ```ts
 const parts = [

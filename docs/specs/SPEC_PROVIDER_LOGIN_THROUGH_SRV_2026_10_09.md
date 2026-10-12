@@ -11,7 +11,7 @@ Two independent implementations log a provider CLI in:
 
 | | Host path | srv path |
 |---|---|---|
-| Runs the CLI | the CEF host: `run_cli_login`, `run_cli_login_pty` (`crates/cef/src/commands/cli_login.rs`) | srv: `auth.start` (`server/identity_handlers.rs`, `identity_auth_spawn.rs`) |
+| Runs the CLI | the CEF host: `run_cli_login`, `run_cli_login_pty` ([`crates/cef/src/commands/cli_login.rs`](../../crates/cef/src/commands/cli_login.rs)) | srv: `auth.start` (`server/identity_handlers.rs`, `identity_auth_spawn.rs`) |
 | Used by | `runProviderLogin` (`/login`, Login Again, Claude and OpenClaw in the New Agent modal, the Claude login panel) | `AuthFlowController` (other providers in the New Agent modal) |
 | Paste a code | `set_provider_auth`, one global slot | `auth.submitcallback`, per session |
 | Terminal fallback | `open_login_terminal`: a native console window | none |

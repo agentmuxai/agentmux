@@ -174,4 +174,4 @@ Whichever option:
 - [`ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) — why floater drag is JS-driven today
 - `ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md` — VS Code dragover quirk
 - `agentmux-srv/src/sagas/tear_off_block.rs:40-177` — saga template for `RedockFloatingPane`
-- `frontend/layout/lib/TileLayout.win32.tsx:661-752` — existing pane-drop targets to extend under Option B
+- [`frontend/layout/lib/TileLayout.win32.tsx:661-752`](../../frontend/layout/lib/TileLayout.win32.tsx) — existing pane-drop targets to extend under Option B

@@ -64,11 +64,11 @@ is isolated to its own phase.
 
 | Platform | Format | Arch | Built by | Wired into CI? |
 |---|---|---|---|---|
-| Windows | `.zip` (portable) | x64 | `task package` → `scripts/package.sh` | Yes (`build-windows.yml`) |
-| Windows | `.exe` (Inno Setup installer) | x64 | `scripts/package-installer.ps1` | Yes (`build-windows.yml`) |
-| Windows | `.msix` (MS Store) | x64 | `scripts/package-msix.ps1` | Yes, non-blocking (`release.yml`, MS Store job) |
-| macOS | `.dmg` | ARM64 only | `scripts/package-macos.sh` (`ARCH="arm64"` hardcoded) | Yes (`build-macos.yml`, `macos-latest` = Apple Silicon runner) |
-| Linux | `.AppImage` (portable) | x64 only | `scripts/package-linux.sh` | Yes (`build-linux.yml`, `ubuntu-22.04` runner) |
+| Windows | `.zip` (portable) | x64 | `task package` → [`scripts/package.sh`](../../scripts/package.sh) | Yes (`build-windows.yml`) |
+| Windows | `.exe` (Inno Setup installer) | x64 | [`scripts/package-installer.ps1`](../../scripts/package-installer.ps1) | Yes (`build-windows.yml`) |
+| Windows | `.msix` (MS Store) | x64 | [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1) | Yes, non-blocking (`release.yml`, MS Store job) |
+| macOS | `.dmg` | ARM64 only | [`scripts/package-macos.sh`](../../scripts/package-macos.sh) (`ARCH="arm64"` hardcoded) | Yes (`build-macos.yml`, `macos-latest` = Apple Silicon runner) |
+| Linux | `.AppImage` (portable) | x64 only | [`scripts/package-linux.sh`](../../scripts/package-linux.sh) | Yes (`build-linux.yml`, `ubuntu-22.04` runner) |
 
 Nothing else exists: no `.deb`, `.rpm`, `.snap`, `.pacman`, no Linux portable
 `.zip`, no Windows `.msi`, no ARM64 Linux, no ARM64/x64 confusion on Windows
@@ -78,16 +78,16 @@ Windows x64 — so it's out of scope here).
 ### 2.1 The one blocker that gates almost everything: CEF runtime binaries
 
 AgentMux embeds Chromium via a maintained CEF fork
-(`agentmuxai/cef`, see `docs/cef-build/CEF_FORK_MAINTENANCE.md`). The runtime
+(`agentmuxai/cef`, see [`docs/cef-build/CEF_FORK_MAINTENANCE.md`](../cef-build/CEF_FORK_MAINTENANCE.md)). The runtime
 `libcef`/framework binaries are pre-built and published per **(platform,
 arch)** pair, and the build scripts download a pinned release tag rather than
-building CEF from source on every run (`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`
+building CEF from source on every run ([`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md)
 pins `cef-windows-x86_64-148.0.7778.180`, `cef-linux-x86_64-148.0.7778.180-codecs`,
 `cef-macos-arm64-148.23.25-codecs`).
 
 **Published today: Windows x86_64, Linux x86_64, macOS arm64. Nothing else.**
 `agentmux-cef/src/sidecar.rs:535-539` already resolves `arm64` vs `x64`
-generically from `target_arch`, and `docs/specs/cef-size-reduction.md` lists
+generically from `target_arch`, and [`docs/specs/cef-size-reduction.md`](cef-size-reduction.md) lists
 "macOS (arm64 + x86_64)" as a platform set elsewhere — so the *code* doesn't
 assume single-arch — but no macOS x86_64, Linux arm64, or Windows arm64 CEF
 binary has actually been built and released from the fork. `package-macos.sh`
@@ -163,7 +163,7 @@ rather than three bespoke pipelines:
   single invocation per format — this is the standard low-effort way to ship
   a non-native-packaged app as deb+rpm without maintaining two build systems.
   Desktop integration (`.desktop` file, icon) already exists for the AppImage
-  path (`docs/specs/linux-icon-and-desktop-2026-05-03.md`) and should be
+  path ([`docs/specs/linux-icon-and-desktop-2026-05-03.md`](linux-icon-and-desktop-2026-05-03.md)) and should be
   reused verbatim.
 - **`.pacman`:** `fpm`'s pacman output support is less battle-tested; the
   idiomatic Arch path is a hand-written `PKGBUILD` + `makepkg`. Slightly more
@@ -321,22 +321,22 @@ hard dependency chain. Phases 5–6 and 7–8 are each a hard dependency pair.
 ## 6. References
 
 - `BUILD.md` — current build prerequisites and commands
-- `docs/cef-build/CEF_FORK_MAINTENANCE.md` — CEF fork branch model, why
+- [`docs/cef-build/CEF_FORK_MAINTENANCE.md`](../cef-build/CEF_FORK_MAINTENANCE.md) — CEF fork branch model, why
   cross-platform binary parity is easy to silently lose
-- `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` — current
+- [`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) — current
   pinned CEF binary tags per platform
-- `docs/specs/SPEC_MACOS_PACKAGING_2026_05_30.md` — existing macOS DMG
+- [`docs/specs/SPEC_MACOS_PACKAGING_2026_05_30.md`](SPEC_MACOS_PACKAGING_2026_05_30.md) — existing macOS DMG
   packaging + signing
-- `docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md` — existing MSIX pipeline
+- [`docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md`](SPEC_MSIX_PACKAGING_2026_05_30.md) — existing MSIX pipeline
   (closest prior art for a from-scratch Windows packaging format)
-- `docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md` — existing
+- [`docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) — existing
   AppImage per-build channel isolation, applies unchanged to any new Linux
   format built from the same tree
-- `docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md` — current release
+- [`docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md`](SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md) — current release
   fan-out this matrix expansion plugs into
-- `docs/specs/linux-icon-and-desktop-2026-05-03.md` — existing `.desktop`
+- [`docs/specs/linux-icon-and-desktop-2026-05-03.md`](linux-icon-and-desktop-2026-05-03.md) — existing `.desktop`
   file / icon integration to reuse for deb/rpm/pacman
-- `scripts/package-linux.sh`, `scripts/package-macos.sh`,
-  `scripts/package-installer.ps1`, `scripts/package-msix.ps1` — existing
+- [`scripts/package-linux.sh`](../../scripts/package-linux.sh), [`scripts/package-macos.sh`](../../scripts/package-macos.sh),
+  [`scripts/package-installer.ps1`](../../scripts/package-installer.ps1), [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1) — existing
   packaging scripts this spec's new scripts should match in structure
   (ephemeral local-build labeling, per-build channel isolation)

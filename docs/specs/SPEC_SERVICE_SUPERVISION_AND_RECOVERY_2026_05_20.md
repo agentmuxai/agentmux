@@ -5,7 +5,7 @@
 **Author:** AgentA
 **Tracking:** to get a long-lived GitHub Discussion thread (sibling of #707 for
 the reducer stack)
-**Case study:** `docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md`
+**Case study:** [`docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md`](../analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md)
 
 ---
 
@@ -272,7 +272,7 @@ legit long op) with *dead*.
 ### 8.1 Renderer responsiveness — active (2026-09-23)
 
 Promoted from draft by the 2026-09-22 freeze
-(`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`):
+([`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`](../incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md)):
 the renderer was alive but stuck, srv/host/launcher stayed healthy, and the
 window never came back. The liveness half already existed (the launcher's
 UI-thread probe, and `SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md` for a renderer
@@ -498,8 +498,8 @@ Each phase ships only when the previous one is boringly reliable.
 
 ## 17. References
 
-- `docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md` — case study #1.
-- `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md` — reducer stack.
-- `docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md` — saga crash-resume precedent.
+- [`docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md`](../analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md) — case study #1.
+- [`docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md) — reducer stack.
+- [`docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md`](SPEC_PHASE_E_SAGAS_2026-04-30.md) — saga crash-resume precedent.
 - Discussion #707 — reducer-stack tracking thread (model for this spec's
   tracking thread).

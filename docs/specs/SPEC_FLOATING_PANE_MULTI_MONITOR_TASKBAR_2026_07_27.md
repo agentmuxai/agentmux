@@ -101,7 +101,7 @@ and are out of scope here.
    doc comment notes it does a hide→restyle→show cycle, which will flicker
    the window if called on every drag-move tick while straddling a monitor
    boundary. Gate on the same dwell-style pattern already used for redock
-   hover (`REDOCK_DWELL_MS`, `frontend/app/workspace/floating-pane-constants.ts`)
+   hover (`REDOCK_DWELL_MS`, [`frontend/app/workspace/floating-pane-constants.ts`](../../frontend/app/workspace/floating-pane-constants.ts))
    rather than inventing a new debounce primitive — settle on "monitor
    changed and stayed changed for N ms" before flipping the taskbar style,
    and flip back immediately (no dwell needed) once it's confirmed back on
@@ -132,7 +132,7 @@ and are out of scope here.
 
 ## Sequencing note
 
-`docs/specs/SPEC_REDOCK_FRAMEWORK_HARDENING_2026_07_27.md`'s Phase 3 (adopt
+[`docs/specs/SPEC_REDOCK_FRAMEWORK_HARDENING_2026_07_27.md`](SPEC_REDOCK_FRAMEWORK_HARDENING_2026_07_27.md)'s Phase 3 (adopt
 the unowned-floater model, re-anchor taskbar visibility via an explicit,
 owner-independent `WS_EX_TOOLWINDOW` flag rather than implicit owned-popup
 behavior) should land **before** this spec's implementation phase. Once
@@ -159,4 +159,4 @@ need to touch otherwise.
 - `agentmux-cef/src/app/monitor.rs` — new `monitor_for_window(hwnd) -> Option<HMONITOR>` (Windows)
 - `agentmux-cef/src/commands/window_pool.rs` — reuse `set_taskbar_hidden`, no changes needed to the function itself
 - `agentmux-cef/src/commands/window/motion.rs`, `agentmux-cef/src/ui_tasks/drag.rs` — hook the monitor-change check into existing move-update paths
-- `frontend/app/workspace/floating-pane-constants.ts` — new dwell constant if the redock dwell constant isn't reused directly
+- [`frontend/app/workspace/floating-pane-constants.ts`](../../frontend/app/workspace/floating-pane-constants.ts) — new dwell constant if the redock dwell constant isn't reused directly

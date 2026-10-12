@@ -63,7 +63,7 @@ What makes it unsuitable as a file format, as-is:
 - **`blocks.push(json!({ "meta": block.meta }))`** (`:95`) — every meta key,
   including `agentInstanceId` (a DB row id), `agent:sessionid`,
   `session:*` stats, `subagent:*`, `agent:last_failure`, absolute `cmd:cwd`,
-  `file`, `media:path` (`frontend/types/srv-types.d.ts:790-937`).
+  `file`, `media:path` ([`frontend/types/srv-types.d.ts:790-937`](../../frontend/types/srv-types.d.ts)).
 - No `version` or schema field.
 - One workspace only (`:384-420`, a documented limitation).
 - Sizes are the tree's raw flex units, not normalised.
@@ -74,7 +74,7 @@ What makes it the right starting point: it already walks Workspace → Tab →
 block list — Phase 2's apply can share it.
 
 The "turn restore off" setting that spec promised doesn't exist
-(`frontend/app-init.ts:354` hardcodes `restoreIfAvailable: true`). Out of
+([`frontend/app-init.ts:354`](../../frontend/app-init.ts) hardcodes `restoreIfAvailable: true`). Out of
 scope here; noted in §8.
 
 ### 1.2 The layout model
@@ -89,9 +89,9 @@ scope here; noted in §8.
   parent), `children`, `data`, `extra` (unknown keys preserved).
   `LayoutNodeData` (`:32-56`): `blockId`, `blockStack` (pane tabs),
   `activeBlockId`. The frontend adds `minimized` and related flags
-  (`frontend/layout/lib/types.ts:193-262`), kept through `extra`.
+  ([`frontend/layout/lib/types.ts:193-262`](../../frontend/layout/lib/types.ts)), kept through `extra`.
 - The only portable layout description today is `PresetNode`
-  (`frontend/app/tab/tab-presets.ts:29-38`): `{widget}` or `{split,
+  ([`frontend/app/tab/tab-presets.ts:29-38`](../../frontend/app/tab/tab-presets.ts)): `{widget}` or `{split,
   children}` — no sizes (`:50-52`), and it duplicates the backend's
   `default_three_pane_tree` by hand (`:43-47`).
 
@@ -116,15 +116,15 @@ scope here; noted in §8.
 
 ### 1.4 Menu and file I/O
 
-- ☰ menu: `frontend/app/window/hamburger-menu.tsx:78-143`, `MenuItem`
-  (`frontend/types/custom.d.ts:452-468`: `label`, `icon`, `subItems`,
+- ☰ menu: [`frontend/app/window/hamburger-menu.tsx:78-143`](../../frontend/app/window/hamburger-menu.tsx), `MenuItem`
+  ([`frontend/types/custom.d.ts:452-468`](../../frontend/types/custom.d.ts): `label`, `icon`, `subItems`,
   `onClick`, `divider`, … — no text input). Entries: New Tab, New Window |
   Theme, Opacity | Settings, Command Palette, Armory, Toolchain, DevTools,
   Online Docs | Exit.
 - **Dialogs: open only.** The CEF host uses `rfd`:
   `show_open_file_dialog` and `show_open_bundle_dialog`
   (`agentmux-cef/src/commands/platform.rs:1007-1051`), wired through
-  `agentmux-cef/src/ipc.rs:295-296` and `frontend/util/cef-api.ts:529-534`.
+  `agentmux-cef/src/ipc.rs:295-296` and [`frontend/util/cef-api.ts:529-534`](../../frontend/util/cef-api.ts).
   No save dialog anywhere.
 - Writing files today: the editor's `writeeditorfile` RPC (home dir only,
   10 MB, `server/editor_handlers.rs:424-489`) behind an in-app path box; a
@@ -191,7 +191,7 @@ tabs, never silently replacing.
   AgentMux"), migrates lower ones on load, and ignores and **preserves**
   unknown fields (every object carries its unknown keys through a
   load/save round trip, as `LayoutNode.extra` already does).
-- A JSON Schema ships at `schema/agentmux-layout.v1.schema.json` and the
+- A JSON Schema ships at [`schema/agentmux-layout.v1.schema.json`](../../schema/agentmux-layout.v1.schema.json) and the
   `$schema` key may reference it; it is informative, never required.
 
 ### 3.2 Windows, tabs, tree
@@ -471,8 +471,8 @@ Decided (§9): Phase 2 follows before the next release.
   Phase 2 rebuild
 - `agentmux-common/src/layout_types.rs` — `LayoutNode`/`LayoutNodeData`
 - `agentmux-cef/src/commands/platform.rs`, `ipc.rs` — the Save dialog
-- `frontend/util/cef-api.ts`, `frontend/types/custom.d.ts` — host API typing
-- `frontend/app/window/hamburger-menu.tsx` — the menu entry
-- new `schema/agentmux-layout.v1.schema.json`
+- [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts), [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) — host API typing
+- [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) — the menu entry
+- new [`schema/agentmux-layout.v1.schema.json`](../../schema/agentmux-layout.v1.schema.json)
 - ABF (Phase 4 only): `backend/bundle_export.rs`, `bundle_import.rs`,
   `server/app_api/bundle/`

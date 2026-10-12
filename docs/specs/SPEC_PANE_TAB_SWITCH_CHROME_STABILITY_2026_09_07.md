@@ -3,7 +3,7 @@
 **Date:** 2026-09-07
 **Status:** implemented — §5's Option B shipped over the following three days,
 after this Status line was written (it described the doc-only PR the spec rode
-in on, and was never revised). `frontend/app/tab/pane-leaf-chrome.tsx` and its
+in on, and was never revised). [`frontend/app/tab/pane-leaf-chrome.tsx`](../../frontend/app/tab/pane-leaf-chrome.tsx) and its
 test now own the narrower inner remount keyed on `NodeModel.activeBlockId`;
 `DisplayNodesWrapper` keys on `node.id` alone so the leaf subtree no longer
 remounts on a switch; `layoutStack.ts` no longer evicts a leaf's NodeModel; and
@@ -20,11 +20,11 @@ refcounts it in `onCleanup` — it does not re-subscribe when a blockId changes.
 Making the pane header survive a block switch means converting that whole tree
 to reactive block identity, which lands on every pane type at once. That needs
 to be a deliberate, separately-verified piece of work, not a rider on a spec.
-**Related:** `docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`
+**Related:** [`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md)
 (added the reveal gate this spec proposes to make unnecessary),
-`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` §4.3 (the
+[`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) §4.3 (the
 block-stack mechanism whose remount design is the root cause),
-`docs/specs/SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md` (same
+[`docs/specs/SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md`](SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md) (same
 surface, written the same day — see §7 for how they interact)
 
 ---
@@ -99,7 +99,7 @@ const blockId = node.data.activeBlockId || node.data.blockId;
 ### 2.2 The constraint underneath it
 
 The real constraint is the **`ViewModel` contract**: *one instance, one
-immutable `blockId` for its lifetime* (`frontend/app/block/block.tsx`).
+immutable `blockId` for its lifetime* ([`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx)).
 `TermViewModel`/`AgentViewModel` are built around a fixed block. Pointing a
 live view at a different block is not supported and is not what this spec
 proposes.
@@ -249,7 +249,7 @@ spec's Step 1 first**, then the blur spec against the final DOM position.
 `layoutStack.ts:26-28` said the remount is driven by the key function in
 `TileLayout.{win32,linux,darwin}.tsx`. That was stale: the
 `<Key … by={activeKeyFor}>` now lives in
-`frontend/layout/lib/tilelayout-shared.tsx` (lines 171 and 354), after the
+[`frontend/layout/lib/tilelayout-shared.tsx`](../../frontend/layout/lib/tilelayout-shared.tsx) (lines 171 and 354), after the
 per-platform TileLayout copies were folded into one core in #3041.
 
 **Fixed in the same PR as this spec**, along with a note recorded at that

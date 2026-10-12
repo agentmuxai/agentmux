@@ -3,7 +3,7 @@
 **Date:** 2026-06-13
 **Status:** implemented in PR #1394; §7 `GL_RENDERER` check added 2026-09-29 — replaces the initial VMware DMI gate
 **Author:** AgentU
-**Related:** `agentmux-cef/src/app.rs` (`on_before_command_line_processing`, `is_vmware_guest`), `agentmux-cef/Cargo.toml`, `frontend/app/view/term/termwrap.ts`, `frontend/util/gpuutil.ts`, `frontend/app/statusbar/GpuStatus.tsx`
+**Related:** `agentmux-cef/src/app.rs` (`on_before_command_line_processing`, `is_vmware_guest`), `agentmux-cef/Cargo.toml`, [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts), [`frontend/util/gpuutil.ts`](../../frontend/util/gpuutil.ts), [`frontend/app/statusbar/GpuStatus.tsx`](../../frontend/app/statusbar/GpuStatus.tsx)
 
 ---
 
@@ -149,7 +149,7 @@ surfaceless throwaway EGL context and prints the renderer; software markers
 timeout mean the Software rung. The render node alone had over-trusted a VMware
 guest with 3D off (vmwgfx keeps `renderD128`, Mesa falls back to llvmpipe): the
 forced `use-angle=gl --ignore-gpu-blocklist` crashed the GPU process and the app
-launched invisible (`docs/retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md`).
+launched invisible ([`docs/retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md`](../retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md)).
 Measured on that guest: the probe reports `llvmpipe (LLVM 21.1.8, 256 bits)`, takes
 ~92 ms, and runs only when there is no hardware Vulkan but a render node exists.
 

@@ -13,7 +13,7 @@ to the repo root.
   is stale; see §2.3.
 - `SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md`: the Operator
   Config seed this spec adds an entry to.
-- `docs/reports/REPORT_OUT_OF_WORKSPACE_CLONE_AUDIT_2026_09_05.md`: the
+- [`docs/reports/REPORT_OUT_OF_WORKSPACE_CLONE_AUDIT_2026_09_05.md`](../reports/REPORT_OUT_OF_WORKSPACE_CLONE_AUDIT_2026_09_05.md): the
   in-workspace clone convention, which no agent is told today.
 
 ## 0. The ask
@@ -47,9 +47,9 @@ their own workspace", matching the audit report's convention. See §8 Q1.
 
 - **Workspace:** the agent instance's working directory,
   `~/.agentmux/agents/<instance-slug>/` (e.g. `clamk-0612a`). The frontend
-  builds the path (`frontend/app/view/agent/agent-model.ts:480-495`, slug
+  builds the path ([`frontend/app/view/agent/agent-model.ts:480-495`](../../frontend/app/view/agent/agent-model.ts), slug
   from `defaults/instance-slug.ts:73`), srv claims it atomically
-  (`allocate_agent_workdir`, `crates/srv/src/server/app_api/agent_define.rs:357`)
+  (`allocate_agent_workdir`, [`crates/srv/src/server/app_api/agent_define.rs:357`](../../crates/srv/src/server/app_api/agent_define.rs))
   and stores it as the instance's `working_directory`. The agent gets it only
   as its launch cwd; no env var names it.
 - **Host agent:** an agent whose CLI runs as a process on this machine.
@@ -72,17 +72,17 @@ traced in code:
 | # | Content | How it arrives | Written by | In the card? |
 |---|---|---|---|---|
 | 1 | `~/.agentmux/agents/CLAUDE.md` (jekt security rules, PR identity tag) | Claude Code's ancestor-directory `CLAUDE.md` discovery | **No code.** Hand-maintained; its header calls itself the authoritative agent-facing copy since the repo `CLAUDE.md` was removed (#3403) | no |
-| 2 | `<workspace>/CLAUDE.md` | Claude's project `CLAUDE.md` | `write_claude_md_respecting_ownership` (`crates/srv/src/backend/agent_config.rs:1401`). Rewritten only if it carries `CLAUDE_MD_MANAGED_MARKER` (:936) or doesn't exist | no |
+| 2 | `<workspace>/CLAUDE.md` | Claude's project `CLAUDE.md` | `write_claude_md_respecting_ownership` ([`crates/srv/src/backend/agent_config.rs:1401`](../../crates/srv/src/backend/agent_config.rs)). Rewritten only if it carries `CLAUDE_MD_MANAGED_MARKER` (:936) or doesn't exist | no |
 | 3 | `<workspace>/.claude/AGENTMUX_MEMORY.md` | `@.claude/AGENTMUX_MEMORY.md` import appended to a foreign `CLAUDE.md` (:941, :962, :1509-1523) | same function, every launch | no |
-| 4 | Global Memory (the 3 Operator Config entries, plus any workspace entries) | inside #2 or #3, as `# Memory` | `inject_global_bundles` (`crates/srv/src/server/editor_handlers.rs:93-116`) or `write_agent_config_files` (`app_api/agent_open.rs:1057-1066`), both via `format_global_bundle_block` (`backend/storage/bundles.rs:184`) | no (as a file) |
+| 4 | Global Memory (the 3 Operator Config entries, plus any workspace entries) | inside #2 or #3, as `# Memory` | `inject_global_bundles` ([`crates/srv/src/server/editor_handlers.rs:93-116`](../../crates/srv/src/server/editor_handlers.rs)) or `write_agent_config_files` (`app_api/agent_open.rs:1057-1066`), both via `format_global_bundle_block` (`backend/storage/bundles.rs:184`) | no (as a file) |
 | 5 | Global + Personal Memory again | SessionStart hook, `agentmux-bashwrap sessionstart --part 1..8` | `compose_delivery` (`server/memory_delivery_handlers.rs:340`), `global_entries` (:364), `personal_entries_in` (:387) | **yes, the only thing in the card** |
 | 6 | Skills index `# Available Skills` | inside #2/#3 | `build_config_files` (`agent_config.rs:101-117`) | no |
 | 7 | Skill files `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` | Claude's native skill/command listing | `agent_config.rs:139-158` | no |
 | 8 | MCP tools (`agentmux` server) | `.mcp.json` | `write_mcp_json_respecting_user_servers` (`agent_config.rs:1222-1312`) | no |
-| 9 | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` (user-level) | Claude's user memory | placeholder seeded by `seed_claude_md_placeholder_if_missing` (`crates/srv/src/backend/providers.rs:812-869`) | no |
+| 9 | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` (user-level) | Claude's user memory | placeholder seeded by `seed_claude_md_placeholder_if_missing` ([`crates/srv/src/backend/providers.rs:812-869`](../../crates/srv/src/backend/providers.rs)) | no |
 | 10 | Continuation packet | prefixed to the first user message | `build_continuation_packet` (`backend/continuity.rs:262-337`) | no (label only; #4034 CD4 covers it) |
 
-The card (`frontend/app/view/agent/components/ContextDeliveryCard.tsx`)
+The card ([`frontend/app/view/agent/components/ContextDeliveryCard.tsx`](../../frontend/app/view/agent/components/ContextDeliveryCard.tsx))
 is built from the `agentmux_memory_injected` frame that
 `notice_frame` (`memory_delivery_handlers.rs:483`) appends after the hook
 parts are acknowledged. So it can only ever show row 5. On the observed
@@ -91,12 +91,12 @@ session it said "3 items" while the agent had been given rows 1-10.
 ### 2.2 No workspace rule anywhere
 
 Nothing the agent receives mentions where to clone or work. The Operator
-Config seed (`crates/srv/operator-config-seed.json`, manifest version 5,
+Config seed ([`crates/srv/operator-config-seed.json`](../../crates/srv/operator-config-seed.json), manifest version 5,
 entries `operator-config-app-api`, `-environment-gotchas`,
 `-rich-output`) doesn't. Neither do the shared `agents/CLAUDE.md` or the
 per-agent `CLAUDE.md`. The convention exists only in
 `REPORT_OUT_OF_WORKSPACE_CLONE_AUDIT_2026_09_05.md` §0 and
-`docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`.
+[`docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`](../analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md).
 
 ### 2.3 Duplicates
 
@@ -174,7 +174,7 @@ Rejected:
 ### 3.3 The entry's text
 
 Id `operator-config-workspace`, name `AgentMux Operator Config: Your
-workspace`, `agent_types: ["host"]` (`crates/srv/operator-config-seed.json`,
+workspace`, `agent_types: ["host"]` ([`crates/srv/operator-config-seed.json`](../../crates/srv/operator-config-seed.json),
 manifest v7). The "host agents" scope is stated in the body rather than
 the name, like the other entries' opening line.
 
@@ -207,7 +207,7 @@ The rule points at the workspace, but an agent that has `cd`'d away (or
 was resumed with a different cwd) has no reliable way to find it. srv
 sets `AGENTMUX_AGENT_WORKDIR` to the block's `cmd:cwd` (the resolved
 workspace) in `build_persistent_spawn_env`
-(`carry_agent_workdir_env`, `crates/srv/src/server/agent_handlers/input.rs`),
+(`carry_agent_workdir_env`, [`crates/srv/src/server/agent_handlers/input.rs`](../../crates/srv/src/server/agent_handlers/input.rs)),
 the env builder of the persistent and per-turn spawn paths, and in the
 ACP (`AcpController::spawn_env`) and app-server controllers, which build
 their own (Codex P2 on #4113). It is server-set: a `cmd:env`
@@ -225,7 +225,7 @@ recorded at launch.** Neither launch path is a good place to record it:
 writers keyed by the workdir. The SessionStart hook, by contrast, runs
 inside the CLI. Its stdin carries the session's `cwd`, and its env has
 `CLAUDE_CONFIG_DIR`. So `agentmux-bashwrap sessionstart` sends both with
-each part request (`crates/bashwrap/src/sessionstart.rs`), and srv lists
+each part request ([`crates/bashwrap/src/sessionstart.rs`](../../crates/bashwrap/src/sessionstart.rs)), and srv lists
 the files from where the CLI actually ran (`backend/startup_files.rs`,
 `claude_startup_files`). A hook binary older than srv sends no `cwd`, and
 the card simply shows no startup files.
@@ -367,7 +367,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
 ### 6.1 How a repin reaches an agent today
 
 - **The pin is compiled in.** `ProviderDefinition.pinned_version`
-  (`crates/srv/src/backend/providers.rs:113`; Claude `"2.1.285"` at :295,
+  ([`crates/srv/src/backend/providers.rs:113`](../../crates/srv/src/backend/providers.rs); Claude `"2.1.285"` at :295,
   mirrored in the frontend catalog). A repin reaches a user only with a new
   AgentMux build.
 - **Installs are shared, one directory per version.**
@@ -377,7 +377,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
   Old version directories are never pruned.
 - **The version is chosen when the CLI process spawns**, never for a
   running process. The frontend's `resolveCliBin`
-  (`frontend/app/view/agent/agent-launch-env.ts:108-120`) calls
+  ([`frontend/app/view/agent/agent-launch-env.ts:108-120`](../../frontend/app/view/agent/agent-launch-env.ts)) calls
   `ResolveCli` with a 300 s timeout, which npm-installs the pinned version
   if it's missing (`server/cli_handlers.rs:180-215`). A Claude persistent
   pane keeps its binary until its process respawns (restart, reconnect,
@@ -391,7 +391,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
 | A pane restored at startup (already in the layout) | **No.** `ResolveCli` installs silently; the pane is just slower to start. The only trace is srv's log line `"CLI installed (npm)"` (`cli_handlers.rs:208`). |
 | The agent comes back on a different version (e.g. 2.1.218 → 2.1.285) | **No,** on any path. The Toolchain pane shows the current version if you look. |
 | "Update available" badge | Fires only for `behind-pin` (`providers/version-drift.ts:58-66,106`), i.e. an *older* install found, which only the legacy per-AgentMux-version layout produces. Never for a fresh instance. |
-| The CLI updating itself | Unknown. Claude Code's auto-updater is disabled only in `docker/Dockerfile.agent-agentmux:98` (`DISABLE_AUTOUPDATER=1`); srv sets nothing for host agents, so an install may drift past the pin unnoticed. |
+| The CLI updating itself | Unknown. Claude Code's auto-updater is disabled only in [`docker/Dockerfile.agent-agentmux:98`](../../docker/Dockerfile.agent-agentmux) (`DISABLE_AUTOUPDATER=1`); srv sets nothing for host agents, so an install may drift past the pin unnoticed. |
 
 ### 6.3 Design
 
@@ -510,7 +510,7 @@ User docs live in `agentmuxai/agentmux-docs` (`src/content/docs/`).
 | `memory.md` | Global Memory entries can apply to host agents, container agents or all; list the Operator Config entries, including the workspace one. | LC1 |
 | agent environment variables page | Add `AGENTMUX_AGENT_WORKDIR`. | LC1 |
 | `memory.md`, "How Memory bundles are reached" | The card lists startup files with their owner; startup no longer duplicates Global Memory. | LC2, LC3 |
-| `agentmux` `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` | Fix the :180 table (today: startup file + hook; after LC3: file only when the import is present). | LC3 |
-| `agentmux` `docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md` | Add the `startup_file` item kind and point at §4 here. | LC2 |
-| `agentmux` `docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md` | Document `agent_types` on seed entries. | LC1 |
+| `agentmux` [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Fix the :180 table (today: startup file + hook; after LC3: file only when the import is present). | LC3 |
+| `agentmux` [`docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | Add the `startup_file` item kind and point at §4 here. | LC2 |
+| `agentmux` [`docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Document `agent_types` on seed entries. | LC1 |
 | agent providers / toolchain page | When a CLI is installed or updated, and what the pane shows; the auto-updater is off for host Claude agents. | LC4, LC5 |

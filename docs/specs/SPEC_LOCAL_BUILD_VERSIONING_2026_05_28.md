@@ -3,9 +3,9 @@
 **Author:** AgentA
 **Status:** proposed — Proposal — chosen pattern, ready to implement.
 **Reporter:** user (this session) — "we want a reliable way to ensure we can iterate on patches during local dev work .. we tried other stuff, but it keeps breaking, can u research best practices."
-**Affected:** `Taskfile.yml` (`package`, `package:local`, `dev:local`), `scripts/package-portable.sh`, `scripts/bump-wrapper.sh` (no longer called by package), `agentmux-common/src/data_paths.rs` (data-dir keying), `CLAUDE.md` (the versioning section).
+**Affected:** `Taskfile.yml` (`package`, `package:local`, `dev:local`), [`scripts/package-portable.sh`](../../scripts/package-portable.sh), [`scripts/bump-wrapper.sh`](../../scripts/bump-wrapper.sh) (no longer called by package), `agentmux-common/src/data_paths.rs` (data-dir keying), `CLAUDE.md` (the versioning section).
 **Supersedes:** the `task package` auto-commit-bump introduced to replace the old ephemeral `package:local`.
-**Related:** RFC #857 (changesets), `SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`, `docs/retro/retro-release-version-desync-2026-05-22.md`.
+**Related:** RFC #857 (changesets), `SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`, [`docs/retro/retro-release-version-desync-2026-05-22.md`](../retro/retro-release-version-desync-2026-05-22.md).
 
 ---
 

@@ -5,8 +5,8 @@ the gap empirically (a live "TEST EDIT" write to an open preview pane's file
 was not reflected without closing/reopening the tab) and at the code level.
 **Author:** Agent3
 **Date:** 2026-07-18
-**Related:** `docs/specs/SPEC_EDITOR_FILE_ENCODINGS_2026_06_17.md`,
-`docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md`, `agentmux-srv/src/backend/config_watcher_fs.rs`
+**Related:** [`docs/specs/SPEC_EDITOR_FILE_ENCODINGS_2026_06_17.md`](SPEC_EDITOR_FILE_ENCODINGS_2026_06_17.md),
+[`docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md`](SPEC_EDITOR_FILE_TREE_2026-05-26.md), `agentmux-srv/src/backend/config_watcher_fs.rs`
 (the existing single-file watcher this design generalizes from).
 
 ## Problem
@@ -14,13 +14,13 @@ was not reflected without closing/reopening the tab) and at the code level.
 Editor/preview panes read a file's content exactly once, at open time.
 `readeditorfile` (`agentmux-srv/src/server/editor_handlers.rs:198-236`) is a
 plain one-shot `std::fs::read` — no watcher, no subscription, no push
-mechanism. The frontend (`frontend/app/view/editor/editor-model.ts`) caches
+mechanism. The frontend ([`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts)) caches
 that read in a view-local `Map` (`_contentByTab`) and has an explicit
 early-return guard (`_openFileWithMode`, lines 401-405) that skips
 re-fetching entirely once a tab is marked `contentLoaded`.
 
 Confirmed empirically: editing
-`docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` on disk
+[`docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md`](REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md) on disk
 (via this agent's own `Edit` tool, which writes the file directly — not
 through AgentMux's `writeeditorfile` RPC) while it was open in a preview pane
 left the pane showing stale content. This is a real, everyday friction: any
@@ -209,5 +209,5 @@ the dirty-confirm-modal component already flagged as pending in
 | `agentmux-srv/src/backend/config_watcher_fs.rs` | The single-file watcher pattern this design generalizes (debounce, `notify` crate usage, WPS broadcast) |
 | `agentmux-srv/src/backend/blockcontroller/mod.rs:486-500` | `publish_controller_status` — the exact per-block WPS scoping pattern to reuse for the new event |
 | `frontend/app/view/editor/editor-model.ts:100-249,351-472` | Tab content cache, `_openFileWithMode`'s load path (to be reused, not duplicated), the existing event fan-out pattern to extend |
-| `frontend/app/store/editor-pane-state-store.ts:583-613` | `TabContentLoaded`/`TabSaved` reducer cases — where the new `TabExternallyChanged` case is added |
-| `frontend/app/view/swarm/swarm-view.tsx` (`summaryFlash`) | Existing "flash on change" UI pattern to reuse for the silent-refresh visual cue |
+| [`frontend/app/store/editor-pane-state-store.ts:583-613`](../../frontend/app/store/editor-pane-state-store.ts) | `TabContentLoaded`/`TabSaved` reducer cases — where the new `TabExternallyChanged` case is added |
+| [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) (`summaryFlash`) | Existing "flash on change" UI pattern to reuse for the silent-refresh visual cue |

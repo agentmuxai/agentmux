@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-06  
 **Status:** implemented — All five fixes shipped — PR #1293, PR #1299, PR #1303. — #1303
-**Related:** `docs/retro/RETRO_REPLACECHILD_CRASH_2026-06-06.md`, PR #1293, PR #1299, PR #1303  
+**Related:** [`docs/retro/RETRO_REPLACECHILD_CRASH_2026-06-06.md`](../retro/RETRO_REPLACECHILD_CRASH_2026-06-06.md), PR #1293, PR #1299, PR #1303\
 **Block under test:** `a8cd53a4-a61c-4483-8606-0eba9ccb3565`
 
 ---
@@ -41,7 +41,7 @@ SolidJS prevents this within a `batch()` (both writes share one frame). The race
 
 ### 2.1 Crash 0 — 2026-05-27 (pre-history, documented separately)
 
-`docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md`
+[`docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md`](../analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md)
 
 Root cause: no sticky frontier; cross-subtree node migration on every append caused `streamingNodes` to shrink and `<For>` (used before `<Index>`) to unmount/remount the active streaming row, crashing on the next token.
 
@@ -195,7 +195,7 @@ The lesson from the 2026-06-06 crashes: the reducer guarantees per-command consi
 
 ## 6. Diagnostic aids already in place
 
-- **`render_trail` ring buffer** (`frontend/log/render-trail.ts`): captures last ~60 `agent:dispatchPane` and `agent:virt:partition` events. Dumped by `BlockErrorBoundary` on every crash. The `virt:partition` entries capture `virtCount`, `streamCount`, and `frontier` at each `partition()` recompute, making the crash context readable without a debugger.
+- **`render_trail` ring buffer** ([`frontend/log/render-trail.ts`](../../frontend/log/render-trail.ts)): captures last ~60 `agent:dispatchPane` and `agent:virt:partition` events. Dumped by `BlockErrorBoundary` on every crash. The `virt:partition` entries capture `virtCount`, `streamCount`, and `frontier` at each `partition()` recompute, making the crash context readable without a debugger.
 - **`DISPOSE UNEXPECTED(mid-turn)` diagnostic** (`agent-view.tsx:194–217`): logs a stack trace + render_trail + recent dispatches when the agent-view disposes while `turnPhase` is in a working state. Identifies silent owner-driven unmounts (e.g., upstream `<Show>` going `false` on a block-delete event).
 - **`CASCADE_DETECTED` warning** (`agent-document-store.ts:139–146`): fires when a `documentAtom` subscriber unmounts the pane synchronously during a dispatch setter call. Identifies re-entrant teardown triggered by document state changes.
 
