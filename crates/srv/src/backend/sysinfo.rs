@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::{Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate};
+use sysinfo::{DiskRefreshKind, Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate};
 use tokio::time::MissedTickBehavior;
 
 use crate::backend::blockcontroller::pidregistry;
@@ -24,6 +24,13 @@ const PERSIST_COUNT: usize = 1024;
 const DEFAULT_INTERVAL_SECS: f64 = 1.0;
 const MIN_INTERVAL_SECS: f64 = 0.2;
 const MAX_INTERVAL_SECS: f64 = 2.0;
+/// How often the disk list and each volume's capacity/free space are
+/// re-read. Every tick only refreshes I/O counters (the read/write rates need
+/// a delta per tick). A full refresh re-lists every mounted volume and, on
+/// macOS, asks each for its "available for important usage" capacity, which
+/// goes through CacheDelete: with a few DMGs mounted that was thousands of
+/// system calls and log lines a minute, for numbers that move slowly.
+const DISK_FULL_REFRESH: Duration = Duration::from_secs(30);
 
 // ── Commit (pagefile) attribution ────────────────────────────────────────
 // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md: a live OOM
@@ -1070,6 +1077,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();
     let mut disks = Disks::new_with_refreshed_list();
+    let mut last_disk_full_refresh = Instant::now();
     let mut last_tick = Instant::now();
     // Commit-attribution cadence — see the "Commit (pagefile) attribution"
     // section above. Starts due-now-minus-interval so the first snapshot
@@ -1119,7 +1127,14 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
             sys.refresh_cpu_usage();
             sys.refresh_memory();
             networks.refresh(true);
-            disks.refresh(true);
+            if last_disk_full_refresh.elapsed() >= DISK_FULL_REFRESH {
+                disks.refresh(true);
+                last_disk_full_refresh = Instant::now();
+            } else {
+                for disk in disks.list_mut() {
+                    disk.refresh_specifics(DiskRefreshKind::nothing().with_io_usage());
+                }
+            }
             get_pagefile_volume_data(&mut pagefile_values);
         });
 
