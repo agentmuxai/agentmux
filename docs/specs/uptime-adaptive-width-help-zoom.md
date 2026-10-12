@@ -158,15 +158,15 @@ class HelpViewModel implements ViewModel {
 ### Feature 1 (uptime adaptive width)
 | File | Change |
 |---|---|
-| `frontend/app/statusbar/BackendStatus.tsx` | Add `uptimeMinWidth()` derived signal; add `style` to uptime span |
-| `frontend/app/statusbar/StatusBar.scss` | Remove `min-width` from `.stat-uptime` |
+| [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx) | Add `uptimeMinWidth()` derived signal; add `style` to uptime span |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | Remove `min-width` from `.stat-uptime` |
 
 ### Feature 2 (help zoom)
 | File | Change |
 |---|---|
-| `frontend/app/view/helpview/helpview.tsx` | Add zoom signal, keydown/wheel handlers, `font-size` style |
+| [`frontend/app/view/helpview/helpview.tsx`](../../frontend/app/view/helpview/helpview.tsx) | Add zoom signal, keydown/wheel handlers, `font-size` style |
 | `frontend/app/view/helpview/helpview.scss` | New file: convert fixed-px values in QuickTips wrapper to `em` |
-| `frontend/app/element/quicktips.tsx` | Audit for fixed-px spacing that would break zoom |
+| [`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx) | Audit for fixed-px spacing that would break zoom |
 | `frontend/types/gotypes.d.ts` | _(no change needed — `help:zoom` goes through existing SetMeta RPC)_ |
 
 ---

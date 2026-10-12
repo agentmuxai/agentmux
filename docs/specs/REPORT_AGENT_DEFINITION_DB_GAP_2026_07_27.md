@@ -73,7 +73,7 @@ identical order — confirmed systemic, not a one-agent data-corruption artifact
 
 ### 1.2 Why step 5's success doesn't prevent step 6
 
-`frontend/app/view/agent/flows/run-provider-login.ts`'s tier-2 path (`seedGlobalLogin`, called before
+[`frontend/app/view/agent/flows/run-provider-login.ts`](../../frontend/app/view/agent/flows/run-provider-login.ts)'s tier-2 path (`seedGlobalLogin`, called before
 opening any terminal) does more than copy a file — on success it calls `persistSeededAccount` (with one
 retry) to register the account in the database. **That registration needs the same
 `db_agent_definitions`/identity-link rows that steps 2-3 already failed to create.** So even though the
@@ -117,7 +117,7 @@ other or with the per-build/stable channels.
 
 What **is** shared globally, confirmed directly: the on-disk config folder
 (`~/.agentmux/agents/parko-0617i/`), which for Parko contains only its own git working directory (a personal
-clone of this same repo, for its own agent sessions), a `.mcp.json`, and a `.claude/` directory — **no
+clone of this same repo, for its own agent sessions), a `.mcp.json`, and a [`.claude/`](../../.claude) directory — **no
 agent-definition metadata file** (name, provider, icon, etc.) of any kind. That metadata is database-only.
 
 ### 2.1 Exhaustive search — the row exists nowhere on this machine

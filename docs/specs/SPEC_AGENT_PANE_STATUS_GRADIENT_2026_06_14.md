@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-14  
 **Status:** Draft  
-**Affects:** `frontend/app/view/agent/`
+**Affects:** [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 
 ---
 
@@ -19,10 +19,10 @@ Three UI improvements to the agent pane:
 ## 1. Current Architecture
 
 **Files:**
-- `frontend/app/view/agent/agent-view.tsx` — main layout
-- `frontend/app/view/agent/components/AgentFooter.tsx` — `AgentStatusLine` + `AgentFooter`
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — main layout
+- [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) — `AgentStatusLine` + `AgentFooter`
 - `frontend/app/view/agent/components/AgentControlBar.tsx` — collapsible model/effort/permission controls
-- `frontend/app/view/agent/styles/_control-bar.scss` — spinner, status line, control bar styles
+- [`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/view/agent/styles/_control-bar.scss) — spinner, status line, control bar styles
 
 **Current layout order (agent-view.tsx lines 514–611):**
 
@@ -437,4 +437,4 @@ Optional new file: `components/AgentWorkingRow.tsx` if extracted from `AgentFoot
 - NProgress: https://github.com/rstacruz/nprogress
 - Current spotlight sweep animation: `_control-bar.scss:121–128`
 - Current status line position decision: `_control-bar.scss:61–71` (comment explains prior move)
-- Prior zone order spec: `docs/specs/SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md`
+- Prior zone order spec: [`docs/specs/SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md`](SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md)

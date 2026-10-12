@@ -7,7 +7,7 @@ subagents + swarm pane" initiative under one consolidated tracker.
 **Author:** Agent3
 **Related:** #1814 (Area-1 tracker, partly stale), #101 (stale swarm epic),
 #1549 (arch refactor, items A6/A9), PR #2177 (Agent1 retro),
-`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`.
+[`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md).
 
 ## Why these three are one initiative
 
@@ -38,7 +38,7 @@ in all three surfaces.
 
 ### 1. Long-running processes started by agents
 
-**Shipped:** ActivityDock (`frontend/app/view/agent/components/ActivityDock.tsx`)
+**Shipped:** ActivityDock ([`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx))
 shows a block-scoped strip of long-running activities — persistent shells
 (`shell-adapter.ts`) + subagents (`subagent-adapter.ts`) — per
 SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md and
@@ -146,8 +146,8 @@ enumerating the phased work below. Alternative (cheaper): retitle/refresh
 
 | File | Role |
 |------|------|
-| `frontend/app/view/swarm/swarm-view.tsx` / `swarm-model.ts` / `swarm-view.scss` | Swarm tree, status derivation, expand-state model |
-| `frontend/app/view/agent/components/ActivityDock.tsx` + `activity/{types,shell-adapter,subagent-adapter,subagent-source}.ts` | Long-running activity strip (shells + subagents; no background flag yet) |
+| [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) / `swarm-model.ts` / `swarm-view.scss` | Swarm tree, status derivation, expand-state model |
+| [`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) + `activity/{types,shell-adapter,subagent-adapter,subagent-source}.ts` | Long-running activity strip (shells + subagents; no background flag yet) |
 | `frontend/app/store/agent-pane-state/{reducer,types}.ts` | Turn-phase state machine (mature; single-axis) |
 | `agentmux-srv/src/backend/subagent_watcher.rs` | Subagent/workflow tracking backend |
 | `agentmux-srv/src/backend/blockcontroller/{health,session_stats}.rs` | Backend turn_active + activity ground truth |

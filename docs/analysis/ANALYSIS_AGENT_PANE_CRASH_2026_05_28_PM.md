@@ -14,7 +14,7 @@
 Two simultaneous user-visible problems:
 
 1. **Agent pane crashed** during an active turn — replaced by the `block-error-boundary` fallback. `NotFoundError: Failed to execute 'replaceChild' on 'Node': The node to be replaced is not a child of this node` inside SolidJS's reconciler.
-2. **Status-bar uptime counter froze** ("universal clock on bottom left"). This is the `formatUptime(uptimeSecs())` readout in `frontend/app/statusbar/BackendStatus.tsx:141-143`, driven by the `sysinfo` event ts (line 64-79).
+2. **Status-bar uptime counter froze** ("universal clock on bottom left"). This is the `formatUptime(uptimeSecs())` readout in [`frontend/app/statusbar/BackendStatus.tsx:141-143`](../../frontend/app/statusbar/BackendStatus.tsx#L141-L143), driven by the `sysinfo` event ts (line 64-79).
 
 The two are almost certainly connected — same dispatch storm.
 
@@ -59,8 +59,8 @@ User confirmation in the same session: "the clock and all the performance indica
 
 Both status-bar consumers subscribe to the same channel:
 
-- `frontend/app/statusbar/BackendStatus.tsx:67-80` — uptime, `eventType: "sysinfo", scope: "local"`
-- `frontend/app/statusbar/SystemStats.tsx:47-67` — CPU/GPU/Mem/Net/Disk, `eventType: "sysinfo", scope: "local"`
+- [`frontend/app/statusbar/BackendStatus.tsx:67-80`](../../frontend/app/statusbar/BackendStatus.tsx#L67-L80) — uptime, `eventType: "sysinfo", scope: "local"`
+- [`frontend/app/statusbar/SystemStats.tsx:47-67`](../../frontend/app/statusbar/SystemStats.tsx#L47-L67) — CPU/GPU/Mem/Net/Disk, `eventType: "sysinfo", scope: "local"`
 
 The dispatch table in `frontend/app/store/wps.ts:126-144`:
 
@@ -145,7 +145,7 @@ The function sends `eventunsub` whenever the map entry is absent. The map entry 
 
 ### 2e. Whether (1) and (2) can be distinguished
 
-Add a single line at the BackendStatus handler (line 71 of `frontend/app/statusbar/BackendStatus.tsx`):
+Add a single line at the BackendStatus handler (line 71 of [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx)):
 
 ```ts
 handler: (event) => {

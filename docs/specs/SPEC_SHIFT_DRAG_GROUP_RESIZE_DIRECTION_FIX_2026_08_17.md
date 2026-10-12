@@ -20,7 +20,7 @@ distribution math within Scope A.
 ## 1. Verdict: design flaw, not intentional
 
 Confirmed by reading `computeGroupResizeSizes`
-(`frontend/layout/lib/layoutResize.ts`) and its spec: the reversed-direction
+([`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts)) and its spec: the reversed-direction
 border movement is a real, unconsidered gap, not a deliberate tradeoff.
 
 - The original spec's §5.2 algorithm distributes the complementary delta
@@ -31,7 +31,7 @@ border movement is a real, unconsidered gap, not a deliberate tradeoff.
   but only to justify confining the feature to one parent's children
   (Scope A vs. Scope B) — it never revisits per-border directionality
   *within* Scope A.
-- The 8 shipped unit tests (`frontend/layout/tests/layoutResize.test.ts`)
+- The 8 shipped unit tests ([`frontend/layout/tests/layoutResize.test.ts`](../../frontend/layout/tests/layoutResize.test.ts))
   only assert total-size conservation and min-size floor clamping. None of
   them construct a case where the driven pane has siblings on *both* sides
   of it — the exact precondition needed to observe the bug — so the
@@ -83,7 +83,7 @@ border, but at a real cost: it silently narrows the feature from "every
 sibling in the row moves together" (the original ask and spec's stated
 goal, §1 of the original spec) down to "only the near side moves," with no
 indication to the user why panes past their cursor stopped participating.
-Rejected for that reason — see `docs/retro`-style reasoning below rather
+Rejected for that reason — see [`docs/retro`](../retro)-style reasoning below rather
 than shipping the narrower behavior silently.
 
 ## 4. Fix: two-block proportional scaling, split at the handle
@@ -173,7 +173,7 @@ locked sibling simply isn't a member of either block.
 ## 5. Implementation
 
 Confined entirely to `computeGroupResizeSizes` in
-`frontend/layout/lib/layoutResize.ts` — same exported signature
+[`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts) — same exported signature
 (`siblings`, `drivenNodeId`, `drivenDesiredSize`, `minNodeSize`), so
 `onResizeMove`'s call site is unchanged. `drivenNodeId` is now used only to
 locate the split point between the two blocks (`siblings.findIndex(...)`);
@@ -194,7 +194,7 @@ Degenerate cases:
 
 ## 6. Testing plan
 
-- Rewrote/added unit tests in `frontend/layout/tests/layoutResize.test.ts`
+- Rewrote/added unit tests in [`frontend/layout/tests/layoutResize.test.ts`](../../frontend/layout/tests/layoutResize.test.ts)
   for the two-block model, including cases with siblings on *both* sides
   of the driven pane, asserting **border positions** (cumulative sums), not
   just individual sizes — this is what actually encodes the regression

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-11
 **Owner:** AgentA
-**Surface area:** `agentmux-bashwrap`, `agentmux-srv` (websocket + agent_config), `frontend/app/view/agent` log overlay
+**Surface area:** `agentmux-bashwrap`, `agentmux-srv` (websocket + agent_config), [`frontend/app/view/agent`](../../frontend/app/view/agent) log overlay
 **PR sequence:** #800 → #803 → #804 → #808 (replaceChild hotfix) → #813 (settings.json hotfix) → **next** (wrapper rewrite)
 **Status:** retro — Streaming still doesn't work end-to-end at 0.33.808. This retro is being written while the wrapper rewrite (PR γ) is being planned.
 
@@ -280,4 +280,4 @@ The match between this list and our wrapper's bug list is near-perfect — we hi
 - Hook auto-injection: `agentmux-srv/src/backend/agent_config.rs:111-128` (post-PR #813)
 - Env injection at Claude spawn: `agentmux-srv/src/server/websocket.rs:843-867`
 - WPS publish endpoint: `agentmux-srv/src/server/mod.rs` `handle_wps_publish`
-- Frontend WPS subscription: `frontend/app/view/agent/useAgentStream.ts` chunkSubs map
+- Frontend WPS subscription: [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) chunkSubs map

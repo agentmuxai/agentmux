@@ -5,8 +5,8 @@
 CLAUDE.md change `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
 flagged as its own blocking prerequisite for Phase B/C.
 **Author:** Korp
-**Related:** `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
-(the design this unblocks), `docs/specs/SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md`
+**Related:** [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md)
+(the design this unblocks), [`docs/specs/SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md)
 (the relaxation this carves an explicit exception out of)
 
 ## 1. What was confirmed, and how
@@ -99,7 +99,7 @@ applies.
 Both rules added to the "Forced to `TIER=sensitive`" list and the "Does
 `TIER=sensitive` always STOP?" section, in this same style/precedent as
 the 2026-08-14/15/17 entries — see the diff in the same commit as this
-spec. `docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md`
+spec. [`docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md`](../reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md)
 §3.3 is the originating decision point.
 
 **Important distinction from the 2026-08-14/15/17 entries this spec is

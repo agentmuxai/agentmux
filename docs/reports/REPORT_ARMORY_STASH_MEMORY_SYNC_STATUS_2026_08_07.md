@@ -57,13 +57,13 @@ each captured in its own spec:
 
 | Date | Doc | What changed |
 |---|---|---|
-| 2026-06-19 | `docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md` | **Origin document.** Named the "Memory" collision explicitly (config presets vs. native memory files) and the "Identity" collision (credential library vs. per-agent keychain). Proposed the rename that became "Bundles," and stated the layer-separation invariant quoted in §0/§4. |
+| 2026-06-19 | [`docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md`](../specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md) | **Origin document.** Named the "Memory" collision explicitly (config presets vs. native memory files) and the "Identity" collision (credential library vs. per-agent keychain). Proposed the rename that became "Bundles," and stated the layer-separation invariant quoted in §0/§4. |
 | 2026-06-19–24 | `SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`, `SPEC_TRUST_CENTER_MODALS_IDENTITY_MEMORY_SEED_2026_06_19.md`, `SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md`, `SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md` | Built out the "Global Brain" (is_global bundle injection) and the native-memory placeholder modal in parallel, as two visibly distinct features from day one. |
 | 2026-07-02 | `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`, `SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` | Trust Center → Armory; Memory-bundle-presets → Bundles. Table renamed `db_memory_bundles` → `db_bundles`; Rust method names deliberately kept as `bundle_memory_*` (internal/external naming decoupled on purpose). |
 | 2026-07-10–16 | `SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10.md`, `SPEC_ARMORY_MCP_SERVER_DEFAULT_SEED_CATALOG_2026_07_13.md`, `SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md`, **`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md`**, `SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`, `SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16.md` | Phase 4/5: storage rename completed; Armory's separate "Identities" tab **removed** and per-agent data pushed entirely out of Armory (the precedent §2 below relies on); responsive layout; Accounts tab de-modalized. |
 | 2026-07-20 | **`ARCHITECTURE_ARMORY_2026_07_20.md`** | Canonical reference, written once the shape stabilized. States the governing principle: *"Armory holds shared, reusable resources... What deliberately does NOT live in Armory: per-agent-instance data."* Documents all 4 live Armory entities' binding mechanisms side by side (§2 below is built from this). |
-| 2026-07-23 | `docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md` | First to name the three-way "Memory" collision precisely (Armory Memories tab / AgentSetupModal Memories tab / Armory Bundles tab) and flag the Accounts dead-write-path bug (§6.1 below). |
-| 2026-07-27 | `docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md` | Renamed the per-agent modal "the agent armory" → **Stash** (this doc's naming source). Confirms Stash's MCP/Skills/Startup tabs are filtered views into the *same* shared tables Armory manages — genuinely "in sync" by construction — while Accounts and (native) Memory are the two tabs that are actually agent-scoped data, not shared-catalog views. |
+| 2026-07-23 | [`docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md`](REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md) | First to name the three-way "Memory" collision precisely (Armory Memories tab / AgentSetupModal Memories tab / Armory Bundles tab) and flag the Accounts dead-write-path bug (§6.1 below). |
+| 2026-07-27 | [`docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md`](REPORT_ARMORY_STASH_NAMING_2026_07_27.md) | Renamed the per-agent modal "the agent armory" → **Stash** (this doc's naming source). Confirms Stash's MCP/Skills/Startup tabs are filtered views into the *same* shared tables Armory manages — genuinely "in sync" by construction — while Accounts and (native) Memory are the two tabs that are actually agent-scoped data, not shared-catalog views. |
 | 2026-07-27–28 | `REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md`, `REPORT_MCP_SKILLS_BIND_DOES_NOT_GATE_CONFIG_2026_07_28.md` | Found and documented the bind/unbind-doesn't-gate-runtime-config bug (§6.2 below) — Armory/Stash's UI state and the agent's actual materialized config can already disagree today. |
 | 2026-08-05 | `SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md` (unrelated subsystem, but the closest existing precedent for *this* premise) | For a different pair of stores (pane scrollback vs. the model's actual context), adopted the principle *"never let the two disagree silently"* rather than forcing them to always match (acknowledged as not fully achievable) — record every divergence explicitly instead. Cited here because it's the nearest existing precedent for how this codebase has previously handled "two sources of truth that can drift," and is worth weighing against a "strict sync" framing. |
 
@@ -181,7 +181,7 @@ per agent/identity today (§3). This is the lever that already exists for
 structure under that root is a Claude Code CLI convention, not a setting —
 there's no flag or env var that decouples the memory folder from the
 cwd-encoding, and nothing in this codebase's own research
-(`docs/research/claude-code-presentation-layer.md`) or history proposes a
+([`docs/research/claude-code-presentation-layer.md`](../research/claude-code-presentation-layer.md)) or history proposes a
 symlink/relocate workaround. But this is moot: AgentMux's own
 `memory_dir_for_cwd`/`memory_dir_for_agent` already **replicates Claude's
 exact algorithm**, so AgentMux can always independently compute and directly
@@ -231,7 +231,7 @@ config generation, which injects **every** global MCP server/skill into
 **every** agent unconditionally, regardless of bind state. Unbinding flips the
 UI badge; the item keeps being injected into the agent's next generated
 config regardless. Documented in
-`docs/reports/REPORT_MCP_SKILLS_BIND_DOES_NOT_GATE_CONFIG_2026_07_28.md`,
+[`docs/reports/REPORT_MCP_SKILLS_BIND_DOES_NOT_GATE_CONFIG_2026_07_28.md`](REPORT_MCP_SKILLS_BIND_DOES_NOT_GATE_CONFIG_2026_07_28.md),
 mitigated today with UI copy only ("this doesn't do what it looks like yet"),
 not fixed — a real fix needs a backfill migration first (§ that report's own
 recommended follow-up, not repeated here).

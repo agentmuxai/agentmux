@@ -1,7 +1,7 @@
 # Status: Long-Running Attached Tasks — Why "Working…" Is Still Broken and `task dev` Still Fights the Agent Loop
 
 > **SUPERSEDED 2026-08-29 (docs-cleanup Phase 3) — read
-> `docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md`
+> [`docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md`](STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md)
 > instead.** That doc continues this one's rung numbering, re-audits it
 > against later code, and records what shipped in the interim. This snapshot
 > is kept for the record, not as a current diagnosis.
@@ -16,11 +16,11 @@
 **Status:** Diagnosis current as of `main` @ `18f424828`. Partial wiring in progress in this working tree (see §6).
 *(Accurate when written — superseded, see the banner above.)*
 **Supersedes nothing** — this consolidates and updates the status across:
-- `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` (Agent1: 12h "Working…" over a healthy dev server)
-- `docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md` (Agent2: original design direction)
-- `docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` (Agent3: verification + 5-step plan)
-- `docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md` (bashwrap idle-kill of a successful `task dev`)
-- `docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md` (Agent A: reducer slice, wiring deferred)
+- [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) (Agent1: 12h "Working…" over a healthy dev server)
+- [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md`](../specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) (Agent2: original design direction)
+- [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md`](../specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) (Agent3: verification + 5-step plan)
+- [`docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`](../retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md) (bashwrap idle-kill of a successful `task dev`)
+- [`docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md`](../specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) (Agent A: reducer slice, wiring deferred)
 
 ## 1. The goal, restated plainly
 
@@ -40,7 +40,7 @@ interact so that fixing one in isolation makes another worse.
 
 | Piece | Where | State |
 |---|---|---|
-| Foreground tool-call promotion (≥30s Bash call → dock row) | `frontend/app/view/agent/activity/tool-adapter.ts`, `TOOL_PROMOTION_MS = 30_000` | ✅ shipped, works |
+| Foreground tool-call promotion (≥30s Bash call → dock row) | [`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts), `TOOL_PROMOTION_MS = 30_000` | ✅ shipped, works |
 | Working-row suppression once dock shows the tool | `hasRunningPromotedTool` → `toolPromoted` prop, `agent-view.tsx:1670` → `AgentWorkingRow` | ✅ shipped, wired |
 | `attachedTask` reducer slice (`AttachedTaskState`, `AttachedTaskObserved`/`Cleared`) | `agent-pane-state/types.ts:123,638-643`, `reducer.ts:1241-1252` + tests | ✅ shipped — **but pure dead state** (see §3.1) |
 | Turn-phase watchdog (force-recover hung `Streaming` → `Idle` after 180s quiet) | `types.ts:870` `LIVENESS_RECOVERY_MS = 180_000` | ✅ shipped — and is *defeated by design* by the heartbeat pattern (see §4) |
@@ -62,7 +62,7 @@ codebase for a week as a perfectly-tested no-op.
 
 ### 3.2 A backgrounded Bash call is invisible to the dock (step 2 never built)
 
-`BashParams` is still `{ command, timeout }` (`frontend/app/view/agent/types.ts:122-125`)
+`BashParams` is still `{ command, timeout }` ([`frontend/app/view/agent/types.ts:122-125`](../../frontend/app/view/agent/types.ts#L122-L125))
 — no `run_in_background` field. The consequence chain, observed live today:
 
 - An agent runs `task dev` with `run_in_background: true`.
@@ -127,7 +127,7 @@ Two **separate concerns** are currently mixed in one dirty tree — they must
 land as two PRs:
 
 **A. Agent-pane new-tab fix (complete, verified, unrelated to this doc's topic):**
-- `frontend/app/view/agent/agent-view.tsx` — tab strip moved from
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — tab strip moved from
   `AgentPresentationView` up to `AgentViewWrapper`; tab list now driven by the
   pane's own `blockStack` (mirroring `term.tsx`) merged with cross-pane fork
   tabs. Fixes "+ makes the whole pane vanish into AgentPicker with no way back."
@@ -138,12 +138,12 @@ land as two PRs:
 **B. attachedTask wiring (STARTED, incomplete):**
 
 Done in-tree:
-- `frontend/app/view/agent/activity/attached-task.ts` (new) —
+- [`frontend/app/view/agent/activity/attached-task.ts`](../../frontend/app/view/agent/activity/attached-task.ts) (new) —
   `hasLiveAttachedActivity(nodes, allSubagents, blockId, now)`: pure helper
   mirroring ActivityDock's shell+subagent+tool aggregate, per spec §4.
 - `agent-pane-state-store.ts` — `attachedTask?` projection setter added to
   `AgentPaneProjections` + projected in `dispatch()`.
-- `frontend/app/view/agent/state.ts` — `attachedTaskAtom` added to
+- [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) — `attachedTaskAtom` added to
   `AgentAtoms` + initialized in `createAgentAtoms`.
 
 **Not yet done** (the actual remaining work, in order):

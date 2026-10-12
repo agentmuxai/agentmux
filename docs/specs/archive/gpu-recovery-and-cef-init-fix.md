@@ -133,7 +133,7 @@ The `unhandledrejection` handler in `tauri-bootstrap.ts:236` catches it but can'
 
 ### Fix: Guard `getApi()` to return a safe stub before initialization
 
-**File: `frontend/app/store/global.ts`** (line 521)
+**File: [`frontend/app/store/global.ts`](../../../frontend/app/store/global.ts)** (line 521)
 
 Replace:
 ```typescript
@@ -192,7 +192,7 @@ export async function initBare() {
 
 To find the actual code that calls `getApi()` too early, add a temporary diagnostic:
 
-**File: `frontend/app/store/global.ts`** (in `getApi()`)
+**File: [`frontend/app/store/global.ts`](../../../frontend/app/store/global.ts)** (in `getApi()`)
 
 ```typescript
 export function getApi(): AppApi {
@@ -213,7 +213,7 @@ Build, launch, check the host log for the stack trace. The stack will show exact
 |------|--------|
 | `agentmux-cef/src/app.rs` | Remove `--in-process-gpu` flag (lines 249-255) |
 | `frontend/tauri-bootstrap.ts` | Add `webglcontextlost` document listener (after line 17) |
-| `frontend/app/store/global.ts` | Add diagnostic + guard to `getApi()` (line 521) |
+| [`frontend/app/store/global.ts`](../../../frontend/app/store/global.ts) | Add diagnostic + guard to `getApi()` (line 521) |
 | `frontend/wave.ts` | Add defensive `window.api` wait in `initBare()` (line 404) |
 
 ---

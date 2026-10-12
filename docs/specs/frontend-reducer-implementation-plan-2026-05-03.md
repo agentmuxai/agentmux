@@ -57,14 +57,14 @@ Each section below specifies what the PR ships. Effort estimates assume contiguo
 
 | File | Change |
 |---|---|
-| `frontend/app/store/agent-pane-state/types.ts` | NEW — `AgentPaneState`, `Command`, `Event` |
-| `frontend/app/store/agent-pane-state/reducer.ts` | NEW — pure update() |
+| [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | NEW — `AgentPaneState`, `Command`, `Event` |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | NEW — pure update() |
 | `frontend/app/store/agent-pane-state/reducer.test.ts` | NEW — table-driven tests |
-| `frontend/app/store/agent-pane-state-store.ts` | NEW — slot map + dispatch (mirrors agent-document-store) |
-| `frontend/app/view/agent/state.ts` | Atoms become projections; factory still creates them but readers don't change |
-| `frontend/app/view/agent/agent-view.tsx` | Register slot synchronously alongside agent-document slot |
-| `frontend/app/view/agent/useAgentStream.ts` | All `setStreaming`, `setSessionStats`, `setCurrentTool`, `setTurnTokens`, `setTurnActive` → dispatch |
-| `frontend/app/view/agent/agent-model.ts` | All composer/decision-flow writes to these atoms → dispatch |
+| [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | NEW — slot map + dispatch (mirrors agent-document-store) |
+| [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) | Atoms become projections; factory still creates them but readers don't change |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Register slot synchronously alongside agent-document slot |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | All `setStreaming`, `setSessionStats`, `setCurrentTool`, `setTurnTokens`, `setTurnActive` → dispatch |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | All composer/decision-flow writes to these atoms → dispatch |
 
 **Commands** (proposed):
 - `SessionLifecycle { action: "subscribe-up" \| "subscribe-down" }` — toggles `streamingState.active`
@@ -94,7 +94,7 @@ Each section below specifies what the PR ships. Effort estimates assume contiguo
 
 ### PR-B — Slice #6: launcher-event-reducer convergence
 
-**Goal:** harmonize the existing `frontend/app/store/launcher-event-reducer.ts` into the conventions established in spec #2.
+**Goal:** harmonize the existing [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) into the conventions established in spec #2.
 
 **Why now:** Validates the conventions retroactively. If something in the conventions doesn't fit the launcher reducer, that's a sign the conventions need a tweak — better to learn this with a small known-good reducer than mid-way through a bigger slice.
 
@@ -102,10 +102,10 @@ Each section below specifies what the PR ships. Effort estimates assume contiguo
 
 | File | Change |
 |---|---|
-| `frontend/app/store/launcher-event-reducer.ts` | Extract pure `update()` to `launcher-event/reducer.ts`; current file becomes the dispatch + slot layer |
-| `frontend/app/store/launcher-event/types.ts` | NEW — extracted Command/Event types (from existing inline types) |
-| `frontend/app/store/launcher-event/reducer.test.ts` | NEW — backfill table-driven tests for the existing arms |
-| `frontend/util/launcher-events.ts` | Wire to the new dispatch (no logic change) |
+| [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) | Extract pure `update()` to `launcher-event/reducer.ts`; current file becomes the dispatch + slot layer |
+| [`frontend/app/store/launcher-event/types.ts`](../../frontend/app/store/launcher-event/types.ts) | NEW — extracted Command/Event types (from existing inline types) |
+| [`frontend/app/store/launcher-event/reducer.test.ts`](../../frontend/app/store/launcher-event/reducer.test.ts) | NEW — backfill table-driven tests for the existing arms |
+| [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts) | Wire to the new dispatch (no logic change) |
 
 **No behavior change.** Pure refactor + test backfill. Echo-loop guard (`applyingRemote`) stays exactly as is — it was the model for the convention.
 
@@ -134,10 +134,10 @@ Per conventions Q1+Q4, there's no command bus chokepoint to build. The chokepoin
 
 | File | Change |
 |---|---|
-| `frontend/app/store/command-source.ts` | NEW — `CommandSource` type + global event log + helpers |
-| `frontend/app/store/agent-document-store.ts` | Accept optional `source` parameter on dispatch; record to global log |
-| `frontend/app/store/agent-pane-state-store.ts` | Same |
-| `frontend/app/store/launcher-event-reducer.ts` | Same |
+| [`frontend/app/store/command-source.ts`](../../frontend/app/store/command-source.ts) | NEW — `CommandSource` type + global event log + helpers |
+| [`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts) | Accept optional `source` parameter on dispatch; record to global log |
+| [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | Same |
+| [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) | Same |
 | All dispatch callsites | Pass `source` where known; default unchanged |
 
 **Effort:** 1 day.
@@ -162,7 +162,7 @@ Per conventions Q1+Q4, there's no command bus chokepoint to build. The chokepoin
 | `frontend/app/store/tab-state/reducer.ts` | NEW — pure update() |
 | `frontend/app/store/tab-state/reducer.test.ts` | NEW |
 | `frontend/app/store/tab-state-store.ts` | NEW — dispatch + wstore subscription + echo-loop guard |
-| `frontend/app/store/global.ts` | Existing tab atoms become projections; factories untouched |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | Existing tab atoms become projections; factories untouched |
 | `frontend/app/tab/*.tsx` | Local UI commands dispatch through the store (no longer write atoms directly) |
 
 **Mirror semantics:**

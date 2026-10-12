@@ -44,7 +44,7 @@ Everything else was healthy at the time:
 
 ### 1.2 Cause
 
-AgentMux sets `CLAUDE_CODE_SHELL_PREFIX` to `agentmux-bashwrap` (PR #4592). The CLI's own code applies that prefix to stdio MCP servers too, passing `[command, ...args].join(" ")` as one argument, so it ran `agentmux-bashwrap agentmux-mcp`. `prefix::prefix_script` accepted a lone argument only if it contained whitespace, because a real CLI shell script always does. `agentmux-mcp` has none, so it fell through to `clap`, which rejected it as an unknown subcommand. The process exited and the CLI recorded `CONNECTION_CLOSED`. Full analysis: `docs/reports/REPORT_AGENT_MCP_DOWN_THROUGH_SHELL_PREFIX_2026_10_11.md`.
+AgentMux sets `CLAUDE_CODE_SHELL_PREFIX` to `agentmux-bashwrap` (PR #4592). The CLI's own code applies that prefix to stdio MCP servers too, passing `[command, ...args].join(" ")` as one argument, so it ran `agentmux-bashwrap agentmux-mcp`. `prefix::prefix_script` accepted a lone argument only if it contained whitespace, because a real CLI shell script always does. `agentmux-mcp` has none, so it fell through to `clap`, which rejected it as an unknown subcommand. The process exited and the CLI recorded `CONNECTION_CLOSED`. Full analysis: [`docs/reports/REPORT_AGENT_MCP_DOWN_THROUGH_SHELL_PREFIX_2026_10_11.md`](../reports/REPORT_AGENT_MCP_DOWN_THROUGH_SHELL_PREFIX_2026_10_11.md).
 
 ### 1.3 Reach
 
@@ -63,7 +63,7 @@ Checked on this computer: the two agents launched on a build with #4592 (AgentY 
 
 - Any lone argument that is not a subcommand or a flag is a prefix call.
 - Only a script with the CLI's `eval` (a Bash call) may claim a Bash call's record. Anything else runs with **inherited, unmodified stdio** (no PTY, no output rewriting): a lone word directly as a program (`exec` on Unix), a command line through `bash -c`. An MCP server speaks newline-delimited JSON-RPC on stdin/stdout, so a single added byte breaks it. This also closes a race where a prefixed hook took a waiting Bash call's record (report §4).
-- **Regression test:** `crates/bashwrap/tests/prefix_runs_mcp_servers.rs` starts the real binary the way the CLI starts an MCP server and checks the stream byte for byte and the exit code.
+- **Regression test:** [`crates/bashwrap/tests/prefix_runs_mcp_servers.rs`](../../crates/bashwrap/tests/prefix_runs_mcp_servers.rs) starts the real binary the way the CLI starts an MCP server and checks the stream byte for byte and the exit code.
 
 Still to do in Phase 1:
 - **Launch-time self-test (cheap, useful beyond this bug):** when srv materializes an agent's config, it already writes the `agentmux` MCP entry. It can run `mcp_probe` against that entry once per agent per AgentMux build, with the same environment the CLI will give it. A failure is logged and, from Phase 1, shown (§4.3). This catches the *config* half of this class of bug before the first message.
@@ -215,9 +215,9 @@ First cut: Claude Code (the only provider with a control protocol for MCP). The 
 **Built** (the PR after #4671):
 - **Detection, signal A only.** `backend/mcp_health.rs` reads the `agentmux` entry of every `system/init` frame, and re-asks with `mcp_status` while it is `pending` (twice, 15 s apart; then it counts as failed). The hooks are two calls to `observe_mcp_frame` in `persistent/stdout_reader.rs`; the controller's half is in `persistent/lifecycle.rs`.
 - **The ladder** without rungs 3 and 4: reconnect, reconnect again after 5 s (each checked with `mcp_status` 2 s later, because the CLI answers `mcp_reconnect` with success even for a server that still fails to start, as a run of the real CLI showed), then the safe-profile restart (`bash_prefix::apply_for_spawn` leaves the prefix out for that pane for the rest of srv's life), else give up. The restart is once per pane unless the agent asks again. A step with no answer for 2 minutes stops holding the next one back.
-- **Telling:** one pane row per episode (`agentmux_mcp_health`, `frontend/app/view/agent/cli-notice.ts`), updated in place; one `[AgentMux]` note to the agent, only when AgentMux gives up, with the error quoted.
+- **Telling:** one pane row per episode (`agentmux_mcp_health`, [`frontend/app/view/agent/cli-notice.ts`](../../frontend/app/view/agent/cli-notice.ts)), updated in place; one `[AgentMux]` note to the agent, only when AgentMux gives up, with the error quoted.
 - **`agent:mcpselfheal`** (default on): off means notices and the note only, no repair.
-- **`agentmux-mcp doctor [--heal]`** (`crates/mcp/src/doctor.rs`) and its routes, `POST /api/v1/agent/self/mcp-health` and `/mcp-heal` (`server/app_api/mcp_health.rs`), which find the caller's pane from its agent token. Run in the incident session, `doctor` names the cause in one line: the server starts directly but not through the shell prefix.
+- **`agentmux-mcp doctor [--heal]`** ([`crates/mcp/src/doctor.rs`](../../crates/mcp/src/doctor.rs)) and its routes, `POST /api/v1/agent/self/mcp-health` and `/mcp-heal` (`server/app_api/mcp_health.rs`), which find the caller's pane from its agent token. Run in the incident session, `doctor` names the cause in one line: the server starts directly but not through the shell prefix.
 
 **Deferred:**
 - **Signal B (the hello stamp) and the shared record.** QTest's Connectors work needs every server's observed status, so QTest builds one per-pane "observed MCP servers" record (all servers from `system/init`, tool counts, the hello stamp, an event and a list RPC), hooked where `observe_mcp_frame` is. `mcp_health` then reads the `agentmux` entry from it, so there is one parser.

@@ -95,7 +95,7 @@ The same pattern holds for search — it was added later, needed the same capabi
 
 ## 3. The broader code structure — what else I bolted on
 
-Here's everything I added to the agent pane during Phases 1–4 of `docs/plans/ultra-long-sessions.md`. Each is a child of the outer `.agent-pane` flex column, a sibling of `AgentDocumentView`:
+Here's everything I added to the agent pane during Phases 1–4 of [`docs/plans/ultra-long-sessions.md`](../plans/ultra-long-sessions.md). Each is a child of the outer `.agent-pane` flex column, a sibling of `AgentDocumentView`:
 
 ### Current render tree (agent-view.tsx:1099-1178)
 
@@ -218,7 +218,7 @@ This is a surgical fix for a concrete, reproducible bug and should be its own PR
 
 ### Longer-term — ban `scrollIntoView` and refactor the ref-passing
 
-**Change:** Grep for `scrollIntoView` across `frontend/`, replace each with a direct `scrollTop` calculation. Add an ESLint rule to prevent reintroduction. Then refactor `scrollToNodeFn` to a signal-based "jump command" pattern where callers set a signal and `AgentDocumentView` reacts.
+**Change:** Grep for `scrollIntoView` across [`frontend/`](../../frontend), replace each with a direct `scrollTop` calculation. Add an ESLint rule to prevent reintroduction. Then refactor `scrollToNodeFn` to a signal-based "jump command" pattern where callers set a signal and `AgentDocumentView` reacts.
 
 **Files changed:** 2–4.
 **Lines changed:** ~60.
@@ -239,7 +239,7 @@ The user asked: *"I think this may be related to code structure, do a full analy
 - Fragile layout stacking
 - `scrollIntoView` leakage across pane boundaries
 - A global keydown listener for Ctrl+B/Ctrl+F (cheap but there)
-- ~800 new lines of component code in `frontend/app/view/agent/` that didn't exist before 2026-04-12
+- ~800 new lines of component code in [`frontend/app/view/agent/`](../../frontend/app/view/agent) that didn't exist before 2026-04-12
 
 I already walked back one chunk of mission creep (deleted bookmarks + search UI was proposed in PR #346's companion work but not yet shipped). The right longer-term move is probably to remove all four banners and the two panels entirely, keep only the backend plumbing (session stats, archival RPCs, digest RPCs, interrupted-session meta), and re-introduce them one by one only when the user actually asks for each. That's a separate conversation.
 

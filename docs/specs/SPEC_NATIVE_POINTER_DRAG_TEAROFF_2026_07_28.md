@@ -1,7 +1,7 @@
 # Spec: replace HTML5/OLE drag with a native pointer-capture drag loop for tab + pane tear-off (Windows)
 
 **Status:** attempted 2026-07-29, shelved — see
-`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md` for the
+[`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md`](../retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md) for the
 full outcome. Summary: the core mechanism (§ Architecture below) does work —
 tab and pane tear-off both function, and the circle-slash cursor is
 structurally eliminated (no OLE session at all). But implementing it
@@ -44,11 +44,11 @@ no cached no-drop cursor, nothing to override. This also happens to be
 **faster**: eliminates OLE/COM drag-session overhead and Blink's HTML5 drag
 event pipeline per mouse-move, replacing both with direct native message
 handling. Full reasoning already captured in conversation; the short version
-is in `docs/retro/` once this spec's work lands (see Verification).
+is in [`docs/retro/`](../retro) once this spec's work lands (see Verification).
 
 ## This is not a new idea — validate and extend an existing, unmerged plan
 
-`docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md` (status: "READY TO
+[`docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md`](PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) (status: "READY TO
 IMPLEMENT," 2026-05-07, never merged) already designed almost exactly this,
 for tabs, backed by a real spike (`setPointerCapture` confirmed to keep
 delivering events across window boundaries in CEF, at native ~60Hz, with
@@ -380,14 +380,14 @@ correctness and verifiability, not minimum effort:
 implementation time given the ~3-month drift already found once)
 
 - New: `frontend/app/drag/native-pointer-drag-tracker.ts`
-- `frontend/app/tab/droppable-tab.tsx`, `tab-reorder.ts`, `tabbar-dnd.ts`
-- `frontend/layout/lib/TileLayout.win32.tsx`, `tilelayout-shared.tsx` (drop-target side, pending the §3.5 open question)
-- `frontend/util/cef-api.ts`, `frontend/types/custom.d.ts` — new
+- [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx), `tab-reorder.ts`, `tabbar-dnd.ts`
+- [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx), `tilelayout-shared.tsx` (drop-target side, pending the §3.5 open question)
+- [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts), [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) — new
   `engageNativeWindowDrag`/`updateNativeWindowDrag`/`endNativeWindowDrag` APIs
 - `agentmux-cef/src/commands/drag.rs` — new RPCs; deletions per §3.7
 - `agentmux-cef/src/commands/tear_off_hook.rs` — new caller of
   `start_tab_drag_tracking`, no logic changes; `HookMode::TearOff` deletion
 - `agentmux-cef/src/ipc.rs` — new command dispatch entries; deleted entries
   per §3.7
-- Delete-or-supersede: `docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md`
+- Delete-or-supersede: [`docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md`](PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md)
   and siblings (mark superseded, keep as history)

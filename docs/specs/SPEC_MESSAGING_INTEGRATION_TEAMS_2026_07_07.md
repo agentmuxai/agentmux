@@ -37,7 +37,7 @@ Reasoning:
    - A specific user request from someone who confirms they have (a) an M365 org account, (b) Azure access, and (c) sideloading rights or an admin willing to grant them, **or**
    - AgentMux itself moving into a team/enterprise distribution model where a shared Entra app registration could serve many tenants at once (multi-tenant bot registration — see §14 open decision) — at that point the setup burden shifts from "every user configures their own Azure Bot" to "AgentMux ships one, tenant admins consent once," which meaningfully changes the friction calculus and would be worth revisiting this spec's sequencing call.
 
-   Until either condition holds, this spec should sit in `docs/specs/` as a ready-to-build design, not an active roadmap item.
+   Until either condition holds, this spec should sit in [`docs/specs/`](.) as a ready-to-build design, not an active roadmap item.
 
 4. **This is not an argument to under-build the design.** Sections 3–14 below are implementation-ready to the same standard as the Discord POC spec and the shipped Discord code. If a developer picks this up because condition (3) above is met, they should be able to work from this document directly.
 

@@ -14,7 +14,7 @@ Step 10 (`useAgentKeyboard`). Not landed: Steps 3 (`useLaunchLogs`),
 and more than that went back in. Anyone picking this up should treat the step
 list as still valid but re-measure first — the numbers in §"Target size" and in
 each step's "(~N lines out)" are all from the 2026-04-13 file.
-**Target:** `frontend/app/view/agent/agent-view.tsx` (1,182 lines) → ≤ 300 lines
+**Target:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (1,182 lines) → ≤ 300 lines
 
 ---
 
@@ -34,7 +34,7 @@ each step's "(~N lines out)" are all from the 2026-04-13 file.
 | `useAgentStream.ts` | 271 |
 | `init-monitor.ts` | 262 |
 | (19 other components) | 30–200 each |
-| **Total `frontend/app/view/agent/`** | **6,235** |
+| **Total [`frontend/app/view/agent/`](../../frontend/app/view/agent)** | **6,235** |
 
 ### What's in `agent-view.tsx` (the elephant)
 
@@ -84,7 +84,7 @@ lines  1-28   imports
 
 ### Problems that size creates
 
-1. **Cross-concern coupling gets silently introduced.** The `scrollIntoView` ancestor-leakage bug reported in `docs/analysis/agent-pane-rich-features-structure-2026-04-13.md` is a direct consequence: bookmarks and search had to reach into `AgentDocumentView` via a mutable `let scrollToNodeFn` ref, because the two features were declared 60 lines apart in the same function but conceptually should never have shared mutable state in the first place. In a modular layout, bookmarks and search would each hold their own reference to the same public API and there'd be no shared `let`.
+1. **Cross-concern coupling gets silently introduced.** The `scrollIntoView` ancestor-leakage bug reported in [`docs/analysis/agent-pane-rich-features-structure-2026-04-13.md`](../analysis/agent-pane-rich-features-structure-2026-04-13.md) is a direct consequence: bookmarks and search had to reach into `AgentDocumentView` via a mutable `let scrollToNodeFn` ref, because the two features were declared 60 lines apart in the same function but conceptually should never have shared mutable state in the first place. In a modular layout, bookmarks and search would each hold their own reference to the same public API and there'd be no shared `let`.
 2. **Hooks and effects get grouped by "when I wrote them" instead of "what they do".** `onMount` is ~220 lines of subscriptions, event bindings, and reactive initializers. Any new feature adds another block of code to `onMount`, and unrelated blocks are N lines apart. Cleanup is in a separate `onCleanup` block far away.
 3. **Testing is impractical.** No hook or helper in this file can be unit-tested in isolation. `nodeSearchText`, `nodePreview`, `formatTimestamp`, etc. are all locked inside closures. Only the whole `AgentPresentationView` can be mounted, and mounting it requires the full Jotai/Atoms/RPC stack.
 4. **SolidJS reactivity becomes hard to audit.** With 70 declarations sharing one scope, it's not visible which signals depend on which. A future engineer (or me, next month) has to trace every `createEffect` + `createMemo` + closure to know whether a change to one signal triggers a re-render somewhere unexpected.
@@ -440,7 +440,7 @@ createEffect(() => {
 ## 5. Out of scope for this refactor
 
 - **Deleting features.** Bookmarks, search, digest, timeline minimap, etc. stay as they are — this is a structural refactor, not a feature cull. A separate conversation covers whether the user wants them at all.
-- **`AgentNotificationStack` component.** Referenced in the target structure but deferred to a separate PR (see `docs/analysis/agent-pane-rich-features-structure-2026-04-13.md` §4.1).
+- **`AgentNotificationStack` component.** Referenced in the target structure but deferred to a separate PR (see [`docs/analysis/agent-pane-rich-features-structure-2026-04-13.md`](../analysis/agent-pane-rich-features-structure-2026-04-13.md) §4.1).
 - **Changes to `AgentDocumentView.tsx` beyond the `scrollIntoView` fix in Step 9.** That file has its own issues (357 lines, several concerns) but it's in decent shape and can be refactored later.
 - **Changes to `agent-model.ts`, `stream-parser.ts`, `init-monitor.ts`, `types.ts`.** All are within reasonable size.
 - **CSS reorganization.** `agent-view.scss` is ~1500 lines. Worth splitting but separate effort.

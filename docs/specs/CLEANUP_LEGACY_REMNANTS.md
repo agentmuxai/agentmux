@@ -169,7 +169,7 @@ These reference the file `frontend/wave.ts` which is the app entry point. Not a 
 |------|------|---------|
 | `frontend/tauri-bootstrap.ts` | 137-143 | `"Loading main application (wave.ts)..."`, `"Failed to load wave.ts:"` |
 | `frontend/tauri-init.ts` | 15 | `"This MUST be awaited before importing wave.ts"` |
-| `frontend/app/store/global.ts` | 169 | `"initialized in wave.ts"` |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | 169 | `"initialized in wave.ts"` |
 
 **Decision:** Optional rename. `wave.ts` could become `app.ts` or `agentmux.ts`, but it's low priority since it's an internal module. The comments are accurate references to the filename.
 
@@ -226,7 +226,7 @@ Contains `wave.` references in OSC escape sequences.
 
 ### Phase 1 — Breaking/CI (do first)
 1. Rewrite `.github/workflows/tauri-build.yml` (Go → Rust)
-2. Fix `.github/ISSUE_TEMPLATE/bug-report.yml` (Wave → AgentMux)
+2. Fix [`.github/ISSUE_TEMPLATE/bug-report.yml`](../../.github/ISSUE_TEMPLATE/bug-report.yml) (Wave → AgentMux)
 3. Delete `SECURITY_CLEANUP_REPORT_2026-03-03.md` from repo
 
 ### Phase 2 — Config/Build
@@ -253,7 +253,7 @@ Contains `wave.` references in OSC escape sequences.
 ## Checklist
 
 - [ ] `.github/workflows/tauri-build.yml` — full rewrite
-- [ ] `.github/ISSUE_TEMPLATE/bug-report.yml` — Wave → AgentMux
+- [ ] [`.github/ISSUE_TEMPLATE/bug-report.yml`](../../.github/ISSUE_TEMPLATE/bug-report.yml) — Wave → AgentMux
 - [ ] `SECURITY_CLEANUP_REPORT_2026-03-03.md` — delete from repo
 - [ ] `tsconfig.json` — remove `emain/**/*`
 - [ ] `package.json` — remove `"main"` field

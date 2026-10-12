@@ -8,7 +8,7 @@
 **Supersedes:** earlier draft of this file (the per-provider Forge-form picker plan)
 **Status:** Proposed — rewrites the model after user feedback
 
-> **Status update (2026-05-09):** the §"Identity Pane / Memory Pane as first-class block-views with widget-bar entries" portion of this spec is **superseded** by `specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` §7.4. Identity and Memory are Agent-pane subsections, **not** widget-bar entries. The `view: "identity"` and `view: "memory"` view-type registrations in `frontend/app/block/block.tsx` and the `IdentityPaneViewModel` / Memory ViewModel remain unchanged, but the `defwidget@identity` and `defwidget@memory` entries have been removed from `agentmux-srv/src/config/widgets.json`. Reach them via:
+> **Status update (2026-05-09):** the §"Identity Pane / Memory Pane as first-class block-views with widget-bar entries" portion of this spec is **superseded** by `specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` §7.4. Identity and Memory are Agent-pane subsections, **not** widget-bar entries. The `view: "identity"` and `view: "memory"` view-type registrations in [`frontend/app/block/block.tsx`](../../../frontend/app/block/block.tsx) and the `IdentityPaneViewModel` / Memory ViewModel remain unchanged, but the `defwidget@identity` and `defwidget@memory` entries have been removed from `agentmux-srv/src/config/widgets.json`. Reach them via:
 >
 > - **Primary:** the cog → settings panel inside an active Agent pane (`AgentIdentityPanel.tsx`, etc.). This path doesn't read `widgets.json`, so it's unaffected.
 > - **Programmatic:** `pane.open` RPC with `view: "identity"` / `view: "memory"`.
@@ -279,31 +279,31 @@ Recommended ship order: F.0 → F.2 → F.1 → F.3 → G. F.0 first because it 
 
 - `frontend/app/view/memory/memory-model.ts` — new (`MemoryViewModel`)
 - `frontend/app/view/memory/memory-view.tsx` — list + detail
-- `frontend/app/view/memory/memory.tsx` — barrel
+- [`frontend/app/view/memory/memory.tsx`](../../../frontend/app/view/memory/memory.tsx) — barrel
 - `frontend/app/view/memory/memory-view.scss`
-- `frontend/app/block/block.tsx` — `BlockRegistry.set("memory", MemoryViewModel)`
+- [`frontend/app/block/block.tsx`](../../../frontend/app/block/block.tsx) — `BlockRegistry.set("memory", MemoryViewModel)`
 - `agentmux-srv/src/config/widgets.json` — `defwidget@memory`
 - `frontend/app/view/forge/` — directory removed; salvageable components migrated into the new `memory/` module
 - `frontend/app/view/agent/components/AgentCardSettingsPanel.tsx` — drop the Forge tab
 
 ### PR-F.2 (Identity pane)
 
-- `frontend/app/view/identity/identity-model.ts` — promote to first-class pane (it currently lives only as agent-pane components per PR-E); add Identity entity types (vs. Account-only)
+- [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts) — promote to first-class pane (it currently lives only as agent-pane components per PR-E); add Identity entity types (vs. Account-only)
 - `frontend/app/view/identity/identity-view.tsx` — left-rail list + right-detail layout, replacing the agent-pane tab content
 - `frontend/app/view/identity/identity.tsx` — barrel
-- `frontend/app/block/block.tsx` — `BlockRegistry.set("identity", IdentityViewModel)`
+- [`frontend/app/block/block.tsx`](../../../frontend/app/block/block.tsx) — `BlockRegistry.set("identity", IdentityViewModel)`
 - `agentmux-srv/src/config/widgets.json` — `defwidget@identity`
-- `frontend/app/view/agent/components/AgentIdentityPanel.tsx` — drop (content moves to the Identity pane)
+- [`frontend/app/view/agent/components/AgentIdentityPanel.tsx`](../../../frontend/app/view/agent/components/AgentIdentityPanel.tsx) — drop (content moves to the Identity pane)
 - `frontend/app/view/agent/components/AgentCardSettingsPanel.tsx` — drop the Identity tab
 
 ### PR-F.3 (Launch modal)
 
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx` — replace per-provider rows with two dropdowns
-- `frontend/app/view/agent/agent-model.ts` — `LaunchOverrides` shape change
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../../frontend/app/view/agent/components/AgentLaunchModal.tsx) — replace per-provider rows with two dropdowns
+- [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts) — `LaunchOverrides` shape change
 
 ### PR-G (Vault)
 
 - `agentmux-srv/Cargo.toml` — `argon2`, `aes-gcm` deps
 - `agentmux-srv/src/identity/vault.rs` — new module
 - `agentmux-srv/src/server/app_api.rs` — register vault commands
-- `frontend/app/view/agent/components/AgentIdentityPanel.tsx` — Export/Import buttons
+- [`frontend/app/view/agent/components/AgentIdentityPanel.tsx`](../../../frontend/app/view/agent/components/AgentIdentityPanel.tsx) — Export/Import buttons

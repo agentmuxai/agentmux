@@ -12,13 +12,13 @@ tool call previews are processing … can we design a one and for all robust sol
 **Author:** AgentO.
 **Supersedes, once implemented:** the glide (`glideContent`, `takeGlideOffset`), the shrink hold (`holdBufferHeight`,
 `releaseBufferHold`, `easeOutBufferHold`, `HOLD_MS`, `HOLD_RELEASE_MS`) and the row-enter rise in
-`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` and `styles/_document.scss`, all from
+[`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) and `styles/_document.scss`, all from
 #4178/#4217/#4322, and the shrink half of `resize-contract.ts`'s height animation while following.
-**Related:** `docs/reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md` (mechanism A/B, the tremor RCA),
+**Related:** [`docs/reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md`](../reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md) (mechanism A/B, the tremor RCA),
 `SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md`, `PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`,
-`docs/reports/REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01.md`, `SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md`.
+[`docs/reports/REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01.md`](../reports/REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01.md), `SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md`.
 
-"VL" is `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`. Line numbers are against `main` at
+"VL" is [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx). Line numbers are against `main` at
 `22857409f`.
 
 ---
@@ -209,7 +209,7 @@ build of it.
 
 | Phase | What | Exit criterion |
 |---|---|---|
-| **0. Measure** | The recorder (`frontend/app/view/agent/scroll/one-way-recorder.ts`, opt-in in every build: `__agentmuxOneWay.enable()`) and the soak (`scripts/ui-screenshots/one-way-soak.mjs`). Baseline current main. | A baseline count of V1/V2 violations per minute of tool-heavy streaming, with causes. |
+| **0. Measure** | The recorder ([`frontend/app/view/agent/scroll/one-way-recorder.ts`](../../frontend/app/view/agent/scroll/one-way-recorder.ts), opt-in in every build: `__agentmuxOneWay.enable()`) and the soak ([`scripts/ui-screenshots/one-way-soak.mjs`](../../scripts/ui-screenshots/one-way-soak.mjs)). Baseline current main. | A baseline count of V1/V2 violations per minute of tool-heavy streaming, with causes. |
 | **1. The one-way path** | R1–R4 and the follower, behind the flag: one observer, compensation, the spacer, the follower, `overflow-anchor: none` while following, no rise, no glide/hold/old pins on this path. | The soak reports zero violations not explained by an exempt user action. |
 | **2. Sources** | Fewer things to compensate: a Write/Bash preview completes inside a box that doesn't shrink while visible; `ToolOverlayLog` and `SystemToolInstallInline` share the user-intent window and log format (09-24 Phase 3). | Spacer time and size per tool call drop in the soak. |
 | **3. Default on** | A 30-minute, 3-pane soak with zero violations; owner sign-off on a live run; flip the default; delete the old path, the glide/hold constants and the 200 px threshold. Update this spec and 09-24 to `implemented`. | Owner sign-off. |

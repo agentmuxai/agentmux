@@ -80,11 +80,11 @@ level. CEF Views `set_always_on_top(bool)` applies directly.
 
 ### 2.3 Frontend
 
-- A floater renders `FloatingPaneWorkspace` (`frontend/app/workspace/floating-pane-workspace.tsx`),
+- A floater renders `FloatingPaneWorkspace` ([`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx)),
   chosen by `IS_FLOATING_PANE` (`app.tsx:387`). The pane's standard
   `BlockFrame_Header` is the only chrome. The window label comes from
   `?windowLabel=floating-*`, and the pane's block is the tab's single block.
-- The header's right end is `EndIcons` (`frontend/app/block/blockframe.tsx:306-418`):
+- The header's right end is `EndIcons` ([`frontend/app/block/blockframe.tsx:306-418`](../../frontend/app/block/blockframe.tsx#L306-L418)):
   - the view's `endIconButtons` (the agent pane's **Stash** is one, `agent-model.ts:209-223`);
   - a separator;
   - (mic);
@@ -97,7 +97,7 @@ level. CEF Views `set_always_on_top(bool)` applies directly.
   classes. `iconbutton.scss:40-47` colors `.toggle.active` with
   **`var(--accent-color)`**, the theme color, defined per theme in `themes/*.scss`.
 - Icons are Font Awesome 6.7.2 Pro via `makeIconClass`. **`fa-thumbtack`** and
-  `fa-thumbtack-slash` are available (`public/fontawesome/css/fontawesome.min.css`).
+  `fa-thumbtack-slash` are available ([`public/fontawesome/css/fontawesome.min.css`](../../public/fontawesome/css/fontawesome.min.css)).
   Nothing uses them today.
 - Host calls go through `getApi().windows` (`WindowHostApi`, `types/custom.d.ts:186-221`),
   implemented in `app/host/cef-host-commands.ts:89-128`. The host-API seam
@@ -244,7 +244,7 @@ Consequences to accept or handle:
 ### 6.1 Key
 `pane:floating_ontop: boolean` on the floater's block (`floatingPaneId`), in the
 existing `pane:floating_*` family. Add it to `MetaType` in
-`frontend/types/srv-types.d.ts`. `pane:floating_placement` isn't declared there
+[`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts). `pane:floating_placement` isn't declared there
 either, so declare both.
 
 ### 6.2 Re-apply

@@ -98,8 +98,8 @@ function AgentRow({ node, focusedBlockId }: { node: AgentTreeNode; focusedBlockI
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/swarm/swarm-view.tsx` | Add `focusedBlockId` memo using existing `layoutModel.focusedNode()`; pass accessor to `AgentRow`; apply `--active` class via `classList` |
-| `frontend/app/view/swarm/swarm-view.scss` | Add `.swarm-agent-row--active` style |
+| [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) | Add `focusedBlockId` memo using existing `layoutModel.focusedNode()`; pass accessor to `AgentRow`; apply `--active` class via `classList` |
+| [`frontend/app/view/swarm/swarm-view.scss`](../../frontend/app/view/swarm/swarm-view.scss) | Add `.swarm-agent-row--active` style |
 
 No changes to `layoutModel.ts`, `swarm-model.ts`, `termagent.ts`, or the backend.
 

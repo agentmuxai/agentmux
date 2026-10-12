@@ -84,15 +84,15 @@ Windows 10 is the user's primary dev machine with an open browser pane.
 
 | File | Line | Role |
 |------|------|------|
-| `frontend/app/statusbar/StatusBar.scss` | 23 | `zoom: var(--zoomfactor)` on status bar |
-| `frontend/app/statusbar/SystemStats.tsx` | 67 | captures `cpuButtonRef.getBoundingClientRect()` |
-| `frontend/app/statusbar/CpuCoresPopover.tsx` | 148 | `computeMenuPosition` call — fixed to pass `avoidNativePanes: false` |
-| `frontend/app/statusbar/TokenBreakdownPopover.tsx` | ~100-103 | identical pattern — same fix applied |
-| `frontend/app/util/menu-position.ts` | 83-95 | `getNativePaneRects()` — queries `.browser-placeholder` |
-| `frontend/app/util/menu-position.ts` | 137-188 | `getPaintableArea()` — four-strip heuristic |
-| `frontend/app/util/menu-position.ts` | 291-358 | `computeMenuPosition()` — `avoidNativePanes` defaults to `true` |
-| `frontend/app/view/browser/browser-view.tsx` | 492-519 | `.browser-placeholder` rendered on ALL platforms (no platform guard) |
-| `frontend/app/platform/pane-overlay.ts` | 238-274 | `usePaneOverlay()` — punches airspace hole through pane HWNDs |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | 23 | `zoom: var(--zoomfactor)` on status bar |
+| [`frontend/app/statusbar/SystemStats.tsx`](../../frontend/app/statusbar/SystemStats.tsx) | 67 | captures `cpuButtonRef.getBoundingClientRect()` |
+| [`frontend/app/statusbar/CpuCoresPopover.tsx`](../../frontend/app/statusbar/CpuCoresPopover.tsx) | 148 | `computeMenuPosition` call — fixed to pass `avoidNativePanes: false` |
+| [`frontend/app/statusbar/TokenBreakdownPopover.tsx`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx) | ~100-103 | identical pattern — same fix applied |
+| [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) | 83-95 | `getNativePaneRects()` — queries `.browser-placeholder` |
+| [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) | 137-188 | `getPaintableArea()` — four-strip heuristic |
+| [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) | 291-358 | `computeMenuPosition()` — `avoidNativePanes` defaults to `true` |
+| [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx) | 492-519 | `.browser-placeholder` rendered on ALL platforms (no platform guard) |
+| [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) | 238-274 | `usePaneOverlay()` — punches airspace hole through pane HWNDs |
 
 ---
 
@@ -109,7 +109,7 @@ Pass `avoidNativePanes: false` to `computeMenuPosition` in both components.
 
 ### Changes required
 
-**1. `frontend/app/statusbar/CpuCoresPopover.tsx:148`**
+**1. [`frontend/app/statusbar/CpuCoresPopover.tsx:148`](../../frontend/app/statusbar/CpuCoresPopover.tsx#L148)**
 
 ```diff
 -const pos = await computeMenuPosition({ anchor: cur, placement: "top-end" }, el);
@@ -136,8 +136,8 @@ Identical change — same `computeMenuPosition` call site.
 
 | Component | File | Fix needed |
 |-----------|------|------------|
-| CpuCoresPopover | `frontend/app/statusbar/CpuCoresPopover.tsx` | Yes |
-| TokenBreakdownPopover | `frontend/app/statusbar/TokenBreakdownPopover.tsx` | Yes |
+| CpuCoresPopover | [`frontend/app/statusbar/CpuCoresPopover.tsx`](../../frontend/app/statusbar/CpuCoresPopover.tsx) | Yes |
+| TokenBreakdownPopover | [`frontend/app/statusbar/TokenBreakdownPopover.tsx`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx) | Yes |
 
 Future status-bar popovers that use `usePaneOverlay` should also pass
 `avoidNativePanes: false`.

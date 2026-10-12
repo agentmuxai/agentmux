@@ -7,8 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 
 - **Date:** 2026-06-11
 - **Status:** Draft / proposed
-- **Area:** `agentmux-srv` agent runner + translator; `frontend/app` agent-pane state; drone run records
-- **Related:** `docs/specs/agent-health-design.md`, `docs/specs/backend-status-tests.md`
+- **Area:** `agentmux-srv` agent runner + translator; [`frontend/app`](../../frontend/app) agent-pane state; drone run records
+- **Related:** `docs/specs/agent-health-design.md`, [`docs/specs/backend-status-tests.md`](backend-status-tests.md)
 
 ---
 
@@ -76,12 +76,12 @@ The Claude CLI can report a failure on **stdout** as a terminal `result` frame w
 `AgentEvent::Error { message }` is defined (`agentmux-srv/src/agents/types.rs:104-108`) and is the intended user-facing error channel. But the runner's failure path returns a bare `Err(String)` on the `final_result` oneshot (`runner.rs:184-186, 223-227`) and **never sends `AgentEvent::Error` on the live event stream (`tx`)**. Stream-watchers (the agent pane) get nothing; only the drone's terminal accumulator sees the string.
 
 ### Gap G5 — the interactive path knows the code but not the cause
-The PTY pane plumbs an exit code end-to-end — `proc_exit_code` (`agentmux-srv/src/backend/blockcontroller/subprocess.rs:94-95`), set on `child.wait()` (lines 727-749), surfaced to the frontend as `shellprocexitcode` (lines 208, 811). The frontend agent state machine has an `errored` outcome (`frontend/app/store/agent-pane-state/types.ts:76-80`) reached via bounded force-transitions with **generic** reasons like `"stream-stalled"` and timeout (`frontend/app/store/agent-pane-state/reducer.ts:663, 718`). So it can say *"errored"* but not *why* — the underlying error text is never captured or classified on this path either.
+The PTY pane plumbs an exit code end-to-end — `proc_exit_code` (`agentmux-srv/src/backend/blockcontroller/subprocess.rs:94-95`), set on `child.wait()` (lines 727-749), surfaced to the frontend as `shellprocexitcode` (lines 208, 811). The frontend agent state machine has an `errored` outcome ([`frontend/app/store/agent-pane-state/types.ts:76-80`](../../frontend/app/store/agent-pane-state/types.ts#L76-L80)) reached via bounded force-transitions with **generic** reasons like `"stream-stalled"` and timeout (`frontend/app/store/agent-pane-state/reducer.ts:663, 718`). So it can say *"errored"* but not *why* — the underlying error text is never captured or classified on this path either.
 
 ### What already works (reuse, don't rebuild)
 - **Token/cost capture** is solid: `TokenCounts { input, output, cache_creation, cache_read }` (`types.rs:110-121`) parsed from the result frame's `usage` (`translator/claude.rs:268-280`) and carried by `AgentEvent::Cost`. The failure struct should ride alongside this, not replace it.
 - **The drone already persists an `error` column** on a run row (`agentmux-srv/src/drone/storage.rs:141, 151, 167, 175`) — today it stores the opaque G2 string. We upgrade *what* goes in, not the plumbing.
-- **The sidecar connection already models cause well**: `backendStatus` distinguishes `crashed`, tracks exit code, and handles "exit code null when signal kill" (`frontend/app/store/backendStatus.test.ts`). That's the precedent to mirror for agents (it is a *different* subject — the srv sidecar, not the agent — but the shape is exactly what we want).
+- **The sidecar connection already models cause well**: `backendStatus` distinguishes `crashed`, tracks exit code, and handles "exit code null when signal kill" ([`frontend/app/store/backendStatus.test.ts`](../../frontend/app/store/backendStatus.test.ts)). That's the precedent to mirror for agents (it is a *different* subject — the srv sidecar, not the agent — but the shape is exactly what we want).
 
 ---
 
@@ -204,7 +204,7 @@ TS mirror in `frontend/types/gotypes.d.ts`; the agent-pane reducer reads `failur
 | persist | `agentmux-srv/src/drone/storage.rs:141-175` | Store `AgentFailure` JSON in `DroneRun.error` |
 | persist | `db_agent_instances` schema + store | Add `last_failure` column/field |
 | G5 | `agentmux-srv/src/backend/blockcontroller/subprocess.rs:727-749` | Capture stderr tail; run `shellprocexitcode` through `classify()` |
-| UI | `frontend/app/store/agent-pane-state/reducer.ts:633-720`, `types.ts:76-80` | `errored` outcome carries `failureCode`/`failureDetail` |
+| UI | [`frontend/app/store/agent-pane-state/reducer.ts:633-720`](../../frontend/app/store/agent-pane-state/reducer.ts#L633-L720), `types.ts:76-80` | `errored` outcome carries `failureCode`/`failureDetail` |
 | UI | agent pane view + Swarm/Warden overview | Render explanation banner + badge |
 
 ---

@@ -27,7 +27,7 @@ Today the feature is gated behind a settings.json edit:
   (`agentmux-srv/src/backend/wconfig/types.rs:206-207`)
 - The HostPopover already detects the disabled state and shows the literal text
   `Enable via "network:lan_discovery": true`
-  (`frontend/app/statusbar/HostPopover.tsx:144`)
+  ([`frontend/app/statusbar/HostPopover.tsx:144`](../../frontend/app/statusbar/HostPopover.tsx#L144))
 - mDNS daemon is started **once at boot** (`agentmux-srv/src/main.rs:601-620`).
   Changing the setting requires a restart today.
 
@@ -53,7 +53,7 @@ firewall popup is the **expected consequence**, not a surprise.
 
 ## Where it lives
 
-The HostPopover is the rightmost item in the status bar (`frontend/app/statusbar/StatusBar.tsx:61-65`).
+The HostPopover is the rightmost item in the status bar ([`frontend/app/statusbar/StatusBar.tsx:61-65`](../../frontend/app/statusbar/StatusBar.tsx#L61-L65)).
 Clicking the hostname opens a popover that already has a **Network** section
 between Instance/Host info and Ports.
 
@@ -201,14 +201,14 @@ only addition is the hot-reload hook. If the setting is missing from
 
 | File | Change |
 |------|--------|
-| `frontend/app/statusbar/HostPopover.tsx` | Add toggle component to disabled-state block; keep peer list rendering for enabled-state |
-| `frontend/app/statusbar/StatusBar.scss` (or `_instance-panel.scss`) | Toggle styles (small switch, matches existing status-bar-item visuals) |
-| `frontend/app/store/global.ts` | Add `setLanDiscoveryEnabled(enabled: boolean)` helper (writes via SetConfigCommand) |
+| [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx) | Add toggle component to disabled-state block; keep peer list rendering for enabled-state |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) (or `_instance-panel.scss`) | Toggle styles (small switch, matches existing status-bar-item visuals) |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | Add `setLanDiscoveryEnabled(enabled: boolean)` helper (writes via SetConfigCommand) |
 | `agentmux-srv/src/server/mod.rs` | `AppState.lan_discovery: Arc<RwLock<Option<Arc<LanDiscovery>>>>` |
 | `agentmux-srv/src/server/mod.rs` | `handle_lan_instances` reads through the RwLock |
 | `agentmux-srv/src/main.rs` | Move initial start into a shared function; wire ConfigWatcher hook |
 | `agentmux-srv/src/backend/wconfig/config_watcher_fs.rs` (or wherever the watcher dispatches) | Add `network:lan_discovery` change hook |
-| `schema/settings.json` | Add missing `network:lan_discovery` entry (also fixes a current schema gap) |
+| [`schema/settings.json`](../../schema/settings.json) | Add missing `network:lan_discovery` entry (also fixes a current schema gap) |
 
 No new dependencies. `mdns-sd` is already in `Cargo.toml`. Setting write API
 (`SetConfigCommand`) already exists.
@@ -236,9 +236,9 @@ const LanDiscoveryToggle = (): JSX.Element => {
 ```
 
 `RpcApi.SetConfigCommand(TabRpcClient, {...})` is the established settings-write
-path used elsewhere (e.g. `frontend/app/menu/base-menus.ts:71`,
-`frontend/app/window/action-widgets.tsx:85`,
-`frontend/app/tab/tabbar.tsx:614`). It wraps the `setconfig` RPC defined in
+path used elsewhere (e.g. [`frontend/app/menu/base-menus.ts:71`](../../frontend/app/menu/base-menus.ts#L71),
+[`frontend/app/window/action-widgets.tsx:85`](../../frontend/app/window/action-widgets.tsx#L85),
+[`frontend/app/tab/tabbar.tsx:614`](../../frontend/app/tab/tabbar.tsx#L614)). It wraps the `setconfig` RPC defined in
 `frontend/app/store/rpc-api.ts:396`.
 
 ### State sync
@@ -328,6 +328,6 @@ and `settingsAtom` re-syncs on the WS broadcast. No new state plumbing.
 - [ ] Toggle persists state across app restarts
 - [ ] No app restart required to apply the change
 - [ ] Default behavior unchanged on fresh install (opt-in)
-- [ ] `schema/settings.json` includes `network:lan_discovery`
+- [ ] [`schema/settings.json`](../../schema/settings.json) includes `network:lan_discovery`
 - [ ] Failure modes (firewall blocked, daemon start error) are visible in the
       popover, not silent

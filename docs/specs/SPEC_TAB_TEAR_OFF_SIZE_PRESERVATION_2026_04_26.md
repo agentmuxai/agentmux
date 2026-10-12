@@ -17,7 +17,7 @@
   (`start_cross_drag` / `update_cross_drag` / `complete_cross_drag` +
   `cross-drag-update` / `cross-drag-end` events) is the code this spec
   replaces wholesale. Fixing under the current pipeline is throwaway
-  work. See `docs/retro/phase-e-status-2026-05-01.md` §11.
+  work. See [`docs/retro/phase-e-status-2026-05-01.md`](../retro/phase-e-status-2026-05-01.md) §11.
 **Trigger:** User feedback —
   > *"chrome tabs don't ghost, you just drag it out, and the
   > entire non-faded window drags around"*
@@ -627,7 +627,7 @@ telemetry lands) external counters.
   capture-handoff, SC_MOVE-posted (with timestamps).
 - Merge / cancel / standalone resolution.
 
-**Integration tests** (see `tools/tests/`):
+**Integration tests** (see [`tools/tests/`](../../tools/tests)):
 - `tear-off-stress.ps1` (Win32) — programmatic 100-tear-off
   sequence with assertions on handshake_ms p99, pool_exhausted
   count, leaked-window count.
@@ -645,15 +645,15 @@ telemetry lands) external counters.
 
 ## 11. Sources
 
-- Existing in-window DnD: `frontend/app/tab/tabbar-dnd.ts`,
-  `frontend/app/tab/tabbar.tsx`,
-  `frontend/app/tab/droppable-tab.tsx`
+- Existing in-window DnD: [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts),
+  [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx),
+  [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx)
 - Existing cross-window drag (will be partially replaced):
-  `frontend/app/drag/CrossWindowDragMonitor.win32.tsx`
+  [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx)
 - Window/tab data plumbing:
   `agentmux-srv/src/backend/wcore/tab.rs`,
   `agentmux-srv/src/backend/wcore/window.rs`,
-  `frontend/app/store/services.ts` (`MoveTabToWorkspace`)
+  [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts) (`MoveTabToWorkspace`)
 - Chrome source — TabDragController: where Chrome actually
   implements this. Useful for understanding cancel/merge
   semantics:
@@ -671,4 +671,4 @@ telemetry lands) external counters.
   https://wayland.app/protocols/xdg-shell#xdg_toplevel:request:move
 - Prior retro on auto-width sub-pixel jitter (motivation for the
   width-snapshot mechanism):
-  `docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md`
+  [`docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md`](../retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md)

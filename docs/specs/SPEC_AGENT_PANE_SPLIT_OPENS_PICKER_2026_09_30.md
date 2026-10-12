@@ -12,7 +12,7 @@ That is the same view "+" → Agent opens.
 
 ## Today
 
-`handleSplitPane` (`frontend/app/block/pane-actions.ts`) copies the source
+`handleSplitPane` ([`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts)) copies the source
 pane's whole meta into the new pane. A view can list keys the copy must skip
 (`splitDropsMeta`). The agent view skips its 13 agent-identity keys
 (`AGENT_SPLIT_DROPPED_META`), so `agentId` is unset and the picker shows. The
@@ -54,7 +54,7 @@ All four directions behave the same. The source pane's session is untouched.
 #4077 covered only the pane menu. The repo owner asked for this to hold
 however the split is asked for. There are three split paths. Each asks the
 same helper, `splitBlockDefFor(source, fallback)`
-(`frontend/app/block/split-block-def.ts`). A view that declares
+([`frontend/app/block/split-block-def.ts`](../../frontend/app/block/split-block-def.ts)). A view that declares
 `splitBlockDef` gets it, and any other view gets the caller's own default:
 
 | Path | Where | Default for other panes (unchanged) |
@@ -97,11 +97,11 @@ pane still opens the default new block.
 
 ## Files
 
-- `frontend/app/block/pane-tab-registry.ts`: `splitBlockDef` replaces
+- [`frontend/app/block/pane-tab-registry.ts`](../../frontend/app/block/pane-tab-registry.ts): `splitBlockDef` replaces
   `splitDropsMeta`.
-- `frontend/app/block/pane-actions.ts`: `handleSplitPane` uses it.
-- `frontend/app/view/agent/agent-picker-blockdef.ts` (new):
+- [`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts): `handleSplitPane` uses it.
+- [`frontend/app/view/agent/agent-picker-blockdef.ts`](../../frontend/app/view/agent/agent-picker-blockdef.ts) (new):
   `agentPickerBlockDef`.
-- `frontend/app/view/agent/agent-manifest.tsx`, `close-agent-tab.ts`,
+- [`frontend/app/view/agent/agent-manifest.tsx`](../../frontend/app/view/agent/agent-manifest.tsx), `close-agent-tab.ts`,
   `agent-pane-tab.ts`: use it; drop `AGENT_SPLIT_DROPPED_META`.
-- `docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`: the capability name.
+- [`docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`](SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md): the capability name.

@@ -416,8 +416,8 @@ Use existing overlay/modal patterns in the codebase (check `AgentFocusedPanel` o
 | File | Change |
 |------|--------|
 | `frontend/app/view/agent/components/AgentActionBar.tsx` | **CREATE** — new component |
-| `frontend/app/view/agent/agent-view.tsx` | **EDIT** — add `<AgentActionBar>` as last child of `.agent-view` |
-| `frontend/app/view/agent/agent-view.scss` | **EDIT** — add `.agent-action-bar` + `.agent-action-btn` styles |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | **EDIT** — add `<AgentActionBar>` as last child of `.agent-view` |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | **EDIT** — add `.agent-action-bar` + `.agent-action-btn` styles |
 | `frontend/app/view/agent/components/ImportPreviewModal.tsx` | **CREATE** — import confirmation modal |
 | `frontend/app/store/rpc-api.ts` | **EDIT** — add `ImportForgeAgentsCommand`, `ExportForgeAgentsCommand` |
 | `agentmux-srv/src/backend/rpc_types.rs` | **EDIT** — add `CommandImportForgeAgentsData`, `ImportForgeAgentsResult`, `ExportForgeAgentsResult`, `ForgeAgentExport`, `ForgeAgentImport` |

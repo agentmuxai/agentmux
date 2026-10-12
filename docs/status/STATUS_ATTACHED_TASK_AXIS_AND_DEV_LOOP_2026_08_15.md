@@ -21,8 +21,8 @@
 **Date:** 2026-08-15
 **Author:** AgentA
 **Status:** Report — code audit against `main` @ `44b3c6a17` (today), consolidating what's shipped since the 08-09 ladder doc, confirming #2491/#2492 are exactly the next unstarted rungs, and proposing a deeper architectural fix rather than two point patches.
-**Supersedes nothing** — updates `docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_09.md` (the "ladder" doc this one continues numbering from) and folds in the two follow-on retros written after it shipped:
-`docs/retro/retro-stuck-background-dock-timer-2026-08-10.md`, `docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`.
+**Supersedes nothing** — updates [`docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_09.md`](STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_09.md) (the "ladder" doc this one continues numbering from) and folds in the two follow-on retros written after it shipped:
+[`docs/retro/retro-stuck-background-dock-timer-2026-08-10.md`](../retro/retro-stuck-background-dock-timer-2026-08-10.md), [`docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`](../retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md).
 
 ---
 
@@ -59,7 +59,7 @@ This means rung 3 is not a design problem, it's a plumbing problem: read `run_in
 
 ### 2.2 The 1-hour dock-cache eviction undermines rung 4 before it even ships
 
-`docs/retro/retro-stuck-background-dock-timer-2026-08-10.md` already flagged this as "not yet tracked as an issue": `DockSnapshotCache` evicts any node — including a genuinely-still-running `bg: true` one — after `MAX_NODE_AGE_MS` (1 hour), with no periodic refresh push to keep a long-lived task's entry alive. `task dev` sessions in this repo's own retros have run 12+ hours (the Agent1 incident) and 17+ minutes minimum before even reaching bashwrap's kill. **Even after rung 4 ships (the OS process survives session teardown), the dock/attachedTask signal chain that's supposed to show the user "this is still running" goes dark after an hour and stays dark until the process actually completes or the pane reloads and re-derives from a live source.** This is the same failure shape as the original #2518 bug (UI silently misrepresenting real state) one layer further out. Any rung-4 design needs to also address this, or it just moves the "stuck 17 dock timers" incident from "shows running forever" to "shows nothing at all" — arguably worse, since at least the old bug was discoverable.
+[`docs/retro/retro-stuck-background-dock-timer-2026-08-10.md`](../retro/retro-stuck-background-dock-timer-2026-08-10.md) already flagged this as "not yet tracked as an issue": `DockSnapshotCache` evicts any node — including a genuinely-still-running `bg: true` one — after `MAX_NODE_AGE_MS` (1 hour), with no periodic refresh push to keep a long-lived task's entry alive. `task dev` sessions in this repo's own retros have run 12+ hours (the Agent1 incident) and 17+ minutes minimum before even reaching bashwrap's kill. **Even after rung 4 ships (the OS process survives session teardown), the dock/attachedTask signal chain that's supposed to show the user "this is still running" goes dark after an hour and stays dark until the process actually completes or the pane reloads and re-derives from a live source.** This is the same failure shape as the original #2518 bug (UI silently misrepresenting real state) one layer further out. Any rung-4 design needs to also address this, or it just moves the "stuck 17 dock timers" incident from "shows running forever" to "shows nothing at all" — arguably worse, since at least the old bug was discoverable.
 
 ### 2.3 The deeper pattern: every signal in this system is client-derived and ephemeral
 
@@ -104,7 +104,7 @@ struct BackgroundTask {
 3. **Session teardown (rung 4)** — the launcher/srv, not the per-session agent process, owns entries in this registry. On agent-session restart, anything still `Running` in the registry gets reparented (Job-Object adoption, consistent with isolation invariants I1–I6 in this repo's `CLAUDE.md`) instead of dying with the old session. This is the piece that has no existing analog to build on — needs its own design pass, flagged as the highest-uncertainty rung.
 4. **Dock / attachedTask axis / footer** — become *readers* of the registry (via a subscription, same WPS-event pattern `AgentProcessRegistry` already uses for `agent:process-added`/`-exited`) instead of re-deriving state by replaying the transcript. Removes the 1-hour TTL problem (§2.2) entirely — the registry is the source of truth, not a cache of a stream that might have been evicted.
 5. **Swarm pane** — same subscription, trivially closes the still-open "feed the signal to Swarm" gap (§1's last row) as a consequence of everything reading one source, not a sixth bespoke wire-up.
-6. **Reconnect/history-restore** — the frontend queries the registry directly on mount instead of replaying/scrubbing transcript state (`scrubOrphanedInProgress`'s session-boundary-only cleanup, `docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`'s stuck-`sleep 45`-entry finding) — a task's real status is always one query away, not dependent on which transcript events happened to survive.
+6. **Reconnect/history-restore** — the frontend queries the registry directly on mount instead of replaying/scrubbing transcript state (`scrubOrphanedInProgress`'s session-boundary-only cleanup, [`docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`](../retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md)'s stuck-`sleep 45`-entry finding) — a task's real status is always one query away, not dependent on which transcript events happened to survive.
 
 ### Why this over two point fixes
 
@@ -125,7 +125,7 @@ This report is grounded in a full code audit (git history, current `main`, all f
 
 Proposed smoke-test plan, once ready to execute:
 
-1. **Baseline repro of the still-open bug**: launch `task dev` via the documented heartbeat-wrapped pattern (`scripts/dev-agent.cmd` + 120s heartbeat, per `CLAUDE.md`/the 07-31 retro), confirm bashwrap still kills it after ~10 min with no exemption (expected — rung 3 unshipped) — this reconfirms §1's audit against live behavior rather than static code reading alone.
+1. **Baseline repro of the still-open bug**: launch `task dev` via the documented heartbeat-wrapped pattern ([`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) + 120s heartbeat, per `CLAUDE.md`/the 07-31 retro), confirm bashwrap still kills it after ~10 min with no exemption (expected — rung 3 unshipped) — this reconfirms §1's audit against live behavior rather than static code reading alone.
 2. **Confirm rungs 1–2 actually work live**: a real `task dev` launched with plain `run_in_background: true` (no heartbeat) should now show a dock row immediately and the turn should return to idle without the 12-hour "Working…" symptom — verifying the theoretical analysis in §1 against a real pane, since neither #2489 nor #2502's own PR bodies record a completed live check (#2489: "Live verification still needed"; #2502: "worth confirming in a running build").
 3. **After #2491 lands**: repeat step 1, confirm the process survives past the old ~10min kill point.
 4. **After #2492 lands**: kill/restart the agent session mid-`task dev`, confirm the dev instance survives and reattaches.

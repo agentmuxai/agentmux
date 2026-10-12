@@ -7,41 +7,41 @@
 
 ## 1. What changes
 
-The six workspace crates move from the repo root into `crates/`, and the folder drops the
+The six workspace crates move from the repo root into [`crates/`](../../crates), and the folder drops the
 `agentmux-` prefix:
 
 | Before | After | Package name (unchanged) | Binary (unchanged) |
 |---|---|---|---|
-| `agentmux-cef/` | `crates/cef/` | `agentmux-cef` | `agentmux-cef` |
-| `agentmux-srv/` | `crates/srv/` | `agentmux-srv` | `agentmux-srv` |
-| `agentmux-launcher/` | `crates/launcher/` | `agentmux-launcher` | `agentmux-launcher` |
-| `agentmux-mcp/` | `crates/mcp/` | `agentmux-mcp` | `agentmux-mcp` |
-| `agentmux-common/` | `crates/common/` | `agentmux-common` | (library) |
-| `agentmux-bashwrap/` | `crates/bashwrap/` | `agentmux-bashwrap` | `agentmux-bashwrap` |
+| `agentmux-cef/` | [`crates/cef/`](../../crates/cef) | `agentmux-cef` | `agentmux-cef` |
+| `agentmux-srv/` | [`crates/srv/`](../../crates/srv) | `agentmux-srv` | `agentmux-srv` |
+| `agentmux-launcher/` | [`crates/launcher/`](../../crates/launcher) | `agentmux-launcher` | `agentmux-launcher` |
+| `agentmux-mcp/` | [`crates/mcp/`](../../crates/mcp) | `agentmux-mcp` | `agentmux-mcp` |
+| `agentmux-common/` | [`crates/common/`](../../crates/common) | `agentmux-common` | (library) |
+| `agentmux-bashwrap/` | [`crates/bashwrap/`](../../crates/bashwrap) | `agentmux-bashwrap` | `agentmux-bashwrap` |
 
-The rule for any old path: drop `agentmux-` from the first segment and prefix `crates/`.
+The rule for any old path: drop `agentmux-` from the first segment and prefix [`crates/`](../../crates).
 `agentmux-srv/src/backend/x.rs` becomes `crates/srv/src/backend/x.rs`.
 
-The top level goes from 23 folders to 18, and the Rust code sits beside `frontend/` as one group.
+The top level goes from 23 folders to 18, and the Rust code sits beside [`frontend/`](../../frontend) as one group.
 New crates go under `crates/<short-name>/` with package name `agentmux-<short-name>`.
 
 ## 2. Why this shape
 
-- **`crates/` is the common Rust workspace layout** (ripgrep, ruff, wasmtime, bevy).
-- **Bare top-level names would collide or confuse:** `cef/` next to `scripts/cef-build/`,
-  `common/` with no context, and `build/` already exists.
+- **[`crates/`](../../crates) is the common Rust workspace layout** (ripgrep, ruff, wasmtime, bevy).
+- **Bare top-level names would collide or confuse:** `cef/` next to [`scripts/cef-build/`](../../scripts/cef-build),
+  `common/` with no context, and [`build/`](../../build) already exists.
 - **Package and binary names stay `agentmux-*` on purpose:**
   - The binaries are user-visible: Task Manager, firewall prompts, installers, the MSIX manifest,
     code signing, crash dumps, Linux packages. The launcher also spawns them by name.
   - A package named `cef` would clash with our `cef` dependency (the cef-rs binding crate).
   - `agentmux_common::…` imports stay as they are, so no Rust source changes beyond relative paths.
-- **Shorter paths** also help Windows `MAX_PATH` (`crates/srv` is 3 characters shorter than
+- **Shorter paths** also help Windows `MAX_PATH` ([`crates/srv`](../../crates/srv) is 3 characters shorter than
   `agentmux-srv`, and deep ts-rs and CEF paths are where we hit the limit).
 
 ## 3. Non-goals
 
 - Renaming packages, binaries, Rust modules, installers, or the `agentmux-docs` crate list.
-- Moving `frontend/`, `scripts/`, `docs/` or anything else.
+- Moving [`frontend/`](../../frontend), [`scripts/`](../../scripts), [`docs/`](..) or anything else.
 - Rewriting dated records (specs, retros, reports, `VERSION_HISTORY.md`). They were correct when
   written; §1's rule maps any old path. Living docs are updated (§4.4).
 
@@ -56,7 +56,7 @@ different ways, so each class has its own check.
 
 | What | Count | Failure if missed | How it's caught |
 |---|---|---|---|
-| ts-rs `#[ts(export, export_to = "../../frontend/types/rpc/")]` in `agentmux-srv` | 374 in 48 files | **Silent:** bindings are written to `crates/frontend/types/rpc/` instead of `frontend/types/rpc/` | `scripts/check-rpc-bindings.sh` (committed bindings must equal generated), plus an explicit check that `crates/frontend/` does not exist after `cargo test` |
+| ts-rs `#[ts(export, export_to = "../../frontend/types/rpc/")]` in `agentmux-srv` | 374 in 48 files | **Silent:** bindings are written to `crates/frontend/types/rpc/` instead of [`frontend/types/rpc/`](../../frontend/types/rpc) | [`scripts/check-rpc-bindings.sh`](../../scripts/check-rpc-bindings.sh) (committed bindings must equal generated), plus an explicit check that `crates/frontend/` does not exist after `cargo test` |
 | `include_str!` / `include_bytes!` climbing to repo-root files | 8, listed below | Loud: compile error | CI build on all three OSes |
 | `env!("CARGO_MANIFEST_DIR")` joins to repo-root paths | 9 uses; 4 climb to the root with one `.parent()` and need two (`agentmux-common/src/api_types.rs`, `agentmux-common/src/redact.rs`, `agentmux-srv/src/backend/reactive/types.rs`, `agentmux-srv/src/backend/rpc_types/block.rs`) | Tests read the wrong folder and fail | Tests; review every hit by hand |
 | `agentmux-cef/build.rs` reads the workspace lockfile as `../Cargo.lock` (build scripts run in the crate folder) | 1 | **Silent:** the version panel's CEF row falls back to "unknown" | Check the version panel on a built app; found during implementation |
@@ -68,12 +68,12 @@ The 8 `include_*` sites that leave their crate, each of which gains one `../`:
 | Site | Resolves to |
 |---|---|
 | `agentmux-cef/src/commands/platform.rs:12` | `settings-template.jsonc` |
-| `agentmux-cef/src/macos_compat.rs:654` | `assets/linux/icons/hicolor/512x512/apps/agentmux.png` |
-| `agentmux-launcher/src/notify/windows.rs:69` | `assets/favicon-150x150.png` |
-| `agentmux-launcher/src/tray/linux.rs:138` | `assets/favicon-71x71.png` |
-| `agentmux-launcher/src/tray/windows.rs:401` | `assets/favicon-150x150.png` |
-| `agentmux-launcher/src/tray/windows.rs:517` | `assets/favicon-150x150.png` |
-| `agentmux-srv/src/backend/layout_file/tests.rs:367` | `schema/agentmux-layout.v1.schema.json` |
+| `agentmux-cef/src/macos_compat.rs:654` | [`assets/linux/icons/hicolor/512x512/apps/agentmux.png`](../../assets/linux/icons/hicolor/512x512/apps/agentmux.png) |
+| `agentmux-launcher/src/notify/windows.rs:69` | [`assets/favicon-150x150.png`](../../assets/favicon-150x150.png) |
+| `agentmux-launcher/src/tray/linux.rs:138` | [`assets/favicon-71x71.png`](../../assets/favicon-71x71.png) |
+| `agentmux-launcher/src/tray/windows.rs:401` | [`assets/favicon-150x150.png`](../../assets/favicon-150x150.png) |
+| `agentmux-launcher/src/tray/windows.rs:517` | [`assets/favicon-150x150.png`](../../assets/favicon-150x150.png) |
+| `agentmux-srv/src/backend/layout_file/tests.rs:367` | [`schema/agentmux-layout.v1.schema.json`](../../schema/agentmux-layout.v1.schema.json) |
 | `agentmux-srv/src/backend/wconfig/mod.rs:30` | `settings-template.jsonc` |
 
 The other `include_*` calls with `../` resolve inside their own crate (`../../resources/…` from
@@ -87,19 +87,19 @@ About 45 files outside the crates name a crate folder. The biggest groups:
 
 - **Workspace `Cargo.toml`:** `members = [...]` becomes `crates/*` entries (explicit list, not a glob,
   so a stray folder never joins the workspace).
-- **`.github/workflows/`:** `build-windows.yml`, `ci-nightly-build.yml`, `container-image.yml`,
+- **[`.github/workflows/`](../../.github/workflows):** `build-windows.yml`, `ci-nightly-build.yml`, `container-image.yml`,
   `srv-image.yml`, and any `--manifest-path`, `working-directory` or cache-key path.
-- **`scripts/`:** packaging (`package.sh`, `package-macos.sh`, `package-linux.sh`,
+- **[`scripts/`](../../scripts):** packaging (`package.sh`, `package-macos.sh`, `package-linux.sh`,
   `build-deb-linux.sh`), CEF verification (`verify-cef-*.sh`, `resolve-cef-runtime*.sh`), and gates
   (`check-name-resolver-callers.sh`, `check-rpc-bindings.sh`, `check-rpc-codegen-hygiene.mjs`,
   `check-muxbus-credential-store.sh`, `check-bundled-tools.sh`, `check-time-helpers.mjs`).
-- **Gate allowlists with hard-coded paths:** `scripts/check-time-helpers.allow` (91 entries) and the
-  test fixtures in `scripts/docs-stale-sweep.test.mjs` and `scripts/ci-classify-changes.test.mjs`.
+- **Gate allowlists with hard-coded paths:** [`scripts/check-time-helpers.allow`](../../scripts/check-time-helpers.allow) (91 entries) and the
+  test fixtures in [`scripts/docs-stale-sweep.test.mjs`](../../scripts/docs-stale-sweep.test.mjs) and [`scripts/ci-classify-changes.test.mjs`](../../scripts/ci-classify-changes.test.mjs).
   A missed allowlist entry makes a gate fail, which is loud but wastes a CI round.
-- **`docker/Dockerfile.agent-agentmux`** and any other `COPY agentmux-*/`.
-- **`Taskfile.yml`**, **`.gitignore`**, **`.vscode/`**, **`.claude/`** (skills that cite paths),
-  **`tools/tests/lib/instance-discovery.mjs`**.
-- **`scripts/ci-classify-changes.mjs`:** today it never classifies a crate change as docs-only
+- **[`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux)** and any other `COPY agentmux-*/`.
+- **`Taskfile.yml`**, **`.gitignore`**, **[`.vscode/`](../../.vscode)**, **[`.claude/`](../../.claude)** (skills that cite paths),
+  **[`tools/tests/lib/instance-discovery.mjs`](../../tools/tests/lib/instance-discovery.mjs)**.
+- **[`scripts/ci-classify-changes.mjs`](../../scripts/ci-classify-changes.mjs):** today it never classifies a crate change as docs-only
   (its docs-only list doesn't include crate folders). Confirm that still holds for
   `crates/*/docs/**` or any Markdown inside a crate, so Rust tests are never skipped.
 
@@ -117,8 +117,8 @@ Hits left in comments that describe history are fine; everything else must be go
 - **agentmux-docs:** `scripts/build-rust-docs.mjs` passes package names (`-p agentmux-srv`), which
   don't change. Its `src/agentmux` submodule is pinned to a commit, so nothing moves until it's
   bumped. After the bump, check `/api/rust/` still builds (that deploy now fails loudly, #137).
-- **CEF drift reporter (private infrastructure repo):** reads `scripts/cef-build/cef-runtime-pins.sh` and
-  `.github/workflows/release.yml`, neither of which moves. No change.
+- **CEF drift reporter (private infrastructure repo):** reads [`scripts/cef-build/cef-runtime-pins.sh`](../../scripts/cef-build/cef-runtime-pins.sh) and
+  [`.github/workflows/release.yml`](../../.github/workflows/release.yml), neither of which moves. No change.
 - **Private repos (ReAgent, dev tools, the cloud repo):** grep each for `agentmux-(srv|cef|…)/` paths
   (review prompts, scripts). Fix any hits in follow-up PRs in those repos.
 - **Agent instructions:** Global Memory, per-agent `CLAUDE.md`, Personal Memory and skills that
@@ -176,7 +176,7 @@ Validation before merge (all must pass):
 
 ### 5.4 After merge: rebasing a branch
 
-Commit 2 adds `scripts/migrate-branch-to-crates.sh`. Run it on any branch created before the move:
+Commit 2 adds [`scripts/migrate-branch-to-crates.sh`](../../scripts/migrate-branch-to-crates.sh). Run it on any branch created before the move:
 
 ```bash
 git fetch origin
@@ -188,8 +188,8 @@ The helper:
 
 - Finds files the branch added under an old folder
   (`git diff --name-only --diff-filter=A origin/main...HEAD`, filtered to `agentmux-*/`) and
-  `git mv`s each to its `crates/` path.
-- Rewrites `agentmux-<x>/` paths in files the branch changed, and bumps `../../frontend/types/rpc/`
+  `git mv`s each to its [`crates/`](../../crates) path.
+- Rewrites `agentmux-<x>/` paths in files the branch changed, and bumps [`../../frontend/types/rpc/`](../../frontend/types/rpc)
   in any new ts-rs `export_to` it finds.
 - Prints what it did and exits non-zero if anything is left under an old folder, so a
   half-migrated branch can't go green by accident.

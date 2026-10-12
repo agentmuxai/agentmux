@@ -86,7 +86,7 @@ is not a scroll-flash fix on its own.
 
 ## What PR #227 adds
 
-**`frontend/app/view/term/termwrap.ts`:**
+**[`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts):**
 
 ```
 scheduleRafWrite()

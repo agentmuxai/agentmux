@@ -66,7 +66,7 @@ npx -p @agentmuxai/widget-sdk agentmux-widget sign ./acme.pr-dashboard --key ~/.
 npx -p @agentmuxai/widget-sdk agentmux-widget verify ./acme.pr-dashboard            # prints the fingerprint
 ```
 
-`sign` computes §8.2's hash exactly as srv does, so a package that verifies with `verify` verifies in AgentMux. The fixture `sdk/widget-sdk/fixtures/acme.fixture/` (stored byte-exact, `-text`) is signed with a fixed test seed; srv's `widget_signature.rs` and the SDK's `widget-sign.test.ts` both check its hash, signature and fingerprint. Signing is the last step: any edit afterwards breaks the signature (`invalid`) until the package is signed again.
+`sign` computes §8.2's hash exactly as srv does, so a package that verifies with `verify` verifies in AgentMux. The fixture [`sdk/widget-sdk/fixtures/acme.fixture/`](../../sdk/widget-sdk/fixtures/acme.fixture) (stored byte-exact, `-text`) is signed with a fixed test seed; srv's `widget_signature.rs` and the SDK's `widget-sign.test.ts` both check its hash, signature and fingerprint. Signing is the last step: any edit afterwards breaks the signature (`invalid`) until the package is signed again.
 
 ### 2.5 What a signature doesn't mean
 
@@ -76,7 +76,7 @@ It names a key, not a person, and it says nothing about what the code does. The 
 
 ### 3.1 Today
 
-A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`, `bundle_import.rs`): instructions, per-provider instructions, context files and skills, all text. Import is preview, then commit, bound by a content digest (`bundle.import.preview`, `bundle.import.commit`, the three import modals in `frontend/app/view/bundle/components/`). Nothing in a bundle runs code, and nothing is signed; non-UTF-8 entries are skipped.
+A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`, `bundle_import.rs`): instructions, per-provider instructions, context files and skills, all text. Import is preview, then commit, bound by a content digest (`bundle.import.preview`, `bundle.import.commit`, the three import modals in [`frontend/app/view/bundle/components/`](../../frontend/app/view/bundle/components)). Nothing in a bundle runs code, and nothing is signed; non-UTF-8 entries are skipped.
 
 ### 3.2 The format: a `widgets` component
 
@@ -123,7 +123,7 @@ A public list of sandboxed widgets, browsable in Settings → Widgets → **Brow
 |---|---|---|---|
 | **A. A public repo `agentmuxai/widgets`** (recommended) | One folder per widget (`widgets/<id>/`, its source), submitted by PR; CI validates and builds `index.json` and one `.zip` per version, published with GitHub Pages | Contributions and review are PRs; CI checks every rule before a human looks; history of every version; independent of app and docs releases | One more public repo to own |
 | B. The docs site | `agentmux-docs` serves `index.json` and the zips next to the docs | No new repo | Widget submissions mixed with docs PRs; a catalog change waits for a docs deploy |
-| C. The app repo | `docs/examples/widgets/` is the catalog | Nothing new | Only AgentMux's own samples; every catalog change is an app PR |
+| C. The app repo | [`docs/examples/widgets/`](../examples/widgets) is the catalog | Nothing new | Only AgentMux's own samples; every catalog change is an app PR |
 
 ### 4.3 The index
 

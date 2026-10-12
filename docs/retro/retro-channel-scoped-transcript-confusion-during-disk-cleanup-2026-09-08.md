@@ -79,7 +79,7 @@ window I was looking at.
 The junction mechanism answers "is the transcript safe" — it does not answer "why is
 `channels/` still 3.2 GB of mostly-dead directories." Two things confirmed separately:
 
-- **`docs/specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`** (Status: **Draft**) proposes exactly
+- **[`docs/specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`](../specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md)** (Status: **Draft**) proposes exactly
   the pipe-liveness-based pruner this problem needs. **No `pruner.rs` exists anywhere in the
   tree** — it was never built. CLAUDE.md's own text already says as much: *"pruning them
   safely needs the launcher's pipe-liveness signal, so it's a tracked follow-up... Clean up

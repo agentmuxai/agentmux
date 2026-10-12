@@ -4,7 +4,7 @@
 **Type:** Design resolution (answers the four open questions gating Pillar 1)
 **Status:** Conclusions agreed — ready to turn into a sized implementation spec
 **Owner:** asaf
-**Resolves:** Q1–Q4 in `docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md` §7
+**Resolves:** Q1–Q4 in [`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`](../architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md) §7
 **Builds on:** `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` (Pillar 1), Pillar 2/3 merged work
 
 > Purpose: close the four open questions that gate Pillar 1 (host becomes a disposable
@@ -89,7 +89,7 @@ Full field inventory from `agentmux-cef/src/state.rs` + `reducer/`, grouped by d
 
 #### 2.A.1 — Correction (2026-07-07): the window-set row above was wrong
 
-Verified against source, not assumed (see `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md` for the full citations). Two separate facts were conflated in the original table:
+Verified against source, not assumed (see [`docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) for the full citations). Two separate facts were conflated in the original table:
 
 - **What IS durable:** `Client.windowids: Vec<String>` (SQLite) — the *list of window ids that should exist* survives a full kill of launcher + host + srv (same data dir). A crash never calls `CloseWindow`, so a crash-killed window's id is never pruned.
 - **What is NOT durable, anywhere:** `Window`'s persisted row (`agentmux-srv/src/backend/obj.rs`) has no `kind` or `parent` field at all. `WindowKind` (`FullInstance`/`Subwindow`) and parent linkage live only in the **launcher's** in-memory `WindowMirror` map (`agentmux-launcher/src/state.rs`) — a third process, separate from both host and srv, with **zero disk persistence** (grepped the whole launcher state/reducer for save/load/serde/sqlite — nothing). Killing the launcher loses this instantly.
@@ -201,11 +201,11 @@ independent of Pillar 1 and can land anytime.
 3. ✅ **Persist window `kind` + parent linkage to srv** — corrected scope (2026-07-07): this was
    **not** an "audit + close small gaps" step as originally written. `kind`/parent had no srv
    representation at all before this (§2.A.1). Sized as its own spec, both phases done, merged,
-   live-verified: `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`.
+   live-verified: [`docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md).
 4. ⬜ **Fire the cold-start restore path on crash** (mid-session reproject) + the "Restoring session…"
    overlay; ensure in-flight (2.C) work is **re-derived from topology, not resumed**. **Sized design
    spec written 2026-07-07, not yet implemented:**
-   `docs/specs/SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md`. Key design: a two-tier reproject —
+   [`docs/specs/SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md`](SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md). Key design: a two-tier reproject —
    prefer the launcher's live in-memory window snapshot (survives a host-only crash, richer/faster;
    the wire protocol already exists as `Command::GetSnapshot`/`Event::Snapshot` but has never been
    called from the host) and fall back to srv's durable `Client.windowids` + Step 3's `kind`/
@@ -246,6 +246,6 @@ independent of Pillar 1 and can land anytime.
 - Event-sourcing snapshotting / background write-through latency —
   https://www.kurrent.io/blog/snapshots-in-event-sourcing/ ·
   https://domaincentric.net/blog/event-sourcing-snapshotting
-- Internal: `docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md` §7 (Q1–Q4),
-  `docs/specs/SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` (Pillar 1), `state.rs` inventory,
+- Internal: [`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`](../architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md) §7 (Q1–Q4),
+  [`docs/specs/SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md`](SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md) (Pillar 1), `state.rs` inventory,
   issue **#864** (layout single write path).

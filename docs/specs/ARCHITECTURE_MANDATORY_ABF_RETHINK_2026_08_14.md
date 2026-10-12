@@ -9,17 +9,17 @@ only build-order item still open, and was written as "(if wanted)". Live artifac
 readonly-once-set enforcement in `agentmux-srv/src/server/app_api/bundle.rs:125-147`.
 Restamped 2026-09-16 — this line read "DECISIONS RESOLVED, NOT YET IMPLEMENTED" for a
 month after the implementation landed the following day, which led
-`docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §4.1 to score it as
+[`docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md`](../reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md) §4.1 to score it as
 the repo’s largest fully-designed-but-unbuilt initiative. It is not. §7 (harness+model as
 readonly portable ABF fields) remains the genuinely open part — see §7.0’s correction.
 Extended same-day (§7) with a portability idea: harness + model as readonly ABF fields, so
 an ABF becomes the portable unit instead of "the agent." All open questions (§2, §5, §7.4)
 resolved as of this revision — §7.5 is the build order.
 **Author:** AgentY (agenty-0629j), at operator request
-**Related:** `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
-`docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md`,
-`docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`,
+**Related:** [`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md),
+[`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md),
+[`docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md`](archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md),
+[`docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md),
 PR #2505 ("model vendor as a concept distinct from harness", merged
 2026-08-10), PR #2558 ("expose model vendor / custom endpoint UI + add
 Antigravity harness", merged 2026-08-13). NOT related despite superficially
@@ -102,7 +102,7 @@ real pick, and even that can be bypassed via the template-clone path.
 
 ### 1.3 No UI surfaces "this agent has no bundle" at all
 
-`frontend/app/view/bundle-summary.tsx` — the Identity/Memory tab in the agent
+[`frontend/app/view/bundle-summary.tsx`](../../frontend/app/view/bundle-summary.tsx) — the Identity/Memory tab in the agent
 settings pane was deliberately stripped of CRUD in
 `SPEC_BUNDLE_MANAGEMENT_2026_05_22.md` and now just points at Armory. Its own
 comment flags a **DATA GAP**: the panel can't even resolve which bundle is
@@ -337,7 +337,7 @@ convention seen elsewhere, e.g. the ABF v0.2 spec's own phased rollout):
    fix only matters for pre-existing persisted layouts with one still
    open; still worth doing correctly and cheaply given the established
    pattern already existed. 5 new tests
-   (`frontend/app/view/bundle-summary.test.tsx`) covering the
+   ([`frontend/app/view/bundle-summary.test.tsx`](../../frontend/app/view/bundle-summary.test.tsx)) covering the
    agent-bound/unbound/failed-resolve/absent-agentId/wrong-agent cases.
 2. **DONE (2026-08-15).** Backfill migration `m0021` for existing agents.
    Turned out to need a real schema addition first —
@@ -493,7 +493,7 @@ a cached field on `AgentDefinition`.
 guessed): `agent.provider` is read at ~10+ call sites within
 `agentmux-srv/src/server/app_api/agent_open.rs` alone (CLI path resolution,
 launch args, auth dir, container command, output format, meta tags, etc.)
-and a similar spread in `frontend/app/view/agent/agent-model.ts`
+and a similar spread in [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts)
 (`agent.provider` at lines 325/327/343/345/628/747). Rewiring every
 individual site is unnecessary churn. Instead: resolve `provider` and
 `model_vendor_base_url` **once, early**, via a bundle lookup keyed by
@@ -726,6 +726,6 @@ Rust side mirrored before this).
   `identity/resolver/inject.rs`, `storage/store/tests.rs`. Fixed with a
   second pass handling both shapes; verified with a broader sweep for
   any other field showing the same pattern (none found).
-- Added the missing `.changesets/` entry this feature PR should have had
+- Added the missing [`.changesets/`](../../.changesets) entry this feature PR should have had
   from the start per CLAUDE.md's mandatory changesets workflow (new
   schema column, new RPC behavior, new UI) — `minor` bump.

@@ -2,8 +2,8 @@
 
 **Date:** 2026-05-26
 **Status:** Proposed
-**Extends:** `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (Windows-only; §10 explicitly defers cross-platform)
-**Pairs with:** `docs/analysis/ANALYSIS_FLOATING_PANE_TEAROFF_STATE_2026-05-26.md`
+**Extends:** [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) (Windows-only; §10 explicitly defers cross-platform)
+**Pairs with:** [`docs/analysis/ANALYSIS_FLOATING_PANE_TEAROFF_STATE_2026-05-26.md`](../analysis/ANALYSIS_FLOATING_PANE_TEAROFF_STATE_2026-05-26.md)
 
 ---
 
@@ -319,7 +319,7 @@ shipped May 11.
 ## 7. References
 
 ### Phase 1 + parent spec
-- `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` — Windows-only base
+- [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) — Windows-only base
   spec; §10 defers cross-platform to this doc.
 - `agentmux-cef/src/floating_pane.rs` — Phase 1 Win32 primitive.
 - `frontend/app/floating-pane/floating-pane-shell.tsx` — placeholder

@@ -9,11 +9,11 @@
 ## 1. Problem
 
 A page in a browser pane that calls `window.open` (or a form with `target=_blank` that the host
-treats as a popup) goes one of two ways today (`crates/cef/src/client/lifecycle.rs`,
+treats as a popup) goes one of two ways today ([`crates/cef/src/client/lifecycle.rs`](../../crates/cef/src/client/lifecycle.rs),
 `on_before_popup`):
 
 - **A known sign-in provider's authorization URL** (`is_known_idp_host` and
-  `is_oauth_authorization_url`, `crates/cef/src/commands/platform.rs`): a real CEF child popup,
+  `is_oauth_authorization_url`, [`crates/cef/src/commands/platform.rs`](../../crates/cef/src/commands/platform.rs)): a real CEF child popup,
   which shares the opener's cookies and keeps `window.opener` and `postMessage` working.
 - **Anything else with an http(s) URL:** the system browser (`open_url_in_default_browser`). The
   popup leaves AgentMux, takes none of the pane's session with it, and cannot return a result to
@@ -28,7 +28,7 @@ Two separate gaps:
 
 1. **Wrong place.** The popup is outside AgentMux, outside the pane's profile.
 2. **Not drivable.** Even the allowlisted OAuth popup has no block id and no `browser_panes`
-   entry; `TargetCache::resolve` (`crates/cef/src/browser_api/resolver.rs`) deliberately never
+   entry; `TargetCache::resolve` ([`crates/cef/src/browser_api/resolver.rs`](../../crates/cef/src/browser_api/resolver.rs)) deliberately never
    returns it. An agent that opened the opener cannot snapshot, click, or hand off in it.
 
 ## 2. Goals
@@ -68,7 +68,7 @@ Two options, in order of preference:
 
 | | Option | Opener link | Cost |
 |---|---|---|---|
-| **A** | **A floating pane** (the existing floater kind, `crates/cef/src/floating_pane.rs`), hosting the CEF child popup | kept | the Chrome runtime owns the popup window and ignores `on_popup_browser_view_created` sizing (`app/mod.rs`); reparenting it into a floater is the unknown. Needs a spike. |
+| **A** | **A floating pane** (the existing floater kind, [`crates/cef/src/floating_pane.rs`](../../crates/cef/src/floating_pane.rs)), hosting the CEF child popup | kept | the Chrome runtime owns the popup window and ignores `on_popup_browser_view_created` sizing (`app/mod.rs`); reparenting it into a floater is the unknown. Needs a spike. |
 | **B** | **A sibling pane in the same window**, the URL loaded as a normal navigation | lost | no `window.opener`, so a flow that posts its result back to the opener (some sign-in and payment widgets) does not complete. Redirect-based flows do. |
 
 Recommendation: ship **B** first (P1) because it needs no new window machinery and covers
@@ -141,11 +141,11 @@ then inherit the opener's identity rather than the default context.
 
 | Part | Change |
 |---|---|
-| `crates/cef/src/client/lifecycle.rs`, `handlers.rs` | `on_before_popup` takes the user-gesture flag; a non-OAuth popup from a browser pane goes to srv from a background thread (`offer_popup_as_pane`), with the system browser as the fallback |
-| `crates/cef/src/client/helpers.rs` | `backend_browser_popup` over a shared `post_as_host` (also used by `backend_browser_attention`) |
-| `crates/srv/src/server/browser_popup.rs` | the §3.1 rule (`decide`, `same_site` on the public suffix list via the `psl` crate), the cap, the opener-to-popups record |
-| `crates/srv/src/server/ui_handlers.rs`, `routes.rs` | `POST /api/v1/host/browser_popup`; the popup opens through `open_pane` beside the opener with `browser:popup_of`, `browser:popup_from`, and an inherited `browser:owner_agent`; snapshots gain `popups` |
-| `crates/srv/src/server/browser_owner.rs` | clients may not write `browser:popup_of` or `browser:popup_from` |
+| [`crates/cef/src/client/lifecycle.rs`](../../crates/cef/src/client/lifecycle.rs), `handlers.rs` | `on_before_popup` takes the user-gesture flag; a non-OAuth popup from a browser pane goes to srv from a background thread (`offer_popup_as_pane`), with the system browser as the fallback |
+| [`crates/cef/src/client/helpers.rs`](../../crates/cef/src/client/helpers.rs) | `backend_browser_popup` over a shared `post_as_host` (also used by `backend_browser_attention`) |
+| [`crates/srv/src/server/browser_popup.rs`](../../crates/srv/src/server/browser_popup.rs) | the §3.1 rule (`decide`, `same_site` on the public suffix list via the `psl` crate), the cap, the opener-to-popups record |
+| [`crates/srv/src/server/ui_handlers.rs`](../../crates/srv/src/server/ui_handlers.rs), `routes.rs` | `POST /api/v1/host/browser_popup`; the popup opens through `open_pane` beside the opener with `browser:popup_of`, `browser:popup_from`, and an inherited `browser:owner_agent`; snapshots gain `popups` |
+| [`crates/srv/src/server/browser_owner.rs`](../../crates/srv/src/server/browser_owner.rs) | clients may not write `browser:popup_of` or `browser:popup_from` |
 | `agentmux-mcp` | the snapshot lists popups; `BrowserSnapshot`'s description says how |
 | frontend | the "Popup from <site>" strip (`popupFromAtom`); the two meta keys in `MetaType` |
 

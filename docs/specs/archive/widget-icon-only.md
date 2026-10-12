@@ -44,10 +44,10 @@ When enabled, tooltips continue to show the widget label/description on hover, s
 
 | File | Change |
 |------|--------|
-| `schema/settings.json` | Add `widget:icononly` (boolean) to schema |
+| [`schema/settings.json`](../../../schema/settings.json) | Add `widget:icononly` (boolean) to schema |
 | `frontend/types/gotypes.d.ts` | Add `widget:icononly?: boolean` to `SettingsType` |
 | `agentmuxsrv-rs/src/backend/wconfig.rs` | Add `widget_icon_only: Option<bool>` to Rust `SettingsType` |
-| `frontend/app/window/action-widgets.tsx` | Read setting, pass to `ActionWidget`, add context menu toggle |
+| [`frontend/app/window/action-widgets.tsx`](../../../frontend/app/window/action-widgets.tsx) | Read setting, pass to `ActionWidget`, add context menu toggle |
 
 ### Frontend Detail
 
@@ -93,7 +93,7 @@ Follows the same pattern as `widget_show_help`. No additional backend logic — 
 
 ### Schema
 
-Added to `schema/settings.json` under the `widget:*` group:
+Added to [`schema/settings.json`](../../../schema/settings.json) under the `widget:*` group:
 ```json
 "widget:icononly": {
   "type": "boolean"

@@ -4,7 +4,7 @@
 **Type:** Implementation spec
 **Status:** proposed — Ready to schedule
 **Owner:** asaf
-**Scope:** `agentmux-srv` (model-catalog fetch + cache + RPC) and `frontend/app/view/agent`
+**Scope:** `agentmux-srv` (model-catalog fetch + cache + RPC) and [`frontend/app/view/agent`](../../frontend/app/view/agent)
 (registry overlay + dropdown convergence).
 
 > **Problem.** The agent-pane model dropdown is a hand-curated list. Its `value`s are family aliases
@@ -34,7 +34,7 @@ same catalog, same fallback) — share that infrastructure rather than build a p
 
 ## 2. Current state (what exists today)
 
-- **TS registry** `frontend/app/view/agent/providers/index.ts`: `ProviderModel = { value, label, default?,
+- **TS registry** [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts): `ProviderModel = { value, label, default?,
   description?, aliases? }` (`:36-42`); Claude's hardcoded list at `:196-200` (alias values, curated
   labels). Comment `:185-195` documents that labels are hand-synced on pin bumps — the drift source.
 - **Rust `ProviderConfig`** `agentmux-srv/src/backend/providers.rs:33-83` carries `pinned_version` (`:77`;

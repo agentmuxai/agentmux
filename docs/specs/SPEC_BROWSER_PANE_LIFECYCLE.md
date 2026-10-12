@@ -17,8 +17,8 @@ A single browser pane is co-owned by four authorities. None of them holds the tr
 
 | Owner | Identifier | Where | What it stores |
 |-------|------------|-------|----------------|
-| Layout tree | `nodeId` -> `TabLayoutData{blockId}` | `frontend/layout/lib/layoutModel.ts` | tree topology |
-| ViewModel + React/Solid | `BlockComponentModel{blockId}` | `frontend/app/block/block.tsx:267-282` | UI state, atoms |
+| Layout tree | `nodeId` -> `TabLayoutData{blockId}` | [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) | tree topology |
+| ViewModel + React/Solid | `BlockComponentModel{blockId}` | [`frontend/app/block/block.tsx:267-282`](../../frontend/app/block/block.tsx#L267-L282) | UI state, atoms |
 | Rust pane manager | `block_id -> label` | `agentmux-cef/src/browser_panes.rs:20` | label mapping |
 | AppState + CEF | `label -> Browser` (CEF holds HWND) | `agentmux-cef/src/state.rs:206`, Chromium internal | HWND, render process |
 
@@ -82,9 +82,9 @@ User report: "I close the pane and the pane closes but the browser content remai
 
 Trace, with file/line cites:
 
-1. User clicks "Close Block". `frontend/layout/lib/layoutMagnify.ts:40` `closeNode` runs `treeReducer(DeleteNode)` then `await model.onNodeDelete(data)`.
-2. `frontend/app/tab/tabcontent.tsx:62` calls `services.ObjectService.DeleteBlock(blockId)` — backend removes the block.
-3. SolidJS reacts to `blockData` becoming null in `frontend/app/block/block.tsx:267`. The Block component unmounts. `onCleanup` at `block.tsx:279` runs `viewModel().dispose()` which is a no-op (`browser-model.ts:172`).
+1. User clicks "Close Block". [`frontend/layout/lib/layoutMagnify.ts:40`](../../frontend/layout/lib/layoutMagnify.ts#L40) `closeNode` runs `treeReducer(DeleteNode)` then `await model.onNodeDelete(data)`.
+2. [`frontend/app/tab/tabcontent.tsx:62`](../../frontend/app/tab/tabcontent.tsx#L62) calls `services.ObjectService.DeleteBlock(blockId)` — backend removes the block.
+3. SolidJS reacts to `blockData` becoming null in [`frontend/app/block/block.tsx:267`](../../frontend/app/block/block.tsx#L267). The Block component unmounts. `onCleanup` at `block.tsx:279` runs `viewModel().dispose()` which is a no-op (`browser-model.ts:172`).
 4. The `BrowserViewComponent` unmounts. `onCleanup` at `browser-view.tsx:100` runs:
    - `resizeObserver.disconnect()` OK
    - `clearInterval(positionInterval)` OK
@@ -272,9 +272,9 @@ Frontend:
 - `agentmux-cef/src/ipc.rs:289-360`
 - `agentmux-cef/src/state.rs:206-218`
 - `agentmux-cef/src/commands/window.rs:239-268`
-- `frontend/app/view/browser/browser-model.ts:151-172`
+- [`frontend/app/view/browser/browser-model.ts:151-172`](../../frontend/app/view/browser/browser-model.ts#L151-L172)
 - `frontend/app/view/browser/browser-view.tsx:34-106,159-167`
-- `frontend/app/block/block.tsx:267-282`
-- `frontend/app/store/focusManager.ts:37-49`
-- `frontend/layout/lib/layoutMagnify.ts:40-70`
-- `frontend/app/tab/tabcontent.tsx:59-69`
+- [`frontend/app/block/block.tsx:267-282`](../../frontend/app/block/block.tsx#L267-L282)
+- [`frontend/app/store/focusManager.ts:37-49`](../../frontend/app/store/focusManager.ts#L37-L49)
+- [`frontend/layout/lib/layoutMagnify.ts:40-70`](../../frontend/layout/lib/layoutMagnify.ts#L40-L70)
+- [`frontend/app/tab/tabcontent.tsx:59-69`](../../frontend/app/tab/tabcontent.tsx#L59-L69)

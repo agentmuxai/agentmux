@@ -376,7 +376,7 @@ rather than a co-located snapshot field. This creates two sources of truth that 
 - `agentmux-srv/src/backend/agent_session.rs` — write/read state, normalize, heal
 - `agentmux-srv/src/backend/session_backfill.rs` — startup session_id backfill
 - `agentmux-srv/src/server/app_api.rs:1066` — `global_output_source` (empty-local guard)
-- `frontend/app/view/agent/hooks/useHistoryPagination.ts` — v2SameBlock, hwm re-derive
-- `frontend/app/view/agent/agent-view.tsx:384` — `writeSnapshotNow`
+- [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts) — v2SameBlock, hwm re-derive
+- [`frontend/app/view/agent/agent-view.tsx:384`](../../frontend/app/view/agent/agent-view.tsx#L384) — `writeSnapshotNow`
 - `docs/retro/retro-naki-history-recovery-all-attempts-2026-06-16.md` — incident history
-- `docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md` — data layout
+- [`docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md`](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md) — data layout

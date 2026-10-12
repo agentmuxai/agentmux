@@ -31,31 +31,31 @@ preserving today's "drag the whole Pane by its header" gesture now that the
 header *is* the tab strip, including reserving enough non-tab space in the
 header row to grab for that gesture when the strip is scrolled to its end.
 **Companion / supersedes-the-deferral-in:**
-`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` §4.8 (scoped
+[`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) §4.8 (scoped
 this work out, named it "Phase 4," gated it on the drag-session refactor) and
-`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md` (Task Group
+[`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) (Task Group
 C's "still genuinely deferred" list: *"Tab reorder (drag + keyboard) and
 tear-off-from-stack ... both explicitly gated behind the separate drag-session
 refactor"*). This document is that deferred work, scoped concretely instead of
 left open.
-**Builds on (backend):** `docs/specs/SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md`
+**Builds on (backend):** [`docs/specs/SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md)
 §6 ("Not in scope: Dragging a tab between panes... when they're built they
 should be commands here (`LayoutStackMove`), not whole-tree pushes") — this
 spec is that follow-up.
 **Must read before touching drag or render state (per the universal redesign
 spec's own citation list, still true here):**
-`docs/specs/SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md` (Draft,
+[`docs/specs/SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md`](SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md) (Draft,
 **never implemented** — `dragSession.ts` does not exist in the tree as of this
 writing; 6 diagnosed architectural defects behind 4 rounds of dead-tab
 incidents; do not add a new pile of scattered drag state on top of this),
-`docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` (§3.1/3.2's
+[`docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md`](SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md) (§3.1/3.2's
 global epoch/transaction model — rejected after 4 review passes, do not
-re-propose), `docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md`
+re-propose), [`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md`](../retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md)
 (this repo's most recent, and explicitly shelved, from-scratch drag rewrite —
 read its "Related history" section before assuming a clean slate; the
 project's own recorded lesson from that session was *"stop broadening
 scope."* This spec is written under that discipline — see §2 Non-goals).
-**Prior art reused, not reinvented:** `docs/specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`
+**Prior art reused, not reinvented:** [`docs/specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md)
 (the existing whole-pane-drag machinery: spring-loaded tab-bar hover-switch,
 the ghost/`ComputeMove` ride-along preview, the `RedockFloatingPane`-style
 saga-plus-layout-queue pattern) and the existing pane tear-off-to-floating-window
@@ -79,10 +79,10 @@ never the Window Tab bar.
 
 ### 1.1 The whole-Pane drag handle is the ENTIRE header row, and nothing inside it currently competes
 
-- `BlockFrame_Header` (`frontend/app/block/blockframe.tsx:520-530`) attaches
+- `BlockFrame_Header` ([`frontend/app/block/blockframe.tsx:520-530`](../../frontend/app/block/blockframe.tsx#L520-L530)) attaches
   `props.nodeModel.dragHandleRef` to the **outer header `<div class="block-frame-default-header" data-role="block-header">`** — the whole row, not a sub-element.
 - The actual `draggable()` (pragmatic-dnd) registration is in
-  `frontend/layout/lib/TileLayout.core.tsx:441-488`, which re-queries
+  [`frontend/layout/lib/TileLayout.core.tsx:441-488`](../../frontend/layout/lib/TileLayout.core.tsx#L441-L488), which re-queries
   `tileNodeRef?.querySelector('[data-role="block-header"]')` fresh each time
   (two components can write the ref — primary header + its ErrorBoundary
   fallback — so it doesn't trust the ref directly). `canDrag` already gates on
@@ -110,7 +110,7 @@ never the Window Tab bar.
 ### 1.2 The header row's "dead space" that whole-Pane drag relies on shrinks to zero once tabs overflow
 
 Header row children, in DOM order (`blockframe.tsx:534-585`,
-`frontend/app/mixins.scss`):
+[`frontend/app/mixins.scss`](../../frontend/app/mixins.scss)):
 
 | Element | Flex behavior | Source |
 |---|---|---|
@@ -145,10 +145,10 @@ the three new drop behaviors this spec needs:
 
 1. **Spring-loaded hover-then-commit** (today: dragging a *whole Pane* over
    the *outer Window Tab bar*). State lives entirely in
-   `frontend/app/tab/tabbar-dnd.ts`: `SPRING_SWITCH_MS = 500`
+   [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts): `SPRING_SWITCH_MS = 500`
    (`tabbar-dnd.ts:68`), `hoveredDropTabId` signal (`:55`),
    `dragActivatedTabIds` Set (`:74`). The dwell timer + drop target is
-   `frontend/app/tab/droppable-tab.tsx:220-275`'s
+   [`frontend/app/tab/droppable-tab.tsx:220-275`](../../frontend/app/tab/droppable-tab.tsx#L220-L275)'s
    `dropTargetForElements({ canDrop: source.data.type === tileItemType,
    onDragEnter: () => { setHoveredDropTabId(...); springTimer =
    setTimeout(...) }, onDragLeave: clearSpring, onDrop: ... })`, registered
@@ -156,7 +156,7 @@ the three new drop behaviors this spec needs:
    itself (tab reordering) — direct precedent for a tab pill needing to be
    simultaneously a drag source and a drop target (§3.4).
 2. **Ghost/`ComputeMove` split preview** (today: dragging a whole Pane over
-   *another Pane's content*). `frontend/layout/lib/tilelayout-shared.tsx`'s
+   *another Pane's content*). [`frontend/layout/lib/tilelayout-shared.tsx`](../../frontend/layout/lib/tilelayout-shared.tsx)'s
    `OverlayNode` registers a per-leaf `dropTargetForElements`
    (`:436-460`) that computes a drop quadrant (`determineDropDirection`/
    `clampCrossTabDirection`), dispatches `LayoutTreeActionType.ComputeMove`
@@ -166,7 +166,7 @@ the three new drop behaviors this spec needs:
    §3.3 for the one thing that has to change (the commit target is a single
    block, not a whole node).
 3. **Tear off to a floating window** (today: dragging a whole Pane, or a
-   whole Window Tab, out of the window). `frontend/app/drag/CrossWindowDragMonitor.win32.tsx`'s
+   whole Window Tab, out of the window). [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx)'s
    `handleCrossWindowDragEnd` (`:186-256`) calls `performTearOff`, which
    branches on `dragType`:
    - `"tile"` (a Pane): measures pane size, calls
@@ -184,7 +184,7 @@ the three new drop behaviors this spec needs:
    `SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md` Phase 0 (#3414, already
    merged) changed the queued `delete` pending-action's semantics from "delete
    the whole leaf" to "remove this one block, delete the leaf only if it was
-   the last member" (`frontend/layout/lib/stackMembers.ts`,
+   the last member" ([`frontend/layout/lib/stackMembers.ts`](../../frontend/layout/lib/stackMembers.ts),
    `agentmux-srv/src/backend/layout/mod.rs:256-276`
    `remove_stack_member`, wired into `LayoutDeleteNodeByBlock`,
    `agentmux-srv/src/reducer/layout.rs:414-438`). **Confirm this during
@@ -223,7 +223,7 @@ indirectly via Phase 0/1.
 ## 2. Non-goals (scope discipline — read this before writing any code)
 
 This repo has a long, repeatedly-shelved history of drag/tear-off rewrites
-(`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md` lists
+([`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md`](../retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md) lists
 over twenty prior branches touching this area). The explicit, repo-owner-given
 lesson from the most recent attempt was to **stop broadening scope**. This
 spec is deliberately narrow:

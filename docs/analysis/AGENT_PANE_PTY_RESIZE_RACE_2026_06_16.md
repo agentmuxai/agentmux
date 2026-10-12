@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-16
 **Status:** Implemented 2026-06-16 (Layers A+B+C below). See changeset `.changesets/1781651181-fix-agent-seed-pty-size-at-spawn-*.md`.
-**Component:** `frontend/app/view/agent/hooks/usePtyWidth.ts` ↔ `agentmux-srv/src/backend/blockcontroller/shell.rs`
-**Related:** `docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md` (the dynamic-resize feature this race lives inside)
+**Component:** [`frontend/app/view/agent/hooks/usePtyWidth.ts`](../../frontend/app/view/agent/hooks/usePtyWidth.ts) ↔ `agentmux-srv/src/backend/blockcontroller/shell.rs`
+**Related:** [`docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md`](AGENT_PANE_PTY_WRAP_2026_05_23.md) (the dynamic-resize feature this race lives inside)
 
 ---
 
@@ -267,12 +267,12 @@ the whole retry window on every cold start. (A) removes the race; widening only 
 
 | Order | File | Change |
 |---|---|---|
-| A1 | `frontend/app/view/agent/hooks/usePtyWidth.ts` | Export a reusable `computeColsForElement(el)`; keep `computeCols` pure. |
-| A2 | `frontend/app/view/agent/flows/launch-flow.ts` | Compute `{rows, cols}` pre-resync; pass via `rt_opts`/block-meta to `ControllerResyncCommand`. |
+| A1 | [`frontend/app/view/agent/hooks/usePtyWidth.ts`](../../frontend/app/view/agent/hooks/usePtyWidth.ts) | Export a reusable `computeColsForElement(el)`; keep `computeCols` pure. |
+| A2 | [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) | Compute `{rows, cols}` pre-resync; pass via `rt_opts`/block-meta to `ControllerResyncCommand`. |
 | A3 | `agentmux-srv/src/backend/blockcontroller/shell.rs` | Read rows/cols from options/meta in `start()`; clamp; use for `pty_size` (replace hardcoded `200×25`); default-fallback. |
 | B1 | `agentmux-srv/src/backend/blockcontroller/shell.rs` | Move `publish_status()` (357) to after `input_tx = Some(..)` (367). |
-| B2 | `frontend/app/view/agent/hooks/usePtyWidth.ts` | Gate the *initial* send on the `controllerstatus:"running"` event; keep observer-driven sends immediate. |
-| C1 | `frontend/app/view/agent/hooks/usePtyWidth.ts` | Classify retryable errors; add jitter; small cap. |
+| B2 | [`frontend/app/view/agent/hooks/usePtyWidth.ts`](../../frontend/app/view/agent/hooks/usePtyWidth.ts) | Gate the *initial* send on the `controllerstatus:"running"` event; keep observer-driven sends immediate. |
+| C1 | [`frontend/app/view/agent/hooks/usePtyWidth.ts`](../../frontend/app/view/agent/hooks/usePtyWidth.ts) | Classify retryable errors; add jitter; small cap. |
 
 Tests: extend `usePtyWidth` `__test__` unit checks (cols math + NaN guard); add a backend test
 that `start()` honors a passed-in size and that `"running"` is published only after `input_tx`

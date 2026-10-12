@@ -157,9 +157,9 @@ const handleDragOver = (e: DragEvent) => {
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tabbar.tsx` | Add signals, wire visual feedback, add dragEnd/dragLeave handlers |
-| `frontend/app/tab/tabbar.scss` | No changes needed — CSS already complete |
-| `frontend/app/tab/tab.tsx` | No changes needed — already accepts isDragging prop |
+| [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx) | Add signals, wire visual feedback, add dragEnd/dragLeave handlers |
+| [`frontend/app/tab/tabbar.scss`](../../../frontend/app/tab/tabbar.scss) | No changes needed — CSS already complete |
+| [`frontend/app/tab/tab.tsx`](../../../frontend/app/tab/tab.tsx) | No changes needed — already accepts isDragging prop |
 
 ---
 

@@ -8,7 +8,7 @@
 
 ## 1. Goal / context
 
-AgentMux embeds messaging apps as two layers: a **pane** (a `browser` widget pointed at the real web app) and a **bridge** (a background process that lets an agent read/send messages through that same app). The full cross-platform architecture, decision matrix, and original per-platform protocol research live in `docs/specs/SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md` §1–§3.3 — read that first; this spec does not re-derive the Slack protocol from scratch, it translates the plan's §3.3 research into the actual Rust module shape this repo uses.
+AgentMux embeds messaging apps as two layers: a **pane** (a `browser` widget pointed at the real web app) and a **bridge** (a background process that lets an agent read/send messages through that same app). The full cross-platform architecture, decision matrix, and original per-platform protocol research live in [`docs/specs/SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md`](SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md) §1–§3.3 — read that first; this spec does not re-derive the Slack protocol from scratch, it translates the plan's §3.3 research into the actual Rust module shape this repo uses.
 
 The Slack **pane** already shipped: `agentmux-srv/src/config/widgets.json` lines 136–150 define `defwidget@slack` as a `browser` widget pointed at `https://app.slack.com/`, description `"Slack — real interface, agent-connected (bridge Phase 2)"`. This spec is that "Phase 2" — the bridge.
 
@@ -375,7 +375,7 @@ Routing logic in the handler: if `blocks` is `Some`, use it as-is (full power, c
 
 ## 8. `MessagingBridge` trait compatibility
 
-As of this writing there is no `MessagingBridge` trait in `agentmux-srv/src/messaging/mod.rs` — only the shared types (`InboundMsg`, `OutboundMsg`, `MsgEmbed`, `EmbedField`, `BridgeHealth`, `BridgeStatus`). A sibling spec, `docs/specs/SPEC_MESSAGING_INTEGRATION_TELEGRAM_2026_07_07.md`, is formalizing that trait concurrently with this one as part of adding the Telegram bridge (the next platform after Discord in the roadmap). Do not block Slack implementation on that spec landing first — design `SlackBridge` to be trivially adaptable to it once it exists.
+As of this writing there is no `MessagingBridge` trait in `agentmux-srv/src/messaging/mod.rs` — only the shared types (`InboundMsg`, `OutboundMsg`, `MsgEmbed`, `EmbedField`, `BridgeHealth`, `BridgeStatus`). A sibling spec, [`docs/specs/SPEC_MESSAGING_INTEGRATION_TELEGRAM_2026_07_07.md`](SPEC_MESSAGING_INTEGRATION_TELEGRAM_2026_07_07.md), is formalizing that trait concurrently with this one as part of adding the Telegram bridge (the next platform after Discord in the roadmap). Do not block Slack implementation on that spec landing first — design `SlackBridge` to be trivially adaptable to it once it exists.
 
 Expected rough shape (per the task brief, reconcile exactly against the Telegram spec at implementation time):
 

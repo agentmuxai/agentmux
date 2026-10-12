@@ -48,7 +48,7 @@ The numerical capture (P50/P75/P95 for tab switch, pane resize) is **blocked** o
 The `@/perf` alias was added to `tsconfig.json` in PR #762 (`"@/perf": ["frontend/perf/index.ts"]`). The alias is correct — `task build:frontend` from CLI resolves it cleanly. But the running `task dev` Vite instance had a stale `vite-tsconfig-paths` cache from when its server first booted (during a tsconfig-in-flux moment in this session), and the plugin doesn't always re-read on file changes.
 
 **Fix:** kill + restart `task dev`. Fresh Vite startup re-reads tsconfig and the alias resolves. Verified the fix is "restart, not edit" by:
-- `frontend/perf/index.ts` exists on disk ✓
+- [`frontend/perf/index.ts`](../../frontend/perf/index.ts) exists on disk ✓
 - `tsconfig.json` contains `"@/perf"` and `"@/perf/*"` paths ✓
 - `task build:frontend` (production) succeeds repeatedly with the same alias ✓
 
@@ -70,7 +70,7 @@ This pattern argues for the App API automation surface in `SPEC_APP_API_AUTOMATI
 
 **Symptom:** `Get-AgentMuxAuthFile` only searched `%APPDATA%\ai.agentmux.cef.*\authkey.dev`. Dev mode writes to `~/.agentmux/dev/<branch>/data/authkey.dev`. Every measurement run required a manual `Copy-Item` to the expected location — three times across two sessions of pane-focus / perf work.
 
-**Fix shipped in this branch:** `Get-AgentMuxAuthFile` now searches the dev path AND the per-version portable path. Operators no longer need to copy auth files. (Pushed inline with this retro; `tools/tests/authfile.ps1`, +14 LOC.)
+**Fix shipped in this branch:** `Get-AgentMuxAuthFile` now searches the dev path AND the per-version portable path. Operators no longer need to copy auth files. (Pushed inline with this retro; [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1), +14 LOC.)
 
 ---
 
@@ -125,7 +125,7 @@ The click-driven numbers come after #2 (log pipe). Service-API numbers come afte
 
 ## Cross-references
 
-- `docs/specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md` — Phase 1 mandate.
+- [`docs/specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md`](../specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) — Phase 1 mandate.
 - `SPEC_APP_API_AUTOMATION_SURFACE.md` — described here as pushed alongside this retro, but it never landed: no such file exists in the repo, and none was ever deleted from it. The harness primitives it was meant to cover are still unspecified. Left unlinked deliberately rather than repointed at a plausible-looking substitute.
 - Memory `feedback_user_drives_ui_for_baseline.md` — the broader principle (use App API, not pixel clicks).
-- `tools/tests/authfile.ps1` — auth path lookup unified in this branch.
+- [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1) — auth path lookup unified in this branch.

@@ -6,12 +6,12 @@
 **Repo state:** main @ `ffdfa4aa3` ("fix(container): ship agentmux-mcp/agentmux-bashwrap in the sandbox image (#2939)", PR #3427)
 **Probed live** against a running instance (`narko`), with a real container-type
 agent (`Mazop`) as the subject
-**Related:** `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (already
+**Related:** [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) (already
 flagged container agents — #2939/#1400 — as blocked "whenever a GUI is
 unavailable"; this report is the concrete follow-through, from the other side:
 what happens once an agent *can* be opened, but needs to be safely restarted),
-`docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md` (`ClosePane`'s own
-spec), `docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
+[`docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md`](../specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) (`ClosePane`'s own
+spec), [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](../specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md)
 **Blocks:** any host agent trying to remotely fix a container agent's
 environment (this session's own motivating case) or supervise/restart one
 programmatically (Warden-style watchers, `SupervisorNudge`'s broader family)

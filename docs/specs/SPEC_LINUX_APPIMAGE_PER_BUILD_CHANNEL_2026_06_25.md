@@ -3,7 +3,7 @@
 **Date:** 2026-06-25
 **Status:** Proposed
 **Author:** smike (agent)
-**Area:** `scripts/package-linux.sh` (new) · `Taskfile.yml` · `scripts/build-appimage-linux.sh`
+**Area:** [`scripts/package-linux.sh`](../../scripts/package-linux.sh) (new) · `Taskfile.yml` · [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh)
 
 ---
 
@@ -33,7 +33,7 @@ if let Ok(channel) = std::env::var("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
 
 The fallback when the env var is absent is `"stable"` (in `data_paths.rs`).
 
-On **Windows**, `scripts/package.sh` computes the channel (`local-<branch-slug>-
+On **Windows**, [`scripts/package.sh`](../../scripts/package.sh) computes the channel (`local-<branch-slug>-
 <branch-hash>-<build-id>`) and exports `AGENTMUX_BUILD_CHANNEL_DEFAULT` **before**
 running cargo — so the channel is stamped into every compiled crate.
 
@@ -42,7 +42,7 @@ On **Linux**, `task package:linux` declares `build:host`, `build:backend`, and
 the env var set. By the time `build-appimage-linux.sh` executes, all binaries are
 already compiled with the `stable` fallback.
 
-macOS has the same gap (`task package:macos` also bypasses `scripts/package.sh`).
+macOS has the same gap (`task package:macos` also bypasses [`scripts/package.sh`](../../scripts/package.sh)).
 
 ---
 
@@ -70,7 +70,7 @@ Output filename: `AgentMux_<label>_amd64.AppImage` for local builds,
 
 ### 3.3 Orchestrator script
 
-Introduce `scripts/package-linux.sh` — mirrors `scripts/package.sh` for Linux:
+Introduce [`scripts/package-linux.sh`](../../scripts/package-linux.sh) — mirrors [`scripts/package.sh`](../../scripts/package.sh) for Linux:
 
 1. Parse `[--fresh] [output-dir]` flags (--fresh kept as no-op for back-compat).
 2. Compute `VERSION`, `BRANCH`, `SHA`, `DIRTY`, `STAMP`, `LABEL`, `CHANNEL`.
@@ -126,9 +126,9 @@ These match the Windows guarantees (see `SPEC_MULTI_INSTANCE_ISOLATION_HARDENING
 
 | File | Change |
 |---|---|
-| `scripts/package-linux.sh` | **New** — Linux build orchestrator (mirrors `scripts/package.sh`) |
-| `Taskfile.yml` | `package:linux` → delegates to `scripts/package-linux.sh`; add `package:release:linux` |
-| `scripts/build-appimage-linux.sh` | Read `AGENTMUX_BUILD_LABEL` for output filename (fallback: `AgentMux_<version>_amd64.AppImage`) |
+| [`scripts/package-linux.sh`](../../scripts/package-linux.sh) | **New** — Linux build orchestrator (mirrors [`scripts/package.sh`](../../scripts/package.sh)) |
+| `Taskfile.yml` | `package:linux` → delegates to [`scripts/package-linux.sh`](../../scripts/package-linux.sh); add `package:release:linux` |
+| [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) | Read `AGENTMUX_BUILD_LABEL` for output filename (fallback: `AgentMux_<version>_amd64.AppImage`) |
 | `CLAUDE.md` | Update `task package:linux` description to note per-build channel |
 
 macOS gap (`task package:macos`) is out of scope here — tracked as a separate follow-up since macOS packaging involves notarization complexity.

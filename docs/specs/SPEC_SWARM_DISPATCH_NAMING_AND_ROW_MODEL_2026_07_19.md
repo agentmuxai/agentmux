@@ -74,7 +74,7 @@ This directly **removes `NameGroup`** (`swarm-model.ts:124-146`,
 #2226) — call this out plainly as a superseding design decision, not an
 oversight. With every dispatch eagerly and individually named, and no more
 "collapse same-name things into one row" concept, `NameGroup` has no reason
-to exist. `frontend/app/view/agent/activity/subagent-adapter.ts` directly
+to exist. [`frontend/app/view/agent/activity/subagent-adapter.ts`](../../frontend/app/view/agent/activity/subagent-adapter.ts) directly
 imports `NameGroup`/`isNameGroup`/`groupCacheKey` today for its own
 independent activity-dock grouping (`groupSubagentsForDock()`) — needs a
 compatibility pass when those types disappear, scope to be confirmed at
@@ -145,7 +145,7 @@ Traced against `agentmux-srv/src/backend/subagent_watcher.rs` and
   debounce loop (`subagent_watcher.rs:492-535`) — one needs to be added
   (e.g. a `live: bool` parameter threaded from each call site). This directly
   guards against repeating the incident class documented in
-  `docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`.
+  [`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`](../retro/retro-subagent-backfill-storm-oom-2026-07-17.md).
 - **Async pattern to follow**: `agentmux-srv/src/backend/reactive/activity_watcher.rs:99-141`
   is the closest existing precedent for "background/non-request-driven
   ambient call, capped and de-duplicated" — an `in_flight: Arc<Mutex<HashSet<String>>>`
@@ -174,7 +174,7 @@ Traced against `agentmux-srv/src/backend/subagent_watcher.rs` and
 
 ## 4. Frontend: two-bucket tree + unified expand
 
-Traced against `frontend/app/view/swarm/swarm-model.ts` and `swarm-view.tsx`:
+Traced against [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) and `swarm-view.tsx`:
 
 - **`buildDispatchChildren()`/`AgentTreeNode.subagents`**
   (`swarm-model.ts:162-270`) today produces one flat, recency-sorted
@@ -226,7 +226,7 @@ Traced against `frontend/app/view/swarm/swarm-model.ts` and `swarm-view.tsx`:
   still in flight or failed), not the common case it is today.
 - **`subagent-adapter.ts` compatibility**: it imports
   `NameGroup`/`isNameGroup`/`groupCacheKey` directly
-  (`frontend/app/view/agent/activity/subagent-adapter.ts:34-39`) for its own
+  ([`frontend/app/view/agent/activity/subagent-adapter.ts:34-39`](../../frontend/app/view/agent/activity/subagent-adapter.ts#L34-L39)) for its own
   independent `groupSubagentsForDock()` — confirm at implementation time
   whether it needs updating or is already self-contained enough not to.
 - **Test rewrite**: `swarm-model.test.ts`'s `buildDispatchChildren` describe
@@ -264,7 +264,7 @@ feed with historical entries present (not just live-from-expand-onward).
 ## 6. Explicitly deferred / open questions
 
 - **No global ambient-call budget/rate-limit exists in the codebase today.**
-  `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md:339-342`
+  [`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md:339-342`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md)
   already flags this as an unimplemented gap for the whole ambient-call
   framework, not something specific to this feature. Eager firing turns a
   click-paced trigger into a filesystem-event-paced one, which makes the gap
@@ -288,11 +288,11 @@ feed with historical entries present (not just live-from-expand-onward).
 - `agentmux-srv/src/server/tests.rs`
 
 **Frontend:**
-- `frontend/app/view/swarm/swarm-model.ts`
-- `frontend/app/view/swarm/swarm-view.tsx`
-- `frontend/app/view/swarm/swarm-view.scss`
-- `frontend/app/view/swarm/swarm-model.test.ts`
-- `frontend/app/view/agent/activity/subagent-adapter.ts` (compatibility check)
+- [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts)
+- [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx)
+- [`frontend/app/view/swarm/swarm-view.scss`](../../frontend/app/view/swarm/swarm-view.scss)
+- [`frontend/app/view/swarm/swarm-model.test.ts`](../../frontend/app/view/swarm/swarm-model.test.ts)
+- [`frontend/app/view/agent/activity/subagent-adapter.ts`](../../frontend/app/view/agent/activity/subagent-adapter.ts) (compatibility check)
 
 ## 8. Verification (for the eventual implementation, not this spec pass)
 

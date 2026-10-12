@@ -42,7 +42,7 @@ The chain breaks at `IconButton`.
 
 ## Root cause — `IconButton` destructures `decl` from props
 
-`frontend/app/element/iconbutton.tsx` line 12:
+[`frontend/app/element/iconbutton.tsx`](../../frontend/app/element/iconbutton.tsx) line 12:
 
 ```typescript
 export function IconButton({ decl, className }: IconButtonProps): JSX.Element {
@@ -101,7 +101,7 @@ A literal object is static — it never changes after mount. The destructuring b
 
 ## Fix
 
-`frontend/app/element/iconbutton.tsx` — stop destructuring, use `props.decl` directly so SolidJS's JSX compiler can track the reactive getter in every attribute expression:
+[`frontend/app/element/iconbutton.tsx`](../../frontend/app/element/iconbutton.tsx) — stop destructuring, use `props.decl` directly so SolidJS's JSX compiler can track the reactive getter in every attribute expression:
 
 ```typescript
 export function IconButton(props: IconButtonProps): JSX.Element {
@@ -146,8 +146,8 @@ export function IconButton(props: IconButtonProps): JSX.Element {
 
 | File | Change |
 |---|---|
-| `frontend/app/element/iconbutton.tsx` | Remove destructuring; use `props.decl` in JSX; preserve longClick null guard; pass `disabled` as getter |
-| `frontend/app/hook/useLongClick.tsx` | Change `disabled` param to `getDisabled: () => boolean`; read inside `createEffect` for reactivity |
+| [`frontend/app/element/iconbutton.tsx`](../../frontend/app/element/iconbutton.tsx) | Remove destructuring; use `props.decl` in JSX; preserve longClick null guard; pass `disabled` as getter |
+| [`frontend/app/hook/useLongClick.tsx`](../../frontend/app/hook/useLongClick.tsx) | Change `disabled` param to `getDisabled: () => boolean`; read inside `createEffect` for reactivity |
 
 No changes needed in:
 - `blockframe.tsx` — reactive chain above `IconButton` is correct

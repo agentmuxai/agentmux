@@ -105,7 +105,7 @@ resolve as safe:
 
 - `"get_wave_init_opts"` → `"get_mux_init_opts"` (`agentmux-cef/src/ipc.rs`) —
   renamed on both sides, and has **no caller at all**, in either tree.
-  `docs/retro/audit-vestigial-types-2026-04-28.md` already documents it as dead.
+  [`docs/retro/audit-vestigial-types-2026-04-28.md`](../retro/audit-vestigial-types-2026-04-28.md) already documents it as dead.
 - `arg_names: vec![... "waveObj" ...]` → `"muxObj"` (`backend/service.rs`) —
   `get_method_meta` is referenced only by its own unit tests; RPC args are
   positional.
@@ -220,11 +220,11 @@ experiment has now been run, and it changes the picture.
 
 ### 9.1 The missing instrument, found in-repo
 CEF exposes a DevTools debug port (9223 dev / 9222 release) and
-`tools/tests/bench-agent-keystroke.mjs` already drives it with
+[`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) already drives it with
 `Input.dispatchKeyEvent`. That is a **genuine browser key event** — the exact
 capability whose absence made the earlier vim report (§4 of
 `REPORT_VIM_TERMINAL_PANE_HANG_INVESTIGATION_2026_09_16.md`) inconclusive.
-A probe built on it lives at `tools/tests/vim-freeze-probe.mjs`.
+A probe built on it lives at [`tools/tests/vim-freeze-probe.mjs`](../../tools/tests/vim-freeze-probe.mjs).
 
 Ground truth is deliberately **the file vim writes**, not the screen: the WebGL
 renderer paints to a canvas that cannot be read back as text, so asserting on

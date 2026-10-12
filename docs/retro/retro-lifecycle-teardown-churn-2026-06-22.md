@@ -68,7 +68,7 @@ Even when `on_before_close` *does* fire, the quit can still fail to start: the *
 
 ## 5. The launcher-authority detour (tried → demoted — do NOT re-litigate)
 
-Phase **B.9.3 (#601)** added a launcher reducer emitting `Event::HostShouldQuit` from `state.windows.is_empty()` — "single authority, re-evaluated on state change." It **could not deliver the quit to the host's UI thread**, across four smoke builds (`docs/retro/b9-3-quit-thread-analysis.md` / `b9-3-lifecycle-analysis.md`):
+Phase **B.9.3 (#601)** added a launcher reducer emitting `Event::HostShouldQuit` from `state.windows.is_empty()` — "single authority, re-evaluated on state change." It **could not deliver the quit to the host's UI thread**, across four smoke builds ([`docs/retro/b9-3-quit-thread-analysis.md`](b9-3-quit-thread-analysis.md) / `b9-3-lifecycle-analysis.md`):
 
 | Build | Approach | Result |
 |---|---|---|
@@ -108,7 +108,7 @@ The quit/teardown path has been **re-architected ~4 times**, each leaving a laye
 1. **The root regression was never reverted.** `66a02bdb` swapped a working browser-handle close for an HWND-guess close as a drive-by inside a drag PR. Every subsequent fix treated downstream symptoms.
 2. **The chain has ≥2 independent SPOFs** (close-doesn't-fire-on_before_close; gate-doesn't-arm) and **2 decision sites that must agree** (`on_before_close`, `orphan_reconcile`) plus an advisory third (launcher saga). Fixing one SPOF leaves the other.
 3. **Implicit predicates.** "Is this a user window?" was reconstructed from label-prefix + pool-set membership (drift-prone) rather than the authoritative `BrowserKind::is_pool` flag.
-4. **Near-zero end-to-end coverage.** There is **no CI test runner** (`.github/workflows/` runs zero `cargo test`/`vitest`) and no "close last window ⇒ tree exits" test — so every regression shipped silently.
+4. **Near-zero end-to-end coverage.** There is **no CI test runner** ([`.github/workflows/`](../../.github/workflows) runs zero `cargo test`/`vitest`) and no "close last window ⇒ tree exits" test — so every regression shipped silently.
 5. **Windows-only divergence.** macOS/Linux kept `try_close_browser`; only Windows took the HWND-guess path — so the bug hid on the platform with the most users *and* the most window-management complexity (pool, tear-off, floaters).
 
 ---

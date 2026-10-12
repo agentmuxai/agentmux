@@ -79,7 +79,7 @@ As of this spec date, the official documentation establishes that:
 The current implementation is authoritative for shared lifecycle semantics:
 
 - provider registry: `agentmux-srv/src/backend/providers.rs`;
-- frontend provider catalog: `frontend/app/view/agent/providers/catalog.ts`;
+- frontend provider catalog: [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts);
 - account storage and direct links:
   `agentmux-srv/src/backend/storage/identities.rs`;
 - spawn-time account resolution:
@@ -87,12 +87,12 @@ The current implementation is authoritative for shared lifecycle semantics:
 - OAuth provider classification:
   `agentmux-srv/src/identity/resolver/provider.rs`;
 - shared provider login flow:
-  `frontend/app/view/agent/flows/run-provider-login.ts`;
+  [`frontend/app/view/agent/flows/run-provider-login.ts`](../../frontend/app/view/agent/flows/run-provider-login.ts);
 - Claude's Armory/Stash recovery UI:
-  `frontend/app/view/accounts/ClaudeLoginPanel.tsx` and
-  `frontend/app/view/identity/agent-identity-links-panel.tsx`;
+  [`frontend/app/view/accounts/ClaudeLoginPanel.tsx`](../../frontend/app/view/accounts/ClaudeLoginPanel.tsx) and
+  [`frontend/app/view/identity/agent-identity-links-panel.tsx`](../../frontend/app/view/identity/agent-identity-links-panel.tsx);
 - Stash composition:
-  `frontend/app/view/agent/components/AgentStashModal.tsx`;
+  [`frontend/app/view/agent/components/AgentStashModal.tsx`](../../frontend/app/view/agent/components/AgentStashModal.tsx);
 - current project materializer:
   `agentmux-srv/src/backend/agent_config.rs`;
 - container runtime: `agentmux-srv/src/backend/container.rs` and
@@ -438,7 +438,7 @@ container paths.
 ### 10.1 Why the Claude builder cannot be reused directly
 
 The current `build_config_files()` always creates Claude-native files including
-`CLAUDE.md`, `.claude/settings.json`, `.claude/commands`, `.claude/skills`, and
+`CLAUDE.md`, `.claude/settings.json`, `.claude/commands`, [`.claude/skills`](../../.claude/skills), and
 `.mcp.json`. Writing those for a Codex definition produces a successful filesystem
 operation but does not configure Codex.
 

@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-24
 **Trigger:** repo owner asked why the newly-added nightly release automation
-(`.github/workflows/nightly-release.yml`, added 2026-08-23 per
-`docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md`) hadn't tagged/
+([`.github/workflows/nightly-release.yml`](../../.github/workflows/nightly-release.yml), added 2026-08-23 per
+[`docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md`](../specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md)) hadn't tagged/
 published v0.55.23, even though both v0.55.22 (PR #2775) and v0.55.23
 (PR #2779) had already merged to `main` as `chore: release` commits.
 **Status:** root cause narrowed to a high-confidence hypothesis (GitHub

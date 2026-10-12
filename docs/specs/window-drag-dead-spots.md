@@ -21,22 +21,22 @@ The header is a flex row with three children:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**File:** `frontend/app/window/window-header.tsx`
+**File:** [`frontend/app/window/window-header.tsx`](../../frontend/app/window/window-header.tsx)
 - `.window-header` div has `{...dragProps}` → `data-tauri-drag-region="true"` ✓
 - `.window-drag.left` — 10px draggable spacer on the far left ✓
 - `<TabBar>` — `data-tauri-drag-region="false"` ✗ (kills drag for entire tab bar area)
 - `<SystemStatus>` — `data-tauri-drag-region="false"` ✗ (kills drag for window controls area)
 
-**File:** `frontend/app/tab/tabbar.tsx` (line 194)
+**File:** [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) (line 194)
 - `.tab-bar` div has `data-tauri-drag-region="false"` — **this is the main dead spot**
 - Empty space after the last tab inherits `no-drag` from the tab-bar container
 - The tab-bar takes `flex: 0 1 auto` so it shrinks, but the empty space inside it is still no-drag
 
-**File:** `frontend/app/window/system-status.tsx` (line 71)
+**File:** [`frontend/app/window/system-status.tsx`](../../frontend/app/window/system-status.tsx) (line 71)
 - `.window-action-buttons` div has `data-tauri-drag-region="false"`
 - Space between/around widgets inherits `no-drag`
 
-**File:** `frontend/app/window/action-widgets.tsx` (line 88)
+**File:** [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) (line 88)
 - Action widget container has `data-tauri-drag-region="false"`
 
 ## Dead Spot Map
@@ -109,13 +109,13 @@ Header: [drag 10px] [+btn] [tab1] [tab2] [tab3] [ DRAG  ] [widget] [widget] [✕
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tabbar.tsx` | Remove `data-tauri-drag-region="false"` from `.tab-bar` div |
-| `frontend/app/tab/tabbar.scss` | Move `-webkit-app-region: no-drag` from `.tab-bar` to `.tab`, `.add-tab-btn` |
-| `frontend/app/window/system-status.tsx` | Remove `data-tauri-drag-region="false"` from `.window-action-buttons` div |
-| `frontend/app/window/system-status.scss` | Move `no-drag` to individual `.window-action-btn` elements |
-| `frontend/app/window/action-widgets.tsx` | Remove `data-tauri-drag-region="false"` from container divs |
-| `frontend/app/window/action-widgets.scss` | Move `no-drag` to individual widget buttons |
-| `frontend/app/tab/tab.tsx` | Add `data-tauri-drag-region="false"` to individual `.tab` div (if not already) |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | Remove `data-tauri-drag-region="false"` from `.tab-bar` div |
+| [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) | Move `-webkit-app-region: no-drag` from `.tab-bar` to `.tab`, `.add-tab-btn` |
+| [`frontend/app/window/system-status.tsx`](../../frontend/app/window/system-status.tsx) | Remove `data-tauri-drag-region="false"` from `.window-action-buttons` div |
+| [`frontend/app/window/system-status.scss`](../../frontend/app/window/system-status.scss) | Move `no-drag` to individual `.window-action-btn` elements |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | Remove `data-tauri-drag-region="false"` from container divs |
+| [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) | Move `no-drag` to individual widget buttons |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Add `data-tauri-drag-region="false"` to individual `.tab` div (if not already) |
 
 ---
 

@@ -6,7 +6,7 @@ detailed design reference for those pieces. Current state, gaps and the plan
 now live in the doc below: the open items (`WorkEnqueue` action, opt-out
 setting, live verification) are its G2/G9 and §9. A 2026-09-26 live check found
 the `fresh` path did not fire (§4 there).
-**Superseded-by:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`
+**Superseded-by:** [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md)
 **Date:** 2026-09-22
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), per direct request from the human operator.
 **Related:** `SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md` (the prior
@@ -102,7 +102,7 @@ The manual Compact button (`AgentComposerStrip.tsx`'s `onCompact`) sends the
 literal text `/compact` through the normal `handleSendMessage` path, which
 Claude Code's persistent stream-json stdin protocol recognizes as its real
 `/compact` command — verified empirically against a live process
-(`docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md`
+([`docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md`](../reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md)
 §6). This is **exactly** the "agent compact button" the ask names as the test
 vector, and it emits the same real `compact_boundary` frame an automatic
 compaction does — so testing via the button exercises the identical code
@@ -139,7 +139,7 @@ applies directly.
   choice, not a missing server capability.)
 - The correct function name is `estimateTokenCount`, not `estimateTokens`
   (this doc's own earlier draft got the name wrong) —
-  `frontend/util/format-count.ts:63` — `estimateTokenCount(text) =
+  [`frontend/util/format-count.ts:63`](../../frontend/util/format-count.ts#L63) — `estimateTokenCount(text) =
   Math.ceil(text.length / 4)` — the repo's existing chars÷4 estimate
   convention, labeled `(est.)` wherever it's shown
   (`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`,
@@ -455,7 +455,7 @@ already-wrapped instance.
 
 Built as three files, TDD throughout (22 total new tests across the three,
 plus the wiring itself passing a full `npx tsc --noEmit` and the complete
-`frontend/app/view/agent/` + `frontend/app/store/` suite — 182 files, 2835
+[`frontend/app/view/agent/`](../../frontend/app/view/agent) + [`frontend/app/store/`](../../frontend/app/store) suite — 182 files, 2835
 tests, zero regressions):
 
 - `hiding-stream-flush-queue.ts` — the wrapper itself. Only the six PUSH
@@ -1153,7 +1153,7 @@ Also worth surfacing, not just per-injection: a running total across a
 session of how many tokens this feature has spent reinjecting memory,
 displayed in the session-stats popover (`AgentSessionStats.tsx`) alongside
 existing cost/token totals — this is the same class of concern
-`docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md` already tracks for this
+[`docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md`](../analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md) already tracks for this
 codebase, and a feature that reinjects potentially-large content on every
 compaction is exactly the kind of thing that analysis line of work would
 want visibility into. Flagged as a should-have, not blocking v1.

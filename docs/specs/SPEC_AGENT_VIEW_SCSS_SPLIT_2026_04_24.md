@@ -4,7 +4,7 @@
 **Status:** implemented — shipped as "Phase 5" of the design-system spec across `#539` (batch 2, 6 top-level partial extractions), `#540` (batch 3, 5 more), `#541` (batch 4, 4 large nested extractions), and `#542` (batch 5, final — "finish agent-view.scss split"). Verified 2026-08-23: `agent-view.scss` is down to 387 lines (from the 4055 this spec was written against), almost entirely `@use` statements pulling in 28 files under `styles/` whose names match this spec's target list exactly (`_picker.scss` created in #541, `_card-info-popover.scss` in #539, etc. — confirmed via `git log --diff-filter=A` per file). The remaining ~350 lines of actual rules are root-level pane-wrapper layout (`.agent-pane-stack`), not unmigrated component styles — consistent with this spec's own §4 caveat that some rules stay at the top level. (A first pass of this same status-correction effort claimed `implemented` without finding these PRs, substituting an inference instead — Codex correctly caught that as insufficient evidence per this repo's own lifecycle rule requiring a citable PR; the batch PRs above were found on a second, more careful search.)
 **Owner:** AgentA
 **Implements:** [SPEC_DESIGN_SYSTEM_2026_04_23](./SPEC_DESIGN_SYSTEM_2026_04_23.md) Phase 5
-**Touches:** `frontend/app/view/agent/agent-view.scss` (4055 lines)
+**Touches:** [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) (4055 lines)
 
 ---
 
@@ -255,7 +255,7 @@ Single PR, executed as one commit.
      ```
    - Note: the dist file name has a content hash — record both filename and SHA so post-split comparison is unambiguous.
 
-2. **Create `frontend/app/view/agent/styles/` directory.**
+2. **Create [`frontend/app/view/agent/styles/`](../../frontend/app/view/agent/styles) directory.**
 
 3. **Extract partials in section order** (top of file → bottom). For each partial:
    - Identify the line range in current `agent-view.scss`.

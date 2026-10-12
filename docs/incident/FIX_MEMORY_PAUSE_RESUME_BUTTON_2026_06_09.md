@@ -3,7 +3,7 @@
 **Status:** P0 fix implemented (this PR); P1 (auto-resume) designed below as follow-up
 **Date:** 2026-06-09
 **Author:** AgentC
-**Related:** `docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md` (Phase 1b)
+**Related:** [`docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`](../specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) (Phase 1b)
 
 ---
 

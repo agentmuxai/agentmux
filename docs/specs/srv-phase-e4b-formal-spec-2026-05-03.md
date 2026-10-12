@@ -4,12 +4,12 @@
 **Status:** Formal implementation spec. Final answers to all open questions; ready to drive PRs.
 **Decision context:** Full E.4.B committed (~4–5 weeks) for **multi-window robust operation**. The half-version (typed tree only) is rejected — it doesn't fix the drag-resize-clobber and concurrent-split-data-loss bugs that motivate the project.
 **Reads-this-first:**
-- `docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — original Phase E.4 spec; deferred E.4.B as "the hard part"
-- `docs/specs/srv-phase-e4b-implementation-plan-2026-05-03.md` — the planning doc this formalizes
+- [`docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) — original Phase E.4 spec; deferred E.4.B as "the hard part"
+- [`docs/specs/srv-phase-e4b-implementation-plan-2026-05-03.md`](srv-phase-e4b-implementation-plan-2026-05-03.md) — the planning doc this formalizes
 - `agentmux-srv/src/reducer.rs:655–700` — E.4.A handlers (the pattern)
 - `agentmux-srv/src/state.rs:69–88` — `TabRecord` struct (extended in this spec)
-- `frontend/layout/lib/layoutTree.ts` — the 11 pure-ish tree mutators to port
-- `frontend/layout/tests/layoutTree.test.ts` — test oracle from PR #686
+- [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) — the 11 pure-ish tree mutators to port
+- [`frontend/layout/tests/layoutTree.test.ts`](../../frontend/layout/tests/layoutTree.test.ts) — test oracle from PR #686
 
 ## 1. Goals
 
@@ -33,7 +33,7 @@ The user-visible payoff is multi-window robust operation. Concretely:
 
 - **No migration of `leaforder` to the reducer.** It's a derived view of `rootnode`; let the existing computation stay wcore-side.
 - **No migration of `pendingbackendactions`.** Re-evaluate after E.4.B has soaked. Likely subsumed by command-level events; defer the call.
-- **No change to the frontend's local-first reducer** (`frontend/layout/lib/layoutTree.ts`). It keeps its existing 15 actions as the local optimistic-update path. Slice #8 only adds an srv-event subscription on top.
+- **No change to the frontend's local-first reducer** ([`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts)). It keeps its existing 15 actions as the local optimistic-update path. Slice #8 only adds an srv-event subscription on top.
 - **No multi-window state sync for state OUTSIDE the layout tree** (e.g. agent-pane state, tab-bar state). Those are separate concerns.
 - **No collaborative-editing-style conflict resolution** (CRDT, OT, etc.). srv is the serializing authority; conflicts are resolved by who-arrived-first ordering at the reducer mutex.
 - **No change to the wstore (SQLite) schema for `LayoutState`.** Existing columns suffice. The persisted JSON shape stays compatible with the typed Rust struct via serde.
@@ -44,7 +44,7 @@ The user-visible payoff is multi-window robust operation. Concretely:
 
 | Reducer | Where | Owns | Role in E.4.B |
 |---|---|---|---|
-| **Frontend layout reducer** | `frontend/layout/lib/layoutTree.ts` + `layoutModel.ts` | Local treeState; 15 actions; pure-ish handlers | UNCHANGED. Stays the primary local-write path for optimistic UI. Slice #8 adds an srv-event subscription that applies remote mutations as additional reducer dispatches. |
+| **Frontend layout reducer** | [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) + `layoutModel.ts` | Local treeState; 15 actions; pure-ish handlers | UNCHANGED. Stays the primary local-write path for optimistic UI. Slice #8 adds an srv-event subscription that applies remote mutations as additional reducer dispatches. |
 | **srv reducer** | `agentmux-srv/src/reducer.rs` | Workspaces, tabs, blocks, windows, focus/magnify | EXTENDED. Gains 11 new `Command::Layout*` arms operating on `TabRecord.layout_tree: Option<LayoutNode>` (new field). |
 
 ### 3.2 Sync shape (Q2 from prior plan — finalized)
@@ -171,7 +171,7 @@ pub struct ResizeOp { pub node_id: String, pub size: f32 }
 pub enum SplitPosition { Before, After }
 ```
 
-These mirror `frontend/layout/lib/layoutTree.ts` semantics 1:1. Test oracle: port the 30 tests from `frontend/layout/tests/layoutTree.test.ts` (PR #686).
+These mirror [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) semantics 1:1. Test oracle: port the 30 tests from [`frontend/layout/tests/layoutTree.test.ts`](../../frontend/layout/tests/layoutTree.test.ts) (PR #686).
 
 ## 5. Command surface
 
@@ -516,7 +516,7 @@ To keep the migration safe:
 
 ### 11.1 Pure helper tests (Phase 4)
 
-Port the 30 tests from `frontend/layout/tests/layoutTree.test.ts` (PR #686) to Rust. Each frontend `test()` becomes a `#[test]` in `agentmux-srv/src/backend/layout/tests.rs`. Same scenarios, same assertions. The frontend test suite is the **behavioral oracle** — Rust pure helpers MUST produce identical state transitions for identical inputs.
+Port the 30 tests from [`frontend/layout/tests/layoutTree.test.ts`](../../frontend/layout/tests/layoutTree.test.ts) (PR #686) to Rust. Each frontend `test()` becomes a `#[test]` in `agentmux-srv/src/backend/layout/tests.rs`. Same scenarios, same assertions. The frontend test suite is the **behavioral oracle** — Rust pure helpers MUST produce identical state transitions for identical inputs.
 
 ### 11.2 Reducer arm tests (Phase 5)
 
@@ -557,7 +557,7 @@ After srv E.4.B is stable in main, slice #8 wires the frontend mirror.
 - For each inbound event:
   - Check correlation ID against `pendingOptimisticDispatches` map (set by frontend reducer's persistence layer when it dispatched this command).
   - If matched (own echo): clear the pending entry and no-op.
-  - If unmatched (remote command): dispatch the equivalent local action to `frontend/layout/lib/layoutTree.ts` reducer.
+  - If unmatched (remote command): dispatch the equivalent local action to [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) reducer.
 - The local reducer applies the action via the existing pure helpers (no separate code path).
 
 ### 12.2 Conflict scenarios
@@ -699,9 +699,9 @@ E.4.B is "done" when:
 ## 20. Reading order for implementers
 
 1. This spec (you're here)
-2. `docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — context for why E.4.B was deferred from E.4.A
+2. [`docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) — context for why E.4.B was deferred from E.4.A
 3. `agentmux-srv/src/reducer.rs:655–700` — the E.4.A pattern this mirrors
 4. `agentmux-srv/src/persist_subscriber.rs:666–707` — the E.4.A persist pattern
-5. `frontend/layout/lib/layoutTree.ts` — the helper functions to port
-6. `frontend/layout/tests/layoutTree.test.ts` — the test oracle
+5. [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) — the helper functions to port
+6. [`frontend/layout/tests/layoutTree.test.ts`](../../frontend/layout/tests/layoutTree.test.ts) — the test oracle
 7. `agentmux-srv/src/state.rs:69–88` — `TabRecord` (will be extended)

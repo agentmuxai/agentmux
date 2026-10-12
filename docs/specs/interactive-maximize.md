@@ -219,10 +219,10 @@ This is less clean but fewer changes.
 | File | Change |
 |------|--------|
 | `frontend/layout/lib/TileLayout.tsx` | Add `MagnifiedPane` component, magnify container/backdrop, hide original tile-node |
-| `frontend/layout/lib/tilelayout.scss` | Add `.magnify-backdrop`, `.magnify-container`, `.tile-hidden` styles |
-| `frontend/layout/lib/layoutGeometry.ts` | Remove magnified node z-index/transform override |
-| `frontend/app/block/block.scss` | Remove `.magnified` opacity/blur styles (pane is now normal-looking) |
-| `frontend/app/theme.scss` | Add new z-index variables for magnify layer |
+| [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) | Add `.magnify-backdrop`, `.magnify-container`, `.tile-hidden` styles |
+| [`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts) | Remove magnified node z-index/transform override |
+| [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) | Remove `.magnified` opacity/blur styles (pane is now normal-looking) |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | Add new z-index variables for magnify layer |
 
 ---
 

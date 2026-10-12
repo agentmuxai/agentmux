@@ -5,7 +5,7 @@
 **Author:** AgentA  
 **Tier:** 1 extension (same auth + transport as existing `agent.open`)  
 **Tracking:** Discussion #1205 (app API long-term thread)  
-**Related:** `docs/specs/app-api-extension.md`, `docs/specs/app-api-status.md`
+**Related:** [`docs/specs/app-api-extension.md`](app-api-extension.md), [`docs/specs/app-api-status.md`](app-api-status.md)
 
 ---
 
@@ -28,7 +28,7 @@ Sidecar inserts/updates db_agent_definitions
 Broadcast agents:changed  →  all frontends refresh My Agents instantly
 ```
 
-This is the **robust, restart-free alternative** to `scripts/import-agents.sh`.
+This is the **robust, restart-free alternative** to [`scripts/import-agents.sh`](../../scripts/import-agents.sh).
 
 ---
 
@@ -306,7 +306,7 @@ broadcast_agents_changed(&state).await;
 
 ## 10. Fit within the Tier taxonomy
 
-From `docs/specs/app-api-extension.md`:
+From [`docs/specs/app-api-extension.md`](app-api-extension.md):
 
 | Tier | Scope | This endpoint |
 |---|---|---|

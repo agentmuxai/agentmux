@@ -88,7 +88,7 @@ not something tied to an individual turn.
 
 ## 2. `log()` — mostly a dead channel today
 
-`LogFn` type: `frontend/app/view/agent/types.ts:675`.
+`LogFn` type: [`frontend/app/view/agent/types.ts:675`](../../frontend/app/view/agent/types.ts#L675).
 
 `agent-view.tsx:501-509`:
 ```ts
@@ -218,7 +218,7 @@ and the `⏹ _Interrupted by user_` node without touching `TurnPhase`,
 `FailureObserved`, or compaction-detection logic itself.
 
 **One unresolved tension this commit doesn't settle:** `launch-flow.ts`'s own
-header comment cites `docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md`
+header comment cites [`docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md)
 as the design basis for `notify()`. That spec's stated goal **G2** is
 *"Every mount narrates itself... posts a minimal, permanent record into the
 conversation"* — i.e. the transcript-injection behavior is a **documented,
@@ -229,7 +229,7 @@ accidental case like `6191a1928` did. Worth being explicit about that before
 starting, since it's a deliberate reversal of a written design decision, not
 a bug fix.
 
-Also relevant: `docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`
+Also relevant: [`docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md)
 §4, which introduced the now-removed "Picked up more work" notification, had
 already hedged its own wording as provisional: *"500ms and the exact
 notification wording are implementation defaults, not confirmed product
@@ -237,7 +237,7 @@ decisions — flagged as reversible/tunable if they don't feel right in
 practice."* That hedge turned out to be prescient.
 
 No dedicated "when is a synthetic transcript message acceptable" design
-document exists anywhere in `docs/specs/` or `docs/retro/` — the rule
+document exists anywhere in [`docs/specs/`](.) or [`docs/retro/`](../retro) — the rule
 currently lives only in `6191a1928`'s commit message and that one hedge.
 That's a documentation gap worth closing once this round's scope is settled,
 so the next person doesn't have to re-derive the rule from git archaeology.
@@ -249,11 +249,11 @@ so the next person doesn't have to re-derive the rule from git archaeology.
 Several of the Category-A items were added in response to specific,
 documented user-facing confusion, not just as a nice-to-have:
 
-- `docs/specs/SPEC_CONTEXT_COMPACTION_NOTIFICATION_2026_06_20.md` and
+- [`docs/specs/SPEC_CONTEXT_COMPACTION_NOTIFICATION_2026_06_20.md`](SPEC_CONTEXT_COMPACTION_NOTIFICATION_2026_06_20.md) and
   `SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` justify the
   compaction banners as fixing a **silent transcript discontinuity** — users
   reported the agent's context "resetting" with no visible marker at all.
-- `docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md` justifies the durable
+- [`docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`](SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md) justifies the durable
   `agent_error` node via a real incident: an agent silently returning 401 on
   every message with no visible sign anything was wrong.
 - `SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md`'s G1 ("no silent

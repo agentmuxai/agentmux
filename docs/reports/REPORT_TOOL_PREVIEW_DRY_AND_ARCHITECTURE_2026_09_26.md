@@ -4,7 +4,7 @@
 **Status:** analysis
 **Verified against:** `main` @ `6b5c2b59b`
 **Scope:**
-- Tool previews: `frontend/app/view/agent/components/ToolBlock.tsx`,
+- Tool previews: [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx),
   `ToolBlockOverlay.tsx`, `ToolOverlayLog.tsx`, `CompactResult.tsx`, and
   `tool-renderers/*`.
 - The per-tool helpers in `stream-parser.ts`, `useAgentStream.ts`, and
@@ -13,7 +13,7 @@
   including #3861's jekt height cap.
 - Row-height estimates (`virtualization/renderers.ts`).
 
-**Companion spec:** `docs/specs/SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md`.
+**Companion spec:** [`docs/specs/SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md`](../specs/SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md).
 Most items below either make that spec's phases smaller or remove the root
 cause of a bug it found.
 
@@ -347,8 +347,8 @@ doesn't add a sixth switch.
 ## 4. Method and limits
 
 - Everything above comes from reading the code at `6b5c2b59b` and from grep
-  sweeps for duplicated helpers and per-tool switches in `frontend/app/view/agent`
-  and `frontend/app/store/agent-document`.
+  sweeps for duplicated helpers and per-tool switches in [`frontend/app/view/agent`](../../frontend/app/view/agent)
+  and [`frontend/app/store/agent-document`](../../frontend/app/store/agent-document).
 - Header output was confirmed by running the real `ClaudeCodeStreamParser` in a
   throwaway vitest (not committed).
 - Result payload shapes were confirmed against real Claude Code transcripts on

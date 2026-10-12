@@ -4,7 +4,7 @@
 
 **Date:** 2026-07-14
 **Trigger:** Live repro during auth stress-testing (documented in
-`docs/analysis/ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md`):
+[`docs/analysis/ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md`](../analysis/ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md)):
 deleting an Anthropic account in the Armory left a running agent fully
 authenticated, and — the part this retro is about — a *respawned* agent
 with no bound account fell all the way through to the user's real,
@@ -18,7 +18,7 @@ changing how a spawn decides what credentials to use.
 
 ## 1. The invariant, as written
 
-`docs/specs/SPEC_PROVIDER_ISOLATION_2026_06_20.md` states it as **INV-A**:
+[`docs/specs/SPEC_PROVIDER_ISOLATION_2026_06_20.md`](../specs/SPEC_PROVIDER_ISOLATION_2026_06_20.md) states it as **INV-A**:
 
 > the agent's live credential dir (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is
 > an **AgentMux-owned** path under `~/.agentmux/…`. It is **never** the
@@ -50,7 +50,7 @@ None of these five commits is individually wrong reasoning. PR-B's tradeoff (ski
 ## 3. Why this matters more than a normal regression
 
 This is functionally identical to the lesson already written down once before, in
-`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md` (a
+[`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](retro-provider-auth-isolation-regression-2026-06-05.md) (a
 different, earlier isolation bug — the "validate-spin" regression):
 
 > A written invariant is worthless if nothing re-checks it when the ground

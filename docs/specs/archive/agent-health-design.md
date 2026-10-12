@@ -4,7 +4,7 @@
 > **Problem:** A CLI process can be "running" but the agent is broken (400 errors, rate limits, auth expired, etc.). AgentMux has no way to detect or surface this.
 > **Archived 2026-08-27:** the detector this doc designed (`HealthMonitor`'s
 > silence watchdog, error-rate tracker, and "Agent unresponsive" banner) was
-> removed in `docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`
+> removed in [`docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`](../SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md)
 > after proving too false-positive-prone in practice. Only the turn-active
 > tracking this design was bundled with survives, renamed
 > `TurnActivityTracker`. Kept for historical record only.

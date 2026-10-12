@@ -3,7 +3,7 @@
 **Status:** implemented — PR #2385 (formatter consolidation incl. §7 sweep); verified in code 2026-08-10.
 **Trigger:** user request while discussing the composer strip's `↑in ↓out` token display — the abbreviated form never rolls over past "k" (a heavy session could show `12345.6k` instead of `12.3m`), and there's no comma-grouped exact form for tooltips/full-precision contexts. Broadened per follow-up request into a sweep for other duplicated utility-shaped logic (§7) worth building out the same way.
 
-`frontend/util/` already exists as this codebase's convention for exactly this (`menu-position.ts`, `settle-detector.ts`) — everything below lands as new siblings there, not a novel location.
+[`frontend/util/`](../../frontend/util) already exists as this codebase's convention for exactly this (`menu-position.ts`, `settle-detector.ts`) — everything below lands as new siblings there, not a novel location.
 
 ## 1. Problem
 
@@ -11,13 +11,13 @@ Searched every token/context-count display in the frontend. The "format a token 
 
 | # | File | Function | Current logic | Used for |
 |---|------|----------|----------------|----------|
-| 1 | `frontend/app/view/agent/components/AgentComposerStrip.tsx:33-36` | `fmtTokens`'s inner `fmt` | `n >= 1000 ? (n/1000).toFixed(1)+'k' : String(n)` | Composer strip `↑in ↓out` (turn/session totals) |
-| 2 | `frontend/app/view/agent/components/AgentComposerStrip.tsx:43-45` | `fmtK` | `Math.round(n/100)/10 + 'k'` | Composer strip context-fill text (`12.1k / 64k`) |
-| 3 | `frontend/app/view/agent/components/AgentFooter.tsx:36-39` | `fmtTokens`'s inner `fmt` | **Byte-identical to #1** | `AgentWorkingRow`'s `↑in ↓out` |
-| 4 | `frontend/app/statusbar/TokenUsageIndicator.tsx:16-20` | `formatTokenCount` | Tiered: raw <1000, 1-decimal `k` <10k, integer `k` ≥10k | Status-bar running total |
-| 5 | `frontend/app/statusbar/TokenBreakdownPopover.tsx:31-32` | (inline, unnamed) | **Same tiered logic as #4**, copy-pasted | Per-service breakdown rows |
-| 6 | `frontend/app/view/swarm/swarm-view.tsx:220-222` | `fmtCtx` | `Math.round(tokens/100)/10 + 'k'` — **same as #2** | Swarm pane per-agent context-fill |
-| 7 | `frontend/app/view/agent/virtualization/DocumentRow.tsx:261` | inline `fmt` | `tok >= 1000 ? Math.round(tok/1000)+'k' : String(tok)` (integer only, no decimal) | "Context compacted: Xk → Yk" transcript node |
+| 1 | [`frontend/app/view/agent/components/AgentComposerStrip.tsx:33-36`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx#L33-L36) | `fmtTokens`'s inner `fmt` | `n >= 1000 ? (n/1000).toFixed(1)+'k' : String(n)` | Composer strip `↑in ↓out` (turn/session totals) |
+| 2 | [`frontend/app/view/agent/components/AgentComposerStrip.tsx:43-45`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx#L43-L45) | `fmtK` | `Math.round(n/100)/10 + 'k'` | Composer strip context-fill text (`12.1k / 64k`) |
+| 3 | [`frontend/app/view/agent/components/AgentFooter.tsx:36-39`](../../frontend/app/view/agent/components/AgentFooter.tsx#L36-L39) | `fmtTokens`'s inner `fmt` | **Byte-identical to #1** | `AgentWorkingRow`'s `↑in ↓out` |
+| 4 | [`frontend/app/statusbar/TokenUsageIndicator.tsx:16-20`](../../frontend/app/statusbar/TokenUsageIndicator.tsx#L16-L20) | `formatTokenCount` | Tiered: raw <1000, 1-decimal `k` <10k, integer `k` ≥10k | Status-bar running total |
+| 5 | [`frontend/app/statusbar/TokenBreakdownPopover.tsx:31-32`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx#L31-L32) | (inline, unnamed) | **Same tiered logic as #4**, copy-pasted | Per-service breakdown rows |
+| 6 | [`frontend/app/view/swarm/swarm-view.tsx:220-222`](../../frontend/app/view/swarm/swarm-view.tsx#L220-L222) | `fmtCtx` | `Math.round(tokens/100)/10 + 'k'` — **same as #2** | Swarm pane per-agent context-fill |
+| 7 | [`frontend/app/view/agent/virtualization/DocumentRow.tsx:261`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx#L261) | inline `fmt` | `tok >= 1000 ? Math.round(tok/1000)+'k' : String(tok)` (integer only, no decimal) | "Context compacted: Xk → Yk" transcript node |
 
 None of the 7 ever produce `m` or `b` — a heavy session's cumulative totals (`sessionTotals` in #1/#3, the status-bar running total in #4/#5) can realistically cross 1M+ tokens over a long day of use, and would currently render as an ever-growing, comma-less `12345.6k` instead of rolling to `12.3m`.
 
@@ -25,7 +25,7 @@ Separately, the exact/full-precision contexts (tooltips) are inconsistent: `Agen
 
 ## 2. Proposed shared utility
 
-New file: `frontend/util/format-count.ts` (generic — context-compaction and swarm displays aren't really "token usage store" concerns, so this doesn't belong in `store/token-usage.ts`).
+New file: [`frontend/util/format-count.ts`](../../frontend/util/format-count.ts) (generic — context-compaction and swarm displays aren't really "token usage store" concerns, so this doesn't belong in `store/token-usage.ts`).
 
 ```ts
 /** Compact k/m/b abbreviation for a non-negative integer count.
@@ -97,7 +97,7 @@ Audited every tooltip/full-precision spot already showing a raw token/context nu
 
 ## 5. Tests
 
-New `frontend/util/format-count.test.ts` covering:
+New [`frontend/util/format-count.test.ts`](../../frontend/util/format-count.test.ts) covering:
 - Boundary values at each tier edge: 999/1000, 9999/10000, 999999/1000000, 999999999/1000000000.
 - The rounding-at-boundary quirk (9950 → "10.0k", still inside the k tier) — documented as expected, not asserted away.
 - Negative numbers (defensive — none of today's 7 call sites can produce negatives, but the function should not throw/mis-render if one ever does).
@@ -113,7 +113,7 @@ Then one updated test per migrated call site (where tests already exist — `Tok
 
 ## 7. Broader sweep: other duplicated display-formatting utilities
 
-Same audit method applied to other common "format a primitive for display" shapes across `frontend/app`. Three more genuine, worth-fixing duplicates found; three checked-and-fine (already centralized, no action needed).
+Same audit method applied to other common "format a primitive for display" shapes across [`frontend/app`](../../frontend/app). Three more genuine, worth-fixing duplicates found; three checked-and-fine (already centralized, no action needed).
 
 ### 7.1 Elapsed-time formatting — 5 copies, **two different conventions in use**
 
@@ -125,7 +125,7 @@ Same audit method applied to other common "format a primitive for display" shape
 | `PersistentShellBlock.tsx:36-41` | `formatElapsed` | `"3:05"`, missing the `Math.max(0, …)` floor the other two mm:ss copies have |
 | `swarm-view.tsx:382-387` | `formatElapsed` | `"3:05"`, same as ActivityRow's |
 
-This one isn't purely mechanical — two visually distinct conventions are already live in the product (prose-style "3m 5s" in the composer strip/footer vs. clock-style "3:05" in dock/activity rows). Proposed: `frontend/util/format-time.ts` exporting **both** as separately named functions — `formatElapsedCompact` (prose form) and `formatElapsedClock` (mm:ss form, with the missing floor guard added to the one copy that lacks it) — rather than forcing one convention on every call site. Still closes the real bug in this group: `PersistentShellBlock.tsx`'s copy can format a negative duration (e.g. a clock-skew edge case) into something like `"-1:05"`; the other two clock-style copies already guard against it.
+This one isn't purely mechanical — two visually distinct conventions are already live in the product (prose-style "3m 5s" in the composer strip/footer vs. clock-style "3:05" in dock/activity rows). Proposed: [`frontend/util/format-time.ts`](../../frontend/util/format-time.ts) exporting **both** as separately named functions — `formatElapsedCompact` (prose form) and `formatElapsedClock` (mm:ss form, with the missing floor guard added to the one copy that lacks it) — rather than forcing one convention on every call site. Still closes the real bug in this group: `PersistentShellBlock.tsx`'s copy can format a negative duration (e.g. a clock-skew edge case) into something like `"-1:05"`; the other two clock-style copies already guard against it.
 
 ### 7.2 String truncate/abbreviate — 3 copies, one dead, one design correction made during implementation
 
@@ -143,24 +143,24 @@ Fixed: `abbreviateText(s, max, opts?: { pathAware?: boolean })` — `pathAware` 
 
 ### 7.3 `sleep(ms)` — 12 inline copies, PLUS an already-exported-but-unused 13th, PLUS a wider tail not fully closed
 
-`grep -rn "new Promise<void>((r) => setTimeout(r"` across `frontend/app` returns **12 hits** (poll loops in `useAgentControllerStatus.ts`'s login-recovery flows, retry loops elsewhere) — the identical `new Promise<void>((r) => setTimeout(r, ms))` expression, inlined every time instead of extracted once.
+`grep -rn "new Promise<void>((r) => setTimeout(r"` across [`frontend/app`](../../frontend/app) returns **12 hits** (poll loops in `useAgentControllerStatus.ts`'s login-recovery flows, retry loops elsewhere) — the identical `new Promise<void>((r) => setTimeout(r, ms))` expression, inlined every time instead of extracted once.
 
 **Third correction, caught by reagent's re-review on PR #2388 (P2, after the fixup commit)**: the `<void>`-anchored grep above was itself too narrow — `CrossWindowDragMonitor.{darwin,linux,win32}.tsx` (already touched by this PR for their 350ms case) each had a SIBLING, untyped `new Promise((r) => setTimeout(r, 50))` a few lines away that the original pattern missed entirely. Fixed: migrated all 3 sibling sites too (`sleep(50)`, reusing the same import already added to those files).
 
-**Known-remaining tail, deliberately left out of this PR's scope**: re-sweeping with a looser pattern (`new Promise[^(]*\(\([a-zA-Z]*\) => setTimeout\(`) after the above fix still surfaces duplicates in files this PR never otherwise touches: `frontend/app/platform/ipc.ts:17` has its OWN named wrapper (`const delay = (ms) => new Promise(...)`) — a third parallel name for the same concept, alongside `util.ts`'s `sleep` and this PR's now-removed `async.ts`; `pane-overlay.ts:201`, `tab-presets.ts:92`, and `termwrap.ts:329` each have one more inline copy; `command-source.test.ts`, `auth-flow-controller.test.ts`, and `useAgentCommands.test.ts` (3 occurrences) have test-local ones. None of these are in files this PR already edits, so pulling them in now would grow a PR reagent already reviewed twice into a much larger, differently-scoped diff. Flagged here rather than silently left for someone to rediscover — worth a small follow-up PR.
+**Known-remaining tail, deliberately left out of this PR's scope**: re-sweeping with a looser pattern (`new Promise[^(]*\(\([a-zA-Z]*\) => setTimeout\(`) after the above fix still surfaces duplicates in files this PR never otherwise touches: [`frontend/app/platform/ipc.ts:17`](../../frontend/app/platform/ipc.ts#L17) has its OWN named wrapper (`const delay = (ms) => new Promise(...)`) — a third parallel name for the same concept, alongside `util.ts`'s `sleep` and this PR's now-removed `async.ts`; `pane-overlay.ts:201`, `tab-presets.ts:92`, and `termwrap.ts:329` each have one more inline copy; `command-source.test.ts`, `auth-flow-controller.test.ts`, and `useAgentCommands.test.ts` (3 occurrences) have test-local ones. None of these are in files this PR already edits, so pulling them in now would grow a PR reagent already reviewed twice into a much larger, differently-scoped diff. Flagged here rather than silently left for someone to rediscover — worth a small follow-up PR.
 
-**Correction, caught by reagent on PR #2388's review (P2)**: the first implementation added a brand-new `frontend/util/async.ts` without checking whether a shared `sleep` already existed. One did — `frontend/util/util.ts:313` already defines and exports `sleep(ms)` (identical body), just with **zero real call sites anywhere** (only its own now-added test used it). The 12-copy count undercounted the actual duplication by missing this 13th, already-shared-but-unconsumed instance. Fixed: deleted the new `async.ts`/`async.test.ts`, repointed all 12 call sites at the existing `@/util/util`'s `sleep` instead, and added the test coverage `sleep` never had (scoped `frontend/util/util.test.ts`, not a full test file for that large grab-bag module).
+**Correction, caught by reagent on PR #2388's review (P2)**: the first implementation added a brand-new `frontend/util/async.ts` without checking whether a shared `sleep` already existed. One did — [`frontend/util/util.ts:313`](../../frontend/util/util.ts#L313) already defines and exports `sleep(ms)` (identical body), just with **zero real call sites anywhere** (only its own now-added test used it). The 12-copy count undercounted the actual duplication by missing this 13th, already-shared-but-unconsumed instance. Fixed: deleted the new `async.ts`/`async.test.ts`, repointed all 12 call sites at the existing `@/util/util`'s `sleep` instead, and added the test coverage `sleep` never had (scoped [`frontend/util/util.test.ts`](../../frontend/util/util.test.ts), not a full test file for that large grab-bag module).
 
 ### 7.4 Checked and already fine — no action needed
 
 - **Debounce** — already a single external dependency (`throttle-debounce` npm package, imported in `hook/useDimensions.tsx`), not reimplemented anywhere. No duplication.
-- **Clipboard writes** — already centralized at `frontend/util/clipboard.ts` (`writeText`), imported consistently by every call site checked (`markdown-codeblock.tsx`, `InstancePanel.tsx`, others). No duplication.
+- **Clipboard writes** — already centralized at [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) (`writeText`), imported consistently by every call site checked (`markdown-codeblock.tsx`, `InstancePanel.tsx`, others). No duplication.
 - **ID generation** — every site calls `crypto.randomUUID()` directly (`contextmenu.ts`, `flash-notifications.ts`, etc.) with no wrapper function to duplicate; this is idiomatic use of a built-in, not a DRY violation.
 - **`formatBytes`-style byte-size formatting** — only one implementation exists (`ToolOverlayLog.tsx`), not reimplemented elsewhere.
 
 ### 7.5 Revised scope if this becomes one PR
 
-Three new files under the existing `frontend/util/` convention, each with its own focused test file, plus one existing-but-unused export finally wired up:
+Three new files under the existing [`frontend/util/`](../../frontend/util) convention, each with its own focused test file, plus one existing-but-unused export finally wired up:
 
 | File | Exports | Replaces |
 |---|---|---|

@@ -310,6 +310,6 @@ Each commit is independently revertible; commit 1 alone ships nothing user-visib
 ## 9. Related
 
 - `SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md` — the parent spec. §C.2's render-shape claim ("body renders inline beneath summary") is updated by this doc.
-- `docs/specs/tool-collapse.md` — ToolBlock overlay precedent; same direction-of-overlay pattern but no anchor-at-cursor invariant.
+- [`docs/specs/tool-collapse.md`](tool-collapse.md) — ToolBlock overlay precedent; same direction-of-overlay pattern but no anchor-at-cursor invariant.
 - `feedback_no_timers_or_delays` — the constraint that rules out grace windows; this spec satisfies it.
 - PR #1020 — ships the version with the bug this spec fixes.

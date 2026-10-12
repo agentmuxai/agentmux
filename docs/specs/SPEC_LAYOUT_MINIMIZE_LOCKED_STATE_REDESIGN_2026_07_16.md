@@ -17,7 +17,7 @@ the wrong status — the doc describes shipped behaviour.)*
 Option B (locks, §6) shipped in #2180, then was retired the same day after the layout
 doctor caught cascade arithmetic producing negative sizes live — Option B's locks
 faithfully preserved the garbage. External research
-(`docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`) confirmed no mature
+([`docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`](../research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md)) confirmed no mature
 system stores minimize as in-tree size state; the implemented design is the research's
 recommendation §7.3 (i3 pattern: display-mode flag + render-derived geometry).
 **Trigger:** User report: a minimized pane can still be resized by dragging the adjacent
@@ -71,7 +71,7 @@ Consequences:
 
 ## 3. How minimize works today (current design)
 
-State lives in the layout tree itself (`frontend/layout/lib/types.ts`), mirrored untyped on
+State lives in the layout tree itself ([`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts)), mirrored untyped on
 the Rust side through `LayoutNode.extra`:
 
 | Field | On | Meaning |
@@ -93,7 +93,7 @@ The key property: **a minimized pane is still an ordinary flex node** with an or
 ## 4. Audit: which mutation surfaces know minimize exists
 
 Grep basis: `minimizedSize|slipMinimize|columnDissolve|minimizedNodeIds` across
-`frontend/` and `agentmux-srv/`. Only `layoutMinimize.ts`, `layoutModel.ts`,
+[`frontend/`](../../frontend) and `agentmux-srv/`. Only `layoutMinimize.ts`, `layoutModel.ts`,
 `layoutNode.ts`, `layoutResize.ts`, `types.ts` (TS) and `balance_node` (Rust) reference
 any of it.
 
@@ -173,7 +173,7 @@ points every mutation already flows through, so individual callers don't need to
    handle on locked edges, the exemption has nothing left to serve and the
    `MinNodeSizePx` guard becomes unconditional again.
 4. **Tests.** Mirror the established pattern: pure oracle tests in
-   `frontend/layout/tests/` (resize op on a minimized node is a no-op; handle list
+   [`frontend/layout/tests/`](../../frontend/layout/tests) (resize op on a minimized node is a no-op; handle list
    contains no locked edges; SetTree with a tampered minimized size snaps back), ported
    Rust tests in `backend/layout/tests.rs`, reducer-level tests for the `NodeLocked`
    rejection, red/green verified against reverted guards.
@@ -252,7 +252,7 @@ Merged history this consolidates:
 - PR #2036 — dead-space point fix (delete-saga frontend notification).
 - PR #2039 — `prune_dangling_block_refs` write-path invariant ("WRR-style").
 - PR #2176 — dissolved-column direction-flip guard in `balanceNode`/`balance_node`.
-- `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`.
+- [`docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`](../investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md).
 
 ## 8. Final design (implemented 2026-07-16): minimize is a display mode
 

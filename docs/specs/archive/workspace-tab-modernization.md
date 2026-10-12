@@ -285,8 +285,8 @@ export class TermWrap {
 ```
 
 **Files to modify:**
-- `frontend/app/view/term/termwrap.ts` - Add visibility + state serialization
-- `frontend/app/view/term/term.tsx` - Connect to workspace state
+- [`frontend/app/view/term/termwrap.ts`](../../../frontend/app/view/term/termwrap.ts) - Add visibility + state serialization
+- [`frontend/app/view/term/term.tsx`](../../../frontend/app/view/term/term.tsx) - Connect to workspace state
 
 **Acceptance Criteria:**
 - ✅ Terminal state persists when switching tabs
@@ -308,7 +308,7 @@ export class TermWrap {
 
 **Files to MODIFY:**
 - `emain/preload.ts` - Remove tab-related IPC handlers
-- `frontend/types/custom.d.ts` - Remove ElectronApi tab methods
+- [`frontend/types/custom.d.ts`](../../../frontend/types/custom.d.ts) - Remove ElectronApi tab methods
 
 **Removed APIs:**
 ```typescript

@@ -2,20 +2,20 @@
 
 **Date:** 2026-08-25 (handoff), resolved 2026-08-26.
 **Status:** Fixed. Rev 6 replaced the fixed left/right slot pairing with a real DOM-measurement-based split — see
-`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` for the Rev 6 write-up and
+[`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`](../specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) for the Rev 6 write-up and
 `AgentComposerStrip.tsx`'s own header comment (`computeBalancedLeftKeys`) for the implementation. Verified visually
 via a real `task dev` build + direct Win32 screenshot capture (not HMR-log-assumed — see "How the fix was verified"
 below): the common case (Claude agent, context tracked, HOST mode) now renders on ONE line at the ≥482px tier, and
 narrower tiers still degrade to 2-3 readable lines with nothing clipped. Temporary debug outlines removed. Original
 diagnosis (below) is preserved for history — read it first if this needs touching again.
-**Read first:** `docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` (Rev 1-6, full history) and `docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md` (unrelated tooling report from the same session — its exact "Shell-tool exit 201" mystery (#6 in that report) turned out, per this fix's own teardown, to just be the ordinary signal from a `taskkill /T /F` on that tree — not a distinct bug).
+**Read first:** [`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`](../specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) (Rev 1-6, full history) and [`docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md`](../reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md) (unrelated tooling report from the same session — its exact "Shell-tool exit 201" mystery (#6 in that report) turned out, per this fix's own teardown, to just be the ordinary signal from a `taskkill /T /F` on that tree — not a distinct bug).
 
 ## How the fix was verified (2026-08-26)
 
 `mcp__agentmux__CaptureWindow`/`DiscoverWindows` (this session's own PR #2810) weren't used for this — screenshotting
 one's OWN dev-build window that way is exactly the hazard-prone path `REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md`
 documents (ambiguous title matches, foreign-instance targeting). Instead: launched `task dev` via
-`scripts/dev-agent.cmd` with the Bash tool's own `run_in_background` (confirmed reliable — plain `&`/`disown`
+[`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) with the Bash tool's own `run_in_background` (confirmed reliable — plain `&`/`disown`
 silently doesn't survive, matching that report's blocker #6b), found the correct window by PID via
 `Get-CimInstance Win32_Process` filtered on its `cef-dev-<build-id>` command-line path (disambiguating from an old
 leftover window sharing the same title), then captured it directly with a small PowerShell/.NET
@@ -45,7 +45,7 @@ With both of those fixed, the strip still needs 2 lines in the common case (Clau
 └──────────────────────────────────────────────────┘
 ```
 
-(See `docs/debug/composer-strip-2026-08-25/single-line-still-lopsided.png` for the real screenshot this is transcribed from, and `.../zones-outlined-2-lines.png` for the same layout with temporary debug outlines added — red = controls/left zone, blue = stats/center zone, green = right zone.)
+(See [`docs/debug/composer-strip-2026-08-25/single-line-still-lopsided.png`](../debug/composer-strip-2026-08-25/single-line-still-lopsided.png) for the real screenshot this is transcribed from, and `.../zones-outlined-2-lines.png` for the same layout with temporary debug outlines added — red = controls/left zone, blue = stats/center zone, green = right zone.)
 
 **Diagnostic finding, confirmed via the debug outlines (important — read before changing the grouping again):** zone *assignment* is correct. The context group (text + countdown + Compact) is entirely inside the red (left/controls) box; auth + HOST/Shell are entirely inside the green (right) box. Nothing is torn across zones. The remaining problem is purely that the **left zone's total content is wider than one line can hold** at common pane widths — runtime trigger + all 3 context-group sub-elements together don't fit, so the last one (Compact) wraps to the left zone's own second internal line — while the right zone's content (auth + HOST + Shell) fits comfortably on one line. Net result: 2 visual lines, with the left zone occupying both of them and the right zone occupying only the second, which still reads as imbalanced even though neither zone is empty and nothing is clipped.
 
@@ -72,4 +72,4 @@ cd <this worktree>
 npm run dev
 ```
 
-Builds and launches a `task dev` instance. See `docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md` for known rough edges in this flow (background-process reliability, window identification) — nothing blocking, just be aware `mcp__agentmux__Shell` specifically doesn't work for this and a full kill+relaunch is more trustworthy than relying on HMR to confirm a fix actually landed.
+Builds and launches a `task dev` instance. See [`docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md`](../reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md) for known rough edges in this flow (background-process reliability, window identification) — nothing blocking, just be aware `mcp__agentmux__Shell` specifically doesn't work for this and a full kill+relaunch is more trustworthy than relying on HMR to confirm a fix actually landed.

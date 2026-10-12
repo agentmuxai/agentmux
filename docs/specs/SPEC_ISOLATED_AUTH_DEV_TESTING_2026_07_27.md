@@ -1,11 +1,11 @@
 # Spec: Opt-in isolated auth for `task dev` testing
 
 **Date:** 2026-07-27
-**Status:** Implemented — defaults amended by `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (2026-08-06) — #2318
-**Related:** `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`,
-`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`
+**Status:** Implemented — defaults amended by [`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) (2026-08-06) — #2318
+**Related:** [`docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`](REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md),
+[`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](../retro/retro-provider-auth-isolation-regression-2026-06-05.md)
 
-> **Amended 2026-10-03:** the default is now **shared on every channel**; `AGENTMUX_ISOLATED_AUTH=1` is the only way to isolate (`docs/specs/SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`). The mechanism below is unchanged.
+> **Amended 2026-10-03:** the default is now **shared on every channel**; `AGENTMUX_ISOLATED_AUTH=1` is the only way to isolate ([`docs/specs/SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md)). The mechanism below is unchanged.
 >
 > **Amended 2026-08-06:** everything below describing the mechanism
 > (channel-scoped store, credential-dir isolation, the two load-bearing
@@ -13,7 +13,7 @@
 > the *default* — "When unset (the default): zero behavior change" and
 > "Isolation must never be the default" (§ below) are no longer true for
 > any channel except `stable`. See
-> `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` for
+> [`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) for
 > the current default and why it changed.
 
 ## The incident that motivated this
@@ -51,7 +51,7 @@ in the first place. Isolation must never be the default.
   default provider config dir, e.g. `~/.agentmux/shared/providers/claude/`).
   That directory's global, channel-independent nature is the structural
   fix for a real prior regression — see
-  `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md` ("the
+  [`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](../retro/retro-provider-auth-isolation-regression-2026-06-05.md) ("the
   validate-spin bug"). This feature is orthogonal to that fix: the
   Armory-account-bound login path always resolves `CLAUDE_CONFIG_DIR` from
   `identities_dir()`, never from `provider_auth_dir()` — confirmed by

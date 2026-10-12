@@ -6,15 +6,15 @@
 2026-08-31 and the ladder fix that shipped in PR #2870. One gap fixed in the same PR (§4.1); the rest recorded,
 not fixed.
 **Scope:** `agentmux-srv/src/agents/failure.rs`,
-`frontend/app/view/agent/hooks/useAgentFailure.ts`,
-`frontend/app/view/agent/failure/failure-accessory.ts`,
-`frontend/app/view/agent/providers/claude-translator.ts`,
-`frontend/app/store/agent-pane-state/reducer.ts`
+[`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts),
+[`frontend/app/view/agent/failure/failure-accessory.ts`](../../frontend/app/view/agent/failure/failure-accessory.ts),
+[`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts),
+[`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts)
 **Related:** `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` (the design; still
 marked Draft/proposed though largely implemented),
 `SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`,
 `SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`,
-`docs/retro/retro-busy-animation-stuck-on-429-2026-06-24.md`
+[`docs/retro/retro-busy-animation-stuck-on-429-2026-06-24.md`](../retro/retro-busy-animation-stuck-on-429-2026-06-24.md)
 
 ---
 
@@ -165,7 +165,7 @@ the code, which is a separate piece of work from this one.
 `useAgentFailure.test.ts` — 8 passing, covering the full ladder, the cap, the
 jitter band, and all three budget-reset paths. Ladder expectations derive from a
 single `LADDER_MS` constant so a future policy change updates one place.
-Full `frontend/app/view/agent` suite: 1572 passing across 120 files.
+Full [`frontend/app/view/agent`](../../frontend/app/view/agent) suite: 1572 passing across 120 files.
 `tsc --noEmit` clean.
 
 Not verified by observation: I did not reproduce a live 429/529 against the

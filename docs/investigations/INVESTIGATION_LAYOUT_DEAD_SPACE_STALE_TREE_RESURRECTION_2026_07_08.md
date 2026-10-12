@@ -9,7 +9,7 @@ self-heals any dangling block reference unconditionally (§WRR-style self-healin
 below), so the invariant holds regardless of which caller or future bug produces a stale
 tree. Mechanism B (saga-step non-atomicity) and the missing CAS on `Store::update` remain
 open, tracked as follow-ons in §Recommended fix.
-**Component:** `agentmux-srv` reducer/layout persistence, `frontend/layout/lib/layoutPersistence.ts`
+**Component:** `agentmux-srv` reducer/layout persistence, [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts)
 **Reported by:** user, dev instance (`v0.51.0`, built 2026-07-07 11:13:02, HEAD `8bea4a52`)
 **Relation to Pillar 1 (host reproject, `SPEC_PILLAR1_*`):** not causal — Pillar 1's reproject
 code doesn't write layout data, it reads `db_layout` as ground truth on window
@@ -98,7 +98,7 @@ codebase: the frontend's next push does not converge the orphan away — **it is
 mechanism that resurrects it** — because, per `layoutPersistence.ts`, the frontend was never
 told to remove the node in the first place.
 
-Confirmed client-side. `frontend/layout/lib/layoutPersistence.ts:52-68`
+Confirmed client-side. [`frontend/layout/lib/layoutPersistence.ts:52-68`](../../frontend/layout/lib/layoutPersistence.ts#L52-L68)
 (`onBackendUpdate`, the *only* function that reacts to an incoming backend `LayoutState`
 update):
 
@@ -207,7 +207,7 @@ caveats (below), both srv-side.
 
 ## This is a known, already-(prematurely)-closed bug class
 
-`docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §8 (added 2026-07-07 00:01, PR
+[`docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`](../specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) §8 (added 2026-07-07 00:01, PR
 #1996) closes out a 2026-07-04 incident matching this one almost exactly: *"`sysinfo`/`swarm`
 panes were pruned from a live layout tree ... leaving a stale-rendered empty cell"* — this
 dead-space block's `meta.view` was `"swarm"`. That investigation found no surviving evidence
@@ -235,7 +235,7 @@ worth flagging directly:
    and no assertion that a deleted block's id never survives as a dangling reference. It
    would not catch either mechanism above.
 
-No other doc in `docs/retro/` or `docs/investigations/` describes this failure mode (broad
+No other doc in [`docs/retro/`](../retro) or [`docs/investigations/`](.) describes this failure mode (broad
 grep for dangling/orphan/stale tree/resurrect/dead pane/phantom pane found only the one hit
 above).
 
@@ -283,7 +283,7 @@ what the frontend's own delete-push converges away" — backwards, per Mechanism
 added a regression test
 (`sagas::delete_block::tests::saga_queues_a_pendingbackendactions_delete_for_a_stale_frontend`)
 asserting the queued action's `actiontype`/`blockid` match what
-`frontend/layout/lib/types.ts`'s `LayoutTreeActionType.DeleteNode` handler expects. This
+[`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts)'s `LayoutTreeActionType.DeleteNode` handler expects. This
 directly closes Mechanism A, the highest-confidence and directly-matched-to-evidence cause.
 All 133 pre-existing + new layout/saga tests pass.
 

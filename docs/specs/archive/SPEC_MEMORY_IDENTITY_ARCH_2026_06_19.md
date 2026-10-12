@@ -1,6 +1,6 @@
 # Memory & Identity Architecture — Simplified Design
 
-> **Archived 2026-07-12.** Superseded by `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` and `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` — its proposed "Presets" naming and identity-bundle options were both resolved differently. Consolidated tracking: issue #2024.
+> **Archived 2026-07-12.** Superseded by `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` and [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](../SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) — its proposed "Presets" naming and identity-bundle options were both resolved differently. Consolidated tracking: issue #2024.
 
 **Date:** 2026-06-19  
 **Status:** Proposal  
@@ -256,8 +256,8 @@ The backend is done. The UI gap is the only thing preventing the brain icon from
 ### Priority 1 — Phase 3: Native memory browser (high user value, backend already done)
 
 **Files to create/modify:**
-- `frontend/app/view/agent/agent-native-memory-model.ts` — `AgentNativeMemoryModel` class (reactive file list, select/read/edit/save/create)
-- `frontend/app/view/agent/components/AgentNativeMemoryModal.tsx` — replace the placeholder with the real two-column browser + editor
+- [`frontend/app/view/agent/agent-native-memory-model.ts`](../../../frontend/app/view/agent/agent-native-memory-model.ts) — `AgentNativeMemoryModel` class (reactive file list, select/read/edit/save/create)
+- [`frontend/app/view/agent/components/AgentNativeMemoryModal.tsx`](../../../frontend/app/view/agent/components/AgentNativeMemoryModal.tsx) — replace the placeholder with the real two-column browser + editor
 - `frontend/app/view/agent/agent-native-memory.scss` — styles
 
 **Layout:**

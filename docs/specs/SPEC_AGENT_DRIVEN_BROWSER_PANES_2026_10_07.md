@@ -25,8 +25,8 @@
 
 | Piece | State |
 |---|---|
-| Browser control layer | Built. `crates/cef/src/browser_api/` is a CDP-backed HTTP surface (in-process CDP since #3832): `query`, `focus_info`, `eval`, `screenshot`, `click_element`, `focus_element`, `dispatch_key`, `navigate`, `back`, `forward`, `reload`. |
-| Agent tools | `UIClick`, `UIQuery`, `UIScreenshot`, `BrowserNavigate`, `BrowserBack`, `BrowserForward`, `BrowserReload`, `BrowserEval`, `BrowserDispatchKey`, `BrowserFocusElement`, `BrowserFocusInfo`. All proxied through `crates/srv/src/server/ui_handlers.rs`. |
+| Browser control layer | Built. [`crates/cef/src/browser_api/`](../../crates/cef/src/browser_api) is a CDP-backed HTTP surface (in-process CDP since #3832): `query`, `focus_info`, `eval`, `screenshot`, `click_element`, `focus_element`, `dispatch_key`, `navigate`, `back`, `forward`, `reload`. |
+| Agent tools | `UIClick`, `UIQuery`, `UIScreenshot`, `BrowserNavigate`, `BrowserBack`, `BrowserForward`, `BrowserReload`, `BrowserEval`, `BrowserDispatchKey`, `BrowserFocusElement`, `BrowserFocusInfo`. All proxied through [`crates/srv/src/server/ui_handlers.rs`](../../crates/srv/src/server/ui_handlers.rs). |
 | Scoping | **Own pane only.** `verified_block_id()` (`ui_handlers.rs:72`) derives the target block from the caller's HMAC-signed identity; a client-supplied block id is never trusted (#2662). Navigate/Back/Forward/Reload/Eval also require that block to be a browser pane. |
 | Typing | Good: `dispatch_key` with `text` uses CDP `Input.insertText` (`routes.rs:704`), which is real input that React and Vue controlled fields accept. |
 | Opening a browser pane | **No tool.** Agents have `OpenAgent`, `OpenEditor`, `OpenMedia`, `OpenFiles`, `NewTab`, `Layout`. `pane.open` (`app_api/pane.rs:1011`) can create any view, so the plumbing exists. |

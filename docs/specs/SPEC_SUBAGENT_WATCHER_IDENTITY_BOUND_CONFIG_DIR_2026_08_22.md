@@ -4,8 +4,8 @@
 **Status:** Implemented — #2757
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/identity/resolver/inject.rs`, `agentmux-srv/src/backend/subagent_watcher/parse.rs`, `agentmux-srv/src/server/reactive.rs`, `agentmux-srv/src/server/service/misc.rs`)
-**Diagnosis:** live repro during the follow-up to `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md` §4 (the original "dispatched subagent never appears in Swarm" bug)
-**Related:** `SPEC_PROVIDER_ISOLATION_2026_06_20.md` §4.3 (the frozen-`cmd:env` tradeoff this closes a gap in), `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+**Diagnosis:** live repro during the follow-up to [`docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`](../reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md) §4 (the original "dispatched subagent never appears in Swarm" bug)
+**Related:** `SPEC_PROVIDER_ISOLATION_2026_06_20.md` §4.3 (the frozen-`cmd:env` tradeoff this closes a gap in), [`docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`](../retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md)
 
 ## 1. Root cause
 
@@ -43,7 +43,7 @@ never runs, because the watch itself never sees the write.
 
 This is not a race or a rare edge case: it reproduces for **every** agent
 with an explicit (non-ambient) identity binding, deterministically, forever
-— which, per `docs/reports/REPORT_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`'s
+— which, per [`docs/reports/REPORT_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`](../reports/REPORT_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md)'s
 own framing, matches "a dispatched subagent never appearing in Swarm at
 all" far better than a naming/attribution bug would.
 

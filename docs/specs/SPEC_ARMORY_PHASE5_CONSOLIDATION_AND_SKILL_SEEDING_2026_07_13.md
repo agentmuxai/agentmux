@@ -52,8 +52,8 @@ launches with (agent picker → Provider/Account/Status table, backed by
 The natural-looking replacement — the agent-pane's own **"Identity" tab** (`view: "identity"`,
 distinct from Armory's tab; CLAUDE.md already calls this out as the intended per-agent surface)
 — does **not currently work**. It renders `BundleSummaryPanel kind="Identity"`
-(`frontend/app/view/identity/identity-pane-view.tsx:27`), whose own code comment
-(`frontend/app/view/bundle-summary.tsx:18-25`) documents an explicit **DATA GAP**: it can't
+([`frontend/app/view/identity/identity-pane-view.tsx:27`](../../frontend/app/view/identity/identity-pane-view.tsx#L27)), whose own code comment
+([`frontend/app/view/bundle-summary.tsx:18-25`](../../frontend/app/view/bundle-summary.tsx#L18-L25)) documents an explicit **DATA GAP**: it can't
 resolve "this agent uses Identity: X" because the launched identity id lives on the
 `AgentInstance` row, not reachable from this settings block. It degrades to a pointer-only
 stub — body text + a button that calls `openOrFocusPaneByView("armory")` with **no section
@@ -73,7 +73,7 @@ join data — the gap is plumbing the *current* agent's id into `BundleSummaryPa
 `identity-pane-view.tsx`'s call site, not new backend work.
 
 **Concrete change:**
-- `frontend/app/view/identity/identity-pane-view.tsx`: replace the generic
+- [`frontend/app/view/identity/identity-pane-view.tsx`](../../frontend/app/view/identity/identity-pane-view.tsx): replace the generic
   `<BundleSummaryPanel kind="Identity" />` stub with a small panel that calls
   `ListAllAgentIdentitiesCommand`, filters to the current block's `agentId`, and renders the
   same Provider/Account/Status row shape `AgentIdentitiesPanel` already renders for one agent
@@ -116,7 +116,7 @@ Confirmed genuine inconsistency, not a considered choice: every other Armory tab
 plural (Accounts, Bundles, MCP Servers, Skills — Identities too, before removal), and the
 2026-07-02 rename that settled "Memory" over "Brain" (#2025) only decided the *term*, never
 addressed pluralization. The team's own architecture doc
-(`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md:45`) already lists
+([`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md:45`](archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md)) already lists
 Armory's contents as "Accounts, **Memories**, MCP Servers, Skills, Briefs, and Bundles" —
 consistent plural, confirming this was always the intended terminology.
 
@@ -146,7 +146,7 @@ to fix in the same PR: `"Manage accounts, memories, skills, MCP servers, and bun
 ### 3.1 Change
 
 Confirmed safe — no persisted "last active tab," no index-dependent logic anywhere under
-`frontend/app/view/armory/` (`section()` is a plain component-local Solid signal, resets to
+[`frontend/app/view/armory/`](../../frontend/app/view/armory) (`section()` is a plain component-local Solid signal, resets to
 `"accounts"` on every mount; routing is entirely by `id` string, never array position).
 
 `RAIL` becomes (after §1's removal and §2's rename):
@@ -291,11 +291,11 @@ as a real product decision, not assuming unconditional is correct by default.
 
 ## 6. Sources
 
-- `docs/specs/SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md`
-- `docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`
-- `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`
+- [`docs/specs/SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md`](SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md)
+- [`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`](SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md)
+- [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md)
 - `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md`
 - `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`
-- `docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md`
+- [`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md`](archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md)
 - GitHub issue #2024 (Armory pane consolidation tracker)
 - `a5af/claw` (`templates/skills/*.md`), read 2026-07-13

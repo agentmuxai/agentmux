@@ -14,7 +14,7 @@ This spec defines three enhancements to the AgentMux tabbar:
 ## Current State
 
 ### TabBar Architecture
-- **Location:** `frontend/app/tab/tabbar.tsx`
+- **Location:** [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx)
 - **Current Layout:**
   ```
   ┌─────────────────────────────────────────────────┐
@@ -87,7 +87,7 @@ This spec defines three enhancements to the AgentMux tabbar:
 
 #### Implementation
 
-**File:** `frontend/app/tab/tabbar.tsx`
+**File:** [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx)
 
 ```typescript
 // Add to imports
@@ -121,7 +121,7 @@ const handleVersionClick = React.useCallback(() => {
 )}
 ```
 
-**File:** `frontend/app/tab/tabbar.scss`
+**File:** [`frontend/app/tab/tabbar.scss`](../../../frontend/app/tab/tabbar.scss)
 
 Add the `.tab-bar-version` styles above.
 
@@ -136,7 +136,7 @@ Add the `.tab-bar-version` styles above.
 
 ### Current Implementation
 
-**Existing WindowDrag component:** `frontend/app/element/windowdrag.tsx`
+**Existing WindowDrag component:** [`frontend/app/element/windowdrag.tsx`](../../../frontend/app/element/windowdrag.tsx)
 - Already uses `data-tauri-drag-region` attribute
 - Tauri automatically handles window dragging for elements with this attribute
 
@@ -154,7 +154,7 @@ Expand the drag region from just the left side to the entire tabbar wrapper, exc
 
 #### Implementation
 
-**File:** `frontend/app/tab/tabbar.tsx`
+**File:** [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx)
 
 **Option A (Recommended): Add drag-region to wrapper**
 ```typescript
@@ -202,7 +202,7 @@ Ensure widgets don't propagate drag events:
 >
 ```
 
-**File:** `frontend/app/tab/tabbar.scss`
+**File:** [`frontend/app/tab/tabbar.scss`](../../../frontend/app/tab/tabbar.scss)
 
 Add cursor styling:
 ```scss
@@ -280,7 +280,7 @@ Add cursor styling:
 
 ### Implementation
 
-**File:** `frontend/app/tab/tabbar.tsx`
+**File:** [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx)
 
 ```typescript
 // Add imports
@@ -456,10 +456,10 @@ WidgetBar re-renders with new visibility
 
 ## Files to Modify
 
-- `frontend/app/tab/tabbar.tsx` (main changes)
-- `frontend/app/tab/tabbar.scss` (styling)
+- [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx) (main changes)
+- [`frontend/app/tab/tabbar.scss`](../../../frontend/app/tab/tabbar.scss) (styling)
 - `frontend/app/tab/widgetbar.tsx` (context menu update - optional)
-- `frontend/app/element/windowdrag.tsx` (no changes needed - keeps current behavior)
+- [`frontend/app/element/windowdrag.tsx`](../../../frontend/app/element/windowdrag.tsx) (no changes needed - keeps current behavior)
 
 ## Testing Checklist
 
@@ -579,5 +579,5 @@ None - all required APIs already exist.
 
 - Tauri Window Dragging: https://tauri.app/v2/guides/features/drag-and-drop/
 - Current WidgetBar implementation: `frontend/app/tab/widgetbar.tsx`
-- Widget config schema: `schema/widgets.json`
+- Widget config schema: [`schema/widgets.json`](../../../schema/widgets.json)
 - Default widgets: `pkg/wconfig/defaultconfig/widgets.json`

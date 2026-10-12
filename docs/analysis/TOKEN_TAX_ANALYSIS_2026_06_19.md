@@ -233,5 +233,5 @@ All facts verified against primary sources:
 - [justacuriousengineer.substack.com — API traffic analysis](https://justacuriousengineer.substack.com/p/breaking-down-claude-codes-prompt)
 - `agentmux-srv/src/backend/agent_config.rs`
 - `agentmux-srv/src/backend/blockcontroller/subprocess.rs`
-- `frontend/app/view/agent/startup/buildStartupPayload.ts`
+- [`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts)
 - `agentmux-srv/agent-seed.json`

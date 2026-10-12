@@ -88,7 +88,7 @@ The renderer's existing `docknodestatus`/completion pushes are unchanged; every 
 
 - srv consumes `agentmux-bashwrap`'s own `tool_chunk` events with a broker observer (`Broker::add_observer`, the pattern `notify/router.rs` uses): `pid` → the existing pending-pid path, `terminal` → complete the row with the real exit code. This removes the renderer round-trip that today only works while the pane is mounted.
 - A periodic liveness sweep over `running` rows with a pid (`reactive::registry::pid_alive`), guarded against pid reuse by comparing the process start time with `started_at_ms`. A dead pid with no reported end becomes `stopped`. A real long-running `task dev` stays visible because its pid is alive.
-- Prerequisite on macOS and Linux: packaged builds must ship `agentmux-bashwrap` (fixed separately, with `scripts/check-bundled-tools.sh`).
+- Prerequisite on macOS and Linux: packaged builds must ship `agentmux-bashwrap` (fixed separately, with [`scripts/check-bundled-tools.sh`](../../scripts/check-bundled-tools.sh)).
 
 ## 6. Tests
 

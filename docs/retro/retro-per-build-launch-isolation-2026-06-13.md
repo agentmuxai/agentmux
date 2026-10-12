@@ -36,7 +36,7 @@ The **cross-channel work (#1387–#1393, shipped 2026-06-13)** moved agents (def
 
 ## 4. The fix
 
-1. **`scripts/package.sh`:** bake a per-build `BUILD_ID` (8-char hash of the full label) into `AGENTMUX_BUILD_CHANNEL_DEFAULT` → channel `local-<slug>-<hash>-<build-id>`. cef-cache + data dir + pipe are now all per-build. (Releases unaffected — `RELEASE_CHANNEL` still wins; ≤55/64 chars.)
+1. **[`scripts/package.sh`](../../scripts/package.sh):** bake a per-build `BUILD_ID` (8-char hash of the full label) into `AGENTMUX_BUILD_CHANNEL_DEFAULT` → channel `local-<slug>-<hash>-<build-id>`. cef-cache + data dir + pipe are now all per-build. (Releases unaffected — `RELEASE_CHANNEL` still wins; ≤55/64 chars.)
 2. **`agentmux-launcher/src/data_dir.rs`:** when launched **nested** (`AGENTMUX` set), resolve path-only and ignore the leaked ambient `AGENTMUX_CHANNEL` — symmetric with dev builds. The launcher's resolved env is already authoritative for the host+srv (`to_env_vars()` overwrites inherited values at every spawn site), so no downstream change is needed. An explicit *standalone* override is still honored.
 3. **Disk accumulation cleanup is a deliberate follow-up, not in this PR.** Per-build data dirs + cef-caches accumulate, but a *safe* prune needs a real liveness signal (is an instance still using this channel?) — which only the launcher has (it owns the single-instance pipe, so it can prune a sibling channel iff its pipe is unheld). A build-script mtime heuristic can't tell a live-but-idle instance from a dead one, and on Unix `rm -rf` would unlink a live DB → corruption. So pruning belongs in launcher startup.
 

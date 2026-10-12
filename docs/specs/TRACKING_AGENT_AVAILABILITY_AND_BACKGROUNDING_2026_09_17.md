@@ -30,7 +30,7 @@ One sentence, and every indicator, gate and dock row is a rendering of it:
 
 > **If the agent has nothing in the foreground that blocks a new message, a message typed now is answered immediately.** Long-running work does not count as blocking once it has been accepted as backgrounded; it stays visible as a dock row.
 
-Encoded in `frontend/app/view/agent/working-indicator.ts` as a single predicate. The progress bar, the `Working…` row and the composer gate are three renderings of that one boolean — **any state where they disagree is a bug by construction**, not a judgement call.
+Encoded in [`frontend/app/view/agent/working-indicator.ts`](../../frontend/app/view/agent/working-indicator.ts) as a single predicate. The progress bar, the `Working…` row and the composer gate are three renderings of that one boolean — **any state where they disagree is a bug by construction**, not a judgement call.
 
 ## 2. The correction that keeps getting re-learned
 
@@ -73,7 +73,7 @@ Landing it surfaced two gaps beyond it merely being uncommitted, both worth reme
 - **It did not typecheck.** `agent-view.tsx` called `hasBlockingForegroundToolCall` without importing it.
 - **The send path was never updated.** `wasAlreadyWorking` reads the raw turn phase, so the indicator would have gone dark while the message still sat in the "send now" queue until a tool-call boundary that, for a turn whose only remaining work is a detached process, may never arrive. Indicator and gate disagreeing is this family's signature bug — it would have shipped inverted. The HOLD branch now flushes via the same exported predicate the indicator renders (`turnHeldOnlyByBackgroundWork`).
 
-**Local-verification blind spot found en route:** 47 test suites under `frontend/app/view/agent/` fail to *load* in a clean checkout (`ERR_INVALID_ARG_VALUE: ... 'file:///@solid-refresh'`), reproducing on `main` with no local changes. Everything in that directory is effectively CI-only today. Plausibly a contributor to why this area keeps regressing; deserves its own issue.
+**Local-verification blind spot found en route:** 47 test suites under [`frontend/app/view/agent/`](../../frontend/app/view/agent) fail to *load* in a clean checkout (`ERR_INVALID_ARG_VALUE: ... 'file:///@solid-refresh'`), reproducing on `main` with no local changes. Everything in that directory is effectively CI-only today. Plausibly a contributor to why this area keeps regressing; deserves its own issue.
 
 ### 3.3 Open work
 

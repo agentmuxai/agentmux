@@ -12,7 +12,7 @@ and `muxcode` fixes are open PRs, not yet merged. See §0 for current state. —
 Audited every `agentmuxai` repo cloned in this workspace (`agentmux`, `agentmux-docs`,
 `muxcode`, `agentmux-mobile`) for their Node.js version pins. **`agentmux` itself is
 already fully standardized on Node 24 LTS** — this was fixed as part of
-`docs/reports/REPORT_FRESH_PC_ONBOARDING_AUDIT_2026_09_02.md`'s finding 2a (that report
+[`docs/reports/REPORT_FRESH_PC_ONBOARDING_AUDIT_2026_09_02.md`](../reports/REPORT_FRESH_PC_ONBOARDING_AUDIT_2026_09_02.md)'s finding 2a (that report
 recorded README.md/BUILD.md still saying "22 LTS" against a `.nvmrc`/CI baseline of 24;
 both docs now correctly say 24). This PR closes the two remaining gaps inside
 `agentmux` itself; two sibling repos have their own open PRs, not yet merged:
@@ -20,8 +20,8 @@ both docs now correctly say 24). This PR closes the two remaining gaps inside
 | Repo | Current state | Action needed |
 |---|---|---|
 | `agentmux` (main app + CI) | **24 everywhere** (`.nvmrc`, `package.json` engines, 8 CI workflow files, `check-toolchain.sh`, README.md, BUILD.md) | None — compliant |
-| `agentmux` `docker/Dockerfile.agent-agentmux` | ✅ **Done, this PR** — bumped to `node:24-slim` | None — could not be rebuilt/tested locally (no Docker in the environment this was prepared in); first real verification is this PR's own `container-image.yml` build-and-push job |
-| `agentmux` `.github/workflows/container-image.yml` | ✅ **Done, this PR** — added an explicit `actions/setup-node@v4` (`node-version: '24'`) step | None |
+| `agentmux` [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) | ✅ **Done, this PR** — bumped to `node:24-slim` | None — could not be rebuilt/tested locally (no Docker in the environment this was prepared in); first real verification is this PR's own `container-image.yml` build-and-push job |
+| `agentmux` [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml) | ✅ **Done, this PR** — added an explicit `actions/setup-node@v4` (`node-version: '24'`) step | None |
 | `agentmux-docs` | CI pinned to **Node 22** (3 workflows); `package.json` has **no `engines` field** | Open PR (agentmux-docs#123): bumps CI to 24, adds `engines`. Not yet merged. |
 | `muxcode` | `package.json` engines: **`>=20.0.0`**; no `.nvmrc`; **no CI at all** | Open PR (muxcode#2): bumps engines floor to 24, adds `.nvmrc`. Not yet merged. CI itself remains a separate open question. |
 | `agentmux-mobile` | Flutter/Dart app — **no Node.js anywhere** in its toolchain or CI | Out of scope, documented so a future drift-checker doesn't flag it as a silent gap |
@@ -61,7 +61,7 @@ BUILD.md line 15                 -> | **Node.js** | v24 LTS | Frontend build (So
 
 Two things outside that list were **not** on 24 — both fixed as part of this same PR:
 
-- **`docker/Dockerfile.agent-agentmux`** (`FROM node:22-slim`) is not this repo's own
+- **[`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux)** (`FROM node:22-slim`) is not this repo's own
   build toolchain — it's the container image AgentMux ships for *running agent CLIs
   inside a sandboxed container* (the "container pane" feature). Its only Node-dependent
   step is `npm install -g @anthropic-ai/claude-code`. **✅ Bumped to `node:24-slim`.**
@@ -71,7 +71,7 @@ Two things outside that list were **not** on 24 — both fixed as part of this s
   could not be done locally — no Docker was available in the environment this was
   prepared in. This PR's own `container-image.yml` build-and-push job is the first
   actual verification.
-- **`.github/workflows/container-image.yml`** never called `actions/setup-node` — its
+- **[`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml)** never called `actions/setup-node` — its
   one Node-touching step (`npm view @anthropic-ai/claude-code version`) ran on whatever
   Node shipped baked into the `ubuntu-latest` runner image, unpinned and drifting on
   GitHub's own schedule. **✅ Added an explicit `actions/setup-node@v4`
@@ -128,14 +128,14 @@ standard — one version string to keep in sync across repos, not two.
 
 ### 4.1 `agentmux` (two edge cases only — everything else already compliant) — ✅ DONE
 
-1. ✅ Bumped `docker/Dockerfile.agent-agentmux`'s `FROM node:22-slim` to
+1. ✅ Bumped [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux)'s `FROM node:22-slim` to
    `FROM node:24-slim`. Could not rebuild/confirm
    `npm install -g @anthropic-ai/claude-code@2.1.263` locally — no Docker available
    in the environment this was prepared in. `container-image.yml`'s own
    build-and-push job is the first real verification; watch it on this PR before
    merging.
 2. ✅ Added an explicit `actions/setup-node@v4` (`node-version: '24'`) step to
-   `.github/workflows/container-image.yml`, matching the other 8 workflows, so CI's
+   [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml), matching the other 8 workflows, so CI's
    Node version is a checked-in fact rather than whatever `ubuntu-latest` happens to
    ship.
 
@@ -178,7 +178,7 @@ No action. Recorded as reviewed and exempt (§2.4).
    `engines` floor changes who can `npm install` it.
 2. **Should this spec's scope include adding CI to `muxcode`** (currently has none), or
    is that a separate, bigger piece of work than "fix the version pin"?
-3. **Is the container image (`docker/Dockerfile.agent-agentmux`) meant to track the same
+3. **Is the container image ([`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux)) meant to track the same
    Node version as the dev toolchain**, or is it intentionally decoupled since it only
    needs to run the Claude Code CLI, not build AgentMux itself?
 4. Any other internal/private repos under `agentmuxai` not cloned into this workspace

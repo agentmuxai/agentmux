@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-12
 **Owner:** Maop
-**Area:** `agentmux-srv/src/backend/lan_discovery.rs` (test-only), `.github/workflows/ci-nightly-build.yml`
+**Area:** `agentmux-srv/src/backend/lan_discovery.rs` (test-only), [`.github/workflows/ci-nightly-build.yml`](../../.github/workflows/ci-nightly-build.yml)
 
 ---
 

@@ -1,6 +1,6 @@
 # Command Palette — Spec
 
-**Status:** implemented — #309 (2026-04-06) shipped the palette itself (Ctrl+P + the `run_command` IPC); this doc was added later in #332 alongside the App API Tier 1 work that extended it. `frontend/app/modals/command-palette.tsx` and its stylesheet are live, wired into the macOS menu via `agentmux-cef/src/macos_menu.rs`. The **Target: v0.35.x** line below is long since passed.  
+**Status:** implemented — #309 (2026-04-06) shipped the palette itself (Ctrl+P + the `run_command` IPC); this doc was added later in #332 alongside the App API Tier 1 work that extended it. [`frontend/app/modals/command-palette.tsx`](../../frontend/app/modals/command-palette.tsx) and its stylesheet are live, wired into the macOS menu via `agentmux-cef/src/macos_menu.rs`. The **Target: v0.35.x** line below is long since passed.\
 **Target:** v0.35.x  
 **Authors:** AgentA
 
@@ -108,7 +108,7 @@ Developer-facing operations.
 
 `Ctrl+P` opens the palette. `Escape` closes it. `Enter` executes the selected command and closes.
 
-Add to `globalKeyMap` in `frontend/app/store/keymodel.ts`:
+Add to `globalKeyMap` in [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts):
 
 ```typescript
 globalKeyMap.set("Ctrl:p", () => {
@@ -362,19 +362,19 @@ Each `CommandEntry` can gain an optional `keybinding?: string` field (e.g., `"Ct
 
 Minimal walking skeleton, in order:
 
-1. **`frontend/app/store/command-registry.ts`** — `CommandEntry`, `CommandRegistry`, `commandRegistry` singleton, `registerDefaultCommands()`, `agentmux-run-command` event listener.
+1. **[`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts)** — `CommandEntry`, `CommandRegistry`, `commandRegistry` singleton, `registerDefaultCommands()`, `agentmux-run-command` event listener.
 
 2. **`agentmux-cef/src/commands/palette.rs`** — `run_command()` handler, dispatches JS event via `state.execute_js()`.
 
 3. **Wire Rust** — add `"run_command"` match arm in `agentmux-cef/src/ipc.rs`, add `pub mod palette;` in `agentmux-cef/src/commands/mod.rs`.
 
-4. **`frontend/app/modals/command-palette.tsx`** + **`command-palette.scss`** — overlay component with input, filtered list, keyboard nav.
+4. **[`frontend/app/modals/command-palette.tsx`](../../frontend/app/modals/command-palette.tsx)** + **`command-palette.scss`** — overlay component with input, filtered list, keyboard nav.
 
-5. **Wire keybinding** — add `Ctrl:p` to `globalKeyMap` in `frontend/app/store/keymodel.ts`, calling `commandPaletteModel.open()`.
+5. **Wire keybinding** — add `Ctrl:p` to `globalKeyMap` in [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts), calling `commandPaletteModel.open()`.
 
 6. **Wire modal** — add `CommandPalette` to `frontend/app/modals/modalregistry.tsx` so Escape dismissal works.
 
-7. **Call `registerDefaultCommands()`** — from `frontend/cef-init.ts` after `initGlobalAtoms()`.
+7. **Call `registerDefaultCommands()`** — from [`frontend/cef-init.ts`](../../frontend/cef-init.ts) after `initGlobalAtoms()`.
 
 ### No New Dependencies
 
@@ -384,12 +384,12 @@ The component uses SolidJS primitives already in the project. Fuzzy match for v1
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/command-registry.ts` | New |
-| `frontend/app/modals/command-palette.tsx` | New |
-| `frontend/app/modals/command-palette.scss` | New |
-| `frontend/app/store/keymodel.ts` | Add `Ctrl:p` binding |
+| [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) | New |
+| [`frontend/app/modals/command-palette.tsx`](../../frontend/app/modals/command-palette.tsx) | New |
+| [`frontend/app/modals/command-palette.scss`](../../frontend/app/modals/command-palette.scss) | New |
+| [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) | Add `Ctrl:p` binding |
 | `frontend/app/modals/modalregistry.tsx` | Register palette |
-| `frontend/cef-init.ts` | Call `registerDefaultCommands()` |
+| [`frontend/cef-init.ts`](../../frontend/cef-init.ts) | Call `registerDefaultCommands()` |
 | `agentmux-cef/src/commands/palette.rs` | New |
 | `agentmux-cef/src/commands/mod.rs` | Add `pub mod palette;` |
 | `agentmux-cef/src/ipc.rs` | Add `"run_command"` arm |

@@ -1,7 +1,7 @@
 # Editor — Markdown rendering bugs (analysis)
 
 **Date:** 2026-06-20  
-**Scope:** `view: "editor"` pane (`frontend/app/view/editor/`)  
+**Scope:** `view: "editor"` pane ([`frontend/app/view/editor/`](../../frontend/app/view/editor))\
 **Status:** Analysis only — no code changed.
 
 Three reported issues, in priority order (Bug 3 is the real defect; 1 and 2 are
@@ -118,7 +118,7 @@ safe.
 
 Note: this `.markdown` rule is editor-scoped (`.editor-md-preview .markdown`), so
 changing it does **not** affect the shared `Markdown` component elsewhere
-(`frontend/app/element/markdown.tsx`).
+([`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx)).
 
 ---
 

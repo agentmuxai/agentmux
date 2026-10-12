@@ -36,7 +36,7 @@ The failure chain, each link verified:
    Log (08:41:15.877): `seed_provider_auth_from_global: seeded isolated dir from
    valid global login … dest=…\identities\8d34a369-…\claude\.credentials.json`.
 2. Tier 2 then calls `persistSeededAccount`
-   (`frontend/app/view/agent/flows/register-seeded-account.ts:78-103`), which
+   ([`frontend/app/view/agent/flows/register-seeded-account.ts:78-103`](../../frontend/app/view/agent/flows/register-seeded-account.ts#L78-L103)), which
    sends this payload to the `upsertidentityaccount` RPC:
 
    ```ts
@@ -225,7 +225,7 @@ So one missed turn-end event pins the pane at "Working…" until the user
 reopens the pane or starts a new turn — matching the observed "stuck even
 though the agent returned" behavior, and consistent with the prior
 stuck-"Working" incidents
-(`docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`, reagent
+([`docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md), reagent
 P1s on PR #2241/#2303). The `Stalled` flaps also suggest long quiet stretches
 during which a throttled renderer is most likely to drop events.
 
@@ -351,10 +351,10 @@ two-step schedule. Design only in this section — not yet implemented.
   requests"`, `"rate_limit"`, or a mentioned HTTP status `429` —
   `mentions_http_status(&hay, "429")`) → `FailureClass::RateLimited`,
   `retryable: true`.
-- `frontend/app/view/agent/failure/failure-accessory.ts`'s `isTransient()`
+- [`frontend/app/view/agent/failure/failure-accessory.ts`](../../frontend/app/view/agent/failure/failure-accessory.ts)'s `isTransient()`
   auto-retry-eligibility check covers exactly three classes: `rate_limited`,
   `overloaded`, `network` — all three share the same schedule below.
-- `frontend/app/view/agent/hooks/useAgentFailure.ts`'s `armAutoRetry()` runs
+- [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts)'s `armAutoRetry()` runs
   a **fixed, non-exponential, 2-entry schedule**:
   `const AUTO_RETRY_BACKOFF_S = [5, 10] as const; // then manual-only`
   — a 1-second countdown ticks down from 5, then (if it fails again) from
@@ -425,7 +425,7 @@ two-step schedule. Design only in this section — not yet implemented.
 
 ### Implementation sketch (not yet built)
 
-- `frontend/app/view/agent/hooks/useAgentFailure.ts`: replace the flat
+- [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts): replace the flat
   `AUTO_RETRY_BACKOFF_S` array with a per-class policy table
   (`{ base, cap, maxAttempts }`) and a `nextDelaySecs(code, attempt,
   retryAfterSecs?)` helper implementing the decorrelated-jitter formula

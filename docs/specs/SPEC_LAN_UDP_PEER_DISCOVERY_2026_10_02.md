@@ -3,8 +3,8 @@
 **Date:** 2026-10-02
 **Status:** implemented — PR #4230; not yet verified on two real machines (section 5).
 **Author:** AgentX (narko), at the owner's request
-**Affects:** `crates/srv/src/backend/lan_discovery.rs`, `crates/srv/src/backend/lan_discovery/udp_peers.rs` (new), `crates/srv/src/backend/lan_firewall.rs` (the ports LAN needs)
-**Builds on:** `docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` (§4.7 item 5 asks for this; §9 names it PR E)
+**Affects:** [`crates/srv/src/backend/lan_discovery.rs`](../../crates/srv/src/backend/lan_discovery.rs), [`crates/srv/src/backend/lan_discovery/udp_peers.rs`](../../crates/srv/src/backend/lan_discovery/udp_peers.rs) (new), [`crates/srv/src/backend/lan_firewall.rs`](../../crates/srv/src/backend/lan_firewall.rs) (the ports LAN needs)
+**Builds on:** [`docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md`](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) (§4.7 item 5 asks for this; §9 names it PR E)
 
 ## 1. Why
 

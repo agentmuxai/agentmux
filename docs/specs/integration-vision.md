@@ -144,7 +144,7 @@ interface ContextEngine {
 
 ## OpenClaw widget
 
-See `docs/specs/openclaw-widget.md`.
+See [`docs/specs/openclaw-widget.md`](openclaw-widget.md).
 
 If OpenClaw already running → WebView at `localhost:18789` (full live state).
 Otherwise → install + setup flow.

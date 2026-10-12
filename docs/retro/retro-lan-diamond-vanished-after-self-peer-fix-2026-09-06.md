@@ -10,7 +10,7 @@ trust — the only status-bar signal that discovery is alive silently disappeare
 for every single-instance user, with nothing to distinguish it from "off".
 **Observed by:** repo owner, on a running v0.55.37 portable
 **Related:** PR #3025 (`b904ae00d`, "fix(lan): stop this instance discovering
-itself as a LAN peer"), `docs/specs/hostname-popover.md`
+itself as a LAN peer"), [`docs/specs/hostname-popover.md`](../specs/hostname-popover.md)
 
 ---
 
@@ -70,7 +70,7 @@ inferred:
    conflict-renamed service (`agentmux-v0 (2).55.34._agentmux._tcp.local.`).
    That phantom is what used to hold the diamond on.
 4. **The spec agrees with the code, not with the expectation.**
-   `docs/specs/hostname-popover.md`: *"If mDNS is enabled **and peers are
+   [`docs/specs/hostname-popover.md`](../specs/hostname-popover.md): *"If mDNS is enabled **and peers are
    found**, the hostname text could show a subtle indicator: `Area54 ◆` … to
    signal **LAN peers exist**"*. Peer count, explicitly — never enabled-state.
 
@@ -133,7 +133,7 @@ a lingering error stale rather than current.
 Filled-vs-hollow carries the peers/no-peers distinction without relying on
 color, so the two hollow states remain distinguishable from the useful one even
 if their hues are not. Glyph, state class and tooltip all come from a single
-pure `resolveLanIndicator()` (`frontend/app/statusbar/lan-indicator.ts`, tested
+pure `resolveLanIndicator()` ([`frontend/app/statusbar/lan-indicator.ts`](../../frontend/app/statusbar/lan-indicator.ts), tested
 in `lan-indicator.test.ts`), so the label a user reads cannot drift from the
 glyph they see — the failure mode that made this bug invisible in the first
 place was exactly a UI signal quietly meaning something other than it appeared to.

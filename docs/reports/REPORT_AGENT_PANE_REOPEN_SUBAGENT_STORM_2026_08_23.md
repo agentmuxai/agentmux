@@ -14,9 +14,9 @@ repro. Evidence is direct log correlation (host `[fe]` console-bridge lines +
 confirmed on both frontend and backend). **Fixed** — §6 option 1 (frontend-only
 debounce, no backend change) shipped same-day in
 [PR #2773](https://github.com/agentmuxai/agentmux/pull/2773) as
-`frontend/app/view/agent/activity/debounced-refresh.ts`, wired into both
+[`frontend/app/view/agent/activity/debounced-refresh.ts`](../../frontend/app/view/agent/activity/debounced-refresh.ts), wired into both
 `dispatch-source.ts` and `subagent-source.ts`; see
-`docs/specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md` for the
+[`docs/specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md`](../specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) for the
 shipped design. Verified directly (2026-08-24): both modules route every
 `subagent:*`/`dispatch:updated` handler through the shared debounce, and the
 full activity test suite (77 tests) passes, including dedicated burst-collapse
@@ -118,8 +118,8 @@ genuinely new spawn" — every one of the 155 looks identical to a live event.
 
 ### 2.3 Two independent frontend singletons each refresh, uncoalesced, per event
 
-`frontend/app/view/agent/activity/dispatch-source.ts` and
-`frontend/app/view/agent/activity/subagent-source.ts` are the app-lifetime,
+[`frontend/app/view/agent/activity/dispatch-source.ts`](../../frontend/app/view/agent/activity/dispatch-source.ts) and
+[`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts) are the app-lifetime,
 singleton data sources behind the Activity Dock's dispatch cards and
 subagent rows respectively (one shared instance across every open pane, by
 design — see each file's own header comment). Both independently subscribe

@@ -5,8 +5,8 @@
 - **Author:** AgentA
 - **Related:**
   - `docs/analysis/ANALYSIS_AGENT_PANE_ARCHITECTURE_2026_05_30.md` — the rethink that surfaced this
-  - `docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md` — the tool overlay / live-log design (owns `onOpenInPane`)
-  - `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` — the virtualizer this is a stepping-stone toward
+  - [`docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) — the tool overlay / live-log design (owns `onOpenInPane`)
+  - [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) — the virtualizer this is a stepping-stone toward
   - Interim caps already landed (uncommitted): `ToolOverlayLog.tsx` (`MAX_VISIBLE_CHUNKS=500`), `BashOutputViewer.tsx` (`MAX_OUTPUT_LINES=800`)
 
 ---
@@ -68,7 +68,7 @@ Phase 1 is the deliverable here (it already exists in hacky form and just needs 
 
 ## §4 The shared cap helper
 
-New file: **`frontend/app/view/agent/components/output-cap.ts`**
+New file: **[`frontend/app/view/agent/components/output-cap.ts`](../../frontend/app/view/agent/components/output-cap.ts)**
 
 ```ts
 /** Max rendered lines of any single tool's output body. Above this we

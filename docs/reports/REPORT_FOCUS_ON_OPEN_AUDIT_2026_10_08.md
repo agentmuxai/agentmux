@@ -26,7 +26,7 @@ The rest of the gaps share one shape: a button is replaced by the input it opens
 form), the button had the caret, it is removed, and the caret falls to `<body>`.
 
 There is no shared helper for "focus this input when it appears"; the surfaces that work each do it their own way
-(§5). #4481 adds one, `focusOnOpen` in `frontend/util/focusutil.ts`, and fixes every row of §2 with it (§7).
+(§5). #4481 adds one, `focusOnOpen` in [`frontend/util/focusutil.ts`](../../frontend/util/focusutil.ts), and fixes every row of §2 with it (§7).
 
 ## 2. Did not take the caret (most-hit first; all fixed in #4481, §7)
 
@@ -131,7 +131,7 @@ the pane is the active tab's selection, no modal, the user's caret isn't in a te
 
 ## 6. Recommendation (one helper, not sixteen fixes)
 
-1. **`focusOnOpen(el, { select })`** in `frontend/util/focusutil.ts` (added in #4481): a microtask, then
+1. **`focusOnOpen(el, { select })`** in [`frontend/util/focusutil.ts`](../../frontend/util/focusutil.ts) (added in #4481): a microtask, then
    `focus({ preventScroll: true })` and an optional select, if the element is in the document. The microtask runs after
    the render that inserted the element and before #4479's next-frame selection focus, which then sees the caret in the
    pane and leaves it. Use as `ref={(el) => focusOnOpen(el)}`. Add a `"stem"` select mode when the file renames move to
@@ -150,7 +150,7 @@ the pane is the active tab's selection, no modal, the user's caret isn't in a te
 
 ## 7. Fixed in #4481
 
-One helper pair in `frontend/util/focusutil.ts`, used everywhere below:
+One helper pair in [`frontend/util/focusutil.ts`](../../frontend/util/focusutil.ts), used everywhere below:
 
 - `focusOnOpen(el, { select })`: on the next microtask, if the element is in the document, `focus({ preventScroll: true
   })` and optionally select its text. Skipped when the user's caret is in a text field in *another* pane, so a form that

@@ -22,9 +22,9 @@
 
 **Date:** 2026-08-23
 **Status:** Root cause confirmed via live incident on this exact machine/agent. Closes the
-outstanding live-repro item from `docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`
+outstanding live-repro item from [`docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`](../specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md)
 (issue #2368). Recovery mechanism (#2693/#2699) confirmed working correctly. Two
-recommendations from `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
+recommendations from [`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`](STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md)
 remain unimplemented — this document narrows and re-confirms them with fresh evidence,
 proposes concrete fixes, and does not change code.
 
@@ -64,7 +64,7 @@ recover → respawn → reach-healthy cycle took **~39 seconds** with **zero UI 
 which is exactly what read as "did it crash?" to the operator.
 
 This is a live, real-world confirmation of the exact bug class documented in
-`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`. The good news:
+[`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`](STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md). The good news:
 the recovery fix that shipped since that report (#2693, #2699) worked correctly here —
 this is the first confirmed live case where it prevented what would otherwise have been
 a silent, total loss of conversation history (exactly like that report's original
@@ -130,7 +130,7 @@ indicator of any kind during that window.
 
 4. **The existing recovery path (#2693, #2699) worked exactly as designed and is now
    live-confirmed for the first time**, closing the outstanding item noted in
-   `docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md` (issue
+   [`docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`](../specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md) (issue
    #2368: *"close only with a live stale-resume repro... watch the blockfile for the doomed
    attempt's error frame — `held_error_line` should suppress it"*). Confirmed:
    `retry_after_resume_failure` (`persistent.rs:1610`) called
@@ -192,7 +192,7 @@ message, nothing distinguishes it from a hang. Given recovery already reliably c
 in the common case (confirmed here), a lightweight, non-alarming pane indicator during
 the `ResumeUnreachable → FireRetry → recovery spawn` window (e.g. "Reconnecting…" similar
 to the existing "Compacting… Ns" composer-strip treatment already used for
-context-compaction visibility, `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`)
+context-compaction visibility, [`docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`](../specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md))
 would turn this exact "is it crashed?" moment into a legible, expected state. This is
 the single highest-value, lowest-risk fix given how well the underlying recovery already
 works — it changes user *perception*, not behavior.
@@ -214,12 +214,12 @@ sufficient on its own without separately chasing CLI startup performance.
 ## 7. What this closes out
 
 - Issue #2368's outstanding live-repro requirement
-  (`docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`,
+  ([`docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`](../specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md),
   and the agent's own memory note tracking it) — **done**. The `poison_resume` /
   `find_recovery_session_id` / `held_error_line` suppression machinery from PR #2500/#2501/
   #2693/#2699 is now confirmed working end-to-end on a real, unplanned production-shaped
   incident, not just synthetic tests.
-- `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`'s open item #4
+- [`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`](STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md)'s open item #4
   (how does a wrong id end up in the registry) — narrowed: at least one concrete mechanism
   is an ordinary superseded top-level session, no subagent-id misattribution required.
   Recommendations §6.1 and §6.3 of that report remain the two live action items; this
@@ -244,7 +244,7 @@ sufficient on its own without separately chasing CLI startup performance.
   `assign_process` warning.
 - `agentmux-srv/src/identity/resolver/inject.rs` (:334-358) — ruled-out blank
   `identity_id` warning.
-- `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md` — prior
+- [`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`](STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md) — prior
   incident this report confirms, narrows, and extends.
-- `docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md` —
+- [`docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`](../specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md) —
   issue #2368's original design spec.

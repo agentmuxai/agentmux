@@ -8,8 +8,8 @@ regressions found by live retest — read §12 before §11: it supersedes
 `FLUSHER_DRAIN_TIMEOUT` half of the reported "hang". §13 takes the close
 from ~4s to immediate; §14 is why the pane still didn't visually
 disappear until the layout bridge gained an arm for it.) — #3225
-**Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
-`docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
+**Related:** [`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) (PtyShell attach/reuse semantics),
+[`docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md`](../reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md) (PTY output coalescing — ruled out, see §3)
 
 ## 1. Symptom
 
@@ -147,7 +147,7 @@ appended after the last, visually indistinguishable from "the same output
 repeating."
 
 `server/mod.rs:1150-1157`'s own doc comment states this reuse is deliberate
-design (`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`), but
+design ([`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)), but
 neither that spec nor the resync path it depends on account for the case
 where the shared shell has already exited — `resync_controller` was written
 for the "PTY died unexpectedly, revive it transparently" case (crash
@@ -173,7 +173,7 @@ the two apart.
   misidentify which `ESC[6n` it's answering.
 - **What actually drives the *repeated* respawns in a pure human-only
   repro** (no agent visibly touching the pane). `TermResyncHandler`
-  (`frontend/app/view/term/term.tsx:36-79`) only calls `resyncController` on
+  ([`frontend/app/view/term/term.tsx:36-79`](../../frontend/app/view/term/term.tsx#L36-L79)) only calls `resyncController` on
   a `connStatus` transition or a backend-restart detection — for a plain
   local terminal, `connStatus` doesn't change on process exit (the
   handler's own comment says as much), so it alone doesn't explain a loop.
@@ -502,7 +502,7 @@ own "attach or create" logic (mount-time, or on next observation that its
 pointed-to block is gone) then did exactly what it's designed to do for
 a genuinely-missing shell: silently create a fresh one — the BrainSpinner
 is that recreate's own loading state (per its doc comment,
-`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`, "masks the
+[`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`](SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md), "masks the
 drawer from mount until... the terminal is constructed"). Net effect: the
 original bug, reproduced via a slower path — respawn instead of a tight
 loop, but still not "closed," and now with §10's delay stacked in front
@@ -688,7 +688,7 @@ That queued entry was from an *earlier* round and had never been picked
 up — the tell. The frontend keeps its own in-memory `LayoutModel` copy of
 the tree; the saga's step 2b queues a `delete` action to tell it to prune
 too. `onBackendUpdate` → `processPendingBackendActions`
-(`frontend/layout/lib/layoutPersistence.ts`) handles that queue correctly
+([`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts)) handles that queue correctly
 — but it only runs when the frontend receives a **LayoutState**
 `waveobj:update`, and no such update was ever broadcast.
 

@@ -67,12 +67,12 @@ This doc maps the next set of fat files in the repo and ranks them by extraction
 | `frontend/types/gotypes.d.ts` | 2,226 | 🟢 **Skip** — generated. Don't touch. |
 | `frontend/app/store/agent-pane-state/reducer.test.ts` | 2,143 | 🟢 **Skip** — tests. |
 | `frontend/app/store/rpc-api.ts` | 1,344 | 🟢 **Skip** — generated thin wrappers. |
-| `frontend/app/store/browser-pane-state/reducer.test.ts` | 1,060 | 🟢 **Skip** — tests. |
-| `frontend/app/view/agent/components/AgentLaunchModal.tsx` | 1,020 | 🔴 **Candidate** — big SolidJS component with multiple `Show when=`-gated subviews (identity tab, memory tab, name & cwd, continue-mode list). Carving each tab into its own file (`<TabName>Panel.tsx`) is the cleanest split. |
-| `frontend/app/tab/tabbar.tsx` | 1,008 | 🟡 **Maybe** — drag-and-drop tab-bar. Could carve `tabbar-drag.ts` (hit-test + drag-state) out of the rendering logic. |
-| `frontend/app/store/agent-document/reducer.test.ts` | 1,006 | 🟢 **Skip** — tests. |
-| `frontend/app/store/global.ts` | 1,002 | 🟡 **Maybe** — Jotai atoms by topic. Could move each atom-family to its own file. Low cost, low pain — defer. |
-| `frontend/app/view/agent/agent-view.tsx` | 958 | 🟡 **Maybe** — already partitioned by section components. Splitting harder than it looks. |
+| [`frontend/app/store/browser-pane-state/reducer.test.ts`](../../frontend/app/store/browser-pane-state/reducer.test.ts) | 1,060 | 🟢 **Skip** — tests. |
+| [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) | 1,020 | 🔴 **Candidate** — big SolidJS component with multiple `Show when=`-gated subviews (identity tab, memory tab, name & cwd, continue-mode list). Carving each tab into its own file (`<TabName>Panel.tsx`) is the cleanest split. |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | 1,008 | 🟡 **Maybe** — drag-and-drop tab-bar. Could carve `tabbar-drag.ts` (hit-test + drag-state) out of the rendering logic. |
+| [`frontend/app/store/agent-document/reducer.test.ts`](../../frontend/app/store/agent-document/reducer.test.ts) | 1,006 | 🟢 **Skip** — tests. |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | 1,002 | 🟡 **Maybe** — Jotai atoms by topic. Could move each atom-family to its own file. Low cost, low pain — defer. |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 958 | 🟡 **Maybe** — already partitioned by section components. Splitting harder than it looks. |
 
 ---
 

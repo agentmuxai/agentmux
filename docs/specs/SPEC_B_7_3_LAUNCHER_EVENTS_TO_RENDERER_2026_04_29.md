@@ -3,7 +3,7 @@
 **Status:** Implementation spec. Written 2026-04-29 after B.9.3 merge (#601).
 **Author:** AgentA.
 **Parent spec:** `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §5.3 + §5.5 (renderer subscription, echo-loop guard).
-**Read after:** `docs/retro/phase-b-roadmap.md`, `docs/retro/next-steps-2026-04-29.md` §1.2.
+**Read after:** [`docs/retro/phase-b-roadmap.md`](../retro/phase-b-roadmap.md), [`docs/retro/next-steps-2026-04-29.md`](../retro/next-steps-2026-04-29.md) §1.2.
 
 ---
 
@@ -162,7 +162,7 @@ Called once from `app-init.ts::initApp` BEFORE the first renderer-state-needing 
 
 The renderer's existing atoms (`openWindowLabelsAtom`, `openWindowEntriesAtom`, `windowInstanceNumAtom`, `windowCountAtom`, etc.) currently get fed by `app-init.ts::applyEntries` which is called by the bespoke event listener. After B.7.3, those atoms are fed by typed events.
 
-New file `frontend/app/store/launcher-event-reducer.ts`:
+New file [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts):
 
 ```ts
 import { createEffect } from "solid-js";

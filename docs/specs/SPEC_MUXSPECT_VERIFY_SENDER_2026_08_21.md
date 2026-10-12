@@ -3,7 +3,7 @@
 **Date:** 2026-08-21 (revised same day post-review — see "Revision history")
 **Author:** Lazo
 **Status:** Implemented (PR #2702)
-**Motivated by:** `docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`
+**Motivated by:** [`docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`](../retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md)
 
 ## Revision history
 

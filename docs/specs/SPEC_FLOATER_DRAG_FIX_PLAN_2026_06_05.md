@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-05
 **Branch:** agenty/floater-drag-native-loop
-**Parent retro:** `docs/retro/retro-floater-drag-state-bugs-2026-06-05.md`
+**Parent retro:** [`docs/retro/retro-floater-drag-state-bugs-2026-06-05.md`](../retro/retro-floater-drag-state-bugs-2026-06-05.md)
 
 Covers the four remaining items from the deep audit not addressed by the previous commit.
 
@@ -99,7 +99,7 @@ fn floater_class_name() -> String {
 
 ## FIX-4 (P1) — macOS/Linux: `window_drag_ended` carries cursor position for redock
 
-**Files:** `agentmux-cef/src/ui_tasks.rs`, `frontend/app/workspace/floating-pane-workspace.tsx`
+**Files:** `agentmux-cef/src/ui_tasks.rs`, [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx)
 
 **Problem:**
 `StartWindowDragTask::execute` emits `window_drag_ended { moved: false }`. The renderer's `window_drag_ended` handler resets `dragging = false` (safety net) but since `moved=false`, `onMouseUp` — even if it fires — can't pass `hasMoved` gate. Redock on macOS/Linux is still non-functional after the drag completes.

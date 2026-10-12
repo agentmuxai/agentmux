@@ -216,7 +216,7 @@ A single scheduler that owns all timers, supports pause/resume, priority, batchi
 
 | Priority | Action | Effort | Benefit |
 |----------|--------|--------|---------|
-| P1 | Build `useTick(ms)` in `frontend/app/hook/useTick.ts` | ~50 LOC | Eliminates 13 duplicate 1s intervals; fixes `globalThis` hack |
+| P1 | Build `useTick(ms)` in [`frontend/app/hook/useTick.ts`](../../frontend/app/hook/useTick.ts) | ~50 LOC | Eliminates 13 duplicate 1s intervals; fixes `globalThis` hack |
 | P2 | Migrate all 1 000 ms clock-tick sites to `useTick(1000)` | ~2h | Reduction to 1 interval; visible in devtools |
 | P2 | Migrate 60 000 ms sites (`termViewModel`, `MyAgentsList`) to `useTick(60000)` | ~30 min | Removes `globalThis` guard |
 | P3 | Add visibility gate to `agent-pane-perf-section.tsx` | ~5 min | Consistency with `hud.tsx` |

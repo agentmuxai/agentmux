@@ -108,7 +108,7 @@ If either dies, a fresh instance reprojects from srv.
 - **Q3.** Write-through mechanism: event-sourced through the reducer (ties into **#864**) vs. snapshot?
 - **Q4.** Can admission control (Pillar 3) ship independently and early, before the host rework? (Likely yes.)
 
-**Q1–Q4 RESOLVED 2026-06-30** — see `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`
+**Q1–Q4 RESOLVED 2026-06-30** — see [`docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`](../specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md)
 (grounded in crash-only software / microreboot / event-sourcing-snapshot literature). Summary: Q1 only
 logical topology moves (layout tree, per-window opacity, floating placement/restore-rects); Q2 visible
 bounded rebuild (<~1.5s + overlay), not invisible recovery; Q3 snapshot write-through via the reducer

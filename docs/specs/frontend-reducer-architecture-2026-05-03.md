@@ -3,9 +3,9 @@
 **Date:** 2026-05-03
 **Status:** Architecture overview + spec family inventory. Each named follow-up spec needs to be written before its implementation.
 **Reads-this-first:**
-- `docs/specs/agent-pane-document-reducer-2026-05-03.md` — first slice to land (the live agent-doc bug fix)
+- [`docs/specs/agent-pane-document-reducer-2026-05-03.md`](agent-pane-document-reducer-2026-05-03.md) — first slice to land (the live agent-doc bug fix)
 - `agentmux-srv/src/reducer.rs` + `SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` — the canonical reducer pattern, server-side
-- `frontend/app/store/launcher-event-reducer.ts` — the only frontend reducer that exists today (window mirror)
+- [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) — the only frontend reducer that exists today (window mirror)
 - `SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — granularity-decision precedent
 
 ## What we're trying to make true
@@ -13,7 +13,7 @@
 Today the frontend has many state mutators with no coordinating layer. State is scattered across:
 
 - Per-pane Solid signals (`createAgentAtoms`, `createTermAtoms`, etc.) with class view-models
-- Global Solid atoms in `frontend/app/store/global.ts` (block atoms, focus, layout)
+- Global Solid atoms in [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) (block atoms, focus, layout)
 - A wstore mirror layer (`wos.ts`) that reflects srv objects
 - `launcher-event-reducer.ts` — single store-level reducer mirroring launcher window state
 - Direct RPC calls scattered across components (`pane-actions.ts`, `command-registry.ts`, slash commands, agent app-API endpoints)
@@ -38,7 +38,7 @@ Each row is a separate spec to be written. They ship in order; each builds on th
 
 | # | Spec | Scope | Status | Effort | Depends on |
 |---|---|---|---|---|---|
-| **1** | `agent-pane-document-reducer-2026-05-03.md` | Single-slice reducer for agent `documentAtom` (Option B from spec). Lives at `frontend/app/store/agent-document-store.ts`. Per-blockId state cell. Fixes the live bug. | **Written, ready** | ~1 day | — |
+| **1** | `agent-pane-document-reducer-2026-05-03.md` | Single-slice reducer for agent `documentAtom` (Option B from spec). Lives at [`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts). Per-blockId state cell. Fixes the live bug. | **Written, ready** | ~1 day | — |
 | **2** | `frontend-reducer-conventions.md` | The shared conventions: command/event types, dispatch signature, slot lifecycle, atom projection, echo-loop guard, test layout. Becomes the template every later spec follows. | **Needed before #3+** | ~1 day spec | #1 sets de facto pattern |
 | **3** | `frontend-command-bus.md` | The big one. Single outbound dispatch for user clicks + slash commands + agent app-API calls. Audits, applies policy ("agent X may not delete pane Y"), routes to srv/host/launcher RPCs. Optional optimistic-update queue for slow ops. Doesn't take ownership of state — that stays in the slice reducers. | **Needed**, biggest | 2–3 days spec, ~2 weeks impl | #2 |
 | **4** | `agent-pane-state-reducer.md` | Option C from #1. Bundles the other agent-pane atoms — `streamingState`, `sessionStats`, `currentTool`, `turnTokens`, `turnActive`, `stopping`, `pendingMessages` — into one slice with cohesive invariants (e.g. `turnActive ↔ streamingState.active`). | Needed | ~1 day spec, ~2 days impl | #1, #2 |

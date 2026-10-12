@@ -1,6 +1,6 @@
 # Top bar: widget labels drop before tabs shrink
 
-**Status:** active — the tier decision (`frontend/app/window/top-bar-tier.ts`) and the measuring hook shipped in #4442
+**Status:** active — the tier decision ([`frontend/app/window/top-bar-tier.ts`](../../frontend/app/window/top-bar-tier.ts)) and the measuring hook shipped in #4442
 and were checked live on macOS by the owner; the 1/3/8-tab CDP sweep and the Windows/Linux check (§4) remain.
 **Date:** 2026-10-07.
 **Requested by:** repo owner (asafebgi): "when widgets automatically switch from text label to icon-only because of
@@ -39,7 +39,7 @@ setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
 ```
 
 A tab's real resting width is its `--tab-natural-width`: its measured label width, floored at `TAB_STANDARD_WIDTH` =
-232 px and capped at 260 px (`frontend/app/tab/tab-measure.ts:23-53`, `tabbar.scss:61-73`). Tabs are
+232 px and capped at 260 px ([`frontend/app/tab/tab-measure.ts:23-53`](../../frontend/app/tab/tab-measure.ts#L23-L53), `tabbar.scss:61-73`). Tabs are
 `flex: 0 1 var(--tab-natural-width)`, so they start shrinking as soon as the tab bar is narrower than their natural
 total. The label trigger waits until each tab would be under 100 px. Between those two points (about 132 px per tab)
 the tabs shrink while the labels are still shown. The comment at line 22-24 says this was deliberate ("labels drop

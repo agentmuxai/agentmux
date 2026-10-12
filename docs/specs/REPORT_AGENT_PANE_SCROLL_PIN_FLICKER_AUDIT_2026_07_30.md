@@ -3,7 +3,7 @@
 **Date:** 2026-07-30
 **Author:** Agent3
 **Status:** historical — Audit + research only — no code changed this pass. Recommends a follow-up implementation spec.
-**Scope reviewed:** `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`, `frontend/app/view/agent/virtualization/state.ts`, `frontend/app/view/agent/virtualization/anchor.ts`, `frontend/app/view/agent/components/MarkdownBlock.tsx`, `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/view/agent/stream-flush-queue.ts`, and the three prior scroll-follow passes: `docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`, `docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`, and commit `30af99e8` (#2349, 2026-07-28).
+**Scope reviewed:** [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx), [`frontend/app/view/agent/virtualization/state.ts`](../../frontend/app/view/agent/virtualization/state.ts), [`frontend/app/view/agent/virtualization/anchor.ts`](../../frontend/app/view/agent/virtualization/anchor.ts), [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx), [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts), [`frontend/app/view/agent/stream-flush-queue.ts`](../../frontend/app/view/agent/stream-flush-queue.ts), and the three prior scroll-follow passes: [`docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`](SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md), [`docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md), and commit `30af99e8` (#2349, 2026-07-28).
 
 ---
 
@@ -40,7 +40,7 @@ The pattern itself is the root cause: **the pin is derived from an itemized whit
 
 ### 2.1 A concrete, currently-untracked growth source: `MarkdownBlock`'s trailing highlight render
 
-`frontend/app/view/agent/components/MarkdownBlock.tsx:54-72` throttles markdown re-parsing during streaming (`STREAM_RENDER_MS = 90`, a deliberate perf rate-limit — re-highlighting on every token is O(n²)):
+[`frontend/app/view/agent/components/MarkdownBlock.tsx:54-72`](../../frontend/app/view/agent/components/MarkdownBlock.tsx#L54-L72) throttles markdown re-parsing during streaming (`STREAM_RENDER_MS = 90`, a deliberate perf rate-limit — re-highlighting on every token is O(n²)):
 
 ```ts
 trailing = setTimeout(() => {
@@ -54,7 +54,7 @@ The leading-edge render during active streaming skips syntax highlighting (`high
 
 This `setTimeout` write is completely outside the Solid signal graph `AgentDocumentVirtualList`'s pin effect depends on: it doesn't touch `props.viewState.nodes()` (the node object reference in the streaming buffer was already updated for content; this is a *local* re-render of the same node), doesn't touch `layoutView()` (streaming-buffer rows aren't virtualized), and doesn't touch `workingRowHeight`. So every time a response contains a code block and the model pauses between tokens for ≥90ms (which is common — it happens between essentially every sentence/paragraph, not just at the end of a turn), the row's height jumps with **no corresponding re-pin**, and the scrollbar sits wrong until the *next* real node-count change fires the effect. This reproduces the reported "moves up, then later snaps back" behavior directly and repeatedly during normal streaming, not just at turn boundaries.
 
-There's also a second, structural culprit: `.agent-document`'s `padding-bottom` is driven by `--agent-working-row-height` (`frontend/app/view/agent/styles/_document.scss:43`, fed from `workingRowHeight()` in `agent-view.tsx:1122/1624`). This one *is* tracked as an effect dependency today, but it illustrates the same fragility from the other direction: it needed its own hand-added dependency in the 2026-07-27 pass specifically because nothing structural was watching the true-bottom target.
+There's also a second, structural culprit: `.agent-document`'s `padding-bottom` is driven by `--agent-working-row-height` ([`frontend/app/view/agent/styles/_document.scss:43`](../../frontend/app/view/agent/styles/_document.scss#L43), fed from `workingRowHeight()` in `agent-view.tsx:1122/1624`). This one *is* tracked as an effect dependency today, but it illustrates the same fragility from the other direction: it needed its own hand-added dependency in the 2026-07-27 pass specifically because nothing structural was watching the true-bottom target.
 
 ## 3. What the wider ecosystem does (external research)
 

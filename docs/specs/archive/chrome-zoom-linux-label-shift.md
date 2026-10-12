@@ -2,7 +2,7 @@
 
 **Status:** SHIPPED
 **Date:** 2026-03-19
-**Component:** `frontend/app/window/window-header.scss`, `frontend/app/store/zoom.ts`
+**Component:** `frontend/app/window/window-header.scss`, [`frontend/app/store/zoom.ts`](../../../frontend/app/store/zoom.ts)
 
 ---
 
@@ -77,7 +77,7 @@ function applyChromeZoomCSS(factor: number): void {
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/zoom.ts` | Set `--chrome-header-width` in `applyChromeZoomCSS` based on platform |
+| [`frontend/app/store/zoom.ts`](../../../frontend/app/store/zoom.ts) | Set `--chrome-header-width` in `applyChromeZoomCSS` based on platform |
 | `frontend/app/window/window-header.scss` | Use `var(--chrome-header-width)` instead of inline `calc()` |
 
 ---

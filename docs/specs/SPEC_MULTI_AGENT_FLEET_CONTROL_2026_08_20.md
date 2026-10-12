@@ -43,7 +43,7 @@ A full internal audit (see research summary, §8) confirmed every existing
 control primitive in this codebase is single-target by construction — a
 `String` id field, never `Vec<String>`:
 
-- **Swarm** (`frontend/app/view/swarm/`): tracks `AgentTreeNode`s per
+- **Swarm** ([`frontend/app/view/swarm/`](../../frontend/app/view/swarm)): tracks `AgentTreeNode`s per
   top-level block via `RpcApi.AgentTrackedBlocksCommand` → backend
   `agent.tracked-blocks`. No selection signal exists anywhere in
   `SwarmViewModel`. Every action (Focus, Retire, per-shell Stop) is a

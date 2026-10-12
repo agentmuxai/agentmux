@@ -6,9 +6,9 @@
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main`. Every citation below is a real file:line, checked
 directly (not taken from a doc's word alone).
 **Related (read in full before writing this):**
-`docs/specs/REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`,
-`docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`,
-`docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md`,
+[`docs/specs/REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`](REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md),
+[`docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md),
+[`docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md`](CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md),
 issue #2603 (closed, "COMPLETE", 6 steps: #2602, #2605, #2606, #2611, #2613, #2614).
 **Motivation:** the operator asked, after closing an AgentY session and reopening it from "My Agents" in a
 newer build, whether continuity is now solved given the recent (closed) work — since it's still resetting or
@@ -60,7 +60,7 @@ The gap is that **for the operator's scenario, the spawn never reaches that poin
 
 `isolated_auth_reason()` (`agentmux-common/src/data_paths.rs`, ~line 662) resolves to
 `ChannelDefaultIsolated` whenever `AGENTMUX_CHANNEL != "stable"` — true for every local/dev/portable build,
-per `scripts/package.sh`'s per-build channel minting (`CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"`,
+per [`scripts/package.sh`](../../scripts/package.sh)'s per-build channel minting (`CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"`,
 confirmed intentional and unrelated to this bug — see the companion report §1.1). This one flag drives two
 things that are conceptually different but were never split apart the way CREDENTIAL vs CONVERSATION HISTORY
 was in #2605:

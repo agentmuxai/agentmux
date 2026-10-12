@@ -6,15 +6,15 @@
 **Status:** implemented (this PR) — #2773
 **Owner:** AgentX
 **Date:** 2026-08-23
-**Scope:** `frontend/app/view/agent/activity/dispatch-source.ts`,
-`frontend/app/view/agent/activity/subagent-source.ts`, a new shared
-`frontend/app/view/agent/activity/debounced-refresh.ts`.
-**Related:** `docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`
+**Scope:** [`frontend/app/view/agent/activity/dispatch-source.ts`](../../frontend/app/view/agent/activity/dispatch-source.ts),
+[`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts), a new shared
+[`frontend/app/view/agent/activity/debounced-refresh.ts`](../../frontend/app/view/agent/activity/debounced-refresh.ts).
+**Related:** [`docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`](../reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md)
 (the analysis this spec implements — read that first for the full
 measurement/evidence; this doc covers only the fix design),
-`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md` (the prior,
+[`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`](../retro/retro-subagent-backfill-storm-oom-2026-07-17.md) (the prior,
 backend-side fix this one complements — bounds the burst *size*, not what
-the frontend does with it), `docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md`
+the frontend does with it), [`docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md`](../retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md)
 (a different, already-fixed Activity Dock bug — display-correctness, not
 performance; unrelated mechanism).
 

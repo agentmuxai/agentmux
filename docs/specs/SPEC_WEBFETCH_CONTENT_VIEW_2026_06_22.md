@@ -6,8 +6,8 @@
 
 > **2026-08-07 audit note:** Implemented (`WebFetchResult.tsx`, PR #1706).
 > Status field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
-**Related:** `frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx`,
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
+**Related:** [`frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx`](../../frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx),
              `SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md`,
              `RETRO_WEBSEARCH_RICHVIEW_SHIPPED_BROKEN_2026_06_22.md`
 
@@ -154,16 +154,16 @@ import "./tool-renderers/WebFetchResult";
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/tool-renderers/web-fetch-result.ts` | New: `extractFetchResult`, `FetchResultData` type |
-| `frontend/app/view/agent/components/tool-renderers/web-fetch-result.test.ts` | New: unit tests for extraction shapes |
-| `frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx` | New: renderer component + registration |
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` | Add side-effect import |
-| `frontend/app/view/agent/stream-parser.ts` | Add `WebFetch`/`web_fetch` to `extractToolDetail` |
-| `frontend/app/view/agent/types.ts` | Add `WebFetch`/`web_fetch` to `TOOL_ICONS` |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | New fetch view styles |
+| [`frontend/app/view/agent/components/tool-renderers/web-fetch-result.ts`](../../frontend/app/view/agent/components/tool-renderers/web-fetch-result.ts) | New: `extractFetchResult`, `FetchResultData` type |
+| [`frontend/app/view/agent/components/tool-renderers/web-fetch-result.test.ts`](../../frontend/app/view/agent/components/tool-renderers/web-fetch-result.test.ts) | New: unit tests for extraction shapes |
+| [`frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx`](../../frontend/app/view/agent/components/tool-renderers/WebFetchResult.tsx) | New: renderer component + registration |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) | Add side-effect import |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | Add `WebFetch`/`web_fetch` to `extractToolDetail` |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `WebFetch`/`web_fetch` to `TOOL_ICONS` |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | New fetch view styles |
 
 Also fix WebSearch while in the area:
-| `frontend/app/view/agent/providers/claude-translator.ts` | Add `isTerminalShaped` guard to `canApplyStructured` — prevents terminal-style `structuredResult` from overwriting non-bash tool results (e.g. WebSearch string content) |
+| [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts) | Add `isTerminalShaped` guard to `canApplyStructured` — prevents terminal-style `structuredResult` from overwriting non-bash tool results (e.g. WebSearch string content) |
 
 ---
 

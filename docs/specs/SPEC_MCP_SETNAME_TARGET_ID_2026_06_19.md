@@ -90,4 +90,4 @@ longer required (we know the target directly). The check is relaxed to only requ
 | File | Change |
 |------|--------|
 | `agentmux-mcp/src/main.rs` | Add `target_id` to `SETNAME_TOOL` schema; extract in handler; pass through |
-| `docs/specs/SPEC_MCP_SETNAME_TARGET_ID_2026_06_19.md` | This file |
+| [`docs/specs/SPEC_MCP_SETNAME_TARGET_ID_2026_06_19.md`](SPEC_MCP_SETNAME_TARGET_ID_2026_06_19.md) | This file |

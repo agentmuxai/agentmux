@@ -4,13 +4,13 @@
 #2920). §7 records what actually happened, including where the plan was wrong.
 **Date:** 2026-09-01
 **Owner:** AgentY
-**Scope:** `docs/`, top-level `specs/`
+**Scope:** [`docs/`](..), top-level `specs/`
 **Related:** [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`](./SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md)
 (the diagnosis and phase plan this executes — read it first),
 [`docs/specs/README.md`](./README.md) (the closed `Status:` vocabulary, Phase 1),
-`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`,
-`docs/reports/REPORT_DEAD_CODE_AND_DOCS_SWEEP_2026_08_03.md`,
-`docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md`
+[`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md),
+[`docs/reports/REPORT_DEAD_CODE_AND_DOCS_SWEEP_2026_08_03.md`](../reports/REPORT_DEAD_CODE_AND_DOCS_SWEEP_2026_08_03.md),
+[`docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md`](../reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md)
 
 ---
 
@@ -40,14 +40,14 @@ fresh judgement call about a doc's content, it is out of scope by construction.
 
 | Metric | Value |
 |---|---|
-| Markdown files under `docs/` | 1,206 |
-| `docs/specs/` | 729 |
+| Markdown files under [`docs/`](..) | 1,206 |
+| [`docs/specs/`](.) | 729 |
 | Compliant `Status:` first word | **411 (56%)** |
 | Non-compliant first word | **192 (26%)** — `spec`, `ready`, `design`, `phase`, `approved`, … |
 | No `Status:` line at all | **126 (17%)** |
 | `superseded` **without** the required `Superseded-by:` pointer | 2 |
 | Duplicate top-level `specs/` tree | 102 files |
-| `docs/specs/INDEX.md` last updated | 2026-08-22 |
+| [`docs/specs/INDEX.md`](INDEX.md) last updated | 2026-08-22 |
 | `draft` specs untouched >60 days | 141 |
 
 Two things the numbers say plainly:
@@ -85,7 +85,7 @@ before proposing anyone else's be touched.
 
 ### Batch B — broken against an adopted rule (small, unambiguous)
 
-`docs/specs/README.md` states `superseded` **REQUIRES** a `Superseded-by:` line,
+[`docs/specs/README.md`](README.md) states `superseded` **REQUIRES** a `Superseded-by:` line,
 "a broken pointer is worse than none". Two files declare `superseded` with no
 pointer:
 
@@ -108,12 +108,12 @@ invent a `Superseded-by:` pointer to satisfy the enum.
 
 ### Batch C — Phase 2, directory consolidation (agreed, never started)
 
-A top-level `specs/` tree holds 102 files alongside `docs/specs/`'s 729. Two
+A top-level `specs/` tree holds 102 files alongside [`docs/specs/`](.)'s 729. Two
 audits recommended consolidating; `docs/retros/` was merged and this was not.
 
 Mechanical: move, fix inbound references, leave no dangling links. **The
 content is not reviewed or rewritten** — only relocated. Anything genuinely
-superseded moves to `docs/specs/archive/` rather than being deleted, matching
+superseded moves to [`docs/specs/archive/`](archive) rather than being deleted, matching
 existing convention (28 files there today).
 
 ### Batch D — Phase 3, regenerate the index
@@ -136,8 +136,8 @@ Minimum viable enforcement, as a check that runs in CI:
    must have a `Status:` line whose first word is in the closed enum.
 
    Both trees, deliberately. Batch C (which would merge `specs/` into
-   `docs/specs/`) is deferrable and gated on an owner decision, so scoping the
-   check to `docs/` alone would leave that tree's 135 files unprotected
+   [`docs/specs/`](.)) is deferrable and gated on an owner decision, so scoping the
+   check to [`docs/`](..) alone would leave that tree's 135 files unprotected
    *indefinitely* — a new root spec could omit the enum entirely with CI green,
    which contradicts this batch's whole claim of stopping the backlog growing.
    The `specs/` glob is removed only once the move has actually landed.
@@ -206,9 +206,9 @@ reader checking whether the cleanup happened would conclude it did not.
 | Plan | #2906 | This document. |
 | A — my own stale docs | #2907 | 5 docs corrected, incl. the camera spec that said "Not implemented" the day it shipped. |
 | B — missing `Superseded-by:` | #2909 | 3 docs (one more than the 2 measured), each resolved differently — none defaulted to `historical`, per §3's warning. |
-| E — enforcement | #2912 | `scripts/check-doc-status.sh`, plus three `check:*` gates that existed in the Taskfile but had **never run in CI**. |
-| D — generated index | #2914 | `scripts/gen-docs-index.sh` + `--check`. |
-| C — directory consolidation | #2920 | 134 files (not 102 — §2 missed `archive/`). Not the mechanical move this plan assumed; see below. |
+| E — enforcement | #2912 | [`scripts/check-doc-status.sh`](../../scripts/check-doc-status.sh), plus three `check:*` gates that existed in the Taskfile but had **never run in CI**. |
+| D — generated index | #2914 | [`scripts/gen-docs-index.sh`](../../scripts/gen-docs-index.sh) + `--check`. |
+| C — directory consolidation | #2920 | 134 files (not 102 — §2 missed [`archive/`](archive)). Not the mechanical move this plan assumed; see below. |
 
 ### Batch C was not the mechanical move §3 described
 
@@ -216,14 +216,14 @@ reader checking whether the cleanup happened would conclude it did not.
 content is not reviewed or rewritten — only relocated." That framing treated the
 two trees as an accidental duplicate. They were not.
 
-The split was a deliberate promotion workflow — `docs/specs/` drafts,
+The split was a deliberate promotion workflow — [`docs/specs/`](.) drafts,
 `specs/` approved and in-flight, `specs/archive/` done — that had inverted
 itself. Measured against the `Status:` field at the time of the merge:
 
 | Tree | Documented as | Actually held |
 |---|---|---|
 | `specs/` | active and approved | 51 `draft`, 2 `implemented` |
-| `docs/specs/` | drafts, not approved | **126 `implemented`**, 14 `active` |
+| [`docs/specs/`](.) | drafts, not approved | **126 `implemented`**, 14 `active` |
 | `specs/archive/` | completed or superseded | 7 `draft`, 3 `ready` |
 
 An agent trusting those READMEs looked in exactly the wrong tree. And it was
@@ -255,8 +255,8 @@ Three claims in this cleanup were false when made, all the same shape — a chec
 that reported success without checking anything:
 
 - **"No dangling links; every reference resolves."** The measuring glob was
-  `docs/specs/*.md specs/*.md`, which cannot see `archive/` subdirectories or
-  `docs/analysis/`. It reported clean for the part of the tree it could see.
+  `docs/specs/*.md specs/*.md`, which cannot see [`archive/`](archive) subdirectories or
+  [`docs/analysis/`](../analysis). It reported clean for the part of the tree it could see.
 - **"0 surviving references to the old tree."** The search used a `(?<!…)`
   lookbehind; ripgrep's default engine rejects lookaround, stderr was redirected
   to `/dev/null`, and `wc -l` faithfully reported `0`. That zero was a silenced
@@ -276,8 +276,8 @@ to exercise the working path.
 §2's table was taken before execution and two entries did not survive it:
 
 - **`superseded` without a pointer: 2 → 3.** The measuring glob was
-  `docs/specs/*.md specs/*.md`, which silently skipped `archive/` subdirectories
-  and `docs/analysis/` entirely. A verification that cannot see part of the tree
+  `docs/specs/*.md specs/*.md`, which silently skipped [`archive/`](archive) subdirectories
+  and [`docs/analysis/`](../analysis) entirely. A verification that cannot see part of the tree
   reports a clean result for the part it can see, which is how "clean" and
   "unchecked" get confused. Later passes used `find docs specs -name "*.md"`.
 - **`INDEX.md` "10 days stale"** understated it. Nothing in the index was
@@ -290,7 +290,7 @@ to exercise the working path.
 **Batch E's gate is narrower than §3 promised, deliberately.** §3 says every
 *added **or modified*** doc must carry a Status line. `check-doc-status.sh`
 enforces Rule 1 only on **added** docs; a doc that was merely modified and never
-had a Status is not blocked (`scripts/check-doc-status.sh`, the comment above
+had a Status is not blocked ([`scripts/check-doc-status.sh`](../../scripts/check-doc-status.sh), the comment above
 the `-z "$status_line"` branch). Rule 2 — `superseded` needs a resolving
 `Superseded-by:` — is enforced on both, since that is a claim the author made in
 the diff.

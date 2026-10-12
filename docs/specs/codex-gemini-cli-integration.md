@@ -29,7 +29,7 @@ Codex and Gemini are defined in the provider registry but their install/auth/lau
 ## Current State
 
 ### What Works
-- Provider definitions exist in `frontend/app/view/agent/providers/index.ts`
+- Provider definitions exist in [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts)
 - `ResolveCliCommand` in the backend has 3-step resolution (versioned → system PATH → install)
 - `CheckCliAuthCommand` supports all 3 providers
 - Forge seed includes Codex (AgentY) and Gemini (AgentZ) agents
@@ -252,8 +252,8 @@ const OAUTH_URL_PATTERNS: Record<string, RegExp> = {
 |------|---------|
 | `agentmuxsrv-rs/src/commands/cli_installer.rs` | Fix npm path resolution, Windows binary paths |
 | `agentmuxsrv-rs/src/server/websocket.rs` | Fix `ResolveCliCommand` install fallback chain |
-| `frontend/app/view/agent/providers/index.ts` | Add `apiKeyEnvVar` field |
-| `frontend/app/view/agent/agent-model.ts` | Add provider-specific OAuth URL patterns |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Add `apiKeyEnvVar` field |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Add provider-specific OAuth URL patterns |
 | `frontend/app/view/forge/forge-view.tsx` | Add API key input in agent settings |
 
 ---

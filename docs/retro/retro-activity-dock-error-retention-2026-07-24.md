@@ -79,7 +79,7 @@ to matter/is about to disappear, draw the eye."
 
 **Recommendation for a follow-up (not done here):** a single `useFlash()`
 hook or `<Flash>` wrapper in a shared location (candidate:
-`frontend/app/hook/` alongside `useTick`) that takes a duration and an
+[`frontend/app/hook/`](../../frontend/app/hook) alongside `useTick`) that takes a duration and an
 `active: () => boolean` accessor, applies a standard flash class, and lets
 call sites pick from a small set of pre-defined visual treatments (bounce,
 color-pulse, invert-strobe) rather than each hand-rolling a keyframe. Should

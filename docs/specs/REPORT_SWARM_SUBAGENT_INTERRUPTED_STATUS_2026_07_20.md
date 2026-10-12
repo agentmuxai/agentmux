@@ -30,7 +30,7 @@ moment its `result` line is read, with no dependency on reopening anything.
 
 ## 2. What the UI actually shows
 
-`subagentDisplayStatus` (`frontend/app/view/swarm/swarm-view.tsx:209-215`):
+`subagentDisplayStatus` ([`frontend/app/view/swarm/swarm-view.tsx:209-215`](../../frontend/app/view/swarm/swarm-view.tsx#L209-L215)):
 
 ```ts
 export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "running" | "idle"): AgentDisplayStatus {
@@ -67,7 +67,7 @@ had its completion re-checked) sits `Active` in memory indefinitely.
 
 The frontend has a documented client-side backstop for exactly this gap
 (`swarm-view.tsx:196-208`, doc comment cites
-`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md` Open
+[`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md) Open
 Question 1 by name): whenever `sub.status === "active"` and the *parent*
 agent's own turn is currently idle (`parentAgentStatus === "idle"`), display
 "Interrupted" rather than a misleading "working." This is correct given the
@@ -88,7 +88,7 @@ is idle between turns essentially all the time the user is looking at it.
 
 ## 4. This is a previously-identified, explicitly-deferred gap
 
-`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md` designed
+[`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md) designed
 and shipped most of this system eight days ago — the `Abandoned` variant,
 `reconcile_stale_subagents`, and the frontend backstop described above are
 all exactly what that spec proposed (§6.1-6.3, §6.5). Its **Open Question

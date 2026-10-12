@@ -34,7 +34,7 @@ Layout mutations (split / resize / move within a tab) still flow through `wcore`
 **Why it matters:** layout edits race tab-level edits during multi-pane flows (e.g. tear-off-while-resizing). Today this is rare enough to be invisible; it becomes load-bearing once host reducer (F) drives layout from CEF events.
 
 ### E.6 — Renderer multi-source + saga buffering
-The renderer dispatcher (`frontend/util/srv-events.ts`) shipped in E.2c.5b as **scaffolding only** — it consumes one source. Multi-source consumption (srv + host events arriving on separate pipes, ordered + buffered while a saga is in flight) is not implemented.
+The renderer dispatcher ([`frontend/util/srv-events.ts`](../../frontend/util/srv-events.ts)) shipped in E.2c.5b as **scaffolding only** — it consumes one source. Multi-source consumption (srv + host events arriving on separate pipes, ordered + buffered while a saga is in flight) is not implemented.
 
 **Why it matters:** until E.6, frontends can only react to *one* reducer at a time. Cross-reducer flows (host emits BrowserClosed → srv emits BlockDeleted → frontend reflects both) are not coherent.
 
@@ -48,7 +48,7 @@ We have proptest coverage of reducer arm invariants (`invariants_hold_across_ran
 
 ## 2. Phase F (host reducer) — spec only
 
-F1.A (persist subscriber) and F1.B (orphan cleanup) shipped in srv as preparation for F. The host reducer itself is **not implemented**. Spec lives at `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
+F1.A (persist subscriber) and F1.B (orphan cleanup) shipped in srv as preparation for F. The host reducer itself is **not implemented**. Spec lives at [`docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](../specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md).
 
 Even after F1 ships, these remain permanent gaps unless we explicitly close them:
 
@@ -171,6 +171,6 @@ Phase G remains the long-term ceiling.
 
 - Phase E status: `phase-e-status-2026-05-01.md`
 - Forward plan: `next-steps-2026-05-01.md`
-- Phase F spec: `../specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`
+- Phase F spec: [`../specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](../specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md)
 - Saga coordinator location: `saga-coordinator-location-analysis-2026-04-30.md`
-- Tear-off spec (downstream consumer): `../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`
+- Tear-off spec (downstream consumer): [`../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md)

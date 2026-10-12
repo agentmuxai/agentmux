@@ -10,20 +10,20 @@ Typing a message into the agent pane's conversation composer (the textarea at th
 
 ## Root cause
 
-The composer `<textarea>` (`frontend/app/view/agent/components/AgentFooter.tsx`, ~line 794) had no `spellcheck` attribute set. `<textarea>` defaults to `spellcheck="true"` (inherited from the document, which AgentMux — a Chromium/CEF app — doesn't override globally), so Chromium's built-in spellchecker runs on it and paints the red squiggly underline.
+The composer `<textarea>` ([`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx), ~line 794) had no `spellcheck` attribute set. `<textarea>` defaults to `spellcheck="true"` (inherited from the document, which AgentMux — a Chromium/CEF app — doesn't override globally), so Chromium's built-in spellchecker runs on it and paints the red squiggly underline.
 
 This is a straightforward omission, not a deliberate choice: `spellcheck={false}` is already an established, consistently-applied convention across the rest of the codebase for exactly this reason. It's already set on every other significant text input in the app:
 
-- `frontend/app/modals/command-palette.tsx`
-- `frontend/app/view/agent/components/AgentMcpModal.tsx`
-- `frontend/app/view/agent/components/AgentNativeMemoryModal.tsx`
-- `frontend/app/view/agent/components/AgentSkillsModal.tsx`
+- [`frontend/app/modals/command-palette.tsx`](../../frontend/app/modals/command-palette.tsx)
+- [`frontend/app/view/agent/components/AgentMcpModal.tsx`](../../frontend/app/view/agent/components/AgentMcpModal.tsx)
+- [`frontend/app/view/agent/components/AgentNativeMemoryModal.tsx`](../../frontend/app/view/agent/components/AgentNativeMemoryModal.tsx)
+- [`frontend/app/view/agent/components/AgentSkillsModal.tsx`](../../frontend/app/view/agent/components/AgentSkillsModal.tsx)
 - `frontend/app/view/agent-def/components/AgentSkillForm.tsx`
 - `frontend/app/view/agent-def/components/ContentEditor.tsx`
 - `frontend/app/view/brain/global-brain-manager.tsx`
 - `frontend/app/view/identity/identity-view.tsx`
-- `frontend/app/view/mcp/mcp-manager.tsx`
-- `frontend/app/view/skill/skill-manager.tsx`
+- [`frontend/app/view/mcp/mcp-manager.tsx`](../../frontend/app/view/mcp/mcp-manager.tsx)
+- [`frontend/app/view/skill/skill-manager.tsx`](../../frontend/app/view/skill/skill-manager.tsx)
 
 The agent pane's conversation composer — by a wide margin the most-used text input in the entire app — was the one conspicuous gap in that pattern.
 

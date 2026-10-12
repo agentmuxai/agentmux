@@ -3,7 +3,7 @@
 **Date:** 2026-04-24
 **Status:** proposed — Ready to implement
 **Owner:** AgentA
-**Touches:** `frontend/app/platform/pane-overlay.ts`, `frontend/app/element/modal-v2.tsx`
+**Touches:** [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts), `frontend/app/element/modal-v2.tsx`
 
 ---
 
@@ -18,7 +18,7 @@ the pane's HWND paints on top of the modal backdrop and panel,
 leaving the modal partially (or fully) invisible.
 
 This is the "airspace" problem explicitly called out in
-`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md:278-280`:
+[`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md:278-280`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md):
 
 > Z-order: The browser overlay always renders on top of the main UI.
 > If a modal or context menu opens, it may render behind the browser
@@ -33,10 +33,10 @@ via Win32 `SetWindowRgn(... RGN_DIFF ...)`:
 
 | Layer | File:line | What it does |
 |---|---|---|
-| Frontend hook | `frontend/app/platform/pane-overlay.ts:59-72` | `usePaneOverlay(getEl)` reads `getBoundingClientRect`, stores in a module-level `Map`, sends the union to IPC |
+| Frontend hook | [`frontend/app/platform/pane-overlay.ts:59-72`](../../frontend/app/platform/pane-overlay.ts#L59-L72) | `usePaneOverlay(getEl)` reads `getBoundingClientRect`, stores in a module-level `Map`, sends the union to IPC |
 | IPC | `agentmux-cef/src/ipc.rs` → `browser_panes_set_overlay_clip` | Forwards rects to the lifecycle manager |
 | Backend | `agentmux-cef/src/browser_panes.rs:343-423` | For every live pane HWND: builds a region = pane-rect minus every intersecting overlay rect; `SetWindowRgn`. Empty list → `NULL` region → full visibility restored |
-| Consumer | `frontend/app/window/action-widgets.tsx:144-214` (`MoreDropdown`) | Calls `usePaneOverlay(() => overlayEl)` on the dropdown's outer div |
+| Consumer | [`frontend/app/window/action-widgets.tsx:144-214`](../../frontend/app/window/action-widgets.tsx#L144-L214) (`MoreDropdown`) | Calls `usePaneOverlay(() => overlayEl)` on the dropdown's outer div |
 
 The registry is shared and union-based — multiple overlays stack
 cleanly (`sendClip()` sends the Array of all current rects every time).
@@ -162,7 +162,7 @@ A is correct.
 
 ## 6. Implementation steps
 
-1. **Enhance hook.** Edit `frontend/app/platform/pane-overlay.ts`:
+1. **Enhance hook.** Edit [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts):
    add the window-resize listener per §4.1. Update the JSDoc
    comment to remove the "not yet needed" caveat about
    dynamically-sized overlays.
@@ -241,9 +241,9 @@ A is correct.
 
 ## 11. Cross-references
 
-- `docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md` — origin of
+- [`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md) — origin of
   the airspace problem callout.
-- `docs/specs/SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md` — modal-v2's
+- [`docs/specs/SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md`](SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md) — modal-v2's
   own design (this is a targeted fix, not a new primitive).
-- `frontend/app/platform/pane-overlay.ts` — the hook.
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) — the hook.
 - `agentmux-cef/src/browser_panes.rs:343` — `set_pane_overlay_clip`.

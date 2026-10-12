@@ -175,7 +175,7 @@ Four PRs, each shippable on its own.
 
 ### PR 1 — Extract `AgentCard` + `NewAgentCard` from `AgentPicker`
 
-**Scope:** Pure refactor inside `frontend/app/view/agent/components/`. The inline `<button class="agent-card">` currently inside the `<For>` moves into `AgentCard.tsx`. Add a placeholder `NewAgentCard.tsx` at the end of the list (no action yet — just the tile). No behavior change, no new features.
+**Scope:** Pure refactor inside [`frontend/app/view/agent/components/`](../../frontend/app/view/agent/components). The inline `<button class="agent-card">` currently inside the `<For>` moves into `AgentCard.tsx`. Add a placeholder `NewAgentCard.tsx` at the end of the list (no action yet — just the tile). No behavior change, no new features.
 
 **Risk:** Very low.
 
@@ -215,13 +215,13 @@ Four PRs, each shippable on its own.
 
 **Scope:**
 - Remove `defwidget@forge` and `defwidget@identity` from `agentmux-srv/src/config/widgets.json`.
-- Unregister `ForgeView` and `IdentityView` in `frontend/app/block/block.tsx`.
+- Unregister `ForgeView` and `IdentityView` in [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx).
 - Delete `forge-view.tsx` and `identity-view.tsx` (the top-level View wrappers). Their internals — `ForgeForm`, `IdentityView` body, etc. — stay where they are and are now consumed by `ForgePanel` / `IdentityPanel` instead.
 - **Migration:** on block load, if a saved block has `view: "forge"` or `view: "identity"`, rewrite it to `view: "agent"` (landing on the picker). Simpler than the tab-based migration in the earlier draft — there's no tab state to preserve since the settings panels are session-local.
 - Audit every string reference to `"forge"` / `"identity"` as a view name:
   - `pkg/wconfig/defaultconfig/widgets.json`
-  - `frontend/app/block/block.tsx`
-  - Any "open X" helpers in `frontend/app/store/global.ts`
+  - [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx)
+  - Any "open X" helpers in [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts)
   - Keyboard shortcut / menu hooks
 
 **Risk:** Medium — the migration is the only spot this can regress. Dry-run against a test layout with both an open Forge pane and an open Identity pane before merging.

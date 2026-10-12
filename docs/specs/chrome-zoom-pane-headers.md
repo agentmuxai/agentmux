@@ -36,7 +36,7 @@
 
 ### 2. Wheel handler: Route pane header scroll to chrome zoom
 
-**File:** `frontend/app/app.tsx`
+**File:** [`frontend/app/app.tsx`](../../frontend/app/app.tsx)
 
 The wheel handler currently checks:
 ```typescript
@@ -60,7 +60,7 @@ This ensures Ctrl+Scroll over any pane header triggers chrome zoom (which scales
 
 | File | Change |
 |------|--------|
-| `frontend/app/app.tsx` | Add `.block-frame-default-header` to chrome zoom hover detection |
+| [`frontend/app/app.tsx`](../../frontend/app/app.tsx) | Add `.block-frame-default-header` to chrome zoom hover detection |
 
 One line change.
 

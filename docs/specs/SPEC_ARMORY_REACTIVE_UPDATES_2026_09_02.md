@@ -275,8 +275,8 @@ cleanup, not inventing a new lifecycle pattern per file.
 |---|---|---|
 | `frontend/app/view/brain/global-brain-model.ts` | `memories:changed` | Yes — `refresh()` |
 | `frontend/app/view/memory/memory-model.ts` (`MemoryViewModel`, ABF) | `memories:changed` | Yes — `refresh()` |
-| `frontend/app/view/mcp/mcp-model.ts` | `mcp:changed` | Yes — `refresh()` |
-| `frontend/app/view/skill/skill-model.ts` | `skills:changed` | Yes — `refresh()` |
+| [`frontend/app/view/mcp/mcp-model.ts`](../../frontend/app/view/mcp/mcp-model.ts) | `mcp:changed` | Yes — `refresh()` |
+| [`frontend/app/view/skill/skill-model.ts`](../../frontend/app/view/skill/skill-model.ts) | `skills:changed` | Yes — `refresh()` |
 
 No backend changes for any of these four — `memories:changed`, `mcp:changed`,
 and `skills:changed` are already published correctly (proven by their

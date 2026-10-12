@@ -2,17 +2,17 @@
 
 **Date:** 2026-09-20
 **Status:** implemented — PR #3458.
-**Related:** `docs/retro/wrr-design-2026-04-28.md` (why WRR is Windows-only),
-`docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md` (origin spec for
-`orphan_reconcile.rs`), `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`
+**Related:** [`docs/retro/wrr-design-2026-04-28.md`](../retro/wrr-design-2026-04-28.md) (why WRR is Windows-only),
+[`docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md`](SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md) (origin spec for
+`orphan_reconcile.rs`), [`docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md)
 §2.1 (the "sanitizer + executor, not a decider" design this fix stays
-within), `docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` (a
+within), [`docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md`](SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md) (a
 Windows-only sibling bug in the parallel `win_event.rs` quit-trigger path
 — not touched by this fix). GitHub issue #1569.
 
 Note: issue #1569 cites an `ANALYSIS_WRR_CROSS_PLATFORM_2026_06_18` doc
-under `docs/specs/` — no file by that name exists anywhere in the repo
-(checked every `docs/` subtree). This spec cites `docs/retro/wrr-design-2026-04-28.md`
+under [`docs/specs/`](.) — no file by that name exists anywhere in the repo
+(checked every [`docs/`](..) subtree). This spec cites [`docs/retro/wrr-design-2026-04-28.md`](../retro/wrr-design-2026-04-28.md)
 instead, which is the real source for the "WRR is Windows-only" claim.
 
 ---
@@ -203,7 +203,7 @@ whether to call it.
 torn down (i.e. `OnBeforeClose` hasn't fired) — it does **not** prove the
 renderer is responsive. `agentmux-cef/src/state/promote_liveness.rs:1-40`
 already documents (citing
-`docs/retro/retro-fresh-vm-suspend-orphaned-frontend-2026-09-03.md`) that
+[`docs/retro/retro-fresh-vm-suspend-orphaned-frontend-2026-09-03.md`](../retro/retro-fresh-vm-suspend-orphaned-frontend-2026-09-03.md)) that
 neither `IsWindow()` nor `window_handle()` proves a renderer is alive —
 both survive a suspend/resume that left the page dead. `is_valid()` has
 the same *kind* of limitation: it catches the crash-orphan case this
@@ -215,7 +215,7 @@ regression this fix introduces.
 
 - **A full macOS/Linux WRR observation layer** (`OffMonitor`/
   `HiddenSinceOpen`/`LingeringHwnd`-equivalent native hooks). Per
-  `docs/retro/wrr-design-2026-04-28.md`, WRR's entire mechanism is built
+  [`docs/retro/wrr-design-2026-04-28.md`](../retro/wrr-design-2026-04-28.md), WRR's entire mechanism is built
   on Win32-specific hooks (`SetWinEventHook`, `WM_WINDOWPOSCHANGED`) with
   no X11/Cocoa equivalent ever designed — low value, high cost, and
   infeasible under Wayland (no equivalent enumeration API). This fix

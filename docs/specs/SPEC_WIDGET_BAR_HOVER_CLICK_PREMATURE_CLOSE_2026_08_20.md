@@ -26,10 +26,10 @@ require two clicks when the open was hover-initiated, not one.
 
 ## 1. Root cause
 
-Two call sites in `frontend/app/window/action-widgets.tsx` wire a trigger's
+Two call sites in [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) wire a trigger's
 `onClick` as a plain open/closed toggle keyed off the same boolean the
 hover-intent controller (`createSubmenuHover`,
-`frontend/app/util/submenu-hover.ts`) already uses to track "is this
+[`frontend/app/util/submenu-hover.ts`](../../frontend/app/util/submenu-hover.ts)) already uses to track "is this
 menu currently visible":
 
 **The "More" button** (`action-widgets.tsx`, `openMore`, ~line 249):
@@ -216,7 +216,7 @@ button and pinned parents rather than generalizing it prematurely.
 ## 3. Scope / out of scope
 
 **In scope:** the two click handlers above (`openMore`,
-`handleParentSlotClick`) in `frontend/app/window/action-widgets.tsx`.
+`handleParentSlotClick`) in [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx).
 
 **Out of scope:**
 - `more-dropdown.tsx`'s nested Case B parent rows (Messengers shown

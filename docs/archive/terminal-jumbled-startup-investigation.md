@@ -12,7 +12,7 @@ place. Intermittent: doesn't happen every time.
 ## Diagnosis
 
 Classic xterm.js startup race. The init sequence in
-`frontend/app/view/term/termwrap.ts` is:
+[`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) is:
 
 | Step | Line | Action |
 |------|------|--------|
@@ -61,7 +61,7 @@ first fit → jumbled. Warm cache → fonts ready synchronously → fine.
 
 ## Proposed fix
 
-Three changes in `frontend/app/view/term/termwrap.ts`:
+Three changes in [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts):
 
 1. **Await fonts before first fit.** Insert `await document.fonts.ready;` (or
    load the Hack font explicitly via the `FontFace` API) between

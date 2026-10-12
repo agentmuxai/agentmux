@@ -4,7 +4,7 @@
 **Status:** Draft
 **Author:** oozp-0621f
 **Related:**
-- `docs/specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md` — pruner integrated here as a startup stage
+- [`docs/specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`](SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md) — pruner integrated here as a startup stage
 - `agentmux-launcher/src/splash.rs` — current splash implementation
 - `agentmux-launcher/src/srv_spawner.rs` — migration subprocess lifecycle
 
@@ -354,7 +354,7 @@ accepts both old and new formats during a transition window.
 
 ### Frontend changes
 
-**`frontend/app-init.ts`** — at `initApp()` start and at `scheduleRevealLift()`:
+**[`frontend/app-init.ts`](../../frontend/app-init.ts)** — at `initApp()` start and at `scheduleRevealLift()`:
 ```ts
 // at start of initApp():
 sendStartupEvent({ event: "startup_stage_begin", stage: "frontend", label: "Frontend init" });

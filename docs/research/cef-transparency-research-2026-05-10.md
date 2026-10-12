@@ -36,7 +36,7 @@ CSS-side transparency works. Patched `libcef.so` exists, claims to include Chad 
 
 ### Distribution
 
-- PR #743's `scripts/resolve-cef-runtime.sh` finds the patched libcef.so and ships it inside the AppImage. As of 0.33.761 the AppImage on Desktop carries the patched binary.
+- PR #743's [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) finds the patched libcef.so and ships it inside the AppImage. As of 0.33.761 the AppImage on Desktop carries the patched binary.
 
 ---
 
@@ -147,12 +147,12 @@ Until (1)–(3) are answered, every minute spent designing the AgentMux-side wir
 - `agentmux-cef/src/commands/window.rs` — `set_window_transparency` handler (Linux no-op currently).
 - `agentmux-cef/src/app.rs` — `on_before_command_line_processing` (where `--background-color=ff222222` is set).
 - `frontend/app/app.tsx::AppSettingsUpdater` — sends the IPC.
-- `frontend/util/cef-api.ts` — IPC wrapper.
-- `scripts/resolve-cef-runtime.sh` — selects the patched libcef.so for bundling.
-- `docs/cef-build/build-patched-libcef.md` — how to rebuild if Step 1 reveals a missing piece.
-- `docs/specs/cef-transparency-architecture.md` — 2026-03-29 Tauri-era spec; useful for the CSS-layer diagram but most "current state" claims are stale.
-- `docs/analysis/opacity-inconsistency.md` — Windows-side fix already shipped; not directly relevant to Wayland.
-- `docs/research/cef-pane-research-2026-05-03.md` — cites the Wayland subsurface limitations.
+- [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) — IPC wrapper.
+- [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) — selects the patched libcef.so for bundling.
+- [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md) — how to rebuild if Step 1 reveals a missing piece.
+- [`docs/specs/cef-transparency-architecture.md`](../specs/cef-transparency-architecture.md) — 2026-03-29 Tauri-era spec; useful for the CSS-layer diagram but most "current state" claims are stale.
+- [`docs/analysis/opacity-inconsistency.md`](../analysis/opacity-inconsistency.md) — Windows-side fix already shipped; not directly relevant to Wayland.
+- [`docs/research/cef-pane-research-2026-05-03.md`](cef-pane-research-2026-05-03.md) — cites the Wayland subsurface limitations.
 - Memory `cef_transparency_root_cause.md` (35 days old) — IPC chain documented; not re-verified against current libcef.so.
 - Memory `cef_build_in_progress.md` (9 days old) — build infrastructure + gotchas; libcef.so location + branch verified.
 

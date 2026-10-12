@@ -9,7 +9,7 @@
 ## Changes from v0.33.24
 
 ### PR #277 — Clipboard Support for CEF Host
-**Files:** `agentmux-cef/src/commands/clipboard.rs` (new), `commands/mod.rs`, `ipc.rs`, `frontend/util/clipboard.ts`
+**Files:** `agentmux-cef/src/commands/clipboard.rs` (new), `commands/mod.rs`, `ipc.rs`, [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts)
 
 Native clipboard implementation replacing the deprecated Tauri clipboard API:
 
@@ -18,13 +18,13 @@ Native clipboard implementation replacing the deprecated Tauri clipboard API:
 - **Linux:** Environment-aware fallback chain:
   - Wayland: `wl-copy`/`wl-paste` (only attempted when `WAYLAND_DISPLAY` is set)
   - X11 fallback: `xclip -selection clipboard`, then `xsel --clipboard`
-- **Frontend:** `frontend/util/clipboard.ts` updated to route through CEF IPC (`read_clipboard`/`write_clipboard` commands) instead of Tauri API
+- **Frontend:** [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) updated to route through CEF IPC (`read_clipboard`/`write_clipboard` commands) instead of Tauri API
 - **Review fixes applied before merge:**
   - `GlobalFree(hmem)` on `GlobalLock` and `OpenClipboard` failure paths (memory leak fix)
   - Wayland detection via `WAYLAND_DISPLAY` env check — prevents silent `wl-copy` failure on X11 sessions
 
 ### PR #278 — Terminal Echo Delay Fix
-**Files:** `frontend/app/view/term/termwrap.ts`
+**Files:** [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts)
 
 - Small PTY writes (typical of character echo) bypass `requestAnimationFrame` batching and write directly to xterm.js
 - Eliminates visible keystroke delay in fast-typing scenarios
@@ -43,10 +43,10 @@ Native clipboard implementation replacing the deprecated Tauri clipboard API:
 | `agentmux-cef/src/commands/mod.rs` | +1 | Register clipboard module |
 | `agentmux-cef/src/ipc.rs` | +4 | Route `read_clipboard`/`write_clipboard` IPC |
 | `agentmux-cef/src/sidecar.rs` | +1/-1 | Minor (unrelated) |
-| `frontend/app/store/ws.ts` | +13/-34 | Simplify WebSocket reconnect |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | +1/-1 | Minor |
-| `frontend/app/view/term/termwrap.ts` | +14/-4 | RAF bypass for echo delay |
-| `frontend/util/clipboard.ts` | +6/-6 | Route clipboard to CEF IPC |
+| [`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) | +13/-34 | Simplify WebSocket reconnect |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | +1/-1 | Minor |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | +14/-4 | RAF bypass for echo delay |
+| [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) | +6/-6 | Route clipboard to CEF IPC |
 | Version files (×7) | +13/-13 | 0.33.24 → 0.33.26 |
 
 **Total:** 15 files, +227 / -55

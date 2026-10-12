@@ -69,9 +69,9 @@ Uses actual screen coordinates (`additionalProps[nodeId].rect`) to compute clock
 
 ### Files Modified
 
-- `frontend/layout/lib/layoutGeometry.ts` — Added `computeSpiralOrder()` function
-- `frontend/layout/lib/layoutModel.ts` — Added `spiralLeafOrder` derived atom
-- `frontend/app/store/keymodel.ts` — Added `Tab`/`Ctrl+Tab` key bindings, `cyclePaneFocus()`, `shouldInterceptTabForCycle()`
+- [`frontend/layout/lib/layoutGeometry.ts`](../../../frontend/layout/lib/layoutGeometry.ts) — Added `computeSpiralOrder()` function
+- [`frontend/layout/lib/layoutModel.ts`](../../../frontend/layout/lib/layoutModel.ts) — Added `spiralLeafOrder` derived atom
+- [`frontend/app/store/keymodel.ts`](../../../frontend/app/store/keymodel.ts) — Added `Tab`/`Ctrl+Tab` key bindings, `cyclePaneFocus()`, `shouldInterceptTabForCycle()`
 
 ## Testing
 

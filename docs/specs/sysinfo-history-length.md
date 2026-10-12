@@ -29,7 +29,7 @@ The `DefaultNumPoints` constant is used in the view model to size the data array
 
 ### 1. Settings Schema
 
-**File:** `schema/settings.json`
+**File:** [`schema/settings.json`](../../schema/settings.json)
 
 Add entry after `telemetry:interval`:
 
@@ -71,7 +71,7 @@ Map from `"telemetry:numpoints"` in the settings deserializer. Default to 120 if
 
 ### 3. Frontend View Model
 
-**File:** `frontend/app/view/sysinfo/sysinfo-model.ts`
+**File:** [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts)
 
 - Replace hardcoded `DefaultNumPoints = 120` with a derived atom that reads from `fullConfigAtom.settings["telemetry:numpoints"]`
 - Clamp to [30, 1024], fallback to 120
@@ -82,7 +82,7 @@ Map from `"telemetry:numpoints"` in the settings deserializer. Default to 120 if
 
 ### 4. Frontend Plot Component
 
-**File:** `frontend/app/view/sysinfo/sysinfo-plot.tsx`
+**File:** [`frontend/app/view/sysinfo/sysinfo-plot.tsx`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx)
 
 No changes needed — `targetLen` is already a prop passed from the view model.
 
@@ -100,9 +100,9 @@ This matches how `telemetry:interval` changes are already handled.
 
 | File | Change |
 |------|--------|
-| `schema/settings.json` | Add `telemetry:numpoints` schema entry |
+| [`schema/settings.json`](../../schema/settings.json) | Add `telemetry:numpoints` schema entry |
 | `agentmuxsrv-rs/src/backend/wconfig.rs` | Add `telemetry_numpoints` field |
-| `frontend/app/view/sysinfo/sysinfo-model.ts` | Read setting, replace hardcoded 120 |
+| [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) | Read setting, replace hardcoded 120 |
 
 ## Testing
 

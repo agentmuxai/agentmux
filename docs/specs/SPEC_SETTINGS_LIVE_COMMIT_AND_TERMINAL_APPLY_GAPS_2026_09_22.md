@@ -4,12 +4,12 @@
 **Status:** implemented in #3509 — see §8 for what shipped and how it was verified
 **Author:** AgentO
 **Related:**
-`docs/reports/REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md`
+[`docs/reports/REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md`](../reports/REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md)
 (PR #3509 — fixed the terminal-side consumer wiring for one setting; this
 spec is the two things found while verifying that fix live: a much bigger
 root cause upstream of it, and four more terminal settings with the exact
 consumer-side gap #3509 already fixed for `scrollSensitivity`),
-`frontend/app/view/settings/settings-controls.tsx` (`SliderControl`,
+[`frontend/app/view/settings/settings-controls.tsx`](../../frontend/app/view/settings/settings-controls.tsx) (`SliderControl`,
 whose existing debounce shape this spec reuses rather than invents)
 
 ---
@@ -296,7 +296,7 @@ remaining three: all inside mutable `ITerminalOptions`, not
 
 ### 6.1 `term.tsx` (Terminal pane)
 
-- **New pure resolver**, `frontend/app/view/term/termfontfamily.ts` —
+- **New pure resolver**, [`frontend/app/view/term/termfontfamily.ts`](../../frontend/app/view/term/termfontfamily.ts) —
   `resolveTermFontFamily(termSettings, connFontFamily?)`, preserving
   `term.tsx`'s exact existing precedence (`ts["term:fontfamily"] ??
   connFontFamily ?? "Hack"` — settings before connection, no per-block
@@ -376,8 +376,8 @@ found live, not assumed). Otherwise as designed: `NumberControl` added to
 
 - 12 unit tests for `NumberControl` (`settings-controls.test.tsx`), 6 for
   `resolveTermFontFamily` (`termfontfamily.test.ts`).
-- Full frontend suite (2029 tests across `frontend/app/view/term`,
-  `frontend/app/view/agent`, `frontend/app/view/settings`) and
+- Full frontend suite (2029 tests across [`frontend/app/view/term`](../../frontend/app/view/term),
+  [`frontend/app/view/agent`](../../frontend/app/view/agent), [`frontend/app/view/settings`](../../frontend/app/view/settings)) and
   `tsc --noEmit -p tsconfig.citypecheck.json` clean.
 - Every one of the four terminal settings (`scrollSensitivity`,
   `fontFamily`, `scrollback`, `allowbracketedpaste`) verified live against

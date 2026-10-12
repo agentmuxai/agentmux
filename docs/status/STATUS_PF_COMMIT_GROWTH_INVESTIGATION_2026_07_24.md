@@ -77,8 +77,8 @@ let fixes/findings for one get attributed to the other.
 - A background research pass (see agent transcript from this session, "Research what happens on
   agent message send") ranked candidate mechanisms **before** any live test was run. Its top
   candidate — full markdown-tree reparse on every streamed chunk in
-  `frontend/app/element/markdown.tsx:202-282` (a documented, previously root-caused *latency*
-  issue per `docs/analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md`, but never
+  [`frontend/app/element/markdown.tsx:202-282`](../../frontend/app/element/markdown.tsx#L202-L282) (a documented, previously root-caused *latency*
+  issue per [`docs/analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md`](../analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md), but never
   evaluated for memory impact) — was **not supported** by the live data: the renderer process
   hosting that code stayed flat (~582-600 MB) across every test message, including a 1800-word,
   6-code-block, 3-table synthetic response designed specifically to stress that code path.
@@ -224,7 +224,7 @@ background while doing normal work, not as a dedicated stress test.
 
 ### 6.4 Write up findings
 
-Follow this doc's own convention (a dated status/retro doc in `docs/status/` or `docs/retro/`,
+Follow this doc's own convention (a dated status/retro doc in [`docs/status/`](.) or [`docs/retro/`](../retro),
 cross-linking back to this one and to `#2218`/`retro-commit-charge-pagefile-growth-2026-07-02.md`/
 `retro-commit-restart-reclaim-2026-07-16.md`) so whoever picks this up next — human or agent —
 has the same continuity this doc is trying to provide right now.
@@ -295,7 +295,7 @@ This unattributed bucket (kernel pool, page tables, and critically GPU-driver-co
 is **exactly the mechanism #2218 described** — "driver-committed memory not reclaimed until
 restart," charged to the System process (PID 4) rather than any visible process. **#2218 was
 closed earlier in this same session** (see the issue-cleanup report,
-`docs/status/STATUS_ISSUE_DISCUSSION_CLEANUP_2026_07_24.md` §1) on the evidence that its 3 fix
+[`docs/status/STATUS_ISSUE_DISCUSSION_CLEANUP_2026_07_24.md`](STATUS_ISSUE_DISCUSSION_CLEANUP_2026_07_24.md) §1) on the evidence that its 3 fix
 PRs (#2220/#2221/#2222) shipped in v0.54.4. This new data doesn't necessarily contradict that —
 the fixes were about renderer-pool eviction on *pane close*, and this session did a lot of
 *background-agent* churn, a different load pattern that may not be covered by those fixes — but

@@ -1,7 +1,7 @@
 # When a pane closes, the pane that takes over gets the caret
 
 **Status:** superseded — never built; replaced by a spec that also covers pane-tab close, panes without an input target and the agent shell drawer.
-**Superseded-by:** `docs/specs/SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md`
+**Superseded-by:** [`docs/specs/SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md`](SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md)
 **Date:** 2026-10-03.
 **Severity:** Medium. No data is lost, but every close costs a mouse trip before the user can type again, and the most common closes (`exit` in a terminal, `/quit` in an agent pane) are keyboard actions where the user's hands are already on the keys.
 **Requested by:** repo owner (asafebgi).
@@ -104,20 +104,20 @@ The five constraints of `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` §5 carry ove
 
 ## 7. Tests
 
-- `frontend/layout/tests/layoutModel.test.ts`: `DeleteNode` of the focused node requests focus for the MRU survivor after commit; `DeleteNode` of an unfocused node requests nothing; a batch from `processPendingBackendActions` that removes the focused node requests focus once, after the batch commit.
+- [`frontend/layout/tests/layoutModel.test.ts`](../../frontend/layout/tests/layoutModel.test.ts): `DeleteNode` of the focused node requests focus for the MRU survivor after commit; `DeleteNode` of an unfocused node requests nothing; a batch from `processPendingBackendActions` that removes the focused node requests focus once, after the batch commit.
 - Active-tab gating: a background tab's layout model removing its focused node requests nothing.
 - `layoutMagnify`: closing the magnified node does not request focus for it.
 - `element/modal`: when the opener is disconnected, focus restore calls `refocusNode`.
-- `tools/tests/pane-focus-smoke.ps1`: add a close scenario (`exit` in a terminal next to an agent pane, then send keystrokes and assert they reach the composer).
+- [`tools/tests/pane-focus-smoke.ps1`](../../tools/tests/pane-focus-smoke.ps1): add a close scenario (`exit` in a terminal next to an agent pane, then send keystrokes and assert they reach the composer).
 
 ## 8. Files likely to change
 
-- `frontend/layout/lib/layoutModel.ts` (`treeReducer` post-commit check)
-- `frontend/layout/lib/layoutPersistence.ts` (`processPendingBackendActions` post-batch check)
-- `frontend/layout/lib/layoutMagnify.ts` (`closeNode` un-magnify without focus)
-- `frontend/app/store/focusManager.ts` (active-tab gate; "caret outside any block" guard)
-- `frontend/app/element/modal.tsx` (restore fallback)
-- `crates/cef/src/browser_panes/close.rs` / `ui_tasks/window.rs` (`MainFocusReclaimTask` skips an intentional browser-pane focus)
+- [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) (`treeReducer` post-commit check)
+- [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts) (`processPendingBackendActions` post-batch check)
+- [`frontend/layout/lib/layoutMagnify.ts`](../../frontend/layout/lib/layoutMagnify.ts) (`closeNode` un-magnify without focus)
+- [`frontend/app/store/focusManager.ts`](../../frontend/app/store/focusManager.ts) (active-tab gate; "caret outside any block" guard)
+- [`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx) (restore fallback)
+- [`crates/cef/src/browser_panes/close.rs`](../../crates/cef/src/browser_panes/close.rs) / `ui_tasks/window.rs` (`MainFocusReclaimTask` skips an intentional browser-pane focus)
 
 ## 9. Open questions
 

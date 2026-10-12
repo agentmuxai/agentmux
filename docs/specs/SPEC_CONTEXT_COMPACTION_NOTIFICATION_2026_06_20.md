@@ -65,13 +65,13 @@ A transcript marker (divider + pill) rendered as a `ContextCompactedNode`:
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/types.ts` | Add `ContextCompactedNode` interface; add to `DocumentNode` union |
-| `frontend/app/store/agent-pane-state/types.ts` | Add `context-compacted` to `AgentPaneEvent` |
-| `frontend/app/store/agent-pane-state/reducer.ts` | Detect drop in `TokensIn` arm; emit `context-compacted` event |
-| `frontend/app/view/agent/useAgentStream.ts` | Handle `context-compacted` event; append synthetic node |
-| `frontend/app/view/agent/virtualization/renderers.ts` | Register + size `context_compacted` node |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | Render `ContextCompactedNode` |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Divider + pill styles |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `ContextCompactedNode` interface; add to `DocumentNode` union |
+| [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | Add `context-compacted` to `AgentPaneEvent` |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | Detect drop in `TokensIn` arm; emit `context-compacted` event |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Handle `context-compacted` event; append synthetic node |
+| [`frontend/app/view/agent/virtualization/renderers.ts`](../../frontend/app/view/agent/virtualization/renderers.ts) | Register + size `context_compacted` node |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | Render `ContextCompactedNode` |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Divider + pill styles |
 
 ## Acceptance Criteria
 

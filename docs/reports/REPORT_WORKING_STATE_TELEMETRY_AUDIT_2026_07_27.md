@@ -15,9 +15,9 @@
 
 ## Prior art this report builds on (not re-derived)
 
-- `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` — Agent1's pane read "Working…/Waiting…" for ~12 hours; root cause was a genuine `run_in_background: true` heartbeat-guarded dev stack, not a crash. The retro's own §3 lesson: *"turn-phase and attached-process-liveness are orthogonal — a live process is not the same signal as a live turn."*
-- `docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` — 5-step fix plan. **Step 1 shipped** this session (PRs #2315, #2317 — `frontend/app/view/agent/activity/tool-adapter.ts`, promotes a Bash call to the `ActivityDock` after 30s and suppresses `AgentWorkingRow`'s "tool · arg" text once promoted). **Steps 2–5 (`run_in_background` threading, two-axis pane status + watchdog exemption, feeding Swarm, generalizing beyond Bash) remain unimplemented** — confirmed fresh via `grep -r run_in_background` (zero hits outside `docs/`) and `git log` on the Swarm-touching files since 07-16 (all row-grouping/UX polish, no new status axis).
-- `docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md` — identifies `agentmux-bashwrap`'s own 600s idle-kill as a *seventh*, structurally isolated liveness mechanism that can silently terminate a healthy long-running task with zero dock entry or trace anywhere in the UI.
+- [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) — Agent1's pane read "Working…/Waiting…" for ~12 hours; root cause was a genuine `run_in_background: true` heartbeat-guarded dev stack, not a crash. The retro's own §3 lesson: *"turn-phase and attached-process-liveness are orthogonal — a live process is not the same signal as a live turn."*
+- [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md`](../specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) — 5-step fix plan. **Step 1 shipped** this session (PRs #2315, #2317 — [`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts), promotes a Bash call to the `ActivityDock` after 30s and suppresses `AgentWorkingRow`'s "tool · arg" text once promoted). **Steps 2–5 (`run_in_background` threading, two-axis pane status + watchdog exemption, feeding Swarm, generalizing beyond Bash) remain unimplemented** — confirmed fresh via `grep -r run_in_background` (zero hits outside [`docs/`](..)) and `git log` on the Swarm-touching files since 07-16 (all row-grouping/UX polish, no new status axis).
+- [`docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md`](../specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) — identifies `agentmux-bashwrap`'s own 600s idle-kill as a *seventh*, structurally isolated liveness mechanism that can silently terminate a healthy long-running task with zero dock entry or trace anywhere in the UI.
 
 This report's job is narrower than those: **not** "fix long-running-process visibility" (already scoped in the report above) but **"when a pane says Working and it's not obvious why, what can an agent actually grep to find out right now — and what's missing."**
 
@@ -103,7 +103,7 @@ What currently drives the visible banner (`AgentFooter.tsx`'s `AgentWorkingRow`,
 
 ### 2.1 The reducer itself: zero logging
 
-`reducer.ts` is a pure function. Confirmed via grep: **zero** `console.*`/`Logger.*` calls anywhere in `frontend/app/store/agent-pane-state/`. Every transition only *returns* an event — it never emits anything observable.
+`reducer.ts` is a pure function. Confirmed via grep: **zero** `console.*`/`Logger.*` calls anywhere in [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state). Every transition only *returns* an event — it never emits anything observable.
 
 ### 2.2 The one place events get consumed (`agent-pane-state-store.ts`)
 
@@ -127,7 +127,7 @@ Its own comment: *"Goes through frontend's `[fe]` log pipe → host log; tail wi
 
 ### 2.4 Tool-call visibility never reaches the backend at all
 
-Confirmed via the auto-detect report's §2.1 (re-verified): the Bash command string arrives via `event.params.command` on the CLI's own `tool_call` NDJSON event, parsed entirely client-side (`useAgentStream.ts`'s `extractToolArg`). There's no backend RPC boundary per tool call — srv never sees "a Bash call started/ended," only the CLI's raw stdout, which lands in the sidecar's transcript log (excluded from `muxlog` by default as "transcript noise" per `docs/MUXLOG.md`). **This is correctly scoped as-is — no protocol change needed here** — but it means backend-side telemetry can never directly see individual tool calls, only process-level and turn-level signals (below).
+Confirmed via the auto-detect report's §2.1 (re-verified): the Bash command string arrives via `event.params.command` on the CLI's own `tool_call` NDJSON event, parsed entirely client-side (`useAgentStream.ts`'s `extractToolArg`). There's no backend RPC boundary per tool call — srv never sees "a Bash call started/ended," only the CLI's raw stdout, which lands in the sidecar's transcript log (excluded from `muxlog` by default as "transcript noise" per [`docs/MUXLOG.md`](../MUXLOG.md)). **This is correctly scoped as-is — no protocol change needed here** — but it means backend-side telemetry can never directly see individual tool calls, only process-level and turn-level signals (below).
 
 ### 2.5 Backend-side signals exist but are logged too coarsely (or not at all)
 
@@ -199,18 +199,18 @@ Mirrors the `[wave-title]` precedent exactly (same tag-prefix convention `muxlog
 
 | Concern | File | Line(s) |
 |---|---|---|
-| `TurnPhase` state machine, watchdog constants | `frontend/app/store/agent-pane-state/types.ts` | 133-171, 720, 733 |
-| Watchdog gate (`toolsActive === 0`) | `frontend/app/store/agent-pane-state/reducer.ts` | 272-343 |
-| `dispatch()` — where all four telemetry additions land | `frontend/app/store/agent-pane-state-store.ts` | 169-249 |
-| Existing single-event-type `eventSink` (precedent for the pattern, narrower) | `frontend/app/store/agent-pane-state-store.ts` | 100-106 |
-| In-memory dispatch ring (dev-only, not muxlog-visible) | `frontend/app/store/command-source.ts` | 57-87 |
-| Dev-only diagnostic panel (Ctrl+Shift+D) | `frontend/app/devtools/diag-panel.tsx` | full |
-| `[wave-title]` precedent to mirror | `frontend/app-init.ts` | 797-872 |
-| `AgentWorkingRow` — what currently renders the banner | `frontend/app/view/agent/components/AgentFooter.tsx` | 57-121 |
-| Step-1 dock-promotion fix (already shipped) | `frontend/app/view/agent/activity/tool-adapter.ts` | full |
+| `TurnPhase` state machine, watchdog constants | [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | 133-171, 720, 733 |
+| Watchdog gate (`toolsActive === 0`) | [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | 272-343 |
+| `dispatch()` — where all four telemetry additions land | [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | 169-249 |
+| Existing single-event-type `eventSink` (precedent for the pattern, narrower) | [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | 100-106 |
+| In-memory dispatch ring (dev-only, not muxlog-visible) | [`frontend/app/store/command-source.ts`](../../frontend/app/store/command-source.ts) | 57-87 |
+| Dev-only diagnostic panel (Ctrl+Shift+D) | [`frontend/app/devtools/diag-panel.tsx`](../../frontend/app/devtools/diag-panel.tsx) | full |
+| `[wave-title]` precedent to mirror | [`frontend/app-init.ts`](../../frontend/app-init.ts) | 797-872 |
+| `AgentWorkingRow` — what currently renders the banner | [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | 57-121 |
+| Step-1 dock-promotion fix (already shipped) | [`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts) | full |
 | Backend process registry (no per-poll logging) | `agentmux-srv/src/backend/process_tracker/registry.rs` | 150-186 |
 | Backend health monitor (coarse-only logging) | `agentmux-srv/src/backend/blockcontroller/health.rs` | 192-279 |
 | `started_at_ms` hardcoded 0 on Windows (blocks §3.4) | `agentmux-srv/src/backend/process_tracker/windows.rs` | 198 |
-| Prior incident retro | `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` | full |
-| Long-running-process report (steps 2-5 still open) | `docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` | full |
-| Sibling bashwrap-idle-kill report | `docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md` | full |
+| Prior incident retro | [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) | full |
+| Long-running-process report (steps 2-5 still open) | [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md`](../specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) | full |
+| Sibling bashwrap-idle-kill report | [`docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md`](../specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) | full |

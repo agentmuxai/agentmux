@@ -5,7 +5,7 @@
 **Bug:** "Open another window" can open a blank/invisible window on HiDPI displays.
 **Regression source:** `#1609` (`c004540c`) "feat(pool): Windows new-window pool"
 **Status:** Implemented — §3.2 (clamp) + §3.3 (post-show re-assert) + telemetry landed; `clamp_rect_within` unit-tested. §3.1 (size normalization) and §3.4 (explicit repaint) deferred as follow-ups (the clamp+re-assert already guarantees on-screen at the current 960×640 size).
-**Related:** `#1610`/`#1612`/`#1616` (recent pool work), `docs/retro/retro-blank-new-window-2026-06-21.md` (the layout-seed fix, orthogonal and already shipped).
+**Related:** `#1610`/`#1612`/`#1616` (recent pool work), [`docs/retro/retro-blank-new-window-2026-06-21.md`](../../retro/retro-blank-new-window-2026-06-21.md) (the layout-seed fix, orthogonal and already shipped).
 
 ---
 

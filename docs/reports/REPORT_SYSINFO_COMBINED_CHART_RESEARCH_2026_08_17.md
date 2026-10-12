@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Investigation complete — no code changed. Written to inform a design decision before implementation.
-**Scope:** `frontend/app/view/sysinfo/` (`sysinfo-view.tsx`, `sysinfo-plot.tsx`, `sysinfo-model.ts`, `sysinfo-types.ts`).
+**Scope:** [`frontend/app/view/sysinfo/`](../../frontend/app/view/sysinfo) (`sysinfo-view.tsx`, `sysinfo-plot.tsx`, `sysinfo-model.ts`, `sysinfo-types.ts`).
 
 ---
 

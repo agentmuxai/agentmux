@@ -18,7 +18,7 @@ tool blocks, not the number of *expanded* ones.
 
 ## 2. Architecture recap
 
-Each tool call renders a `ToolBlock` (`frontend/app/view/agent/components/ToolBlock.tsx`):
+Each tool call renders a `ToolBlock` ([`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)):
 a one-line summary row plus an `<ToolBlockOverlay>` panel holding the **full** tool
 output (params, stdout/stderr, result). The panel has two states:
 
@@ -195,9 +195,9 @@ the abandoned lazy-mount made it frequent. Fix:
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_document-nodes.scss` | `content-visibility: hidden` on `.agent-tool-panel--hidden` |
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | guard `<For>` callback against an undefined `virtualItem` (§4.3) |
-| `docs/specs/SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md` | this spec |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | `content-visibility: hidden` on `.agent-tool-panel--hidden` |
+| [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) | guard `<For>` callback against an undefined `virtualItem` (§4.3) |
+| [`docs/specs/SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md`](SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md) | this spec |
 
 ---
 

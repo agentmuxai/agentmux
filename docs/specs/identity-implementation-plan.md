@@ -11,11 +11,11 @@
 | File | Action | Purpose |
 |------|--------|---------|
 | `agentmuxsrv-rs/src/config/widgets.json` | Edit | Register `defwidget@identity` |
-| `frontend/app/block/block.tsx` | Edit | `BlockRegistry.set("identity", IdentityViewModel)` |
-| `frontend/app/view/identity/identity-model.ts` | Create | `IdentityViewModel` — Solid.js signals, localStorage CRUD |
+| [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) | Edit | `BlockRegistry.set("identity", IdentityViewModel)` |
+| [`frontend/app/view/identity/identity-model.ts`](../../frontend/app/view/identity/identity-model.ts) | Create | `IdentityViewModel` — Solid.js signals, localStorage CRUD |
 | `frontend/app/view/identity/identity-view.tsx` | Create | Solid.js view — accounts tab, detail panel, add/edit form |
 | `frontend/app/view/identity/identity.tsx` | Create | Barrel — wires `viewComponent` onto prototype |
-| `frontend/app/view/identity/identity-view.scss` | Create | Styles matching swarm/forge conventions |
+| [`frontend/app/view/identity/identity-view.scss`](../../frontend/app/view/identity/identity-view.scss) | Create | Styles matching swarm/forge conventions |
 
 ## Architecture Decisions
 

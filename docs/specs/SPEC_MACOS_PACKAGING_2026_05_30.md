@@ -2,9 +2,9 @@
 
 **Date:** 2026-05-30
 **Status:** proposed — Spec → implementation (phased)
-**Related:** `docs/macos-signing.md`, `docs/retro/retro-macos-keychain-prompt-2026-05-30.md`,
-`docs/specs/SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md` (framework bundling — done),
-`docs/specs/SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md` (keychain prompt — done, #1208).
+**Related:** [`docs/macos-signing.md`](../macos-signing.md), [`docs/retro/retro-macos-keychain-prompt-2026-05-30.md`](../retro/retro-macos-keychain-prompt-2026-05-30.md),
+[`docs/specs/SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md`](SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md) (framework bundling — done),
+[`docs/specs/SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md`](SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md) (keychain prompt — done, #1208).
 
 ## Goal
 
@@ -74,7 +74,7 @@ Notes:
    - `Contents/MacOS/*.dylib` = the GL libs (the GPU helper resolves them via its own DIR_MODULE).
    - `Contents/Info.plist`: `CFBundleIdentifier = ai.agentmux.cef.helper`, `CFBundleExecutable =
      AgentMux Helper`, `LSUIElement = true`, `CFBundlePackageType = APPL`.
-   - Signed with hardened runtime + `build/entitlements.mac.plist` (the renderer's V8 needs
+   - Signed with hardened runtime + [`build/entitlements.mac.plist`](../../build/entitlements.mac.plist) (the renderer's V8 needs
      allow-jit / unsigned-executable-memory; disable-library-validation lets it load the framework).
    - A single helper suffices because all subprocess types share one entitlement set (Chromium permits
      one helper when entitlements don't vary per type).
@@ -96,7 +96,7 @@ Notes:
 
 Inside-out, deepest first, `--options runtime --timestamp`: GL dylibs → framework `Libraries/*.dylib` →
 framework bundle → **Helper.app** (its dylibs, then the helper exe, then the helper bundle) → srv → host
-→ the `.app`. Backend/host/helper/app get `build/entitlements.mac.plist`. Cert auto-detected from the
+→ the `.app`. Backend/host/helper/app get [`build/entitlements.mac.plist`](../../build/entitlements.mac.plist). Cert auto-detected from the
 keychain (`security find-identity`; never hardcode identity — `MACOS_SIGN_CERT` override; details in the
 private `agentmux-builder`).
 
@@ -109,8 +109,8 @@ before any notarization succeeds.
 
 ## Phasing & PRs
 
-- **PR 1 — packaging pipeline + this spec.** `task package:macos` + `scripts/package-macos.sh`
-  (assemble Parts A/C/D) + `docs/macos-signing.md` refresh + the `entitlements` comment + `.gitignore`
+- **PR 1 — packaging pipeline + this spec.** `task package:macos` + [`scripts/package-macos.sh`](../../scripts/package-macos.sh)
+  (assemble Parts A/C/D) + [`docs/macos-signing.md`](../macos-signing.md) refresh + the `entitlements` comment + `.gitignore`
   for the build artifact. Produces a valid **signed** DMG. (App not yet launchable — Part B follows;
   documented in the PR + this spec.)
 - **PR 2 — CEF Helper app (Part B).** The macOS-gated Rust change + the packaging script emitting +

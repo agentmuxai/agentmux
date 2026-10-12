@@ -1,17 +1,17 @@
 # Spec: Token stats panel — break out by agent + value-add details
 
 **Date:** 2026-08-30
-**Status:** implemented — #2849 (2026-08-30), the PR this doc was added in. `frontend/app/statusbar/TokenBreakdownPopover.tsx` cites this spec and has tests, backed by `store/token-usage.ts`. The Non-goals section is unchanged.
+**Status:** implemented — #2849 (2026-08-30), the PR this doc was added in. [`frontend/app/statusbar/TokenBreakdownPopover.tsx`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx) cites this spec and has tests, backed by `store/token-usage.ts`. The Non-goals section is unchanged.
 **Motivated by:** direct request — the status bar's token breakdown popover
 currently groups by provider/service only; break it out by agent instead,
 and identify what else is worth adding while touching this panel.
 
 ## Background
 
-The status bar's `TokenUsageIndicator` (`frontend/app/statusbar/`) shows a
+The status bar's `TokenUsageIndicator` ([`frontend/app/statusbar/`](../../frontend/app/statusbar)) shows a
 running `↑X ↓Y` total for the whole AgentMux session and opens
 `TokenBreakdownPopover` on click. The popover is driven by
-`frontend/app/store/token-usage.ts`, a session-local store keyed by
+[`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts), a session-local store keyed by
 **provider id** (`"claude"`, `"codex"`, `"gemini"`, …) — see
 `SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md`. `InstancePanel.tsx`'s own doc
 comment already flagged this as a known gap: *"Per-window token totals
@@ -34,7 +34,7 @@ Two things make "by agent" more than a regroup:
    visual distinction, which is confusing and gets worse once real agent
    rows are also broken out individually.
 
-Separately, `SessionStats` (`frontend/app/view/agent/types.ts:545`) already
+Separately, `SessionStats` ([`frontend/app/view/agent/types.ts:545`](../../frontend/app/view/agent/types.ts#L545)) already
 carries `cost_usd`, `duration_ms`, and `num_turns` **per pane**, accumulated
 cumulatively in `AgentPaneState.sessionTotals`
 (`SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md`) — and none of it reaches

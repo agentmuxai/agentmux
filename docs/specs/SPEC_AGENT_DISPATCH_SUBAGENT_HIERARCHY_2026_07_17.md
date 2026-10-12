@@ -1,7 +1,7 @@
 # SPEC: two-level dispatch/member schema for subagents and workflows
 
 **Date:** 2026-07-17
-**Status:** implemented — #2208 (2026-07-17), the PR this doc was added in; "no implementation yet" was written before it merged. The two-level AgentDispatch/SubAgent hierarchy is in `agentmux-srv/src/backend/subagent_watcher/` (`types.rs`, with tests) and surfaced through `frontend/app/view/agent/activity/subagent-adapter.ts`.
+**Status:** implemented — #2208 (2026-07-17), the PR this doc was added in; "no implementation yet" was written before it merged. The two-level AgentDispatch/SubAgent hierarchy is in `agentmux-srv/src/backend/subagent_watcher/` (`types.rs`, with tests) and surfaced through [`frontend/app/view/agent/activity/subagent-adapter.ts`](../../frontend/app/view/agent/activity/subagent-adapter.ts).
 **Ask (verbatim):** "the subagents are actually subsubagents .. We want to keep
 track of the Agent and Workflow tool calls. each should produce one type of
 SubAgent entity, which then has SubSubAgents, unless you can think of a better
@@ -26,7 +26,7 @@ This conflation is visible in three places:
    workflow *run* is being modeled as a kind of subagent-list query, when
    conceptually it's the container one level up.
 2. **The frontend had to invent the missing entity itself.**
-   `frontend/app/view/swarm/swarm-model.ts:59-72` defines `WorkflowGroup`, a
+   [`frontend/app/view/swarm/swarm-model.ts:59-72`](../../frontend/app/view/swarm/swarm-model.ts#L59-L72) defines `WorkflowGroup`, a
    client-only wrapper, with the comment *"backend has no separate
    workflow-name concept."* Because this wrapper has no backend-issued stable
    ID, the frontend then needs `shallowEqualGroup` / `stabilizeGroupIdentity`
@@ -36,7 +36,7 @@ This conflation is visible in three places:
    array. A solo Task-tool dispatch gets none of this — it has no group
    wrapper, stable or otherwise, because the backend gives it no dispatch-
    level identity to hang one on.
-3. **The crash this session traced to it.** `docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`
+3. **The crash this session traced to it.** [`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`](../retro/retro-subagent-backfill-storm-oom-2026-07-17.md)
    (this session, same day) root-caused a launcher-killing OOM crash to an
    unbounded historical replay of *raw JSONL files* on every srv restart —
    1,030+ replayed files in ~10s. The fix (PR #2205) caps by file count
@@ -150,7 +150,7 @@ containing its member `SubAgent`s.
   event_count, model, workflow_id: Option<String>, display_name`
 - `SubagentStatus` (L64-77): `Active | Completed | Abandoned` — the
   `Abandoned` variant's doc comment cites
-  `docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`, which
+  [`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md), which
   **does not exist on disk** (confirmed by search) — a dangling reference
   worth fixing alongside this redesign.
 - `WorkflowInfo` (L100-113): `workflow_id, parent_agent, parent_block_id,
@@ -167,7 +167,7 @@ the `"subagent"` namespace): `ListActive → Vec<SubagentInfo>`,
 `subagent:activity`, `subagent:completed`, `workflow:updated`.
 
 **Frontend** — two parallel implementations:
-- Current: `frontend/app/view/swarm/swarm-model.ts` — `ActiveSubagent`,
+- Current: [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) — `ActiveSubagent`,
   `WorkflowGroup` (client-synthesized, §1), `SwarmChild = ActiveSubagent |
   WorkflowGroup`, `groupSubagentsByWorkflow` (L96-126), `buildTree()`
   (L583-618). Identity-preservation hacks at L128-218 (see §1).
@@ -175,7 +175,7 @@ the `"subagent"` namespace): `ListActive → Vec<SubagentInfo>`,
   simpler types, **not workflow-aware at all** (no `workflow_id`/
   `display_name`). Still present; §6 asks what to do with it.
 
-**Doc trail** (chronological, all in `docs/specs/`): `swarm-redesign-active-retired-2026-05-03.md`
+**Doc trail** (chronological, all in [`docs/specs/`](.)): `swarm-redesign-active-retired-2026-05-03.md`
 → `SPEC_SWARM_TREE_REDESIGN_2026_06_19.md` → `SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md`
 (states, pre-`WorkflowInfo`: *"No workflow tracking... Workflow tool runs
 exist only as files"* — the doc that led to `WorkflowInfo` being bolted on)
@@ -292,13 +292,13 @@ pub struct SubAgent {
 of `AgentDispatch`es (single digits), but a Workflow-kind dispatch can have
 hundreds to low-thousands of members — this session's own crash investigation
 found workflow `wf_ff1c5825-522` with **1,030+ member subagent files** in one
-run (`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`). Workflow
+run ([`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`](../retro/retro-subagent-backfill-storm-oom-2026-07-17.md)). Workflow
 patterns are *designed* to fan out this way (loop-until-dry, judge panels,
 multi-modal sweeps) — a single dispatch legitimately produces far more
 members than a human would ever want listed as individual rows.
 
 **Current behavior falls short at this scale.** `WorkflowGroupRow`
-(`frontend/app/view/swarm/swarm-view.tsx:315-354`) already collapses the
+([`frontend/app/view/swarm/swarm-view.tsx:315-354`](../../frontend/app/view/swarm/swarm-view.tsx#L315-L354)) already collapses the
 *top-level* row — one row per `workflow_id`, not one per member, matching
 `REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`'s "group, not truncate"
 approach. But its expand state (L345-350) still renders one `<SubagentRow>`
@@ -428,9 +428,9 @@ phase independently shippable:
   doc comment, `Abandoned` dangling citation)
 - `agentmux-srv/src/server/service/misc.rs:47-88`, `agentmux-srv/src/server/app_api/session.rs:195-279`
   (RPC surface)
-- `frontend/app/view/swarm/swarm-model.ts`, `frontend/app/view/swarm/swarm-view.tsx:315-354` (current per-member expand rendering), `frontend/app/view/subagent/subagent-model.ts`
-- `docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md` (this session — the crash that motivated re-examining this schema)
-- `docs/specs/SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md`, `REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`, `REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`
+- [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts), [`frontend/app/view/swarm/swarm-view.tsx:315-354`](../../frontend/app/view/swarm/swarm-view.tsx#L315-L354) (current per-member expand rendering), `frontend/app/view/subagent/subagent-model.ts`
+- [`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`](../retro/retro-subagent-backfill-storm-oom-2026-07-17.md) (this session — the crash that motivated re-examining this schema)
+- [`docs/specs/SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md), `REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`, `REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`
 - GitHub Actions docs (Workflow Run → Job → Step): https://runs-on.com/github-actions/jobs-and-steps/
 - Apache Airflow docs (DAG Run → Task Instance): https://www.sparkcodehub.com/airflow/task-management/task-instances
 - Temporal docs (Workflow Execution → Activity/Child-Workflow Execution): https://docs.temporal.io/child-workflows

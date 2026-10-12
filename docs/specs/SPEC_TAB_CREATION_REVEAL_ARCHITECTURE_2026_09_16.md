@@ -18,9 +18,9 @@ fixed by capturing the active tab id BEFORE `CreateTab` fires and skipping
 activation if it's changed by the time `applyTabPreset` resolves (new tab
 stays created-but-inactive, reachable via the tab bar normally). Covered
 by a new `tab-actions.test.ts` (4 cases, all passing). — #3300
-**Scope:** window-level tabs only (`frontend/app/workspace/workspace.tsx`,
-`frontend/app/store/tab-actions.ts`, `frontend/app/store/tab-reveal.ts`,
-`frontend/app/tab/tab-presets.ts`) — specifically the "+" new-tab creation
+**Scope:** window-level tabs only ([`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx),
+[`frontend/app/store/tab-actions.ts`](../../frontend/app/store/tab-actions.ts), [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts),
+[`frontend/app/tab/tab-presets.ts`](../../frontend/app/tab/tab-presets.ts)) — specifically the "+" new-tab creation
 path. Does **not** touch ordinary tab-*switching* (already-existing tabs)
 or in-pane tab switching (a separately-tracked surface, see
 `ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md` §6).
@@ -29,7 +29,7 @@ when creating a new tab... we see a lot of flashing. these are window
 tabs. we may need an architecture rethink and cleanup."*
 **Read first:** `ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md`
 (the perf investigation behind PR #3239, which this spec's root cause is a
-direct side effect of) and `frontend/app/workspace/workspace.tsx`'s own
+direct side effect of) and [`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx)'s own
 extensive inline comments — this is the file whose accumulated patches
 this spec is untangling.
 
@@ -37,7 +37,7 @@ this spec is untangling.
 
 ## 1. The confirmed root cause
 
-`createTab()` (`frontend/app/store/tab-actions.ts:20-55`) holds the
+`createTab()` ([`frontend/app/store/tab-actions.ts:20-55`](../../frontend/app/store/tab-actions.ts#L20-L55)) holds the
 reveal gate through **two** sequential async steps on purpose — the
 `CreateTab` RPC, then `applyTabPreset()` (creates the tab's default
 agent/sysinfo/swarm panes) — and only calls `scheduleRevealLift()` once
@@ -58,13 +58,13 @@ It's undermined by two facts, both verified directly against the code
    dispatches a **separate `Command::SetActiveTab`** to the reducer,
    right there, before the RPC even returns to the client. So
    `ws.activetabid` flips to the new tab's id, and the frontend's
-   `tabId()` signal (`frontend/app/workspace/workspace.tsx:18`) updates
+   `tabId()` signal ([`frontend/app/workspace/workspace.tsx:18`](../../frontend/app/workspace/workspace.tsx#L18)) updates
    to match, **the moment `CreateTab` resolves** — well before
    `applyTabPreset` even starts.
 
 2. **`applyTabPreset` is guaranteed to take longer than the reveal
    gate's 80ms settle window, entirely in `await`s with no long tasks.**
-   `waitForLayoutModel()` (`frontend/app/tab/tab-presets.ts:91-102`)
+   `waitForLayoutModel()` ([`frontend/app/tab/tab-presets.ts:91-102`](../../frontend/app/tab/tab-presets.ts#L91-L102))
    opens with `await new Promise((r) => setTimeout(r, 30))` in a polling
    loop, by design ("poll briefly for the layout model to be ready
    rather than racing against the [object] queue") — then walks the

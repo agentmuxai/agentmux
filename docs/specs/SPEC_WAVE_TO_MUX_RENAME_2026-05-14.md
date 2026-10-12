@@ -74,12 +74,12 @@ Plus module/file/function names:
 | `updateWaveObject` (internal) | `updateMuxObject` | |
 | `wpsSubscribeToObject`, `wpsReconnectHandler` | `mpsSubscribeToObject`, `mpsReconnectHandler` | **Confirmed:** `wps` stands for **"Wave PubSub"** (per the module's structure in `agentmux-srv/src/backend/wps.rs:60` and `frontend/app/store/wps.ts:146`). Rename to `mps` ("Mux PubSub") for consistency with `mstore` / `mos`. |
 | **Module / file names** | | |
-| `frontend/app/store/wos.ts` | `frontend/app/store/mos.ts` | All importers update path |
+| `frontend/app/store/wos.ts` | [`frontend/app/store/mos.ts`](../../frontend/app/store/mos.ts) | All importers update path |
 | `WOS` namespace import (`import * as WOS from ...`) | `MOS` | 19 importers |
 | `agentmux-srv/src/backend/storage/store.rs` | `agentmux-srv/src/backend/storage/mstore.rs` | Module declaration + 50+ `use` statements |
 | `agentmux-srv/src/backend/wps.rs` | `agentmux-srv/src/backend/mps.rs` | Wave PubSub module → Mux PubSub. Sweep `use ...::wps::...` across crate |
-| `frontend/app/store/wps.ts` | `frontend/app/store/mps.ts` | Same; 6 frontend importers |
-| `frontend/types/gotypes.d.ts` | `frontend/types/srv-types.d.ts` | 2074-line type bindings file; the filename used to reference the (now-defunct) Go source. New name describes where the types come from today: the `agentmux-srv` sidecar. The file is in the global ambient-type lookup (`declare global { ... }`), so renaming doesn't require import updates anywhere — just rename the file. `tsconfig.json` uses `include: ["frontend/**/*"]` so it auto-discovers. |
+| `frontend/app/store/wps.ts` | [`frontend/app/store/mps.ts`](../../frontend/app/store/mps.ts) | Same; 6 frontend importers |
+| `frontend/types/gotypes.d.ts` | [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts) | 2074-line type bindings file; the filename used to reference the (now-defunct) Go source. New name describes where the types come from today: the `agentmux-srv` sidecar. The file is in the global ambient-type lookup (`declare global { ... }`), so renaming doesn't require import updates anywhere — just rename the file. `tsconfig.json` uses `include: ["frontend/**/*"]` so it auto-discovers. |
 | **Wire-protocol strings** | | |
 | `"waveobj:update"` (WebSocket eventtype discriminator) | `"muxobj:update"` | **5 occurrences:** `agentmux-srv/src/server/app_api.rs:399,816`; `service.rs:45`; `websocket.rs:125,541` (plus frontend handler in `app/store/global.ts`). Backend + frontend must change in the same commit. See §10.1 for migration concerns. |
 | **Database schema** | | |
@@ -106,7 +106,7 @@ Plus module/file/function names:
 
 | Old path | New path |
 |---|---|
-| `frontend/app/store/wos.ts` | `frontend/app/store/mos.ts` |
+| `frontend/app/store/wos.ts` | [`frontend/app/store/mos.ts`](../../frontend/app/store/mos.ts) |
 | `agentmux-srv/src/backend/storage/store.rs` | `agentmux-srv/src/backend/storage/mstore.rs` |
 | `agentmux-srv/src/backend/storage/store.test.rs` (if exists) | `mstore.test.rs` |
 
@@ -231,7 +231,7 @@ These were open in the first draft of this spec; resolved by reading the source.
 
 **Answer:** **Yes, in the same commit as the type rename.** The string is a discriminator in the WS message envelope, present at:
 - Rust backend: `agentmux-srv/src/server/{app_api.rs:399,816, service.rs:45, websocket.rs:125,541}` — 5 emit sites
-- Frontend: `frontend/app/store/global.ts` — listener handler
+- Frontend: [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) — listener handler
 
 Both ends ship from this repo in a single release. The rename to `"muxobj:update"` is safe as a single-commit lockstep change — there's no external consumer of the WS protocol (no mobile client, no third-party SDK that subscribes).
 

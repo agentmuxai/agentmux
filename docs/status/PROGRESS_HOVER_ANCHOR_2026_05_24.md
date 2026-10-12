@@ -1,7 +1,7 @@
 # Progress — startup-injection hover anchor
 
 **Date:** 2026-05-24
-**Spec:** `docs/specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md`
+**Spec:** [`docs/specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md`](../specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md)
 **Branch:** `agenta/hover-anchor-direction`
 
 ---
@@ -54,7 +54,7 @@ Three commits on `agenta/hover-anchor-direction`:
 
 ### Step 1 — pure function + L1 tests ✅
 
-Created `frontend/app/view/agent/components/hover-anchor.ts` with `pickExpandDirection(rect, viewportH, bodyEstimate) → "above" | "below"`.
+Created [`frontend/app/view/agent/components/hover-anchor.ts`](../../frontend/app/view/agent/components/hover-anchor.ts) with `pickExpandDirection(rect, viewportH, bodyEstimate) → "above" | "below"`.
 
 Decision tree:
 1. Body fits below → "below".

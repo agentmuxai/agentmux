@@ -67,7 +67,7 @@ against this:
   `layoutModel.leafs().some(l => l.id === node.id)` before touching local
   signals; global/`layoutModel`-level cleanup still always runs. **Root
   cause of the blank window itself is NOT actually this** — per
-  `docs/analysis/ANALYSIS_AGENT_PANE_CRASH_2026_05_28_PM.md` §B, writing to
+  [`docs/analysis/ANALYSIS_AGENT_PANE_CRASH_2026_05_28_PM.md`](../analysis/ANALYSIS_AGENT_PANE_CRASH_2026_05_28_PM.md) §B, writing to
   a disposed owner's signal is a silent no-op in SolidJS (the write
   succeeds, no render fan-out happens, no error), so it cannot itself have
   caused a blank window. The guard is a reasonable defensive cleanup either
@@ -126,21 +126,21 @@ against this:
 This repo has a long, repeated history of tear-off/redock work across many
 agents — don't re-derive from scratch. In rough chronological/topical order:
 
-- `docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md` + siblings
+- [`docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md`](../specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) + siblings
   (`SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md`,
   `SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md`,
   `RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md`) — the original
   `setPointerCapture` spike this session's tab work extended. Never merged.
-- `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`,
+- [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](../specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md),
   `SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`,
-  `docs/specs/tearoff-pane-size.md` — sizing/pool-window history.
-  `docs/retro/retro-pane-tearoff-full-window-regression-2026-06-20.md`,
-  `docs/retro/2026-06-20-linux-pane-tearoff-anywhere.md`,
-  `docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`,
-  `docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md` — assorted
+  [`docs/specs/tearoff-pane-size.md`](../specs/tearoff-pane-size.md) — sizing/pool-window history.
+  [`docs/retro/retro-pane-tearoff-full-window-regression-2026-06-20.md`](retro-pane-tearoff-full-window-regression-2026-06-20.md),
+  [`docs/retro/2026-06-20-linux-pane-tearoff-anywhere.md`](2026-06-20-linux-pane-tearoff-anywhere.md),
+  [`docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`](phase-e-tear-off-and-remaining-2026-04-30.md),
+  [`docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md`](BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md) — assorted
   regression retros from earlier tear-off work.
 - macOS/Linux tear-off + redock parity:
-  `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`,
+  [`docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`](../specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md),
   `SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md`,
   `SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md`,
   `SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md`,

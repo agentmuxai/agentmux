@@ -134,9 +134,9 @@ CSS in `agent-view.scss`:
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/types.ts` | Add `timestamp?: number` to `MarkdownNode`, `ToolNode`, `SectionNode`, `SubagentLinkNode` |
-| `frontend/app/view/agent/useAgentStream.ts` | Stamp `Date.now()` on every `pendingNew.push` |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `timestamp?: number` to `MarkdownNode`, `ToolNode`, `SectionNode`, `SubagentLinkNode` |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Stamp `Date.now()` on every `pendingNew.push` |
 | `frontend/app/view/agent/components/NodeTimestamp.tsx` | New component |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | Wrap each node in `.doc-node`, render `<NodeTimestamp>` |
-| `frontend/app/view/agent/components/AgentMessageBlock.tsx` | Remove existing always-on timestamp (superseded by pill) |
-| `frontend/app/view/agent/agent-view.scss` | `.doc-node` + `.node-ts` styles |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | Wrap each node in `.doc-node`, render `<NodeTimestamp>` |
+| [`frontend/app/view/agent/components/AgentMessageBlock.tsx`](../../frontend/app/view/agent/components/AgentMessageBlock.tsx) | Remove existing always-on timestamp (superseded by pill) |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | `.doc-node` + `.node-ts` styles |

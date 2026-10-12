@@ -6,7 +6,7 @@
 **Trigger:** User request — *"when opening the Shell button in the agent
 pane, we need the shell to open below (not above) the agent pane text
 input."*
-**Area:** Agent pane composer region (`frontend/app/view/agent/`)
+**Area:** Agent pane composer region ([`frontend/app/view/agent/`](../../frontend/app/view/agent))
 
 ---
 
@@ -28,7 +28,7 @@ floating popup with a `placement: "top-start"` option), the Shell drawer has
 `display:flex; flex-direction:column` container, and it renders above the
 composer purely because it appears *earlier* in the JSX.
 
-`frontend/app/view/agent/agent-view.tsx:1814-1899` — current structure
+[`frontend/app/view/agent/agent-view.tsx:1814-1899`](../../frontend/app/view/agent/agent-view.tsx#L1814-L1899) — current structure
 inside `.agent-composer-region`:
 
 ```tsx
@@ -51,7 +51,7 @@ inside `.agent-composer-region`:
 </div>
 ```
 
-`frontend/app/view/agent/styles/_control-bar.scss:409-414`:
+[`frontend/app/view/agent/styles/_control-bar.scss:409-414`](../../frontend/app/view/agent/styles/_control-bar.scss#L409-L414):
 
 ```scss
 .agent-composer-region {
@@ -199,5 +199,5 @@ frozen in place.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/agent-view.tsx` | Move the `detailsOpenAtom` `Show` block to after `AgentFooter`; swap `AgentControlBar`/`ResizableDetailsDrawer` order within it (§3.1) |
-| `frontend/app/view/agent/components/ResizableDetailsDrawer.tsx` | Doc-comment update only — handle stays on the top edge, drag math unchanged (§3.2) |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Move the `detailsOpenAtom` `Show` block to after `AgentFooter`; swap `AgentControlBar`/`ResizableDetailsDrawer` order within it (§3.1) |
+| [`frontend/app/view/agent/components/ResizableDetailsDrawer.tsx`](../../frontend/app/view/agent/components/ResizableDetailsDrawer.tsx) | Doc-comment update only — handle stays on the top edge, drag math unchanged (§3.2) |

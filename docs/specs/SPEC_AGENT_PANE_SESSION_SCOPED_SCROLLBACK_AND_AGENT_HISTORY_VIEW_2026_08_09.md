@@ -7,7 +7,7 @@
 honest *"New session started"* divider this spec builds on)
 **Related:** `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` (account-wide,
 cross-agent browse — orthogonal; this doc is the *per-agent, in-pane* surface),
-`docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`
+[`docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`](../analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md)
 (the global transcript zone this doc reads from)
 
 ---

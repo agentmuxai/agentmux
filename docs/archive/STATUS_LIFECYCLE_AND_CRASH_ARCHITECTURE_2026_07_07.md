@@ -5,7 +5,7 @@
 >
 > - **Pillar 1 Step 4 (crash-reproject) — DONE, all 5 phases** (#2014, #2015, #2017, #2032):
 >   two-tier fast/slow reproject, restoring-session overlay, opt-in E2E suite
->   (`test/e2e/crash-reproject.e2e.test.ts`). §1's "Step 4 not started" and everything blocked
+>   ([`test/e2e/crash-reproject.e2e.test.ts`](../../test/e2e/crash-reproject.e2e.test.ts)). §1's "Step 4 not started" and everything blocked
 >   on it no longer holds. Follow-up hardening: #2048 (startup window storm), #2053 (silent
 >   CloseWindow reducer no-op).
 > - **Pillar 2 (sanitize-then-decide) — DONE, all 4 phases** (#2080, #2081, #2084, #2083):
@@ -14,7 +14,7 @@
 >   Spec closure: `SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` + §3.3 rows in
 >   `SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md`.
 > - **`Client.windowids` leak class — CLOSED, all three entry points** (#2087 IPC close path,
->   #2088 registration race + `test/e2e/window-close-baseline.e2e.test.ts`, #2089 OS-level
+>   #2088 registration race + [`test/e2e/window-close-baseline.e2e.test.ts`](../../test/e2e/window-close-baseline.e2e.test.ts), #2089 OS-level
 >   WM_CLOSE wndproc routing).
 >
 > Program remaining as of 2026-07-11: crash-reproject bake period (~3–4 weeks of real usage)
@@ -22,7 +22,7 @@
 > 2026-07-07 picture, kept verbatim.
 
 **Type:** Status snapshot, not a plan — a point-in-time picture of the three-pillar disposability
-program (`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`).
+program ([`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`](../architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md)).
 **Verify before acting:** every claim below is checked against source or a live test as of this
 date; re-verify file:line references if this doc is read more than a few days after 2026-07-07 —
 the surrounding code moves fast.
@@ -59,7 +59,7 @@ and rebuilds it, Pillar 1 just needs to fire that on crash." Verified instead:
 
 - Cold launch (`agentmux-cef/src/app.rs::on_context_initialized`) unconditionally creates **exactly
   one** native window; the frontend inside it reads only `Client.windowids[0]`
-  (`frontend/app-init.ts:317-339`). A second FullInstance window or a Subwindow is **never**
+  ([`frontend/app-init.ts:317-339`](../../frontend/app-init.ts#L317-L339)). A second FullInstance window or a Subwindow is **never**
   automatically recreated today, on any relaunch — only by explicit user/agent action.
 - So Step 4 needs genuinely new code: enumerate `Client.windowids[1..]` (now durable and readable
   thanks to Step 3), resolve each one's `kind`/`parent_window_id`, and drive the equivalent of
@@ -149,10 +149,10 @@ a supposedly-complete PR).
 
 ## 6. Sources
 
-- `docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md` (program index)
-- `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` (corrected 2026-07-07)
-- `docs/specs/SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md`
-- `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`
-- `docs/specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md` (corrected 2026-07-07)
-- `docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`
-- `docs/specs/SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md`
+- [`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`](../architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md) (program index)
+- [`docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`](../specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md) (corrected 2026-07-07)
+- [`docs/specs/SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md`](../specs/SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md)
+- [`docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`](../specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md)
+- [`docs/specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md`](../specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md) (corrected 2026-07-07)
+- [`docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`](../retro/retro-browser-pane-renderer-leak-2026-07-07.md)
+- [`docs/specs/SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md`](../specs/SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md)

@@ -7,7 +7,7 @@
 > **2026-08-07 audit note:** Superseded by the generalized universal-zoom
 > framework (`term:zoom` block-meta key), not the agent-specific design
 > proposed here. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Area:** agent pane / view zoom, per-agent content storage
 
 ---
@@ -26,11 +26,11 @@ a throwaway object (the block), so it cannot outlive a single pane.
 
 Agent zoom lives in the **block's `meta`** under the key `term:zoom`:
 
-- **Read / apply:** `frontend/app/view/agent/agent-view.tsx:917` reads
+- **Read / apply:** [`frontend/app/view/agent/agent-view.tsx:917`](../../frontend/app/view/agent/agent-view.tsx#L917) reads
   `meta?.["term:zoom"]` into a memo and applies it as the CSS `zoom` on
   `.agent-view` (`:1000`). The terminal view reads the same key
-  (`frontend/app/view/term/term.tsx:75`).
-- **Write:** `frontend/app/view/term/term.tsx:222-226` handles Ctrl+Wheel and
+  ([`frontend/app/view/term/term.tsx:75`](../../frontend/app/view/term/term.tsx#L75)).
+- **Write:** [`frontend/app/view/term/term.tsx:222-226`](../../frontend/app/view/term/term.tsx#L222-L226) handles Ctrl+Wheel and
   calls `SetMetaCommand` on `block:<id>` with `{ "term:zoom": next }` (or `null`
   at 1.0, by convention, so a default pane carries no key). This routes through
   the block-meta update path (`UpdateBlockMeta` reducer,

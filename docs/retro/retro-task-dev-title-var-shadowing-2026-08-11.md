@@ -38,10 +38,10 @@ either way, so quoting was never the variable at play.
 
 This meant `{{.TITLE}}` inside `dev:serve` always rendered `''` regardless of
 what was passed at any call site, so `VITE_DEV_TITLE` was always baked in
-empty. `frontend/app-init.ts:400-408` reads `import.meta.env.VITE_DEV_TITLE`
+empty. [`frontend/app-init.ts:400-408`](../../frontend/app-init.ts#L400-L408) reads `import.meta.env.VITE_DEV_TITLE`
 at startup and calls `ObjectService.UpdateObjectMeta` with it — with an empty
 string, the window's `window:displayname` meta is never set, so
-`resolveWindowName()` (`frontend/util/window-title.ts`) falls through to its
+`resolveWindowName()` ([`frontend/util/window-title.ts`](../../frontend/util/window-title.ts)) falls through to its
 third tier, `Window ${index + 1}`.
 
 Confirmed live (not just by code reading) via CDP against the actual running
@@ -60,7 +60,7 @@ to the real file.
 
 ## 4. Why this wasn't caught earlier
 
-The wrapper script `scripts/dev-agent.cmd` already auto-defaults `TITLE=` to
+The wrapper script [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) already auto-defaults `TITLE=` to
 `$AGENTMUX_AGENT_ID` when the caller doesn't pass one explicitly — most
 day-to-day usage never exercises an *explicit* `TITLE=...` override at all,
 since the common case (a single agent, one dev session) never needs to tell

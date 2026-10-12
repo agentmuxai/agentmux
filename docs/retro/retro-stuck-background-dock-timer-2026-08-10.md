@@ -57,7 +57,7 @@ Both shapes are legal responses to a `run_in_background: true` request — the h
 
 ### Root cause
 
-`frontend/app/view/agent/activity/tool-adapter.ts`'s `isAcceptedBackgroundLaunch` (added for issue #2490, the original "give backgrounded calls a dock row" feature) checked only:
+[`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts)'s `isAcceptedBackgroundLaunch` (added for issue #2490, the original "give backgrounded calls a dock row" feature) checked only:
 
 ```ts
 (n.params as BashParams | undefined)?.run_in_background === true && n.status === "success"
@@ -133,6 +133,6 @@ This exact check is now baked into how this session drives every subsequent PR.
 - Done: `muxspect dock`'s `bg` column surfaces which entries are genuinely-accepted background launches — not a detector for the #2518 bug itself (that class is now structurally impossible; see "What `bg` does and doesn't detect" above), but visibility into the adjacent risk of a real launch whose notification never lands.
 
 ### Longer term
-- `docs/MUXSPECT.md` still documents that `STUCK?` cannot fire for a `bg`-tagged row even when it should be investigated — worth revisiting if a server-side view of `<task-notification>` delivery ever becomes cheap to add (today it would mean duplicating client-side transcript-parsing logic server-side, which was judged disproportionate for what is now a fixed bug class).
+- [`docs/MUXSPECT.md`](../MUXSPECT.md) still documents that `STUCK?` cannot fire for a `bg`-tagged row even when it should be investigated — worth revisiting if a server-side view of `<task-notification>` delivery ever becomes cheap to add (today it would mean duplicating client-side transcript-parsing logic server-side, which was judged disproportionate for what is now a fixed bug class).
 - **Not yet tracked as an issue:** `bg` visibility silently expires after `MAX_NODE_AGE_MS` (one hour) with no refresh push for a still-pending accepted launch, so it can't help with the specific hours-old symptom that motivated this retro. A background launch that pushes a periodic "still alive" delta (or a longer/no TTL specifically for `bg: true` entries) would close this; worth its own issue rather than folding into #2520's already-closed scope.
 - No general process exists yet for `git merge-base --is-ancestor origin/main HEAD` sanity-checking before every push — it's a manual habit this retro reinforces, not a hook. A pre-push check (local git hook or a `task` target) would remove the manual step entirely.

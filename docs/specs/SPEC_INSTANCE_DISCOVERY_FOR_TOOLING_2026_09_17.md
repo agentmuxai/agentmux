@@ -9,8 +9,8 @@
 ## 1. Problem
 
 Agent and test tooling hardcodes the CEF debug port — "9223 dev / 9222 release":
-`tools/tests/bench-agent-keystroke.mjs`, `tools/tests/agent-layout-drift.mjs`,
-`tools/tests/bench-aggregate.mjs`'s documented invocation, and `docs/linux.md`.
+[`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs), [`tools/tests/agent-layout-drift.mjs`](../../tools/tests/agent-layout-drift.mjs),
+[`tools/tests/bench-aggregate.mjs`](../../tools/tests/bench-aggregate.mjs)'s documented invocation, and [`docs/linux.md`](../linux.md).
 
 Those are only **preferred** values. `agentmux-cef/src/lib.rs` binds the
 preferred port if it is free and otherwise takes an OS-assigned one — deliberately,
@@ -62,7 +62,7 @@ Release builds write the file too, so this is not dev-only.
 
 ### 3.2 Discover, verify, and refuse
 
-`tools/tests/lib/instance-discovery.mjs`:
+[`tools/tests/lib/instance-discovery.mjs`](../../tools/tests/lib/instance-discovery.mjs):
 
 - `listLiveInstances()` — every `authkey.dev` under `~/.agentmux/{channels,dev}`
   whose `host_pid` is still alive, newest first.
@@ -81,8 +81,8 @@ instance.
 
 ## 4. Tests
 
-`tools/tests/lib/instance-discovery.test.mjs` (node:test, per the
-`tools/tests/lib/` convention):
+[`tools/tests/lib/instance-discovery.test.mjs`](../../tools/tests/lib/instance-discovery.test.mjs) (node:test, per the
+[`tools/tests/lib/`](../../tools/tests/lib) convention):
 
 - a dead instance's authkey is ignored
 - the port comes from the file, not a constant (asserts 42149, not 9222)

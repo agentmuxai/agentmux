@@ -25,10 +25,10 @@ The two are linked: symptom 2 makes symptom 1 permanent for the affected pane (�
 ## 2. Root cause 1: "no tool call running" was taken to mean "the agent is idle"
 
 The ring is `agent-pane-progress-bar--active` when `paneBusy()` is true
-(`frontend/app/view/agent/agent-view.tsx:2541-2549`). `paneBusy` is
+([`frontend/app/view/agent/agent-view.tsx:2541-2549`](../../frontend/app/view/agent/agent-view.tsx#L2541-L2549)). `paneBusy` is
 `paneBusyForInput` (`agent-view.tsx:1727-1737`), which since #3340 (2026-09-17,
 shipped in v0.56.5) goes false for a Streaming turn when
-`turnHeldOnlyByBackgroundWork` holds (`frontend/app/view/agent/working-indicator.ts:113-138`):
+`turnHeldOnlyByBackgroundWork` holds ([`frontend/app/view/agent/working-indicator.ts:113-138`](../../frontend/app/view/agent/working-indicator.ts#L113-L138)):
 
 ```ts
 if (input.turnPhase.kind !== "Streaming") return false;
@@ -38,12 +38,12 @@ return !input.hasBlockingForegroundToolCall;
 
 `hasBlockingForegroundToolCall` is true only while some tool node is
 `running`, `pending_approval` or `awaiting_answer`
-(`frontend/app/view/agent/activity/tool-adapter.ts:130-154`).
+([`frontend/app/view/agent/activity/tool-adapter.ts:130-154`](../../frontend/app/view/agent/activity/tool-adapter.ts#L130-L154)).
 
 The intent was right, and owner-confirmed on 2026-09-17: a turn that is still
 open **only** because of accepted background work shouldn't read as busy, so the
 user can talk to the agent (§2.3a of
-`docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md`).
+[`docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md`](../reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md)).
 
 The detection is wrong. "No foreground tool call is running at this instant" is
 also true **every time the model is thinking or writing text between two tool
@@ -114,7 +114,7 @@ their absence from `background_tasks_changed`**.
 - The renderer's own path (`parseTaskNotification`) needs a `<task-notification>`
   in the pane, which never comes for a subagent's task (#3953 spec §1).
 - The backstops for "tasks the CLI never reports ending" are Phase 4 of
-  `docs/specs/SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md` (§5):
+  [`docs/specs/SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md`](../specs/SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) (§5):
   bashwrap `terminal` events and a pid liveness sweep. **They're not started**,
   and a liveness sweep couldn't help here anyway, because the pid is null.
 - Nothing puts a lifetime on a row. A `running` row with a `last_seen_ms` 17 hours

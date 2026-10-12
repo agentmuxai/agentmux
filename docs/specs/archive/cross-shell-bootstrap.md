@@ -174,7 +174,7 @@ export function buildBootstrapScript(opts: BootstrapOptions): string {
 
 ### 3. Frontend: Wait for shell type before injecting
 
-**File:** `frontend/app/view/agent/agent-model.ts`
+**File:** [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts)
 
 Instead of a blind 500ms `setTimeout`, wait for the `shell:type` meta key to appear:
 
@@ -235,7 +235,7 @@ No special error recovery code is needed — the terminal itself is the recovery
 |------|--------|
 | `agentmuxsrv-rs/src/backend/blockcontroller/shell.rs` | Write `shell:type` to block meta after shell detection |
 | `frontend/app/view/agent/bootstrap.ts` | Three script builders (PowerShell, cmd, bash), `ShellType` parameter |
-| `frontend/app/view/agent/agent-model.ts` | Wait for `shell:type` meta instead of blind setTimeout |
+| [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts) | Wait for `shell:type` meta instead of blind setTimeout |
 
 ## Testing Matrix
 

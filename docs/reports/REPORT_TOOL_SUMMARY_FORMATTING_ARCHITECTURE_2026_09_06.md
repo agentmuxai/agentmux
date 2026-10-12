@@ -26,7 +26,7 @@ already shows for the identical call: `ls /c/Users/area54/ 2>/dev/null | head -5
 
 ## 2. Two implementations of the same idea
 
-**A — `frontend/app/view/agent/stream-parser.ts:117`, `extractToolDetail`.** Typed,
+**A — [`frontend/app/view/agent/stream-parser.ts:117`](../../frontend/app/view/agent/stream-parser.ts#L117), `extractToolDetail`.** Typed,
 per-tool, covers 10 kinds, and picks the field a human actually wants:
 
 ```ts
@@ -163,7 +163,7 @@ independent housekeeping that can wait for someone touching those types anyway.
 - Real-world size distribution of tool `input` payloads. Phase 2's budget depends on it and I
   am not guessing at a number.
 - Whether any consumer outside Swarm reads `input_summary`. I found none in
-  `frontend/` (only `swarm-model.ts`/`swarm-view.tsx`), but I did not audit MCP or external
+  [`frontend/`](../../frontend) (only `swarm-model.ts`/`swarm-view.tsx`), but I did not audit MCP or external
   RPC callers, which could make its shape a compatibility surface.
 - The blank-lines half of the original report. That is a rendering question in `AnsiText`, not
   a formatting-layer one, and is deliberately out of scope here.

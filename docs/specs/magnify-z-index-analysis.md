@@ -105,9 +105,9 @@ If that doesn't fix it, the issue is elsewhere. Alternative fixes:
 | `frontend/layout/lib/TileLayout.tsx` | 187-195 | DisplayNodesWrapper — `<Key>` rendering |
 | `frontend/layout/lib/TileLayout.tsx` | 295-310 | tile-node inline style application |
 | `frontend/layout/lib/TileLayout.tsx` | 129-181 | NodeBackdrops component |
-| `frontend/layout/lib/layoutGeometry.ts` | 115-135 | Magnified node z-index assignment |
-| `frontend/layout/lib/utils.ts` | 63-88 | setTransform creates stacking context |
-| `frontend/layout/lib/tilelayout.scss` | 72-107 | .tile-node CSS (overflow, width, height) |
-| `frontend/layout/lib/tilelayout.scss` | 12-35 | Container z-indices |
-| `frontend/app/theme.scss` | 57-67 | Z-index variable definitions |
-| `frontend/app/block/block.scss` | 443-445 | block-focused z-index: 10 |
+| [`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts) | 115-135 | Magnified node z-index assignment |
+| [`frontend/layout/lib/utils.ts`](../../frontend/layout/lib/utils.ts) | 63-88 | setTransform creates stacking context |
+| [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) | 72-107 | .tile-node CSS (overflow, width, height) |
+| [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss) | 12-35 | Container z-indices |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | 57-67 | Z-index variable definitions |
+| [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) | 443-445 | block-focused z-index: 10 |

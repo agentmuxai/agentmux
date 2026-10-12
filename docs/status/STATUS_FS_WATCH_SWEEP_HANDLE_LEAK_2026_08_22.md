@@ -7,7 +7,7 @@ live A/B (broken-vs-fixed) test on a real running `agentmux-srv` process.**
 
 Live-investigating an operator-reported "opening an old agent is slow, why
 isn't it instant" complaint (same day, same host as
-`docs/status/STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md`).
+[`docs/status/STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md`](STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md)).
 That doc's leading hypothesis (a concurrent `output.idx` rebuild starving the
 Tokio runtime) didn't hold up on review and was withdrawn there. A fresh live
 repro on the same two long-running local instances showed **zero
@@ -17,7 +17,7 @@ mid-stall: *"possible handle leak in an AgentMux process... handles: 51,917"*
 (healthy baseline: under ~1K).
 
 This looked at first like a recurrence of the already-fixed
-`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md` /
+[`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`](STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md) /
 `STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md` bug (sysinfo's
 `CreateToolhelp32Snapshot` leak, fixed by PR #2666,
 commit `3760067`) — but checking the actual handle-type breakdown
@@ -313,8 +313,8 @@ replacement explanation for it.
   the regression test)
 - `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/windows.rs`
   (`add_watch`, `stop_watch`, `remove_watch` — read directly, not from docs)
-- `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`,
-  `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`
+- [`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`](STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md),
+  [`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`](STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md)
   (the prior, unrelated, already-fixed leak this was initially mistaken for)
-- `docs/status/STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md`
+- [`docs/status/STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md`](STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md)
   (the investigation this fix branched off from)

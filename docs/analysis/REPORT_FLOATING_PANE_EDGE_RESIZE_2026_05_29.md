@@ -46,8 +46,8 @@ The border math should reuse `floating_pane_wndproc`'s `RESIZE_BORDER_CSS` (6px,
 - The redock resolver walks *top-level* windows by process and matches against `window_hwnds`; it doesn't depend on child hit-testing, so a child returning `HTTRANSPARENT` at the border shouldn't change which top-level the cursor resolves to. Verify explicitly during the tear-off↔redock smoke (the bug class we just stabilized).
 
 ## Specs / references
-- `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`, `…_CROSS_PLATFORM_2026-05-26.md` — floater design.
-- `docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md` — WxH badge.
+- [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md), `…_CROSS_PLATFORM_2026-05-26.md` — floater design.
+- [`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`](../specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) — WxH badge.
 - `SPEC_PANE_STATE_REDUCER_2026-05-28.md (no longer in this repo)` + `reducer/pane_window.rs` module doc — `ReportNormalRect`/`ReportOSPlacementChange` deferred phases.
 - #1132 (parked resize+maximize, the original edge-resize attempt), #1159 (maximize-only, deferred edge-resize), #1173 (WM_SIZE resizes frontend child).
 

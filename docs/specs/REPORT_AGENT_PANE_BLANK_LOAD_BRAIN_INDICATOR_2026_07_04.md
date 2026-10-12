@@ -18,7 +18,7 @@ There are two independent causes, and they stack for content-heavy panes.
 
 ### 1. `block.tsx` renders literally nothing until the pane object resolves
 
-`frontend/app/block/block.tsx:299` — the `ready` memo:
+[`frontend/app/block/block.tsx:299`](../../frontend/app/block/block.tsx#L299) — the `ready` memo:
 ```ts
 const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
 ```
@@ -32,20 +32,20 @@ This is stage-one blank: waiting on the block's WaveObject metadata +
 
 ### 2. Content-heavy history replay is a single synchronous blocking parse
 
-`frontend/app/view/agent/hooks/useHistoryPagination.ts`, `onMount` (~line 181):
+[`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts), `onMount` (~line 181):
 - Dispatches `InitStart` immediately, then asynchronously tries a v2 snapshot
   restore, falling back to v1, falling back to raw NDJSON replay.
 - `RESTORE_WINDOW_LINES = 5_000` (line 116) — on restore, up to 5000 trailing
   NDJSON lines are fetched and parsed via `parseHistoryLines()`
-  (`frontend/app/view/agent/parseHistoryLines.ts`, 77 lines) — a **pure,
+  ([`frontend/app/view/agent/parseHistoryLines.ts`](../../frontend/app/view/agent/parseHistoryLines.ts), 77 lines) — a **pure,
   synchronous, non-yielding** loop: per line, `JSON.parse` → `translator
   .translate()` → `parser.parseLine()`, building a `DocumentNode[]`.
 - The result is bulk-dispatched in one `batch(...)` call (lines 286/348/410),
   which drives the reducer + `AgentDocumentVirtualList`
-  (`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`) to
+  ([`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx)) to
   mount/measure the initially-visible rows.
 
-`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` already measured
+[`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) already measured
 this exact path for tab-switching and found the dominant cost (500-600ms for
 heavy sessions) is **browser-side layout/paint of the resulting DOM tree**,
 not any single JS function — markdown memoization, virtualizer
@@ -57,7 +57,7 @@ scale with conversation size, matching the report exactly.
 ### The existing reveal-gate doesn't cover this case
 
 AgentMux already has a hide-until-settled mechanism for a *similar* problem —
-`frontend/app/store/tab-reveal.ts` + `frontend/app/workspace/workspace.tsx` —
+[`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts) + [`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx) —
 used for whole-**tab** switches: `holdRevealGate()` hides the active tab
 (`visibility:hidden; opacity:0`) before an async tab operation, and
 `scheduleRevealLift()` (a `PerformanceObserver` watching for Long Tasks, with
@@ -66,14 +66,14 @@ opacity fade once things quiet down.
 
 Confirmed via grep: `holdRevealGate`/`scheduleRevealLift` have **no other
 callers**. They only fire from `createTab()` and `setActiveTab()` in
-`frontend/app/store/global.ts`. **Opening a new agent pane inside an
+[`frontend/app/store/global.ts`](../../frontend/app/store/global.ts). **Opening a new agent pane inside an
 already-visible tab — split, view-swap, swarm sub-agent click, tear-off
 landing — has no gating and no indicator at all.** This is very likely the
 specific scenario behind the report: not "switching tabs is blank" (already
 gated), but "a new/growing pane inside a tab I'm already looking at is
 blank."
 
-`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md` (the reveal gate's original
+[`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md`](SPEC_TAB_CONTENT_REVEAL_GATE.md) (the reveal gate's original
 spec, issue #774) explicitly lists both "fade-in transition on reveal" and
 "per-block skeletons" as **out of scope**, filed for later. This is that
 later.
@@ -94,9 +94,9 @@ component:
 }
 ```
 Same SVG is also saved standalone at
-`frontend/logos/agentmux-logo-brain-alternate.svg`.
+[`frontend/logos/agentmux-logo-brain-alternate.svg`](../../frontend/logos/agentmux-logo-brain-alternate.svg).
 
-`frontend/app/init/startup-splash.ts` controls it:
+[`frontend/app/init/startup-splash.ts`](../../frontend/app/init/startup-splash.ts) controls it:
 `fadeOutStartupSplash()` adds a `.fading` class, waits for `transitionend`
 (or a 320ms timeout), then **permanently removes the DOM node**. It's called
 from `tab-reveal.ts`'s `liftGate()` — every tab-reveal gate lift calls it, but
@@ -127,7 +127,7 @@ moment — currently unused for any visual loading-state purpose.
 ## What would actually need to be built
 
 1. **Extract the brain into a real component** (SVG + `startup-pulse`
-   keyframes) — `frontend/app/element/` seems like the natural home, matching
+   keyframes) — [`frontend/app/element/`](../../frontend/app/element) seems like the natural home, matching
    where other small reusable visual elements live.
 2. **A per-pane (not global-singleton) show/fade signal.** The existing
    `tabSwitching` signal in `tab-reveal.ts` is a single module-level boolean,
@@ -156,9 +156,9 @@ moment — currently unused for any visual loading-state purpose.
 
 ## Prior art / related specs (for context, not yet implemented against)
 
-- `docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md` — origin of the tab-level gate;
+- [`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md`](SPEC_TAB_CONTENT_REVEAL_GATE.md) — origin of the tab-level gate;
   explicitly scoped out fade-in and per-block skeletons.
-- `docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` — measured the
+- [`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) — measured the
   same 500-600ms paint cost this report describes, proposed (but per that
   doc, did not confirm shipped) lazy tool-block hydration and a snapshot
   pre-warm, either of which would reduce how long the brain needs to stay

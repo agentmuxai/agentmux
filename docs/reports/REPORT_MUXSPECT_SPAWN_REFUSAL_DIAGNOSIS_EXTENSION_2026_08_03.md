@@ -140,7 +140,7 @@ attempted here.
 
 ### 3.4 Docs
 
-`docs/MUXSPECT.md`'s "what it can and can't see" section now documents
+[`docs/MUXSPECT.md`](../MUXSPECT.md)'s "what it can and can't see" section now documents
 `last_error` alongside the existing lifecycle/process-tree/staleness bullets.
 
 ### 3.5 Fixed during review: two of the four sources weren't actually persisted (codex P1)

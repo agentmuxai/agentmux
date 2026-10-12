@@ -4,7 +4,7 @@
 **Status:** Implemented — #2759
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-mcp/src/main.rs`)
-**Diagnosis:** `docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md` §3.1
+**Diagnosis:** [`docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md`](../reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md) §3.1
 
 ## 1. Problem
 

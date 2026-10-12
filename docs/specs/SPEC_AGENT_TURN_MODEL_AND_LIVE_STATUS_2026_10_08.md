@@ -3,8 +3,8 @@
 **Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503, phase 2b (attention, §5.5) in PR #4511 and phase 3 (the live status, §6.8 and §6.9) in PR #4510. The live status's change timing was corrected in PR #4559 (§6.10). §7's replay tests are in the same PR. Still open: §7's live checks, and phase 4 (tuning `TIMING` from real log data). See §4.7 for how the build differs from the design below.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
-- Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
-- Working row: `AgentWorkingRow` in `frontend/app/view/agent/components/AgentFooter.tsx`.
+- Turn accounting: [`crates/srv/src/backend/blockcontroller/health.rs`](../../crates/srv/src/backend/blockcontroller/health.rs) (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state) (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
+- Working row: `AgentWorkingRow` in [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx).
 
 **Builds on:**
 - `SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md`: the ambient summary in the row.
@@ -308,7 +308,7 @@ Two guards keep the trigger honest:
 - **Worked verb:** `Worked on AgentX's jekt`, `Worked on github-consumer's notice`, `Worked on a scheduled run` or `Worked on a finished task`. A user turn keeps plain `Worked`.
 - **Secondary:** what joined the turn, by kind, for example `+1 jekt  ·  +2 your messages`, with `+N more` past the listed ones.
 
-**Transcript.** ~~A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`.~~ **Removed 2026-10-11.** Claude Code sends a `task_notification` for every Bash call, foreground ones too, and the live stream never parses the user's own message (it is an echo), so the line also landed on the user's next turn, naming their last command. The operator judged the line not needed, and it is gone from the live stream and from replay (`docs/retro/RETRO_AGENT_PANE_SEND_FLASH_AND_WOKE_UP_LINE_2026_10_11.md`). The Working row and the Worked line still name a task trigger: they come from srv, which sees every input. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
+**Transcript.** ~~A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`.~~ **Removed 2026-10-11.** Claude Code sends a `task_notification` for every Bash call, foreground ones too, and the live stream never parses the user's own message (it is an echo), so the line also landed on the user's next turn, naming their last command. The operator judged the line not needed, and it is gone from the live stream and from replay ([`docs/retro/RETRO_AGENT_PANE_SEND_FLASH_AND_WOKE_UP_LINE_2026_10_11.md`](../retro/RETRO_AGENT_PANE_SEND_FLASH_AND_WOKE_UP_LINE_2026_10_11.md)). The Working row and the Worked line still name a task trigger: they come from srv, which sees every input. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
 
 ### 5.5 As built (phase 2b: attention follows need)
 
@@ -404,7 +404,7 @@ Turn ── Idle
 
 ### 6.4 The presenter: the right line at the right time
 
-`presentStatus(activity, now, memory) → { text, detail?, tone, revealKind }` is a pure function in a new `frontend/app/view/agent/status/present-status.ts`. It holds a small presenter memory (what is shown and since when) so dwell can be enforced without timers in the reducer.
+`presentStatus(activity, now, memory) → { text, detail?, tone, revealKind }` is a pure function in a new [`frontend/app/view/agent/status/present-status.ts`](../../frontend/app/view/agent/status/present-status.ts). It holds a small presenter memory (what is shown and since when) so dwell can be enforced without timers in the reducer.
 
 **Salience order** (first eligible wins):
 

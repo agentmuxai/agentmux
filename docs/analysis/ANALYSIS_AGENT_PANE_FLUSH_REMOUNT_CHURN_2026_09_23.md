@@ -32,7 +32,7 @@ a scrollbar with its forced layouts each time. One equality-gated memo fixes it.
 ## 1. What was measured, and how
 
 All numbers come from the running dev build (`main @ 7519f71`, CEF/Chrome 152)
-over CDP, with the scripts under `scripts/ui-screenshots/` added in #3569
+over CDP, with the scripts under [`scripts/ui-screenshots/`](../../scripts/ui-screenshots) added in #3569
 (split out of this PR so its tooling review doesn't hold up the fix):
 
 | Script | Instrument |

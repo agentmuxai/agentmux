@@ -76,7 +76,7 @@ Same user, same "Default" identity, but **each agent froze a different `CLAUDE_C
 
 ## 3. Q2 — Why does "Login Again" do nothing?
 
-Path: failure-row **Login Again** → `relogin()` (`useAgentControllerStatus.ts`) → `forceProviderLogin()` (`frontend/app/view/agent/flows/force-login.ts`) → `getApi().runCliLogin(cliPath, authLoginCommand, authEnv, requiresTty)` → host `run_cli_login_pty` (`agentmux-cef/src/commands/platform.rs`).
+Path: failure-row **Login Again** → `relogin()` (`useAgentControllerStatus.ts`) → `forceProviderLogin()` ([`frontend/app/view/agent/flows/force-login.ts`](../../frontend/app/view/agent/flows/force-login.ts)) → `getApi().runCliLogin(cliPath, authLoginCommand, authEnv, requiresTty)` → host `run_cli_login_pty` (`agentmux-cef/src/commands/platform.rs`).
 
 Two compounding reasons it no-ops for Poal:
 
@@ -164,11 +164,11 @@ DB locations:
 > Context: AgentMux was originally designed so each provider kept its **own**
 > AgentMux-owned auth, **decoupled from the user's personal `~/.claude`**. This
 > section traces when that changed. Cross-checked against git; the canonical
-> write-up of the drift is `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`.
+> write-up of the drift is [`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](../retro/retro-provider-auth-isolation-regression-2026-06-05.md).
 
 ### 9.1 The original design (isolated, decoupled from global)
 
-`docs/specs/provider-auth-isolation.md` — design dated **2026-03-21** (src-tauri
+[`docs/specs/provider-auth-isolation.md`](../specs/provider-auth-isolation.md) — design dated **2026-03-21** (src-tauri
 era; first committed to this repo 2026-05-14 in #850):
 
 - Each provider had its own AgentMux-owned dir:

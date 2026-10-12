@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date:** 2026-05-13
 **Author:** AgentX
-**Supersedes (in part):** `docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md`
+**Supersedes (in part):** [`docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md`](../retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md)
 **Related PR:** #734 (`6c7dfe3b`) — original absolute-positioning fix
 
 ---
@@ -28,7 +28,7 @@ A **latent unit mismatch** in the original fix, masked by Win10's default 100% s
 
 ### The math, broken
 
-In `frontend/app/hook/useWindowDrag.win32.ts:123-124`:
+In [`frontend/app/hook/useWindowDrag.win32.ts:123-124`](../../frontend/app/hook/useWindowDrag.win32.ts#L123-L124):
 
 ```ts
 const tx = initWinX + (e.screenX - clickScreenX);   // physical + CSS = mismatched units
@@ -54,7 +54,7 @@ A Win10 user manually set to 125% would see the bug. A Win11 user at 100% wouldn
 
 ### Files involved
 
-- `frontend/app/hook/useWindowDrag.win32.ts` — frontend hook (the unit mismatch lives here, lines 60-65 + 75-78 + 123-124)
+- [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts) — frontend hook (the unit mismatch lives here, lines 60-65 + 75-78 + 123-124)
 - `agentmux-cef/src/commands/window.rs:162-176` — `get_window_position` (returns physical, correct)
 - `agentmux-cef/src/commands/window.rs:223-257` — `set_window_position` (consumes physical, correct)
 
@@ -207,13 +207,13 @@ Add §4.3 (resnap on DPR change) and §4.4 (manifest audit). Add §4.7 test matr
 
 PR #734's code is byte-identical between merge and today — no one reverted the fix. The regression isn't from a code change at all. The fix had a latent unit bug that was tested on Win10 (100% default) but never on Win11 (125% default).
 
-The retro doc at `docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md` doesn't mention DPI scaling either, which suggests the author never observed it because they tested at 100%. A test-matrix item for high-DPI would have caught this pre-merge.
+The retro doc at [`docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md`](../retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md) doesn't mention DPI scaling either, which suggests the author never observed it because they tested at 100%. A test-matrix item for high-DPI would have caught this pre-merge.
 
 ## 7. Open questions
 
 1. **Linux behavior?** The hook at `useWindowDrag.linux.ts` likely has the same bug if Linux is run at fractional scaling (HiDPI laptops with `scale-monitor-framebuffer` or fractional scaling enabled). Out of scope for this spec; flag for follow-up.
 2. **macOS behavior?** macOS handles HiDPI differently (point-vs-pixel coordinate space). The hook at `useWindowDrag.darwin.ts` likely needs a similar audit. Out of scope; flag for follow-up.
-3. **Should the retro be updated?** Yes — once Phase 1 lands, append a "Postscript: DPI regression" section to `docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md` documenting that the fix shipped without DPI testing.
+3. **Should the retro be updated?** Yes — once Phase 1 lands, append a "Postscript: DPI regression" section to [`docs/retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md`](../retro/BUG_WINDOW_DRAG_CURSOR_DRIFT_2026-05-07.md) documenting that the fix shipped without DPI testing.
 
 ## 8. References
 

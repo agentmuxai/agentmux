@@ -4,7 +4,7 @@
 **Date:** 2026-09-24
 **Author:** agentx
 **Observed on:** local 0.57.0 portable (`07a2e91e1`), Windows, "Window 1 - Tab 2" (4 panes). Reported as a recurring anomaly ("we have seen this before").
-**Related:** #3519 (`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md`), `frontend/layout/lib/tilelayout.scss`, `frontend/layout/lib/layoutModel.ts` (`overlayTransform`), `frontend/app/store/focusManager.ts`, `frontend/app/view/agent/agent-model.ts` (`giveFocus`).
+**Related:** #3519 (`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md`), [`frontend/layout/lib/tilelayout.scss`](../../frontend/layout/lib/tilelayout.scss), [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) (`overlayTransform`), [`frontend/app/store/focusManager.ts`](../../frontend/app/store/focusManager.ts), [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) (`giveFocus`).
 
 ---
 
@@ -124,7 +124,7 @@ places, **and the 560 px offset stays**.
 ### 4.3 Why it sticks, even across tab switches
 
 - Nothing ever resets `.tile-layout.scrollTop`. There is no scroll handler or
-  reset anywhere in `frontend/layout`, and the user can't scroll an
+  reset anywhere in [`frontend/layout`](../../frontend/layout), and the user can't scroll an
   `overflow: hidden` box.
 - **Switching tabs does not clear it.** Tabs are kept alive: both tabs'
   `.tile-layout` elements measured with real, non-zero rects. Inactive tabs are
@@ -221,7 +221,7 @@ before and after would settle it on the next occurrence.
 `giveFocus()`). Terminal and editor focus go through xterm and Monaco, whose
 internal `focus()` calls this change can't reach. With 1 in place they can no
 longer scroll `.tile-layout` either. Both guards are pinned by
-`frontend/layout/tests/tileLayoutFocusScroll.test.ts`. 4 is unnecessary once 1
+[`frontend/layout/tests/tileLayoutFocusScroll.test.ts`](../../frontend/layout/tests/tileLayoutFocusScroll.test.ts). 4 is unnecessary once 1
 is in: there's nothing left to scroll.
 
 1. **Make `.tile-layout` not a scroll container: `overflow: clip` instead of
@@ -230,7 +230,7 @@ is in: there's nothing left to scroll.
    programmatic scrolling is impossible. That closes the whole class,
    regardless of which focus or scroll call fires or how containers are parked.
    One line. Check before merging: anything that relied on `.tile-layout` being
-   a scroll container (nothing in `frontend/layout` reads or sets its
+   a scroll container (nothing in [`frontend/layout`](../../frontend/layout) reads or sets its
    `scrollTop` today), and sticky-positioned descendants.
 2. **`focus({ preventScroll: true })` in pane `giveFocus()` implementations**
    (agent `agent-model.ts`, editor, terminal) and in #3519's on-mount claim. A

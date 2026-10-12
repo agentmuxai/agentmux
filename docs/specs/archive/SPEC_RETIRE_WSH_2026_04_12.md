@@ -83,15 +83,15 @@ grep -rn 'wsh (getmeta|setmeta|ai |notify|view |term |editor|launch|workspace|fi
 
 | Location | What it is | Verdict |
 |---|---|---|
-| `agentmux-wsh/tests/copytests/cases/test*.sh` | **53 shell test scripts**, all testing `wsh file copy` (1 subcommand out of 20+) | **Orphaned.** `docs/analysis/test-infrastructure-audit-2026-04-04.md:127` explicitly says: *"Not integrated into any standard test runner — must be run manually."* The tests have no CI wiring and almost certainly have never executed under AgentMux. |
+| `agentmux-wsh/tests/copytests/cases/test*.sh` | **53 shell test scripts**, all testing `wsh file copy` (1 subcommand out of 20+) | **Orphaned.** [`docs/analysis/test-infrastructure-audit-2026-04-04.md:127`](../../analysis/test-infrastructure-audit-2026-04-04.md) explicitly says: *"Not integrated into any standard test runner — must be run manually."* The tests have no CI wiring and almost certainly have never executed under AgentMux. |
 | `README.md:107, 128` | Architecture diagram mentioning `agentmux-wsh` as a build target + `task build:backend` description | **Never as a user feature.** Just build-system bookkeeping. |
 | `BUILD.md:201` | *"wsh (agentmux-wsh/src/): Run `task build:wsh`, restart dev"* | Just says how to rebuild the crate. Teaches maintenance, not usage. |
 
 ### What is NOT in the repo
 
-- **No documentation** teaching a user to type `wsh <anything>`. No onboarding step. No recipe in any `docs/` file. No example in README.
+- **No documentation** teaching a user to type `wsh <anything>`. No onboarding step. No recipe in any [`docs/`](../..) file. No example in README.
 - **No agent tool hint** suggesting agents should invoke `wsh`. The only tool that could call it is Claude's generic `Bash`, and no prompt in the codebase steers an agent toward it.
-- **No script** in `scripts/`, `Taskfile.yml`, or `agentmux-srv/src/backend/shellintegration/` invokes `wsh`. The four shell-integration files (`bash.sh`, `zsh.sh`, `fish.fish`, `pwsh.ps1`) only add `$AGENTMUX`'s dirname to `$PATH` — they never call the binary.
+- **No script** in [`scripts/`](../../../scripts), `Taskfile.yml`, or `agentmux-srv/src/backend/shellintegration/` invokes `wsh`. The four shell-integration files (`bash.sh`, `zsh.sh`, `fish.fish`, `pwsh.ps1`) only add `$AGENTMUX`'s dirname to `$PATH` — they never call the binary.
 - **No frontend code** imports, spawns, or references wsh. The frontend talks to agentmux-srv directly via WebSocket RPC; wsh is bypassed entirely in the UI path.
 - **No internal backend caller.** `agentmux-srv/src/` contains `find_wsh_binary` (used once, in `shell.rs:504` to set the `AGENTMUX` env var — *not* to spawn wsh), `COMMAND_CONN_REINSTALL_WSH`, `COMMAND_CONN_UPDATE_WSH` (constants with no handlers), and nothing else.
 

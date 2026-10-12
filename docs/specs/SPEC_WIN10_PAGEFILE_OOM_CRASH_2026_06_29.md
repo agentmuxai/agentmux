@@ -5,11 +5,11 @@
 **Affected:** AgentMux (CEF/Chromium 148) on Windows 10 22H2 (build 19045).
 
 > **Read first — this builds on prior work, it does not replace it:**
-> - `docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md` — the overnight silent OOM kill
-> - `docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md` — process inventory, commit math, P0–P3 list
-> - `docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md` — `mem_supervisor.rs` design
-> - `docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md` — renderer OOM recovery
-> - `docs/specs/SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md`
+> - [`docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`](../incident/INCIDENT_2026_06_26_APP_CLOSED.md) — the overnight silent OOM kill
+> - [`docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`](SPEC_MEMORY_ANALYSIS_2026_06_26.md) — process inventory, commit math, P0–P3 list
+> - [`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) — `mem_supervisor.rs` design
+> - [`docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) — renderer OOM recovery
+> - [`docs/specs/SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md)
 >
 > **Already shipped** (confirmed in tree): commit gauge in StatusBar (`SystemStats.tsx`, #1799);
 > launcher memory-aware relaunch (`mem_supervisor.rs`, #1493); `CreateMemoryResourceNotification`

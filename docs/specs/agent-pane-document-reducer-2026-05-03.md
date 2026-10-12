@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-03
 **Status:** Draft — awaiting review
-**Scope:** `frontend/app/view/agent/`
+**Scope:** [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 **Triggering bug:** Mid-Claude-session, the agent pane chat history disappears and only a "skeleton" (empty pane shell) remains.
 
 ## TL;DR
@@ -53,7 +53,7 @@ We already use the reducer pattern in three production places + one frontend ins
 - `agentmux-srv/src/reducer.rs` — srv reducer (Phase E): workspaces, tabs, blocks, layouts, identity. Largest scope; serves as the canonical state.
 - `agentmux-cef/src/reducer/` — host reducer (task #182 PR-F-2): browsers, panes, drag, pool, quit, top-level
 - `agentmux-launcher/src/reducer/` — launcher reducer (task #182 PR-A through PR-E): window lifecycle
-- `frontend/app/store/launcher-event-reducer.ts` — **frontend reducer**: subscribes to launcher events, holds an in-memory `knownEntries: Map`, mirrors into store atoms, has echo-loop scaffolding (`applyingRemote`)
+- [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) — **frontend reducer**: subscribes to launcher events, holds an in-memory `knownEntries: Map`, mirrors into store atoms, has echo-loop scaffolding (`applyingRemote`)
 
 The closest analog to this proposal is **`launcher-event-reducer.ts`** — that's the prior art for a frontend store-level reducer.
 
@@ -96,7 +96,7 @@ Cons: doesn't match the established frontend pattern (`launcher-event-reducer.ts
 
 ### Option B — Store-level, agent-document keyed by blockId (~1 day, recommended)
 
-`frontend/app/store/agent-document-store.ts` — single module owns `Map<blockId, AgentDocumentState>` and exports `dispatchFor(blockId, command)`. Pane registers a slot on mount, releases on cleanup. The per-pane `documentAtom` becomes a projection over the store.
+[`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts) — single module owns `Map<blockId, AgentDocumentState>` and exports `dispatchFor(blockId, command)`. Pane registers a slot on mount, releases on cleanup. The per-pane `documentAtom` becomes a projection over the store.
 
 Pros: matches `launcher-event-reducer.ts` exactly (single module, in-memory mirror, atom projection); leaves the door open for cross-pane consumers (e.g. a future "agent activity feed"); centralized event log easier to surface in diagnostics.
 Cons: needs slot lifecycle (cleanup on pane close to avoid leak); marginally more wiring than Option A.
@@ -203,7 +203,7 @@ The reducer being pure is the point — it lets us assert invariants directly:
 | Q1 | Should `SessionStart` be auto-derived from "first stream-append" or an explicit signal from `useAgentStream`? | Explicit signal — the hook knows when subprocess spawn completed |
 | Q2 | Truncate suppression window: time-based (GRACE_MS) or event-based (next non-truncate event lifts the suppression)? | Time-based, ~5s — survives socket reconnect (~1–3s typical) without permanently blocking legitimate truncates |
 | Q3 | Persist event log across pane sessions, or in-memory ring buffer only? | In-memory ring buffer (200 events); persistence is a future feature if telemetry needs it |
-| Q4 | Reducer in `frontend/app/view/agent/document-reducer/` or in a more generic location like `frontend/app/store/`? | View-local — single consumer, follows the per-domain split established by task #182 PR-F-2 |
+| Q4 | Reducer in `frontend/app/view/agent/document-reducer/` or in a more generic location like [`frontend/app/store/`](../../frontend/app/store)? | View-local — single consumer, follows the per-domain split established by task #182 PR-F-2 |
 | Q5 | Are there other agent-view atoms suffering similar race issues that should join this PR? (e.g. `pendingMessagesAtom` is also written by multiple hooks) | Out of scope; surface in a follow-up retro after Phase 1 ships |
 | Q6 | Should the diagnostics panel surface the event-log immediately, or in a follow-up? | Follow-up — keep Phase 1 focused |
 
@@ -221,7 +221,7 @@ The choice here is **redux-toolkit-style reducer** over Solid store, because the
 ## Estimated effort
 
 - Phase 0 (relief patch): 1–2 hours, single PR, no API change.
-- Phase 1 (reducer + refactor): ~1 day. ~200 LOC reducer + ~100 LOC tests + ~3 callsites refactored. Breaking change is internal to `frontend/app/view/agent/`.
+- Phase 1 (reducer + refactor): ~1 day. ~200 LOC reducer + ~100 LOC tests + ~3 callsites refactored. Breaking change is internal to [`frontend/app/view/agent/`](../../frontend/app/view/agent).
 - Phase 2 (cleanup): 1–2 hours follow-up.
 
 ## Risks

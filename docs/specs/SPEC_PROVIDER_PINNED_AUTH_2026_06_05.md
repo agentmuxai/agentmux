@@ -4,7 +4,7 @@
 **Author:** AgentA
 **Date:** 2026-06-05
 **Supersedes:** `provider-auth-isolation.md` (2026-03-21, "per-version" model)
-**Retro:** `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`
+**Retro:** [`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](../retro/retro-provider-auth-isolation-regression-2026-06-05.md)
 
 ---
 

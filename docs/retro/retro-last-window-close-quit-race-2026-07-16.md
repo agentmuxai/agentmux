@@ -4,7 +4,7 @@
 
 **Date:** 2026-07-16
 **Severity:** Medium — permanent srv-side `db_window`/`db_workspace` row leak, resurrected by crash-reproject on every subsequent launch
-**Tracking:** `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md` §4c Round 3 (this fix)
+**Tracking:** [`docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`](../specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md) §4c Round 3 (this fix)
 **Fix (confirmed, live-verified):** `agentmux-cef/src/ui_tasks/window.rs` (`CloseWindowTask::execute`, "main" branch)
 **Fix (defense-in-depth, not the live Windows path):** `agentmux-cef/src/client/lifecycle.rs` (`on_before_close`) — see §5
 

@@ -1,9 +1,9 @@
 # SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale)
 
 **Date:** 2026-06-17
-**Status:** implemented — `frontend/app/view/agent/components/tool-renderers/registry.ts`
+**Status:** implemented — [`frontend/app/view/agent/components/tool-renderers/registry.ts`](../../frontend/app/view/agent/components/tool-renderers/registry.ts)
 
-> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> **Implementing PR not recoverable (checked 2026-09-17).** [`docs/specs/README.md`](README.md)
 > requires an `implemented` Status to cite its PR. This one cannot, and a guess would
 > be worse than the gap: the only commit that set this Status was a bulk restamp
 > (or predates the PR-squash convention), so git alone does not identify who
@@ -20,9 +20,9 @@ already recorded the truth; this just moves it into the Status field where the i
 > **2026-08-07 audit note:** Implemented, load-bearing — `registry.ts`/
 > `registry.test.ts` are the actual mechanism underpinning several other
 > still-stale-status specs (WebFetch, WebSearch, Write-MD content views).
-> See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> See [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Builds on:** `SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md` (PR #1511 — `TerminalOutput` + `terminalText`, the first result-shape classifier)
-**Components:** `frontend/app/view/agent/stream-parser.ts`, `frontend/app/view/agent/types.ts`, `frontend/app/view/agent/components/ToolOverlayLog.tsx`, `…/components/*`
+**Components:** [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts), [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts), [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx), `…/components/*`
 
 ---
 
@@ -171,11 +171,11 @@ Not throwaway — the **seed**. `terminalText`→`TerminalOutput` is precisely a
 ---
 
 ## 11. Key file references
-- `frontend/app/view/agent/types.ts:213` — closed `ToolNode.tool` enum (add `toolName`)
-- `frontend/app/view/agent/types.ts:602` — `TOOL_ICONS` (second tool-keyed dispatch)
-- `frontend/app/view/agent/stream-parser.ts:504-508` — `normalizeToolName` (where the raw name is dropped)
+- [`frontend/app/view/agent/types.ts:213`](../../frontend/app/view/agent/types.ts#L213) — closed `ToolNode.tool` enum (add `toolName`)
+- [`frontend/app/view/agent/types.ts:602`](../../frontend/app/view/agent/types.ts#L602) — `TOOL_ICONS` (second tool-keyed dispatch)
+- [`frontend/app/view/agent/stream-parser.ts:504-508`](../../frontend/app/view/agent/stream-parser.ts#L504-L508) — `normalizeToolName` (where the raw name is dropped)
 - `frontend/app/view/agent/stream-parser.ts:311,463` — AskUserQuestion special-case + icon pick
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312` — `renderToolResultBody` switch (becomes the registry lookup)
-- `frontend/app/view/agent/components/CompactResult.tsx` — JSON/terminal fallback (becomes the chain's tail)
-- `frontend/app/view/agent/components/TerminalOutput.tsx` + `terminal-text.ts` — the seed (#1511)
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx#L233-L312) — `renderToolResultBody` switch (becomes the registry lookup)
+- [`frontend/app/view/agent/components/CompactResult.tsx`](../../frontend/app/view/agent/components/CompactResult.tsx) — JSON/terminal fallback (becomes the chain's tail)
+- [`frontend/app/view/agent/components/TerminalOutput.tsx`](../../frontend/app/view/agent/components/TerminalOutput.tsx) + `terminal-text.ts` — the seed (#1511)
 - provider translators (`claude-/codex-/acp-/gemini-/kimi-translator.ts`) — carry raw tool name; the (A) normalization site

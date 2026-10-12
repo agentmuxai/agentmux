@@ -9,7 +9,7 @@ here in case that reading was wrong. — #3232
 **Date:** 2026-09-15
 **Verified against:** code as of `c00644790` (`frontend/app/view/global-bundle/
 global-bundle-manager.tsx`, `global-bundle-model.ts`) plus
-`docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (the spec that
+[`docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) (the spec that
 introduced the split this document proposes partially undoing).
 **Related:** `SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md` (the
 preceding pane-declutter pass this one continues), the two follow-up PRs to

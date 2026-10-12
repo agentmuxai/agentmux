@@ -14,15 +14,15 @@
   off, so the bug pushes people toward exactly what #3615 was built to stop.
 
 **Related:**
-- #3615 / `docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md`: introduced the guard. Its §3.4 says CI "passes unchanged"; this spec corrects that.
-- `docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`: why the guard must stay on.
-- `docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md`: an earlier backslash-path break in the same pipeline.
+- #3615 / [`docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md): introduced the guard. Its §3.4 says CI "passes unchanged"; this spec corrects that.
+- [`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`](../incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md): why the guard must stay on.
+- [`docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md`](../retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md): an earlier backslash-path break in the same pipeline.
 
 ---
 
 ## 1. Problem
 
-`scripts/cef-build/verify-cef-runtime-windows.sh:50`:
+[`scripts/cef-build/verify-cef-runtime-windows.sh:50`](../../scripts/cef-build/verify-cef-runtime-windows.sh#L50):
 
 ```bash
 actual="$(sha256sum "$libcef" | cut -d' ' -f1)"
@@ -101,7 +101,7 @@ It is exported unchanged as `AGENTMUX_CEF_RUNTIME_DIR_WINDOWS`
 `D:\a\agentmux\agentmux`, so the guard receives
 `D:\a\agentmux\agentmux/cef-runtime-windows` and should refuse the correct r2
 runtime:
-- `scripts/package.sh` → `task bundle` → `bundle:windows` → exit 1.
+- [`scripts/package.sh`](../../scripts/package.sh) → `task bundle` → `bundle:windows` → exit 1.
 
 **Not yet observed.** Every Windows CI build since the guard landed
 (2026-09-24T05:14Z) has either not run or not reached `bundle:windows`:
@@ -158,8 +158,8 @@ site.
 ### 3.2 Gate: forbid file-argument hash parsing
 
 The `doc status + grep gates` job already runs grep gates such as
-`check-menu-positioning.sh` and `tools/lint/check-input-handler-layout-reads.sh`.
-Add one more: `scripts/check-hash-from-stdin.sh`.
+`check-menu-positioning.sh` and [`tools/lint/check-input-handler-layout-reads.sh`](../../tools/lint/check-input-handler-layout-reads.sh).
+Add one more: [`scripts/check-hash-from-stdin.sh`](../../scripts/check-hash-from-stdin.sh).
 - It fails on any `sha(1|224|256|384|512)sum|md5sum|b2sum|shasum` given a file
   argument whose output is piped on the same line. It scans the git-tracked
   `scripts/**/*.sh`, `tools/**/*.sh`, `Taskfile*.yml` and
@@ -177,7 +177,7 @@ implemented, and this is a defect in it.
 
 ## 4. Tests
 
-In `scripts/cef-build/verify-cef-runtime-windows.test.sh`, which runs on Ubuntu
+In [`scripts/cef-build/verify-cef-runtime-windows.test.sh`](../../scripts/cef-build/verify-cef-runtime-windows.test.sh), which runs on Ubuntu
 in `ci-pr`. Linux allows `\` in a directory name, and coreutils escapes it the
 same way there (§1), so the Windows failure can be reproduced on Linux:
 
@@ -189,7 +189,7 @@ same way there (§1), so the Windows failure can be reproduced on Linux:
    found" assertion (line 62) to the stdin form, so the test can't share the
    script's bug.
 
-Plus `scripts/check-hash-from-stdin.test.sh`, run by `ci-pr` together with the
+Plus [`scripts/check-hash-from-stdin.test.sh`](../../scripts/check-hash-from-stdin.test.sh), run by `ci-pr` together with the
 gate:
 - 5 violating shapes, including the exact line 50 from #3615;
 - 8 clean shapes: stdin, piped input, `shasum -a N < f`, `-c`, a hash printed

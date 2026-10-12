@@ -259,10 +259,10 @@ All rendering components are transport-agnostic:
 
 | File | Changes |
 |------|---------|
-| `frontend/app/view/agent/agent-model.ts` | Remove: `buildConfigPreamble()`, `writeHeredoc()`, `shellQuote()`, `shellEscape()`, all bootstrap/PTY imports, `setTimeout(500)` hack. Rewrite: `launchAgent()` and `launchForgeAgent()` to use `WriteAgentConfigCommand` + `SubprocessSpawnCommand`. Change `controller: "shell"` → `"subprocess"`. |
-| `frontend/app/view/agent/useAgentStream.ts` | Change `TermFileName` from `"term"` to `"output"`. Update JSDoc. |
-| `frontend/app/view/agent/agent-view.tsx` | User input via `AgentInputCommand` (JSON) instead of `ControllerInputCommand` (base64). |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | `handleSendMessage` formats JSON and calls `AgentInputCommand`. |
+| [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts) | Remove: `buildConfigPreamble()`, `writeHeredoc()`, `shellQuote()`, `shellEscape()`, all bootstrap/PTY imports, `setTimeout(500)` hack. Rewrite: `launchAgent()` and `launchForgeAgent()` to use `WriteAgentConfigCommand` + `SubprocessSpawnCommand`. Change `controller: "shell"` → `"subprocess"`. |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../../frontend/app/view/agent/useAgentStream.ts) | Change `TermFileName` from `"term"` to `"output"`. Update JSDoc. |
+| [`frontend/app/view/agent/agent-view.tsx`](../../../frontend/app/view/agent/agent-view.tsx) | User input via `AgentInputCommand` (JSON) instead of `ControllerInputCommand` (base64). |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../../frontend/app/view/agent/components/AgentFooter.tsx) | `handleSendMessage` formats JSON and calls `AgentInputCommand`. |
 | `frontend/app/store/wshclientapi.ts` | Add bindings for new RPC commands. |
 | `agentmuxsrv-rs/src/backend/blockcontroller/mod.rs` | Register `SubprocessController` alongside `ShellController`. |
 

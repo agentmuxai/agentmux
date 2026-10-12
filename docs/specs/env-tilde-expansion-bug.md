@@ -29,7 +29,7 @@ Two sites set tilde paths without expansion:
 
 ### Site 1: Frontend (origin of the value)
 
-**File:** `frontend/app/view/agent/agent-model.ts:200`
+**File:** [`frontend/app/view/agent/agent-model.ts:200`](../../frontend/app/view/agent/agent-model.ts#L200)
 ```typescript
 envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${agentSlug}`;
 ```

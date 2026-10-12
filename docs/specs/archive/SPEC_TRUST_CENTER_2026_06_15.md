@@ -1,12 +1,12 @@
 # SPEC: Trust Center — Unified Memory · Identity · Accounts Hub
 
-> **Archived 2026-07-12.** Historical — describes the original Trust Center pane exactly as it shipped. The pane was renamed Armory (see `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`) and the account/identity model has since moved to direct links (`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`). Consolidated tracking: issue #2024.
+> **Archived 2026-07-12.** Historical — describes the original Trust Center pane exactly as it shipped. The pane was renamed Armory (see [`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`](SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md)) and the account/identity model has since moved to direct links ([`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`](../SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md)). Consolidated tracking: issue #2024.
 
 **Date:** 2026-06-15
 **Status:** Draft — design / plan
 **Author:** Smark
 **Note:** Folds in and replaces an earlier app-wide-Accounts-only draft; this is the cohesive plan.
-**Affects:** `frontend/app/view/trust-center/` (new), `frontend/app/view/identity/`, `frontend/app/view/memory/`, `agentmux-srv/src/identity/`, `agentmux-srv/src/backend/storage/`
+**Affects:** `frontend/app/view/trust-center/` (new), [`frontend/app/view/identity/`](../../../frontend/app/view/identity), [`frontend/app/view/memory/`](../../../frontend/app/view/memory), `agentmux-srv/src/identity/`, `agentmux-srv/src/backend/storage/`
 
 ---
 
@@ -59,10 +59,10 @@ Memory (db_memory_bundles)                     ← THE "memory"
 ```
 
 Sources:
-- `IdentityAccount` + `SecretRef` (TS): `frontend/app/view/identity/identity-model.ts:18-61`
+- `IdentityAccount` + `SecretRef` (TS): [`frontend/app/view/identity/identity-model.ts:18-61`](../../../frontend/app/view/identity/identity-model.ts#L18-L61)
 - `IdentityBundle` / `IdentityBinding` (TS): `frontend/types/gotypes.d.ts:304-319`
 - Rust storage: `agentmux-srv/src/backend/storage/identities.rs:71-127`, `memory_bundles.rs:20-50`
-- Composition (startup payload): `frontend/app/view/agent/startup/buildStartupPayload.ts:129-150`
+- Composition (startup payload): [`frontend/app/view/agent/startup/buildStartupPayload.ts:129-150`](../../../frontend/app/view/agent/startup/buildStartupPayload.ts#L129-L150)
 - Existing entry point (to absorb): hamburger **"Identity & Memory"** → `bundle-manager-modal.tsx` (singleton modal)
 
 ### Two distinct "account-like" concepts (do NOT merge)
@@ -82,7 +82,7 @@ Sources:
 
 **Decision: reuse the existing modal.** No new modal file. The current hamburger entry **"Identity & Memory"** already opens `bundle-manager-modal.tsx` as an app-wide singleton with cross-window coordination and a tabbed left rail. We:
 
-1. **Rename** the hamburger entry **"Identity & Memory" → "Trust Center"** (`frontend/app/window/hamburger-menu.tsx` ~L130). The label string is the only menu change.
+1. **Rename** the hamburger entry **"Identity & Memory" → "Trust Center"** ([`frontend/app/window/hamburger-menu.tsx`](../../../frontend/app/window/hamburger-menu.tsx) ~L130). The label string is the only menu change.
 2. **Build Accounts out inside that existing modal** — add an **Accounts** tab alongside the existing Identity and Memory tabs in `bundle-manager-modal.tsx`. Everything else (singleton claim, "open elsewhere" banner, WPS coordination) is inherited unchanged.
 
 This keeps the surface, coordination, and persistence we already have and confines new work to a new tab + the Accounts UI/backend. (A standalone `view: "trust-center"` block pane remains a possible Phase-4 add-on; not needed for the core feature.)
@@ -294,12 +294,12 @@ Rust crate: `keyring` (cross-platform) for the common path; encrypted-file fallb
 
 | File | Change | Phase |
 |------|--------|-------|
-| `frontend/app/window/hamburger-menu.tsx` | rename entry "Identity & Memory" → "Trust Center" (label only) | 1 |
+| [`frontend/app/window/hamburger-menu.tsx`](../../../frontend/app/window/hamburger-menu.tsx) | rename entry "Identity & Memory" → "Trust Center" (label only) | 1 |
 | `frontend/app/modals/bundle-manager-modal.tsx` | add **Accounts** tab to left rail; render `AccountsSection` | 1 |
 | `frontend/app/view/accounts/AccountsSection.tsx` | NEW — accounts UI + key Entry→Validate→Locked state machine + §5.1 egress help | 1/2 |
 | `frontend/app/view/accounts/catalog.ts` | NEW — service descriptors | 1/3 |
 | `frontend/app/view/accounts/accounts-model.ts` | NEW — view model, CRUD, verify flow | 1/2 |
-| `frontend/app/view/identity/identity-model.ts` | extend `AccountProvider`; `AccountKind += "oauth"`; add `maskedTail`,`length`,`last_validated_at` | 2 |
+| [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts) | extend `AccountProvider`; `AccountKind += "oauth"`; add `maskedTail`,`length`,`last_validated_at` | 2 |
 | `frontend/app/store/rpc-api.ts` | add `account.key.*`, `account.oauth.*` bindings | 2/3 |
 | `agentmux-srv/src/identity/key_validator.rs` | NEW — per-service validation probes | 2 |
 | `agentmux-srv/src/identity/secret_store.rs` | NEW — `SecretRef::Keychain`, zeroize | 2 |
@@ -397,14 +397,14 @@ Per account row, show **which identity bundles bind it**. Query the existing `db
 
 ## 13. References
 
-- Identity model (TS): `frontend/app/view/identity/identity-model.ts`
+- Identity model (TS): [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts)
 - Backend identity/memory storage (Rust): `agentmux-srv/src/backend/storage/identities.rs`, `memory_bundles.rs`
 - OAuth session manager / patterns: `agentmux-srv/src/identity/auth_session.rs`, `auth_patterns.rs`
 - Token expiry probe: `agentmux-srv/src/identity/resolver.rs`
 - Auth state machine (reusable): `frontend/app/view/agent/auth/auth-state.ts`, `auth-flow-controller.ts`
-- CLI provider catalog: `frontend/app/view/agent/providers/index.ts`
-- Startup composition: `frontend/app/view/agent/startup/buildStartupPayload.ts`
-- Hamburger menu: `frontend/app/window/hamburger-menu.tsx`
+- CLI provider catalog: [`frontend/app/view/agent/providers/index.ts`](../../../frontend/app/view/agent/providers/index.ts)
+- Startup composition: [`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../../frontend/app/view/agent/startup/buildStartupPayload.ts)
+- Hamburger menu: [`frontend/app/window/hamburger-menu.tsx`](../../../frontend/app/window/hamburger-menu.tsx)
 - Singleton modal pattern (to mirror): `frontend/app/modals/bundle-manager-modal.tsx`
-- Block registry: `frontend/app/block/block.tsx:47-61`
-- Prior specs: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`, `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`
+- Block registry: [`frontend/app/block/block.tsx:47-61`](../../../frontend/app/block/block.tsx#L47-L61)
+- Prior specs: [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](../SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md), [`docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`](SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md)

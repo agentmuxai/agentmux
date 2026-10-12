@@ -10,7 +10,7 @@
 
 The agent launch modal (and the sibling install / create-from-template / authentication modals plumbed through `useTabModal`) currently uses `scope="tab"`. When it opens, the backdrop covers the whole tab — every other pane in the tile layout goes `inert`, can't be clicked, can't be scrolled. That's overreach: the modal is configuring **one agent pane**; the user shouldn't lose access to a browser pane / terminal / second agent pane in the same tab.
 
-Switch it to `scope="pane"`. The infrastructure already exists (`PaneModalScope` context in `frontend/app/element/modal.tsx`; built per `SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md` §12.2 but unused). The user-visible change: the modal backdrop is clipped to the agent pane's bounds, and `inert` only covers the pane's own content — every other pane in the tab stays interactive.
+Switch it to `scope="pane"`. The infrastructure already exists (`PaneModalScope` context in [`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx); built per `SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md` §12.2 but unused). The user-visible change: the modal backdrop is clipped to the agent pane's bounds, and `inert` only covers the pane's own content — every other pane in the tab stays interactive.
 
 ---
 
@@ -20,7 +20,7 @@ Stack as wired today:
 
 1. `AgentPicker.tsx` (rendered inside an agent pane's content) calls `useTabModal()` and dispatches a `launch` request.
 2. `TabModalLayer.tsx` (wrapping the entire `<TabContent>`'s tile layout) holds the request signal, dispatches on `kind`, renders the panel inside a `<Modal scope="tab">`.
-3. The unified `<Modal>` from `frontend/app/element/modal.tsx` (`scope="tab"` branch) reads `TabModalScope` for the mount node — set by `TabModalLayer` to its own wrapper — and applies scope-relative `inert` + scroll lock to the tab's content root.
+3. The unified `<Modal>` from [`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx) (`scope="tab"` branch) reads `TabModalScope` for the mount node — set by `TabModalLayer` to its own wrapper — and applies scope-relative `inert` + scroll lock to the tab's content root.
 
 Net effect: backdrop spans the whole tab area; every pane in the tile layout (including non-agent panes — browser, terminal, sysinfo) goes `inert` for the lifetime of the modal.
 
@@ -36,7 +36,7 @@ The user is configuring **one agent pane**. The modal's authority shouldn't exte
 
 Switch to `scope="pane"`. The unified modal system already supports this:
 
-- `PaneModalScope` context in `frontend/app/element/modal.tsx:96` — symmetric with `TabModalScope`.
+- `PaneModalScope` context in [`frontend/app/element/modal.tsx:96`](../../frontend/app/element/modal.tsx#L96) — symmetric with `TabModalScope`.
 - `<Modal scope="pane">` resolves the mount node from `useContext(PaneModalScope)`, applies inert to the pane root, backdrop is clipped to the pane via `position: absolute` inside the mount node.
 - Modal stack (§6 of the unified spec) already accounts for pane-scoped lock regions — multiple pane modals in different panes coexist; ESC/backdrop "reachable topmost" calculation does the right thing.
 
@@ -84,7 +84,7 @@ Mirror the existing `TabModalLayer` but at pane scope. Keep the existing request
 - `TabModalLayer`'s remaining surface (UpsertMemory etc.) can stay tab-scoped where appropriate, or migrate individually.
 - The unified `<Modal>` is small; rendering it inline from the agent view costs ~10 lines.
 
-Risk for Option A: the launch flow has a "+ New" → create-from-template → back-to-launch state machine that currently rides on `TabModalLayer`'s dispatch (see `frontend/app/store/launch-flow-state/`). Moving it under the agent view means the state machine moves too — bigger refactor than the cursor-fix-sized PR I want this to be. **Mitigation:** do a thin Option B first (introduce `PaneModalLayer`, swap the call site to `usePaneModal()`), keep the dispatch table identical; revisit Option A in a follow-up if the indirection feels heavy.
+Risk for Option A: the launch flow has a "+ New" → create-from-template → back-to-launch state machine that currently rides on `TabModalLayer`'s dispatch (see [`frontend/app/store/launch-flow-state/`](../../frontend/app/store/launch-flow-state)). Moving it under the agent view means the state machine moves too — bigger refactor than the cursor-fix-sized PR I want this to be. **Mitigation:** do a thin Option B first (introduce `PaneModalLayer`, swap the call site to `usePaneModal()`), keep the dispatch table identical; revisit Option A in a follow-up if the indirection feels heavy.
 
 **Revised recommendation:** ship Option B in PR 1, defer Option A's flattening.
 
@@ -125,7 +125,7 @@ Out of scope:
 | 7 | Switch tab while modal open, switch back | Modal still open in the same state |
 | 8 | Multi-window (split into two AgentMux windows) | Each window's launch modal is independent (unchanged from today) |
 
-Integration: `frontend/app/view/agent/components/AgentLaunchModal.integration.test.tsx` exists for the launch flow; extend with a regression that asserts the rendered `<Modal>` has `scope="pane"` and `PaneModalScope` resolves to a pane-local mount.
+Integration: [`frontend/app/view/agent/components/AgentLaunchModal.integration.test.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.integration.test.tsx) exists for the launch flow; extend with a regression that asserts the rendered `<Modal>` has `scope="pane"` and `PaneModalScope` resolves to a pane-local mount.
 
 ## 7. Delivery plan
 

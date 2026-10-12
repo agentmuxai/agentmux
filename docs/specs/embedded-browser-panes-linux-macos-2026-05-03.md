@@ -116,12 +116,12 @@ Five things have to be true for the Views approach to fit. All five are.
 | `agentmux-cef/src/app.rs` | `AgentMuxWindowDelegate` gains a method to host pane BrowserViews. Two options below in "Open question 1"; pick after a quick spike. | Edit |
 | `agentmux-cef/src/browser_pane/callbacks.rs` | The existing `on_after_created_browser_pane` / `on_before_close_browser_pane` / `on_load_end_browser_pane` callbacks already work generically over the `Browser` handle and don't depend on HWND. They should fire for Views-created panes too — but verify by tracing. | Verify, no change expected |
 | `agentmux-cef/src/browser_pane/hwnd.rs` (379 lines) | Windows-specific HWND management for native pane windows. Untouched on this PR. (When Windows eventually migrates to Views, this whole file can be deleted.) | Untouched |
-| `frontend/app/platform/pane-overlay.ts` | The SetWindowRgn-equivalent clipping mechanism. Skip its work on Linux/macOS — Views z-order handles it. **Today's pane-overlay.ts only fires `browser_panes_set_overlay_clip` IPC; that IPC's Rust handler should no-op on non-Windows.** | Edit (Rust handler), maybe edit (frontend) |
+| [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) | The SetWindowRgn-equivalent clipping mechanism. Skip its work on Linux/macOS — Views z-order handles it. **Today's pane-overlay.ts only fires `browser_panes_set_overlay_clip` IPC; that IPC's Rust handler should no-op on non-Windows.** | Edit (Rust handler), maybe edit (frontend) |
 | `agentmux-cef/src/ipc.rs` | The five `browser_pane_*` IPCs (`create`, `navigate`, `resize`, `close`, `go_back`, `go_forward`) keep their current dispatch shape. `BrowserPaneManager::resize` switches on cfg to use `view.set_bounds` on Linux/macOS instead of HWND `SetWindowPos`. | Edit (small) |
 
 ### Data flow — pane creation, end-to-end
 
-1. **Frontend:** user opens `defwidget@browser` widget. `BrowserViewModel` (`frontend/app/view/browser/browser-model.ts`) renders a pane DIV with a `block_id`. After mount, it measures the DIV's screen rect and fires `browser_pane_create` IPC with `{ block_id, url, rect: {x, y, w, h} }`.
+1. **Frontend:** user opens `defwidget@browser` widget. `BrowserViewModel` ([`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts)) renders a pane DIV with a `block_id`. After mount, it measures the DIV's screen rect and fires `browser_pane_create` IPC with `{ block_id, url, rect: {x, y, w, h} }`.
 
 2. **Rust IPC dispatcher** (`agentmux-cef/src/ipc.rs:312`): unchanged, calls `state.browser_panes.create(state, block_id, url, rect)`.
 
@@ -317,14 +317,14 @@ When macOS becomes a build target:
 **Untouched:**
 - `agentmux-cef/src/browser_pane/hwnd.rs` (Windows-only).
 - `agentmux-cef/src/browser_pane/callbacks.rs` (works generically over `Browser`).
-- `frontend/app/platform/pane-overlay.ts` (kept as-is; Rust handler ignores its IPC on non-Windows).
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) (kept as-is; Rust handler ignores its IPC on non-Windows).
 - macOS / Windows packaging.
 
 ---
 
 ## Source references
 
-The full source-cited research backing this spec lives at `/tmp/cef-pane-research.md` (also archive at `docs/research/cef-pane-research-2026-05-03.md` if needed). Primary sources:
+The full source-cited research backing this spec lives at `/tmp/cef-pane-research.md` (also archive at [`docs/research/cef-pane-research-2026-05-03.md`](../research/cef-pane-research-2026-05-03.md) if needed). Primary sources:
 
 - [chromiumembedded/cef issue #2804 — embedded Ozone/Wayland windows](https://github.com/chromiumembedded/cef/issues/2804)
 - [chromiumembedded/cef issue #3681 — Lightweight Alloy-style windows in Chrome runtime](https://github.com/chromiumembedded/cef/issues/3681)

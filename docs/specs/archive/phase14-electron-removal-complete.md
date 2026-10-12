@@ -38,7 +38,7 @@ AgentMux has successfully migrated to Tauri v2. The Electron codebase is no long
 | `emain/` | Directory | ~TBD | Entire Electron main process |
 | `electron.vite.config.ts` | Config | 6KB | Electron Vite config |
 | `electron-builder.config.cjs` | Config | 8KB | Electron Builder config |
-| `frontend/types/custom.d.ts` | Types | N/A | ElectronApi types (partial) |
+| [`frontend/types/custom.d.ts`](../../../frontend/types/custom.d.ts) | Types | N/A | ElectronApi types (partial) |
 
 ### Dependencies to Remove
 
@@ -144,7 +144,7 @@ declare global {
 ```
 
 **Files to modify:**
-- `frontend/types/custom.d.ts` - Remove ElectronApi interface
+- [`frontend/types/custom.d.ts`](../../../frontend/types/custom.d.ts) - Remove ElectronApi interface
 
 ---
 
@@ -525,7 +525,7 @@ See `docs/architecture/agentmux-components.md` for details.
 
 ### Making Changes
 
-- **Frontend (React):** Edit `frontend/app/`, hot reload enabled
+- **Frontend (React):** Edit [`frontend/app/`](../../../frontend/app), hot reload enabled
 - **Tauri (Rust):** Edit `src-tauri/src/`, restart `task dev`
 - **Backend (Go):** Edit `pkg/`, run `task build:backend`, restart
 

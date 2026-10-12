@@ -26,14 +26,14 @@
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `frontend/app/view/term/termwrap.ts` | 545 | Main wrapper — instantiation, addons, PTY, lifecycle |
-| `frontend/app/view/term/term.tsx` | 361 | React component, search, theming, resize |
-| `frontend/app/view/term/termosc.ts` | 320 | OSC handlers (7, 0/2, 9283, 16162) |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | 545 | Main wrapper — instantiation, addons, PTY, lifecycle |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | 361 | React component, search, theming, resize |
+| [`frontend/app/view/term/termosc.ts`](../../frontend/app/view/term/termosc.ts) | 320 | OSC handlers (7, 0/2, 9283, 16162) |
 | `frontend/app/view/term/fitaddon.ts` | 101 | Custom FitAddon fork (noScrollbar + private API) |
-| `frontend/app/view/term/filelinkprovider.ts` | 129 | File path link provider |
-| `frontend/app/view/term/termtheme.ts` | 37 | Dynamic theme + transparency |
+| [`frontend/app/view/term/filelinkprovider.ts`](../../frontend/app/view/term/filelinkprovider.ts) | 129 | File path link provider |
+| [`frontend/app/view/term/termtheme.ts`](../../frontend/app/view/term/termtheme.ts) | 37 | Dynamic theme + transparency |
 | `frontend/app/view/term/term-wsh.tsx` | 55 | WSH RPC (scrollback lines) |
-| `frontend/app/theme.scss` | z-index block | xterm CSS z-index overrides |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | z-index block | xterm CSS z-index overrides |
 
 ### Key Architecture Notes
 

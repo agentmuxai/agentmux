@@ -3,9 +3,9 @@
 **Date:** 2026-09-30
 **Status:** analysis — recommendations for a follow-up fix; not yet implemented
 **Author:** AgentX (narko), at the owner's request
-**Prompted by:** `docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md`.
+**Prompted by:** [`docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md`](../retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
 The menu read "Sonnet 5.5 · high" while the agent ran Opus 5.5 at medium.
-**Companion:** `docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md` lists every binding between the
+**Companion:** [`docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`](REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md) lists every binding between the
 menu and the process (§3) and every gap (§4); this report is the design for closing the general case.
 **Goal:** the model and effort shown in the menu are always what the agent is
 actually using. Where the two can differ, the menu says so instead of showing a
@@ -180,7 +180,7 @@ selected":
    the Agent tool in this session, as running totals" — it is a per-model
    cost/usage breakdown, not an identity of "the model this turn ran on".
    An ordinary turn that delegates to a subagent legitimately reports more
-   than one model in it (`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`
+   than one model in it ([`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`](../specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md)
    §6 item 3 already flags this as unresolved), and the `result` message's
    own schema has no separate field naming the primary/session model — so a
    rule like "warn if `modelUsage` contains a model other than the effective
@@ -229,8 +229,8 @@ selected":
 - Claude Code docs: Model configuration: https://code.claude.com/docs/en/model-config
 - Claude Code docs: Agent SDK reference, TypeScript (`setModel`, `applyFlagSettings`, `initializationResult`, `modelUsage`): https://code.claude.com/docs/en/agent-sdk/typescript
 - Control schema strings in the installed CLI (`claude.exe` 2.1.280): `set_model`, `apply_flag_settings`, `get_settings` with `applied: {model, effort}`; the `result` message's own schema (no top-level primary-model field) and its `modelUsage` field's internal description ("Subagents started through the Agent tool in this session, as running totals")
-- `docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md` §6 item 3, flagging `modelUsage`'s multi-model-subagent shape as an open question independently of this report
-- `frontend/app/view/agent/buildRuntimeArgs.ts:127-136`, the existing `bypass` → CLI `--permission-mode default` translation for control-protocol agents this report's reconciler must not undo (Codex P2 on this PR)
+- [`docs/specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md`](../specs/SPEC_CONTEXT_VISIBILITY_2026_06_17.md) §6 item 3, flagging `modelUsage`'s multi-model-subagent shape as an open question independently of this report
+- [`frontend/app/view/agent/buildRuntimeArgs.ts:127-136`](../../frontend/app/view/agent/buildRuntimeArgs.ts#L127-L136), the existing `bypass` → CLI `--permission-mode default` translation for control-protocol agents this report's reconciler must not undo (Codex P2 on this PR)
 - Kubebuilder book: Good Practices: https://book.kubebuilder.io/reference/good-practices.html
 - Kubernetes status and conditions (observedGeneration, `kubectl wait`): https://www.golinuxcloud.com/kubernetes-status-and-conditions/
 - KEP-5067, Pod generation / observedGeneration: https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/5067-pod-generation

@@ -163,9 +163,9 @@ Layout rules:
 |------|--------|
 | `agentmux-cef/src/floating_pane.rs` | Add `floater_hwnd_for_label(label)` getter |
 | `agentmux-cef/src/ui_tasks/window.rs` | `FocusWindowTask`: floater branch (restore + `SetForegroundWindow`) before Views path |
-| `frontend/app/store/window-opacity-store.ts` | Key live-opacity store by label instead of windowId |
-| `frontend/app/statusbar/InstancePanel.tsx` | Merge opacity slider into name row (windows), add slider to floating rows, drop meta-persist for floaters |
-| `frontend/app/statusbar/_instance-panel.scss` | Inline opacity control, fixed slider column |
+| [`frontend/app/store/window-opacity-store.ts`](../../frontend/app/store/window-opacity-store.ts) | Key live-opacity store by label instead of windowId |
+| [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx) | Merge opacity slider into name row (windows), add slider to floating rows, drop meta-persist for floaters |
+| [`frontend/app/statusbar/_instance-panel.scss`](../../frontend/app/statusbar/_instance-panel.scss) | Inline opacity control, fixed slider column |
 
 ## 5. Testing
 

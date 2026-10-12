@@ -8,8 +8,8 @@
 - `phase-b-roadmap.md` — Phase B sub-PR-level state.
 - `multi-reducer-proposal-2026-04-28.md` — long-term design rationale.
 - `next-steps-2026-04-29.md` — earlier ordering snapshot (some items already shipped).
-- `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — driving spec.
-- `docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` — pre-migration state inventory.
+- [`docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md`](../specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) — driving spec.
+- [`docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md`](../specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md) — pre-migration state inventory.
 - `b5-migration-architecture-2026-04-28.md` — why some maps can't follow the standard ratchet.
 - `wrr-design-2026-04-28.md` — Window Reality Reconciliation (B.9 family).
 - `b9-3-lifecycle-analysis.md` + `b9-3-quit-thread-analysis.md` — close-cascade design rationale.
@@ -105,8 +105,8 @@ Workspace / tab / pane / layout / agent state still flows through srv's HTTP/WS 
 After **B.7.3 (#602–#604)** — typed launcher events delivered via the CEF JS bridge are the SOLE source for the InstancePanel atoms (`openWindowLabelsAtom`, `openWindowEntriesAtom`, `windowCountAtom`). The bespoke `window-instances-changed` channel is fully retired.
 
 Pattern at the renderer:
-- `frontend/util/launcher-events.ts` — installs `window.__agentmux_launcher_event` dispatcher into a SolidJS signal.
-- `frontend/app/store/launcher-event-reducer.ts` — `createEffect` over the signal, maintains in-memory `knownEntries` map, mutates atoms via `recomputeAtoms()`.
+- [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts) — installs `window.__agentmux_launcher_event` dispatcher into a SolidJS signal.
+- [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) — `createEffect` over the signal, maintains in-memory `knownEntries` map, mutates atoms via `recomputeAtoms()`.
 - `frontend/app-init.ts::initInstanceTracking` — seeds the reducer from an init RPC snapshot for renderers that join mid-session; tombstones pre-seed close events to avoid ghost rows (codex P2 #604).
 
 Atoms / blocks consume the typed stream. No bespoke proxy events from host. No polling.

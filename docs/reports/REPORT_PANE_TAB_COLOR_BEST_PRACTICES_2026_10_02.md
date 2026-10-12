@@ -15,7 +15,7 @@
 
 ## 2. How AgentMux colours a pane today
 
-From `frontend/app/block/pane-color-menu.ts`, `blockframe.tsx`, `PaneChrome.tsx`, `PaneTabStrip.scss` on main:
+From [`frontend/app/block/pane-color-menu.ts`](../../frontend/app/block/pane-color-menu.ts), `blockframe.tsx`, `PaneChrome.tsx`, `PaneTabStrip.scss` on main:
 
 | Element | Dark theme | Light theme |
 |---|---|---|

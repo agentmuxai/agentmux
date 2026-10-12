@@ -108,8 +108,8 @@ Handler POSTs `{ shell_id }` to `/api/v1/shell/stop`.
 | `agentmux-srv/src/server/websocket.rs` | `shellstop` WS RPC handler |
 | `agentmux-mcp/src/main.rs` | `ShellStop` tool + handler |
 | `frontend/app/store/rpc-api.ts` | `ShellStopCommand` |
-| `frontend/app/view/agent/components/PersistentShellBlock.tsx` | `■` stop button |
-| `frontend/app/view/agent/useAgentStream.ts` | `stopped` → status `"stopped"` |
+| [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx) | `■` stop button |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | `stopped` → status `"stopped"` |
 
 ## 6. Test / Verify
 

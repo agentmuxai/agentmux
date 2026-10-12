@@ -1,10 +1,10 @@
 # SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv
 
-**Status:** active — the design for Phase 2 (steps 7–9) of `docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md`, now being executed. §3.1 (`register_typed` + the `RpcSchema` registry) landed in #3074 and §3.3's gate in #3078, both 2026-09-07; §3.4 step 2's handler-by-handler migration is ongoing (most recently #3342, 2026-09-18). **§3.2 was superseded in implementation:** rather than a `--dump-rpc-schema` mode emitting `frontend/types/rpc.gen.d.ts` and `rpc-api/gen/<domain>.ts`, ts-rs `#[ts(export)]` emits one file per type into `frontend/types/rpc/` as a side effect of `cargo test`, and `scripts/check-rpc-bindings.sh` gates freshness by asking git whether that tree is dirty. The hand-written `rpc-api/*.ts` stubs are still being deleted per domain as each migrates, as §3.4 describes.
+**Status:** active — the design for Phase 2 (steps 7–9) of [`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md`](../reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md), now being executed. §3.1 (`register_typed` + the `RpcSchema` registry) landed in #3074 and §3.3's gate in #3078, both 2026-09-07; §3.4 step 2's handler-by-handler migration is ongoing (most recently #3342, 2026-09-18). **§3.2 was superseded in implementation:** rather than a `--dump-rpc-schema` mode emitting `frontend/types/rpc.gen.d.ts` and `rpc-api/gen/<domain>.ts`, ts-rs `#[ts(export)]` emits one file per type into [`frontend/types/rpc/`](../../frontend/types/rpc) as a side effect of `cargo test`, and [`scripts/check-rpc-bindings.sh`](../../scripts/check-rpc-bindings.sh) gates freshness by asking git whether that tree is dirty. The hand-written `rpc-api/*.ts` stubs are still being deleted per domain as each migrates, as §3.4 describes.
 
 ## 1. Problem
 
-The frontend talks to `agentmux-srv` through 284 hand-written command stubs (`frontend/app/store/rpc-api/*.ts`), 38 service methods (`frontend/app/store/services.ts`) and a 2,819-line hand-maintained `frontend/types/gotypes.d.ts`, each headed "keep in sync with…". On srv's side there are about 190 `#[derive(Serialize, Deserialize)]` structs under `backend/rpc_types/` and 237 `engine.register_handler(COMMAND_X, …)` registrations. Nothing checks that the two sides agree. The audit counted 334 sync comments and found one live drift by hand (the default layout tree, fixed in PR #2988, whose frontend copy claimed to be in sync and could not even express the backend's sizing).
+The frontend talks to `agentmux-srv` through 284 hand-written command stubs (`frontend/app/store/rpc-api/*.ts`), 38 service methods ([`frontend/app/store/services.ts`](../../frontend/app/store/services.ts)) and a 2,819-line hand-maintained `frontend/types/gotypes.d.ts`, each headed "keep in sync with…". On srv's side there are about 190 `#[derive(Serialize, Deserialize)]` structs under `backend/rpc_types/` and 237 `engine.register_handler(COMMAND_X, …)` registrations. Nothing checks that the two sides agree. The audit counted 334 sync comments and found one live drift by hand (the default layout tree, fixed in PR #2988, whose frontend copy claimed to be in sync and could not even express the backend's sizing).
 
 ## 2. Why "derive the TypeScript types" is not enough on its own
 
@@ -48,7 +48,7 @@ A `--dump-rpc-schema <dir>` mode of `agentmux-srv` builds the engine with every 
 
 ### 3.3 The gate
 
-`scripts/check-rpc-bindings.sh`: run the dump into a temporary directory and `diff -r` it against the committed generated files; any difference fails CI. Same "is the generated artefact current" pattern as the specs-index gate. From then on, a Rust type change that is not reflected in the frontend is a build failure instead of a comment.
+[`scripts/check-rpc-bindings.sh`](../../scripts/check-rpc-bindings.sh): run the dump into a temporary directory and `diff -r` it against the committed generated files; any difference fails CI. Same "is the generated artefact current" pattern as the specs-index gate. From then on, a Rust type change that is not reflected in the frontend is a build failure instead of a comment.
 
 ### 3.4 Migration order
 

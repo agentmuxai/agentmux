@@ -10,7 +10,7 @@
 
 The frontend runs inside the CEF desktop host, and it reaches that host in two ways:
 
-1. **Through the seam:** `getApi()` returns `window.api`, an `AppApi` (`frontend/types/custom.d.ts`) built by `buildCefApi()` (`frontend/util/cef-api.ts`). That is 109 methods and 218 call sites in 76 files.
+1. **Through the seam:** `getApi()` returns `window.api`, an `AppApi` ([`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)) built by `buildCefApi()` ([`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)). That is 109 methods and 218 call sites in 76 files.
 2. **Around it:**
    - 95 direct `invokeCommand` calls in 39 files, 27 of them `browser_pane_*`, plus dynamic `import("@/app/platform/ipc")` in 7 more files;
    - 21 direct `listenEvent` calls;
@@ -53,7 +53,7 @@ Declared next to `AppApi` in `types/custom.d.ts`, and returned by `AppApi.getHos
 | `windowTransparency` | Transparency and opacity |
 | `nativeWindowChrome` | Custom title bar and window controls, window drag |
 
-- **CEF** reports all of them (`CEF_HOST_CAPS`, `frontend/app/host/host-caps.ts`).
+- **CEF** reports all of them (`CEF_HOST_CAPS`, [`frontend/app/host/host-caps.ts`](../../frontend/app/host/host-caps.ts)).
 - `NO_HOST_CAPS` is the empty set.
 - `hostHas(cap)` is the one-line check UI code uses.
 
@@ -61,11 +61,11 @@ New capabilities are added when a slice needs one, not speculatively.
 
 ### 3.2 Test host
 
-`makeTestHostApi(overrides, caps)` (`frontend/app/host/test-host.ts`) returns an `AppApi`. Methods the test doesn't override are no-ops returning `undefined`, and the capabilities default to `NO_HOST_CAPS`. It is for tests only.
+`makeTestHostApi(overrides, caps)` ([`frontend/app/host/test-host.ts`](../../frontend/app/host/test-host.ts)) returns an `AppApi`. Methods the test doesn't override are no-ops returning `undefined`, and the capabilities default to `NO_HOST_CAPS`. It is for tests only.
 
 ### 3.3 Boundary ratchet
 
-`frontend/app/host/host-boundary.test.ts` scans `frontend/` for files that import `app/platform/ipc`, statically or with a dynamic `import()`, or read `__AGENTMUX_IPC_*`. The result must equal the **seam** (the CEF implementation and entry, goal 1) plus a **PENDING** list of files that still bypass it. PENDING is empty since slice 5b.
+[`frontend/app/host/host-boundary.test.ts`](../../frontend/app/host/host-boundary.test.ts) scans [`frontend/`](../../frontend) for files that import `app/platform/ipc`, statically or with a dynamic `import()`, or read `__AGENTMUX_IPC_*`. The result must equal the **seam** (the CEF implementation and entry, goal 1) plus a **PENDING** list of files that still bypass it. PENDING is empty since slice 5b.
 
 - A **new** bypass fails the test.
 - A listed file that **no longer** bypasses also fails the test, until it's removed from the list. The list can only shrink.

@@ -6,13 +6,13 @@
 tooltips). Deferred: Fix 4's *deeper* launch-time seeding (the user-visible symptom is resolved by Fix 1
 — see note below); live repro of Fix 5 (applied defensively per user direction, not yet confirmed running). — #1912
 **Owner:** asaf
-**Scope:** agent pane composer strip + control bar (frontend only, `frontend/app/view/agent`).
+**Scope:** agent pane composer strip + control bar (frontend only, [`frontend/app/view/agent`](../../frontend/app/view/agent)).
 
 > Follow-up to `SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` Part C, which named this exact
 > nesting problem and left it as an open decision ("(a) leave `AgentControlBar` alongside the log" vs
 > "(b) split them"). (a) shipped; the user has now confirmed they want (b), plus promoting **Mode** to
 > the strip (which didn't exist as an editable top-level control before). See
-> `docs/retro/retro-composer-strip-log-controls-nesting-2026-07-02.md` for the full root-cause writeup.
+> [`docs/retro/retro-composer-strip-log-controls-nesting-2026-07-02.md`](../retro/retro-composer-strip-log-controls-nesting-2026-07-02.md) for the full root-cause writeup.
 
 ---
 
@@ -319,11 +319,11 @@ and a `checked` field per item for the selected mark. So each control becomes:
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | Add Mode `<select>` (Fix 1); remove permission pill + `showPermissionPill` (Fix 1); widen `updateRuntime` patch type (Fix 1). |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | Add Mode `<select>` (Fix 1); remove permission pill + `showPermissionPill` (Fix 1); widen `updateRuntime` patch type (Fix 1). |
 | `frontend/app/view/agent/components/AgentControlBar.tsx` | Remove `expanded` signal, chevron header, Mode/Model/Effort body, now-dead label/color consts and summary helpers (Fix 2). Optionally rename (Fix 3, pending decision). |
-| `frontend/app/view/agent/agent-view.tsx` | No structural change if Fix 3 = Option A (still mounts the same component, now session-only, inside `.agent-composer-details`); update the import/JSX name if renamed. |
-| `frontend/app/view/agent/styles/_composer-strip.scss` | Add a modifier class for the Mode select if it needs distinct width/color-border styling from Model/Effort. |
-| `frontend/app/view/agent/styles/_control-bar.scss` (or wherever `AgentControlBar`'s styles live) | Remove chevron/header/body rules for the deleted Mode/Model/Effort block; keep banner/session-button rules. |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | No structural change if Fix 3 = Option A (still mounts the same component, now session-only, inside `.agent-composer-details`); update the import/JSX name if renamed. |
+| [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) | Add a modifier class for the Mode select if it needs distinct width/color-border styling from Model/Effort. |
+| [`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/view/agent/styles/_control-bar.scss) (or wherever `AgentControlBar`'s styles live) | Remove chevron/header/body rules for the deleted Mode/Model/Effort block; keep banner/session-button rules. |
 
 ## 7. Test plan
 - With a Claude agent pane open: click Log → confirm only log entries render, no chevron/summary row
@@ -344,7 +344,7 @@ and a `checked` field per item for the selected mark. So each control becomes:
   selects, gating).
 - `frontend/app/view/agent/components/AgentControlBar.tsx:28-58,60-61,68-102,197-349` (full current
   component, to be split).
-- `frontend/app/view/agent/agent-view.tsx:1005-1016` (mount site).
-- `docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` Part C (origin of the (a)/(b) decision
+- [`frontend/app/view/agent/agent-view.tsx:1005-1016`](../../frontend/app/view/agent/agent-view.tsx#L1005-L1016) (mount site).
+- [`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) Part C (origin of the (a)/(b) decision
   this spec resolves).
-- `docs/retro/retro-composer-strip-log-controls-nesting-2026-07-02.md` (root cause).
+- [`docs/retro/retro-composer-strip-log-controls-nesting-2026-07-02.md`](../retro/retro-composer-strip-log-controls-nesting-2026-07-02.md) (root cause).

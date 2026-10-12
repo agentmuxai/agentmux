@@ -353,7 +353,7 @@ Three separate corrections came out of this, in order:
 
 ### 7.1 "Ambient" was a real terminology collision — renamed
 
-`term:ambient_summary` (`frontend/app/store/activitySummary.ts`) already
+`term:ambient_summary` ([`frontend/app/store/activitySummary.ts`](../../frontend/app/store/activitySummary.ts)) already
 means "the Haiku-derived per-turn activity paraphrase shown as a pane's
 status text" — an established, unrelated concept. (There is also a
 `crate::ambient` "Ambient Model Call gateway" backend module — a *third*

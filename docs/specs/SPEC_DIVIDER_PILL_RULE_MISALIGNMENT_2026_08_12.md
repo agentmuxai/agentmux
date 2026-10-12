@@ -20,7 +20,7 @@ The transcript dividers that show a centered pill flanked by horizontal rules �
 "SESSION CONTINUED" — render with the rule lines crossing directly through the
 pill text instead of framing it cleanly. The effect reads as garbled/overlapping
 text rather than the intended `─── label ───` divider look described in
-`docs/specs/SPEC_CONTEXT_COMPACTION_NOTIFICATION_2026_06_20.md` (§Surface):
+[`docs/specs/SPEC_CONTEXT_COMPACTION_NOTIFICATION_2026_06_20.md`](SPEC_CONTEXT_COMPACTION_NOTIFICATION_2026_06_20.md) (§Surface):
 
 ```
 ─────────────── context compacted ───────────────
@@ -32,7 +32,7 @@ renders correctly — it's the reference for what "right" looks like.
 
 ## Root Cause
 
-Both bugs live in `frontend/app/view/agent/styles/_document-nodes.scss`, and
+Both bugs live in [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss), and
 both stem from copying `.agent-day-divider`'s rule pattern onto a container
 shape it wasn't designed for.
 
@@ -269,8 +269,8 @@ low-risk there. Worth a follow-up if it's ever observed in practice.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/virtualization/DocumentRow.tsx` | Add `-rule` wrapper `<div>` around each pill (`context_compacted`, `session_outcome` branches) |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Move `position:relative` + `::before`/`::after` from `.agent-context-compacted` / `.agent-session-outcome` onto new `-rule` classes; add `background` to the two `-label` classes |
+| [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) | Add `-rule` wrapper `<div>` around each pill (`context_compacted`, `session_outcome` branches) |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Move `position:relative` + `::before`/`::after` from `.agent-context-compacted` / `.agent-session-outcome` onto new `-rule` classes; add `background` to the two `-label` classes |
 
 ## Acceptance Criteria
 

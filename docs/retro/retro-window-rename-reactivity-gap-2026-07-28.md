@@ -50,7 +50,7 @@ reducer (`Command::UpdateWindowMeta` / `UpdateWorkspaceMeta` /
 `UpdateTabMeta` / `UpdateBlockMeta`), persists synchronously, then
 publishes the reducer's emitted event onto `srv_events_tx`. A dedicated
 subscriber — `agentmux-srv/src/server/wave_obj_bridge.rs`, purpose-built
-for exactly this class of bug (see `docs/specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`,
+for exactly this class of bug (see [`docs/specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`](../specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md),
 triggered by an earlier **workspace**-rename reactivity bug) — picks up
 the event and broadcasts a full-payload `waveobj:update` to every
 connected client, correctly, for workspace/window/tab/block alike.
@@ -175,11 +175,11 @@ verification pass, not a bundled fix here.
   reducer-routed path, lines ~291-398)
 - `agentmux-srv/src/server/wave_obj_bridge.rs` (the fix for the earlier,
   analogous workspace-rename bug)
-- `docs/specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md` (prior art — the
+- [`docs/specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`](../specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) (prior art — the
   exact same bug class, previously diagnosed for workspaces)
 - `frontend/app/store/wos.ts` (`updateWaveObject`'s silent-no-op-on-null
   behavior, `wpsSubscribeToObject`)
-- `frontend/app/store/rpc-api/workspace.ts` (`SetMetaCommand`'s generic,
+- [`frontend/app/store/rpc-api/workspace.ts`](../../frontend/app/store/rpc-api/workspace.ts) (`SetMetaCommand`'s generic,
   un-narrowed signature)
 - `agentmux-docs/src/content/docs/internals/agent-app-api.md`
   (`SetName` — the documented, correct path)

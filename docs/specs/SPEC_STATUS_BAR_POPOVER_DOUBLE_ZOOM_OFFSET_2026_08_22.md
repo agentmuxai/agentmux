@@ -3,15 +3,15 @@
 **Date:** 2026-08-22 (fixed 2026-08-22, PR #2736)
 **Type:** Bug diagnosis + fix (implemented, verified live via CDP)
 **Status:** Resolved
-**Scope (confirmed affected):** `frontend/app/statusbar/TokenBreakdownPopover.tsx`
-(+ `_token-usage.scss`), `frontend/app/statusbar/CpuCoresPopover.tsx`
-(+ `_cpu-cores-popover.scss`), `frontend/app/statusbar/DiskVolumesPopover.tsx`
-(+ `_disk-volumes-popover.scss`), `frontend/app/statusbar/StatusBarTip.tsx`
+**Scope (confirmed affected):** [`frontend/app/statusbar/TokenBreakdownPopover.tsx`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx)
+(+ `_token-usage.scss`), [`frontend/app/statusbar/CpuCoresPopover.tsx`](../../frontend/app/statusbar/CpuCoresPopover.tsx)
+(+ `_cpu-cores-popover.scss`), [`frontend/app/statusbar/DiskVolumesPopover.tsx`](../../frontend/app/statusbar/DiskVolumesPopover.tsx)
+(+ `_disk-volumes-popover.scss`), [`frontend/app/statusbar/StatusBarTip.tsx`](../../frontend/app/statusbar/StatusBarTip.tsx)
 (+ `StatusBarTip.scss`), and the shared `.status-bar-popover` class
 (`StatusBar.scss:244` — confirmed also covers `HostPopover.tsx`, which
 renders with `class="status-bar-popover host-popover"`, i.e. via the same
 shared, now-fixed class, not a separate one). **Not affected:**
-`InstancePanel.tsx` — despite living in the same `frontend/app/statusbar/`
+`InstancePanel.tsx` — despite living in the same [`frontend/app/statusbar/`](../../frontend/app/statusbar)
 directory and looking superficially similar, it positions itself via its
 own `bottom`/`right` fixed-positioning logic (`InstancePanel.tsx:411-421`),
 NOT `computeMenuPosition`, and `_instance-panel.scss` has no `zoom:`
@@ -59,7 +59,7 @@ value — not a wrong-coordinate-space capture, and not ambiguous:
    applied (`StatusBar.scss:25` — a *deliberate* decision, see below), this
    rect is already **real, on-screen, post-zoom pixel coordinates**. This
    part is correct and not the bug.
-2. **`computeMenuPosition`** (`frontend/app/util/menu-position.ts:228-296`)
+2. **`computeMenuPosition`** ([`frontend/app/util/menu-position.ts:228-296`](../../frontend/app/util/menu-position.ts#L228-L296))
    takes that already-real anchor rect, runs floating-ui's
    `computePosition(..., { strategy: "fixed", middleware: [offset, flip, shift, size] })`,
    and writes back `left`/`top` as plain `px` values. It never reads `zoom`,
@@ -83,7 +83,7 @@ applied twice to the same coordinate.
 
 ### Why the self-`zoom:` rule exists at all (not a random mistake)
 
-`docs/specs/zoom-architecture.md` (§3, "Option A") is the origin: it
+[`docs/specs/zoom-architecture.md`](zoom-architecture.md) (§3, "Option A") is the origin: it
 proposed and this codebase adopted `zoom: var(--zoomfactor)` as the
 architecture for scaling **in-flow chrome containers** — `.window-header`,
 `.status-bar`, and (per that doc's own "what responds" table, written before
@@ -96,7 +96,7 @@ The gap: that document only ever discusses **in-flow containers**. It never
 anticipated a **Portal'd, `position: fixed`, floating popover positioned via
 absolute-pixel math derived from an anchor that is ITSELF inside a zoomed
 container** — which is exactly what most status-bar popovers are (per
-`docs/specs/SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md`'s own
+[`docs/specs/SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md`](SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md)'s own
 confirmed-consumer list for the AIRSPACE-CLIP mechanism specifically:
 `TokenBreakdownPopover`, `CpuCoresPopover`, `DiskVolumesPopover`,
 `InstancePanel`, all sharing `usePaneOverlay`. That list is about airspace
@@ -112,7 +112,7 @@ all, just normal flow layout.
 
 ### `usePaneOverlay` — confirmed NOT involved
 
-`usePaneOverlay` (`frontend/app/platform/pane-overlay.ts:265-316`, the
+`usePaneOverlay` ([`frontend/app/platform/pane-overlay.ts:265-316`](../../frontend/app/platform/pane-overlay.ts#L265-L316), the
 "airspace cut" mechanism) only measures the popover's already-rendered
 `getBoundingClientRect()` and forwards it to the Rust host so native browser-
 pane HWNDs can be clipped around it (`SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md`).
@@ -128,7 +128,7 @@ element's own `zoom:` declaration (or compensating for it) would.
 ## Blast radius
 
 Confirmed via direct grep for `zoom:\s*var\(--zoomfactor\)` across
-`frontend/`:
+[`frontend/`](../../frontend):
 
 | File | Selector | Self-applies zoom? |
 |---|---|---|

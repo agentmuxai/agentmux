@@ -4,8 +4,8 @@
 **Type:** Architecture spec
 **Status:** Root-caused (live-verified); proposes an architecture rethink + an immediate fix.
 **Owner:** asaf
-**Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` +
-`frontend/app/view/agent/styles/_composer-strip.scss`.
+**Scope:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) +
+[`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss).
 
 > **Symptom.** On a normal agent pane the composer strip shows **only the "Log" button** — no
 > Mode / Model / Effort controls. Reported as "may need an architecture rethink … a lot of hackish crude."

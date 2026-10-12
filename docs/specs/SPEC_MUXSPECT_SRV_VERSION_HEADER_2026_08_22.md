@@ -5,7 +5,7 @@
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/server/mod.rs`,
 `agentmux-srv/src/backend/shellintegration/muxspect.mjs`)
-**Related:** Ext 5 of `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`
+**Related:** Ext 5 of [`docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`](../reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md)
 
 ## 1. Problem
 

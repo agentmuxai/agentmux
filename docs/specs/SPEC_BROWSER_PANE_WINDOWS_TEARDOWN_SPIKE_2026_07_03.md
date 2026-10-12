@@ -4,8 +4,8 @@
 Date: 2026-07-03
 Owner: Lzop
 Tracking: #1936 (renderer/pagefile commit-charge leak)
-Prior art: `docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md` (2026-04-17),
-`docs/specs/SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md`
+Prior art: [`docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md`](SPEC_BROWSER_PANE_LIFECYCLE.md) (2026-04-17),
+[`docs/specs/SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md`](SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md)
 
 ## 1. The bug this spike targets
 

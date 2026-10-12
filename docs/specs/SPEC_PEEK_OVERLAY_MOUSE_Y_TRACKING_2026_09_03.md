@@ -4,10 +4,10 @@
 **Date:** 2026-09-03
 **Author:** agent3
 **Related:**
-- `frontend/app/view/agent/components/PeekOverlay.tsx` (positioning logic)
-- `frontend/app/view/agent/components/hover-anchor.ts` (`findScrollContainerRect`, `PEEK_ENTER_DELAY_MS`)
-- `frontend/app/view/agent/hooks/useNodePeek.ts` (shared hover timer/state)
-- `frontend/app/view/agent/components/MarkdownBlock.tsx`, `ToolBlock.tsx`, `UserMessageBlock.tsx` (the three `align="end"` consumers)
+- [`frontend/app/view/agent/components/PeekOverlay.tsx`](../../frontend/app/view/agent/components/PeekOverlay.tsx) (positioning logic)
+- [`frontend/app/view/agent/components/hover-anchor.ts`](../../frontend/app/view/agent/components/hover-anchor.ts) (`findScrollContainerRect`, `PEEK_ENTER_DELAY_MS`)
+- [`frontend/app/view/agent/hooks/useNodePeek.ts`](../../frontend/app/view/agent/hooks/useNodePeek.ts) (shared hover timer/state)
+- [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx), `ToolBlock.tsx`, `UserMessageBlock.tsx` (the three `align="end"` consumers)
 
 ---
 

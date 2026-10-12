@@ -4,7 +4,7 @@
 **Date:** 2026-05-18
 **Author:** AgentA
 **Related:**
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx` (current Identity+Memory section)
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) (current Identity+Memory section)
 - [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](./archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) (identity bundle storage)
 - `frontend/app/view/agent/identity/IdentityPaneViewModel.ts` (existing identity-pane manage-connectors UI)
 

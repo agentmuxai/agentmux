@@ -27,7 +27,7 @@ Phase 1 ships the dropdown + reuse of working dir + bundles. Phase 2 adds CLI se
 ### Already exists
 
 - **`db_agent_instances`** (v7 schema): `id`, `definition_id`, `parent_instance_id`, `block_id`, `session_id`, `status`, `github_context`, `started_at`, `ended_at`, `created_at`. Plus `identity_id` FK (per v7). One row per launch, kept forever.
-- **Launch modal** (`frontend/app/view/agent/components/AgentLaunchModal.tsx`): user enters `instanceName`, picks runtime, picks Identity bundle, picks Memory bundle. Submitted as `LaunchOverrides`.
+- **Launch modal** ([`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx)): user enters `instanceName`, picks runtime, picks Identity bundle, picks Memory bundle. Submitted as `LaunchOverrides`.
 - **Spawn flow** (`server/app_api.rs::launch_forge_agent` ≈ line 1659): generates an instance id, calls `allocate_agent_workdir(instanceName)` to claim a working directory, writes agent config files (`CLAUDE.md`, `.mcp.json`, `.claude/settings.json`), spawns the CLI subprocess with `AGENTMUX_AGENT_ID`, `AGENTMUX_BLOCKID`, identity env, etc.
 - **Identity/Memory** are first-class via PR #746/#749/#750/#751 — already pickable in the launch modal.
 
@@ -238,9 +238,9 @@ Phase 0+1+2 land together (the migration is useless without the UX, the UX is us
 ## 12. Cross-references
 
 - v7 Identity schema: [`SPEC_IDENTITY_FORGE_INTEGRATION_AND_VAULT_2026_05_08.md`](archive/identity-forge-integration-and-vault-2026-05-08.md) (link path may need adjusting)
-- Launch modal rearchitecture: `docs/specs/launch-modal-rearchitecture-2026-05-01.md`
+- Launch modal rearchitecture: [`docs/specs/launch-modal-rearchitecture-2026-05-01.md`](launch-modal-rearchitecture-2026-05-01.md)
 - `db_agent_instances` schema: `agentmux-srv/src/backend/storage/migrations.rs:410-424`
 - Launch entry: `agentmux-srv/src/server/app_api.rs::launch_forge_agent`
 - `allocate_agent_workdir`: same file
 - Identity resolver: `agentmux-srv/src/identity/resolver.rs`
-- Launch modal component: `frontend/app/view/agent/components/AgentLaunchModal.tsx`
+- Launch modal component: [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx)

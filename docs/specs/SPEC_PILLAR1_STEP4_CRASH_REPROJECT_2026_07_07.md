@@ -101,11 +101,11 @@ Three existing loading-treatment mechanisms, none reusable as-is:
   re-invoked on the crash-restart branches (`windows.rs:558-624`). Its content is a stage-telemetry
   list (`"Saga recovery"`, `"Host startup"`, …), not a swappable headline — there's no generic text
   field to repurpose.
-- **`BrainSpinner`** (`frontend/app/element/BrainSpinner.tsx`) — confirmed frontend/DOM-only; every
+- **`BrainSpinner`** ([`frontend/app/element/BrainSpinner.tsx`](../../frontend/app/element/BrainSpinner.tsx)) — confirmed frontend/DOM-only; every
   call site is a `Suspense`/`Show` fallback *inside an already-mounted pane inside an already-loaded
   window*. Not usable for the pre-window phase of a reproject, which is exactly the phase that
   matters most (the user sees nothing at all until a window exists).
-- **`index.html`'s `#startup-loading`** (`frontend/app/init/startup-splash.ts`) — a CSS-only
+- **`index.html`'s `#startup-loading`** ([`frontend/app/init/startup-splash.ts`](../../frontend/app/init/startup-splash.ts)) — a CSS-only
   full-cover overlay baked into the HTML template, shown before any JS runs, dismissed by
   `fadeOutStartupSplash()`. Reappears automatically on every window's page load (including a
   reprojected one) with zero host-side wiring — but has no text slot either, just an animated logo.
@@ -178,7 +178,7 @@ For each window beyond the default one:
 2. Call `open_window_with_kind(state, kind, Some(new_parent_label), None, None, explicit_rect)`.
 3. The window's *content* (workspace/tab/layout) is **not** part of this call — exactly as today,
    the frontend inside the newly-created window resolves its own workspace via the existing
-   per-window bootstrap (`frontend/app-init.ts`), reading srv directly. This is the part of the
+   per-window bootstrap ([`frontend/app-init.ts`](../../frontend/app-init.ts)), reading srv directly. This is the part of the
    design doc's claim that *is* still true: content-level reproject reuses existing machinery
    without new deserialization code. Only the **window-set** enumeration is new.
 
@@ -332,7 +332,7 @@ Redesigned rather than patched: `reproject_from_srv` no longer guesses main's sr
 positionally. It's now called from `commands/window/meta.rs::register_backend_window`'s `"main"`
 branch instead of `on_after_created` — the point where `"main"`'s own confirmed `window_id` is known
 with certainty (the frontend has already resolved and possibly created it via its own bootstrap,
-`frontend/app-init.ts`'s `initHostWave`). That confirmed id is filtered out of `Client.windowids` **by
+[`frontend/app-init.ts`](../../frontend/app-init.ts)'s `initHostWave`). That confirmed id is filtered out of `Client.windowids` **by
 value**, not position, so reordering can't matter. `UiThreadGate` gained `pending_slow_path: bool`:
 `"main"`'s registration (`on_after_created`, still the earliest point) sets it when no fast-path stash
 has anything useful, `register_backend_window` consumes it once `"main"`'s id is known, and a
@@ -376,13 +376,13 @@ script reading `?restoring=1` (mirroring the existing `window_transparent` query
 only for reprojected windows, threaded through from `reproject_from_snapshot`'s call site (shared by
 both fast and slow paths).
 
-**Phase 5 — E2E test.** ✅ Done. `test/e2e/crash-reproject.e2e.test.ts` — greenfield (no prior E2E
+**Phase 5 — E2E test.** ✅ Done. [`test/e2e/crash-reproject.e2e.test.ts`](../../test/e2e/crash-reproject.e2e.test.ts) — greenfield (no prior E2E
 infra existed in this repo; Vitest is the only test runner, no Playwright), Windows-only, opt-in via
 `AGENTMUX_E2E_BUILD_DIR` (skips instantly under a plain `npm test`, since a real portable build takes
 minutes to produce). Spawns a real isolated instance (env-scrubbed, matching this session's manual
 methodology all Phases 1-3 were verified with), opens a `FullInstance` window and a subwindow of
 main, kills the inner host process only, and asserts the respawned host's CDP target list — not just
-its own log lines, per the explicit lesson from `docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`
+its own log lines, per the explicit lesson from [`docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`](../retro/retro-browser-pane-renderer-leak-2026-07-07.md)
 ("a test that only checks host log lines... would have passed throughout this entire investigation").
 Uses Node's native global `WebSocket` rather than the `ws` npm package — the shared `vitest.config.ts`
 merges in the frontend's own browser-oriented `vite.config`, which redirects `ws` to a stub that
@@ -506,7 +506,7 @@ session established.
    live-verification run in this session: a plain cold start with no extra windows takes the
    fast-path-empty → slow-path-empty-too (or fast-path-has-data) route and both no-op cleanly, per
    the idempotent-by-construction design in §2.1. 169 unit tests pass throughout, no regressions.
-5. ✅ E2E test automating #2 (Phase 5) — `test/e2e/crash-reproject.e2e.test.ts`, opt-in via
+5. ✅ E2E test automating #2 (Phase 5) — [`test/e2e/crash-reproject.e2e.test.ts`](../../test/e2e/crash-reproject.e2e.test.ts), opt-in via
    `AGENTMUX_E2E_BUILD_DIR`, passing.
 6. ✅ Repeated crashes don't cause unbounded window-recreation growth — the accumulation bug found
    while building #5 is fixed (old srv window_ids closed once reprojected) and capped as a defensive
@@ -516,9 +516,9 @@ session established.
 
 ## 7. Sources
 
-- `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` (parent design doc, corrected
+- [`docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`](SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md) (parent design doc, corrected
   2026-07-07 — the doc this spec resolves step 4 of).
-- `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md` (the srv-side persistence this
+- [`docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) (the srv-side persistence this
   spec's slow path reads from).
 - `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` (the status snapshot that
   recommended this spec be written next).
@@ -529,5 +529,5 @@ session established.
   launcher_ipc.rs:84-306`, `agentmux-cef/src/app.rs:1125-1233`, `agentmux-cef/src/reducer/mod.rs:65-
   188`, `agentmux-cef/src/state.rs:923`, `agentmux-cef/src/commands/window/creation.rs:237-463`,
   `agentmux-cef/src/ui_tasks/window.rs:1146-1158`, `agentmux-launcher/src/splash.rs:173-338`,
-  `frontend/app/element/BrainSpinner.tsx:1-40`, `frontend/app/init/startup-splash.ts:1-38`,
+  [`frontend/app/element/BrainSpinner.tsx:1-40`](../../frontend/app/element/BrainSpinner.tsx#L1-L40), [`frontend/app/init/startup-splash.ts:1-38`](../../frontend/app/init/startup-splash.ts#L1-L38),
   `index.html:20-82`.

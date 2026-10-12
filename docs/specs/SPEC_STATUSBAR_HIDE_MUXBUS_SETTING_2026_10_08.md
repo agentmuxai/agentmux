@@ -67,7 +67,7 @@ alternative is `window:showmuxbuscloud`; nothing below depends on the choice.
 
 ### 3.2 Backend
 
-- `crates/srv/src/backend/wconfig/types.rs`: add
+- [`crates/srv/src/backend/wconfig/types.rs`](../../crates/srv/src/backend/wconfig/types.rs): add
 
   ```rust
   #[serde(rename = "statusbar:showmuxbuscloud", default, skip_serializing_if = "Option::is_none")]
@@ -77,9 +77,9 @@ alternative is `window:showmuxbuscloud`; nothing below depends on the choice.
   next to the other display settings, and a `statusbar:*` clear key
   (`statusbar_clear: bool`, `skip_serializing_if = "is_false"`) if the
   `widget:*` / `window:*` pattern is to be kept for the new group.
-- `schema/settings.json`: a `statusbar:showmuxbuscloud` boolean with a description
+- [`schema/settings.json`](../../schema/settings.json): a `statusbar:showmuxbuscloud` boolean with a description
   that names the default.
-- `frontend/types/srv-types.d.ts` (hand-maintained): add
+- [`frontend/types/srv-types.d.ts`](../../frontend/types/srv-types.d.ts) (hand-maintained): add
   `"statusbar:showmuxbuscloud"?: boolean;` and, if added, `"statusbar:*"?: boolean;`.
 
 No new RPC. `SetConfigCommand` already persists arbitrary typed keys, and
@@ -171,7 +171,7 @@ every open window.
 ## 5. Rollout
 
 - One PR: Rust type, schema, `srv-types.d.ts`, `HostPopover.tsx`, the Devices
-  row, tests, and a changeset (`scripts/changeset.sh`).
+  row, tests, and a changeset ([`scripts/changeset.sh`](../../scripts/changeset.sh)).
 - No migration: absent already means shown.
 - Public repo: this spec and the PR describe only the desktop UI. They name no
   cloud endpoints, account details or private repos.

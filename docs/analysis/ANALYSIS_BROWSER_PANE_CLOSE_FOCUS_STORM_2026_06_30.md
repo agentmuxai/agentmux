@@ -236,8 +236,8 @@ The recovery is fragile: a second switch to an external browser and back will re
 - `agentmux-cef/src/ui_tasks.rs:2179` — `find_main_render_widget`
 
 **Related analysis**
-- `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md` — same Defect A class (focus orphaning), different trigger (redock vs. close)
-- `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`
+- [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md`](ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md) — same Defect A class (focus orphaning), different trigger (redock vs. close)
+- [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`](ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md)
 
 **Issues**
 - #768 — Phantom browser pane lifecycle divergence (lifecycle events still missing)

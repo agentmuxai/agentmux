@@ -6,7 +6,7 @@ PR #4677. Phase 1 (observed servers) and Phase 2a (In use now) shipped in
 PR #4683 (with #4685). Phase 2b's catalog half ("Not loaded by") is PR #4701;
 its startup-card half is deferred (§4). Phase 3 (other providers) is next.
 **Author:** QTest@narko
-**Grounded in:** `docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`
+**Grounded in:** [`docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`](../reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md)
 (the investigation and history). File references are as of `main` at
 `ab3d3e44f`.
 **Related:**
@@ -137,7 +137,7 @@ says it has, from every source.
   otherwise the CLI's label. It gives each pane's agent id and Tower label,
   and drops panes that no longer exist.
 - **Names, statuses and counts only.** The frame carries no config.
-- **Contract test.** `scripts/cli-contract/mcp-servers-contract.mjs`, in the
+- **Contract test.** [`scripts/cli-contract/mcp-servers-contract.mjs`](../../scripts/cli-contract/mcp-servers-contract.mjs), in the
   `cli-hook-contract` workflow, runs the real CLI against the fake API with
   servers in `.mcp.json`, the account config and `--mcp-config`, one of them
   exiting at once. It checks each one's status, source and tool names.

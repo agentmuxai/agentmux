@@ -40,7 +40,7 @@ the **renderer/compositor (the CEF fork)**.
 | B | **CEF transparent window** (`a5af/cef` fork) | Fork patches make the browser/window background `SK_ColorTRANSPARENT` and propagate it down the Views → WebContents → `cc::LayerTreeHost` cascade. | Linux/Wayland (patched `libcef.so`) | **Partial.** Window borders bleed through; pane interiors still rasterize opaque — suspected `cc::RasterSource` / `PictureLayer` tile-cache opaque-clear bug (`session-3` retro). |
 | C | **Win32 `SetLayeredWindowAttributes`** (PR #868) | `set_window_opacity` → `apply_window_opacity` → `WS_EX_LAYERED` + `LWA_ALPHA` on the host HWND. | Windows only | **Broken with GPU** (DirectComposition bypass). Works only `--disable-gpu`. |
 
-A + B are the real architecture (`docs/specs/cef-transparency-architecture.md`).
+A + B are the real architecture ([`docs/specs/cef-transparency-architecture.md`](cef-transparency-architecture.md)).
 C is a separate, Windows-only attempt added by #868 that sidesteps A/B — and is
 a dead end.
 
@@ -80,7 +80,7 @@ renderer/compositor** — which is why it has to live in the CEF fork.
 4. Controlled test — 0.37.8 relaunched `--disable-gpu` (same build, GPU the
    only variable): transparency worked. Confirmed by the user.
 
-**Linux (prior history):** `docs/retro/cef-transparency-session-2-2026-05-11.md`
+**Linux (prior history):** [`docs/retro/cef-transparency-session-2-2026-05-11.md`](../retro/cef-transparency-session-2-2026-05-11.md)
 and `…-empirical-…` — after the fork's transparency-cascade patches,
 *"pane interiors still render opaque rgb(34,34,34) … window borders/gaps
 continue to show wallpaper bleed-through."* Root cause located in the
@@ -172,12 +172,12 @@ bug.
 
 ## 10. Source history
 
-- `docs/specs/cef-transparency-architecture.md` — intended A+B design.
-- `docs/research/cef-transparency-research-2026-05-10.md`,
-  `docs/retro/cef-transparency-empirical-2026-05-11.md`,
-  `docs/retro/cef-transparency-session-2-2026-05-11.md` — the Linux attempts
+- [`docs/specs/cef-transparency-architecture.md`](cef-transparency-architecture.md) — intended A+B design.
+- [`docs/research/cef-transparency-research-2026-05-10.md`](../research/cef-transparency-research-2026-05-10.md),
+  [`docs/retro/cef-transparency-empirical-2026-05-11.md`](../retro/cef-transparency-empirical-2026-05-11.md),
+  [`docs/retro/cef-transparency-session-2-2026-05-11.md`](../retro/cef-transparency-session-2-2026-05-11.md) — the Linux attempts
   and the unresolved opaque-raster finding.
-- `docs/analysis/opacity-inconsistency.md`, `specs/SPEC_WINDOW_TRANSPARENCY.md`.
-- `scripts/resolve-cef-runtime.sh` — how the patched `libcef` is bundled.
-- `docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md` — the GPU crashes that
+- [`docs/analysis/opacity-inconsistency.md`](../analysis/opacity-inconsistency.md), `specs/SPEC_WINDOW_TRANSPARENCY.md`.
+- [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) — how the patched `libcef` is bundled.
+- [`docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md`](../analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md) — the GPU crashes that
   masked this bug (separate problem).

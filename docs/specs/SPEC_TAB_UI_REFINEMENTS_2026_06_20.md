@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-20  
 **Status:** proposed — Approved for implementation
-**Scope:** `frontend/app/tab/`
+**Scope:** [`frontend/app/tab/`](../../frontend/app/tab)
 
 ---
 
@@ -20,8 +20,8 @@ Three targeted changes to the tab bar UI:
 
 ### Current state
 
-- **`frontend/app/tab/tab.tsx:294-307`** — SVG `width="14" height="14"`, `viewBox="0 0 16 16"`
-- **`frontend/app/tab/tab.scss:121-135`** — `.wave-button` container is 16×16px
+- **[`frontend/app/tab/tab.tsx:294-307`](../../frontend/app/tab/tab.tsx#L294-L307)** — SVG `width="14" height="14"`, `viewBox="0 0 16 16"`
+- **[`frontend/app/tab/tab.scss:121-135`](../../frontend/app/tab/tab.scss#L121-L135)** — `.wave-button` container is 16×16px
 
 ### Proposed change
 
@@ -57,7 +57,7 @@ No other sizing changes. The tab's inner flex layout already centers the button;
 
 ### Current state
 
-**`frontend/app/tab/tab.tsx:32-104`** — `TabContextPanel` component.  
+**[`frontend/app/tab/tab.tsx:32-104`](../../frontend/app/tab/tab.tsx#L32-L104)** — `TabContextPanel` component.\
 The "✕ Close" button at lines 97-99 calls `props.onClose`, which closes the **tab** (deletes it from the workspace).
 
 ### Proposed change
@@ -100,7 +100,7 @@ When the user clicks the X button on a tab:
 
 ### Settings schema addition
 
-**`schema/settings.json`** — add under the `tab:` block:
+**[`schema/settings.json`](../../schema/settings.json)** — add under the `tab:` block:
 
 ```json
 "tab:skipcloseconfirm": {
@@ -197,7 +197,7 @@ function TabCloseConfirmModal(props: {
 
 #### D. `Modal` scope note
 
-The existing modal system (`frontend/app/element/modal.tsx`) supports `scope="window"`. This renders the modal via the window-level Portal, overlaying the full app content — correct for a destructive confirmation that blocks all tab interactions. The `inert` + scroll-lock machinery is already handled by the Modal component for this scope.
+The existing modal system ([`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx)) supports `scope="window"`. This renders the modal via the window-level Portal, overlaying the full app content — correct for a destructive confirmation that blocks all tab interactions. The `inert` + scroll-lock machinery is already handled by the Modal component for this scope.
 
 ---
 
@@ -205,13 +205,13 @@ The existing modal system (`frontend/app/element/modal.tsx`) supports `scope="wi
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tab.tsx` | SVG size 14→16; context-menu "Close" → dismiss only |
-| `frontend/app/tab/tab.scss` | `.wave-button` container 16px→20px |
-| `frontend/app/tab/tabbar.tsx` | `requestClose` gate, `pendingCloseTabId` signal, `TabCloseConfirmModal` usage |
-| `schema/settings.json` | Add `tab:skipcloseconfirm` boolean key |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | SVG size 14→16; context-menu "Close" → dismiss only |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | `.wave-button` container 16px→20px |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | `requestClose` gate, `pendingCloseTabId` signal, `TabCloseConfirmModal` usage |
+| [`schema/settings.json`](../../schema/settings.json) | Add `tab:skipcloseconfirm` boolean key |
 
 Optional (if modal is extracted):
-| `frontend/app/tab/tab-close-confirm-modal.tsx` | New component |
+| [`frontend/app/tab/tab-close-confirm-modal.tsx`](../../frontend/app/tab/tab-close-confirm-modal.tsx) | New component |
 
 ---
 

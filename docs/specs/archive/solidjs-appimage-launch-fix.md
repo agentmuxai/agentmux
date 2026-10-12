@@ -2,7 +2,7 @@
 
 **Status:** SHIPPED
 **Date:** 2026-03-14
-**Component:** `frontend/tauri-bootstrap.ts`, `frontend/wave.ts`, `frontend/app/store/contextmenu.ts`
+**Component:** `frontend/tauri-bootstrap.ts`, `frontend/wave.ts`, [`frontend/app/store/contextmenu.ts`](../../../frontend/app/store/contextmenu.ts)
 **Tracks:** Issues first fixed for React in PR #116, now regressed after SolidJS migration (PR #120)
 
 ---
@@ -75,7 +75,7 @@ All downstream code that uses `platform` or `appVersion` must work with the defe
 
 ### 2.3 `ContextMenuModel` calls `getApi()` at module instantiation
 
-**File:** `frontend/app/store/contextmenu.ts` lines 9–11, 57
+**File:** [`frontend/app/store/contextmenu.ts`](../../../frontend/app/store/contextmenu.ts) lines 9–11, 57
 
 ```typescript
 // CURRENT — broken:
@@ -206,7 +206,7 @@ Should print `export WEBKIT_DISABLE_DMABUF_RENDERER=1`. If missing, the window w
 |------|--------|
 | `frontend/tauri-bootstrap.ts` | Replace `await import("./wave")` with `import { initBare } from "./wave"` (static); call `await initBare()` explicitly after `setupTauriApi()` |
 | `frontend/wave.ts` | Export `initBare`; move `const platform` and `const appVersion` inside `initBare()`; remove/guard `DOMContentLoaded` self-start at bottom of file; call `ContextMenuModel.init()` inside `initBare()` |
-| `frontend/app/store/contextmenu.ts` | Remove `getApi()` from constructor; add `init()` method that registers the click handler |
+| [`frontend/app/store/contextmenu.ts`](../../../frontend/app/store/contextmenu.ts) | Remove `getApi()` from constructor; add `init()` method that registers the click handler |
 
 ---
 

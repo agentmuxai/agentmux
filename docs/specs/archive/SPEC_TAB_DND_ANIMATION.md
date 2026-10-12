@@ -142,10 +142,10 @@ const gapAfter = () => {
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tabbar-dnd.ts` | Add `InsertionPoint` type; replace `nearestHint` signal with `insertionPoint`; update `computeInsertionPoint()` to return `{beforeTabId, afterTabId}` |
-| `frontend/app/tab/droppable-tab.tsx` | Derive `gapBefore`/`gapAfter` from `insertionPoint`; apply as inline `--tab-gap-before`/`--tab-gap-after`; add `tab-bounce` class on drop |
-| `frontend/app/tab/tabbar.tsx` | Monitor `onDrag` sets `insertionPoint` instead of `nearestHint`; on drop/cancel, clears it |
-| `frontend/app/tab/tabbar.scss` | `padding-left/right` transitions on `.tab-drop-wrapper`; `@keyframes tab-bounce`; remove `tab-insert-left/right` line indicators (gap IS the indicator now) |
+| [`frontend/app/tab/tabbar-dnd.ts`](../../../frontend/app/tab/tabbar-dnd.ts) | Add `InsertionPoint` type; replace `nearestHint` signal with `insertionPoint`; update `computeInsertionPoint()` to return `{beforeTabId, afterTabId}` |
+| [`frontend/app/tab/droppable-tab.tsx`](../../../frontend/app/tab/droppable-tab.tsx) | Derive `gapBefore`/`gapAfter` from `insertionPoint`; apply as inline `--tab-gap-before`/`--tab-gap-after`; add `tab-bounce` class on drop |
+| [`frontend/app/tab/tabbar.tsx`](../../../frontend/app/tab/tabbar.tsx) | Monitor `onDrag` sets `insertionPoint` instead of `nearestHint`; on drop/cancel, clears it |
+| [`frontend/app/tab/tabbar.scss`](../../../frontend/app/tab/tabbar.scss) | `padding-left/right` transitions on `.tab-drop-wrapper`; `@keyframes tab-bounce`; remove `tab-insert-left/right` line indicators (gap IS the indicator now) |
 
 ---
 

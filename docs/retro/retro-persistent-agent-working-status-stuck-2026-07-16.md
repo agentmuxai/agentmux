@@ -23,7 +23,7 @@ Agent1 (host/persistent mode, `stable` channel, v0.53.6) displayed an
 ambiguous "Waiting…/Working…" state for ~12 hours (2026-07-15 20:54 →
 2026-07-16 08:59). It was **not** hung and **not** cosmetically mislabeled: it
 had genuinely started a long-running background process — its own dev stack
-via `./scripts/dev-agent.cmd` (which runs `task dev`: vite + cargo-watch + a
+via [`./scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) (which runs `task dev`: vite + cargo-watch + a
 launched nested AgentMux instance / CEF) — launched with the Bash tool's
 `run_in_background: true`. The status UI collapsed "a user-launched
 long-running process is attached and alive" into the same generic
@@ -55,7 +55,7 @@ Transcript (`…/projects/…agent1-06309/76f11793-….jsonl`):
   foreground tool call** after it — the CLI genuinely finished its turn and
   went idle waiting for input.
 - Scanning all Bash tool calls for `tool_use` with no matching `tool_result`,
-  and for the dev stack: the agent ran `./scripts/dev-agent.cmd` many times
+  and for the dev stack: the agent ran [`./scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) many times
   over several days, each with `run_in_background: true`. The relevant one:
 
   ```bash
@@ -76,7 +76,7 @@ Transcript (`…/projects/…agent1-06309/76f11793-….jsonl`):
 
 ## Root cause
 
-The agent-pane status model (`frontend/app/store/agent-pane-state/`, the
+The agent-pane status model ([`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state), the
 `TurnPhase` discriminated union: Idle / Submitting / Streaming / Interrupting
 / Done / Disconnected) has **no state representing "a long-running
 process/tool the agent launched is attached and alive."** A `run_in_background:
@@ -123,7 +123,7 @@ disagreeing, which is itself the wiring seam to fix.
 
 ### Why this is NOT the two nearby, real, already-fixed bugs
 
-- **Not the bashwrap PTY-EOF hang** (`docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`,
+- **Not the bashwrap PTY-EOF hang** ([`docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`](RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md),
   fixed by #2156 — `fix(bashwrap): disable git pager, kill idle-hung children
   instead of leaking the wrapper`, merged 2026-07-14, confirmed **present in
   v0.53.6** which Agent1 was running). That bug hangs the *wrapper* on a
@@ -131,7 +131,7 @@ disagreeing, which is itself the wiring seam to fix.
   the `publisher_handle` wait to 5s. Agent1's dev stack was a *backgrounded*
   task that returned its handle fine — the wrapper didn't hang, the process
   legitimately kept running.
-- **Not the liveness-recovery watchdog** (`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`,
+- **Not the liveness-recovery watchdog** ([`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`](../specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md),
   shipped #1842). That watchdog force-recovers a *hung* `Streaming` turn to
   `Idle` after 180s. Here the turn wasn't hung — and if the watchdog *had*
   fired, it would have been **wrong**, flipping a legitimately-busy agent to
@@ -171,12 +171,12 @@ turn-phase label and reads as stuck.
 
 | File | Relevance |
 |------|-----------|
-| `frontend/app/store/agent-pane-state/reducer.ts` / `types.ts` | Turn-phase state machine — models the model-turn lifecycle only; no attached-process-liveness axis (**primary gap**) |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | Renders the "Working…" / "Rate limited…" labels — where a new "Running: <task>" affordance belongs |
-| `frontend/app/view/agent/useAgentStream.ts` | Background-task subscription + watchdog dispatch; watchdog must exempt panes with live background tasks |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) / `types.ts` | Turn-phase state machine — models the model-turn lifecycle only; no attached-process-liveness axis (**primary gap**) |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | Renders the "Working…" / "Rate limited…" labels — where a new "Running: <task>" affordance belongs |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Background-task subscription + watchdog dispatch; watchdog must exempt panes with live background tasks |
 | `agentmux-srv/src/backend/blockcontroller/session_stats.rs` | `record_line()` → `session:last_activity_ms` — accurate CLI-idle ground truth; froze correctly here (the CLI *was* idle) |
-| `docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md` | Adjacent, genuinely-different bug (wrapper hang), already fixed by #2156 — ruled out here |
-| `docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md` | Liveness watchdog — its "quiet = hung" premise breaks for long-running attached processes |
+| [`docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md`](RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md) | Adjacent, genuinely-different bug (wrapper hang), already fixed by #2156 — ruled out here |
+| [`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`](../specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) | Liveness watchdog — its "quiet = hung" premise breaks for long-running attached processes |
 
 ## Lessons
 

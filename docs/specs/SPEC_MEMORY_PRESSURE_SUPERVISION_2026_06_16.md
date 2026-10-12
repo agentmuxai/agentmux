@@ -2,9 +2,9 @@
 
 **Status:** active — "no PR yet" was true for a few hours. §8's P0 shipped the same day in two PRs: #1493 (`agentmux-launcher/src/mem_supervisor.rs` — memory-aware host relaunch, OOM-class exit classification, backed-off relaunch on its own budget) and #1494 (`agentmux-cef/src/memory_pressure.rs` + `memory_heartbeat.rs` — debounced detection and observability). §5.D's `commit_free_mb()`/`WARN_FLOOR` probes are live in the host, so P1 is at least partly in. **P2 and P3 are not built** — no Job-Object notification limit and no `CreateMemoryResourceNotification` anywhere in the tree. P0 alone was stated to close the 2026-06-16 incident, and it did.
 **Date:** 2026-06-16
-**Amended by:** `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md` (2026-10-08): the top-of-window banner is gone; the signals turn the status bar's backend dot yellow and show as notices at the top of its panel, and the event is now `health-signal`.
+**Amended by:** [`docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md`](../reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md) (2026-10-08): the top-of-window banner is gone; the signals turn the status bar's backend dot yellow and show as notices at the top of its panel, and the event is now `health-signal`.
 **Author:** AgentA
-**Motivating incident:** `docs/retro/retro-oom-crash-2026-06-16.md`
+**Motivating incident:** [`docs/retro/retro-oom-crash-2026-06-16.md`](../retro/retro-oom-crash-2026-06-16.md)
 **Complements (does not replace):** `SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`
 
 ---
@@ -220,8 +220,8 @@ This is the one mechanism that bounds a *single instance's* greed; combined with
 
 ### 5.F — User-facing signals (honest, non-modal)
 
-Reuse the existing notification infra — `frontend/app/notification/`
-(`usenotification.tsx`, toast bubbles) and `frontend/app/errors/ErrorBanner.tsx`,
+Reuse the existing notification infra — [`frontend/app/notification/`](../../frontend/app/notification)
+(`usenotification.tsx`, toast bubbles) and [`frontend/app/errors/ErrorBanner.tsx`](../../frontend/app/errors/ErrorBanner.tsx),
 driven from srv via the wave pub/sub (`agentmux-srv/src/backend/wps.rs`):
 
 - At `WARN_FLOOR` / on a Job-Object soft-limit hit: a **non-modal** banner —
@@ -409,7 +409,7 @@ Each phase is independently valuable and shippable; P0 alone closes the incident
 ## 13. Cross-references & sources
 
 **Internal (do not duplicate):**
-- `docs/retro/retro-oom-crash-2026-06-16.md` — the motivating incident.
+- [`docs/retro/retro-oom-crash-2026-06-16.md`](../retro/retro-oom-crash-2026-06-16.md) — the motivating incident.
 - `SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md` — the renderer-level layer this
   complements (renderer pause/resume; §6.D shedding this extends instance-wide;
   §6.C native overlay this reuses for give-up).
@@ -418,7 +418,7 @@ Each phase is independently valuable and shippable; P0 alone closes the incident
 - `SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` — the renderer recovery page.
 - `SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` — invariants I1-I6 that
   constrain §5.G cross-instance work.
-- `docs/MEMORY_HEARTBEAT_SPEC.md` — the heartbeat + `commit_free_mb()` this reads.
+- [`docs/MEMORY_HEARTBEAT_SPEC.md`](../MEMORY_HEARTBEAT_SPEC.md) — the heartbeat + `commit_free_mb()` this reads.
 
 **Integration points (from codebase survey):**
 - Launcher supervisor: `agentmux-launcher/src/main.rs` (Windows ~1082-1581, Unix
@@ -428,7 +428,7 @@ Each phase is independently valuable and shippable; P0 alone closes the incident
 - CEF flags: `agentmux-cef/src/app.rs::on_before_command_line_processing` 536-729;
   `CefSettings`/`remote_debugging_port` `agentmux-cef/src/main.rs` 651-696.
 - Wave pub/sub: `agentmux-srv/src/backend/wps.rs`. Notifications:
-  `frontend/app/notification/`, `frontend/app/errors/ErrorBanner.tsx`.
+  [`frontend/app/notification/`](../../frontend/app/notification), [`frontend/app/errors/ErrorBanner.tsx`](../../frontend/app/errors/ErrorBanner.tsx).
 - Persistence: `agentmux-srv/src/persist_subscriber.rs` (on-change SQLite writes),
   `objects.db` (`agentmux-srv/src/main.rs:375`).
 - Warm pool: `agentmux-cef/src/commands/window_pool.rs` (`POOL_TARGET_SIZE` 60,

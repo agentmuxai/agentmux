@@ -106,7 +106,7 @@ the minimized restore.
 ### Where the Editor calls it
 
 In `EditorViewModel`'s `META_PENDING_OPEN_FILES` drain
-(`frontend/app/view/editor/editor-model.ts`, the `createEffect` around
+([`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts), the `createEffect` around
 `:266-305`). That effect is the only consumer of reuse opens, the files
 pushed by `maybe_reuse_editor_pane` (`agentmux-srv/src/server/app_api/pane.rs:351-409`).
 After it schedules `openFile()` for a non-empty batch:
@@ -202,10 +202,10 @@ effect already runs in the right place at the right time.
 
 ## Files
 
-- `frontend/app/util/reveal-block.ts`: `showBlockInPane`,
+- [`frontend/app/util/reveal-block.ts`](../../frontend/app/util/reveal-block.ts): `showBlockInPane`,
   `showBlockWithoutFocus`; `revealBlockLocally` uses the first.
-- `frontend/layout/lib/types.ts`, `layoutModel.ts`, `layoutMagnify.ts`: the
+- [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts), `layoutModel.ts`, `layoutMagnify.ts`: the
   `focused` flag on `MagnifyNodeToggle`.
-- `frontend/app/view/editor/editor-model.ts`: the drain calls it.
+- [`frontend/app/view/editor/editor-model.ts`](../../frontend/app/view/editor/editor-model.ts): the drain calls it.
 - Tests next to each (`reveal-block.test.ts`, the editor drain's test file).
 - No backend change.

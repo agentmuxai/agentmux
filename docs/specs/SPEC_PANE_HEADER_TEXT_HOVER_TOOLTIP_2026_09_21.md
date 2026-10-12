@@ -3,9 +3,9 @@
 **Date:** 2026-09-21
 **Status:** implemented in #3488 — see §5 for what shipped
 **Author:** AgentO
-**Related:** `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`
-(the redesign whose side effect this fixes), `docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`,
-`frontend/app/element/PaneHeaderTabStrip.tsx` (its own doc comment already
+**Related:** [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md)
+(the redesign whose side effect this fixes), [`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md),
+[`frontend/app/element/PaneHeaderTabStrip.tsx`](../../frontend/app/element/PaneHeaderTabStrip.tsx) (its own doc comment already
 states header text was left untouched by that redesign)
 
 ---
@@ -69,7 +69,7 @@ text-foreground shadow-xl z-50`) as the shared `Tooltip` component
 Positioning goes through `computeMenuPosition` (`util/menu-position.ts`),
 not a raw `computePosition` call — the repo-wide rule for any floating
 surface (`SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20`, enforced by
-`scripts/check-menu-positioning.sh`, which caught the first cut). It
+[`scripts/check-menu-positioning.sh`](../../scripts/check-menu-positioning.sh), which caught the first cut). It
 matters concretely here rather than being a formality: browser panes are
 native `CefBrowserView` child windows that paint *above* the webview's
 DOM, so a tooltip that merely fits the viewport can still be drawn behind
@@ -123,7 +123,7 @@ PR #3488, raised twice — on open and again on re-review):
 
 Hover-bridging the tooltip (a close delay plus listeners on the floated
 content) would have fixed (1) and not (2). The fix is instead to
-**partition** the elements — `frontend/app/block/header-elems.ts`:
+**partition** the elements — [`frontend/app/block/header-elems.ts`](../../frontend/app/block/header-elems.ts):
 
 - `isInteractiveHeaderElem(elem)` — true for anything the user can act on.
   `input`/`toggleiconbutton`/`connectionbutton`/`menubutton` always;
@@ -164,8 +164,8 @@ exactly the things still rendered inline in
 ## 5. What shipped / verification
 
 - `AnchoredTooltip` component and its wiring into `BlockFrame_Header`
-  (`frontend/app/block/blockframe.tsx`).
-- `frontend/app/block/header-elems.ts` — the interactive/passive partition
+  ([`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)).
+- [`frontend/app/block/header-elems.ts`](../../frontend/app/block/header-elems.ts) — the interactive/passive partition
   (§3a), with 13 unit tests in `header-elems.test.ts` covering every
   `elemtype`, the `noAction`/`disabled`/missing-handler cases, nested
   divs, and order preservation. Being an import-free pure module, it
@@ -177,7 +177,7 @@ exactly the things still rendered inline in
 
 Verified live against the running dev instance via its CDP debug port
 (`Runtime.evaluate`/`Page.captureScreenshot`, the same technique used in
-`docs/analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md`):
+[`docs/analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md`](../analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md)):
 - `.block-frame-textelems-wrapper`'s `textContent` is empty across every
   pane after the change (previously held the command/OSC-title text).
 - Dispatching `mouseenter` on a terminal pane's header (`[data-role="block-header"]`)

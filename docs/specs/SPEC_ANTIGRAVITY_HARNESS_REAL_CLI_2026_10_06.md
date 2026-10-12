@@ -183,7 +183,7 @@ Permission modes map to agy's own flags: bypass is
   stdin; resume adds `--conversation <id>`; an over-long prompt is refused.
 - CLI resolution for an `argv` provider never returns a `.cmd` or `.bat` path.
 - Translator unit tests from the captured runs, stored in
-  `frontend/test/fixtures/providers/agy/1.1.11/` with the local user name and
+  [`frontend/test/fixtures/providers/agy/1.1.11/`](../../frontend/test/fixtures/providers/agy/1.1.11) with the local user name and
   temp folder replaced.
 - Manual, in a `task dev` build: create an Antigravity agent, send two
   prompts (the second resumes the same conversation), run one that uses a

@@ -3,7 +3,7 @@
 **Author:** AgentA
 **Status:** Scope / plan — ready to implement.
 **Why:** Single highest-leverage unblock for Phase 3b. It removes the `instance_get` fetch-and-merge in the update path, which is the *only* production code that needs transient per-launch fields out of `instance_get` — clearing the blocker on **3b.3c** (`instance_get` → db_agents) and, bundled, **3b.3b** (`instance_list` status-filter).
-**Refs:** `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md` (Phase 3b status table); `project_agent_migration_2026_05_28` memory.
+**Refs:** [`docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) (Phase 3b status table); `project_agent_migration_2026_05_28` memory.
 
 ---
 

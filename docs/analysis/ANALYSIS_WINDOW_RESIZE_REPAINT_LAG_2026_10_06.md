@@ -82,7 +82,7 @@ So the forced read is a symptom, not the cost. The cost is laying out every tab'
 
 ### 3.1 Every window tab relays out on every resize frame (the main cause)
 
-- **The setting:** `window:keepinactivetabslaidout` is on unless set to `false` (`frontend/app/workspace/window-tab-visibility.ts:18-26`). Inactive tabs are hidden with `visibility: hidden; opacity: 0` and stay `content-visibility: visible`. That makes a tab switch one frame (`ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md`).
+- **The setting:** `window:keepinactivetabslaidout` is on unless set to `false` ([`frontend/app/workspace/window-tab-visibility.ts:18-26`](../../frontend/app/workspace/window-tab-visibility.ts#L18-L26)). Inactive tabs are hidden with `visibility: hidden; opacity: 0` and stay `content-visibility: visible`. That makes a tab switch one frame (`ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md`).
 - **The cost on resize:** every tab is sized by the window, so each width change invalidates layout and container-query styles in every tab. Every tab's own ResizeObservers fire too: the tile layout, terminals, agent document lists and tab strips.
 - **How it scales:** cost grows with the total number of panes in the window, not with what's on screen. Most users who leave tabs open will hit it, and it is the one setting that took the measured case from 30 to 96 frames.
 
@@ -188,7 +188,7 @@ The repo owner asked for these to be taken as they come up.
 
 ## 7. How this was measured (to reproduce or check a fix)
 
-Scripts are in Agent4's workspace and aren't part of the repo; they can move to `scripts/perf/` if useful.
+Scripts are in Agent4's workspace and aren't part of the repo; they can move to [`scripts/perf/`](../../scripts/perf) if useful.
 - **`resizesteps.ps1`:** steps the dev window's width with `SetWindowPos`.
 - **`frameprobe.mjs`:** records `requestAnimationFrame` timestamps, `resize` events and long-animation-frame entries through CDP, and summarises them.
 - **`traceprobe.mjs`:** records a Chromium trace around the resize and totals main-thread events, plus forced layouts attributed by time to the enclosing `FunctionCall`.
@@ -207,7 +207,7 @@ A check for any fix: the 5-tab, 16-terminal row of §2.1 should get to within a 
 
 Implemented in the PR that adds this doc.
 
-**`frontend/app/platform/window-resize.ts`** holds a `windowResizing()` signal.
+**[`frontend/app/platform/window-resize.ts`](../../frontend/app/platform/window-resize.ts)** holds a `windowResizing()` signal.
 - It turns on at the first `resize` event, which fires once per frame for a drag, a maximize, a snap or a programmatic resize, and before that frame's style and layout.
 - It turns off `WINDOW_RESIZE_SETTLE_MS` (120 ms) after the last one.
 - The same file has `drainWhenIdle`.
@@ -267,7 +267,7 @@ The two long frames left after §10 came at the same window widths in every run.
 - **The rule:** Tailwind's `.container` utility, with one `max-width` rule per breakpoint: `(width >= 40rem)`, `48rem`, `64rem`, `80rem` and `96rem` (640, 768, 1,024, 1,280 and 1,536 px). Those five were the app's only viewport-width media queries.
 - **Why it existed:** nothing uses `.container` (0 elements on the page). Tailwind v4 generates a utility for every candidate word it finds in scanned source, and the word "container" is in many files.
 - **Its cost:** whenever a resize crossed one of those widths, the trace showed `StyleEngine::updateActiveStyleSheets` → `RuleSet::addRulesFromSheet` → `StyleEngine::InvalidateStyleAndLayoutForFontUpdates`, then a full relayout of the visible tab (3,692 of 3,692 objects, 37–45 ms). A drag across a monitor crosses several of them.
-- **The fix:** `@source not inline("container");` in `frontend/tailwindsetup.css`. The page now has no viewport-width media queries: only `prefers-reduced-motion`, `print` and `hover`.
+- **The fix:** `@source not inline("container");` in [`frontend/tailwindsetup.css`](../../frontend/tailwindsetup.css). The page now has no viewport-width media queries: only `prefers-reduced-motion`, `print` and `hover`.
 
 **Measured**, the agent-pane tab of §10, three runs:
 

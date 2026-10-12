@@ -149,7 +149,7 @@ Minimal set of changes to make the use case work end-to-end:
 | M2 | Embed agent ID in PR bodies (§3.2) | Convention + agent prompt / git hook | 1 day |
 | M3 | Cloud consumer reads the PR-body tag | agentmux-cloud | 2h |
 | M4 | Auto-register agents with cloud subscriber at startup | `agentmux-srv/src/server/agent_handlers.rs` | 2h |
-| M5 | Document GitHub webhook setup | `docs/` or Armory help text | 1h |
+| M5 | Document GitHub webhook setup | [`docs/`](..) or Armory help text | 1h |
 
 P1 additions (post-MVP):
 | # | Change | Effort |
@@ -169,7 +169,7 @@ Convention: all agent-opened PRs include the following in the PR body:
 
 This can be enforced via:
 - Agent CLAUDE.md instruction: "always include `<!-- agentmux:agent_id=$AGENTMUX_AGENT_BUS_ID -->` in PR bodies"
-- A git hook in `scripts/` that injects it into `gh pr create` calls
+- A git hook in [`scripts/`](../../scripts) that injects it into `gh pr create` calls
 - The `agentmux-mcp` `Shell` wrapper (future: intercept `gh pr create` and append)
 
 The cloud consumer reads the tag from the PR body; how it uses it is
@@ -225,7 +225,7 @@ Actions: `approved`, `changes_requested`, `commented`, `dismissed`.
 
 ## 8. Armory — not a blocker
 
-The Armory redesign (`docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`) is
+The Armory redesign ([`docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`](archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md)) is
 **not required** for this MVP. The accounts gallery tile and `AgentMuxConnectPanel`
 already exist and work correctly once `VITE_MUXBUS_CLIENT_ID` is set (M1).
 

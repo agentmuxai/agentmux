@@ -20,7 +20,7 @@ the terminal output. Without that log, drag never initiated.
 
 ### Bug 1 — `tab-drop-wrapper` missing `data-tauri-drag-region="false"` (CRITICAL)
 
-**File:** `frontend/app/tab/tabbar.tsx:192-217`
+**File:** [`frontend/app/tab/tabbar.tsx:192-217`](../../../frontend/app/tab/tabbar.tsx#L192-L217)
 
 The `.tab-bar` div has `data-tauri-drag-region="true"` (spread from `useWindowDrag` on Windows).
 On Windows, Tauri/WebView2 handles this attribute at the OS level — it intercepts `pointerdown`
@@ -50,7 +50,7 @@ reorder on drop.
 
 ### Bug 2 — Frontend sends combined indices; backend uses section-specific indices (LOGIC BUG)
 
-**Files:** `frontend/app/tab/tabbar.tsx:161`, `agentmuxsrv-rs/src/backend/wcore.rs:483-493`
+**Files:** [`frontend/app/tab/tabbar.tsx:161`](../../../frontend/app/tab/tabbar.tsx#L161), `agentmuxsrv-rs/src/backend/wcore.rs:483-493`
 
 The frontend builds a combined `allTabIds()` array: `[...pinnedTabIds(), ...regularTabIds()]`
 and uses that to compute `tabIndex`:
@@ -120,7 +120,7 @@ be made reactive.
 
 ### Bug 4 — `nearestHint` is module-level; breaks with multiple windows (FUTURE RISK)
 
-**File:** `frontend/app/tab/tabbar.tsx:39`
+**File:** [`frontend/app/tab/tabbar.tsx:39`](../../../frontend/app/tab/tabbar.tsx#L39)
 
 ```typescript
 const [nearestHint, setNearestHint] = createSignal<...>(null);
@@ -139,7 +139,7 @@ Currently not a bug, but the shared state should be encapsulated in a class or c
 
 ### Bug 5 — `monitorForElements` registered in TabBar `onMount`, but it references `allTabIds()` closure
 
-**File:** `frontend/app/tab/tabbar.tsx:305-341`
+**File:** [`frontend/app/tab/tabbar.tsx:305-341`](../../../frontend/app/tab/tabbar.tsx#L305-L341)
 
 The `onDrop` callback in `monitorForElements` calls `allTabIds()` to resolve `targetIdx` and
 `sourceIdx`. `allTabIds` is a reactive derived signal — reading it inside a non-reactive callback
@@ -150,7 +150,7 @@ subtle and worth documenting.
 
 ### Bug 6 — `NewTabDropZone` uses native DnD (`onDragOver`) not pragmatic-dnd
 
-**File:** `frontend/app/tab/tabbar.tsx:223-239`
+**File:** [`frontend/app/tab/tabbar.tsx:223-239`](../../../frontend/app/tab/tabbar.tsx#L223-L239)
 
 The `NewTabDropZone` component listens to `onDragOver` (native HTML5 DnD), while all tabs use
 pragmatic-dnd. These two systems don't interoperate — a tab being dragged via pragmatic-dnd will

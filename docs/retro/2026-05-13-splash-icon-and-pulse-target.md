@@ -24,9 +24,9 @@ let icon = LoadIconW(hinst, 1usize as *const u16);
 That resource is `agentmux-cef/resources/win/agentmux.ico` — the stacked-rectangles app icon set up by winres at build time for the taskbar / Alt-Tab / window title. It's an `.ico` (multi-resolution but capped at the sizes winres bakes in), and it's **not the icon the user expects to see on the splash**.
 
 The user expects the **brain logo** — the same SVG that renders as the "no panes loaded" background:
-- `frontend/app/asset/logo-brain.svg`
-- `assets/agentmux-logo-brain-alternate.png`
-- `assets/agentmux-box-art-brain-alternate-3840x2160.png` (high-res)
+- [`frontend/app/asset/logo-brain.svg`](../../frontend/app/asset/logo-brain.svg)
+- [`assets/agentmux-logo-brain-alternate.png`](../../assets/agentmux-logo-brain-alternate.png)
+- [`assets/agentmux-box-art-brain-alternate-3840x2160.png`](../../assets/agentmux-box-art-brain-alternate-3840x2160.png) (high-res)
 
 Two distinct brand assets ended up at the splash by accident:
 - **App icon** (`agentmux.ico`) — for OS surfaces (taskbar, Alt-Tab). Designed to read at 16px / 32px.
@@ -63,7 +63,7 @@ In hindsight, "pulsing brain on solid background" is what the spec's intent was 
 **Follow-up PR scope** (don't fold into anything else):
 
 ### Asset pipeline
-- Embed `assets/agentmux-logo-brain-alternate.png` (or render the SVG at build time to a 128×128 / 256×256 PNG) as a raw resource in `agentmux-launcher`.
+- Embed [`assets/agentmux-logo-brain-alternate.png`](../../assets/agentmux-logo-brain-alternate.png) (or render the SVG at build time to a 128×128 / 256×256 PNG) as a raw resource in `agentmux-launcher`.
 - Load it at splash spawn via `LoadImageW` with `IMAGE_BITMAP` (not `IMAGE_ICON`) so we get a proper bitmap with alpha channel preserved.
 
 ### Rendering
@@ -85,7 +85,7 @@ Update `agentmux-launcher/src/splash.rs` module doc:
 
 1. **"App icon" is ambiguous in this codebase.** OS icon ≠ brand logo. Specs that say "show the icon" need to qualify *which* icon. Add a glossary entry to `CLAUDE.md` if this keeps biting.
 2. **Pulse subject must be specified in the spec.** "Alpha-pulsed splash" doesn't say what pulses. Future visual specs should mock the target frames (or at least say "background X, foreground Y, pulse target = Y").
-3. **Brand assets need a launcher-accessible path.** Today the brain SVG lives in `frontend/app/asset/` — `agentmux-launcher` can't reach it without copying or symlinking. A `assets/launcher/` dir checked into the repo with launcher-ready PNGs avoids the per-build asset shuffle.
+3. **Brand assets need a launcher-accessible path.** Today the brain SVG lives in [`frontend/app/asset/`](../../frontend/app/asset) — `agentmux-launcher` can't reach it without copying or symlinking. A `assets/launcher/` dir checked into the repo with launcher-ready PNGs avoids the per-build asset shuffle.
 4. **Bot reviewers can't see brand decisions.** Visual / branding bugs slip through reagent + codex. For PRs with visual output (splash, themes, icons), include a screenshot in the PR body so a human reviewer can sanity-check the look without building.
 5. **`SetLayeredWindowAttributes(LWA_ALPHA)` is a foot-gun for partial pulses.** It's globally-applied. For element-level animation you need `UpdateLayeredWindow` + per-pixel alpha. Document this in any future Win32 layered-window work.
 

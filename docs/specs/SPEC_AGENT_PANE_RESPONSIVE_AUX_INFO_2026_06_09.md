@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-09  
 **Status:** proposed — Design / Pre-implementation
-**Scope:** `frontend/app/view/agent/`
+**Scope:** [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 
 ---
 

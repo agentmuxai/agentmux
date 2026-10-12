@@ -128,7 +128,7 @@ Complete rebrand from WaveTerm/Wave Terminal to AgentMux, ensuring all reference
 
 ### Other Config Files
 - [ ] `tools/sandbox/config/wavemux-instance.json`: Review `waveterm-dev` references
-- [ ] `scripts/verify-package.sh`: `EXE_NAME="waveterm"` → `EXE_NAME="agentmux"`
+- [ ] [`scripts/verify-package.sh`](../../../scripts/verify-package.sh): `EXE_NAME="waveterm"` → `EXE_NAME="agentmux"`
 
 ---
 
@@ -172,14 +172,14 @@ Files to review (update "Wave Terminal" → "AgentMux"):
 
 ### Docs Directory
 
-Files in `docs/`:
+Files in [`docs/`](../..):
 - [ ] `ACKNOWLEDGEMENTS.md`
 - [ ] `FORK.md` - Keep attribution to Wave Terminal origin
 - [ ] `README.md`
 - [ ] `ROADMAP.md`
 - [ ] `RELEASE_CHECKLIST.md`
 - [ ] `RELEASE_NOTES_v0.12.11.md` and other release notes
-- [ ] All files in `docs/specs/`
+- [ ] All files in [`docs/specs/`](..)
 - [ ] All `.mdx` files in `docs/docs/`
 - [ ] `docusaurus.config.ts` - Site configuration
 

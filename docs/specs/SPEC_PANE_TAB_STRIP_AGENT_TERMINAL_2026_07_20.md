@@ -6,9 +6,9 @@
 layout store, agent runtime, shell controller
 **Author:** Agent3
 **Related:**
-`docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md` (the fork model + block-stack
+[`docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md`](SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md) (the fork model + block-stack
 mechanism this spec builds on, and whose §7 fork-bar UI this spec supersedes),
-`docs/specs/SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md` (the definition-fork backend
+[`docs/specs/SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md`](SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md) (the definition-fork backend
 mechanism, reused unchanged),
 the editor's existing multi-tab system (it never had a spec of its own; it is now specified
 in `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.1) — the visual/interaction reference this spec generalizes,
@@ -22,8 +22,8 @@ and styles being lifted out and reused)
 > tabs *within* one agent or terminal pane, exactly like the editor's existing tab strip. It is
 > **not** what this codebase already calls **"inter-pane"** (peer-to-peer MCP messaging
 > *between* agent panes — `send_message`, `inject_terminal`, `broadcast_message`; see
-> `docs/specs/openclaw-widget.md`, `docs/specs/integration-vision.md`,
-> `docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`). It is also not the outer app's top-level
+> [`docs/specs/openclaw-widget.md`](openclaw-widget.md), [`docs/specs/integration-vision.md`](integration-vision.md),
+> [`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`](SPEC_PANE_FILE_DROP_2026_05_30.md)). It is also not the outer app's top-level
 > browser-style tab strip (`workspace.tsx`, covered by
 > `SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`) — that holds whole workspaces of panes, a
 > different layer entirely. This doc's title says "pane tab strip," not "inter-pane tabs,"
@@ -51,7 +51,7 @@ parallel primitive.
 close button, and a `Tooltip` showing the full path. Active tab gets an accent underline
 (`box-shadow: inset 0 -2px 0 0 var(--accent-color)`) plus a lighter background; dirty tabs
 always show their ×; preview tabs (VS Code-style, replaced by the next single-click) render
-italic. State lives in `frontend/app/store/editor-pane-state-store.ts` (slice #10) — a pure
+italic. State lives in [`frontend/app/store/editor-pane-state-store.ts`](../../frontend/app/store/editor-pane-state-store.ts) (slice #10) — a pure
 `{tabs[], activeTabId, recentlyClosed[]}` reducer, dispatched via `OpenFile`/`CloseTab`/
 `SwitchTab`/etc. There is **no `+` button today** — new editor tabs are opened by clicking a
 file in the tree, not by an explicit "add tab" affordance. (§7 proposes adding one, for
@@ -72,7 +72,7 @@ consistency with the new agent/terminal strips this spec introduces.)
   2026-06-15 (§6.4 of the June spec) — this part needs no further validation.
 - **The one new structural piece — a layout-node `blockStack`/`activeBlockId`** — is
   specified (§6.2) but **not yet implemented**: no `blockStack` field exists anywhere in
-  `frontend/app/store/` today (confirmed by search). This is still the single missing piece
+  [`frontend/app/store/`](../../frontend/app/store) today (confirmed by search). This is still the single missing piece
   that turns "a fork is a block" into "a pane can show one of several forks."
 - **Four Phase 1/2 PRs already landed on `main`**, ahead of the layout-store piece:
   `frontend/app/view/agent/components/PaneRegions.tsx`, `PaneRow.tsx` (+ `.scss`/tests), and
@@ -94,7 +94,7 @@ consistency with the new agent/terminal strips this spec introduces.)
   `agentmux-srv/src/backend/blockcontroller/shell/controller.rs` holds exactly one
   `conn_name`/`input_tx`/`child_pid` per block (`ShellControllerInner`, `controller.rs:45-72`);
   `lifecycle.rs:149` opens exactly one `portable_pty` on `start()`. No array/map of processes
-  anywhere in this controller. `frontend/app/view/term/term.tsx` (`TerminalView`) and
+  anywhere in this controller. [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) (`TerminalView`) and
   `TermViewModel` likewise own exactly one xterm instance per block. There is no split,
   multiplex, or session-index concept anywhere in this stack today.
 - **The existing `ShellSessionRegistry` (`agentmux-srv/src/backend/shell_node.rs`) is a
@@ -328,15 +328,15 @@ since they touch disjoint view trees.
 - **Shared strip:** new `frontend/app/view/shared/PaneTabStrip.tsx`,
   `frontend/app/view/shared/_pane-tab-strip.scss`; refactor
   `frontend/app/view/editor/editor-tab-strip.tsx` and the relevant rules in
-  `frontend/app/view/editor/editor-view.scss` to consume it.
+  [`frontend/app/view/editor/editor-view.scss`](../../frontend/app/view/editor/editor-view.scss) to consume it.
 - **Layout store:** wherever `LayoutNode`/tile state lives today
   (`agentmux-common/src/layout_types.rs` backend type; the frontend layout/tile store consuming
   it) for `blockStack`/`activeBlockId`.
-- **Agent:** `frontend/app/view/agent/agent-view.tsx` (wire the new top region), reuse
-  `frontend/app/view/agent/fork/fork-set.ts` (`computeForkSet`) unchanged; retire
+- **Agent:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (wire the new top region), reuse
+  [`frontend/app/view/agent/fork/fork-set.ts`](../../frontend/app/view/agent/fork/fork-set.ts) (`computeForkSet`) unchanged; retire
   `ForkBar.tsx`'s `PaneRow`-based rendering in favor of `<PaneTabStrip>` (keep `PaneRow` itself
   — the `ActivityDock` still uses it for pinned processes, that usage is untouched).
-- **Terminal:** `frontend/app/view/term/term.tsx`, `frontend/app/view/term/termViewModel.ts`
+- **Terminal:** [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx), [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts)
   (new top region + tab-switch wiring); new RPC handler near
   `agentmux-srv/src/server/app_api/pane.rs` (`open_pane_floating`'s sibling); no changes to
   `agentmux-srv/src/backend/blockcontroller/shell/**` (PTY/controller machinery reused as-is).

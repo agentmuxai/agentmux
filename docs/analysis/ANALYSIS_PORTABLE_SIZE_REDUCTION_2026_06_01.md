@@ -69,7 +69,7 @@
 #### 2. Make source maps dev-only in production portables (est. ~28 MB)
 **Current:** Source maps always included because `sourcemap: true` is unconditional.  
 **Context:** The runtime source-map resolver (SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md) uses maps to rewrite crash stacks. Maps are the "why" for keeping them.  
-**Fix (shipped v0.41.1):** `task package:release` runs `find dist/frontend -name "*.map" -delete` after the Vite build. `task package` (dev portables) keeps maps. See `docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md`.  
+**Fix (shipped v0.41.1):** `task package:release` runs `find dist/frontend -name "*.map" -delete` after the Vite build. `task package` (dev portables) keeps maps. See [`docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md`](../specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md).\
 **Trade-off:** Production crash stacks show minified names. Acceptable since dev builds retain full maps.  
 **Effort:** Done.
 

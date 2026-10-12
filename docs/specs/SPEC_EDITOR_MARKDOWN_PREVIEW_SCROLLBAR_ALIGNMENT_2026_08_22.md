@@ -4,9 +4,9 @@
 **Status:** Draft
 **Author:** Korp
 **Repo touched:** `agentmux` (`frontend`)
-**Related:** `frontend/app/view/editor/editor-view.tsx`, `frontend/app/view/editor/editor-view.scss`,
-`frontend/app/element/markdown.tsx`, `frontend/app/element/markdown.scss`,
-`docs/specs/SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md` (the
+**Related:** [`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx), [`frontend/app/view/editor/editor-view.scss`](../../frontend/app/view/editor/editor-view.scss),
+[`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx), [`frontend/app/element/markdown.scss`](../../frontend/app/element/markdown.scss),
+[`docs/specs/SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md`](SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md) (the
 established house precedent for this exact failure mode — see §2)
 
 ## 1. Problem
@@ -127,7 +127,7 @@ Preview use the exact same scrollbar as Source, not just a same-sized one in
 the same place.
 
 **Fix:** `<Markdown>` gains a new `nativeScrollbar` prop
-(`frontend/app/element/markdown.tsx`). When set, `onMount` skips calling
+([`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx)). When set, `onMount` skips calling
 `OverlayScrollbars(contentsEl, ...)` entirely, leaving `.content`'s plain CSS
 `overflow` to render a real native/webkit scrollbar — styled by the exact
 same universal `*::-webkit-scrollbar` rule (`app.scss:87-90`) CodeMirror's

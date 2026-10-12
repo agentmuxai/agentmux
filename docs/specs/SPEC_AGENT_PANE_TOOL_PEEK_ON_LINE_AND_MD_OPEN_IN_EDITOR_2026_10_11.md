@@ -4,7 +4,7 @@
 **Date:** 2026-10-11 | **Version:** main at `cc94d15e0`.
 **Requested by:** repo owner: "in the agent pane, when hovering over tool calls (like bash) we want to display the popover only hovering over the actual tool call line. the expandable result/preview should not show the hover. this is so we can see it but also select it. the hover over the tool preview blocks that. Additionally, on the top right of md file previews, add a button to the top right which opens it in an editor pane (with collapsed tree)." Then: "if an editor is open and not minimized in the same window tab, then open the doc in another document tab in the same editor pane tab. If the editor is not on the same window tab, or is minimized or not shown, open a new editor pane", and "a button for all tools (md previews and normal, so that md's have 2 buttons, and normal have 1) … an extend/shorten button, that makes the preview 3x the height (or revert back to original preview height)."
 **Author:** Loap.
-**Related:** `SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md` §1.3 (which widened the tool peek to the whole row), `frontend/app/view/agent/hooks/useNodePeek.ts`, `frontend/app/view/agent/components/PeekOverlay.tsx`.
+**Related:** `SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md` §1.3 (which widened the tool peek to the whole row), [`frontend/app/view/agent/hooks/useNodePeek.ts`](../../frontend/app/view/agent/hooks/useNodePeek.ts), [`frontend/app/view/agent/components/PeekOverlay.tsx`](../../frontend/app/view/agent/components/PeekOverlay.tsx).
 
 ---
 
@@ -46,7 +46,7 @@ Unchanged:
 
 ### 2.1 Today
 
-A Read or Write of a `.md`/`.mdx` file renders its content as Markdown. `FilePreview` in `frontend/app/view/agent/components/tool-renderers/builtins.tsx` (L65–97, `isMarkdownPath` at L55) does it, wrapped in `.agent-tool-read-md` / `.agent-tool-write-md`. Above it, both renderers draw a header row, `.agent-tool-file-path-row`, holding the path (and Read's line range, Write's byte count): `renderRead` L159–164, `renderWrite` L228–236.
+A Read or Write of a `.md`/`.mdx` file renders its content as Markdown. `FilePreview` in [`frontend/app/view/agent/components/tool-renderers/builtins.tsx`](../../frontend/app/view/agent/components/tool-renderers/builtins.tsx) (L65–97, `isMarkdownPath` at L55) does it, wrapped in `.agent-tool-read-md` / `.agent-tool-write-md`. Above it, both renderers draw a header row, `.agent-tool-file-path-row`, holding the path (and Read's line range, Write's byte count): `renderRead` L159–164, `renderWrite` L228–236.
 
 Nothing in the agent pane opens a file in an editor today. Markdown links go to `openLink`, which opens an external browser. A PDF Read already has buttons in that position ("Open", "Show in folder", `.agent-tool-read-open`, `builtins.tsx` L169–184), so the pattern exists.
 

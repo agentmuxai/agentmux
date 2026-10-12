@@ -24,7 +24,7 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 
 | # | Action | V | E | R | Status | PR | Notes / blockers |
 |---|--------|---|---|---|--------|----|------------------|
-| A1 | RPC contract enforcement test | ★★★★★ | Low | Low | ✅ **done** | #1544 | `test/contract/rpc-contract.test.ts`. Keep baselines shrinking. |
+| A1 | RPC contract enforcement test | ★★★★★ | Low | Low | ✅ **done** | #1544 | [`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts). Keep baselines shrinking. |
 | A2 | Extract srv↔mcp↔bashwrap HTTP DTOs into `agentmux-common` | ★★★★ | Med | Low | 🔴 **blocked** | — | Collides with a5af **#1498** (`agentmux-mcp`). Wait for it to merge. |
 | A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | ✅ **done** | #1566 | global.ts 1047→821 LOC; cycle broken; leaf violations fixed. |
 | A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
@@ -53,7 +53,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 **gotchas**. Done items record what landed + lessons.
 
 ### A1 — RPC contract enforcement ✅ (#1544)
-- **Landed:** `test/contract/rpc-contract.test.ts`. Re-derives both contract sides from source and
+- **Landed:** [`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts). Re-derives both contract sides from source and
   freezes three shrink-only baselines: `liveUnregistered` (commands the FE *calls* with no handler),
   `declaredUnregistered` (rpc-api.ts methods with no handler), `registeredUndeclared` (handlers with
   no FE binding). A new drift fails the test.
@@ -89,9 +89,9 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   merges** (or coordinate). Re-check open PRs (§3.4).
 
 ### A3 — Break `global.ts` god-module + cycle 🟢
-- **Entry points:** `frontend/app/store/global.ts:39` ↔ `frontend/app/store/wos.ts:12` (bidirectional
+- **Entry points:** [`frontend/app/store/global.ts:39`](../../frontend/app/store/global.ts#L39) ↔ `frontend/app/store/wos.ts:12` (bidirectional
   import cycle). `global.ts` = 87 exports, 95 importers, imports *up* into `@/app/modals` + `@/app/tab`.
-  Leaf violations: `frontend/util/logger.ts:4`, `frontend/layout/lib/layoutModel.ts:4-7` import the store.
+  Leaf violations: [`frontend/util/logger.ts:4`](../../frontend/util/logger.ts#L4), [`frontend/layout/lib/layoutModel.ts:4-7`](../../frontend/layout/lib/layoutModel.ts#L4-L7) import the store.
 - **Approach:** split `global.ts` by concern (selection / layout-glue / object-cache / modal-glue);
   invert the leaf→store imports (pass state in, don't import it). Break the wos cycle by extracting the
   shared piece both need into a third leaf module.
@@ -129,7 +129,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   via `super::shell::…` today.
 
 ### A6 — Collapse agent-pane 4 state systems 🟡 (mirror removed; scroll/expansion tracked separately)
-- **Entry points:** `frontend/app/view/agent/agent-view.tsx` (1282 LOC); `…/store/agent-pane-state/`
+- **Entry points:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (1282 LOC); `…/store/agent-pane-state/`
   (the `turnPhase` reducer — the *good* core); the `AgentAtoms` 1:1 mirror; per-pane `documentState`;
   `agent-pane-layout-store.ts`. Dual scroll/expansion bridged by `expansion-source.ts`.
 - **Approach:** make the reducer state the single source; render from it directly (drop the
@@ -140,7 +140,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Status (2026-09-06):** the `AgentAtoms` mirror is gone — SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06.md. `AgentPaneModel.state` (one generated signal per reducer field) and `.document` are the single reactive source; `PaneRegistration` is `{ agentId }`; the 19-signal bundle shrank to the one view-local `documentStateAtom`. The acceptance criterion (one-place field addition, no copy) is met and pinned by `agent-pane-view.test.ts`. The scroll/expansion half is SPEC_AGENT_PANE_LAYOUT_REDUCER render-path wiring and is tracked there, not here.
 
 ### A7 — Shared `ToolCorrelator` ✅ (#1545)
-- **Landed:** `frontend/app/view/agent/providers/tool-correlation.ts` (`ToolCorrelator` map+`call()`+
+- **Landed:** [`frontend/app/view/agent/providers/tool-correlation.ts`](../../frontend/app/view/agent/providers/tool-correlation.ts) (`ToolCorrelator` map+`call()`+
   `result()`+`reset()`, and `wrapOutput`). codex/gemini/kimi/acp refactored to use it; **claude left
   untouched** (genuine streaming-accumulation complexity, not duplication).
 - **Lessons:** behaviour was preserved *exactly* — codex `_raw`/`call-` prefix, kimi object-args +
@@ -191,8 +191,8 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   `/.agentmux`. The board called this item "cleanup".
 
 ### A11 — Real `BlockRegistry` + registry-driven `ModalLayer` 🟢
-- **Entry points:** hardcoded `BlockRegistry` map at `frontend/app/block/block.tsx:47-61` (shadows the
-  real registry); `frontend/app/element/ModalLayer.tsx:55-64` imports **9 concrete** agent-view modals.
+- **Entry points:** hardcoded `BlockRegistry` map at [`frontend/app/block/block.tsx:47-61`](../../frontend/app/block/block.tsx#L47-L61) (shadows the
+  real registry); [`frontend/app/element/ModalLayer.tsx:55-64`](../../frontend/app/element/ModalLayer.tsx#L55-L64) imports **9 concrete** agent-view modals.
 - **Approach:** use the real block registry instead of the hardcoded map; make `ModalLayer`
   registry-driven so a new modal registers itself instead of editing the layer.
 - **Acceptance:** no hardcoded block map; `ModalLayer` doesn't import concrete modals; adding a
@@ -213,13 +213,13 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Acceptance:** dead symbols gone; A1 baselines shrink accordingly; tsc/cargo green.
 
 ### A13 — Spec/doc hygiene 🟢
-- **Findings:** ~733 markdown files; duplicate dirs `docs/retro/`+`docs/retros/` (merged),
-  `docs/analysis/`+`docs/analyses/` (merged); `specs/` vs `docs/specs/` lifecycle stalled; no index of record;
+- **Findings:** ~733 markdown files; duplicate dirs [`docs/retro/`](../retro)+`docs/retros/` (merged),
+  [`docs/analysis/`](.)+`docs/analyses/` (merged); `specs/` vs [`docs/specs/`](../specs) lifecycle stalled; no index of record;
   demonstrable drift (execution plans reference `saga.rs`/`saga_coordinator.rs` that no longer exist).
-- **Approach:** add `docs/specs/INDEX.md` (subsystem → current authoritative spec); merge the duplicate
+- **Approach:** add [`docs/specs/INDEX.md`](../specs/INDEX.md) (subsystem → current authoritative spec); merge the duplicate
   dirs; archive superseded per-incident specs.
 - **Acceptance:** one index exists; no duplicate-named dirs; superseded specs archived.
-- **Status:** analysis — ✅ dirs merged; `docs/specs/INDEX.md` added; all stale path refs updated.
+- **Status:** analysis — ✅ dirs merged; [`docs/specs/INDEX.md`](../specs/INDEX.md) added; all stale path refs updated.
 
 ### A14 — Shared FE event-name constants 🟢
 - **Entry points:** Rust centralises WPS/wave-event names (`backend/wps.rs:22-54`,
@@ -296,8 +296,8 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 | `agentmux-srv/src/backend/blockcontroller/shell.rs` | 2358 | A5 |
 | `frontend/types/gotypes.d.ts` | 2297 | A1 (hand-maintained) |
 | `frontend/app/store/rpc-api.ts` | 1568 | A1 (hand-maintained) |
-| `frontend/app/view/agent/agent-view.tsx` | 1282 → **2730** (2026-09-06) | A6 |
-| `frontend/app/store/global.ts` | (87 exports / 95 importers) | A3 |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 1282 → **2730** (2026-09-06) | A6 |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | (87 exports / 95 importers) | A3 |
 
 **Healthy patterns to copy** (audit §7): the agent-pane `update()` reducer + `EventSink` fan-out; the
 srv egress chain Broker→EventBusBridge→EventBus lanes (`eventbus.rs:221-249`); the data-driven

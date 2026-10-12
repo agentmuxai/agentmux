@@ -163,7 +163,7 @@ Given the "duplicating some, dropping others" behavior specifically with Claude 
 
 | File | What |
 |------|------|
-| `frontend/app/view/term/termwrap.ts` | Add debug logging in `doTerminalWrite`, `scheduleRafWrite`, `handleNewFileSubjectData`, `loadInitialTerminalData` |
+| [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) | Add debug logging in `doTerminalWrite`, `scheduleRafWrite`, `handleNewFileSubjectData`, `loadInitialTerminalData` |
 
 All logs appear in the `task dev` terminal output tagged `[fe]` — **not in browser DevTools** (log pipe forwards all console output to the backend).
 

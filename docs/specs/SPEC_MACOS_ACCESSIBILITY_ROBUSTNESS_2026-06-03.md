@@ -1,7 +1,7 @@
 # SPEC: macOS Accessibility Robustness — surviving external AX clients without crashing
 
 **Status:** Draft · **Date:** 2026-06-03 · **Owner:** AgentMux host/macOS
-**Related:** `SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md`, `REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md`, `docs/cef-patches/README.md`, `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`
+**Related:** `SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md`, `REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md`, [`docs/cef-patches/README.md`](../cef-patches/README.md), [`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`](../retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md)
 
 ---
 
@@ -231,7 +231,7 @@ silently regress.
   - Repro harness + acceptance criteria 1.
 - **Phase 2 (needs the from-source toolchain):**
   - Symbolize the crash site (from-source DWARF, `llvm-symbolizer`) to decide 2a vs 2b.
-  - If needed, L2(b) CEF fork patch (`docs/cef-patches/`), rebuilt + notarized framework.
+  - If needed, L2(b) CEF fork patch ([`docs/cef-patches/`](../cef-patches)), rebuilt + notarized framework.
   - L3 state-restore verification/closure; L4 telemetry + symbolication pipeline.
 - **Phase 3:** track CEF #3512 / Chromium upstream; bump Chromium when fixed and **remove** the
   patch; keep L1 (it is correct behavior regardless of the bug).
@@ -269,6 +269,6 @@ non-evasive delivery: AgentMux survives the box as-is and remains accessible.
 - Electron #37465 — *`AXManualAccessibility` can't be set (`kAXErrorAttributeUnsupported`)*: https://github.com/electron/electron/issues/37465
 - Chromium accessibility overview (AT-gated activation, browser-process AX tree): https://chromium.googlesource.com/chromium/src/+/main/docs/accessibility/overview.md
 - Chromium Mac accessibility (`AXEnhancedUserInterface` activation): https://www.chromium.org/developers/design-documents/accessibility/
-- Internal: `SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md`, `REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md` (the existing macOS-26 `_objc_terminate`/`EXC_BREAKPOINT` selector shim), `docs/cef-patches/README.md`, `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md` (symbolization: `llvm-symbolizer`, not `atos`).
+- Internal: `SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md`, `REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md` (the existing macOS-26 `_objc_terminate`/`EXC_BREAKPOINT` selector shim), [`docs/cef-patches/README.md`](../cef-patches/README.md), [`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`](../retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md) (symbolization: `llvm-symbolizer`, not `atos`).
 - Host hook to extend: `agentmux-cef/src/main.rs:846` (`patch_nsapp_unrecognized_selector`).
 - Launcher supervision/forensics: `agentmux-launcher/src/{splash_mac,event_log,state}.rs`.

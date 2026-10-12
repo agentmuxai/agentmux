@@ -15,9 +15,9 @@ File drag-and-drop is deliberately scoped to individual panes, never the window 
 - Terminal panes register `dragover`/`drop` listeners on their own view element (`frontend/app/view/term/term.tsx:496,498`).
 - Agent panes do the same via `useAgentDropAttach` (`frontend/app/view/agent/hooks/useAgentDropAttach.ts:212,214`).
 - No other view type registers a drop handler.
-- There is **no window- or document-level `dragover`/`drop` listener anywhere** (checked `frontend/app-init.ts` and the whole `frontend/` tree — the only `window.addEventListener("dragover"/"drop", …)` call sites are tab-tearoff/pane-resize internals, none of which call `preventDefault()` on an arbitrary drop).
+- There is **no window- or document-level `dragover`/`drop` listener anywhere** (checked [`frontend/app-init.ts`](../../frontend/app-init.ts) and the whole [`frontend/`](../../frontend) tree — the only `window.addEventListener("dragover"/"drop", …)` call sites are tab-tearoff/pane-resize internals, none of which call `preventDefault()` on an arbitrary drop).
 
-`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md` and `docs/specs/drag-drop-files-into-panes.md` both describe this scoped-to-pane design intentionally — but neither spec (nor the code) has a fallback for a drop that lands **outside** any registered pane surface: the tab strip, the title bar, the splitters/gaps between panes, or any pane of a type that never registered a handler.
+[`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`](../specs/SPEC_PANE_FILE_DROP_2026_05_30.md) and [`docs/specs/drag-drop-files-into-panes.md`](../specs/drag-drop-files-into-panes.md) both describe this scoped-to-pane design intentionally — but neither spec (nor the code) has a fallback for a drop that lands **outside** any registered pane surface: the tab strip, the title bar, the splitters/gaps between panes, or any pane of a type that never registered a handler.
 
 ### Why that's catastrophic here, not just a no-op
 
@@ -124,12 +124,12 @@ Surface `show_fatal_dialog` on the srv-spawn-timeout path too, ideally including
 
 ## 4. Sources
 
-- `frontend/app-init.ts`, `frontend/app/view/term/term.tsx:496-498`, `frontend/app/view/agent/hooks/useAgentDropAttach.ts:212-214`
-- `docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`, `docs/specs/drag-drop-files-into-panes.md`
+- [`frontend/app-init.ts`](../../frontend/app-init.ts), [`frontend/app/view/term/term.tsx:496-498`](../../frontend/app/view/term/term.tsx#L496-L498), [`frontend/app/view/agent/hooks/useAgentDropAttach.ts:212-214`](../../frontend/app/view/agent/hooks/useAgentDropAttach.ts#L212-L214)
+- [`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`](../specs/SPEC_PANE_FILE_DROP_2026_05_30.md), [`docs/specs/drag-drop-files-into-panes.md`](../specs/drag-drop-files-into-panes.md)
 - `agentmux-cef/src/client/lifecycle.rs:749-785` (`on_before_browse`)
 - `agentmux-cef/src/client/handlers.rs:113-176` (`DragHandler`)
 - `agentmux-launcher/src/supervisor/windows.rs` (splash spawn, `spawn_srv` timeout handling, `HOST_RESTART_BUDGET`/`SRV_RESTART_BUDGET`)
 - `agentmux-srv/src/server/service/session_restore.rs`, `window_close.rs`, `window_create.rs`
-- `docs/retro/retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md`
+- [`docs/retro/retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md`](retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md)
 - `VERSION_HISTORY.md` (0.55.6 — 2026-08-11, 0.55.8 — 2026-08-14: `feat(window): restore last session's tabs/panes on relaunch`)
 - Live evidence: `~/.agentmux/logs/agentmux-launcher.log` (lines ~115519–117339, dir_hash `ed4b4624df95a47e`, pid 57224, 2026-08-16 11:17:29–11:18:15 UTC), `~/.agentmux/snapshots/local-main-b28b7a-cdf87dde-pre-v0.55.{7,9}-*.bak`

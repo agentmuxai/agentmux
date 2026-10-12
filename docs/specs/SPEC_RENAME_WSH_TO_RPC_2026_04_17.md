@@ -22,12 +22,12 @@ WebSocket connection.
 
 | Old File | New File | Purpose |
 |----------|----------|---------|
-| `frontend/app/store/wshclient.ts` | `frontend/app/store/rpc-client.ts` | Base RPC client class + response helper |
+| `frontend/app/store/wshclient.ts` | [`frontend/app/store/rpc-client.ts`](../../frontend/app/store/rpc-client.ts) | Base RPC client class + response helper |
 | `frontend/app/store/wshclientapi.ts` | `frontend/app/store/rpc-api.ts` | Typed RPC command wrappers (generated-style) |
-| `frontend/app/store/wshrouter.ts` | `frontend/app/store/rpc-router.ts` | Routes RPC messages between browser tabs |
-| `frontend/app/store/wshrpcutil-base.ts` | `frontend/app/store/rpc-util-base.ts` | Low-level RPC send/receive primitives |
-| `frontend/app/store/wshrpcutil.ts` | `frontend/app/store/rpc-util.ts` | High-level RPC utilities (TabRpcClient init) |
-| `frontend/app/view/term/term-wsh.tsx` | `frontend/app/view/term/term-rpc.tsx` | Terminal-specific RPC handlers |
+| `frontend/app/store/wshrouter.ts` | [`frontend/app/store/rpc-router.ts`](../../frontend/app/store/rpc-router.ts) | Routes RPC messages between browser tabs |
+| `frontend/app/store/wshrpcutil-base.ts` | [`frontend/app/store/rpc-util-base.ts`](../../frontend/app/store/rpc-util-base.ts) | Low-level RPC send/receive primitives |
+| `frontend/app/store/wshrpcutil.ts` | [`frontend/app/store/rpc-util.ts`](../../frontend/app/store/rpc-util.ts) | High-level RPC utilities (TabRpcClient init) |
+| `frontend/app/view/term/term-wsh.tsx` | [`frontend/app/view/term/term-rpc.tsx`](../../frontend/app/view/term/term-rpc.tsx) | Terminal-specific RPC handlers |
 
 ## Symbol Renames
 

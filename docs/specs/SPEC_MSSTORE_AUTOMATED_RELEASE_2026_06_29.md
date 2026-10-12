@@ -3,7 +3,7 @@
 **Date:** 2026-06-29
 **Status:** Draft — open questions resolved
 **Author:** AgentX
-**Related:** `scripts/package-msix.ps1`, `docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md`, `Taskfile.yml` (`release`, `package:release`, `package:msix`, winget update), `.github/workflows/`
+**Related:** [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1), [`docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md`](SPEC_MSIX_PACKAGING_2026_05_30.md), `Taskfile.yml` (`release`, `package:release`, `package:msix`, winget update), [`.github/workflows/`](../../.github/workflows)
 
 ---
 
@@ -20,7 +20,7 @@ correct artifact), reserving the app, or anything Microsoft gates manually.
 
 **`msstore` (Microsoft Store Developer CLI) driven from a GitHub Actions
 workflow.** AgentMux ships a **packaged MSIX** (`AgentMux_<semver>_x64.msix` from
-`scripts/package-msix.ps1:156`), so:
+[`scripts/package-msix.ps1:156`](../../scripts/package-msix.ps1#L156)), so:
 
 - The `microsoft/store-submission` Action is **out** — it is the *unpackaged
   MSI/EXE* flow; wrong artifact class.
@@ -76,7 +76,7 @@ uploaded/submitted artifact is the plain `makeappx`-packed, unsigned msix.
 
 ### OQ4 — Version source of truth?
 `package.json.version` → MSIX `X.Y.Z.0` (already how `package-msix.ps1:62-64`
-derives it). The **release-consistency invariant** (`.github/workflows/release-consistency.yml`)
+derives it). The **release-consistency invariant** ([`.github/workflows/release-consistency.yml`](../../.github/workflows/release-consistency.yml))
 already guarantees `package.json` ≡ `VERSION_HISTORY` ≡ `Cargo.toml`, so the tag,
 the artifact filename, and the manifest version are the same value. The workflow
 derives the version from the tag and **asserts** it matches the artifact filename

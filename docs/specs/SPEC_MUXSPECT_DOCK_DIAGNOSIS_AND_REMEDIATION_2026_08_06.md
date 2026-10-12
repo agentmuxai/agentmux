@@ -16,13 +16,13 @@ not a one-off.
 
 > **2026-08-07 audit note:** Implemented within a day — `muxspect dock`/
 > `dock clear` commands are live in `muxspect.mjs`. Status field was never
-> updated. See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> updated. See [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
-**Related:** `docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`
+**Related:** [`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`](SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md)
 (§5.3, §7 — the two prior scope exclusions this spec proposes narrowly
-reversing), `docs/specs/SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md`
+reversing), [`docs/specs/SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md)
 (§3, §7 — independently diagnosed the identical bug, recommends a
-complementary first-party in-renderer fix), `docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`
+complementary first-party in-renderer fix), [`docs/reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md`](../reports/REPORT_MUXSPECT_SPAWN_REFUSAL_DIAGNOSIS_EXTENSION_2026_08_03.md)
 (closest prior art — `last_error`, same "diagnose a wedged pane" shape),
 Discussion #2375 (process/turn-liveness tracking thread — lists this exact bug
 as "⏳ Diagnosed, not fixed"; per that thread's own instruction, this spec is
@@ -47,7 +47,7 @@ a scriptable way to both notice and act on this.
 
 ### 1.1 The state machine gap
 
-Traced end-to-end in `frontend/app/view/agent/`:
+Traced end-to-end in [`frontend/app/view/agent/`](../../frontend/app/view/agent):
 
 1. A `ToolNode` is created **optimistically** at `status: "running"` the
    instant a `tool_call` stream event is parsed — `stream-parser.ts`'s
@@ -68,7 +68,7 @@ Traced end-to-end in `frontend/app/view/agent/`:
    dispatches `TurnEnd` to the **pane-state** reducer (clears "Working…")
    but never touches the **document** reducer that owns `nodes[]`, and
    never calls `scrubOrphanedInProgress`.
-5. `scrubOrphanedInProgress` (`frontend/app/store/agent-document/reducer.ts:53-148`)
+5. `scrubOrphanedInProgress` ([`frontend/app/store/agent-document/reducer.ts:53-148`](../../frontend/app/store/agent-document/reducer.ts#L53-L148))
    only runs on three real triggers, all session/reload/reconnect
    boundaries — `SessionEnd` (pane unmount/reconnect/close), `HistoryLoaded`,
    `HistoryRestored` — never on an ordinary turn boundary. (A fourth,
@@ -143,7 +143,7 @@ renderer connection a question (a new, riskier "srv reaches into one
 particular open pane" mechanism), the renderer **pushes** a small
 dock-summary delta to `agentmux-srv` whenever a `ToolNode`'s status
 changes, as a new fire-and-forget RPC command over the frontend's existing
-single persistent WS connection (`frontend/app/store/ws.ts`) — the same
+single persistent WS connection ([`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts)) — the same
 connection every other `RpcApi.*Command` already uses, called the same
 "dispatch, don't await the response" way `RpcApi.SetMetaCommand` already
 is at `frontend/app/view/armory/armory-view.tsx:46-49`. (There is no

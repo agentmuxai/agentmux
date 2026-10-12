@@ -87,8 +87,8 @@ Also clear the dead entry: on destroy, remove `LAST_FOCUSED_BY_ROOT[root]` if it
 ### The redock create flow
 A redock = backend saga moves the block to the target tab; the floater auto-closes; the target window re-renders the block and calls `browser_pane_create`. Relevant pieces:
 
-- Frontend re-create + slot init: `frontend/app/store/browser-pane-state-store.ts` — `registerPane()` seeds `initialState()` with **`url: ""`**.
-- Frontend create: `frontend/app/view/browser/browser-view.tsx:191` (`createPane`) — on success sets `paneCreated(true)` + `model.onLoad()`, **with no retry on the deferred case**.
+- Frontend re-create + slot init: [`frontend/app/store/browser-pane-state-store.ts`](../../frontend/app/store/browser-pane-state-store.ts) — `registerPane()` seeds `initialState()` with **`url: ""`**.
+- Frontend create: [`frontend/app/view/browser/browser-view.tsx:191`](../../frontend/app/view/browser/browser-view.tsx#L191) (`createPane`) — on success sets `paneCreated(true)` + `model.onLoad()`, **with no retry on the deferred case**.
 - Host create gate: `agentmux-cef/src/browser_panes.rs:242` — if the floater's old pane is still `Closing`, create returns `RegisterResult::Closing` and **stashes** the create; the IPC still resolves `Ok(())`, so the frontend believes it succeeded.
 - Deferred replay: `browser_panes.rs:454` (`replay_pending_create`) re-issues the create on close-completion (`CompleteBrowserPaneClose` / `DrainBrowserPaneByLabel`).
 
@@ -104,7 +104,7 @@ Net: a black `about:blank` pane with an empty address bar that silently drops wh
 - **#1168** deterministic re-create-after-close + **#1166** deterministic redock-onto-main reduced the *intermittent load failure*. The **stash/replay** in `browser_panes.rs` is the in-code remedy.
 - **#1133** evicts stale HWNDs from `window_hwnds` on close (`client/mod.rs:778`).
 - **#1156** native-pane reflow re-samples + pushes bounds during layout change (`browser-view.tsx:159`), preventing a stale/zero-bounds invisible pane.
-- Analysis doc already on disk: `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`.
+- Analysis doc already on disk: [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`](ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md).
 
 ### Remaining gap (Defect B)
 The **slot re-init to `url:""` + lack of re-navigation** survives the mitigations. On a deferred/replayed create the new browser is never told to navigate to the pane's intended URL, and the slot has no URL to show. Fix:
@@ -120,18 +120,18 @@ The **slot re-init to `url:""` + lack of re-navigation** survives the mitigation
 - mutate the layout tree (frontend persists that locally — `sagas/redock_floating_pane.rs` "saga does not touch LayoutState"), or
 - clear/repoint `focused_node_id`. Compare `layout.rs::handle_layout_delete_node` (which *does* validate + clear stale focus) — there is **no equivalent on move**. So after redock, `focused_node_id` can point at a node id from the pre-move tree.
 
-`frontend/layout/lib/layoutFocus.ts:15` (`validateFocusedNode`) clears a focused node that's gone from the tree, but it runs on the frontend's local tree recompute — timing-dependent relative to the move persist.
+[`frontend/layout/lib/layoutFocus.ts:15`](../../frontend/layout/lib/layoutFocus.ts#L15) (`validateFocusedNode`) clears a focused node that's gone from the tree, but it runs on the frontend's local tree recompute — timing-dependent relative to the move persist.
 
 ### Three sources of truth drift
 Per issue #768 there are three lifecycle authorities:
-1. Frontend slice-#9 slot store — `frontend/app/store/browser-pane-state-store.ts`
+1. Frontend slice-#9 slot store — [`frontend/app/store/browser-pane-state-store.ts`](../../frontend/app/store/browser-pane-state-store.ts)
 2. Host `BrowserPaneManager` registry (real CEF state)
 3. Host reducer state (`BrowserRegistered`/`BrowserUnregistered`)
 
 A redock that **bypasses the block-removal saga** doesn't dispose the slice-#9 slot, so the old slot lingers (`closed` never flips) while the host tears the HWND down — the divergence #768 describes. `BrowserViewModel.closed` reads `bpSnapshot(blockId)?.closed ?? true` (`browser-model.ts:165`), which can sit in a not-closed-yet state.
 
 ### Node remount vs. block keep-alive
-`frontend/layout/lib/TileLayout.win32.tsx:324` keys the tile `<Key>` by **`node.id`**, but `block.tsx` caches the ViewModel by **`blockId`** (`getBlockComponentModel`). On redock the LayoutNode id changes → the `DisplayNode` DOM remounts while the `BrowserViewModel` survives. If disposal/recreate timing doesn't align with the DOM unmount, IPC can fire into a half-alive pane — another route into Defects A/B.
+[`frontend/layout/lib/TileLayout.win32.tsx:324`](../../frontend/layout/lib/TileLayout.win32.tsx#L324) keys the tile `<Key>` by **`node.id`**, but `block.tsx` caches the ViewModel by **`blockId`** (`getBlockComponentModel`). On redock the LayoutNode id changes → the `DisplayNode` DOM remounts while the `BrowserViewModel` survives. If disposal/recreate timing doesn't align with the DOM unmount, IPC can fire into a half-alive pane — another route into Defects A/B.
 
 ### Fix (Defect C)
 - Add a **focus-validation arm to `handle_move_block`** (mirror `handle_layout_delete_node`) so `focused_node_id` is repointed/cleared on move.
@@ -177,19 +177,19 @@ A redock that **bypasses the block-removal saga** doesn't dispose the slice-#9 s
 
 **Frontend / reducer code**
 - `frontend/app/view/browser/browser-view.tsx:100/136/159/191` — paneRect, syncPosition, reflow, createPane.
-- `frontend/app/store/browser-pane-state-store.ts` — slice #9 slot store (`initialState().url = ""`).
+- [`frontend/app/store/browser-pane-state-store.ts`](../../frontend/app/store/browser-pane-state-store.ts) — slice #9 slot store (`initialState().url = ""`).
 - `frontend/app/view/browser/browser-model.ts:165/546` — `closed` snapshot + `dispose()`.
 - `agentmux-srv/src/reducer/block.rs:77` — `handle_move_block` (no layout/focus mutation).
 - `agentmux-srv/src/reducer/layout.rs` — `handle_set_focused_node`, `handle_layout_delete_node` (has focus validation move lacks).
 - `agentmux-srv/src/sagas/redock_floating_pane.rs` — redock saga (`MoveBlock`, no LayoutState touch).
-- `frontend/layout/lib/TileLayout.win32.tsx:324` — tile keyed by `node.id`; `block.tsx` caches VM by `blockId`.
-- `frontend/layout/lib/layoutFocus.ts:15` — `validateFocusedNode`.
+- [`frontend/layout/lib/TileLayout.win32.tsx:324`](../../frontend/layout/lib/TileLayout.win32.tsx#L324) — tile keyed by `node.id`; `block.tsx` caches VM by `blockId`.
+- [`frontend/layout/lib/layoutFocus.ts:15`](../../frontend/layout/lib/layoutFocus.ts#L15) — `validateFocusedNode`.
 
 **Prior analysis / specs**
-- `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`
-- `docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`
-- `docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`
+- [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`](ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md)
+- [`docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`](ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md)
+- [`docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`](../specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md)
 - `SPEC_PHANTOM_BROWSER_PANE_RECOVERY.md (no longer in this repo)` (branch `agenta/spec-phantom-browser-pane-recovery`)
-- `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md` §8.15
+- [`docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](../specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md) §8.15
 
 **Relevant merged PRs:** #1112 (MVP redock), #1156 (pane reflow), #1166 (deterministic redock-onto-main), #1168 (deterministic re-create-after-close), #1133 (stale-HWND eviction), #1249 (redock dwell/velocity gate).

@@ -1,6 +1,6 @@
 # Linux/macOS: wire startup-time window-pool fill
 
-**Status:** active — RESOLVED — both blockers fixed by Phase 7 (PR #1595, merged 2026-06-20). Tab tear-off pool now active on macOS and Linux. See `docs/specs/SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md` for the implementation and `docs/specs/SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md` for remaining work (pane pool, new-window pool). — #788
+**Status:** active — RESOLVED — both blockers fixed by Phase 7 (PR #1595, merged 2026-06-20). Tab tear-off pool now active on macOS and Linux. See [`docs/specs/SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md`](SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md) for the implementation and [`docs/specs/SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) for remaining work (pane pool, new-window pool). — #788
 **Author:** runtime investigation 2026-05-08.
 **Owner:** TBD.
 **Affects:** Linux + macOS AppImage / .app builds.
@@ -306,5 +306,5 @@ Measure end-to-end tear-off latency before and after:
 - `agentmux-cef/src/saga_dispatch.rs` — Windows launcher saga path.
 - `agentmux-cef/src/app.rs::AgentMuxWindowDelegate` — main window
   registration site.
-- `docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md` — sister spec
+- [`docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md`](linux-appimage-cold-launch-tax-2026-05-08.md) — sister spec
   for the orthogonal AppImage cold-launch issue.

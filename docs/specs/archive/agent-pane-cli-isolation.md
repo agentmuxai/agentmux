@@ -58,7 +58,7 @@ Each AgentMux version gets its own CLI directory, nested under the existing inst
 
 ### Provider Definitions (no changes needed)
 
-`frontend/app/view/agent/providers/index.ts` already has all required fields:
+[`frontend/app/view/agent/providers/index.ts`](../../../frontend/app/view/agent/providers/index.ts) already has all required fields:
 
 | Provider | npmPackage | pinnedVersion | cliCommand |
 |----------|-----------|---------------|------------|
@@ -321,7 +321,7 @@ On startup, scan `~/.agentmux/instances/` and delete `cli/` directories for vers
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/agent-model.ts` | Replace bare command injection with bootstrap script in both `connectWithProvider()` and `connectStyled()` |
+| [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts) | Replace bare command injection with bootstrap script in both `connectWithProvider()` and `connectStyled()` |
 | `frontend/app/view/agent/bootstrap.ts` | **New file** — `buildBootstrapScript()` function |
 | `src-tauri/src/commands/cli_installer.rs` | Update paths to version-isolated directories, remove `install_claude_native()`, remove system PATH detection |
 

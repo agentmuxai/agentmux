@@ -4,7 +4,7 @@
 **Date:** 2026-06-12  
 **Author:** AgentA  
 **Parent spec:** `SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md`  
-**Motivation:** `docs/analysis/ANALYSIS_RENDERER_CRASH_WRITE_STATE_OOM_2026_06_12.md`
+**Motivation:** [`docs/analysis/ANALYSIS_RENDERER_CRASH_WRITE_STATE_OOM_2026_06_12.md`](../analysis/ANALYSIS_RENDERER_CRASH_WRITE_STATE_OOM_2026_06_12.md)
 
 ---
 
@@ -149,7 +149,7 @@ the JSON content changes.
 
 ## 5. Write path changes (frontend)
 
-**File:** `frontend/app/view/agent/agent-view.tsx`
+**File:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)
 
 ### 5.1 Replace `writeSnapshotNow`
 
@@ -217,7 +217,7 @@ reflect that nodes come from NDJSON replay (see §6.3).
 
 ## 6. Read path changes (frontend)
 
-**File:** `frontend/app/view/agent/hooks/useHistoryPagination.ts`
+**File:** [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts)
 
 ### 6.1 Schema version constant
 

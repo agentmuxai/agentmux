@@ -64,7 +64,7 @@ in the disposable renderer — the same smell as the host-reducer problem, one l
 ## 1. Current architecture (verified)
 
 ### 1.1 Where the algebra lives today — the frontend
-`frontend/layout/lib/`: pure tree fns in `layoutTree.ts` (13 reducers) + `layoutNode.ts` (primitives
+[`frontend/layout/lib/`](../../frontend/layout/lib): pure tree fns in `layoutTree.ts` (13 reducers) + `layoutNode.ts` (primitives
 + `balanceNode`); the stateful dispatcher `LayoutModel.treeReducer` (`layoutModel.ts:522`); minimize
 in `layoutMinimize.ts`; persistence in `layoutPersistence.ts`.
 
@@ -84,7 +84,7 @@ result*, through the generic object RPC. There is **no** frontend→srv layout-i
 - **Commands:** all 11, `ipc.rs:506-588`. **Events:** partial — `LayoutSplitHorizontalApplied`,
   `LayoutSplitVerticalApplied`, `LayoutCleared`, … (`ipc.rs:1462+`); the rest need adding.
 - **Pure fns:** `backend/layout/mod.rs` — full set, oracle-tested against
-  `frontend/layout/tests/layoutTree.test.ts` (30 tests, PR #686). Handles `extra` catch-all
+  [`frontend/layout/tests/layoutTree.test.ts`](../../frontend/layout/tests/layoutTree.test.ts) (30 tests, PR #686). Handles `extra` catch-all
   preservation, single-child collapse on delete, ancestor/descendant guards on move/swap, atomic
   resize validation.
 - **Wired arms:** `reducer/layout.rs` — `handle_set_focused_node`, `handle_set_magnified_node`,
@@ -142,7 +142,7 @@ frontend doesn't send intents, and (d) minimize/dissolve is geometry-coupled and
 The frontend runs `balanceNode` (`layoutNode.ts:200-232`) after **every** committed action via
 `updateTree(balanceTree=true)`. The Rust reducer must run an equivalent `balance_node` at the end of
 every structural arm, or it cannot own normalized output. The six invariants to port (oracle:
-`frontend/layout/tests/` balance tests + the live `balanceNode`):
+[`frontend/layout/tests/`](../../frontend/layout/tests) balance tests + the live `balanceNode`):
 
 1. **Direction alternation** — any child with `flex_direction == parent.flex_direction` is flipped to
    the reverse. Sibling axes alternate Row/Column down the tree.
@@ -340,7 +340,7 @@ validation + its migration test, the resync layout carve-out. The payoff deletio
   `agentmux-srv/src/reducer/layout.rs` (4 wired arms); `reducer.rs:86-91` ("4 of 11");
   `backend/storage/store.rs:394` (blind-increment version, not CAS).
 - Frontend: `frontend/layout/lib/{types.ts,layoutNode.ts,layoutTree.ts,layoutMinimize.ts,
-  layoutPersistence.ts,layoutModel.ts}`; oracle `frontend/layout/tests/layoutTree.test.ts`.
+  layoutPersistence.ts,layoutModel.ts}`; oracle [`frontend/layout/tests/layoutTree.test.ts`](../../frontend/layout/tests/layoutTree.test.ts).
 - Program docs: `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md`,
   `SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`,
   `DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md` §7a (authority principle),

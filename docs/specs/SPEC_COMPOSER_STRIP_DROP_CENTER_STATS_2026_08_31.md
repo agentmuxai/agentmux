@@ -22,7 +22,7 @@ Once idle, they show *different* numbers in the *same visual shape*
 (`↑X ↓Y  ·  Ns`) with no label saying "this turn" vs. "total this
 session" — a user has no way to tell which is which without already
 knowing the two components' separate designs. Confirmed via
-`docs/specs/SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md`, the spec that
+[`docs/specs/SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md`](SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md), the spec that
 originally split per-turn (`sessionStats`, feeding `AgentWorkingRow`)
 from cumulative (`sessionTotals`, feeding `AgentComposerStrip`) — that
 split was about fixing *what number* `AgentComposerStrip` showed, not
@@ -49,8 +49,8 @@ with a `$cost · N turns` secondary line the composer strip never had.
 a third, always-centered concern alongside the left/right slot rows —
 this is the file's own most heavily documented, most-revised piece of
 logic (7 revisions across 2 days per the module doc comment;
-`docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md` and
-`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`). The
+[`docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) and
+[`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`](SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md)). The
 scaffolding already handles "the stats zone has no content" as a normal,
 existing case — `statsZone()`'s `<Show when={rightText()}>` renders
 nothing when `rightText()` is empty, and `computeStatsInline` (line

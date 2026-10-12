@@ -56,10 +56,10 @@ Two facts from that history matter for this spec:
    `SPEC_FLOATING_REDOCK_DWELL_2026-06-03.md` under the specs directory for the
    "full research summary, design rationale, behavior matrix, known limitations,
    and future work." That file has never existed in git history. (Its full path
-   is deliberately not written out here: `scripts/check-spec-citations.sh` would
+   is deliberately not written out here: [`scripts/check-spec-citations.sh`](../../scripts/check-spec-citations.sh) would
    read it as a live citation, and a pointer to nothing is worse than none.) The industry research and
    the tuning rationale therefore lived only in a PR description, where nobody
-   revisiting the constant would find them. `scripts/check-spec-citations.sh`
+   revisiting the constant would find them. [`scripts/check-spec-citations.sh`](../../scripts/check-spec-citations.sh)
    did not catch it because it only validates citations in *changed* files.
    This document replaces that missing spec.
 
@@ -70,7 +70,7 @@ reported behavior**, because 3.2 defeats any threshold value.
 
 ### 3.1 The threshold is below the human intent boundary
 
-`frontend/app/workspace/floating-pane-constants.ts:12` — `REDOCK_DWELL_MS = 180`.
+[`frontend/app/workspace/floating-pane-constants.ts:12`](../../frontend/app/workspace/floating-pane-constants.ts#L12) — `REDOCK_DWELL_MS = 180`.
 
 PR #1249's tuning note justifies it:
 
@@ -85,7 +85,7 @@ pane is grafted into the layout tree, and recovering the previous state means
 manually tearing off again and re-positioning the window.
 
 This codebase already reached the opposite conclusion for a strictly *smaller*
-action. `frontend/app/tab/tabbar-dnd.ts:62` sets `SPRING_SWITCH_MS = 500`, and
+action. [`frontend/app/tab/tabbar-dnd.ts:62`](../../frontend/app/tab/tabbar-dnd.ts#L62) sets `SPRING_SWITCH_MS = 500`, and
 `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md:31-33` justifies it as:
 
 > deliberately longer than the redock ghost's 180 ms since switching the visible
@@ -104,7 +104,7 @@ exact condition it is meant to measure — holding still.
 
 To compensate, the renderer arms redock through a disjunction of fallbacks that
 substitute *elapsed time since the last event* for genuine dwell
-(`frontend/app/workspace/floating-pane-workspace.tsx`):
+([`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx)):
 
 | Line | Fallback | Why it re-opens the hole |
 |---|---|---|
@@ -127,7 +127,7 @@ shorter than any deliberate "place it here and let go."
 
 ### 3.3 There is no neutral surface to park over
 
-`frontend/app-init.ts:180-182` maps `DropDirection::Center` (dir `8`) to the
+[`frontend/app-init.ts:180-182`](../../frontend/app-init.ts#L180-L182) maps `DropDirection::Center` (dir `8`) to the
 **full leaf rect**. Combined with Top/Right/Bottom/Left (half-leaf) and the
 `Outer*` bands (1/5 edge), every pixel of every pane in the main window resolves
 to a valid drop zone. There is no region a user can hover over that means
@@ -285,7 +285,7 @@ answer.
 
 ### 5.4 P4 — Collapse the duplicated gate (debt paydown)
 
-`docs/retro/retro-redock-ghost-landing-reliability-2026-07-27.md:47` already
+[`docs/retro/retro-redock-ghost-landing-reliability-2026-07-27.md:47`](../retro/retro-redock-ghost-landing-reliability-2026-07-27.md) already
 flagged this:
 
 > The dwell/velocity hover gate is hand-implemented twice (once for the Windows
@@ -295,7 +295,7 @@ flagged this:
 
 This spec is exactly such a tweak, and it touches both copies. Extract the
 arming state machine into one module (proposal:
-`frontend/app/workspace/redock-arming.ts`) exposing a platform-agnostic
+[`frontend/app/workspace/redock-arming.ts`](../../frontend/app/workspace/redock-arming.ts)) exposing a platform-agnostic
 `onHoverSample({ target, x, y, t })` returning `{ armed, indicator }`, with the
 two platform paths reduced to feeding it samples. This is what makes P1-P3
 testable (section 7) — the current state is spread across roughly twenty mutable
@@ -305,11 +305,11 @@ closure variables in an `onMount` body and cannot be unit-tested at all.
 
 | File | Lines | Role | Phase |
 |---|---|---|---|
-| `frontend/app/workspace/floating-pane-constants.ts` | `12`, `15` | Constant definitions | P2 |
+| [`frontend/app/workspace/floating-pane-constants.ts`](../../frontend/app/workspace/floating-pane-constants.ts) | `12`, `15` | Constant definitions | P2 |
 | `agentmux-cef/src/ui_tasks/drag.rs` | `463-464`, `598-616`, `666-672` | Win32 hover emission + wake tick | P1 |
-| `frontend/app/workspace/floating-pane-workspace.tsx` | `53` (import), `533`, `540`, `545`, `560`, `562`, `652`, `657`, `659` (arming), `730`, `808` (velocity), `765` (dwell arm), `780`, `830` (IPC lead-in) | Floater-side gate, both platform paths | P1, P2, P4 |
-| `frontend/app-init.ts` | `59` (import), `180-182` (`rectForDirection` Center), `187` (`ghostDwellMs`), `217` (ghost show gate) | Ghost-side gate + drop-zone mapping | P1, P3 |
-| `frontend/app/tab/tabbar-dnd.ts` | `62` | `SPRING_SWITCH_MS` — update its comment, which currently anchors itself to the 180 ms value | P2 |
+| [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) | `53` (import), `533`, `540`, `545`, `560`, `562`, `652`, `657`, `659` (arming), `730`, `808` (velocity), `765` (dwell arm), `780`, `830` (IPC lead-in) | Floater-side gate, both platform paths | P1, P2, P4 |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts) | `59` (import), `180-182` (`rectForDirection` Center), `187` (`ghostDwellMs`), `217` (ghost show gate) | Ghost-side gate + drop-zone mapping | P1, P3 |
+| [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts) | `62` | `SPRING_SWITCH_MS` — update its comment, which currently anchors itself to the 180 ms value | P2 |
 
 No Rust code reads either constant; the Rust change in P1 is emission cadence
 only. `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md:31-33` and `:164` cite the 180 ms
@@ -389,4 +389,4 @@ rather than the next one. P3 remains a separate, unstarted change.
 
 - The drop target (`setFloatingRedockTarget`) is stored only while armed and cleared the moment the drag falls back to the preview (the velocity gate trips) or leaves the window. So the §5.2 invariant, "no dock without the armed ghost having been shown", is unchanged.
 - The threshold is unchanged (300 ms); only what the user sees during it changed. Preview → armed is a 100 ms fade (`app.scss`).
-- The listener moved from `app-init.ts` to `frontend/app/workspace/redock-ghost.ts` (unchanged), with tests in `redock-ghost.test.ts`.
+- The listener moved from `app-init.ts` to [`frontend/app/workspace/redock-ghost.ts`](../../frontend/app/workspace/redock-ghost.ts) (unchanged), with tests in `redock-ghost.test.ts`.

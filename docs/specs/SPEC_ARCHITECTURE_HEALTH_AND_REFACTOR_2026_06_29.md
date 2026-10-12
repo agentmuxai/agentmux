@@ -119,9 +119,9 @@ One budget owner (srv) gates `claude.exe`/turn spawning on **available commit be
 - Estimates are not in this doc on purpose — this is a direction decision; each pillar needs its own sized spec.
 
 ## 8. Sources / supporting docs
-- `docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`, `docs/specs/SPEC_GRACEFUL_OOM_EXIT_2026_06_29.md`
-- `docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`, `docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`
-- `docs/retro/retro-lifecycle-teardown-churn-2026-06-22.md`, `docs/specs/SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md`
-- `docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`, `docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`
+- [`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`](SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md), [`docs/specs/SPEC_GRACEFUL_OOM_EXIT_2026_06_29.md`](SPEC_GRACEFUL_OOM_EXIT_2026_06_29.md)
+- [`docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`](../incident/INCIDENT_2026_06_26_APP_CLOSED.md), [`docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`](SPEC_MEMORY_ANALYSIS_2026_06_26.md)
+- [`docs/retro/retro-lifecycle-teardown-churn-2026-06-22.md`](../retro/retro-lifecycle-teardown-churn-2026-06-22.md), [`docs/specs/SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md`](SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md)
+- [`docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md), [`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md)
 - `reducer/quit.rs` (the unwired `reconcile_quit`), `agentmux-launcher/src/saga/` (the collapsible layer)
 - Phase 3b/3c agents migration (unmerged), `agents_consolidate.rs` / `dual_write.rs` (transitional scaffolding)

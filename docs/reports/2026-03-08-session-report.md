@@ -12,8 +12,8 @@
 **Fix:** Created a derived `intervalSecsAtom` on `SysinfoViewModel` that extracts only the `telemetry:interval` value. Only re-renders when the interval actually changes. Replaced all 3 direct `fullConfigAtom` reads with this atom.
 
 **Files changed:**
-- `frontend/app/view/sysinfo/sysinfo-model.ts` — added `intervalSecsAtom`, refactored `getConfiguredInterval()`
-- `frontend/app/view/sysinfo/sysinfo-view.tsx` — both `SysinfoView` and `SysinfoViewInner` use the new atom
+- [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) — added `intervalSecsAtom`, refactored `getConfiguredInterval()`
+- [`frontend/app/view/sysinfo/sysinfo-view.tsx`](../../frontend/app/view/sysinfo/sysinfo-view.tsx) — both `SysinfoView` and `SysinfoViewInner` use the new atom
 
 **Status:** Pushed, rebased on main, PR #75 ready for merge after testing.
 
@@ -33,8 +33,8 @@
 
 ### 3. Retro & Specs
 
-- `docs/retro/pr70-opener-scope-regression.md` — root cause analysis of the opener regression
-- `docs/specs/sysinfo-scrollbar-investigation.md` — investigation notes from prior session (scrollbar regression)
+- [`docs/retro/pr70-opener-scope-regression.md`](../retro/pr70-opener-scope-regression.md) — root cause analysis of the opener regression
+- [`docs/specs/sysinfo-scrollbar-investigation.md`](../specs/sysinfo-scrollbar-investigation.md) — investigation notes from prior session (scrollbar regression)
 
 ## Open PRs
 

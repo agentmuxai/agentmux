@@ -33,7 +33,7 @@ Default roster (the operator can change it):
 
 ## 3. When it applies
 
-- Any change to platform-specific code: `*.win32.ts(x)`, `*.darwin.ts(x)`, `*.linux.ts(x)`, the platform modules in `crates/cef` (drag, windows, hooks, input), or `isWindows()` / `isMacOS()` branches.
+- Any change to platform-specific code: `*.win32.ts(x)`, `*.darwin.ts(x)`, `*.linux.ts(x)`, the platform modules in [`crates/cef`](../../crates/cef) (drag, windows, hooks, input), or `isWindows()` / `isMacOS()` branches.
 - Any behavior the OS mediates: keys and shortcuts, mouse gestures, drag and drop, window moves and resizes, focus, clipboard, file dialogs, notifications.
 
 **Merge gate:** each affected platform has a result on the commit being merged: pass, or a skip the lead records with a reason. A platform the change can't reach (proven, e.g. a Windows-only file) needs no run; the lead says so in the PR.
@@ -100,4 +100,4 @@ Unexpected: <anything else seen>
 ## 9. Open questions
 
 1. Should each platform tester run on its own dev data directory (`--fresh`), so windows restored from earlier sessions can't get in the way?
-2. Is it worth a small shared input helper per platform (the Windows one lives in AgentA's scratch), checked into `scripts/`?
+2. Is it worth a small shared input helper per platform (the Windows one lives in AgentA's scratch), checked into [`scripts/`](../../scripts)?

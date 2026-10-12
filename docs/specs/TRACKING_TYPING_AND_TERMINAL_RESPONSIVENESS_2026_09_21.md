@@ -47,7 +47,7 @@ one continuous regression from the outside:
 So: nothing to revert, one designed fix never built, and one new mechanism
 introduced by unrelated feature work. Issue #3361 (open, unclaimed, 3 days old)
 is the live ask to close both loops for real using the repro tool that now
-exists to do it (`tools/tests/pane-load.mjs`, merged 09-17 as #3286).
+exists to do it ([`tools/tests/pane-load.mjs`](../../tools/tests/pane-load.mjs), merged 09-17 as #3286).
 
 ## 2. State of play
 
@@ -58,14 +58,14 @@ exists to do it (`tools/tests/pane-load.mjs`, merged 09-17 as #3286).
 | Uncontrolled `<textarea>` composer (root fix for the original re-render-storm lag) | v0.33.91, `AgentFooter.tsx` |
 | IME composition handling + `agent-keystroke` perf marks | #1146 |
 | CI lint guardrail against layout reads in `frontend/app/view/term/**` + `AgentFooter.tsx` | #1148 |
-| `tools/tests/bench-agent-keystroke.mjs` (CDP P50/P95/P99 bench) | #1150 |
+| [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) (CDP P50/P95/P99 bench) | #1150 |
 | Throttle (~1/90ms) + defer-highlight streaming-markdown render, replacing the rejected per-block-split plan | #1213 — `MarkdownBlock.tsx`'s `STREAM_RENDER_MS`, confirmed present and unmodified in substance |
 | Agent-pane virtualization, Phases 1–3 | #783 / #784 / #787 (issue #782) |
 | PTY output coalescing before broadcast (cuts renderer/GPU CPU under heavy output) | #3206 |
 | Per-pane fair egress dequeue (`fair_drain_priority`/`priority_pane_key`) — the 09-04 cross-pane fix | #2973 — confirmed intact, no commit touching `websocket.rs` since has changed this machinery (diffed all 8) |
 | `pane-load.mjs` — on-demand realistic PTY load repro (bulk text / escape-heavy repaint / many-tiny-writes), the tool item 3 below depends on | #3286 |
 | In-memory `agent_lock` registry, replacing a blocking `Store` (SQLite) read on the `controllerinput`/`PtyShellInput` path | #3249 (09-15 report, at corrected scope — see §2.3) |
-| Phase 0.2 — keydown-path synchronous-IPC audit: baseline was already clean (no `await` IPC/async handlers on the keystroke path); CI guard added to keep it that way | `tools/lint/check-input-handler-sync-ipc.sh` + `.github/workflows/input-handler-sync-ipc.yml` |
+| Phase 0.2 — keydown-path synchronous-IPC audit: baseline was already clean (no `await` IPC/async handlers on the keystroke path); CI guard added to keep it that way | [`tools/lint/check-input-handler-sync-ipc.sh`](../../tools/lint/check-input-handler-sync-ipc.sh) + `.github/workflows/input-handler-sync-ipc.yml` |
 | Phase 0.3 — `backdrop-filter: blur` audit: only one always-mounted blur exists over a typed-into pane (`.block-mask`, 0.1px — layer-promotion only, not real blur cost); everything else is `<Show>`-gated or gesture-transient. Verdict: cleared, no code change warranted | analysis-only, no PR |
 | **Predictive local echo** — paints a just-typed printable character in the keydown frame, reconciles byte-exact against the authoritative PTY echo; observational arming means it never predicts without a confirmed echo first (no password-prompt flash). **Un-shelves and explicitly supersedes** the 2026-05-30 "rejected" call in §2.2 below, one day later, once armed-observation + reconcile/rollback answered the security objection. On by default (`term:predictiveecho=false` to opt out). Verified: only 2 commits ever, last 2026-06-06, unmodified since | `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`, #1223 (merged 06-01), stall-cooldown fix #1242 (06-06) |
 
@@ -87,7 +87,7 @@ Three layers found and fixed in three days, each measured before and after:
 The remaining agent-pane work — cost that grows with conversation length — is planned in
 `SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md` and tracked phase
 by phase in `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`. Measure
-with `scripts/ui-screenshots/full-conversation-bench.mjs` (#3593) — no human
+with [`scripts/ui-screenshots/full-conversation-bench.mjs`](../../scripts/ui-screenshots/full-conversation-bench.mjs) (#3593) — no human
 at the keyboard and no agent tokens needed.
 
 ### 2.2 Decided but never built
@@ -130,31 +130,31 @@ Nothing is deleted. Nothing below needed a status change beyond one file (§3.3)
 | `SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md` | the contract every input-path change must obey (≤16ms handler, never read layout after touching style on the keystroke path) |
 | `PLAN_INPUT_RESPONSIVENESS_EXECUTION_2026_05_29.md` | the execution plan; §6/§7 are the profiling gates #3361 exists to finally clear |
 | `SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md` | the undelivered design — read before implementing §2.4 item 1 |
-| `docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md` | the egress-fairness diagnosis + fix, intact |
-| `docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md` | the corrected re-diagnosis — read §2a before §1 |
-| `docs/analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md` | the streaming-markdown O(n²) root cause + the shipped (different-shaped) fix, #1213 |
-| `docs/analysis/ANALYSIS_KEYDOWN_IPC_AUDIT_2026_05_29.md` | Phase 0.2 — keydown dispatch sync-IPC audit (clean baseline, CI guard shipped) |
-| `docs/analysis/ANALYSIS_BLUR_AUDIT_INPUT_FIRST_2026_05_30.md` | Phase 0.3 — `backdrop-filter` audit over typed-into panes (cleared, no fix needed) |
-| `docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md` | the un-shelving design (its own §2 title: "Why this was shelved, and why we are un-shelving it") — shipped as #1223, still live |
+| [`docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md`](../analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md) | the egress-fairness diagnosis + fix, intact |
+| [`docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md`](../analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md) | the corrected re-diagnosis — read §2a before §1 |
+| [`docs/analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md`](../analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md) | the streaming-markdown O(n²) root cause + the shipped (different-shaped) fix, #1213 |
+| [`docs/analysis/ANALYSIS_KEYDOWN_IPC_AUDIT_2026_05_29.md`](../analysis/ANALYSIS_KEYDOWN_IPC_AUDIT_2026_05_29.md) | Phase 0.2 — keydown dispatch sync-IPC audit (clean baseline, CI guard shipped) |
+| [`docs/analysis/ANALYSIS_BLUR_AUDIT_INPUT_FIRST_2026_05_30.md`](../analysis/ANALYSIS_BLUR_AUDIT_INPUT_FIRST_2026_05_30.md) | Phase 0.3 — `backdrop-filter` audit over typed-into panes (cleared, no fix needed) |
+| [`docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`](SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md) | the un-shelving design (its own §2 title: "Why this was shelved, and why we are un-shelving it") — shipped as #1223, still live |
 
 ### Superseded — banner + `Superseded-by:` added alongside this file
 | Doc | What's dead |
 |---|---|
-| `docs/analysis/ANALYSIS_TYPING_PERF_OPEN_TRACKING_2026_05_29.md` | entirely — it was the 05-29 snapshot of what was open; this file is now that snapshot, kept current |
+| [`docs/analysis/ANALYSIS_TYPING_PERF_OPEN_TRACKING_2026_05_29.md`](../analysis/ANALYSIS_TYPING_PERF_OPEN_TRACKING_2026_05_29.md) | entirely — it was the 05-29 snapshot of what was open; this file is now that snapshot, kept current |
 
 ### History — accurate for their date, not current
-`docs/analysis/agent-pane-typing-lag-2026-04-12.md` (the original controlled-textarea root cause, v0.33.91) ·
-`docs/analysis/agent-typing-lag-trace-2026-04-12.md` (DevTools trace analysis, v0.33.105) ·
-`docs/analysis/agent-pane-extreme-smoothness-2026-04-12.md` (the "5 fixes" bundle behind #334 — its node-cap/content-visibility approach to bounding DOM size was superseded in spirit by real virtualization, #782, though the CSS containment/`content-visibility` pieces are still present in `_document.scss`)
+[`docs/analysis/agent-pane-typing-lag-2026-04-12.md`](../analysis/agent-pane-typing-lag-2026-04-12.md) (the original controlled-textarea root cause, v0.33.91) ·
+[`docs/analysis/agent-typing-lag-trace-2026-04-12.md`](../analysis/agent-typing-lag-trace-2026-04-12.md) (DevTools trace analysis, v0.33.105) ·
+[`docs/analysis/agent-pane-extreme-smoothness-2026-04-12.md`](../analysis/agent-pane-extreme-smoothness-2026-04-12.md) (the "5 fixes" bundle behind #334 — its node-cap/content-visibility approach to bounding DOM size was superseded in spirit by real virtualization, #782, though the CSS containment/`content-visibility` pieces are still present in `_document.scss`)
 
 ### Not in scope despite similar symptoms
-`docs/analysis/ANALYSIS_TEAR_OFF_PERF_2026_06_13.md` and
-`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md` matched a
+[`docs/analysis/ANALYSIS_TEAR_OFF_PERF_2026_06_13.md`](../analysis/ANALYSIS_TEAR_OFF_PERF_2026_06_13.md) and
+[`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md`](../analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md) matched a
 keyword search for "typing" but are about tear-off/redock window mechanics, not
 keystroke latency — a different symptom that happens to share the word.
 
 ### Adjacent — grew out of this investigation, tracked separately
-`docs/specs/SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md` — many-agent
+[`docs/specs/SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md`](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) — many-agent
 tab-switch/reveal-latency design (not keystroke echo). Cites this file's §3 finding
 (`useAgentStream.ts` dispatches ungated by visibility) as part of its own root-cause
 argument for why the tab-reveal gate's global quiet-window signal breaks down with

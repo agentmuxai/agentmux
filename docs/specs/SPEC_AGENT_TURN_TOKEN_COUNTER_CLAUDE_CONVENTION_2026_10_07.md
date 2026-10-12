@@ -2,8 +2,8 @@
 
 **Status:** implemented — PR #4465, landed on main in PR #4468.
 **Date:** 2026-10-07 · **Author:** agent2
-**Component:** `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx`)
-**Token accounting:** `frontend/app/store/agent-pane-state/` (`reducer.ts`, `turn-contribution.ts`), `frontend/app/view/agent/main-agent-usage.ts`, `useAgentStream.ts`
+**Component:** `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx))
+**Token accounting:** [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state) (`reducer.ts`, `turn-contribution.ts`), [`frontend/app/view/agent/main-agent-usage.ts`](../../frontend/app/view/agent/main-agent-usage.ts), `useAgentStream.ts`
 **Replaces:** §3.4 ("Per-turn tokens: what the turn added") of `SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md`. The rest of that spec stands.
 **Builds on:** #4458. The live tokens now follow the stream's own order and survive the backend's turn-ended push, which reaches the pane before the turn's `session_end`.
 

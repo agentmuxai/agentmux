@@ -5,8 +5,8 @@
 **Scope:** Frontend-only — no Rust changes, no schema changes
 **Files touched:**
 - `frontend/app/view/agent/agentModel.ts` (or the agent ViewModel file)
-- `frontend/app/block/blockframe.tsx`
-- `frontend/app/block/block.scss`
+- [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)
+- [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss)
 
 ---
 

@@ -101,7 +101,7 @@ export function buildPaneContextMenu(
 
 ### 1. Header right-click (existing, update to use shared builder)
 
-**File:** `frontend/app/block/blockframe.tsx`
+**File:** [`frontend/app/block/blockframe.tsx`](../../../frontend/app/block/blockframe.tsx)
 **Function:** `handleHeaderContextMenu()`
 
 ```typescript
@@ -187,8 +187,8 @@ implementing.
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/pane-actions.ts` | Add `buildPaneContextMenu()` shared builder |
-| `frontend/app/block/blockframe.tsx` | Refactor `handleHeaderContextMenu` to use shared builder; add `onContextMenu` to body container |
+| [`frontend/app/block/pane-actions.ts`](../../../frontend/app/block/pane-actions.ts) | Add `buildPaneContextMenu()` shared builder |
+| [`frontend/app/block/blockframe.tsx`](../../../frontend/app/block/blockframe.tsx) | Refactor `handleHeaderContextMenu` to use shared builder; add `onContextMenu` to body container |
 
 No new files needed — `pane-actions.ts` already exists from v1.
 
@@ -241,8 +241,8 @@ don't belong on the body context menu.
 
 ## References
 
-- `frontend/app/block/blockframe.tsx` — current header menu
-- `frontend/app/block/pane-actions.ts` — split + vscode actions (Phase 1)
-- `frontend/app/store/contextmenu.ts` — ContextMenuModel.showContextMenu()
-- `frontend/layout/lib/layoutModel.ts` — layout split operations
+- [`frontend/app/block/blockframe.tsx`](../../../frontend/app/block/blockframe.tsx) — current header menu
+- [`frontend/app/block/pane-actions.ts`](../../../frontend/app/block/pane-actions.ts) — split + vscode actions (Phase 1)
+- [`frontend/app/store/contextmenu.ts`](../../../frontend/app/store/contextmenu.ts) — ContextMenuModel.showContextMenu()
+- [`frontend/layout/lib/layoutModel.ts`](../../../frontend/layout/lib/layoutModel.ts) — layout split operations
 - `SPEC_PANE_CONTEXT_MENU.md` (this file, v1 superseded)

@@ -14,8 +14,8 @@ the stub surface turned out to be dead code, not un-migrated code. Remaining ope
 §5.1-5.3 and §5.5-5.9.
 
 **2026-09-18 — docs lifecycle (§2.4, §5.5).** Four PRs landed: #3366, #3367, #3368, #3369.
-Three add enforcement (relative-link resolution, the `docs/README.md` directory map, and
-citations widened from `docs/specs/` to any `docs/<dir>/`), each clearing the backlog it
+Three add enforcement (relative-link resolution, the [`docs/README.md`](../README.md) directory map, and
+citations widened from [`docs/specs/`](../specs) to any `docs/<dir>/`), each clearing the backlog it
 exposed — 45 broken links, a map advertising a directory deleted six weeks earlier, and 10
 code comments citing documents that were never committed. One folds an archive directory
 and writes down why the last split is deliberate. A fifth (#3370, this change) folds two singleton directories
@@ -90,7 +90,7 @@ Err(e) => {
 
 Phases 0, 1a (#3043, #3047), 1b, 1c (#3065), 2 (#3070), 3 (#3062), 5 (#3066) and 6 all shipped
 2026-09-07. Supporting artifacts verified present: `migrations/phase5_tests.rs`,
-`docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`, `srv_stderr::migration_failed_line`,
+[`docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`](../incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md), `srv_stderr::migration_failed_line`,
 `runner::doctor_report_for_instance`. **Only Phase 4 remains, and the spec itself calls it a
 product decision, not engineering.**
 
@@ -168,13 +168,13 @@ Three of them are Part 4 (enforcement), not Phase 2:
 | gate | catches | first-run backlog |
 |---|---|---|
 | `check-doc-links.mjs` (#3366) | relative Markdown links that do not resolve from the file they are written in | **45 broken links across 27 files → 0** |
-| `check-docs-dir-map.mjs` (#3368) | `docs/README.md`'s directory table vs the directories that actually exist | 2 → 0 |
-| `check-spec-citations.sh` widened (#3369) | citations naming any `docs/<dir>/x.md`, not only `docs/specs/` | 10 dangling code citations → 0 |
+| `check-docs-dir-map.mjs` (#3368) | [`docs/README.md`](../README.md)'s directory table vs the directories that actually exist | 2 → 0 |
+| `check-spec-citations.sh` widened (#3369) | citations naming any `docs/<dir>/x.md`, not only [`docs/specs/`](../specs) | 10 dangling code citations → 0 |
 
 The gap the first two close is specific and had been open a long time: `check-spec-citations.sh`
-only recognises a path containing `docs/specs/`, so a link written `](specs/archive/Y.md)` in
-`docs/reports/` was invisible to it, and resolved only from files that happened to sit in
-`docs/`. Those have been dead since the top-level `specs/` tree was folded in (#2920).
+only recognises a path containing [`docs/specs/`](../specs), so a link written `](specs/archive/Y.md)` in
+[`docs/reports/`](.) was invisible to it, and resolved only from files that happened to sit in
+[`docs/`](..). Those have been dead since the top-level `specs/` tree was folded in (#2920).
 
 **The finding that generalises beyond docs:** of the documents cited from source comments,
 five were never committed to this repo at all — no file, no deletion, nothing in history
@@ -186,19 +186,19 @@ doc merely moved, check `git log --diff-filter=D --all` — for these five it re
 
 **Phase 2 (directory consolidation) is partly done, and the rest is deliberate.** The audit
 counted four archive directories; two were already gone (`specs/archive/` left with the
-top-level tree), and #3367 folded `docs/analysis/archive/` into `docs/archive/`, leaving two.
-`docs/specs/archive/` stays on purpose and is documented in `docs/archive/README.md`: it is
-load-bearing tooling, not a folder. `gen-docs-index.sh` scans `docs/specs/` and excludes
+top-level tree), and #3367 folded `docs/analysis/archive/` into [`docs/archive/`](../archive), leaving two.
+[`docs/specs/archive/`](../specs/archive) stays on purpose and is documented in [`docs/archive/README.md`](../archive/README.md): it is
+load-bearing tooling, not a folder. `gen-docs-index.sh` scans [`docs/specs/`](../specs) and excludes
 exactly that subtree, `check-docs-lifecycle.mjs` hardcodes the path, and two build scripts
 cite into it — so moving it forces an INDEX.md regeneration, which is not reproducible
 off-CI (a Windows run emits ~21 extra status buckets and a different row order than CI's).
 
 **Singleton directories: two folded, three kept (#3370).** `docs/sessions/` (1 file, no
-inbound references) moved to `docs/status/`, and `docs/recovery/` (3 files) to
-`docs/incident/` — a fold `docs/README.md` already described as one category, so it
+inbound references) moved to [`docs/status/`](../status), and `docs/recovery/` (3 files) to
+[`docs/incident/`](../incident) — a fold [`docs/README.md`](../README.md) already described as one category, so it
 required no new judgement about what those documents are. 18 directories became 17.
 
-`docs/api/`, `docs/cef-patches/` and `docs/providers/` were **kept**, each having a
+[`docs/api/`](../api), [`docs/cef-patches/`](../cef-patches) and [`docs/providers/`](../providers) were **kept**, each having a
 distinct audience or purpose (a user-facing App API guide; the vendored CEF patch set with
 its own README; a cross-provider reference cited from five places). The hardening spec only
 asks a singleton to fold when it does not have one.
@@ -298,7 +298,7 @@ work.
 ## 4. What this PR changed
 
 Every item was verified against a named code artifact first. **No bulk restamping** —
-`scripts/check-doc-status.sh`'s own comments name that as the failure to avoid ("replaces
+[`scripts/check-doc-status.sh`](../../scripts/check-doc-status.sh)'s own comments name that as the failure to avoid ("replaces
 unknown status with confidently wrong status"), which is why the 357-file backlog in §5.5 is
 deliberately left alone.
 
@@ -307,7 +307,7 @@ deliberately left alone.
 | `CLAUDE.md` | `transcript_request` is "a pre-committed POLICY for a jekt type that **does not exist in shipped code yet**" | live since PR #2764 | `transcript_request.rs`; `resolve_transcript_request_tier_fields()` at `reactive.rs:716`, called at 10+ sites |
 | `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` | `Proposed — not yet implemented` | `active` — host tier shipped, WAN half gated | `jekt_sign::{sign_jekt,verify_jekt}`; `inject_jekt_signing_keys_into_mcp_json` (`agent_config.rs:1312`). First restamped `implemented`; corrected after review — see §5.9 |
 | `ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` | `DECISIONS RESOLVED, NOT YET IMPLEMENTED` | `active` — steps 1–3 shipped | PR #2587 artifacts, §2.2 |
-| `SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md` | `Draft — spec only, no code written yet` | `implemented` | `frontend/app/element/primitive-list-detail.tsx` cites it by name |
+| `SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md` | `Draft — spec only, no code written yet` | `implemented` | [`frontend/app/element/primitive-list-detail.tsx`](../../frontend/app/element/primitive-list-detail.tsx) cites it by name |
 | `SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md` | `Proposed (…not implemented) (implemented — see note below)` | `implemented` | `tool-renderers/registry.ts` + `registry.test.ts` |
 | `migrations/runner.rs:50` | "17 of 19 registered migrations" | count removed | registry holds **34** |
 
@@ -339,7 +339,7 @@ run for Phase A or B.
   anywhere in srv. The sidecar is genuinely unreachable from inside a container.
 - **The audit's other container claim is already stale:** the working dir *is* mounted
   (`ContainerMountSpec.workspace_host_dir` → `/workspace`, landed 2026-09-02), so `.mcp.json` is
-  visible in-container. What actually breaks is narrower: `docker/Dockerfile.agent-agentmux`
+  visible in-container. What actually breaks is narrower: [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux)
   ships neither `agentmux-mcp` nor `agentmux-bashwrap`, and `PATH` is in
   `CONTAINER_ENV_DENYLIST`, so `"command": "agentmux-mcp"` and the bashwrap PreToolUse hook
   cannot resolve.
@@ -434,7 +434,7 @@ causes and raw occurrences rather than actionable duplication.
 
 **Cause 1 was mis-framed, and the real gap was sharper.** The audit said "no Rust↔TS
 codegen". In fact `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.4 step 1 had shipped —
-`register_typed`, the `RpcSchema` registry, ts-rs export and `scripts/check-rpc-bindings.sh`
+`register_typed`, the `RpcSchema` registry, ts-rs export and [`scripts/check-rpc-bindings.sh`](../../scripts/check-rpc-bindings.sh)
 were all live with 12 generated types. What had not happened is step 2, and specifically:
 **nothing in the frontend imported a single generated type.** All 12 were generated, gated
 against drift, and unused, while the hand-written stubs kept inline duplicates of the same
@@ -498,7 +498,7 @@ That is **72% of registrations typed**, from 5%. `srv-types.d.ts` is down 38%.
 #### 5.4b The finding that changed the plan: 25% of the stub surface was dead
 
 Mapping `block`'s remaining commands turned up ten with **no backend handler**. That is not
-new information — `test/contract/rpc-contract.test.ts` already tracked them in a
+new information — [`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts) already tracked them in a
 `KNOWN_DECLARED_UNREGISTERED` allowlist, and the first instinct to report it as a discovery
 was wrong. What *was* new is the scale, measured across all 16 stub files: **69 of 277
 commands (25%)**, concentrated in `file.ts` (23/42), `workspace.ts` (22/39), `misc.ts`
@@ -610,7 +610,7 @@ every gate stays green, because the generated file is internally consistent and 
 describes a wire format that does not exist. Three sightings: `oauth_config_dir` (#3320),
 `FlowNode.type` → `node_type` (#3329), `pathSource` → `path_source` (#3344). All three
 were caught by *reading generated output*, not by any check. There is one now —
-`scripts/check-rpc-codegen-hygiene.mjs`, wired into `ci-pr.yml` beside the bindings gate.
+[`scripts/check-rpc-codegen-hygiene.mjs`](../../scripts/check-rpc-codegen-hygiene.mjs), wired into `ci-pr.yml` beside the bindings gate.
 
 **Wrong, and retracted in #3345: ts-rs does NOT ignore `#[serde(rename_all)]`.** #3329
 added `#[ts(rename_all)]` to two enums with a comment asserting it did, and an earlier
@@ -627,7 +627,7 @@ noisy check that gets read beats a quiet one that gets trusted.
 
 #### 5.4e-bis The four checks, and why none of them is `tsc`
 
-`scripts/check-rpc-codegen-hygiene.mjs` carries four checks, each written after the same
+[`scripts/check-rpc-codegen-hygiene.mjs`](../../scripts/check-rpc-codegen-hygiene.mjs) carries four checks, each written after the same
 defect got past review more than once. They share one property worth stating plainly:
 **every failure they catch compiles, typechecks, AND passes `check-rpc-bindings.sh`.**
 
@@ -718,7 +718,7 @@ versus the audit's ~360, i.e. **flat while the tree grew by 41**. New specs are 
 ones are untouched, exactly as `check-doc-status.sh`'s changed-files-only scoping intends. Top
 offenders: `ready` ×35, `spec` ×33, `design` ×13, `approved`/`analysis` ×11. Nothing schedules
 the burn-down. Issue **#3216** (`docs-stale-sweep`, auto-updated weekly, backed by
-`scripts/docs-stale-sweep.mjs`) already reports a wider 1,330-doc scan with 453 flagged — the
+[`scripts/docs-stale-sweep.mjs`](../../scripts/docs-stale-sweep.mjs)) already reports a wider 1,330-doc scan with 453 flagged — the
 instrumentation exists; the burn-down does not.
 
 **Re-measured 2026-09-18.** 912 specs (excluding `archive/`, INDEX, README):
@@ -753,8 +753,8 @@ this backlog is surfaced, not repaired, and #3216's weekly sweep already reports
 
 #### 5.5a The backlog is three times bigger than this section says, because this section only counted specs
 
-Measured 2026-09-18 across `docs/`: **1,489 tracked `.md`, of which 6 are INDEX/README and
-not themselves documents with a lifecycle — so 1,483 scanned**, not just `docs/specs/`.
+Measured 2026-09-18 across [`docs/`](..): **1,489 tracked `.md`, of which 6 are INDEX/README and
+not themselves documents with a lifecycle — so 1,483 scanned**, not just [`docs/specs/`](../specs).
 The rows below sum to that 1,483.
 
 | | count |
@@ -767,12 +767,12 @@ The rows below sum to that 1,483.
 | **scanned** | **1,483** |
 | **total non-compliant** | **610** |
 
-The gate is not specs-scoped — its `docs/` filter is applied in awk on the diff destination —
+The gate is not specs-scoped — its [`docs/`](..) filter is applied in awk on the diff destination —
 so all 610 are in its blast radius the moment someone edits one.
 
 **The reason most of them are non-compliant is not neglect.** The top non-vocabulary words are
 `root` x45 (`**Status:** root-caused; fix in ...`), `analysis` x25, `shipped` x11,
-`fixed` x7, `investigation` x6. Those are `docs/retro/` and `docs/analysis/` files, and the
+`fixed` x7, `investigation` x6. Those are [`docs/retro/`](../retro) and [`docs/analysis/`](../analysis) files, and the
 closed vocabulary — `draft | proposed | active | implemented | living | historical |
 superseded` — was designed for **specs**, which are 974 of the 1,483 scanned. A retro is not
 "implemented"; it is a record of something that happened. Forcing it into a spec's lifecycle
@@ -825,7 +825,7 @@ being necessary.
 - **#1400** is now a duplicate of #2939 workstream 1 (its only two comments say so) — close into it.
 - **#2024** — all three items answered; successor work parked by repo-owner call. Close or re-title.
 - **#1960** closed 2026-07-12 with all six gaps verified; any doc still describing A4–A7 as pending is wrong.
-- **#950** — `term.type` exists *only* in `docs/specs/app-api-extension.md`, not in server code: a doc promising an API that does not exist.
+- **#950** — `term.type` exists *only* in [`docs/specs/app-api-extension.md`](../specs/app-api-extension.md), not in server code: a doc promising an API that does not exist.
 - Eight tracking discussions last moved 2026-06-14/15 (~93 days) and are effectively abandoned.
 
 ### 5.9 Jekt WAN sender-binding — nearly lost from the backlog 🟡 **[verified]**

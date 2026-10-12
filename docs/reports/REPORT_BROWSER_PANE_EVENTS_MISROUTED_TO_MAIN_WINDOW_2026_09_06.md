@@ -45,7 +45,7 @@ falling back to "any browser" only if `main` is absent:
 
 After the tear-off the pane's view model lives in window 2's renderer. `main` still exists, so the lookup succeeds, `execute_java_script` runs in `main`'s renderer, and the `agentmux-event` `CustomEvent` fires there — where no view model for that `block_id` is subscribed any more. The event is dropped silently: no warning on the host (the target browser was found), no log on the frontend (nobody is listening).
 
-Why that presents as a stuck brain: `frontend/app/view/browser/browser-view.tsx` clears the overlay only on a true→false transition of the pane's `loadingAtom`, which is driven solely by the `is_loading` field of `browser-pane-nav-state`. Navigation still works because `invokeCommand` is request/response and window-agnostic — which is exactly the "navigates but never finishes" shape reported.
+Why that presents as a stuck brain: [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx) clears the overlay only on a true→false transition of the pane's `loadingAtom`, which is driven solely by the `is_loading` field of `browser-pane-nav-state`. Navigation still works because `invokeCommand` is request/response and window-agnostic — which is exactly the "navigates but never finishes" shape reported.
 
 The pane registry already knows the right answer. `HostState.browser_panes[block_id].window_label` is written by the reducer (`reducer/panes.rs`, `TryRegisterBrowserPaneLive`) before the CEF browser is created, and the log confirms it held `window-pool-930b71ac…` for the recreated pane. `AppState::browser_pane_window_label` exposes it. Nothing in the five sites consulted it.
 

@@ -1,7 +1,7 @@
 # SPEC: Native macOS menu bar (File / Edit / View / Window / Help)
 
 **Status:** Draft · **Date:** 2026-06-03 · **Owner:** AgentMux host/macOS
-**Related:** `SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md` (the menu bar appeared because the app now runs as a regular Dock app), `frontend/app/window/hamburger-menu.tsx`, `frontend/app/store/keymodel.ts`, `frontend/app/menu/base-menus.ts`
+**Related:** `SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md` (the menu bar appeared because the app now runs as a regular Dock app), [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx), [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts), [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts)
 
 ---
 
@@ -233,4 +233,4 @@ Recommend **A**, revisit if users miss quick title-bar access. Either way the fa
 ## 10. References
 
 - Apple HIG — *Menus* and the standard macOS menu-bar layout (App, File, Edit, Format, View, Window, Help) and standard key equivalents.
-- Internal: `frontend/app/window/hamburger-menu.tsx` (current items), `frontend/app/store/keymodel.ts` (shortcuts/actions), `frontend/app/menu/base-menus.ts` (shared menu builder), `frontend/app/modals/command-palette.tsx`, `agentmux-cef/src/main.rs` (`set_macos_activation_policy_regular`, the swizzle/FFI patterns to mirror for `setMainMenu:`), `SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md`.
+- Internal: [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) (current items), [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) (shortcuts/actions), [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) (shared menu builder), [`frontend/app/modals/command-palette.tsx`](../../frontend/app/modals/command-palette.tsx), `agentmux-cef/src/main.rs` (`set_macos_activation_policy_regular`, the swizzle/FFI patterns to mirror for `setMainMenu:`), `SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md`.

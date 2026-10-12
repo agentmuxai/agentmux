@@ -5,7 +5,7 @@
 **Date:** 2026-05-29
 **Author:** AgentX
 **Scope:** Phase 0.2 of the input-first execution plan (follow-up to [discussion #1161](https://github.com/agentmuxai/agentmux/discussions/1161)), enforcing invariant **I2 — "No synchronous IPC on any input path, ever."**
-**Builds on:** `docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`
+**Builds on:** [`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](../specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md)
 
 ---
 
@@ -15,7 +15,7 @@ The input-first review identified the renderer↔host IPC layer as the highest-s
 
 ## What "synchronous IPC on the input path" means here
 
-The host IPC transport is **async by construction** — `invokeCommand()` (`frontend/app/platform/ipc.ts:30`) issues `fetch("http://127.0.0.1:${port}/ipc", …)` and returns a Promise. So a keystroke handler that *dispatches* a command fire-and-forget is **compliant** with I2 — it returns immediately and the result settles later. The violations are the **blocking** shapes:
+The host IPC transport is **async by construction** — `invokeCommand()` ([`frontend/app/platform/ipc.ts:30`](../../frontend/app/platform/ipc.ts#L30)) issues `fetch("http://127.0.0.1:${port}/ipc", …)` and returns a Promise. So a keystroke handler that *dispatches* a command fire-and-forget is **compliant** with I2 — it returns immediately and the result settles later. The violations are the **blocking** shapes:
 
 1. `await invokeCommand(...)` / `await fetch(...)` inside an input handler — stalls the handler on a round-trip before paint.
 2. An `async` `keyDownHandler` (returns a Promise) — the central dispatch in `store/keymodel.ts` treats the return as a synchronous boolean; making it async breaks that contract and invites awaited IPC.
@@ -23,7 +23,7 @@ The host IPC transport is **async by construction** — `invokeCommand()` (`fron
 
 ## How the input path actually dispatches
 
-Central dispatch is `appHandleKeyDown()` (`frontend/app/store/keymodel.ts:369`, entry via `:433`):
+Central dispatch is `appHandleKeyDown()` ([`frontend/app/store/keymodel.ts:369`](../../frontend/app/store/keymodel.ts#L369), entry via `:433`):
 
 ```
 keydown → appHandleKeyDown(waveEvent): boolean
@@ -40,14 +40,14 @@ Every handler returns a **synchronous boolean** (consumed or not). Block-level h
 |---|---|
 | `await invokeCommand` / `await fetch` inside input-dispatch files | **None** |
 | `async keyDownHandler` / `keyDownHandler(): Promise` | **None** — all return synchronous `boolean` |
-| Synchronous XHR (`open(…, false)`) anywhere in `frontend/app` | **None** |
+| Synchronous XHR (`open(…, false)`) anywhere in [`frontend/app`](../../frontend/app) | **None** |
 | Fire-and-forget `invokeCommand` from keymap handlers | Present and **compliant** (dispatch, not await) |
 
 The keystroke path does not block on IPC today. This is the property to preserve.
 
 ## Guard shipped
 
-- **`tools/lint/check-input-handler-sync-ipc.sh`** — grep+awk scan (mirrors `check-input-handler-layout-reads.sh`). Flags awaited-IPC and async key handlers within the input-dispatch scope (`keymodel.ts`, `termViewModel.ts`, `launcher.tsx`, `AgentFooter.tsx`) plus a repo-wide synchronous-XHR ban. Comment lines skipped; escape hatch `// perf:allow-input-ipc — <why>`.
+- **[`tools/lint/check-input-handler-sync-ipc.sh`](../../tools/lint/check-input-handler-sync-ipc.sh)** — grep+awk scan (mirrors `check-input-handler-layout-reads.sh`). Flags awaited-IPC and async key handlers within the input-dispatch scope (`keymodel.ts`, `termViewModel.ts`, `launcher.tsx`, `AgentFooter.tsx`) plus a repo-wide synchronous-XHR ban. Comment lines skipped; escape hatch `// perf:allow-input-ipc — <why>`.
 - **`.github/workflows/input-handler-sync-ipc.yml`** — path-filtered PR + main check.
 
 Verified locally: passes clean on current `main`; exits non-zero on an injected `await invokeCommand` in scope; escape-hatch and comment-skip honored.

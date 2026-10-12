@@ -32,14 +32,14 @@ AgentA's pane is an agent-first pane, so it has the agent chrome and the slot.
 The busy ring lives in pane **chrome**, and chrome belongs to whichever view
 was active when the pane first hoisted. It is never re-derived after that.
 
-1. `frontend/app/tab/pane-leaf-chrome.tsx:414-420`: `chromeVm` latches the
+1. [`frontend/app/tab/pane-leaf-chrome.tsx:414-420`](../../frontend/app/tab/pane-leaf-chrome.tsx#L414-L420): `chromeVm` latches the
    **first** non-null `ViewModel` it ever sees and renders
    `vm.renderPaneChrome(...)` from it for the pane's whole life. This is
    deliberate: it prevents chrome remount flashes on tab switch.
-2. `frontend/app/element/PaneChrome.tsx:69`: the shared chrome resolves the
+2. [`frontend/app/element/PaneChrome.tsx:69`](../../frontend/app/element/PaneChrome.tsx#L69): the shared chrome resolves the
    `PaneChromeModel` **once**, from that latched vm's `paneChromeModel`.
 3. Only the agent's `PaneChromeModel` provides `renderBelowHeader`
-   (`frontend/app/view/agent/agent-view.tsx:515`), which renders
+   ([`frontend/app/view/agent/agent-view.tsx:515`](../../frontend/app/view/agent/agent-view.tsx#L515)), which renders
    `.agent-pane-progress-bar-slot`. The same model's effect
    (`agent-view.tsx:484-492`) is also what calls
    `setProgressBarMount(slotEl)` on the active agent vm.

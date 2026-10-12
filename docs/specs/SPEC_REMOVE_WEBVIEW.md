@@ -66,9 +66,9 @@ Remove `web:openlinksinternally` reference in the openLink function.
 
 | File | Reason |
 |------|--------|
-| `frontend/app/block/autotitle.ts:176` | `case "tsunami": return "Tsunami"` -- harmless fallback string for any legacy blocks |
-| `frontend/app/view/helpview/helpview.tsx` | Comment-only reference ("Previously extended WebViewModel...") |
-| `frontend/app/block/autotitle.ts:166` | `case "preview": return generatePreviewTitle(block)` -- independent of webview code |
+| [`frontend/app/block/autotitle.ts:176`](../../frontend/app/block/autotitle.ts#L176) | `case "tsunami": return "Tsunami"` -- harmless fallback string for any legacy blocks |
+| [`frontend/app/view/helpview/helpview.tsx`](../../frontend/app/view/helpview/helpview.tsx) | Comment-only reference ("Previously extended WebViewModel...") |
+| [`frontend/app/block/autotitle.ts:166`](../../frontend/app/block/autotitle.ts#L166) | `case "preview": return generatePreviewTitle(block)` -- independent of webview code |
 
 ## Libraries Removed
 

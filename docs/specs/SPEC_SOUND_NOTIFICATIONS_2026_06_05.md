@@ -1,18 +1,18 @@
 # SPEC — Sound notifications subsystem
 
-**Status:** implemented, and past v1 — #1301 (2026-06-07), the PR this doc was added in. Its "fix(sounds)" title understates it: every file §7.1 lists exists under `frontend/app/notification/sound/`, wired through `agent-pane-state`'s reducer and `wconfig/types.rs`. §7 scoped v1 to turn-complete only and predicted further events would "drop in by adding entries to `SOUNDS`" — that is what happened; `sounds.ts` now carries 21, and #1607 added the blocked-for-input ambient tone. No `.ogg` assets are committed, so `synth-fallback.ts` is the live source rather than the sampled path Appendix B describes.
+**Status:** implemented, and past v1 — #1301 (2026-06-07), the PR this doc was added in. Its "fix(sounds)" title understates it: every file §7.1 lists exists under [`frontend/app/notification/sound/`](../../frontend/app/notification/sound), wired through `agent-pane-state`'s reducer and `wconfig/types.rs`. §7 scoped v1 to turn-complete only and predicted further events would "drop in by adding entries to `SOUNDS`" — that is what happened; `sounds.ts` now carries 21, and #1607 added the blocked-for-input ambient tone. No `.ogg` assets are committed, so `synth-fallback.ts` is the live source rather than the sampled path Appendix B describes.
 **Date:** 2026-06-05
 **Author:** agent2
 **First use case:** play a "ding" when the agent pane's turn completes.
 **Scope:** frontend-only (no Rust changes). Generalizes from the first use case to a registry-driven system that any pane / store / saga can opt into.
 
 **Related:**
-- `frontend/app/store/agent-pane-state/types.ts` (lines 480–605 — `AgentPaneEvent` union, source of the `turn-ended` event we react to)
-- `frontend/app/store/agent-pane-state-store.ts` (lines 78–89, 172 — current single-sink event delivery; we extend it to multicast)
-- `frontend/app/store/command-source.ts` (the global dispatch ring buffer we **do not** use; rationale in §6.2)
-- `frontend/app/store/global.ts` (lines 91, 129, 459–470 — `settingsAtom`, `notifications`, `getSettingsKeyAtom` we plug into)
-- `frontend/app/notification/usenotification.tsx` (the visual notification framework we coexist with — sound is additive, not a replacement)
-- `frontend/app/store/focusManager.ts` + `frontend/util/focusutil.ts` (pane-focus signal used to suppress sound when the user is already looking at the pane)
+- [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) (lines 480–605 — `AgentPaneEvent` union, source of the `turn-ended` event we react to)
+- [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) (lines 78–89, 172 — current single-sink event delivery; we extend it to multicast)
+- [`frontend/app/store/command-source.ts`](../../frontend/app/store/command-source.ts) (the global dispatch ring buffer we **do not** use; rationale in §6.2)
+- [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) (lines 91, 129, 459–470 — `settingsAtom`, `notifications`, `getSettingsKeyAtom` we plug into)
+- [`frontend/app/notification/usenotification.tsx`](../../frontend/app/notification/usenotification.tsx) (the visual notification framework we coexist with — sound is additive, not a replacement)
+- [`frontend/app/store/focusManager.ts`](../../frontend/app/store/focusManager.ts) + [`frontend/util/focusutil.ts`](../../frontend/util/focusutil.ts) (pane-focus signal used to suppress sound when the user is already looking at the pane)
 - `agentmux-srv/src/backend/wconfig/types.rs` (lines 200–225 — backend settings struct we extend with the new `notify:sounds:*` keys)
 - `frontend/types/gotypes.d.ts` (lines 1287–1351 — TS counterpart of the settings struct)
 - `settings-template.jsonc` (the user-facing commented template we add a `-- Notification sounds --` section to)
@@ -67,7 +67,7 @@ We design for the general case from day one. A bespoke `playDingOnTurnEnd()` hac
 
 ### 3.1 Reducer events are already the right shape
 
-`AgentPaneEvent` (`frontend/app/store/agent-pane-state/types.ts:480–605`) is a discriminated union with stable type literals: `turn-ended`, `turn-started`, `stream-stalled`, `submit-timed-out`, `interrupt-timed-out`, `pending-accepted`, `pending-rejected`, `pending-expired`, `stream-stuck`, etc. These are **already** emitted on every state transition we'd want a sound for. The reducer is the single source of truth and the event is the audit-friendly form. We do not need a parallel "fire a sound" command; we just need a subscriber.
+`AgentPaneEvent` ([`frontend/app/store/agent-pane-state/types.ts:480–605`](../../frontend/app/store/agent-pane-state/types.ts#L480-L605)) is a discriminated union with stable type literals: `turn-ended`, `turn-started`, `stream-stalled`, `submit-timed-out`, `interrupt-timed-out`, `pending-accepted`, `pending-rejected`, `pending-expired`, `stream-stuck`, etc. These are **already** emitted on every state transition we'd want a sound for. The reducer is the single source of truth and the event is the audit-friendly form. We do not need a parallel "fire a sound" command; we just need a subscriber.
 
 `agent-pane-state-store.ts:172` fans every emitted event into a single global `eventSink` function (default: warn-logger). The browser, editor, and drone slices follow the same pattern. The sink slot is "last-writer-wins" with idempotent install guards — see `browser-model.ts:installEventSinkOnce` and the comment block above it. This was fine when each slice had **one** consumer (the side-effecting bridge between reducer and DOM); it becomes a problem the moment a second consumer (us) wants in.
 
@@ -112,11 +112,11 @@ The reducer already computes `outcome` two lines earlier (line 405). No new cont
 
 ### 3.5 Visual notifications exist; sound is additive
 
-`atoms.notifications` + `setNotifications` (`global.ts:129`) drive the toast UI (`frontend/app/notification/notificationbubbles.tsx`). The sound service can optionally push a matching toast for any sound event when the user has muted audio or has accessibility settings on — that's our WCAG 1.4.2 visual-equivalent path. It is **not** required for v1 — the spinner stopping + "Worked" label is already a visual signal — but the hook is in place if we want belt-and-suspenders.
+`atoms.notifications` + `setNotifications` (`global.ts:129`) drive the toast UI ([`frontend/app/notification/notificationbubbles.tsx`](../../frontend/app/notification/notificationbubbles.tsx)). The sound service can optionally push a matching toast for any sound event when the user has muted audio or has accessibility settings on — that's our WCAG 1.4.2 visual-equivalent path. It is **not** required for v1 — the spinner stopping + "Worked" label is already a visual signal — but the hook is in place if we want belt-and-suspenders.
 
 ### 3.6 Pane focus tracking exists; window focus doesn't
 
-`focusManager.blockFocusAtom()` (`focusManager.ts:11–19`) is a reactive accessor for "which blockId currently holds DOM focus." We can use this to **suppress** a sound when the originating pane is focused (the user is already watching — no audio summons needed). There is **no** existing app-level "is this window in the foreground" signal; `document.visibilityState` and `document.hasFocus()` are available but only consulted ad-hoc (one MyAgentsList refetch handler + one command-registry guard — `command-registry.ts:410`). v1 adds a small focus-state signal under `frontend/app/window/` for the sound service to read.
+`focusManager.blockFocusAtom()` (`focusManager.ts:11–19`) is a reactive accessor for "which blockId currently holds DOM focus." We can use this to **suppress** a sound when the originating pane is focused (the user is already watching — no audio summons needed). There is **no** existing app-level "is this window in the foreground" signal; `document.visibilityState` and `document.hasFocus()` are available but only consulted ad-hoc (one MyAgentsList refetch handler + one command-registry guard — `command-registry.ts:410`). v1 adds a small focus-state signal under [`frontend/app/window/`](../../frontend/app/window) for the sound service to read.
 
 ---
 
@@ -134,7 +134,7 @@ frontend/app/notification/sound/
     index.ts              # Bootstrap — installed once at app init
 ```
 
-Co-located with `frontend/app/notification/` because the user-mental-model of "what counts as a notification" is the same — they're going to expect to find sound settings near the existing notification settings.
+Co-located with [`frontend/app/notification/`](../../frontend/app/notification) because the user-mental-model of "what counts as a notification" is the same — they're going to expect to find sound settings near the existing notification settings.
 
 ### 4.2 The registry — `sounds.ts`
 
@@ -423,7 +423,7 @@ export { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 export { SOUNDS, type SoundId, type SoundDef, type SoundCategory } from "./sounds";
 ```
 
-`installSoundService()` is called once from `frontend/app-init.ts` after the settings atom is hydrated (so the AudioContext-prime listener is installed before the first user click) and after the agent-pane store is constructed (so we can add the multicast listener).
+`installSoundService()` is called once from [`frontend/app-init.ts`](../../frontend/app-init.ts) after the settings atom is hydrated (so the AudioContext-prime listener is installed before the first user click) and after the agent-pane store is constructed (so we can add the multicast listener).
 
 ---
 
@@ -549,7 +549,7 @@ Chromium's autoplay policy blocks new `AudioContext`s from playing until a user 
 
 ### 6.7 Where does the user-facing label "Notification sounds" live?
 
-Nowhere in v1 — there is no settings UI in v1. The only user-facing strings are the comments in `settings-template.jsonc` and the `description` fields in `schema/settings.json`. A future settings panel reads `SOUNDS[id].label` for the per-event toggle row.
+Nowhere in v1 — there is no settings UI in v1. The only user-facing strings are the comments in `settings-template.jsonc` and the `description` fields in [`schema/settings.json`](../../schema/settings.json). A future settings panel reads `SOUNDS[id].label` for the per-event toggle row.
 
 ---
 
@@ -576,15 +576,15 @@ public/sounds/turn-complete.ogg           # CC0 — see Appendix B
 
 | File | Change |
 |---|---|
-| `frontend/app/store/agent-pane-state/types.ts` | Add `outcome: TurnOutcome` to the `turn-ended` event variant. |
-| `frontend/app/store/agent-pane-state/reducer.ts` | Include `outcome` when emitting `turn-ended` (one-line change inside the existing TurnEnd arm). |
-| `frontend/app/store/agent-pane-state-store.ts` | Add `addEventListener(sink): () => void` (§4.4 Path B). Fan emitted events to both the single sink and the listener set. |
-| `frontend/app/store/agent-pane-state-store.test.ts` | Test the multicast: existing single-sink behavior unchanged; an added listener also receives events; unsubscribing stops delivery; a throwing listener does not break the single sink. |
-| `frontend/app-init.ts` | Call `installSoundService()` once after settings hydrate + the agent-pane store is up. |
+| [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | Add `outcome: TurnOutcome` to the `turn-ended` event variant. |
+| [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | Include `outcome` when emitting `turn-ended` (one-line change inside the existing TurnEnd arm). |
+| [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | Add `addEventListener(sink): () => void` (§4.4 Path B). Fan emitted events to both the single sink and the listener set. |
+| [`frontend/app/store/agent-pane-state-store.test.ts`](../../frontend/app/store/agent-pane-state-store.test.ts) | Test the multicast: existing single-sink behavior unchanged; an added listener also receives events; unsubscribing stops delivery; a throwing listener does not break the single sink. |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts) | Call `installSoundService()` once after settings hydrate + the agent-pane store is up. |
 | `agentmux-srv/src/backend/wconfig/types.rs` | Add the 9 `notify:*` fields per §5.1. |
 | `frontend/types/gotypes.d.ts` | Mirror the type additions per §5.2. |
 | `settings-template.jsonc` | Add the "Notification sounds" section per §5.3. |
-| `schema/settings.json` | Add the same keys with type + description. |
+| [`schema/settings.json`](../../schema/settings.json) | Add the same keys with type + description. |
 
 ### 7.3 Files NOT changed
 

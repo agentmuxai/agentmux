@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-23
 **Owner:** AgentY
-**Area:** `frontend/app/block/block.tsx` (`Block`'s `ready()` gate), `frontend/app/view/agent/agent-view.tsx` (`AgentPicker` -> `AgentPresentationView` cross-fade)
+**Area:** [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) (`Block`'s `ready()` gate), [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (`AgentPicker` -> `AgentPresentationView` cross-fade)
 **Introduced by:** PR #2768 (`f59bb43b7`, 2026-08-22), "feat(layout): cross-fade the remaining pane-mount hard cuts (Phase 3-4)"
 
 ---

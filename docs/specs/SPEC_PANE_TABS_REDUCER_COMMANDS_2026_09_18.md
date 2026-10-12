@@ -3,19 +3,19 @@
 **Date:** 2026-09-18
 **Status:** active — Phase 0 implemented in #3414; Phase 1 partly implemented in #3424 (§4); Phases 2–3 not started.
 **Author:** AgentA@Area54
-**Related:** `docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
+**Related:** [`docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md)
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for
 what this spec prevents),
-`docs/specs/SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (the reducer is the
+[`docs/specs/SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md`](SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md) (the reducer is the
 single writer of `db_layout`),
-`docs/specs/SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md` (proposed:
+[`docs/specs/SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) (proposed:
 frontend sends intents, reducer computes the tree — this spec is a narrow,
 stack-only slice of that direction),
-`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` (introduced
+[`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) (introduced
 `blockStack` / `activeBlockId`, §4.3),
-`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md` (§A3 chose
+[`docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) (§A3 chose
 "zero backend work" for adding a pane tab — this spec revisits that),
-`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` (had asked
+[`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) (had asked
 for a generic reducer path, l.341-348).
 
 ---
@@ -50,12 +50,12 @@ block and placing it becomes one step.
 
 ### 1.2 Every change is a frontend edit plus a whole-tree push
 
-- All stack writers are in `frontend/layout/lib/layoutStack.ts`:
+- All stack writers are in [`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts):
   `pushBlockOntoStack`, `setActiveBlockInStack`, `closeBlockInStack`,
   `addWidgetAsPaneTab`. Each edits the frontend's tree in place and calls
   `persistToBackend()`. The file's header (l.12-17) says they deliberately skip
   `treeReducer`.
-- `persistToBackend` (`frontend/layout/lib/layoutPersistence.ts:391`) is a
+- `persistToBackend` ([`frontend/layout/lib/layoutPersistence.ts:391`](../../frontend/layout/lib/layoutPersistence.ts#L391)) is a
   100ms trailing debounce. It sends the whole tree through `UpdateObject`,
   which becomes `Command::LayoutSetTree`
   (`agentmux-srv/src/server/service/object.rs:486-627`).
@@ -84,7 +84,7 @@ queues no layout action. No backend path places a block into an existing stack.
 
 The frontend understands `insert`, `delete`, `insertatindex`, `clear`,
 `replace`, `splithorizontal`, `splitvertical`
-(`frontend/layout/lib/types.ts:56-64`, handled in `layoutPersistence.ts:213-385`).
+([`frontend/layout/lib/types.ts:56-64`](../../frontend/layout/lib/types.ts#L56-L64), handled in `layoutPersistence.ts:213-385`).
 Every insert/replace/split builds a fresh leaf with a single block. Nothing can
 say "add this block to that pane's tabs" or "remove this one tab".
 
@@ -97,7 +97,7 @@ say "add this block to that pane's tabs" or "remove this one tab".
    still there to do it.
 2. **A backend `delete` for one tab removes the whole pane.** The frontend's
    `delete` handler looks the leaf up with `getNodeByBlockId`, which also
-   matches background stack members (`frontend/layout/lib/layoutNodeModels.ts:222-230`),
+   matches background stack members ([`frontend/layout/lib/layoutNodeModels.ts:222-230`](../../frontend/layout/lib/layoutNodeModels.ts#L222-L230)),
    then deletes the whole leaf (`layoutPersistence.ts:232-269`). Every
    `delete_block` saga run queues exactly that action
    (`agentmux-srv/src/sagas/delete_block.rs`, Step 2b). So when a terminal tab's
@@ -212,7 +212,7 @@ expected outputs in a Rust test and a vitest).
 ## 4. Phases
 
 **Phase 0 — the `delete` action fix (§3.4).** Implemented in #3414:
-`frontend/layout/lib/stackMembers.ts`, `backend::layout::remove_stack_member`,
+[`frontend/layout/lib/stackMembers.ts`](../../frontend/layout/lib/stackMembers.ts), `backend::layout::remove_stack_member`,
 and `LayoutDeleteNodeByBlock` member removal. Frontend handler change, the
 `LayoutDeleteNodeByBlock` semantics change, and tests: a terminal tab exiting
 in a stack with an agent tab leaves the agent tab's pane and block intact. Small;

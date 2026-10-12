@@ -4,7 +4,7 @@
 **Author:** Agent3
 **Verified against:** `main` @ `38978e6ba` (pulled 2026-07-27).
 **Status:** Audit + naming proposal — not yet implemented, awaiting a name decision.
-**Related:** `docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md` (original "Armory" naming brainstorm), `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (execution), `docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md` (gave the per-agent button the same vault icon "for parity"), `docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md` (prior architecture/naming audit, 4 days before this one — did not address this specific two-surfaces-one-name problem).
+**Related:** [`docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md`](../specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md) (original "Armory" naming brainstorm), [`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`](../specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md) (execution), [`docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md`](../specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) (gave the per-agent button the same vault icon "for parity"), [`docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md`](REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md) (prior architecture/naming audit, 4 days before this one — did not address this specific two-surfaces-one-name problem).
 
 ## User's request (verbatim, for traceability)
 
@@ -12,7 +12,7 @@
 
 ## 1. What "Armory" is today — one code concept, two surfaces sharing its name
 
-**There is exactly one thing actually called "Armory" in the codebase and in user-facing copy: the global, fleet-wide pane** (`view: "armory"`, hamburger menu → Armory, `frontend/app/view/armory/`). It's a rail of five independently-owned managers over **shared, reusable** resources — Accounts, Memories, Skills, MCP Servers, Bundles — governed by an explicit architecture doc (`ARCHITECTURE_ARMORY_2026_07_20.md` §0): *"Armory holds shared, reusable resources... What deliberately does NOT live in Armory: per-agent-instance data."*
+**There is exactly one thing actually called "Armory" in the codebase and in user-facing copy: the global, fleet-wide pane** (`view: "armory"`, hamburger menu → Armory, [`frontend/app/view/armory/`](../../frontend/app/view/armory)). It's a rail of five independently-owned managers over **shared, reusable** resources — Accounts, Memories, Skills, MCP Servers, Bundles — governed by an explicit architecture doc (`ARCHITECTURE_ARMORY_2026_07_20.md` §0): *"Armory holds shared, reusable resources... What deliberately does NOT live in Armory: per-agent-instance data."*
 
 **The per-agent surface you're describing is `AgentSetupModal`** — opened by the single header icon on an agent pane (title/tooltip: **"Agent setup"**). It is a *separate* component tree (own Accounts/Memories/MCP Servers/Skills/Startup tabs), not the global pane reopened pre-filtered. Its user-facing button text has never said "Armory" — but three independent places in code and specs informally call it **"the agent armory"**:
 
@@ -81,14 +81,14 @@ Mirroring the original Trust Center → Armory rename's own "minimal-risk scope"
 |---|---|---|
 | Global Armory pane model (icon) | `frontend/app/view/armory/armory-model.ts` | 22 |
 | Global Armory rail (labels+icons, id/label mismatch) | `frontend/app/view/armory/armory-view.tsx` | 17-23 |
-| Armory hamburger entry | `frontend/app/window/hamburger-menu.tsx` | 117-120 |
+| Armory hamburger entry | [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) | 117-120 |
 | Armory widget def | `agentmux-srv/src/config/widgets.json` | 208-219 |
-| Architecture/intent doc | `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md` | §0 |
-| Per-agent header button (label + vault icon) | `frontend/app/view/agent/agent-model.ts` | 143-158 |
+| Architecture/intent doc | [`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](../specs/ARCHITECTURE_ARMORY_2026_07_20.md) | §0 |
+| Per-agent header button (label + vault icon) | [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | 143-158 |
 | Per-agent modal ("the agent armory") | `frontend/app/view/agent/components/AgentSetupModal.tsx` | 1-25 |
-| Header icon rationale spec | `docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md` | 23-31 |
-| Failure banner "Open Armory → Accounts" (vault reuse) | `frontend/app/view/agent/failure/failure-accessory.ts` | 100-108 |
-| Naming brainstorm (Vault rejected, Loadout runner-up) | `docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md` | 36-53 |
+| Header icon rationale spec | [`docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md`](../specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) | 23-31 |
+| Failure banner "Open Armory → Accounts" (vault reuse) | [`frontend/app/view/agent/failure/failure-accessory.ts`](../../frontend/app/view/agent/failure/failure-accessory.ts) | 100-108 |
+| Naming brainstorm (Vault rejected, Loadout runner-up) | [`docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md`](../specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md) | 36-53 |
 | Icon collision precedent (vault replaced shield-halved to avoid Warden clash) | git commit `9b88b7ca7` | — |
-| "Connectors" already reserved for a different concept | `docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md` | §4 |
+| "Connectors" already reserved for a different concept | [`docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md`](REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md) | §4 |
 | MCP/Skills hand-duplication (the §4 semantic caveat) | same report | §1, §2 |

@@ -2,8 +2,8 @@
 
 **Status:** Draft — spec only, no implementation yet
 **Date:** 2026-08-23
-**Scope:** `agentmux-cef` (Linux-only code paths), `scripts/build-appimage-linux.sh`
-(new bundled helper + policy template), `assets/linux/` (new files).
+**Scope:** `agentmux-cef` (Linux-only code paths), [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh)
+(new bundled helper + policy template), [`assets/linux/`](../../assets/linux) (new files).
 
 ---
 
@@ -34,12 +34,12 @@ Confirmed independently this session:
 - The downloaded `v0.55.21` AppImage's internal structure (icon, `.desktop`,
   `AppRun`) is completely correct — not a packaging defect.
 - `chrome-sandbox` is copied into the AppImage
-  (`scripts/build-appimage-linux.sh:150-158`) but is **never chmod'd, chown'd,
+  ([`scripts/build-appimage-linux.sh:150-158`](../../scripts/build-appimage-linux.sh#L150-L158)) but is **never chmod'd, chown'd,
   or made setuid anywhere** in the build — confirmed dead weight, consistent
-  with `docs/cef-build/build-patched-libcef.md:224-228` ("chrome-sandbox is
+  with [`docs/cef-build/build-patched-libcef.md:224-228`](../cef-build/build-patched-libcef.md) ("chrome-sandbox is
   intentionally omitted... ships fine without it").
 - AppImage is the **only** Linux distribution format that actually exists
-  today. `docs/linux.md` and `SPEC_LINUX_DOCS_UPDATE_2026_06_06.md` both claim
+  today. [`docs/linux.md`](../linux.md) and `SPEC_LINUX_DOCS_UPDATE_2026_06_06.md` both claim
   a `.deb` is "produced by CI builder" — that claim is stale: the referenced
   builder repo was deleted 2026-07-18, and even before deletion never had a
   working Linux build. This matters structurally: a `.deb`'s root `postinst`
@@ -70,8 +70,8 @@ possible, and make it survive future updates instead of repeating forever."
 
 ### 1.3 Why AppArmor (option 1), not reviving SUID chrome-sandbox (option 2)
 
-`AppRun`'s extract-once-cache (`scripts/linux-apprun.sh`, Phase 2 of
-`docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md`) extracts a **fresh,
+`AppRun`'s extract-once-cache ([`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh), Phase 2 of
+[`docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md`](linux-appimage-cold-launch-tax-2026-05-08.md)) extracts a **fresh,
 version-scoped copy** of the AppImage's contents to
 `$HOME/.local/share/agentmux/extracted/<VERSION>/` on first run of each new
 version. Every extraction is owned by the extracting user, non-setuid, by
@@ -240,7 +240,7 @@ stderr text as the last resort for a fully headless/minimal box):
   for this process only (not persisted) and proceeds — but the main window,
   once it comes up, shows a **persistent, non-dismissable-by-accident**
   indicator (status bar icon or similar, reusing whatever pattern
-  `frontend/app/store/flash-notifications.ts` or an equivalent persistent
+  [`frontend/app/store/flash-notifications.ts`](../../frontend/app/store/flash-notifications.ts) or an equivalent persistent
   (not auto-expiring) banner mechanism provides) that the session is running
   without the OS sandbox, with a link back to re-trigger "Fix it now" later
   without needing to hit the failure again.
@@ -257,9 +257,9 @@ stderr text as the last resort for a fully headless/minimal box):
 | `agentmux-cef/src/linux_sandbox.rs` (new) | **Create** — proactive `unshare(CLONE_NEWUSER)` probe, dialog display, `pkexec` invocation, exit-code/log fallback detection |
 | `assets/linux/install-userns-apparmor-fix.sh` (new) | **Create** — the `pkexec`-invoked helper (§5.2) |
 | `assets/linux/agentmux-userns.apparmor` (new) | **Create** — the profile template (§5.1), read by the helper script rather than inlined, so it's one source of truth |
-| `scripts/build-appimage-linux.sh` | **Modify** — bundle the new helper + profile template into the AppDir (mirrors how `install-linux-desktop.sh` is already bundled) |
-| `docs/linux.md` | **Modify** — document the AppArmor issue, the fix dialog, and the manual `pkexec`/`sudo` command as a reference (the dialog links here) |
-| `docs/specs/SPEC_CEF_SANDBOX_2026_06_20.md` | **Modify (small)** — add a forward-reference note in §4.2 pointing at this spec, so a future reader doesn't think the "no setuid helper needed" claim is still unconditionally true |
+| [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) | **Modify** — bundle the new helper + profile template into the AppDir (mirrors how `install-linux-desktop.sh` is already bundled) |
+| [`docs/linux.md`](../linux.md) | **Modify** — document the AppArmor issue, the fix dialog, and the manual `pkexec`/`sudo` command as a reference (the dialog links here) |
+| [`docs/specs/SPEC_CEF_SANDBOX_2026_06_20.md`](SPEC_CEF_SANDBOX_2026_06_20.md) | **Modify (small)** — add a forward-reference note in §4.2 pointing at this spec, so a future reader doesn't think the "no setuid helper needed" claim is still unconditionally true |
 
 ---
 

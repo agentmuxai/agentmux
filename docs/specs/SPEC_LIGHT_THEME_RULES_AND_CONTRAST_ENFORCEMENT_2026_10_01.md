@@ -34,7 +34,7 @@ The short answer to "is there a best practice": yes, three that fit together:
 
 ### 1.1 Solid dark pane headers on light themes
 
-`frontend/app/block/blockframe.tsx`, `headerStyle` (line ~717):
+[`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx), `headerStyle` (line ~717):
 
 ```ts
 const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";   // line 90
@@ -212,7 +212,7 @@ luminance ≥ 0.6 (R1). And R7: the set of themes whose solid surface is light e
 
 Extend `eslint.theme-colors.config.js` (and a small script for SCSS):
 - no `#…`, `rgb(…)`, `hsl(…)`, `black`, `white` as a **background** or **text colour**
-  in `frontend/app/block`, `element`, `statusbar`, `window` and the shared chrome
+  in [`frontend/app/block`](../../frontend/app/block), `element`, `statusbar`, `window` and the shared chrome
   (allow-list for terminal/code surfaces and the theme files themselves);
 - no `opacity: <1` on a rule that also sets text content in `statusbar/` and
   `element/PaneTabStrip.scss` (R4).

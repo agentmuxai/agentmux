@@ -205,7 +205,7 @@ Must not break:
   (~lines 183–197), and the existing test "node updates within the same branch read no
   geometry and no computed style" (`ToolOverlayLog.test.tsx:347`). Pins read geometry
   only in ResizeObserver callbacks and `requestAnimationFrame`, never in the update path
-  or in input handlers (`tools/lint/check-input-handler-layout-reads.sh`).
+  or in input handlers ([`tools/lint/check-input-handler-layout-reads.sh`](../../tools/lint/check-input-handler-layout-reads.sh)).
 - The FLIP transition (`withHeightContinuity`). While FOLLOWING, re-pin at the end of the
   transition as well as at the start, so the bottom stays in view as the box eases.
 
@@ -213,7 +213,7 @@ Must not break:
 
 The 09-24 spec already plans this as its **Phase 3**: move `ToolOverlayLog` (and
 `SystemToolInstallInline`) onto a shared `createFollowScroll` primitive. That primitive
-does not exist yet (`frontend/app/view/agent/scroll/` is absent; Phases 1–2 not
+does not exist yet ([`frontend/app/view/agent/scroll/`](../../frontend/app/view/agent/scroll) is absent; Phases 1–2 not
 started).
 
 Recommended order:
@@ -221,7 +221,7 @@ Recommended order:
 1. **Confirm the cause first.** Add the pane's I4 telemetry to this scroller, one
    `[scroll-follow] tool=<id7> <from>→<to> cause=<cause>` line per state change plus a
    `pin reason=<chunks|result-swap|resize>` debug line, and reproduce with the CDP
-   harness (`scripts/ui-screenshots/`): stream a 200-line Bash, let it finish, and read
+   harness ([`scripts/ui-screenshots/`](../../scripts/ui-screenshots)): stream a 200-line Bash, let it finish, and read
    `scrollTop`/`scrollHeight`/`clientHeight` before and after completion. This tells us
    which of B.2's causes is real before we write the fix.
 2. **Build the pure reducer** (the 09-24 spec's Phase 1, `followReducer`), table-tested,
@@ -270,11 +270,11 @@ lines give the live confirmation once the change ships.
   instead: `.agent-tool-block .agent-tool-panel` has `max-height: calc(50vh / 3)`, and
   the shell block keeps `50vh`. A small SCSS-source test, or skip it and rely on the
   pixel check.
-- **Pixel check** (`scripts/ui-screenshots/`): a 200-line Bash output at window heights
+- **Pixel check** ([`scripts/ui-screenshots/`](../../scripts/ui-screenshots)): a 200-line Bash output at window heights
   800 / 1080 / 1440, in a narrow and a ≥ 900 px pane. Assert the panel height is within
   ±2 px of `innerHeight × 0.5 / 3` at both widths. A 3-line output renders at
   natural height with no empty gap. Repeat at a **non-100% app zoom**: I haven't verified
-  how the app's zoom handling (`docs/specs/zoom-architecture.md`) interacts with `vh`, so
+  how the app's zoom handling ([`docs/specs/zoom-architecture.md`](zoom-architecture.md)) interacts with `vh`, so
   check it rather than assume it.
 
 **Follow (Part B)** — extend `ToolOverlayLog.test.tsx`, stubbing geometry the way its

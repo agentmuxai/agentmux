@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12
 **Status:** Audit only — no code changed. Written to establish a baseline before refining Swarm pane behavior.
-**Scope:** `frontend/app/view/swarm/{swarm-model.ts,swarm-view.tsx,swarm.tsx}` and every `docs/specs/`, `docs/retro/`, `docs/reports/` file touching "swarm."
+**Scope:** `frontend/app/view/swarm/{swarm-model.ts,swarm-view.tsx,swarm.tsx}` and every [`docs/specs/`](../specs), [`docs/retro/`](../retro), [`docs/reports/`](.) file touching "swarm."
 **Trigger:** Local `agentmux` clone was 21 commits behind `origin/main`; fast-forwarded to `2ee8f9f36` before this audit. Cross-referenced each swarm spec's own "Status:" line against actual current source, since several were stale.
 
 ---

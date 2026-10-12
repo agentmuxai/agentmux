@@ -115,7 +115,7 @@ what tier."
 
 ## Proposed fix
 
-See `SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md` in `docs/specs/`.
+See `SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md` in [`docs/specs/`](../specs).
 
 ## Addendum: the spawner relationship was the real signal, and it's cheap to check
 

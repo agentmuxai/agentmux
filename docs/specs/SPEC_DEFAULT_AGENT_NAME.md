@@ -10,7 +10,7 @@ Pre-populate with `<Provider> Agent` (e.g., `Claude Agent`). If that name's take
 
 ## Spec
 
-`docs/specs/SPEC_DEFAULT_AGENT_NAME.md` on branch `agenta/spec-default-agent-name`.
+[`docs/specs/SPEC_DEFAULT_AGENT_NAME.md`](SPEC_DEFAULT_AGENT_NAME.md) on branch `agenta/spec-default-agent-name`.
 
 Covers: algorithm, where to compute, dirty-flag handling on provider change, validation, effort (~55 LOC, ~0.5 day).
 

@@ -58,7 +58,7 @@ Both closed by #1690 and #1691 (one root cause: blocks created store-only after 
 ## 3. Confirmed still-open (verified by code inspection, not just doc claims)
 
 ### 3.1 🔴 P0 — Tab reorder within the strip does not work at all
-`specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` Addendum A3 (2026-07-11), never filed as its own issue, **no code has touched the relevant files since** (verified: zero commits to `frontend/app/tab/` after the addendum was written). Log evidence at write-time: zero `tab-drag started` lines (logged unconditionally in `DroppableTab.draggable.onDragStart`) across a full dev session — the drag never initiates as a pragmatic drag, not a drop-side bug. Debug plan already written (check `onGenerateDragPreview` for a silent throw; check whether native `dragstart` fires at all on `.tab-drop-wrapper`; check for an intercepting overlay/window-drag-region conflict; check `Tab`'s own `onDragStart={() => {}}` prop for interference).
+`specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` Addendum A3 (2026-07-11), never filed as its own issue, **no code has touched the relevant files since** (verified: zero commits to [`frontend/app/tab/`](../../frontend/app/tab) after the addendum was written). Log evidence at write-time: zero `tab-drag started` lines (logged unconditionally in `DroppableTab.draggable.onDragStart`) across a full dev session — the drag never initiates as a pragmatic drag, not a drop-side bug. Debug plan already written (check `onGenerateDragPreview` for a silent throw; check whether native `dragstart` fires at all on `.tab-drop-wrapper`; check for an intercepting overlay/window-drag-region conflict; check `Tab`'s own `onDragStart={() => {}}` prop for interference).
 
 **This is a basic, user-visible, currently-broken feature with no tracking issue.** Filing one and fixing it is the highest-leverage single next step in this domain — small surface (drag initiation only), doesn't depend on the larger refactor, and is probably a one-line interference bug given the "zero native dragstart" signature.
 
@@ -68,7 +68,7 @@ Both closed by #1690 and #1691 (one root cause: blocks created store-only after 
 Not urgent in the sense of "currently broken" — §2.3's root-cause fix stopped the active bleeding — but it's the fix that prevents the *next* point-fix cycle. Recommended: land §3.5 (small, mechanical) opportunistically; treat the full FSM (§3.1–§3.3 of that spec) as its own scheduled effort, not a fire.
 
 ### 3.3 🟠 P1 — Atomic reducer-owned redock MOVE (structural, addresses the redock-race class)
-Discussion #1205's own conclusion (2026-06-23, AgentA): "stop incremental patching... the real fix is the structural §9 atomic-MOVE... + the R5/R6 HWND/role registry." Verified not landed: no `PaneLocation` state machine, no `RedockAtomic`-style command in `agentmux-srv/src/reducer/` or `sagas/`. Redock is still frontend close-then-recreate. `docs/specs/SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` Track 2 (R5/R6 — HWND/role registry, the drag/redock cluster) is still `Status: Draft`.
+Discussion #1205's own conclusion (2026-06-23, AgentA): "stop incremental patching... the real fix is the structural §9 atomic-MOVE... + the R5/R6 HWND/role registry." Verified not landed: no `PaneLocation` state machine, no `RedockAtomic`-style command in `agentmux-srv/src/reducer/` or `sagas/`. Redock is still frontend close-then-recreate. [`docs/specs/SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md`](SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md) Track 2 (R5/R6 — HWND/role registry, the drag/redock cluster) is still `Status: Draft`.
 
 §2.6 fixed the highest-impact *symptom* of this gap (block destruction on redock). This item is the deeper fix that would retire the whole class of "redock roulette" races, including whatever's left of #1662's mechanism under different timing and any future variant. Not urgent standalone; sequence after P0/P1-FSM.
 
@@ -126,15 +126,15 @@ Already has an accurate, current status comment (2026-07-11, on the issue itself
 - `specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` (+ addenda A1–A3) — §2.3, §3.1
 - `specs/SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md` — §2.4, §3.2
 - `docs/specs/SPEC_SEAMLESS_CROSS_WINDOW_PANE_DOCK_2026_05_30.md` — §3.4
-- `docs/specs/SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` (Track 2) — §3.3
-- `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — canonical architecture map, P1–P6 plan (§3.3 = its P3)
-- `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`, `SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md`, `SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md`, `SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` — tear-off phase model (§2.1, §4)
-- `docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md` — R1/R2/R3 (§2.6, §2.7, §3.5)
+- [`docs/specs/SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md`](SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md) (Track 2) — §3.3
+- [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) — canonical architecture map, P1–P6 plan (§3.3 = its P3)
+- [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md), `SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md`, `SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md`, `SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` — tear-off phase model (§2.1, §4)
+- [`docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md`](SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) — R1/R2/R3 (§2.6, §2.7, §3.5)
 
 **Analysis:**
-- `docs/analysis/ANALYSIS_TEAR_OFF_PERF_2026_06_13.md` — pane-vs-tab tear-off perf, VS Code comparison
-- `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md` — #1461's defect triage
-- `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md` — persistence clobber mechanism behind §2.4
+- [`docs/analysis/ANALYSIS_TEAR_OFF_PERF_2026_06_13.md`](../analysis/ANALYSIS_TEAR_OFF_PERF_2026_06_13.md) — pane-vs-tab tear-off perf, VS Code comparison
+- [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md`](../analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md) — #1461's defect triage
+- [`docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`](../investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md) — persistence clobber mechanism behind §2.4
 
 **Tracking:**
 - Discussion #1205 — umbrella (§5)

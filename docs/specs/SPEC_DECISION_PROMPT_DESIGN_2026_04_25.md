@@ -267,8 +267,8 @@ this doc rather than against the patched-PR-556 history.
 
 ## 10. Cross-references
 
-- `docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md` — feature spec
-- `docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md` —
+- [`docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md`](SPEC_DECISION_PROMPT_2026_04_24.md) — feature spec
+- [`docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md`](SPEC_MODAL_PANE_CLIP_2026_04_24.md) —
   `usePaneOverlay` pattern
 - `frontend/app/element/modal-v2.tsx` — `ModalPaneOverlayClip`
   reference implementation of the §4.1 mounting pattern

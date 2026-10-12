@@ -3,7 +3,7 @@
 **Date:** 2026-03-25
 **File to create:** `frontend/app/store/global.test.ts`
 **Runner:** Vitest (existing setup in `vitest.config.ts`)
-**Pattern:** mirrors `frontend/app/view/agent/state.test.ts` — SolidJS signals tested directly, no JSDOM required for pure signal logic
+**Pattern:** mirrors [`frontend/app/view/agent/state.test.ts`](../../frontend/app/view/agent/state.test.ts) — SolidJS signals tested directly, no JSDOM required for pure signal logic
 
 ---
 
