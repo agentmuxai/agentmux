@@ -22,7 +22,10 @@ static STARTUP_POOLS_PENDING: std::sync::atomic::AtomicBool =
 
 /// How long after the "main" browser is created the pools start anyway if the
 /// main window never reports `wave-ready` (its frontend failed to initialize).
-const STARTUP_POOLS_FALLBACK_MS: i64 = 15_000;
+/// Longer than the slowest healthy startup: `initCefApi` waits up to 30 s for
+/// `backend-ready` (frontend/util/cef-api.ts) before init can go on, and a
+/// fallback inside that wait would start the pools next to main's own init.
+const STARTUP_POOLS_FALLBACK_MS: i64 = 60_000;
 
 /// Called from `on_after_created` for the "main" label: arm the pools. They
 /// start when main reports `wave-ready` ([`on_main_window_ready`]), or after
