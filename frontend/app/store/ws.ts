@@ -170,18 +170,15 @@ class WSControl {
         this.runMsgQueue();
     }
 
+    /// Send everything queued while the socket was connecting, in order, at
+    /// once. It used to send one message per 100 ms: startup queues about 16
+    /// (event subscriptions, then the first RPCs), so an RPC queued behind
+    /// them, `GetFullConfig` in `initMux`, waited 1.3-1.8 s on launches where
+    /// the socket wasn't open yet.
     runMsgQueue() {
-        if (!this.open) {
-            return;
+        while (this.open && this.msgQueue.length > 0) {
+            this.sendMessage(this.msgQueue.shift());
         }
-        if (this.msgQueue.length == 0) {
-            return;
-        }
-        const msg = this.msgQueue.shift();
-        this.sendMessage(msg);
-        setTimeout(() => {
-            this.runMsgQueue();
-        }, 100);
     }
 
     onmessage(event: MessageEvent) {
