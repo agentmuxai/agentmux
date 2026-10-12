@@ -3,7 +3,7 @@
 **Author:** AgentX
 **Created:** 2026-09-07
 **Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7,
-plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
+plus the recon output [`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`](../reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md));
 verdict is **go** on targeting 152 directly — patches #1/#2/#3 are verified
 against real CEF/Chromium 152 source, and of the 18 fork-modified CEF files,
 **16 are byte-identical upstream 7778↔7977** (mechanical copy) with only **2
@@ -62,8 +62,8 @@ blocker found.** Bumping `agentmux-cef/Cargo.toml` to `cef = "152"`
 workspace-wide compiles clean (confirmed, `cargo check --workspace`,
 zero errors) but is NOT safe to land alone — Codex P1 on #3176: it links
 **every** platform against CEF 152 headers, while
-`.github/workflows/release.yml` still resolves CEF 148 runtimes for all
-three, and unlike Windows (`scripts/verify-cef-version.sh`), macOS/Linux
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) still resolves CEF 148 runtimes for all
+three, and unlike Windows ([`scripts/verify-cef-version.sh`](../../scripts/verify-cef-version.sh)), macOS/Linux
 have no gate that would catch a resulting runtime mismatch before
 shipping.
 
@@ -113,7 +113,7 @@ but do not attempt the mechanism it describes without solving the `links`
 conflict first.
 
 **2026-09-10 (Korp) — a second, unrelated bug found and fixed in the same
-pass:** `scripts/verify-angle-libs.sh` (agentmuxai/agentmux#3119, a
+pass:** [`scripts/verify-angle-libs.sh`](../../scripts/verify-angle-libs.sh) (agentmuxai/agentmux#3119, a
 guardrail merged the same day this investigation started) used a uniform
 1MB size floor for both `libEGL`/`libGLESv2` and returned early on a small
 file WITHOUT running its symbol-export check. `libEGL.dll` is legitimately
@@ -125,7 +125,7 @@ bytes — an 8% difference from the real file, not a safe size threshold at
 all. Fixed: the symbol check (confirmed reliable — 0 matches on the real
 stub, 1 on the genuine file) is now the sole gate; size is only a coarse
 10KB sanity floor for a truly corrupt/empty file. Regression-tested
-(`scripts/verify-angle-libs.test.sh`, 6 cases, new).
+([`scripts/verify-angle-libs.test.sh`](../../scripts/verify-angle-libs.test.sh), 6 cases, new).
 
 **2026-09-10 — CEF 152 Windows build: real, silent GPU regression found
 and fixed, affects all three platforms.** Chromium's `use_static_angle`
@@ -144,7 +144,7 @@ either way); with the flag added, it's 8.4 MB with the full real GL export
 table. Symptom in the shipped app: GPU process dies at init
 (`eglGetProcAddress not found`), falls back to neither hardware nor
 SwiftShader — GPU fully off, not degraded. Fixed for Windows in
-`scripts/cef-build/args-windows.gn` (`use_static_angle=false`, with the
+[`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) (`use_static_angle=false`, with the
 full investigation notes inline there).
 
 **Correction (2026-09-10, Clare, via cross-host jekt — confirmed
@@ -226,13 +226,13 @@ in on `angle_metal_internal_shaders_to_air` without it:
 Xcode 26 ships the `metal` binary but not the compiler behind it, so
 `xcrun -f metal` resolves and the tool still refuses to run — an availability
 check cannot catch it. **I initially recorded this as new in 152; that was
-wrong**, caught by Codex on #3155. `docs/cef-patches/README.md` §Metal already
+wrong**, caught by Codex on #3155. [`docs/cef-patches/README.md`](../cef-patches/README.md) §Metal already
 documented it for the 148 build, including a second failure mode where
 `-downloadComponent` is itself broken by a stale `DVTDownloads.framework`. My
 evidence — zero hits for that target in the 148 logs — only showed the target
 did not RE-RUN in an incremental rebuild; the 148 tree's `.air` dates from
 2026-06-02. Both milestones default to `angle_enable_metal=true`. Documented in
-`docs/cef-build/build-patched-framework-macos.md` with a compile-based check,
+[`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md) with a compile-based check,
 because the download reports success regardless of whether the compiler works.
 
 **Update 2026-09-11 — Phase C `links` blocker (found 2026-09-10, above) is
@@ -286,7 +286,7 @@ boots clean via `cefsimple.exe`; `cef_version.h` confirms a genuine
 `152.0.7977.83` build. **ANGLE re-verified via the actual symbol-export
 gate, not file size** (codex P2 on #3224 caught an earlier revision of
 this note leaning on size alone, which this spec's own Sept 10 section
-above already warned isn't reliable) — `scripts/verify-angle-libs.sh`
+above already warned isn't reliable) — [`scripts/verify-angle-libs.sh`](../../scripts/verify-angle-libs.sh)
 against both the build directory and the extracted packaged zip: clean
 pass on both, genuine `eglGetProcAddress`/`glGetString` exports present.
 
@@ -310,7 +310,7 @@ merge-base --is-ancestor` that `2817bfb6f` is an ancestor of
 `agentmuxai/7977`'s current tip, and that the one integration-branch
 commit not reachable from it (`agentmux_process_requirement`, macOS-only,
 touches only `base/apple/`) cannot affect a Windows binary either way.
-Packaged per `docs/cef-build/build-patched-cef-windows.md` §7:
+Packaged per [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) §7:
 `cef-windows-x86_64-152.0.7977.83.zip` (194 MB, 455 entries, libcef.dll
 size cross-checked against the zip entry). **Deliberately not published**
 — per Opaz's 2026-09-11 comment on #3108, being the first platform to cut
@@ -355,7 +355,7 @@ collapse landing first.
   far). The `agentmux/152-begin-window-drag` commit is Korp's own prior
   work (2026-09-10, same investigation) — same mechanical field-append as
   the existing 148 patch, same struct size delta, not a new derivation.
-- `scripts/verify-cef-version.sh`: was made to look up the `cef_win`
+- [`scripts/verify-cef-version.sh`](../../scripts/verify-cef-version.sh): was made to look up the `cef_win`
   dependency key specifically during the staged-rollout mechanism
   (#3204) — left unfixed, this would have silently gone warn-only
   (`could not resolve cef_win's version — skipping check`) after the
@@ -413,22 +413,22 @@ Our pins: `agentmux-cef/Cargo.toml` → `cef = { version = "148" }`; root `Cargo
 
 ## 2. What we carry on the fork — the thing that makes this expensive
 
-A milestone upgrade is not "bump a number." It is "forward-port every patch, rebuild three binaries, re-verify every feature those patches enable." Current inventory, from `docs/analysis/REPORT_CEF148_FORK_UPDATE_2026-06-02.md` and `agentmuxai/cef`'s branches:
+A milestone upgrade is not "bump a number." It is "forward-port every patch, rebuild three binaries, re-verify every feature those patches enable." Current inventory, from [`docs/analysis/REPORT_CEF148_FORK_UPDATE_2026-06-02.md`](../analysis/REPORT_CEF148_FORK_UPDATE_2026-06-02.md) and `agentmuxai/cef`'s branches:
 
 | # | Patch | Upstream status | Used by | Port required? |
 |---|---|---|---|---|
 | 1 | `agentmux_process_requirement.patch` (`GetPeerValidationPolicy() → kNoValidation`, the -67030 renderer fix) | Not upstream | ~~All platforms~~ → **macOS only** ⁽¹⁾ | **Yes** — mandatory; ~~registered in `patch/patch.cfg`~~ → **was not registered or merged until 2026-09-08** ⁽²⁾ |
-| 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | **Linux only.** Windows uses its own Win32 path (`post_win32_begin_move`) and never calls this — `scripts/cef-build/args-windows.gn:4` states the patch "never [was] needed" there; macOS uses AppKit drag regions. Gated by the `patched-libcef` feature | **Yes, if Linux native drag stays in scope** — nothing else depends on it |
+| 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | **Linux only.** Windows uses its own Win32 path (`post_win32_begin_move`) and never calls this — [`scripts/cef-build/args-windows.gn:4`](../../scripts/cef-build/args-windows.gn) states the patch "never [was] needed" there; macOS uses AppKit drag regions. Gated by the `patched-libcef` feature | **Yes, if Linux native drag stays in scope** — nothing else depends on it |
 | 3 | HTCAPTION right-click fall-through to renderer | Not upstream as of 148 — **re-check against 152** | Title-bar right-click menus | Yes, if that UX is kept |
 | 4 | Transparency cascade (RWHView/WebContents bg) | **Partial** upstream since 148 | Window opacity | Re-verify; may be droppable |
 
 Plus **build flags, not patches** — version-controlled in *this* repo, not the fork:
-`scripts/cef-build/args.gn` (Linux), `args-darwin.gn` (macOS), `args-windows.gn` (Windows). These carry `proprietary_codecs=true`, `ffmpeg_branding="Chrome"`, HEVC/AC3/EAC3/Dolby Vision enables, Widevine, and (critically) the `dcheck_always_on=false` requirement — a from-source `is_official_build=false` build defaults DCHECKs *on*, which crashes on drag/close (see `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`).
+[`scripts/cef-build/args.gn`](../../scripts/cef-build/args.gn) (Linux), `args-darwin.gn` (macOS), `args-windows.gn` (Windows). These carry `proprietary_codecs=true`, `ffmpeg_branding="Chrome"`, HEVC/AC3/EAC3/Dolby Vision enables, Widevine, and (critically) the `dcheck_always_on=false` requirement — a from-source `is_official_build=false` build defaults DCHECKs *on*, which crashes on drag/close (see [`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`](../retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md)).
 
 **Re-checking #2, #3 and #4 against upstream 152 is the first task in this spec, because the answer can delete work.** Between 146 and 148, several AgentMux patches (`CefV8BackingStore`, `CefComponentUpdater`, `blink_ax_viewport_collapse`, the task-manager shutdown fix) were upstreamed and stopped being ours to carry. The same may have happened again across four milestones.
 
 > **Phase A corrections (2026-09-08)** — full detail in
-> `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`:
+> [`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`](../reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md):
 >
 > ⁽¹⁾ Patch #1 touches `base/apple/mach_port_rendezvous_mac.cc`. Mach ports are
 > Darwin-only and Chromium's `base/apple/` is not compiled on Windows/Linux, so
@@ -473,7 +473,7 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 
 ### Phase A — Reconnaissance ✅ **COMPLETE 2026-09-08** (1 minor check deferred to Phase D)
 
-Output: `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`.
+Output: [`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`](../reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md).
 **Verdict: go on the 152 target** — nothing found makes it harder, and 16 of the
 18 fork-modified CEF files are byte-identical upstream. **Not a readiness
 statement:** patches #1/#2/#3 are verified against real 152 source, **#4 only
@@ -678,9 +678,9 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 
 | Platform | Build doc | GN args | Output |
 |---|---|---|---|
-| Windows x86_64 | `docs/cef-build/build-patched-cef-windows.md` | `scripts/cef-build/args-windows.gn` | `libcef.dll` + runtime DLLs/paks |
-| macOS arm64 | `docs/cef-build/build-patched-framework-macos.md` | `args-darwin.gn` | `Chromium Embedded Framework.framework` (~547 MB unstripped) |
-| Linux x86_64 | `docs/cef-build/build-patched-libcef.md` | `args.gn` | `libcef.so` (strip before publishing) |
+| Windows x86_64 | [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) | [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) | `libcef.dll` + runtime DLLs/paks |
+| macOS arm64 | [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md) | `args-darwin.gn` | `Chromium Embedded Framework.framework` (~547 MB unstripped) |
+| Linux x86_64 | [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md) | `args.gn` | `libcef.so` (strip before publishing) |
 
 **Total build cost: 9–18 machine-hours across three machines**, plus the ~100 GB checkout on each. The three are fully independent and should run in parallel on three machines — see §6.
 
@@ -691,7 +691,7 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 > failure on any of the three platforms. **This is NOT a one-line fix to
 > copy to every platform's args file — `use_static_angle`'s correct value
 > differs per platform.** Windows needs `use_static_angle=false`
-> (`scripts/cef-build/args-windows.gn`, confirmed the existing config was
+> ([`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn), confirmed the existing config was
 > broken). macOS confirmed the opposite: its existing `args-darwin.gn`
 > (no `use_static_angle` override at all) is already correct — ANGLE is
 > statically linked into the framework binary there, verified by export
@@ -718,12 +718,12 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 
 ### Phase E — Distribution
 Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create`; this is by documented convention a deliberate step separate from any source PR), then update consumers in *this* repo:
-- `scripts/cef-build/fetch-patched-cef-windows.sh` (tag/version)
+- [`scripts/cef-build/fetch-patched-cef-windows.sh`](../../scripts/cef-build/fetch-patched-cef-windows.sh) (tag/version)
 - `Taskfile.yml`'s CEF resolution tiers (`cefBuildDefault`, version-match assertion — it currently asserts `libcef.dll` major matches the linked `cef` crate major)
 - `.github/workflows/build-{linux,macos,windows}.yml` — the `cef-runtime-tag` input default
 - `docs/cef-build/*` version references
 
-**Changing those input defaults is not sufficient, and assuming otherwise would silently un-pin releases.** `.github/workflows/release.yml` passes `cef-runtime-tag: ""` explicitly to all three build jobs (lines 92, 111, 150), and every callee documents blank as "latest". A caller-supplied empty string overrides the callee default, so **release builds today do not pin CEF at all — they float to whatever the newest `agentmuxai/cef` release happens to be.** Phase E must therefore set an explicit tag in `release.yml`'s three call sites, not just in the callees' defaults.
+**Changing those input defaults is not sufficient, and assuming otherwise would silently un-pin releases.** [`.github/workflows/release.yml`](../../.github/workflows/release.yml) passes `cef-runtime-tag: ""` explicitly to all three build jobs (lines 92, 111, 150), and every callee documents blank as "latest". A caller-supplied empty string overrides the callee default, so **release builds today do not pin CEF at all — they float to whatever the newest `agentmuxai/cef` release happens to be.** Phase E must therefore set an explicit tag in `release.yml`'s three call sites, not just in the callees' defaults.
 
 This is worth treating as its own finding, not merely a step: it means the CEF version in any given release artifact is determined by release *timing* rather than by anything in the commit, so two builds of the same commit can ship different Chromium versions. Pinning it explicitly is a prerequisite for the rollback story in Phase G being real.
 
@@ -810,7 +810,7 @@ cef-macos-arm64-148.23.23-codecs         ← CEF framework version + suffix
 cef-macos-arm64-148.0.9                  ← different scheme again
 ```
 
-Three version schemes (Chromium `148.0.7778.180`, CEF `148.23.23`, CEF `148.0.9`) and ad-hoc suffixes (`-codecs`, `-2`, `-3`). A human can resolve these; **an automated drift checker cannot** — which matters directly, because the companion spec `SPEC_VERSION_DRIFT_REPORTER_2026_09_07.md` (in `a5af/shared-infrastructure`, under its own `docs/specs/`) proposes machine-comparing our shipped CEF against upstream. Recommend standardizing new tags on `cef-<platform>-<arch>-<chromium-version>[-rN]` and normalizing at read time for the historical ones.
+Three version schemes (Chromium `148.0.7778.180`, CEF `148.23.23`, CEF `148.0.9`) and ad-hoc suffixes (`-codecs`, `-2`, `-3`). A human can resolve these; **an automated drift checker cannot** — which matters directly, because the companion spec `SPEC_VERSION_DRIFT_REPORTER_2026_09_07.md` (in `a5af/shared-infrastructure`, under its own [`docs/specs/`](.)) proposes machine-comparing our shipped CEF against upstream. Recommend standardizing new tags on `cef-<platform>-<arch>-<chromium-version>[-rN]` and normalizing at read time for the historical ones.
 
 ### 7.2 A stale comment in `agentmux-cef/Cargo.toml` — ✅ FIXED 2026-09-08
 The `patched-libcef` feature comment cites `https://github.com/a5af/cef, branch agentmux/7680-…`. The org redirects (`a5af` → `agentmuxai`) and that branch does still exist, so nothing breaks — but it names a CEF 146-era branch while root `Cargo.toml` documents `7778` as current. Worth correcting to whatever milestone this upgrade lands on.
@@ -826,7 +826,7 @@ The `patched-libcef` feature comment cites `https://github.com/a5af/cef, branch 
 > `agentmuxai` org redirect. Re-point if 152 lands on a new branch.
 
 ### 7.3 A superseded root-cause doc — ✅ FIXED 2026-09-08
-`docs/archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md` attributes a Windows GPU failure to the fork's libcef being a non-official/DCHECK build. Its own tracking issue (#1345) retracts that: the real cause was a missing `supportedOS` manifest (#1354, merged 2026-06-11). The archived doc still reads as if the fork were at fault, which could mislead someone scoping this upgrade. Worth a status-correction header.
+[`docs/archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md`](../archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md) attributes a Windows GPU failure to the fork's libcef being a non-official/DCHECK build. Its own tracking issue (#1345) retracts that: the real cause was a missing `supportedOS` manifest (#1354, merged 2026-06-11). The archived doc still reads as if the fork were at fault, which could mislead someone scoping this upgrade. Worth a status-correction header.
 
 > **Fixed:** the doc now opens with a RETRACTED banner stating the real cause
 > (missing `supportedOS` manifest, #1354) and explicitly warning against citing

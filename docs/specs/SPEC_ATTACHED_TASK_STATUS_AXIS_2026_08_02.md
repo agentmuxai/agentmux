@@ -3,9 +3,9 @@
 **Status:** active — reducer slice + dispatch wiring + hasRunningPromotedTool shipped (PR #2489); the AgentFooter render from #2489 was deliberately reverted 2026-08-10 (dock running-row is the indicator); §6 item 4 (Swarm pane / muxspect surfacing) not started. Verified 2026-08-10.
 **Author:** Agent A (agenta-07017)
 **Builds on:**
-- `docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md` (Agent2) — original analysis, §6/§7 design direction.
-- `docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` (Agent3) — verification pass + synthesized 5-step recommendation (§3), open questions resolved (§4).
-- `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` — the Agent1 incident this whole line of work generalizes from.
+- [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md`](REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) (Agent2) — original analysis, §6/§7 design direction.
+- [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md`](REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) (Agent3) — verification pass + synthesized 5-step recommendation (§3), open questions resolved (§4).
+- [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) — the Agent1 incident this whole line of work generalizes from.
 
 This document does **not** re-derive the diagnosis both prior reports already did well — it starts from their conclusion ("turn-phase and attached-process-liveness are orthogonal axes, and the reducer only models one") and answers the one question they left as a to-be-decided implementation detail: **what does "two-axis pane status" actually look like in `agent-pane-state`'s types/reducer**, since a naive reading of "add a TurnPhase state for a long-running attached process" would violate an invariant the reducer's own docs already state explicitly.
 
@@ -13,11 +13,11 @@ This document does **not** re-derive the diagnosis both prior reports already di
 
 Both prior reports are ~1-2 weeks old. Re-checked directly against the current tree:
 
-- **Step 1 (duration-threshold tool-call promotion) is DONE.** `frontend/app/view/agent/activity/tool-adapter.ts` exists: `TOOL_PROMOTION_MS = 30_000`, `toolActivities()` promotes any Bash `ToolNode` still running (or that ran) past the threshold into a `PinnedActivity` of kind `"tool"`, independent of command text — exactly report §4.2's resolved recommendation (duration-first, not regex-first).
+- **Step 1 (duration-threshold tool-call promotion) is DONE.** [`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts) exists: `TOOL_PROMOTION_MS = 30_000`, `toolActivities()` promotes any Bash `ToolNode` still running (or that ran) past the threshold into a `PinnedActivity` of kind `"tool"`, independent of command text — exactly report §4.2's resolved recommendation (duration-first, not regex-first).
 - **The `AgentWorkingRow` suppression half of step 3 is DONE.** `hasRunningPromotedTool()` in the same file is the exact signal report §4.3 called for ("suppress the working row's own tool text once the dock already shows it") — already exported, ready for a consumer.
 - **Not yet wired**: nothing currently *calls* `hasRunningPromotedTool` from `AgentFooter.tsx` (checked: no reference to it outside `tool-adapter.ts`/its test). The signal exists; the consumer doesn't yet.
 - **Still open, confirmed today:**
-  - `BashParams` (`frontend/app/view/agent/types.ts`) still has no `run_in_background` field — step 2 (backgrounded-task threading) is unbuilt.
+  - `BashParams` ([`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)) still has no `run_in_background` field — step 2 (backgrounded-task threading) is unbuilt.
   - `AgentProcessRegistry`'s `started_at_ms` is still hardcoded to `0` on Windows (`agentmux-srv/src/backend/process_tracker/windows.rs:198`) — no process-age data exists yet, so an OS-process-duration heuristic (the fallback for detached work with no self-declared signal at all — a bare `nohup foo &`, no MCP Shell tool, no `run_in_background`) has no data to key on.
   - No reducer-level field exists yet for "is there a live attached task independent of the turn." This is this spec's subject.
 

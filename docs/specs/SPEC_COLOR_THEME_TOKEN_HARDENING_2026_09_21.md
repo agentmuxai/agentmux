@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-21
 **Status:** implemented in #3478 — see §6 for exactly what shipped
-**Related:** `docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md` (the
+**Related:** [`docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`](SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) (the
 pane-color consolidation work that surfaced this — its own precedent fix used
 the exact bug pattern documented here, on the ICON only, and left the LABEL
 text next to it still broken), `docs/specs/SPEC_LIGHT_THEME_AND_DEPTH_FIXES
@@ -24,7 +24,7 @@ color mechanisms, and nothing stops a component from using the wrong one:
 1. **This app's own theme system** — CSS custom properties defined once per
    theme in `frontend/app/themes/*.scss` (`--main-text-color`,
    `--secondary-text-color`, `--hover-bg-color`, etc.), swapped live via
-   `[data-theme="..."]` on `<html>` (`frontend/app/app.tsx`). Correctly
+   `[data-theme="..."]` on `<html>` ([`frontend/app/app.tsx`](../../frontend/app/app.tsx)). Correctly
    theme-aware by construction.
 2. **Tailwind's own literal palette** (`text-white`, `bg-black`,
    `bg-gray-800`, and their `slate`/`neutral`/`zinc`/`stone` siblings) — these
@@ -41,7 +41,7 @@ fix for the label, plus everywhere else the same pattern was found.
 
 ## 1. Root cause #1: two Tailwind tokens were never wired to the theme system
 
-`frontend/tailwindsetup.css`'s `@theme` block defines ~15 custom Tailwind
+[`frontend/tailwindsetup.css`](../../frontend/tailwindsetup.css)'s `@theme` block defines ~15 custom Tailwind
 color tokens (`--color-hover`, `--color-panel`, `--color-foreground`, etc.)
 as fixed literals. Every theme file re-declares the ones it needs inside its
 own `[data-theme="..."]` block as a `var(--...)` reference to that theme's
@@ -63,8 +63,8 @@ already-light background, every time, on every non-default theme, and
 always did.
 
 Usages found (`bg-hoverbg`/`bg-highlightbg`, either polarity):
-`frontend/app/window/action-widgets.tsx`, `frontend/app/modals/about.tsx`,
-`frontend/app/element/quicktips.tsx` (`bg-highlightbg` once, plus a
+[`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx), [`frontend/app/modals/about.tsx`](../../frontend/app/modals/about.tsx),
+[`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx) (`bg-highlightbg` once, plus a
 `from-highlightbg/…` gradient stop).
 
 ## 2. Root cause #2: raw Tailwind palette literals used for theme-dependent purposes
@@ -76,15 +76,15 @@ tooltip's own background paired with theme-aware text. A full repo grep
 (`\b(hover:|focus:|active:|group-hover:)?(text|bg|border|ring|divide|
 placeholder|from|via|to|fill|stroke)-(white|black|gray-\d+|slate-\d+|
 neutral-\d+|zinc-\d+|stone-\d+)(/[\d.\[\]]+)?\b` across every `.tsx` under
-`frontend/app`) found 43 raw occurrences across 6 files. Classified by hand:
+[`frontend/app`](../../frontend/app)) found 43 raw occurrences across 6 files. Classified by hand:
 
 | File | Verdict | Why |
 |---|---|---|
-| `frontend/app/window/action-widgets.tsx` (1 occurrence, `hover:text-white`) | **Bug — fixed** | The originally-reported symptom: widget label text goes invisible on hover on a light theme. |
-| `frontend/app/view/launcher/launcher.tsx` (5 occurrences) | **Bug — fixed** | Identical `hover:text-white` pattern on the launcher's back-breadcrumb, plus a widget-tile grid using raw `bg-white/…`/`text-white` for its hover/selected states. |
-| `frontend/app/element/tooltip.tsx` (1 occurrence, `bg-gray-800`) | **Bug — fixed** | Tooltip background hardcoded dark; its own text (`text-foreground`) correctly flips to DARK on a light theme — dark-on-dark-gray on any light theme. |
-| `frontend/app/element/quicktips.tsx` (34 occurrences) | **Bug — fixed** | The onboarding "Quick Tips" panel: every row/card hover and every card's resting background used raw `white`/`black` tints at various opacities, plus one `border-gray-700`. Never exercised against a light theme. |
-| `frontend/app/element/markdown.tsx` (1 occurrence, `bg-white/[0.03]`) | **Bug — fixed** | A markdown table's `<thead>` tint; low severity (3% white is nearly a no-op either way) but still wrong-polarity, fixed for consistency. |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) (1 occurrence, `hover:text-white`) | **Bug — fixed** | The originally-reported symptom: widget label text goes invisible on hover on a light theme. |
+| [`frontend/app/view/launcher/launcher.tsx`](../../frontend/app/view/launcher/launcher.tsx) (5 occurrences) | **Bug — fixed** | Identical `hover:text-white` pattern on the launcher's back-breadcrumb, plus a widget-tile grid using raw `bg-white/…`/`text-white` for its hover/selected states. |
+| [`frontend/app/element/tooltip.tsx`](../../frontend/app/element/tooltip.tsx) (1 occurrence, `bg-gray-800`) | **Bug — fixed** | Tooltip background hardcoded dark; its own text (`text-foreground`) correctly flips to DARK on a light theme — dark-on-dark-gray on any light theme. |
+| [`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx) (34 occurrences) | **Bug — fixed** | The onboarding "Quick Tips" panel: every row/card hover and every card's resting background used raw `white`/`black` tints at various opacities, plus one `border-gray-700`. Never exercised against a light theme. |
+| [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) (1 occurrence, `bg-white/[0.03]`) | **Bug — fixed** | A markdown table's `<thead>` tint; low severity (3% white is nearly a no-op either way) but still wrong-polarity, fixed for consistency. |
 | `frontend/app/element/dragoverlay.tsx` (3 occurrences) | **Not a bug — annotated** | A drag-and-drop overlay that paints its OWN fixed black scrim + chip over whatever pane is underneath. Genuinely theme-independent by design — this is the escape hatch the new lint rule (§4) is FOR, not a violation of it. Given `eslint-disable-next-line` comments with a one-line reason each. |
 
 SCSS `:hover` rules using a literal `white`/`#fff` text color were audited
@@ -105,7 +105,7 @@ left as-is.
   `hover:text-foreground` (the already-theme-synced token, which resolves
   to the exact color the widget icon's own hover state already used —
   `--widget-icon-hover-color: var(--main-text-color)` in
-  `frontend/app/theme.scss`, so text and icon now agree). `quicktips.tsx`'s
+  [`frontend/app/theme.scss`](../../frontend/app/theme.scss), so text and icon now agree). `quicktips.tsx`'s
   raw white/black tints mapped onto the existing theme-synced tokens by
   visual role: `hover:bg-white/5` → `hover:bg-hover` (row hover, subtle),
   `bg-black/20`/`hover:bg-black/30` → `bg-panel`/`hover:bg-highlightbg`
@@ -125,7 +125,7 @@ left as-is.
 ## 4. New lint rule — `eslint.theme-colors.config.js`
 
 A standalone ESLint flat-config file, run via `npm run lint:theme-colors`
-and wired into CI (`.github/workflows/ci-pr.yml`'s `vitest` job, right after
+and wired into CI ([`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)'s `vitest` job, right after
 `tsc --noEmit`). Deliberately NOT added to the repo's main
 `eslint.config.js`: that file's `recommended` ruleset currently has 1200+
 pre-existing violations (mostly `@typescript-eslint/no-explicit-any` and
@@ -138,7 +138,7 @@ The rule (`no-restricted-syntax`, matched against both plain string
 `Literal`s and template-literal `TemplateElement`s) flags the exact pattern
 from §2: a raw Tailwind palette utility (`white`/`black`/`gray-N`/etc.,
 optionally behind `hover:`/`focus:`/`active:`/`group-hover:`, optionally
-with an opacity modifier) anywhere in a `.tsx` file under `frontend/app`.
+with an opacity modifier) anywhere in a `.tsx` file under [`frontend/app`](../../frontend/app).
 It is not a blanket ban on those words — `dragoverlay.tsx`'s three
 genuinely-safe usages (§2's table) demonstrate the intended escape hatch:
 an inline `// eslint-disable-next-line no-restricted-syntax -- <reason>`
@@ -176,7 +176,7 @@ theme-polarity-aware — dark themes keep the darkened look, light themes
 keep the pre-2026-09-20 "bright" behavior (header matches the border's
 full-strength color) — since a near-black, low-lightness header reads as
 broken/muddy against a light UI. See
-`frontend/app/block/pane-color-menu.ts`'s `headerBgForEffectiveColor` and
+[`frontend/app/block/pane-color-menu.ts`](../../frontend/app/block/pane-color-menu.ts)'s `headerBgForEffectiveColor` and
 its own tests for the mechanism; not re-documented in full here since it's
 one function in a sibling PR's own commit, not part of this spec's own
 audit.
@@ -192,6 +192,6 @@ Verification: `npx vitest run` (4389 tests, 0 failures — this is a
 CSS-class-only change, no new test coverage was written for individual
 class-name swaps since there's no existing visual-regression test
 infrastructure for this; verified by re-running the lint rule itself
-against the whole `frontend/app` tree, `npx tsc --noEmit`, and live in
+against the whole [`frontend/app`](../../frontend/app) tree, `npx tsc --noEmit`, and live in
 `task dev`), `npm run lint:theme-colors` (clean after the fixes, confirmed
 it fails loudly against a deliberately-reintroduced violation first).

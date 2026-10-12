@@ -9,11 +9,11 @@ tier 2 starting) shipped in #2255, the PR this doc was added in, and is at
 carry their own independent bodies, so `runProviderLogin` is still not the only
 login implementation. §7's open questions are answered —
 see the update at the bottom of §5 phase 3 and the new §7 for what changed.
-**Context:** `docs/retro/retro-headless-login-browser-open-2026-07-20.md` and
-`docs/retro/retro-login-three-code-paths-2026-07-20.md`. Those two retros
+**Context:** [`docs/retro/retro-headless-login-browser-open-2026-07-20.md`](../retro/retro-headless-login-browser-open-2026-07-20.md) and
+[`docs/retro/retro-login-three-code-paths-2026-07-20.md`](../retro/retro-login-three-code-paths-2026-07-20.md). Those two retros
 fixed three call sites (`/login`, "Login Again", the gated launch flow behind
 "Retry Login") by routing them through a new orchestrator,
-`runProviderLogin` (`frontend/app/view/agent/flows/run-provider-login.ts`).
+`runProviderLogin` ([`frontend/app/view/agent/flows/run-provider-login.ts`](../../frontend/app/view/agent/flows/run-provider-login.ts)).
 A full audit today found that orchestrator is not actually the only login
 implementation in the app — it's the third. This plan proposes closing the
 rest.

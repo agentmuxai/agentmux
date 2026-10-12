@@ -7,7 +7,7 @@ not maintained as the code changes.
 **Repo state:** `main` @ `f32aec9a5` (2026-09-23 01:12 -0700)
 **Question asked:** do jekt messages ever cut into an agent's text blob or train of thought?
 **Answer: yes — on every provider except Codex, unconditionally, by design.**
-**Follow-up:** the fix is specified in `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`, which is
+**Follow-up:** the fix is specified in [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md), which is
 the source of truth for policy and implementation status. This report is retained as the evidence
 behind it — read it for *why*, read the spec for *what now*.
 
@@ -52,7 +52,7 @@ stale. `persistent.rs` has since been split into a module directory, so the cite
 
 ## 3. It is empirically proven, not theoretical
 
-`docs/specs/evidence/steer-probe-claude-run1.txt` is a recorded probe. A long multi-tool
+[`docs/specs/evidence/steer-probe-claude-run1.txt`](evidence/steer-probe-claude-run1.txt) is a recorded probe. A long multi-tool
 task was started, then a message injected mid-turn:
 
 ```

@@ -2,10 +2,10 @@
 
 **Date:** 2026-07-03
 **Status:** implemented — #1947 (2026-07-03), the PR this doc was added in. The AMC gateway is `agentmux-srv/src/ambient/`, and §4's migration plan is done through step 5: `invoke_cli_for_activity`'s direct spawn is gone (step 2), `term:activity` is split into `osc_title`/`ambient_summary` (step 4, see `osc_extractor.rs`), and `token-usage.ts` collapses ambient call sites into a `__ambient__` bucket (step 5). Step 6's `phaseToDisplayStatus` no longer exists under that name — the swarm view was since restructured — so it is neither verifiably fixed nor outstanding. Step 7 is a standing rule, not a task.
-**Related:** `agentmux-srv/src/server/app_api/session.rs`, `frontend/app/view/agent/hooks/useAgentActivitySummary.ts`,
-`frontend/app/view/agent/hooks/useBlockActivity.ts`, `frontend/app/view/swarm/`, `frontend/app/store/token-usage.ts`,
-`docs/specs/SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md`, `specs/SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29.md`,
-`docs/retro/retro-haiku-activity-pane-header-2026-06-24.md`
+**Related:** `agentmux-srv/src/server/app_api/session.rs`, [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts),
+[`frontend/app/view/agent/hooks/useBlockActivity.ts`](../../frontend/app/view/agent/hooks/useBlockActivity.ts), [`frontend/app/view/swarm/`](../../frontend/app/view/swarm), [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts),
+[`docs/specs/SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md`](SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md), `specs/SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29.md`,
+[`docs/retro/retro-haiku-activity-pane-header-2026-06-24.md`](../retro/retro-haiku-activity-pane-header-2026-06-24.md)
 
 ---
 
@@ -37,7 +37,7 @@ mistakes.
 
 ### 1.1 The one real LLM call site
 
-- Trigger: `frontend/app/view/agent/hooks/useAgentActivitySummary.ts:42-71` — on
+- Trigger: [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts:42-71`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts) — on
   `TurnPhase.kind === "Done"`, calls `RpcApi.AgentActivitySummaryCommand` (20s
   frontend timeout, no retry).
 - Backend: `agentmux-srv/src/server/app_api/session.rs:109`
@@ -46,8 +46,8 @@ mistakes.
   (`session.rs:198-267`) spawns the CLI with `--model claude-haiku-4-5-20251001`,
   15s timeout.
 - Result is written to block meta key `"term:activity"`.
-- Consumers: `frontend/app/view/agent/agent-model.ts:106-122` (`viewText()`, the
-  pane header text) and `frontend/app/view/swarm/swarm-model.ts:221-222`
+- Consumers: [`frontend/app/view/agent/agent-model.ts:106-122`](../../frontend/app/view/agent/agent-model.ts) (`viewText()`, the
+  pane header text) and [`frontend/app/view/swarm/swarm-model.ts:221-222`](../../frontend/app/view/swarm/swarm-model.ts)
   (`AgentTreeNode.activitySummary`, the Swarm tree).
 
 This is a **singleton pattern** — grepping for `haiku` and for
@@ -69,8 +69,8 @@ of it instead of copied from it.
 `type == "assistant"` text blocks; it never reads the `result`/usage event, and
 `ActivitySummaryResult` has no token-count field to carry it back
 (`session.rs:242-266`). The app's total-tokens counter
-(`frontend/app/store/token-usage.ts`'s `recordTurn()`) is fed exclusively by
-`frontend/app/view/agent/useAgentStream.ts:426-444` from the *main* agent turn's
+([`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts)'s `recordTurn()`) is fed exclusively by
+[`frontend/app/view/agent/useAgentStream.ts:426-444`](../../frontend/app/view/agent/useAgentStream.ts) from the *main* agent turn's
 `session_end` event. The Haiku subprocess is a real, billed API call that never
 touches this counter — a structural under-count, not a display lag.
 
@@ -79,11 +79,11 @@ touches this counter — a structural under-count, not a display lag.
 `term:activity` has two independent writers with no merge/precedence protocol
 (last-write-wins via plain `UpdateObjectMeta`):
 
-1. `frontend/app/view/agent/hooks/useBlockActivity.ts:39-83` — subscribes to a
+1. [`frontend/app/view/agent/hooks/useBlockActivity.ts:39-83`](../../frontend/app/view/agent/hooks/useBlockActivity.ts) — subscribes to a
    `block:activity` WPS event sourced from **OSC 0 terminal-title escape
    sequences** the CLI itself emits (parsed by
    `agentmux-srv/src/backend/osc_extractor.rs`, a pure state machine, no LLM, no
-   subprocess — see `docs/specs/SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md`).
+   subprocess — see [`docs/specs/SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md`](SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md)).
    300ms debounced. Cleared only on `ControllerStatus === "done"`.
 2. `useAgentActivitySummary.ts:54-66` — the Haiku writer (§1.1). No debounce, no
    in-flight guard (two 15-20s Haiku calls from quick successive turns can run
@@ -98,10 +98,10 @@ noted, not fixed, before.
 
 ### 1.4 Bug 3 — Swarm renders "idle"/blank for actually-active agents
 
-`frontend/app/view/swarm/swarm-view.tsx:163-167` (`phaseToDisplayStatus`):
+[`frontend/app/view/swarm/swarm-view.tsx:163-167`](../../frontend/app/view/swarm/swarm-view.tsx) (`phaseToDisplayStatus`):
 `if (!phaseAccessor) return "idle";` — if a block's `TurnPhase` was never
 registered in the *current renderer's* registry
-(`frontend/app/store/agentActivity.ts:55-57`, populated only by `registerActivity()`
+([`frontend/app/store/agentActivity.ts:55-57`](../../frontend/app/store/agentActivity.ts), populated only by `registerActivity()`
 from a *mounted* agent-pane component), the status defaults to `"idle"`
 regardless of actual backend state. A subagent running in an unmounted pane,
 a background tab, or another workspace has no registry entry — it reads as idle.

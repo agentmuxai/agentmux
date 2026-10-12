@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27
 **Author:** AgentA
-**Status:** active — the investigation half is done and load-bearing; the remediation half is not. #1108 (the PR this doc was added in) shipped the fade-in opacity reveal, and this spec's Phase 0 measurements are now cited as authority from `frontend/app/util/settle-detector.ts` and `frontend/app/tab/active-tab-display.ts` ("measured that at…"). **Phase 1's premise needs re-checking before anyone acts on it:** it hypothesises that "there's no cache" for markdown re-parsing, but `frontend/app/element/markdown.tsx` has wrapped its transform in a `createMemo` — essentially Phase 1's own Option B — since the initial commit, i.e. before this spec was written. Phases 2 and 3 are unverified; Phase 4 was always deferred.
+**Status:** active — the investigation half is done and load-bearing; the remediation half is not. #1108 (the PR this doc was added in) shipped the fade-in opacity reveal, and this spec's Phase 0 measurements are now cited as authority from [`frontend/app/util/settle-detector.ts`](../../frontend/app/util/settle-detector.ts) and [`frontend/app/tab/active-tab-display.ts`](../../frontend/app/tab/active-tab-display.ts) ("measured that at…"). **Phase 1's premise needs re-checking before anyone acts on it:** it hypothesises that "there's no cache" for markdown re-parsing, but [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) has wrapped its transform in a `createMemo` — essentially Phase 1's own Option B — since the initial commit, i.e. before this spec was written. Phases 2 and 3 are unverified; Phase 4 was always deferred.
 
 ---
 
@@ -16,7 +16,7 @@ Switching between tabs that each host an agent pane is **noticeably slow** — l
 
 ### Tabs stay mounted
 
-Per `frontend/app/workspace/workspace.tsx:46`, inactive tabs use `display: none` rather than unmounting. From the inline comment:
+Per [`frontend/app/workspace/workspace.tsx:46`](../../frontend/app/workspace/workspace.tsx), inactive tabs use `display: none` rather than unmounting. From the inline comment:
 
 > Inactive tabs are `display: none` already.
 
@@ -31,14 +31,14 @@ The cascade itself isn't gone — the gate just hides its ugliness. The dominant
 ### What runs in the cascade
 
 1. **Virtualizer remeasure** — TanStack Virtual's `measureElement` reads `getBoundingClientRect()` on every rendered row. With `display: none` ancestors, those rects are 0/empty; on reveal, every row gets a fresh measurement pass. For 50 streaming-buffer rows + 5 overscan = ~55 sync `getBoundingClientRect` calls + layout invalidations.
-2. **Markdown re-render** — `frontend/app/element/markdown.tsx` runs the full `unified` pipeline (`remarkParse` → `remarkRehype` → rehype-highlight → `toJsxRuntime`) **on every render**, with no memoization layer. Reactive reads inside the agent virtualizer can trigger fresh renders of every visible markdown node. Per-node cost is 2-10ms.
+2. **Markdown re-render** — [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) runs the full `unified` pipeline (`remarkParse` → `remarkRehype` → rehype-highlight → `toJsxRuntime`) **on every render**, with no memoization layer. Reactive reads inside the agent virtualizer can trigger fresh renders of every visible markdown node. Per-node cost is 2-10ms.
 3. **Tool block panel hydration** — `ToolBlock` mounts its overlay panel components (`BashOutputViewer`, diff viewer, log tail). These are present in the DOM even when collapsed; they re-run their setup effects on reveal.
 4. **IntersectionObserver / ResizeObserver fan-out** — every row registers with the observers; reveal triggers them all.
 5. **Async snapshot restore (one-shot)** — for tabs visited the first time in a session, `useHistoryPagination` fires `AgentSessionReadCommand` RPC + dispatches `HistoryRestored`. Subsequent tab visits skip this.
 
 ### Existing perf instrumentation
 
-We already log per-tab signals (`frontend/perf/observers.ts`):
+We already log per-tab signals ([`frontend/perf/observers.ts`](../../frontend/perf/observers.ts)):
 
 | Tap | Threshold | Logged as |
 |---|---|---|
@@ -198,7 +198,7 @@ Established the 500-600ms long-task pattern per tab switch — see §"Tab-switch
 
 ### Phase 1 — markdown memoization (skipped after investigation)
 
-The original hypothesis assumed `<Markdown>` had no memoization. Inspection of `frontend/app/element/markdown.tsx:466` revealed an existing `createMemo` on the unified pipeline keyed via `transformedText() → resolvedText() → props.text`. **The hypothesis was already implemented.** Skipped. No PR shipped.
+The original hypothesis assumed `<Markdown>` had no memoization. Inspection of [`frontend/app/element/markdown.tsx:466`](../../frontend/app/element/markdown.tsx) revealed an existing `createMemo` on the unified pipeline keyed via `transformedText() → resolvedText() → props.text`. **The hypothesis was already implemented.** Skipped. No PR shipped.
 
 ### Phase 1 (revised) — instrument hot spots (measured negative results)
 
@@ -252,13 +252,13 @@ JS-side suspects exhausted. Browser-side layout cost remains. Next candidates:
 ## References
 
 ### Internal
-- `frontend/app/workspace/workspace.tsx:40-48` — display:none + visibility reveal gate
+- [`frontend/app/workspace/workspace.tsx:40-48`](../../frontend/app/workspace/workspace.tsx) — display:none + visibility reveal gate
 - `frontend/app/tab/tab-reveal.ts` — frame-budget detector that lifts the gate
-- `frontend/app/element/markdown.tsx` — unified-pipeline markdown renderer
-- `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` — virtualizer + partition logic
-- `frontend/app/view/agent/components/MarkdownBlock.tsx` — per-node markdown wrapper
-- `frontend/app/view/agent/components/ToolBlock.tsx` — tool block with eagerly-mounted bodies
-- `frontend/perf/index.ts` + `frontend/perf/observers.ts` — existing perf instrumentation
+- [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) — unified-pipeline markdown renderer
+- [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) — virtualizer + partition logic
+- [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) — per-node markdown wrapper
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — tool block with eagerly-mounted bodies
+- [`frontend/perf/index.ts`](../../frontend/perf/index.ts) + [`frontend/perf/observers.ts`](../../frontend/perf/observers.ts) — existing perf instrumentation
 
 ### External — best practices
 - [VS Code sandbox migration — keep renderers alive](https://code.visualstudio.com/blogs/2022/11/28/vscode-sandbox)

@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-31
 **Type:** Bug-fix spec
-**Scope:** `frontend/app/view/agent/hooks/useAgentControllerStatus.ts`,
-`frontend/app/view/agent/flows/launch-flow.ts`
+**Scope:** [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts),
+[`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts)
 **Status:** Implemented (PR #2377, 5 fixup commits after codex review — see §4's
 correction note) — awaiting a live `task dev` check before merge.
 **Trigger:** User report, live-testing a `task dev` build: opening agent "Parko"
@@ -11,15 +11,15 @@ showed a "Log in" prompt even though the agent's actual bound account was
 already authenticated — clicking "Log in" produced no visible re-auth (no
 browser, no OAuth prompt) and the agent worked immediately after. User noted
 this is roughly the 4th time this exact symptom shape has come up.
-**Related:** `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`
+**Related:** [`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`](REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md)
 (names 3 separate credential systems + 5 login code paths; this bug lives
-inside system 1, "provider-CLI identity"), `docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`
+inside system 1, "provider-CLI identity"), [`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`](../reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md)
 (a different, previously-fixed divergence in the same family — two panes on
 the same identity resolving `CLAUDE_CONFIG_DIR` independently),
-`docs/retro/retro-agent-auth-relogin-noop-2026-07-01.md` ("Login Again" as a
+[`docs/retro/retro-agent-auth-relogin-noop-2026-07-01.md`](../retro/retro-agent-auth-relogin-noop-2026-07-01.md) ("Login Again" as a
 silent no-op — same *symptom*, different root cause than this one),
-`docs/retro/retro-login-three-code-paths-2026-07-20.md` /
-`docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` (partial
+[`docs/retro/retro-login-three-code-paths-2026-07-20.md`](../retro/retro-login-three-code-paths-2026-07-20.md) /
+[`docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) (partial
 consolidation via PR #2255, doesn't touch this specific check).
 
 ---

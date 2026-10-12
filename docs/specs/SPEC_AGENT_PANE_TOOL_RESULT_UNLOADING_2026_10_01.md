@@ -3,7 +3,7 @@
 **Status:** proposed — nothing here is built.
 **Date:** 2026-10-01
 **Verified against:** `agentmux` `main` @ `fd95207ea`, plus #4121 (the live
-feed bounded by size). Paths are relative to `frontend/app/view/agent/`
+feed bounded by size). Paths are relative to [`frontend/app/view/agent/`](../../frontend/app/view/agent)
 unless noted.
 **Related:**
 - the live-feed report `REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30`

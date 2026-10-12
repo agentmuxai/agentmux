@@ -8,7 +8,7 @@
 
 ## Problem
 
-The AgentPicker (`frontend/app/view/agent/components/AgentPicker.tsx`) has two tiers:
+The AgentPicker ([`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx)) has two tiers:
 **My Agents** (`MyAgentsList.tsx`, up to 20 rows by default, backend-capped at 100) and
 **+ New from template** (the seeded-template card grid). Both are plain scrollable
 lists — finding one specific agent by eye gets slow as the My Agents list grows.
@@ -35,7 +35,7 @@ in") by substring match against the agent's name as the user types.
   There is no name/text filter parameter on that RPC today — `identity_id` is the only
   server-side filter.
 - `.agent-picker` already carries a top padding offset for the floating
-  `PaneTabStrip` (`frontend/app/view/agent/styles/_picker.scss`, shipped in PR #2618)
+  `PaneTabStrip` ([`frontend/app/view/agent/styles/_picker.scss`](../../frontend/app/view/agent/styles/_picker.scss), shipped in PR #2618)
   — the filter bar sits below that offset, same as everything else in the pane.
 - A component named `AgentSearchBar.tsx` already exists in this same directory but is
   unrelated: it's the in-session **transcript** search overlay (Ctrl+F, searches

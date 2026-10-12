@@ -5,12 +5,12 @@
 passed; `tsc --noEmit`: clean; `vitest`: 2962 passed (29 pre-existing
 Windows-only @solid-refresh/jsdom failures, none touching this feature's
 files). Not yet manually verified in a running `task dev` instance. — #3288
-**Scope:** `frontend/app/view/browser/` (nav bar, model),
+**Scope:** [`frontend/app/view/browser/`](../../frontend/app/view/browser) (nav bar, model),
 `agentmux-srv/src/backend/wconfig/` (`FullConfigType`, `ConfigState`),
 `agentmux-srv/src/backend/config_watcher_fs.rs`, `agentmux-srv/src/bootstrap.rs`.
 **Revision note:** superseded design in §3 — the first pass proposed a
 dedicated `shared_dir` file plus a `.get`/`.set` RPC pair, with the value
-preloaded via a new sequential RPC call added to `frontend/app-init.ts`'s
+preloaded via a new sequential RPC call added to [`frontend/app-init.ts`](../../frontend/app-init.ts)'s
 boot sequence. On reconsideration (repo owner: "we want robust fast
 performance, engineering cost is not important"), that design is replaced
 below with one that adds **zero** boot-time latency and gets **true
@@ -28,14 +28,14 @@ exchange for exactly the two properties asked for.
 > bookmarks button, it is to set the start page. Make it the first entry."
 
 A new item at the **top** of the bookmarks dropdown
-(`frontend/app/view/browser/browser-nav-bar.tsx:285-329`,
+([`frontend/app/view/browser/browser-nav-bar.tsx:285-329`](../../frontend/app/view/browser/browser-nav-bar.tsx),
 `bookmarkMenuItems`) that saves the active tab's URL as the page a **new**
 browser pane opens to, replacing the hardcoded fallback that exists today.
 
 ## 2. Current state
 
 - **No start-page concept exists anywhere in the codebase today** — checked
-  `frontend/app/view/browser/`, `agentmux-srv/src/config/` for
+  [`frontend/app/view/browser/`](../../frontend/app/view/browser), `agentmux-srv/src/config/` for
   `startPage`/`homePage`/`defaultUrl`/`newTabUrl`; nothing.
 - A fresh browser pane's URL comes from `BrowserViewModel`'s constructor
   (`browser-model.ts:522-537`):
@@ -57,7 +57,7 @@ browser pane opens to, replacing the hardcoded fallback that exists today.
   `~/.agentmux/shared/browser-bookmarks.json`
   (`agentmux-srv/src/backend/bookmarks_store.rs`) — a dedicated
   `shared_dir` file, fetched lazily on menu open, with **no live sync
-  across windows** (`docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md`'s
+  across windows** ([`docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md`](SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md)'s
   own unhappy-paths table names this explicitly: "a menu opened before
   another window's edit lands shows a stale snapshot until closed and
   reopened"). That gap is fine for bookmarks' accepted scope; it is exactly
@@ -87,7 +87,7 @@ when the goal is robustness over minimal engineering effort.
 — global across channels, same reasoning as bookmarks: nobody wants their
 start page reset by switching `dev-<branch>` channels, and `settings.json`
 isolation is whole-file only with no per-key tiering
-(`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` §6).
+([`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) §6).
 
 **What changes is how the frontend learns about it.** Instead of a
 dedicated `.get` RPC fetched lazily (bookmarks' pattern) or a new preload
@@ -98,14 +98,14 @@ already:
 - loads once at srv startup, before any client connects
   (`bootstrap.rs:1048`, `wconfig::build_default_config()`),
 - is already fetched by the frontend and awaited **before the app even
-  renders** (`frontend/app-init.ts:1122`, `RpcApi.GetFullConfigCommand`),
+  renders** ([`frontend/app-init.ts:1122`](../../frontend/app-init.ts), `RpcApi.GetFullConfigCommand`),
   so this is genuinely free — not "one more parallel call," zero additional
   round trips of any kind,
 - already has a live file-watch → in-memory-update → WebSocket-broadcast
   pipeline for exactly this "a config file changed on disk, tell every
   connected window" problem
   (`agentmux-srv/src/backend/config_watcher_fs.rs`, `WpsEvent.Config` on
-  the frontend, `frontend/app/store/global.ts:242-246`:
+  the frontend, [`frontend/app/store/global.ts:242-246`](../../frontend/app/store/global.ts):
   `setFullConfigAtom(fullConfig)` on every push).
 
 This is the same infrastructure `settings.json` itself uses, and — unlike
@@ -214,7 +214,7 @@ passes through untouched, confirmed by reading its implementation.
 
 ### 3.3 Frontend changes
 
-**`frontend/app/store/config-signals.ts`** — one new derived signal,
+**[`frontend/app/store/config-signals.ts`](../../frontend/app/store/config-signals.ts)** — one new derived signal,
 identical shape to `settingsAtom` on the line right above it:
 
 ```ts
@@ -272,7 +272,7 @@ that already separates actions from the saved list.
 own UI section named as available for exactly this ("a check/star state on
 the pinned first row") but never used. `FlyoutMenu`'s existing renderer
 already draws a check glyph for `checked: true`
-(`frontend/types/custom.d.ts:463-477`) — no new rendering code.
+([`frontend/types/custom.d.ts:463-477`](../../frontend/types/custom.d.ts)) — no new rendering code.
 
 `setCurrentAsStartPage` — an optimistic local update for instant feedback
 in the clicking window (mirroring `toggleCurrentBookmark`/
@@ -352,9 +352,9 @@ already use on the bookmarks button (`bookmarksError()`,
 
 ## 7. References
 
-- `frontend/app/view/browser/browser-nav-bar.tsx` (menu construction,
+- [`frontend/app/view/browser/browser-nav-bar.tsx`](../../frontend/app/view/browser/browser-nav-bar.tsx) (menu construction,
   optimistic-write pattern)
-- `frontend/app/view/browser/browser-model.ts` (`DEFAULT_BROWSER_URL`,
+- [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts) (`DEFAULT_BROWSER_URL`,
   constructor's initial-URL resolution)
 - `agentmux-srv/src/backend/bookmarks_store.rs` (file read/write pattern
   mirrored by the new module)
@@ -365,14 +365,14 @@ already use on the bookmarks button (`bookmarksError()`,
   mirrors)
 - `agentmux-srv/src/bootstrap.rs:1048-1057` (boot wiring, where the two new
   calls are added)
-- `frontend/app/store/config-signals.ts`, `frontend/app/store/global.ts:242-246`
+- [`frontend/app/store/config-signals.ts`](../../frontend/app/store/config-signals.ts), [`frontend/app/store/global.ts:242-246`](../../frontend/app/store/global.ts)
   (`fullConfigAtom`'s boot-time population and live `WpsEvent.Config`
   update — the mechanism this spec rides instead of building a parallel one)
-- `docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md` (design
+- [`docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md`](SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md) (design
   ancestor — persistence-location reasoning, `FlyoutMenu` reuse, and the
   accepted-staleness limitation this spec's revised design deliberately
   improves on)
-- `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` (why
+- [`docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) (why
   channel isolation is per-file, not per-key — the reasoning that keeps a
   `shared_dir`-sourced field inside `FullConfigType` global despite
   `settings` itself being isolated)

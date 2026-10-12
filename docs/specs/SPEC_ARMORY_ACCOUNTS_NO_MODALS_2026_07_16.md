@@ -5,8 +5,8 @@
 want to get rid of the modals, and use the page dynamics u see on the other sections of the armory."
 **Scope:** Armory's Accounts tab only (`AccountsManager`, `AccountsGallery`, `AccountsTab`/`AccountForm`/
 `AccountDetail` in `identity-view.tsx`, `AgentMuxConnectPanel`). Builds directly on
-`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md` (PR #2170, merged) and
-`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`'s shared `PrimitiveListDetail`
+[`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`](SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md) (PR #2170, merged) and
+[`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`](SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md)'s shared `PrimitiveListDetail`
 primitive — this spec is "finish the job" for the one Armory tab that primitive pass didn't touch.
 **Verify before acting:** all file:line citations checked against `main` @ `4cbf856b` on 2026-07-16.
 
@@ -24,7 +24,7 @@ Checked every place "AgentMux" renders an icon inside Accounts:
 
 `ProviderLogo.tsx`'s provider-to-icon map (`p === "agentmux"`) already returns `brainSvg`
 (`@/app/asset/logo-brain.svg`, the "brain-alternate" brand mark — code comment confirms it's
-"byte-identical to the source `frontend/logos/agentmux-logo-brain-alternate.svg`"). This mapping
+"byte-identical to the source [`frontend/logos/agentmux-logo-brain-alternate.svg`](../../frontend/logos/agentmux-logo-brain-alternate.svg)"). This mapping
 predates this session entirely (introduced in `feaee26f`, PR #1504 — the original AgentMux Cloud
 tile feature) and every AgentMux-icon call site routes through it; there's no second, hardcoded, or
 stale icon anywhere in Accounts to fix.
@@ -37,7 +37,7 @@ fresh `task dev`/rebuild against current `main` should show the brain immediatel
 ## 2. Modals in the Accounts flow — the actual work
 
 Three distinct overlay/modal shells currently gate every Accounts action beyond the gallery+list
-that PR #2170 already unified into one scrolling page (`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`):
+that PR #2170 already unified into one scrolling page ([`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`](SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md)):
 
 | Flow | Trigger | Current shell |
 |---|---|---|
@@ -48,7 +48,7 @@ that PR #2170 already unified into one scrolling page (`docs/specs/SPEC_ARMORY_R
 
 Every other Armory tab (Bundles, Skills, MCP Servers) went through exactly this same
 overlay-on-top-of-a-list shape before PR #2170/#2178, and now uses the shared
-`PrimitiveListDetail` primitive (`frontend/app/element/primitive-list-detail.tsx`) instead: the
+`PrimitiveListDetail` primitive ([`frontend/app/element/primitive-list-detail.tsx`](../../frontend/app/element/primitive-list-detail.tsx)) instead: the
 list view and the detail/form view are two mutually-exclusive full-pane states, never an overlay
 floating on top of the list. Accounts is the one tab that pass didn't touch (it wasn't a
 side-by-side split to begin with — it was already single-column — so it fell outside that spec's
@@ -149,11 +149,11 @@ renders, reused as-is — no new component needed for this part.
 
 ## 5. Sources
 
-- `frontend/app/view/accounts/accounts-manager.tsx`, `AccountsGallery.tsx`, `AgentMuxConnectPanel.tsx`,
+- [`frontend/app/view/accounts/accounts-manager.tsx`](../../frontend/app/view/accounts/accounts-manager.tsx), `AccountsGallery.tsx`, `AgentMuxConnectPanel.tsx`,
   `OAuthConnectPanel.tsx`, `accounts-catalog.ts`
 - `frontend/app/view/identity/identity-view.tsx`, `identity-model.ts`
-- `frontend/app/element/ProviderLogo.tsx`, `frontend/app/asset/logo-brain.svg`
-- `frontend/app/element/primitive-list-detail.tsx`
-- `docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md` (the pattern this spec extends)
-- `frontend/app/element/modal.tsx` (`Modal`/`ModalHeader`/`ModalBody`/`ModalFooter` — shared
+- [`frontend/app/element/ProviderLogo.tsx`](../../frontend/app/element/ProviderLogo.tsx), [`frontend/app/asset/logo-brain.svg`](../../frontend/app/asset/logo-brain.svg)
+- [`frontend/app/element/primitive-list-detail.tsx`](../../frontend/app/element/primitive-list-detail.tsx)
+- [`docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md`](SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md) (the pattern this spec extends)
+- [`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx) (`Modal`/`ModalHeader`/`ModalBody`/`ModalFooter` — shared
   primitive, not modified by this spec)

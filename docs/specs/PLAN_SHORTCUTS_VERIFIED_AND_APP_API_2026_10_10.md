@@ -5,7 +5,7 @@
 **Author:** AgentA@Area54 (Windows), with Masty@starpower and Maricon@charlie for the other platforms
 **Builds on:**
 - [../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md](../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md) (the audit, by reading code; phases 3–6 shipped in #4323–#4328)
-- `frontend/app/keybindings/defaults.ts` (the one shortcut table the dispatcher, the Help pane, the host and the docs read)
+- [`frontend/app/keybindings/defaults.ts`](../../frontend/app/keybindings/defaults.ts) (the one shortcut table the dispatcher, the Help pane, the host and the docs read)
 
 ## 1. Goals
 
@@ -47,7 +47,7 @@ L1 and L2 run unattended from a script against a dev instance (§5). L3 is the p
 
 ## 4. App API additions
 
-Three tools on the agent App API (`crates/mcp`), served by srv and carried out by the frontend, following the path `UIClick` already uses (srv `ui_handlers.rs` → CEF host → page):
+Three tools on the agent App API ([`crates/mcp`](../../crates/mcp)), served by srv and carried out by the frontend, following the path `UIClick` already uses (srv `ui_handlers.rs` → CEF host → page):
 
 - **`ListShortcuts`** returns the effective table for this platform: command id, label, category, keys as the Help pane shows them, context rule, and whether the row is pane-local. Agents read what the user sees.
 - **`RunCommand(command, target?)`** runs a table command by id in the agent's window: global commands through the dispatcher's own `runKeyCommand` (not the separate command-palette registry), pane commands (`doctab:*`, `editor:*`, `files:*`, `term:*`) through the target pane's handler. `target` picks the pane (default: the focused pane) or tab. It returns whether the command ran and a short reason when it didn't ("no terminal focused", "fewer than two terminals").
@@ -64,7 +64,7 @@ The command registry (palette) and the key handlers should run the same code for
 
 ## 5. The verification script
 
-`scripts/verify-shortcuts.mjs`, run against a dev instance (any platform):
+[`scripts/verify-shortcuts.mjs`](../../scripts/verify-shortcuts.mjs), run against a dev instance (any platform):
 
 1. List the rows for this platform (`ListShortcuts`' code path).
 2. For each row, in the pane it needs (passed by block id: `--files`, `--editor`, `--media`, `--term`):
@@ -72,7 +72,7 @@ The command registry (palette) and the key handlers should run the same code for
    - L2: press each listed key (`PressKeys`' code path) and check it resolved to that command.
 3. Write the matrix (row × key × layer × result) as Markdown, or JSON with `--json`.
 
-It talks to the page over the DevTools protocol directly, the same calls the host makes, so a partner can run it against a dev build without an agent in it. As built it checks resolution, not each command's visible effect; effect checks per row are a follow-up, and until then a row whose L1 "ran" is judged by eye when it matters. The grab reports, `scripts/gnome-grabs.mjs` (Maricon) and `scripts/mac-grabs.mjs` (Masty), are the read-only half of L3.
+It talks to the page over the DevTools protocol directly, the same calls the host makes, so a partner can run it against a dev build without an agent in it. As built it checks resolution, not each command's visible effect; effect checks per row are a follow-up, and until then a row whose L1 "ran" is judged by eye when it matters. The grab reports, [`scripts/gnome-grabs.mjs`](../../scripts/gnome-grabs.mjs) (Maricon) and [`scripts/mac-grabs.mjs`](../../scripts/mac-grabs.mjs) (Masty), are the read-only half of L3.
 
 Rules for the script, since it runs on hosts where other agents and the owner are working:
 - It talks to the dev instance whose DevTools port is in `AGENTMUX_CDP_PORT`; it never assumes the default port, which another agent's dev instance may hold.
@@ -129,7 +129,7 @@ The questions as asked:
 
 Filled in by phase 3. Early results:
 
-**L3, taken by GNOME (charlie, Maricon, 2026-10-10, main @ `998175d3c`).** Every Linux key in the table (the first key of a chord) checked against the 150 accelerators GNOME 50 grabs on charlie: the window manager, mutter, the shell, media keys, and the enabled dash-to-dock and tiling-assistant extensions. **4 of 120 are taken, all `pane:swap:*`** (Ctrl+Alt+Shift+Arrow, `move-to-workspace-*`). The other 116 are free on stock GNOME, including every Alt+Shift+Arrow, Alt+Arrow and Ctrl+Alt+Shift+PageUp/PageDown row; the Linux table has no Super keys. A replacement for `pane:swap` on Linux should avoid Ctrl+Alt+Arrow and Ctrl+Alt+letter, which GNOME also takes; Alt+Shift+Arrow is free on GNOME but used by other desktops. This covers stock GNOME as configured on charlie, not KDE, Xfce or Sway, and not keys lost to an input method or VMware; injected L3 (`ydotool`) confirms it later. The check is a read-only script, `scripts/gnome-grabs.mjs`.
+**L3, taken by GNOME (charlie, Maricon, 2026-10-10, main @ `998175d3c`).** Every Linux key in the table (the first key of a chord) checked against the 150 accelerators GNOME 50 grabs on charlie: the window manager, mutter, the shell, media keys, and the enabled dash-to-dock and tiling-assistant extensions. **4 of 120 are taken, all `pane:swap:*`** (Ctrl+Alt+Shift+Arrow, `move-to-workspace-*`). The other 116 are free on stock GNOME, including every Alt+Shift+Arrow, Alt+Arrow and Ctrl+Alt+Shift+PageUp/PageDown row; the Linux table has no Super keys. A replacement for `pane:swap` on Linux should avoid Ctrl+Alt+Arrow and Ctrl+Alt+letter, which GNOME also takes; Alt+Shift+Arrow is free on GNOME but used by other desktops. This covers stock GNOME as configured on charlie, not KDE, Xfce or Sway, and not keys lost to an input method or VMware; injected L3 (`ydotool`) confirms it later. The check is a read-only script, [`scripts/gnome-grabs.mjs`](../../scripts/gnome-grabs.mjs).
 
 **L3, taken on macOS (starpower, Masty, 2026-10-10, main @ `998175d3c`).** Read-only: every macOS key in the table (117 keys over 98 rows, chords by their first key) against Apple's default system shortcuts with this Mac's overrides, AgentMux's menu bar, the window manager app running there (Magnet), and the F-row setting. **11 of 117 hit:**
 - **The OS, suspected:** `pane:focus:*`, ⌃⇧Arrow. macOS has hidden Shift variants of the Mission Control and Spaces hotkeys (ids 34/35 for ⌃⇧↑/↓, 80/82 for ⌃⇧←/→; 80 and 82 are stored as enabled there). If they take the keys, focusing a pane by direction doesn't work on macOS at all, so this is the first key to press at L3. The plain ⌃Arrow keys are taken, but no macOS row uses them.
@@ -137,7 +137,7 @@ Filled in by phase 3. Early results:
 - **The menu bar, as expected:** the Files pane's select-all, copy, cut, paste and undo (⌘A/C/X/V/Z) overlap the Edit menu. Chromium gives the page the key first, so the Files pane should win when it handles the key; L3 decides.
 - **The F-row:** F1 (help), F2 (rename), F5 (refresh), F6/⇧F6 (next/previous pane) work there only because "Use F1, F2, etc. keys as standard function keys" is on. At macOS's default they need fn. Help has ⌘/ as well; rename, refresh and pane cycling have no macOS alternative yet.
 
-Free on macOS: everything else, including ⌘M and ⌘W, ⌘T ⌘N ⌘D ⇧⌘D ⌘[ ⌘] ⌃Tab ⌃⇧Tab ⌘1–9, the ⌃⇧S chords, `pane:swap` (⌃⌥⇧Arrow) and zoom. Not covered: keys lost to input methods, and ⌃PageUp/PageDown and ⇧⌘PageUp/PageDown, which a keyboard without Page keys types as fn+Arrow; macOS 15+ window tiling owns fn⌃Arrow in the Window menu. Those need a manual press. The check is `scripts/mac-grabs.mjs`.
+Free on macOS: everything else, including ⌘M and ⌘W, ⌘T ⌘N ⌘D ⇧⌘D ⌘[ ⌘] ⌃Tab ⌃⇧Tab ⌘1–9, the ⌃⇧S chords, `pane:swap` (⌃⌥⇧Arrow) and zoom. Not covered: keys lost to input methods, and ⌃PageUp/PageDown and ⇧⌘PageUp/PageDown, which a keyboard without Page keys types as fn+Arrow; macOS 15+ window tiling owns fn⌃Arrow in the Window menu. Those need a manual press. The check is [`scripts/mac-grabs.mjs`](../../scripts/mac-grabs.mjs).
 
 **L1/L2, first run on all three platforms (2026-10-10, #4593).** macOS (starpower, Masty), Linux (charlie, Maricon) and Windows (Area54, AgentA: global, Files and terminal rows; no editor pane). Every global row passes both layers on every platform, apart from rows whose context the script didn't set up: `agent:focusComposer` needs an agent pane, `pane:find`'s Ctrl+F goes to a focused terminal's shell by design (Ctrl+Shift+F is the terminal's find, and passes), and `app:escape` needs something open. The ⌃⇧Arrow focus and ⌃⌥⌘←/→ resize keys pass on macOS, as expected, because CDP skips the OS; those are L3 questions. The editor, document-tab and terminal rows pass. No platform-specific L1/L2 failure was found. Found and fixed in the follow-up:
 - **Stale-read crash in the Files pane.** Both partners hit Solid's stale `<Show>` read from `runFilesCommand` → `setSelection` (`files:back` on macOS; `files:selectAll` after the full Files sequence on Linux), after which later updates kept failing until a reload. The rows read their entry through the `<Show>` callback accessor. A listing that drops a name in the same update as a selection change (the re-list prunes the selection in that batch) can re-run a row after its condition went false, and that read throws. Rows now read a memo that keeps the last entry. jsdom doesn't reproduce the ordering, and neither did the Windows run (back, forward and up pass L1 there), so the partners' rerun confirms it.
@@ -157,7 +157,7 @@ Method: real keys sent through System Events into a dev window. The window was r
 - **Found: the Files pane swallowed some global shortcuts.** With it focused, ⌘/, ⌃⇧↑/↓, ⇧⌘PageUp/PageDown and ⌃⌥⌘↑ reached the page and resolved nothing. Its list handler took any arrow, Page key or "/" as its own, whatever the modifiers, and stopped the dispatcher. It now leaves a key the table gives a global command to the dispatcher (`isGlobalKey`). This affected every platform.
 
 **L3 on Linux, real key presses (charlie, Maricon, 2026-10-10, main @ `3dc1bc120` plus the L3 branch, #4624, kinks plan L3).** GNOME 50.1 on Wayland.
-- Method: `scripts/verify-shortcuts-l3-linux.mjs` presses each distinct Linux key once through `ydotool`, with the dev window holding OS focus (checked through `document.hasFocus()` before each key). A passive keydown listener records whether the key arrived, and `last()` what it resolved to.
+- Method: [`scripts/verify-shortcuts-l3-linux.mjs`](../../scripts/verify-shortcuts-l3-linux.mjs) presses each distinct Linux key once through `ydotool`, with the dev window holding OS focus (checked through `document.hasFocus()` before each key). A passive keydown listener records whether the key arrived, and `last()` what it resolved to.
 - **92 of 92 keys pressed reached AgentMux**; the desktop took none.
 - Not pressed:
   - the four `pane:swap:*` keys, which GNOME takes for "move window to workspace" (the gsettings result above). Wayland gives no way to read and restore the workspace, so they're never pressed;

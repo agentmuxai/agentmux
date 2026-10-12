@@ -3,9 +3,9 @@
 **Date:** 2026-07-03
 **Status:** implemented — #1961 (2026-07-03), the PR this doc was added in; "not yet implemented" was written before it merged. The backend side is in `rpc_types/session.rs` and `server/app_api/session.rs`, both citing this spec by name, and the composer-side ghost text is in `AgentFooter.tsx` with tests.
 **Related:** `agentmux-srv/src/ambient/mod.rs`, `agentmux-srv/src/server/app_api/session.rs`,
-`frontend/app/view/agent/hooks/useAgentActivitySummary.ts`,
-`frontend/app/view/agent/components/AgentFooter.tsx`,
-`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`
+[`frontend/app/view/agent/hooks/useAgentActivitySummary.ts`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts),
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx),
+[`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md)
 
 ---
 
@@ -28,7 +28,7 @@ emits a `prompt_suggestion` event.
 
 So AgentMux cannot "turn on" Claude's ghost text — it has to build its own
 equivalent. That turns out to be exactly what the Ambient Model Call (AMC)
-framework (`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`) is
+framework ([`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md)) is
 for: a second ambient call, `next_prompt_suggestion`, built the same shape as
 the existing `activity_summary` one — triggered on `Done`, gated through the
 AMC gateway for coalescing/cancellation, tagged for token accounting — whose
@@ -134,7 +134,7 @@ this signal itself if it wants the UX.
 
 ## 3. What AgentMux has today (and why it isn't this feature)
 
-`frontend/app/view/agent/components/AgentFooter.tsx`'s composer already has
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx)'s composer already has
 something informally called "ghost text" in its own comments (line ~316),
 but it's the textarea's static HTML `placeholder` — a constant string
 ("Send message to Claude...", or "Speak to Claude..." while voice input is
@@ -204,7 +204,7 @@ suggestion is **interactive**:
   fall back to the free one" shape as `readActivitySummary()`'s precedence
   for `term:ambient_summary` / `term:osc_title` — worth implementing as a
   sibling helper (e.g. `readNextPromptSuggestion()`) in
-  `frontend/app/store/activitySummary.ts` or a co-located new file, for the
+  [`frontend/app/store/activitySummary.ts`](../../frontend/app/store/activitySummary.ts) or a co-located new file, for the
   same reason: one place owning precedence so it can't drift.
 
 ### 4.3 Binding-lifecycle discipline — the sharpest edge of this feature

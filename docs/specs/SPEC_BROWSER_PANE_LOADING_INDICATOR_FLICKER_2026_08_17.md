@@ -3,7 +3,7 @@
 **Date:** 2026-08-17
 **Type:** Analysis + architecture proposal (root-caused via code investigation; shipped — see Status)
 **Status:** implemented — #2642 (2026-08-17), the PR this doc was added in. The fix lives in `agentmux-cef` across `browser_pane/callbacks.rs`, `client/lifecycle.rs`, `client/navigation.rs` and `state/mod.rs`, all citing this spec. The scope/non-goals section is unchanged.
-**Scope:** `agentmux-cef/src/client/navigation.rs`, `agentmux-cef/src/browser_pane/callbacks.rs` (Rust, CEF LoadHandler wiring) + `frontend/app/view/browser/browser-model.ts`, `browser-view.tsx`, `frontend/app/store/browser-pane-state/reducer.ts` (frontend loading-state plumbing and spinner rendering).
+**Scope:** `agentmux-cef/src/client/navigation.rs`, `agentmux-cef/src/browser_pane/callbacks.rs` (Rust, CEF LoadHandler wiring) + [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts), `browser-view.tsx`, [`frontend/app/store/browser-pane-state/reducer.ts`](../../frontend/app/store/browser-pane-state/reducer.ts) (frontend loading-state plumbing and spinner rendering).
 
 ## Problem
 
@@ -23,7 +23,7 @@ hard, visible full-pane hide/reveal.
 
 ### Cause 1 — the loading signal isn't scoped to the main frame
 
-`model.loadingAtom()` (`frontend/app/view/browser/browser-model.ts:118-120`),
+`model.loadingAtom()` ([`frontend/app/view/browser/browser-model.ts:118-120`](../../frontend/app/view/browser/browser-model.ts)),
 which drives the spinner, is set directly from CEF's `is_loading` flag,
 forwarded verbatim end-to-end:
 
@@ -52,7 +52,7 @@ callback that carries `is_loading` structurally can't distinguish which
 frame triggered it.
 
 This is a **new finding**, not a regression of a previously-fixed bug.
-`docs/specs/SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md` (the
+[`docs/specs/SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md`](SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md) (the
 spec that built this wiring) fixed a different, real bug — `loading` was
 being cleared within the same tick it was set, so the spinner never showed
 at all (§2, §4.1-4.2) — and that fix is correctly implemented in the
@@ -176,7 +176,7 @@ successfully painted content yet:
   `SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md` (covering
   Chromium's own blank-page gap while a heavy SPA bundle boots) and should
   be left exactly as-is.
-  - Also see `docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`'s own
+  - Also see [`docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md)'s own
     freeze-frame coordination (`pane-overlay.ts:172-203`, `wait()` on the
     `pane-overlay-clip-changed` event) — that machinery already exists for
     letting a pane's snapshot paint under a hide before the native hide
@@ -218,7 +218,7 @@ repeatedly.
 ## Scope / non-goals
 
 - Does not touch the status-bar popover airspace bug — unrelated,
-  covered in `docs/specs/SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md`.
+  covered in [`docs/specs/SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md`](SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md).
 - Does not change `BrainSpinner`'s own visuals or the existing 200ms
   CSS fade — only when/how often it mounts, and how much of the pane its
   overlay claims.
@@ -260,20 +260,20 @@ repeatedly.
 
 ## References
 
-- `docs/specs/SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md` —
+- [`docs/specs/SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md`](SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md) —
   the spec that built the current (partially correct) wiring; fixed a real
   same-tick-clear bug, but never investigated sub-frame aggregation and
   explicitly flagged the full-pane-overlay risk as unverified (§3, §6.3).
-- `docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md` — the airspace-clip
+- [`docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md) — the airspace-clip
   mechanism whose full-pane-size use is cause 2.
-- `frontend/app/view/browser/browser-model.ts`,
-  `frontend/app/view/browser/browser-view.tsx` — frontend loading-state
+- [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts),
+  [`frontend/app/view/browser/browser-view.tsx`](../../frontend/app/view/browser/browser-view.tsx) — frontend loading-state
   plumbing and spinner rendering.
-- `frontend/app/store/browser-pane-state/reducer.ts` — `TabLoadingChanged`
+- [`frontend/app/store/browser-pane-state/reducer.ts`](../../frontend/app/store/browser-pane-state/reducer.ts) — `TabLoadingChanged`
   handling, the natural home for layer 3's debounce.
 - `agentmux-cef/src/client/navigation.rs`, `agentmux-cef/src/client/lifecycle.rs`,
   `agentmux-cef/src/browser_pane/callbacks.rs` — CEF LoadHandler callbacks,
   the existing main-frame-scoped watchdog state layer 1 proposes reusing.
-- `docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md` —
+- [`docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md`](../reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md) —
   unrelated bug, but adjacent: also flags the airspace/overlay subsystem's
   lifecycle-visibility fragility as worth a broader look.

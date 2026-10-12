@@ -3,10 +3,10 @@
 **Date:** 2026-07-08
 **Status:** Draft — root cause confirmed, fix proposed, not yet implemented
 **Related:** `agentmux-srv/src/server/app_api/session.rs`, `agentmux-srv/src/ambient/mod.rs`,
-`frontend/app/view/agent/hooks/useNextPromptSuggestion.ts`,
-`frontend/app/view/agent/components/AgentFooter.tsx`,
-`docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md`,
-`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`
+[`frontend/app/view/agent/hooks/useNextPromptSuggestion.ts`](../../frontend/app/view/agent/hooks/useNextPromptSuggestion.ts),
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx),
+[`docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md`](SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md),
+[`docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md)
 
 ---
 

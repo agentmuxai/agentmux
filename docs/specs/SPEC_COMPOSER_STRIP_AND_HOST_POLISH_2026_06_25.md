@@ -87,10 +87,10 @@ Replace the two native `<select>` elements for **Model** and **Effort** with cus
 components that:
 
 - Open **above** the strip (i.e., `placement: "top-start"` using the existing `computeMenuPosition` /
-  Floating UI stack in `frontend/app/util/menu-position.ts`).
+  Floating UI stack in [`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts)).
 - Match the visual style of the existing native selects as closely as possible (compact, same
   height as the strip, no focus ring artifact on the strip background).
-- Use `FlyoutMenu` from `frontend/app/element/flyoutmenu.tsx` as the base, passing
+- Use `FlyoutMenu` from [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) as the base, passing
   `placement="top-start"` to override the default `"bottom-start"`.
 
 The click handlers, option lists (`MODEL_OPTIONS`, `EFFORT_OPTIONS`), and `updateRuntime`
@@ -182,14 +182,14 @@ separate channel.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/components/AgentComposerStrip.tsx` | Rename Shell→Log, remove onClick expand, remove chevron, rewire Log button, add context bar, add compaction badge |
-| `frontend/app/view/agent/styles/_composer-strip.scss` | Rename shell CSS classes to log, style context fill bar, compaction badge |
+| [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | Rename Shell→Log, remove onClick expand, remove chevron, rewire Log button, add context bar, add compaction badge |
+| [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) | Rename shell CSS classes to log, style context fill bar, compaction badge |
 | `frontend/app/view/agent/styles/_shell-history.scss` | Delete (panel retired) |
 | `frontend/app/view/agent/components/AgentShellHistoryPanel.tsx` | Delete (panel retired) |
 | `frontend/app/store/shell-history.ts` | Delete (no longer needed) |
 | `agent-view.tsx` | Rewire Log button → detailsOpenAtom, remove shellOpenAtom wiring, verify push-up layout on `.agent-composer-details` |
-| `frontend/app/view/agent/components/RuntimeBadge.tsx` | (no change) |
-| `frontend/app/statusbar/HostPopover.tsx` | Replace plain hostType span with RuntimeBadge |
+| [`frontend/app/view/agent/components/RuntimeBadge.tsx`](../../frontend/app/view/agent/components/RuntimeBadge.tsx) | (no change) |
+| [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx) | Replace plain hostType span with RuntimeBadge |
 | Agent pane state / RPC layer | Add `context_window.remaining_percentage` field to streaming output |
 | Claude Code hook config (SDK or settings.json) | Register PreCompact / PostCompact / StatusLine hooks |
 

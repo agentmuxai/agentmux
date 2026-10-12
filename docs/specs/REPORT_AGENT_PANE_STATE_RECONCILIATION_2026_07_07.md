@@ -58,7 +58,7 @@ of what "a big mess... handling state gracefully" is pointing at.
 
 - `registerPane()` seeds every (re)mounted pane's `turnPhase` to
   `{kind:"Idle"}` unconditionally
-  (`frontend/app/store/agent-pane-state/types.ts:287`, via
+  ([`frontend/app/store/agent-pane-state/types.ts:287`](../../frontend/app/store/agent-pane-state/types.ts), via
   `agent-pane-state-store.ts:154`) — regardless of whether the underlying
   agent process is mid-turn, idle, or something else.
 - `agent-view.tsx`'s `onMount` **does** call a real reconciliation-shaped
@@ -170,7 +170,7 @@ literal string `"Subagent completed"` is produced by `parse_event_type`'s
 }
 ```
 Real Claude Code result events (verified against
-`docs/specs/SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md:28`, a live-run-
+[`docs/specs/SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md:28`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md), a live-run-
 confirmed shape) carry a populated `result` field — so the fallback almost
 never triggers, `completed` stays `false`, and `subagent:completed` is never
 broadcast. `swarm-view.tsx:273` renders straight from `SubagentStatus`, so
@@ -182,7 +182,7 @@ redesign (`2ff8d28d`, #1597) and workflow tracking (`dd524cb7`, #1976). Not
 a regression from any PR in the recent list (#1722/#1752/#1793/#1809/#1947/
 #1987 all touch the *separate* TurnPhase mechanism for root panes, confirmed
 via diff review of #1987 — zero overlap with `subagent_watcher.rs` or
-anything under `frontend/app/view/swarm/` / `subagent/`).
+anything under [`frontend/app/view/swarm/`](../../frontend/app/view/swarm) / `subagent/`).
 
 **Fix shape:** key completion off `parse_event_type` recognizing a
 `"result"`-typed line directly (e.g. return a tag/bool alongside
@@ -231,7 +231,7 @@ them uncapped.
 `view: "subagent"` renders `SubagentView`
 (`frontend/app/view/subagent/subagent-view.tsx`) — a wholly separate,
 lightweight component from `AgentPresentationView`
-(`frontend/app/view/agent/agent-view.tsx`), confirmed via grep: `BrainSpinner`
+([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)), confirmed via grep: `BrainSpinner`
 and `scheduleOnSettle` appear only in `agent-view.tsx` (and generically in
 `block.tsx`'s per-view-type fallback from #1992).
 

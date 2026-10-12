@@ -61,7 +61,7 @@ in every window is logged in too.
 The Views path resolves the parent window's context and passes it
 through (`agentmux-cef/src/browser_pane/creation_views.rs:154-173`).
 That was done to stop a FATAL, not to give users isolation
-(`docs/specs/multi-window-pane-and-newwindow-fixes-linux-2026-05-15.md`
+([`docs/specs/multi-window-pane-and-newwindow-fixes-linux-2026-05-15.md`](multi-window-pane-and-newwindow-fixes-linux-2026-05-15.md)
 §Bug 1). The consequence:
 
 | Window | Context the pane gets | Persistence |
@@ -78,7 +78,7 @@ data-loss surprise nobody chose. This spec fixes that as a side effect
 
 - Host IPC `browser_pane_create` args: `block_id, url, x, y, width,
   height, window_label` — `agentmux-cef/src/ipc.rs:443-461`.
-- Frontend caller: `frontend/app/view/browser/use-pane-rect-sync.ts:164-187`.
+- Frontend caller: [`frontend/app/view/browser/use-pane-rect-sync.ts:164-187`](../../frontend/app/view/browser/use-pane-rect-sync.ts).
 - Block meta for a browser block is `view` + `url` (+
   `browser:show_controls`): `agentmux-srv/src/server/app_api/pane.rs:246-251`,
   `agentmux-srv/src/config/widgets.json` (Discord/Slack/Telegram/
@@ -108,7 +108,7 @@ data-loss surprise nobody chose. This spec fixes that as a side effect
 `root_cache_path` makes Chrome materialize a real profile, after which
 browser creation never completes — no `on_after_created`, no load, no
 error (`agentmux-cef/src/commands/mod.rs:39-49`,
-`docs/specs/SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md` §1.6(b), verified
+[`docs/specs/SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md`](SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md) §1.6(b), verified
 live 2026-07-09). A grandchild path silently degrades to a unique
 off-the-record profile. An **empty** `cache_path` reliably yields a
 unique, in-memory off-the-record profile and is what every secondary
@@ -277,7 +277,7 @@ in the 154 `-r2` runtimes. See `SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md`
 Two candidate routes, decided by a spike, in this order of preference:
 
 1. **CEF-fork patch.** The repo already ships a patched CEF
-   (`docs/cef-patches/`, `--features patched-libcef`, fork
+   ([`docs/cef-patches/`](../cef-patches), `--features patched-libcef`, fork
    `agentmuxai/cef@agentmux/7977-…`). A patch making
    `CefWidgetImpl::AddAssociatedProfile` tolerate a widget that already
    observes the shared `ThemeService` (check `HasObserver` before
@@ -340,7 +340,7 @@ in the pane first.
     coloured initial for a named profile; a neutral person glyph for
     `shared`.
   - **Menu** (a `FlyoutMenu`, the same primitive as the bookmark menu,
-    `frontend/app/view/browser/browser-nav-bar.tsx`): `Shared (default)`,
+    [`frontend/app/view/browser/browser-nav-bar.tsx`](../../frontend/app/view/browser/browser-nav-bar.tsx)): `Shared (default)`,
     `Private — this pane only`, then each named profile (Phase 3), then
     **Manage profiles…**. Choosing another identity shows a one-line
     confirm ("Reopens this pane logged out." or "Reopens this pane as
@@ -370,10 +370,10 @@ the indicator lives in pane chrome:
 
 **Model plumbing.** `BrowserViewModel` reads
 `meta["browser:identity"]` the way it reads `browser:show_controls`
-(`frontend/app/view/browser/browser-model.ts:363`), and
+([`frontend/app/view/browser/browser-model.ts:363`](../../frontend/app/view/browser/browser-model.ts)), and
 `use-pane-rect-sync.ts:168` forwards it in the `browser_pane_create`
 args. The menu writes it through the existing `SetMetaCommand`
-(`frontend/app/store/rpc-api/workspace.ts:139`), then triggers the
+([`frontend/app/store/rpc-api/workspace.ts:139`](../../frontend/app/store/rpc-api/workspace.ts)), then triggers the
 recreate.
 
 **Platform gating.** The menu group and widget are hidden when the host
@@ -392,7 +392,7 @@ tear-off/redock keeps the login when the context is held in a map, and
 loses it when it is not; (d) per-private-pane RSS delta from
 `mem_attribution`. On Linux, confirm constraint B fires for a per-pane
 OTR context, so §4.4 is grounded in a fresh repro rather than a
-four-month-old note. Output: a short report under `docs/reports/` and
+four-month-old note. Output: a short report under [`docs/reports/`](../reports) and
 a Status bump here.
 
 **Phase 1 — Private identity, Windows.** §4.1, §5.1, §5.2, §5.3, the
@@ -424,7 +424,7 @@ child of `root_cache_path`, the one layout Chrome accepts), and an
 answer to whether profiles live inside the per-version data dir
 (`SPEC_VERSION_ISOLATION_2026_06_01.md`) or in the shared tree the
 archived data-dir-unification spec planned for cookies
-(`archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` §chromium-cookies).
+([`archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) §chromium-cookies).
 
 ## 7. Security notes
 

@@ -6,7 +6,7 @@
 // relative link, so a reader on GitHub can click through to the file.
 //
 //   `crates/srv/src/main.rs`      ->  [`crates/srv/src/main.rs`](crates/srv/src/main.rs)
-//   `scripts/release.sh:183`      ->  [`scripts/release.sh:183`](scripts/release.sh#L183)
+//   `scripts/release.sh:183`      ->  [`scripts/release.sh:183`](scripts/release.sh)
 //
 //   node scripts/link-md-paths.mjs FILE...      rewrite these files
 //   node scripts/link-md-paths.mjs --all        rewrite every tracked .md file
@@ -22,8 +22,9 @@
 // heading, paths that don't exist (stale ones are for a person to fix), and
 // bare file names (`mod.rs`) in a file below the repo root, where they usually
 // mean a file next to the code being discussed, not a file at the root.
-// A `:N` or `:N-M` suffix becomes a `#LN` / `#LN-LM` anchor, except on a .md
-// target, which GitHub renders and so has no line anchors.
+// A `:N` or `:N-M` suffix stays in the text but gets no `#LN` anchor: a line
+// number in a doc dates from when it was written, and an anchor that lands on
+// whatever sits at that line today looks right and isn't.
 // The agentmux-docs site does the same at build time with remark plugins; this repo
 // is read on GitHub as written, so the links have to be in the source.
 
@@ -37,8 +38,10 @@ import remarkGfm from "remark-gfm";
 
 const PATH_RE = /^(?:\.\/)?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)*\/?(?::(\d+)(?:[-–](\d+))?)?$/;
 const SKIP_ANCESTORS = new Set(["link", "linkReference", "heading", "definition"]);
-// Written only by the release flow (scripts/release.sh), never by hand in a feature PR.
-const NOT_OURS = (f) => f === "VERSION_HISTORY.md" || f.startsWith(".changesets/");
+// Written only by the release flow (scripts/release.sh), never by hand in a feature PR,
+// or generated (docs/specs/INDEX.md, by scripts/gen-docs-index.mjs, which CI re-checks).
+const NOT_OURS = (f) =>
+  f === "VERSION_HISTORY.md" || f.startsWith(".changesets/") || f === "docs/specs/INDEX.md";
 
 /** Index of tracked files and the folders that hold them. */
 export function trackedIndex(repoRoot) {
@@ -60,7 +63,6 @@ export function trackedIndex(repoRoot) {
 export function resolveTarget(value, mdFile, tracked) {
   const m = PATH_RE.exec(value);
   if (!m) return null;
-  const [, start, end] = m;
   const p = value
     .replace(/:\d+(?:[-–]\d+)?$/, "")
     .replace(/^\.\//, "")
@@ -82,11 +84,7 @@ export function resolveTarget(value, mdFile, tracked) {
   }
   if (!repoPath) return null;
 
-  let target = path.posix.relative(mdDir === "." ? "" : mdDir, repoPath) || ".";
-  if (start && !repoPath.endsWith(".md")) {
-    target += end ? `#L${start}-L${end}` : `#L${start}`;
-  }
-  return target;
+  return path.posix.relative(mdDir === "." ? "" : mdDir, repoPath) || ".";
 }
 
 /** Rewrite one Markdown text. Returns { text, changes: [{ line, value, target }] }. */
@@ -120,7 +118,25 @@ export function linkPaths(text, mdFile, tracked) {
     const code = out.slice(e.start, e.end);
     out = `${out.slice(0, e.start)}[${code}](${e.target})${out.slice(e.end)}`;
   }
-  return { text: out, changes: edits.map(({ line, value, target }) => ({ line, value, target })) };
+  return { text: hardBreaksAsBackslash(out, edits), changes: edits.map(({ line, value, target }) => ({ line, value, target })) };
+}
+
+// A line this script edits that ends in a two-space hard break would fail the
+// pre-commit `git diff --check`; a trailing backslash is the same break in
+// CommonMark and GitHub. Trailing spaces with no line after them break nothing,
+// so they are just dropped.
+function hardBreaksAsBackslash(text, edits) {
+  const lines = text.split("\n");
+  for (const n of new Set(edits.map((e) => e.line))) {
+    const i = n - 1;
+    const cr = lines[i].endsWith("\r") ? "\r" : "";
+    const body = cr ? lines[i].slice(0, -1) : lines[i];
+    const core = body.replace(/[ \t]+$/, "");
+    if (core === body) continue;
+    const next = (lines[i + 1] ?? "").trim();
+    lines[i] = (next && body.length - core.length >= 2 ? `${core}\\` : core) + cr;
+  }
+  return lines.join("\n");
 }
 
 function main(argv) {

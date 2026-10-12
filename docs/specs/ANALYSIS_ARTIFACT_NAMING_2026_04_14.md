@@ -90,7 +90,7 @@ are **actively imported** in the frontend at runtime-detection boundaries:
 
 - `frontend/tauri-bootstrap.ts` — conditionally loaded when `window.__TAURI_INTERNALS__` present
 - `frontend/util/tauri-api.ts` — full AppApi shim for Tauri runtime
-- `frontend/app/platform/ipc.ts` — dynamic imports of invoke/listen
+- [`frontend/app/platform/ipc.ts`](../../frontend/app/platform/ipc.ts) — dynamic imports of invoke/listen
 - `frontend/util/notification.ts` — desktop notifications
 
 The frontend uses a host-abstraction layer (`ipc.ts`) that dispatches to CEF HTTP IPC
@@ -136,7 +136,7 @@ No "cef" in any platform artifact name.
 
 ## Implementation Plan
 
-1. Rename `scripts/package-cef-portable.sh` → `scripts/package-portable.sh`, apply all line changes above
+1. Rename `scripts/package-cef-portable.sh` → [`scripts/package-portable.sh`](../../scripts/package-portable.sh), apply all line changes above
 2. Update `Taskfile.yml` line 536 to reference new script name
 3. Update `BUILD.md` artifact name examples
 4. Bump patch version, commit, build to verify

@@ -13,7 +13,7 @@ This bundles four independent, small UI fixes discovered/designed in one investi
 
 ### Current behavior
 
-`AgentRuntimeDropup`'s trigger button (`frontend/app/view/agent/components/AgentRuntimeDropup.tsx:281-295`) renders a live `"Mode · Model · Effort"` summary (e.g. `"Auto · Sonnet 5 · Medium"`) inside `.agent-runtime-dropup-trigger-label`. The trigger and label are styled in `frontend/app/view/agent/styles/_composer-strip.scss:48-79`:
+`AgentRuntimeDropup`'s trigger button ([`frontend/app/view/agent/components/AgentRuntimeDropup.tsx:281-295`](../../frontend/app/view/agent/components/AgentRuntimeDropup.tsx)) renders a live `"Mode · Model · Effort"` summary (e.g. `"Auto · Sonnet 5 · Medium"`) inside `.agent-runtime-dropup-trigger-label`. The trigger and label are styled in [`frontend/app/view/agent/styles/_composer-strip.scss:48-79`](../../frontend/app/view/agent/styles/_composer-strip.scss):
 
 ```scss
 .agent-runtime-dropup-trigger {
@@ -56,7 +56,7 @@ Drop the unconditional cap; let the button size to its content (its neighbors al
 
 This satisfies "only show ellipsis if there is no room for the control" literally: unconstrained above 320px pane width, truncated only below it.
 
-**Files:** `frontend/app/view/agent/styles/_composer-strip.scss` (lines ~48-53, ~236-243).
+**Files:** [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) (lines ~48-53, ~236-243).
 
 ---
 
@@ -147,7 +147,7 @@ Today, `.agent-composer-strip { flex-wrap: wrap }` lets the right zone drop to i
 
 Recommend starting with option 1 and only adding option 2 if manual testing at very narrow pane widths shows clipping/overlap.
 
-**Files:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` (lines 155-215), `frontend/app/view/agent/styles/_composer-strip.scss` (lines 13-34, 161-172).
+**Files:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) (lines 155-215), [`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss) (lines 13-34, 161-172).
 
 ---
 
@@ -155,7 +155,7 @@ Recommend starting with option 1 and only adding option 2 if manual testing at v
 
 ### Current behavior
 
-`frontend/app/view/agent/styles/_pending-footer.scss:78-88`:
+[`frontend/app/view/agent/styles/_pending-footer.scss:78-88`](../../frontend/app/view/agent/styles/_pending-footer.scss):
 
 ```scss
 .agent-input-mic {
@@ -172,7 +172,7 @@ The textarea (`.agent-input`, same file, lines 102-138) auto-grows via `field-si
 
 ### Fix
 
-Track the container's vertical center instead of pinning to a fixed offset from the top — pure CSS, consistent with the codebase's existing zero-JS auto-grow approach (`docs/analysis/agent-typing-lag-trace-2026-04-12.md`, referenced at line 121):
+Track the container's vertical center instead of pinning to a fixed offset from the top — pure CSS, consistent with the codebase's existing zero-JS auto-grow approach ([`docs/analysis/agent-typing-lag-trace-2026-04-12.md`](../analysis/agent-typing-lag-trace-2026-04-12.md), referenced at line 121):
 
 ```scss
 // Pinned mic — right edge of the composer, vertically centered against the
@@ -191,7 +191,7 @@ At the single-line resting height (`min-height: 20px`) this lands within a coupl
 
 No change needed to the `:has(.mic-button-wrap) .agent-input { padding-right: 22px }` rule (line 98-100) — that reserves horizontal space only, unaffected by vertical positioning.
 
-**Files:** `frontend/app/view/agent/styles/_pending-footer.scss` (lines 78-88, plus the comment above it).
+**Files:** [`frontend/app/view/agent/styles/_pending-footer.scss`](../../frontend/app/view/agent/styles/_pending-footer.scss) (lines 78-88, plus the comment above it).
 
 ---
 
@@ -203,7 +203,7 @@ Confirmed live in this session: the srv log shows `model catalog: HTTP 401 Unaut
 
 ### Current curated list
 
-`frontend/app/view/agent/providers/index.ts:198-202`:
+[`frontend/app/view/agent/providers/index.ts:198-202`](../../frontend/app/view/agent/providers/index.ts):
 
 ```ts
 models: [
@@ -255,7 +255,7 @@ const curated = base.models.map((m) => {
 
 `familyKey("sonnet")` → `"sonnet"` (alphabetic tokens, no `-` to split, nothing to strip) and `familyKey("claude-fable-5")` → `"fable"` — both still match their respective families exactly as before for opus/sonnet/haiku, but now Fable (and any future curated entry pinned to a concrete id) auto-refreshes across version bumps the same way, with no duplicate-entry risk. This is a small, low-risk change confined to `setProviderModels()`; recommend shipping it in the same PR as the curated-list addition so the new Fable entry doesn't reintroduce the exact "stale label" bug this whole feature exists to fix.
 
-**Files:** `frontend/app/view/agent/providers/index.ts` (lines 198-202, and optionally 578-584 for the `familyKey()` fix).
+**Files:** [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) (lines 198-202, and optionally 578-584 for the `familyKey()` fix).
 
 ---
 

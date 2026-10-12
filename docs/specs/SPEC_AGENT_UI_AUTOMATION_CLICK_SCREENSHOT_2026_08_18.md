@@ -8,7 +8,7 @@ written ("default every tool to the caller's own window/pane") turned out to
 be stricter than intended once built — the muxbus sign-in chip that
 motivated this whole spec (§0/§7) lives in the status bar, which is app-wide
 chrome rendered as a *sibling* of the pane-content tree
-(`frontend/app/workspace/workspace.tsx:85`), not a descendant of any pane's
+([`frontend/app/workspace/workspace.tsx:85`](../../frontend/app/workspace/workspace.tsx)), not a descendant of any pane's
 `[data-blockid]` wrapper. Strict pane-subtree scoping made it structurally
 unreachable — the exact motivating scenario couldn't work. Resolved
 (repo-owner confirmed): `UIClick`/`UIQuery` allow an element if it's either
@@ -109,7 +109,7 @@ them operate the rest of the app.
 AgentMux already ships a full CDP (Chrome DevTools Protocol) automation
 layer: `agentmux-cef/src/browser_api/` (`cdp.rs`, `resolver.rs`,
 `routes.rs`, `types.rs`, `scripts/query.js`), designed and specced in
-`docs/specs/SPEC_BROWSER_DOM_API.md` / `docs/specs/PLAN_BROWSER_DOM_API.md`.
+[`docs/specs/SPEC_BROWSER_DOM_API.md`](SPEC_BROWSER_DOM_API.md) / [`docs/specs/PLAN_BROWSER_DOM_API.md`](PLAN_BROWSER_DOM_API.md).
 It is real, shipped, production code — not a draft — currently used to
 replace flaky Win32 pixel-coordinate clicks in the `pane-focus-stress.ps1`
 test harness. It already implements, over CDP's `Page.*`/`Input.*`/
@@ -131,7 +131,7 @@ closer to "agent-ready" than it looks at first glance:
    `remote_debugging_port: debug_port as i32` on CEF's process-wide
    `Settings` with no dev/release gate at that call site (dev picks 9223,
    release 9222, falling back to an OS-assigned free port per instance to
-   avoid collisions across parallel AgentMux instances). `docs/specs/SPEC_TEST_API_ACCESS.md`
+   avoid collisions across parallel AgentMux instances). [`docs/specs/SPEC_TEST_API_ACCESS.md`](SPEC_TEST_API_ACCESS.md)
    §4.3 rejected using CDP for a *different* purpose (fetching `auth_key`
    for test-harness bootstrapping) partly on the premise "DevTools is
    disabled on release by default (and should be)" — that premise is
@@ -162,7 +162,7 @@ CDP client, no new screenshot/click mechanism, no new dependency.
 
 ## 2. Prior art in this repo (read before building; reconcile, don't ignore)
 
-- **`docs/specs/computer-use-pane.md`** — draft, unbuilt. Proposes a
+- **[`docs/specs/computer-use-pane.md`](computer-use-pane.md)** — draft, unbuilt. Proposes a
   first-class "Computer Use pane" using Anthropic's `computer_20251124`
   tool contract: OS-level whole-desktop screenshot (`xcap`) + input
   injection (`enigo`), for driving *arbitrary third-party apps*.
@@ -177,7 +177,7 @@ CDP client, no new screenshot/click mechanism, no new dependency.
   screen), and deserves a lower-risk mechanism. See §6 for why this spec
   deliberately stays inside the CDP/DOM boundary instead of reaching for
   `computer-use-pane.md`'s OS-level approach.
-- **`docs/specs/SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md`** — draft,
+- **[`docs/specs/SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md`](SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md)** — draft,
   unbuilt. Proposes agent-facing `browser_screenshot`/`browser_execute_js`
   MCP tools scoped to the *agent's own Browser pane*. Closest prior art in
   spirit (agent-facing, CDP-based) but doesn't cover the main-UI-window
@@ -185,7 +185,7 @@ CDP client, no new screenshot/click mechanism, no new dependency.
   content), and no `browser_*` MCP tool exists today — confirmed zero
   matches for `browser_api`/`/agentmux/browser` in
   `agentmux-mcp/src/main.rs`.
-- **`docs/specs/SPEC_TEST_API_ACCESS.md`** §4.3 — see §1 above re: the
+- **[`docs/specs/SPEC_TEST_API_ACCESS.md`](SPEC_TEST_API_ACCESS.md)** §4.3 — see §1 above re: the
   stale "disabled on release" premise. Its other objections (CDP is an
   "uncontrolled" wire protocol we don't own; frontend internals like
   `globalAtoms` aren't a stable API surface; per-call latency) are still
@@ -193,7 +193,7 @@ CDP client, no new screenshot/click mechanism, no new dependency.
   against *stable, purpose-built* hooks (data attributes / accessible
   names), not ad hoc `Runtime.evaluate` reaching into frontend internals —
   see §6.
-- **`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`** —
+- **[`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`](SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md)** —
   independently recommends CDP as the right mechanism for read-only
   introspection of what the app is actually doing, explicitly out of scope
   for muxspect itself. Corroborates CDP as the house-favored "look from

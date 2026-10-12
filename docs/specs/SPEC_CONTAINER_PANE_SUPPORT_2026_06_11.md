@@ -339,7 +339,7 @@ Do NOT try to signal the `docker exec` child process directly — it does not cr
 | Startup Docker availability check | `main.rs` |
 | Cross-platform socket detection | `container.rs` |
 | Windows path translation utility | `container.rs` |
-| Settings schema + template | `schema/settings.json`, `settings-template.jsonc` |
+| Settings schema + template | [`schema/settings.json`](../../schema/settings.json), `settings-template.jsonc` |
 
 ---
 
@@ -574,7 +574,7 @@ app_state.container_manager = container_manager;
 
 4. **Podman on macOS:** Low adoption compared to OrbStack/Colima. Probably not worth testing in CI but worth documenting for users who report it.
 
-5. **`scripts/import-agents.sh` interaction:** The import script rehydrates Claude session transcripts into `~/.claude` paths. If `~/.claude` is a named Docker volume, the script's rehydration logic needs updating to write into the volume. This is a cross-team concern.
+5. **[`scripts/import-agents.sh`](../../scripts/import-agents.sh) interaction:** The import script rehydrates Claude session transcripts into `~/.claude` paths. If `~/.claude` is a named Docker volume, the script's rehydration logic needs updating to write into the volume. This is a cross-team concern.
 
 ---
 

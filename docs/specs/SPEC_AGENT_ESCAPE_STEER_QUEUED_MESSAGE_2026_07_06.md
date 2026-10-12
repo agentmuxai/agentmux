@@ -3,12 +3,12 @@
 **Date:** 2026-07-06
 **Author:** Agent2
 **Status:** Draft
-**Scope:** `frontend/app/view/agent/components/AgentFooter.tsx`, `frontend/app/view/agent/hooks/useAgentCommands.ts`, `frontend/app/view/agent/agent-view.tsx`; a Tier 2 follow-on may touch `agentmux-srv/src/backend/blockcontroller/persistent.rs`.
+**Scope:** [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx), [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts), [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx); a Tier 2 follow-on may touch `agentmux-srv/src/backend/blockcontroller/persistent.rs`.
 **Related (must-read first):**
-`docs/specs/SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md` (the empirical proof this spec leans on — mid-turn stdin steering for persistent Claude Code is proven, with a reusable probe-script methodology this spec follows for its own open question),
-`docs/analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md` (Issue 3 — the "Send now" button this spec's design replaces),
-`docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md` (the immediately-preceding PR — this spec is a direct continuation of that thread, not a new investigation),
-`docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md` (the existing control-protocol demultiplexer in `persistent.rs` this spec's Tier 2 would extend, if it turns out to be needed).
+[`docs/specs/SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md`](SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md) (the empirical proof this spec leans on — mid-turn stdin steering for persistent Claude Code is proven, with a reusable probe-script methodology this spec follows for its own open question),
+[`docs/analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md`](../analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md) (Issue 3 — the "Send now" button this spec's design replaces),
+[`docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md`](SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md) (the immediately-preceding PR — this spec is a direct continuation of that thread, not a new investigation),
+[`docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) (the existing control-protocol demultiplexer in `persistent.rs` this spec's Tier 2 would extend, if it turns out to be needed).
 
 ---
 
@@ -23,7 +23,7 @@ The other half — **does it also silence the agent's current output right away*
 ## 2. Where we are today
 
 **The "queues, then auto-delivers at the next breakpoint" half already exists and already works correctly** — this was not part of the investigation, it's confirmed-working prior art:
-- `sendMessage()` (`frontend/app/view/agent/hooks/useAgentCommands.ts`, ~264-388): while a turn is in flight, the message is dispatched as `PendingMessageQueued{enqueuedWhileBusy:true}` and pushed onto `heldQueue` (~184) instead of being delivered yet.
+- `sendMessage()` ([`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts), ~264-388): while a turn is in flight, the message is dispatched as `PendingMessageQueued{enqueuedWhileBusy:true}` and pushed onto `heldQueue` (~184) instead of being delivered yet.
 - An auto-flush `createEffect` in `agent-view.tsx` (~624-640) watches `currentToolAtom` and `turnPhaseAtom.kind`, calling `commands.flushHeldMessages()` as soon as a new tool call starts **or** the turn becomes idle/done.
 - `flushHeldMessages()` (~462-480) drains `heldQueue` FIFO via `deliverToBackend()` (~397-454), which calls the `agentinput` RPC.
 
@@ -56,7 +56,7 @@ This also fully replaces "Send now" (Issue 3 of the motivating analysis) with so
 The open question: does the real interactive Claude CLI's Escape *only* deliver the next message sooner (same next-inference-boundary timing `SPEC_INJECT_AT_TOOL_BOUNDARY` already proved), or does it *also* immediately truncate whatever the model is currently streaming/whatever tool is in flight — a genuine interrupt, not just an early steer? The existing probe only tested injection during an in-flight **tool call** (four `sleep 4`s); it did not test injection during **plain streaming text** with no tool running, which is the scenario closest to what a literal "stops mid-sentence" experience would require.
 
 This is unverified, not assumed. Before any backend work:
-1. **Extend `docs/specs/evidence/steer-probe.py`** (or write a sibling probe) with a case that forces Claude to stream a long plain-text answer (no tool call), inject a second stdin message partway through, and capture whether the CLI (a) keeps streaming the original response to its natural end before addressing the new message, or (b) stops early. This mirrors exactly how `SPEC_INJECT_AT_TOOL_BOUNDARY` §4 resolved its own open questions — captured bytes, not speculation.
+1. **Extend [`docs/specs/evidence/steer-probe.py`](evidence/steer-probe.py)** (or write a sibling probe) with a case that forces Claude to stream a long plain-text answer (no tool call), inject a second stdin message partway through, and capture whether the CLI (a) keeps streaming the original response to its natural end before addressing the new message, or (b) stops early. This mirrors exactly how `SPEC_INJECT_AT_TOOL_BOUNDARY` §4 resolved its own open questions — captured bytes, not speculation.
 2. **If the CLI's stream-json control protocol exposes an actual interrupt/cancel control-request** (distinct from `can_use_tool`, the only control-request type this codebase currently demultiplexes, `persistent.rs:458-489`), capture its exact wire shape from real traffic before writing any Rust to send it — do not guess the JSON shape.
 3. **If no such mechanism exists**, the honest answer is that "immediate visual silence mid-stream" isn't achievable for stream-json-driven Claude without killing the process (which is what today's Escape already does, just without the steering benefit) — in which case Tier 1's "steer at the next natural boundary, don't kill" is the correct final behavior, and the user-facing difference from real interactive Claude CLI (which may rely on true terminal-level Ctrl-C handling not exposed over stream-json) would be a documented, accepted gap rather than something to force via a destructive workaround.
 

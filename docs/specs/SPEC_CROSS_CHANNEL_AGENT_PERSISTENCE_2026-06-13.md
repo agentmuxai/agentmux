@@ -8,8 +8,8 @@
 > persistence" is named directly in current code (`paths.rs`) and is
 > load-bearing per `CLAUDE.md`. Badly stale status for a doc flagged
 > critical-priority. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
-- **Related:** `SPEC_VERSION_ISOLATION_2026_06_01.md` (§5 Phase 2 introduced per-version data), `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` (transcript store), data-isolation discussion **#1026**, `RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md`, `scripts/import-agents.sh` (the current manual workaround this spec retires)
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
+- **Related:** `SPEC_VERSION_ISOLATION_2026_06_01.md` (§5 Phase 2 introduced per-version data), `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` (transcript store), data-isolation discussion **#1026**, `RESEARCH_PER_VERSION_DATA_ISOLATION_2026_05_24.md`, [`scripts/import-agents.sh`](../../scripts/import-agents.sh) (the current manual workaround this spec retires)
 
 ---
 
@@ -19,7 +19,7 @@ A user's agents (e.g. **Maksi / Mopeo / Spixo**) do **not** follow them across b
 
 - Launching a **new version** in the **same channel** boots an empty roster (observed 2026-06-13: a fresh `0.44.2` build on channel `local-agenta-replacechild-diagnos-3f4e60` came up with templates only; the user's three agents had to be copied in by hand).
 - Launching a **different channel** (a different branch's local build, `stable` vs `local`, or a `--fresh` data dir) shows a *completely* different/empty roster.
-- The only recovery today is `scripts/import-agents.sh`, a brittle manual catalog-and-copy across every `objects.db` on disk. It is the wrong layer (a shell script reaching into SQLite) and silently mis-fired in practice (see its hardening PR).
+- The only recovery today is [`scripts/import-agents.sh`](../../scripts/import-agents.sh), a brittle manual catalog-and-copy across every `objects.db` on disk. It is the wrong layer (a shell script reaching into SQLite) and silently mis-fired in practice (see its hardening PR).
 
 The user requirement is explicit: **agents must persist across channels** (and, by extension, across versions within a channel). An agent the user created once should be available in every AgentMux build they run, exactly like their provider login already is.
 
@@ -51,7 +51,7 @@ Agent **definitions + instances** are written to the per-version `objects.db` (`
 **Goals**
 - G1 — An agent created in any build is visible in **every** other build (any channel, any version), without a manual import.
 - G2 — Its conversation **resumes** in the new build (definition + instance→session/cwd linkage travel with it; transcript is already global).
-- G3 — One authoritative, cross-process-safe store; retire `scripts/import-agents.sh` as a normal-path tool.
+- G3 — One authoritative, cross-process-safe store; retire [`scripts/import-agents.sh`](../../scripts/import-agents.sh) as a normal-path tool.
 - G4 — Zero data loss / no regression for existing per-version data (migrated, not abandoned).
 
 **Non-goals**
@@ -106,7 +106,7 @@ Generalize `migrate_from_sqlite_once`:
 3. Write a **global** `.migrated_from_sqlite` marker under `~/.agentmux/shared/agents/registry/` so it runs at most once.
 4. Leave SQLite untouched (read-only) — rollback is just "ignore the registry."
 
-This subsumes `scripts/import-agents.sh`: the same catalog-and-merge, done once in-process at the right layer.
+This subsumes [`scripts/import-agents.sh`](../../scripts/import-agents.sh): the same catalog-and-merge, done once in-process at the right layer.
 
 ## 6. Edge cases
 
@@ -122,7 +122,7 @@ This subsumes `scripts/import-agents.sh`: the same catalog-and-merge, done once 
 - **P0 — Re-root + migrate (read).** Point the registry at `~/.agentmux/shared/agents/registry/`; run the global migration on startup; make `My Agents` read registry-first with SQLite fallback. *No write changes yet.* → agents become **visible** everywhere immediately.
 - **P1 — Registry-primary writes (dual-write).** Definition/instance create/update/delete write the registry first, mirror to local SQLite. Tombstones on delete.
 - **P2 — Cutover.** Registry is the sole source of truth; SQLite mirror becomes best-effort/diagnostic only.
-- **P3 — Retire.** Drop the per-version `db_agent_*` tables from the schema; delete `scripts/import-agents.sh`; remove the SQLite fallback.
+- **P3 — Retire.** Drop the per-version `db_agent_*` tables from the schema; delete [`scripts/import-agents.sh`](../../scripts/import-agents.sh); remove the SQLite fallback.
 
 Each phase is independently shippable and reversible (drop back to SQLite). P0 alone solves the user-visible problem.
 
@@ -174,7 +174,7 @@ What a channel **stops** being is an **identity/content scope**. Today it fragme
 | 2 | Duplicate **channel-root** `channels/<ch>/data/db/objects.db` — Phase-1 legacy, byte-identical to the live `versions/<v>/data/db/objects.db` (verified 2026-06-13) | Stale dead weight. Remove once nothing reads it; confirm no code path still resolves the pre-Phase-2 `data/` path. |
 | 3 | Per-version agent tables `db_agent_definitions` / `db_agents` / `db_agent_instances` / `db_agent_content` / `db_agent_skills` | Become vestigial after registry cutover → drop in P3. |
 | 4 | `registry/migrate.rs` parameter named `shared_home` that is actually the **channel** dir (`instance_dir`), not global `shared/` | Rename + re-point at the true global root as part of generalizing the migration to scan all channels. |
-| 5 | `scripts/import-agents.sh` (manual catalog-and-copy across every `objects.db`) | Obsolete once the in-process global migration ships — delete in P3. |
+| 5 | [`scripts/import-agents.sh`](../../scripts/import-agents.sh) (manual catalog-and-copy across every `objects.db`) | Obsolete once the in-process global migration ships — delete in P3. |
 
 ### 10.4 What this is *not*
 

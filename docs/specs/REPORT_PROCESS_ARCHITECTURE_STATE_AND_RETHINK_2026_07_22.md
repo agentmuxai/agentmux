@@ -49,7 +49,7 @@ immediate need. That's exactly how six mechanisms accumulate without anyone deci
 
 The team just solved a structurally identical problem in the auth domain: three independent OAuth/credential
 systems, five duplicated login-trigger code paths, "sharing nothing but a SQLite connection handle" (per
-`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`), fixed by designing **one Credential
+[`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`](REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md)), fixed by designing **one Credential
 Broker** and shipping its Phase A skeleton the same night (`agentmux-srv/src/broker/`, commit `fba79dcb`).
 This report recommends applying the same pattern — one **Process Broker**, one public read/write contract,
 existing mechanisms demoted to internal implementation details behind it — while flagging explicitly where
@@ -116,7 +116,7 @@ moment.
 ### 2.2 The Swarm pane's finest-grained signal is client-side-only
 
 The activity chip (working / using tools / stopping / error / disconnected) that Swarm shows per agent is
-populated by `getBlockTurnPhase(blockId)` (`frontend/app/store/agentActivity.ts`) — a purely
+populated by `getBlockTurnPhase(blockId)` ([`frontend/app/store/agentActivity.ts`](../../frontend/app/store/agentActivity.ts)) — a purely
 in-renderer registry that an Agent pane component populates via `registerActivity()` *if and only if that
 agent's own pane happens to be mounted in the same renderer*. If it isn't, Swarm silently falls back to the
 coarser running/idle signal from mechanism #1. `swarm-view.tsx`'s own comments flag this as a past bug
@@ -140,7 +140,7 @@ client-side-only fine status chip.
 
 ### 3.0 The precedent: `agentmux-srv/src/broker/` (Credential Broker)
 
-Built the same night as `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` was written
+Built the same night as [`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`](REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md) was written
 (commit `fba79dcb`, "feat(auth): credential broker skeleton — single-flight refresh + keychain-backed MuxBus
 tokens"). Its own module doc states the shape of the problem it solves in language that transposes almost
 directly onto this report's §0-§2:
@@ -483,6 +483,6 @@ This report synthesizes six parallel, read-only codebase investigations (auth br
 trace), each independently file:line-citing its claims, cross-checked against each other for consistency
 (all six independently converged on the same `agent.tracked-blocks` `.chain()` mechanism as the direct cause
 of the reported symptom, without being told about each other's findings), plus direct reads of
-`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`, `agentmux-srv/src/broker/mod.rs`, and
+[`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md`](REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md), `agentmux-srv/src/broker/mod.rs`, and
 `agentmux-srv/src/server/app_api/agent_io.rs` to verify the most load-bearing claims firsthand rather than
 taking any single research pass's word for it.

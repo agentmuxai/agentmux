@@ -10,7 +10,7 @@ proceed to implementation without further sign-off). §11's open questions are a
 host … we want a best practice method to ensure that 2 agents can't open simultaneously, even across the 3 tiers."*
 **Researched against:** `agentmuxai/agentmux` `main` @ `01100e9c9` (v0.57.3). The two instances in §1 ran v0.57.0 and v0.57.2.
 **Related:**
-- `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — the same failure, found on 2026-07-29. It
+- [`docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`](../retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md) — the same failure, found on 2026-07-29. It
   named "cross-process turn ownership" as follow-up work. A lease was built for it (§2.2) but never wired to interactive panes.
 - `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` §4.2 — rung **R0 Live** ("a controller for this agent is already running
   elsewhere → don't resume") is this spec's requirement, and today it only holds inside one process.

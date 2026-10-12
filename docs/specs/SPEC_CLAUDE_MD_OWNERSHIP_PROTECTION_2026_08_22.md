@@ -6,7 +6,7 @@
 (the design's one open question) was smoke-tested directly against the
 real Claude Code CLI (`claude -p`) before implementation — confirmed
 working as assumed. — #2747
-**Current delivery state:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
+**Current delivery state:** [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
 **Motivated by:** direct request, following the Armory "Global Memory" rename
 (`SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md`) — Global Memory
 is supposed to represent "the global rules agents follow," but a project's
@@ -28,7 +28,7 @@ warning, no merge.**
 The write target — `<agent.working_directory>/CLAUDE.md` — is not an
 AgentMux-owned location. It's confirmed identical to Claude Code's own
 native "project CLAUDE.md" discovery slot
-(`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`'s own location
+([`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md`](../reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md)'s own location
 table). **Any agent launched with its working directory pointed at a real
 project that keeps hand-authored instructions in a root `CLAUDE.md` — this
 repo included — has that file silently, fully replaced on every launch.**
@@ -62,7 +62,7 @@ real files today.**
   literally resolves to `~/.claude/`).
 - **No `--system-prompt`/`--append-system-prompt` flag is used anywhere in
   this codebase today.** It's a real Claude Code CLI flag
-  (`docs/research/claude-code-presentation-layer.md` confirms it exists),
+  ([`docs/research/claude-code-presentation-layer.md`](../research/claude-code-presentation-layer.md) confirms it exists),
   but introducing it here would be new integration work, not reuse of an
   existing path — and its compatibility with AgentMux's actual persistent
   launch mode (`--input-format stream-json --output-format stream-json
@@ -115,7 +115,7 @@ single file rather than a dynamic set:
      @.claude/AGENTMUX_MEMORY.md
      ```
      via Claude Code's own `@path` import mechanism
-     (`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md:261-262`
+     ([`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md:261-262`](../reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md)
      confirms `@path` imports are real and already used for the analogous
      user-level case). **This never touches the user's own content above
      it** — append-only, and the insertion is idempotent (checked before

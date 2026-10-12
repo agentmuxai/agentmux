@@ -1,7 +1,7 @@
 # Phase E.5 Sagas — Execution Plan
 
 **Date:** 2026-04-30
-**Companion to:** `docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md` (the design spec)
+**Companion to:** [`docs/specs/SPEC_PHASE_E_SAGAS_2026-04-30.md`](SPEC_PHASE_E_SAGAS_2026-04-30.md) (the design spec)
 **Goal:** finish migrating every wcore-direct mutation through the srv reducer via saga or atomic command, removing the inconsistency window that produced the tear-off → CreateTab regression.
 
 ---
@@ -264,7 +264,7 @@ RPC handlers migrated:
 - Audit `agentmux-srv/src/server/service.rs` for any remaining wcore-direct mutations of reducer-tracked state. Should be zero.
 - Remove the `ensure_workspace_in_reducer` helper (if Option-A hot-fix was ever shipped). **Per current plan: never shipped, so nothing to remove.**
 - Drop `wstore_workspace_exists` if no longer used (was added for DeleteWorkspace fallback in E.2c.2 / E.2c.3; now redundant).
-- Update `docs/retro/multi-reducer-status-2026-04-29.md` and `phase-e-status-2026-04-30.md` to mark E.5 complete.
+- Update [`docs/retro/multi-reducer-status-2026-04-29.md`](../retro/multi-reducer-status-2026-04-29.md) and `phase-e-status-2026-04-30.md` to mark E.5 complete.
 
 ### What stays the same in PR 4
 - Phase E.6 + E.7 still ahead — renderer multi-source + saga buffering, then phase exit.
@@ -331,7 +331,7 @@ These are non-blocking but should fold into one of the PRs above when convenient
 
 ## 9b. Post-E.5 follow-up PRs (small, scheduled)
 
-Two cheap correctness gaps worth filing now so they don't get lost. Both are documented in `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` §6.3-§6.4.
+Two cheap correctness gaps worth filing now so they don't get lost. Both are documented in [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md) §6.3-§6.4.
 
 | ID | Scope | LoC | When | Why |
 |---|---|---|---|---|
@@ -345,6 +345,6 @@ The other three robustness gaps (host as saga step, renderer registration as sag
 ## 10. Decision log
 
 - **2026-04-30:** plan written. 4-PR structure agreed. Hot-fix Option A skipped in favor of going straight to sagas.
-- **2026-04-30:** coordinator location decided as srv-side (Path A). See `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`.
+- **2026-04-30:** coordinator location decided as srv-side (Path A). See [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md).
 - **2026-04-30:** post-E.5 follow-ups F1.A (subscriber transactions) and F1.B (frontend orphan cleanup) added to plan §9b.
 - Refer to `SPEC_PHASE_E_SAGAS_2026-04-30.md` for the design spec; this plan is the execution sequence.

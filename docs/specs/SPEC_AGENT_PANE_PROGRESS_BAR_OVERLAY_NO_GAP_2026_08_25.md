@@ -3,8 +3,8 @@
 **Date:** 2026-08-25
 **Author:** AgentY
 **Status:** Draft — deliberate, partial reversal of `SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md`; see §2.1 for why this isn't the same tradeoff being re-litigated blind.
-**Scope:** `frontend/app/view/agent/agent-view.tsx` (`AgentViewWrapper`'s slot div) and `frontend/app/view/agent/agent-view.scss` (`.agent-pane-progress-bar-slot` / `.agent-pane-progress-bar`) only. `PaneTabStrip.tsx`/`.scss` and the bar's own portal machinery (`progressBarSlot` signal, `<Show>`/`<Portal>` wrapping in `AgentPresentationView`) are unaffected — see §2.3.
-**Related:** `docs/specs/SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md` (introduced the slot this spec removes — must-read first), `docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md` (the tab strip's own overlay-over-content pattern this spec's fix now mirrors one level up).
+**Scope:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (`AgentViewWrapper`'s slot div) and [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) (`.agent-pane-progress-bar-slot` / `.agent-pane-progress-bar`) only. `PaneTabStrip.tsx`/`.scss` and the bar's own portal machinery (`progressBarSlot` signal, `<Show>`/`<Portal>` wrapping in `AgentPresentationView`) are unaffected — see §2.3.
+**Related:** [`docs/specs/SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md`](SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md) (introduced the slot this spec removes — must-read first), [`docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`](SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md) (the tab strip's own overlay-over-content pattern this spec's fix now mirrors one level up).
 
 ---
 
@@ -65,8 +65,8 @@ With the slot out of flow, `.agent-pane-stack-content` (`flex: 1 1 auto`) become
 
 ## 3. Files touched
 
-- `frontend/app/view/agent/agent-view.scss` — `.agent-pane-stack` gains `position: relative`; its `> .agent-pane-progress-bar-slot { flex: 0 0 auto; }` rule is removed (no longer a flex participant); `.agent-pane-progress-bar-slot`'s own rule (currently `position: relative; height: 3px; overflow: hidden;`) becomes the absolutely-positioned overlay in §2.2.
-- `frontend/app/view/agent/agent-view.tsx` — no structural change expected (the slot div at line 526 stays exactly where it is in JSX; only its CSS changes), but re-check the comment at lines 521-525 ("Progress bar's own row — always reserved...") for accuracy once the fix lands — it currently documents the exact behavior this spec removes and needs updating to describe the overlay instead.
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) — `.agent-pane-stack` gains `position: relative`; its `> .agent-pane-progress-bar-slot { flex: 0 0 auto; }` rule is removed (no longer a flex participant); `.agent-pane-progress-bar-slot`'s own rule (currently `position: relative; height: 3px; overflow: hidden;`) becomes the absolutely-positioned overlay in §2.2.
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — no structural change expected (the slot div at line 526 stays exactly where it is in JSX; only its CSS changes), but re-check the comment at lines 521-525 ("Progress bar's own row — always reserved...") for accuracy once the fix lands — it currently documents the exact behavior this spec removes and needs updating to describe the overlay instead.
 
 ## 4. Verification
 

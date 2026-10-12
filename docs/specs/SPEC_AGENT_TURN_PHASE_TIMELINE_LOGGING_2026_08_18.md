@@ -24,7 +24,7 @@ this question required.
 
 ## Why now
 
-- **Real, expensive precedent.** `docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md`
+- **Real, expensive precedent.** [`docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md`](../reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md)
   root-caused a stuck-"Working" pane, but getting there required: manually
   locating the right instance's log directory (the default picker returned
   a wrong instance silently), cross-referencing TWO separate log files
@@ -41,7 +41,7 @@ this question required.
   own logs to say which one for sure" — the same manual process the Aug 14
   report describes, not yet made routine.
 - **The underlying telemetry already exists but isn't correlated or
-  surfaced as a first-class query.** `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md`
+  surfaced as a first-class query.** [`docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md`](../reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md)
   catalogued 9 false-positive "Working" paths and prescribed logging; the
   `[wave-turn]` (frontend) and `[health] turn_active flip` (backend) lines
   it called for are shipped and confirmed present on `main`. What's missing
@@ -56,7 +56,7 @@ this question required.
 
 ## Current state of the code
 
-- **Frontend transitions:** `frontend/app/store/agent-pane-state-store.ts`
+- **Frontend transitions:** [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts)
   emits `console.info` on every `turnPhase.kind` change, tagged
   `[wave-turn]`. This lands in the **host** log (`muxlog`'s `fe` target is
   exactly "the host log, pre-filtered to `[fe]` lines").
@@ -65,7 +65,7 @@ this question required.
   log — a different file, in some cases a different log root entirely
   (`~/.agentmux/dev/<branch>/logs/` vs `~/.agentmux/logs/`).
 - **No existing tool merges these two by timestamp.** `muxlog`'s own doc
-  (`docs/MUXLOG.md`) lists a combined `all` view as an explicit **roadmap
+  ([`docs/MUXLOG.md`](../MUXLOG.md)) lists a combined `all` view as an explicit **roadmap
   item**, not yet built. The three existing correlated recipes
   (`muxlog swarm`, `muxlog auth`, `muxlog bridge` —
   `agentmux-srv/src/backend/shellintegration/muxlog.mjs:381-434`) are each
@@ -126,7 +126,7 @@ this question required.
 
 Add a `[wave-turn] watchdog: tick` line the periodic `StreamWatchdogTick`
 handler already dispatches every 5s
-(`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`) — gated to
+([`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts)) — gated to
 avoid noise (see Design questions) rather than one line per tick
 unconditionally. This directly removes the exact evidentiary gap the Aug
 14 report had to reason around ("we'd see a line if it were ticking, we
@@ -360,16 +360,16 @@ flagged here as a known non-goal for this spec, not a TODO.
 
 ## References
 
-- `docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md` —
+- [`docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md`](../reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md) —
   the incident that motivates this spec; also the source of the `(stray)`
   StreamFlushObserved distinction and the watchdog-tick-visibility gap.
-- `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` —
+- [`docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md`](../reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md) —
   original telemetry audit; `[wave-turn]`/`[health]` logging traces back
   to this.
-- `docs/MUXLOG.md` — existing recipe conventions this spec extends.
+- [`docs/MUXLOG.md`](../MUXLOG.md) — existing recipe conventions this spec extends.
 - `agentmux-srv/src/backend/shellintegration/muxlog.mjs` — implementation
   home for the new `phases` recipe.
-- `frontend/app/store/agent-pane-state-store.ts` — `[wave-turn]` source.
-- `frontend/app/view/agent/hooks/useTurnLifecycle.ts` — watchdog interval,
+- [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) — `[wave-turn]` source.
+- [`frontend/app/view/agent/hooks/useTurnLifecycle.ts`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts) — watchdog interval,
   visibility listener, PR #2575's fixes.
 - `agentmux-srv/src/backend/blockcontroller/health.rs` — `[health]` source.

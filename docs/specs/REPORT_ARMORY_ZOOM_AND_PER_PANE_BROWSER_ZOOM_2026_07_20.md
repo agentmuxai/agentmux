@@ -32,7 +32,7 @@ Fixing one does not fix the other, and (per §5) they don't share an implementat
 
 ### 2.1 Current behavior, traced exactly
 
-`AppZoomHandler` (`frontend/app/app.tsx:261-299`) is the single global Ctrl+Wheel listener,
+`AppZoomHandler` ([`frontend/app/app.tsx:261-299`](../../frontend/app/app.tsx)) is the single global Ctrl+Wheel listener,
 attached to `window` with `{ passive: false }`. On every Ctrl/Cmd+wheel event it:
 
 1. Calls `e.preventDefault()` unconditionally (line 270) — this is what suppresses the
@@ -43,7 +43,7 @@ attached to `window` with `{ passive: false }`. On every Ctrl/Cmd+wheel event it
    `zoomBlockIn`/`zoomBlockOut(blockId, WHEEL_STEP)` (lines 287-288).
 
 `data-blockid` is set on **every** block frame regardless of view type
-(`frontend/app/block/blockframe.tsx:880`), so Armory panes have the attribute and the handler does
+([`frontend/app/block/blockframe.tsx:880`](../../frontend/app/block/blockframe.tsx)), so Armory panes have the attribute and the handler does
 fire — this part works.
 
 The actual dead end is one level deeper, in `getBlockZoom()`
@@ -67,7 +67,7 @@ here conflicts with adding zoom — there's simply nothing there yet.
 
 ### 2.2 This gap has a documented history
 
-`docs/specs/per-pane-zoom-hover.md` (the original spec for the hover-target wheel-zoom design)
+[`docs/specs/per-pane-zoom-hover.md`](per-pane-zoom-hover.md) (the original spec for the hover-target wheel-zoom design)
 explicitly flagged this exact scenario as unresolved at design time (§"Edge cases"):
 
 > **Mouse over non-terminal pane:** Ctrl+Scroll is a no-op (or could fall through to focused pane —
@@ -76,14 +76,14 @@ explicitly flagged this exact scenario as unresolved at design time (§"Edge cas
 The current allow-list (`term`, `agent`, `swarm`, `editor`) reflects view types that were added to
 the mechanism individually over time, one at a time, as each needed it — not a closed design
 decision that deliberately excludes Armory. Armory (added later — see
-`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`) simply hasn't had this follow-up done yet. This is
+[`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md)) simply hasn't had this follow-up done yet. This is
 the same shape of gap, not a new one.
 
 ### 2.3 What "zoom" should mean for Armory
 
 Unlike a terminal pane, Armory has no `fontSizeAtom`-driven single scaling knob today — it's a
 form/list UI (bundle editor, skill list, MCP server list, account cards), not a monospace grid.
-`docs/specs/zoom-architecture.md` §3 already surveyed exactly this class of problem for **chrome**
+[`docs/specs/zoom-architecture.md`](zoom-architecture.md) §3 already surveyed exactly this class of problem for **chrome**
 zoom (scaling a mixed UI of text, icons, fixed-size buttons, and gaps) and recommended **CSS `zoom`
 on a container** (Option A) over `calc()`-propagation (Option C, "tedious... 50+ individual property
 changes") or `transform: scale()` (Option B, needs manual layout compensation). The same tradeoff
@@ -162,7 +162,7 @@ tab-zoom-sharing semantics into a product where that's surprising.
 **unrelated** to this bug, despite the name. It only drives the **chrome** `--zoomfactor` CSS
 variable (title bar/status bar — see `zoom-architecture.md` §1) and explicitly does *not* call
 `host.set_zoom_level()` — the code comment at `meta.rs:41-43` notes that doing so "deadlocks from
-the IPC thread." `frontend/util/cef-api.ts:408-409` is its only caller. Worth ruling out early since
+the IPC thread." [`frontend/util/cef-api.ts:408-409`](../../frontend/util/cef-api.ts) is its only caller. Worth ruling out early since
 the name is misleading, but this global scalar is not why browser-pane page zoom is shared.
 
 ### 3.4 Fix directions (tradeoffs, not a decision)
@@ -216,8 +216,8 @@ Chased Option B far enough to learn two real things, both worth recording:
    left open on GitHub as a record of the investigation, not merged.**
 2. **Building a patched libcef is per-platform, and Windows has no precedent at all.** The C++ source
    patch itself is plain, `#ifdef`-free Chromium code — identical on every platform as written. But
-   each OS ships its own separately-compiled `libcef` binary, and `docs/cef-build/build-patched-libcef.md`
-   (Linux, tested, ~3-6h/~99GB) and `docs/cef-build/build-patched-framework-macos.md` (macOS) are the
+   each OS ships its own separately-compiled `libcef` binary, and [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md)
+   (Linux, tested, ~3-6h/~99GB) and [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md) (macOS) are the
    *only* documented build paths in this repo — there is no Windows equivalent, and nothing suggests
    one has ever been produced for this project (the existing `BeginWindowDrag`/transparency patches
    are Linux+macOS only; Windows apparently ships the vanilla published `cef-dll-sys` crate because
@@ -249,7 +249,7 @@ implemented approach — see §6 below, updated accordingly.**
 
 ## 4. Interaction between the two fixes
 
-None. Issue 1's fix lives entirely in `frontend/` (TS/SolidJS + existing RPC). Issue 2's fix lives
+None. Issue 1's fix lives entirely in [`frontend/`](../../frontend) (TS/SolidJS + existing RPC). Issue 2's fix lives
 entirely in `agentmux-cef/` (Rust, native HWND/CEF APIs) with no DOM/JS involvement at all —
 `AppZoomHandler` will never see browser-pane wheel events regardless of what Issue 1 does. They can
 ship as fully independent PRs in either order.
@@ -294,20 +294,20 @@ entirely, regardless of which native-side fix is chosen.
 
 ## 7. Sources
 
-- `frontend/app/app.tsx:261-299` (`AppZoomHandler`)
+- [`frontend/app/app.tsx:261-299`](../../frontend/app/app.tsx) (`AppZoomHandler`)
 - `frontend/app/store/zoom.win32.ts:64,99-109` (`getBlockZoom`, `zoomBlockIn/Out` allow-list gate)
-- `frontend/app/block/blockframe.tsx:880` (`data-blockid` attribute)
+- [`frontend/app/block/blockframe.tsx:880`](../../frontend/app/block/blockframe.tsx) (`data-blockid` attribute)
 - `frontend/app/view/armory/armory-view.tsx`, `armory-view.scss:36,98`
 - `agentmux-cef/src/browser_pane/hwnd.rs:377-395` (`WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL` logged-only)
 - `agentmux-cef/src/browser_pane/creation_views.rs:140-164` (shared parent `RequestContext`)
 - `agentmux-cef/src/browser_pane/creation.rs:192` (legacy path, `None` request_context)
 - `agentmux-cef/src/commands/window/meta.rs:19-49`, `agentmux-cef/src/state.rs:545,1289`
   (`zoom_factor` — chrome-only, ruled out as unrelated)
-- `frontend/util/cef-api.ts:408-409`
-- `docs/specs/zoom-architecture.md` (chrome-zoom options analysis; §5 per-pane architecture reference)
-- `docs/specs/per-pane-zoom-hover.md` (original hover-wheel-zoom spec; documents the
+- [`frontend/util/cef-api.ts:408-409`](../../frontend/util/cef-api.ts)
+- [`docs/specs/zoom-architecture.md`](zoom-architecture.md) (chrome-zoom options analysis; §5 per-pane architecture reference)
+- [`docs/specs/per-pane-zoom-hover.md`](per-pane-zoom-hover.md) (original hover-wheel-zoom spec; documents the
   non-terminal-pane gap as unresolved "TBD" at design time)
 - the Linux pane/window request-context note (since removed from the tree) (why browser panes share a
   `RequestContext` — the crash-avoidance tradeoff Issue 2's Option A would need to revisit)
-- `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md` (Armory pane structure, confirms it's a recent
+- [`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md) (Armory pane structure, confirms it's a recent
   addition relative to the zoom allow-list's original scope)

@@ -133,7 +133,7 @@ presentational)
 - `agent-view` / helper: `onSwitchAccount` with exactly one candidate still opens a menu, whereas
   `onBindAccount` with one candidate still binds directly. Menu rows are `Switch to <label>`, and choosing
   one calls `bindExistingAccount` with that account.
-- Live check with the CDP harness (`scripts/ui-screenshots/`): switch on a real pane, watch the restart,
+- Live check with the CDP harness ([`scripts/ui-screenshots/`](../../scripts/ui-screenshots)): switch on a real pane, watch the restart,
   confirm the chip changes to the new email and the agent answers the next message (this is Q1).
 
 ---

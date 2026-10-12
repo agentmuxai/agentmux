@@ -44,7 +44,7 @@ because it analysed the **one-shot subprocess** controller, which runs the CLI i
 `-p` / `--print` mode with no live stdin. That blocker **does not apply to host
 agents**, which use the **persistent** controller:
 
-- `frontend/app/view/agent/providers/index.ts:161` — the Claude provider's
+- [`frontend/app/view/agent/providers/index.ts:161`](../../frontend/app/view/agent/providers/index.ts) — the Claude provider's
   `persistentLaunchArgs` are
   `["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"]`.
   This is a **bidirectional** NDJSON session: the CLI reads user messages from
@@ -80,7 +80,7 @@ is Phase 2 — see §9.
 | `AskUserQuestion` recognised anywhere | ❌ literal string absent in repo | grep `docs/ specs/ frontend/ agentmux-srv/` → none |
 | Tool_use → StreamEvent | ✅ generic | `claude-translator.ts:174-196`, `:301-322`, `:363-389` emit `{type:"tool_call", tool, id, params}` |
 | StreamEvent → DocumentNode (ToolNode) | ✅ generic | `stream-parser.ts` `eventToNode()` switch; unknown tools → `tool: "Other"` |
-| ToolNode model + status enum | ✅ | `frontend/app/view/agent/types.ts:207-243` — `status: "running" \| "pending_approval" \| "success" \| "failed" \| "denied" \| "canceled"`, plus `pendingPermission?` |
+| ToolNode model + status enum | ✅ | [`frontend/app/view/agent/types.ts:207-243`](../../frontend/app/view/agent/types.ts) — `status: "running" \| "pending_approval" \| "success" \| "failed" \| "denied" \| "canceled"`, plus `pendingPermission?` |
 | Interactive panel pattern | ✅ (for permissions) | `components/AgentDecisionPanel.tsx`; collected via `pendingDecisions()` in `agent-view.tsx:432-489`, submitted via `RpcApi.ToolDecisionCommand` |
 | Decision RPC backend | ⚠️ audit-log only | `websocket.rs:717-774` — validates + logs; delivery deferred |
 | **Live stdin to running agent** | ✅ **persistent only** | `persistent.rs:146-168` `send_message()` |
@@ -486,10 +486,10 @@ tool_use can't consume.)
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/types.ts` | `AskUserQuestion{Option,Item,Request,Answer}` types; `ToolNode.status += "awaiting_answer"`; `ToolNode.question?` |
-| `frontend/app/view/agent/stream-parser.ts` | special-case `tool === "AskUserQuestion"` in `eventToNode()` |
-| `frontend/app/view/agent/components/AgentQuestionPanel.tsx` | **new** — interactive question panel (mirror of `AgentDecisionPanel`) |
-| `frontend/app/view/agent/agent-view.tsx` | `pendingQuestions()`, `handleAnswer()`, render the panel |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | `AskUserQuestion{Option,Item,Request,Answer}` types; `ToolNode.status += "awaiting_answer"`; `ToolNode.question?` |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | special-case `tool === "AskUserQuestion"` in `eventToNode()` |
+| [`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) | **new** — interactive question panel (mirror of `AgentDecisionPanel`) |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | `pendingQuestions()`, `handleAnswer()`, render the panel |
 | `frontend/app/store/rpc-api.ts` | `AgentAnswerCommand` binding |
 | `agentmux-srv/src/backend/rpc_types.rs` | `CommandAgentAnswerData`, `COMMAND_AGENT_ANSWER` |
 | `agentmux-srv/src/server/websocket.rs` | register `COMMAND_AGENT_ANSWER` handler |

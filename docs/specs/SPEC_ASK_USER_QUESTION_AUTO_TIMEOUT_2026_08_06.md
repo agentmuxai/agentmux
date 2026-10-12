@@ -28,17 +28,17 @@ with a visible countdown so a pending question can never stall work forever.
 - `AskUserQuestion` tool-use is delivered to AgentMux via the Agent SDK
   **control protocol** (`--permission-prompt-tool stdio`), not the stream —
   Claude Code auto-rejects the tool in plain headless mode. See
-  `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`. The CLI sends a
+  [`docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md). The CLI sends a
   `control_request` (subtype `can_use_tool`), and AgentMux's backend parks it
   in `pending_questions: HashMap<String,(String, serde_json::Value)>`
   (`agentmux-srv/src/backend/blockcontroller/persistent.rs:250-255`) until a
   `control_response` is sent back via `answer_question()` (`persistent.rs:1695`).
 - The frontend surfaces this as a `ToolNode` with `status: "awaiting_answer"`
   and a populated `question` field
-  (`frontend/app/view/agent/types.ts:591-618` for the wire shapes). It is
+  ([`frontend/app/view/agent/types.ts:591-618`](../../frontend/app/view/agent/types.ts) for the wire shapes). It is
   rendered by `AgentQuestionPanel.tsx`, collected via
   `pendingQuestions()`/`handleAnswer()` in
-  `frontend/app/view/agent/hooks/useAgentQuestions.ts`, mounted from
+  [`frontend/app/view/agent/hooks/useAgentQuestions.ts`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts), mounted from
   `agent-view.tsx:1667-1676`.
 - **There is no timeout anywhere in this path today.** The panel sits open —
   full or minimized — until a human answers or the pane is closed. This is the
@@ -63,7 +63,7 @@ with a visible countdown so a pending question can never stall work forever.
   An auto-timeout only needs to trigger the *same* `submit()` call a human
   click already triggers — no new wire format, no backend change.
 - **Existing countdown precedent to reuse**, not invent from scratch:
-  `frontend/app/modals/userinputmodal.tsx` — `countdown` signal seeded from a
+  [`frontend/app/modals/userinputmodal.tsx`](../../frontend/app/modals/userinputmodal.tsx) — `countdown` signal seeded from a
   timeout, `setInterval` ticking every 1000ms, firing an action at 0
   (lines 17, 80-95), rendered in the modal title as `` `${title} (${countdown()}s)` ``
   (line 157), cleaned up via `onCleanup` clearing both the interval and a
@@ -233,16 +233,16 @@ implementation-time judgment").
 
 ## 3. Files touched
 
-- `frontend/app/view/agent/components/AgentQuestionPanel.tsx` — timer state
+- [`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) — timer state
   and lifecycle, `recommendedOptions()` helper, merge-at-timeout logic,
   countdown rendering (full + minimized), `autoFilledCount` on `AnswerOutcome`.
-- `frontend/app/view/agent/components/AgentQuestionPanel.scss` — countdown
+- [`frontend/app/view/agent/components/AgentQuestionPanel.scss`](../../frontend/app/view/agent/components/AgentQuestionPanel.scss) — countdown
   chip styling (default/`--warning-color`/`--error-color` states + pulse
   keyframe), `--recommended` option highlight class.
-- `frontend/app/view/agent/hooks/useAgentQuestions.ts` — consume
+- [`frontend/app/view/agent/hooks/useAgentQuestions.ts`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts) — consume
   `outcome.autoFilledCount` when building the transcript summary text
   (~line 123).
-- `frontend/app/view/agent/components/AgentQuestionPanel.test.tsx` — new
+- [`frontend/app/view/agent/components/AgentQuestionPanel.test.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.test.tsx) — new
   test cases per §7 (file already exists — see current Enter/Escape
   keyboard-handling tests for the mount/mock conventions to follow).
 - **No `agentmux-srv` (Rust) changes.** No `agentmux-common` changes. No new

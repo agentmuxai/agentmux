@@ -12,13 +12,13 @@ The operator pastes a command into a terminal pane, with **right-click → Paste
 
 ## 2. Verdict
 
-**Right-click → Paste: reproduced, root cause found.** The right-click menu is an HTML overlay in the page itself (`showJsContextMenu`, `frontend/util/cef-api.ts`; the host's `show_context_menu` IPC is a no-op, "handled in JS overlay"). The bug unfolds like this:
+**Right-click → Paste: reproduced, root cause found.** The right-click menu is an HTML overlay in the page itself (`showJsContextMenu`, [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts); the host's `show_context_menu` IPC is a no-op, "handled in JS overlay"). The bug unfolds like this:
 
 1. Pressing the mouse on a menu row, a plain `<div>`, does what a mousedown on any non-focusable element does: the browser blurs the focused element, the terminal's `xterm-helper-textarea`, and focus falls to `<body>`.
-2. The row's `click` handler closes the menu and runs the item. For Paste, that's `buildPaneContextMenu`'s handler (`frontend/app/block/pane-actions.ts`): read the clipboard, then `viewModel.paste(text)` → xterm's `terminal.paste()`. That writes into the terminal but never focuses it.
+2. The row's `click` handler closes the menu and runs the item. For Paste, that's `buildPaneContextMenu`'s handler ([`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts)): read the clipboard, then `viewModel.paste(text)` → xterm's `terminal.paste()`. That writes into the terminal but never focuses it.
 3. Nothing gives focus back. `closeMenu()` removes the overlay but doesn't restore the element that had focus when the menu opened. So keystrokes, Enter included, go to `<body>` until the user clicks the terminal.
 
-**Ctrl+Shift+V: not reproduced at the page level.** The terminal's key handler (`termViewModel.ts`, `term:paste`) calls `preventDefault`, reads the clipboard and calls `terminal.paste()`. Focus stays in the terminal; xterm's own key-up handler even refocuses its textarea. The host only intercepts keys for browser panes (`handle_pre_key_event` → `host_key_for`, `crates/cef/src/client/handlers.rs`), so the key never leaves the page. See §6 for what's left to check on this path.
+**Ctrl+Shift+V: not reproduced at the page level.** The terminal's key handler (`termViewModel.ts`, `term:paste`) calls `preventDefault`, reads the clipboard and calls `terminal.paste()`. Focus stays in the terminal; xterm's own key-up handler even refocuses its textarea. The host only intercepts keys for browser panes (`handle_pre_key_event` → `host_key_for`, [`crates/cef/src/client/handlers.rs`](../../crates/cef/src/client/handlers.rs)), so the key never leaves the page. See §6 for what's left to check on this path.
 
 ## 3. Evidence
 
@@ -61,18 +61,18 @@ The `focusin` this produces in the block also fires `handleChildFocus` → `recl
 
 ## 7. Method
 
-- Code read at `main` @ `22857409f`: `pane-actions.ts`, `cef-api.ts` (`showJsContextMenu`), `contextmenu.ts`, `termViewModel.ts` (`term:paste`, `giveFocus`), `termwrap.ts` (paste handler), `block.tsx` (`handleChildFocus`, `reclaimWindowFocus`), `focusManager.ts`, `crates/cef/src/ipc.rs` (`show_context_menu`, `main_window_focus`), `crates/cef/src/commands/clipboard.rs` (Win32 `OpenClipboard(NULL)`, which doesn't touch focus) and `client/handlers.rs` (`handle_pre_key_event`).
+- Code read at `main` @ `22857409f`: `pane-actions.ts`, `cef-api.ts` (`showJsContextMenu`), `contextmenu.ts`, `termViewModel.ts` (`term:paste`, `giveFocus`), `termwrap.ts` (paste handler), `block.tsx` (`handleChildFocus`, `reclaimWindowFocus`), `focusManager.ts`, [`crates/cef/src/ipc.rs`](../../crates/cef/src/ipc.rs) (`show_context_menu`, `main_window_focus`), [`crates/cef/src/commands/clipboard.rs`](../../crates/cef/src/commands/clipboard.rs) (Win32 `OpenClipboard(NULL)`, which doesn't touch focus) and `client/handlers.rs` (`handle_pre_key_event`).
 - Live: own `task dev` instance, CDP from a scratch script; nothing driven in the operator's instance. The native OS keyboard was not used, so nothing could reach the operator's windows.
 
 ## 8. Implementation
 
 All three layers of §5:
 
-- **`frontend/util/cef-api.ts` `showJsContextMenu`:**
+- **[`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) `showJsContextMenu`:**
   - The overlay's `mousedown` handler, which covers the backdrop, the menu and every submenu, now calls `preventDefault()`. A press anywhere on the menu no longer takes focus; the click still fires.
   - The menu records the focused element when it opens (`opener`). After `closeMenu()`, in a microtask that runs once the chosen item has run synchronously, it refocuses the opener if focus is on `<body>` or went with the removed overlay, and the opener is still in the document.
-- **`frontend/app/block/pane-actions.ts`:** Paste calls `viewModel.giveFocus()` after `viewModel.paste(text)`.
-- **`frontend/app/view/agent/components/shell-drawer-menu.ts`:** `pasteClipboardIntoShell` focuses the drawer's terminal after pasting. `getTerminal`'s type gains an optional `focus()`, which xterm's `Terminal` has.
+- **[`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts):** Paste calls `viewModel.giveFocus()` after `viewModel.paste(text)`.
+- **[`frontend/app/view/agent/components/shell-drawer-menu.ts`](../../frontend/app/view/agent/components/shell-drawer-menu.ts):** `pasteClipboardIntoShell` focuses the drawer's terminal after pasting. `getTerminal`'s type gains an optional `focus()`, which xterm's `Terminal` has.
 
 **Tests:**
 - `cef-api.test.ts` "showJsContextMenu — focus":

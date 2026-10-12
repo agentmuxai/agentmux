@@ -197,7 +197,7 @@ The "Create MEMORY.md" button creates the directory + file with a starter templa
 
 The agent pane already wraps its entire content in `<ModalLayer scope="pane">` (`agent-view.tsx` line 104). Any component inside the pane can call `useModalLayer()` to open a pane-scoped modal — it inerts and backdrops only the pane, not the whole window.
 
-Pane-scoped modals are dispatched via a `ModalRequest` union (defined in `frontend/app/element/modal-layer.ts`). To add the two new modals, we extend the union with new `kind` values and add matching cases to the `ModalLayer` dispatcher.
+Pane-scoped modals are dispatched via a `ModalRequest` union (defined in [`frontend/app/element/modal-layer.ts`](../../frontend/app/element/modal-layer.ts)). To add the two new modals, we extend the union with new `kind` values and add matching cases to the `ModalLayer` dispatcher.
 
 ```typescript
 // frontend/app/element/modal-layer.ts  (additions)
@@ -405,12 +405,12 @@ MEMORY.md status post-compact is not explicitly guaranteed by docs. Add a
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/agent-model.ts` | Replace cog with 2 icons; remove OverlayTab, _setOverlayTab, _lastOverlayTab |
-| `frontend/app/view/agent/agent-view.tsx` | Remove showOverlayTab signal + AgentFocusedPanel render |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Replace cog with 2 icons; remove OverlayTab, _setOverlayTab, _lastOverlayTab |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Remove showOverlayTab signal + AgentFocusedPanel render |
 | `frontend/app/view/agent/components/AgentFocusedPanel.tsx` | **DELETE** |
 | `frontend/app/view/agent/components/AgentCardSettingsPanel.tsx` | **DELETE** |
-| `frontend/app/view/agent/components/AgentNativeMemoryModal.tsx` | **NEW** |
-| `frontend/app/view/agent/agent-native-memory-model.ts` | **NEW** |
+| [`frontend/app/view/agent/components/AgentNativeMemoryModal.tsx`](../../frontend/app/view/agent/components/AgentNativeMemoryModal.tsx) | **NEW** |
+| [`frontend/app/view/agent/agent-native-memory-model.ts`](../../frontend/app/view/agent/agent-native-memory-model.ts) | **NEW** |
 | `agentmux-srv/src/server/native_memory_handlers.rs` | **NEW** |
 | `agentmux-srv/src/server/app_api.rs` | Register 3 new RPCs |
 | `agentmux-srv/src/bin/gen_types.rs` (or equivalent) | Add RPC type exports |

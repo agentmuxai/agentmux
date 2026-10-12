@@ -391,7 +391,7 @@ The header was the only entry point for "exit this agent session and return to t
 
 Go with **option 1** (block frame header icon) as primary + **option 4** as a secondary affordance.
 
-For option 1, the exact implementation depends on `HeaderElem`'s existing vocabulary — check `frontend/types/custom.d.ts` for whether it supports click-able icons, or if we need a new variant. If it doesn't, fall back to placing a small back button inside the control bar row (from item #7) as a stopgap.
+For option 1, the exact implementation depends on `HeaderElem`'s existing vocabulary — check [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) for whether it supports click-able icons, or if we need a new variant. If it doesn't, fall back to placing a small back button inside the control bar row (from item #7) as a stopgap.
 
 ### Alternative considered
 

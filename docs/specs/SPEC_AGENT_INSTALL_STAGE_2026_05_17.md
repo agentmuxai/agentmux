@@ -558,14 +558,14 @@ User clicks Install with no network → `npm install` fails. We surface the erro
 ## 14. References
 
 ### Code (current state, pre-spec)
-- `frontend/app/view/agent/providers/index.ts` — `ProviderDefinition` (grows `installRecipe` field)
+- [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) — `ProviderDefinition` (grows `installRecipe` field)
 - `agentmux-srv/src/backend/providers.rs` — `ProviderConfig` (Rust mirror grows the same field)
 - `agentmux-srv/src/server/cli_handlers.rs` — existing `npm install` + `ResolveCli` (becomes one step of the recipe)
 - `agentmux-srv/src/server/identity_handlers.rs` — `spawn_auth_cli_pty` (reused for `requiresTty: true` install steps)
 - `agentmux-srv/src/identity/auth_session.rs` — pattern for `install_session_manager` (mirrors auth-session machinery)
-- `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx` — AUTH_REQUIRED → AUTHING transitions already wired here; keep them, just relocate the entry point into the new install panel
+- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx) — AUTH_REQUIRED → AUTHING transitions already wired here; keep them, just relocate the entry point into the new install panel
 - `frontend/app/view/agent/components/AgentInstallCard.tsx` — NEW (the tinted Install button + description in the pane's default view)
-- `frontend/app/view/agent/components/AgentInstallModal.tsx` — NEW (modal with xterm.js live feed; sibling to `AgentLaunchModal.tsx`)
+- [`frontend/app/view/agent/components/AgentInstallModal.tsx`](../../frontend/app/view/agent/components/AgentInstallModal.tsx) — NEW (modal with xterm.js live feed; sibling to `AgentLaunchModal.tsx`)
 - `agentmux-srv/src/identity/install_session.rs` — NEW (analogous to `auth_session.rs`; tracks in-flight installs, holds cancel tokens, emits `install_chunk` events)
 - xterm.js terminal-pane shell (already in deps) — reused for the modal feed
 

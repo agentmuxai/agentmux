@@ -49,12 +49,10 @@ describe("resolveTarget", () => {
   it("resolves a path relative to the doc when the root has no such file", () => {
     expect(resolveTarget("specs/SPEC_B.md", "docs/README.md")).toBe("specs/SPEC_B.md");
   });
-  it("turns :N and :N-M into line anchors", () => {
-    expect(resolveTarget("scripts/release.sh:183", "README.md")).toBe("scripts/release.sh#L183");
-    expect(resolveTarget("scripts/release.sh:10-20", "README.md")).toBe("scripts/release.sh#L10-L20");
-    expect(resolveTarget("scripts/release.sh:10–20", "README.md")).toBe("scripts/release.sh#L10-L20");
-  });
-  it("adds no line anchor to a Markdown target", () => {
+  it("links :N and :N-M to the file, without a line anchor", () => {
+    expect(resolveTarget("scripts/release.sh:183", "README.md")).toBe("scripts/release.sh");
+    expect(resolveTarget("scripts/release.sh:10-20", "README.md")).toBe("scripts/release.sh");
+    expect(resolveTarget("scripts/release.sh:10–20", "README.md")).toBe("scripts/release.sh");
     expect(resolveTarget("docs/specs/SPEC_A.md:12", "README.md")).toBe("docs/specs/SPEC_A.md");
   });
   it("links a folder, with or without a trailing slash", () => {
@@ -84,7 +82,7 @@ describe("linkPaths", () => {
   it("links several paths on one line, and paths in tables", () => {
     const md = "| a | b |\n|---|---|\n| `Cargo.toml` | `scripts/release.sh:5` |\n";
     expect(linkPaths(md, "README.md").text).toBe(
-      "| a | b |\n|---|---|\n| [`Cargo.toml`](Cargo.toml) | [`scripts/release.sh:5`](scripts/release.sh#L5) |\n",
+      "| a | b |\n|---|---|\n| [`Cargo.toml`](Cargo.toml) | [`scripts/release.sh:5`](scripts/release.sh) |\n",
     );
   });
   it("skips fenced code, existing links and headings", () => {
@@ -106,6 +104,12 @@ describe("linkPaths", () => {
     const md = "---\ndescription: see `Cargo.toml`\n---\n\nBody `Cargo.toml`.\n";
     expect(linkPaths(md, "README.md").text).toBe(
       "---\ndescription: see `Cargo.toml`\n---\n\nBody [`Cargo.toml`](Cargo.toml).\n",
+    );
+  });
+  it("turns a two-space hard break on an edited line into a backslash", () => {
+    const md = "**File:** `Cargo.toml`  \nnext line  \n\nend `Cargo.toml`  \n";
+    expect(linkPaths(md, "README.md").text).toBe(
+      "**File:** [`Cargo.toml`](Cargo.toml)\\\nnext line  \n\nend [`Cargo.toml`](Cargo.toml)\n",
     );
   });
   it("is idempotent", () => {

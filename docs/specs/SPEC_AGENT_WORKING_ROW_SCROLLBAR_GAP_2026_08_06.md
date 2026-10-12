@@ -16,7 +16,7 @@ floating-overlay geometry of `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2
 outside `.agent-document-scroll-region` entirely, so it cannot paint over the
 message list's scrollbar and the gutter-color gap this spec fixed cannot
 occur. Retained for history, not as a description of current code.
-**Scope:** `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/styles/_control-bar.scss`, `frontend/app/view/agent/styles/_document.scss`
+**Scope:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), [`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/view/agent/styles/_control-bar.scss), [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss)
 **Related:** `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.2 (introduced the floating-overlay architecture this spec builds on), the `.agent-working-row-anchor` z-index-obscures-scrollbar comment in `_control-bar.scss` (the earlier bug this spec must not reintroduce)
 
 ## 1. Report

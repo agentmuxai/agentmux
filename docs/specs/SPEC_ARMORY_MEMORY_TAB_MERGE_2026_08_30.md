@@ -8,7 +8,7 @@ inside it, using the brain icon for the combined tab.
 
 ## Background
 
-`docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md` split
+[`docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md`](SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md) split
 one "Memory" concept into two adjacent rail tabs — "Global Memory" (`memory`
 id, `GlobalBrainManager`) and "Personal Memory" (`native_memory` id,
 `NativeMemoryManager`) — to make each tab's scope legible at a glance. That

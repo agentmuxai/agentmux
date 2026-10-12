@@ -21,7 +21,7 @@ is the trigger to build it.
 
 ## What "similar to My Agents" means here — and where it must diverge
 
-`AgentPickerFilterBar.tsx` (`frontend/app/view/agent/components/`) is the
+`AgentPickerFilterBar.tsx` ([`frontend/app/view/agent/components/`](../../frontend/app/view/agent/components)) is the
 reference: a fixed text-filter input (magnifying-glass icon, clear button,
 Escape-to-clear) plus a sort `<select>` at the far right, both purely
 presentational — `AgentPicker.tsx` owns the signals and does the actual
@@ -99,7 +99,7 @@ make a card vanish out from under a user mid-load.
 └──────────────────────────────────────────────────────────┘
 ```
 
-- `MemoryAgentFilterBar` (new, `frontend/app/view/native-memory/`): text
+- `MemoryAgentFilterBar` (new, [`frontend/app/view/native-memory/`](../../frontend/app/view/native-memory)): text
   input + "Has memories" checkbox + sort `<select>`. Purely presentational,
   same as its Agent-pane counterpart — no data access of its own.
 - `NativeMemoryManager.tsx` owns three new signals (`nameFilter`,

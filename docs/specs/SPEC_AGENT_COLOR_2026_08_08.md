@@ -28,7 +28,7 @@ zero new rendering code, by reusing the pane frame's existing
 | Block-meta seeding at open | `register_agent_open` (`server/app_api/agent_open.rs:297`) already seeds `term:zoom` from `agent_content("ui:zoom")` | The exact pattern for seeding `frame:bordercolor` from `ui:color`. |
 | Pane frame color rendering | `blockframe.tsx:733` styles the block border from `meta["frame:bordercolor"]`; right-click pane-header swatch palette already writes this key | The display surface — colors show on every agent pane's frame with **no frontend changes**. The user can still override per pane via the existing palette. |
 | Migration framework | `agentmux-srv/src/migrations/` (m0000–m0019), once-per-channel tracking in `db_migrations` | The codebase's mechanism for exactly-once backfills — the requested "one-time script". |
-| 14-hue palette | `TAB_COLORS` (`frontend/app/tab/tab.tsx:20`) — also used for random tab colors (`tab-actions.ts:31`) | Color values to assign from. Duplicated as hexes in the Rust migration (a one-time list; drift is inconsequential since assigned colors are stored, not derived). |
+| 14-hue palette | `TAB_COLORS` ([`frontend/app/tab/tab.tsx:20`](../../frontend/app/tab/tab.tsx)) — also used for random tab colors (`tab-actions.ts:31`) | Color values to assign from. Duplicated as hexes in the Rust migration (a one-time list; drift is inconsequential since assigned colors are stored, not derived). |
 
 ## 3. Design
 
@@ -84,7 +84,7 @@ agent pane's `frame:activebordercolor` was seeded, it was checked AFTER
 overwrote it — so picking a hue on an agent pane had no visible effect,
 permanently, for that block's lifetime (the seed is a one-time write, but
 `blockData()` re-reads it on every render). Fixed in
-`frontend/app/block/blockframe.tsx`'s focused-state branch by checking
+[`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx)'s focused-state branch by checking
 `frame:activebordercolor` BEFORE `frame:hue` instead — the explicit user
 choice now always wins when present; clearing the hue picker
 (`frame:hue: null`) correctly falls through to the agent's default color
@@ -128,10 +128,10 @@ Not confirmed with a live repro (out of scope to chase further here), but
 the code shape is identical enough to flag.
 
 **Fix:** duplicate the same seed logic into `launchAgentDefinition`
-(`frontend/app/view/agent/agent-model.ts`), since that is the code path
+([`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts)), since that is the code path
 that actually runs for the everyday flow:
 
-- New `frontend/app/view/agent/agent-color.ts` — a TS counterpart of
+- New [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts) — a TS counterpart of
   `agent_color.rs` (`pickAgentColor` FNV-1a hash over `TAB_COLORS`,
   `isValidAgentColor`, `dimAgentColor`). Deliberately NOT shared code with
   the Rust side — the two don't need to agree bit-for-bit, since whichever
@@ -196,7 +196,7 @@ reading the persisted block meta from the channel's SQLite store.
 | `agentmux-srv/src/backend/mod.rs` | Register `agent_color` module |
 | `agentmux-srv/src/server/agent_handlers/core.rs` | Assign `ui:color` in `createagent` |
 | `agentmux-srv/src/server/app_api/agent_open.rs` | Seed both frame color keys from `ui:color` (with assign-if-missing fallback) — the RPC path, not the one the picker uses (§3.5) |
-| `frontend/app/view/agent/agent-color.ts` (new) | TS counterpart of `agent_color.rs` — §3.5 |
-| `frontend/app/view/agent/agent-color.test.ts` (new) | Mirrors the Rust unit tests |
-| `frontend/app/view/agent/agent-model.ts` | `launchAgentDefinition`: seed `term:zoom` + both frame color keys — the actual picker-flow fix, §3.5 |
-| `frontend/app/block/blockframe.tsx` | Focused-state border-color memo: check `frame:activebordercolor` before `frame:hue` so the explicit "Pane Color" picker keeps working on agent panes (§3.4 note, reagent P1) |
+| [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts) (new) | TS counterpart of `agent_color.rs` — §3.5 |
+| [`frontend/app/view/agent/agent-color.test.ts`](../../frontend/app/view/agent/agent-color.test.ts) (new) | Mirrors the Rust unit tests |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | `launchAgentDefinition`: seed `term:zoom` + both frame color keys — the actual picker-flow fix, §3.5 |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Focused-state border-color memo: check `frame:activebordercolor` before `frame:hue` so the explicit "Pane Color" picker keeps working on agent panes (§3.4 note, reagent P1) |

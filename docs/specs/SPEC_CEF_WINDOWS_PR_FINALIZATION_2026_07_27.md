@@ -52,8 +52,8 @@ version-desync, not a real content conflict (confirmed: `origin/main`'s
 `package.json`/`Cargo.toml` are already at `0.54.5`; the rebase just needs to
 pick that up instead of the branch's stale 0.54.4 baseline).
 
-> `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md:10` —
-> References `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md` as
+> [`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md:10`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) —
+> References [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md) as
 > the triggering root-cause report, but this file does not exist anywhere in
 > the repo.
 
@@ -80,8 +80,8 @@ scoped to **finishing the PR** (the plumbing already does the right thing),
 plus updating two doc headers that still say "first-pass draft, not yet
 validated" now that a real build has shipped:
 
-- `docs/cef-build/build-patched-cef-windows.md` — top-of-file status note.
-- `scripts/cef-build/args-windows.gn` — header comment citing an "unverified"
+- [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) — top-of-file status note.
+- [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) — header comment citing an "unverified"
   size delta and a "not yet verified against a real build" GN-args set (the
   GN args themselves were already corrected mid-build on 2026-07-26 per that
   file's own changelog comment — only the top status framing is stale).
@@ -99,7 +99,7 @@ already depend on. No new secret provisioning needed.
 2. **PR #2308**:
    - `git fetch origin main && git rebase origin/main` on
      `docs/cef-proprietary-codecs-spec` — resolves both P0s by construction.
-   - Add `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`
+   - Add [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)
      (cherry-picked from `feat/media-pane`) — resolves the P2.
    - Update the two stale doc-status headers to reflect the real, booted,
      published build (cite the actual release URL + boot verification).
@@ -117,9 +117,9 @@ already depend on. No new secret provisioning needed.
 |---|---|
 | `agentmux-srv/src/config/widgets.json` | `defwidget@media` → `"display:pinned": true` |
 | `docs/cef-proprietary-codecs-spec` branch | rebase onto `origin/main` |
-| `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md` | added to PR #2308's branch (already exists on `feat/media-pane`) |
-| `docs/cef-build/build-patched-cef-windows.md` | status header: draft → validated, real build details |
-| `scripts/cef-build/args-windows.gn` | header comment: unverified → validated, real build details |
+| [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md) | added to PR #2308's branch (already exists on `feat/media-pane`) |
+| [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) | status header: draft → validated, real build details |
+| [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) | header comment: unverified → validated, real build details |
 
 No `agentmux-srv`/`agentmux-cef` runtime code changes — this pass is entirely
 PR-hygiene (review blockers, doc accuracy) plus confirming (not rebuilding)

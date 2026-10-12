@@ -13,7 +13,7 @@
 
 Define the provider boundary between Codex CLI JSONL and AgentMux's provider-neutral
 agent stream. This document replaces the Codex output assumptions in
-`docs/specs/codex-gemini-cli-integration.md`; that earlier document predates the
+[`docs/specs/codex-gemini-cli-integration.md`](codex-gemini-cli-integration.md); that earlier document predates the
 documented `codex exec --json` contract.
 
 This is a transport and translation spec. It answers:

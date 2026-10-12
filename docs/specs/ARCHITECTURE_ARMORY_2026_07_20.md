@@ -36,11 +36,11 @@ no deeper per-tab routing indirection than this.
 **What deliberately does NOT live in Armory:** per-agent-instance data. Armory
 used to have an "Identities" tab (`AgentIdentitiesPanel`) showing which account
 each agent was bound to — this was **removed** in Phase 5
-(`docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md`)
+([`docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md))
 specifically to move per-agent data out of Armory. The read-only panel that
 used to render there was extracted and relocated to the agent pane's own
 `view: "identity"` tab (`AgentIdentityLinksPanel`,
-`frontend/app/view/identity/identity-pane-view.tsx`) — Armory kept nothing
+[`frontend/app/view/identity/identity-pane-view.tsx`](../../frontend/app/view/identity/identity-pane-view.tsx)) — Armory kept nothing
 per-agent, only the reusable resources themselves. This precedent matters: any
 new Armory entity should be a *reusable resource*, with per-agent *bindings* to
 it living outside Armory (agent-pane tabs), the same shape all four entities
@@ -63,15 +63,15 @@ OAuthConfigDir | Keychain`.
 `linkagentidentity`/`unlinkagentidentity`/`listagentidentities`/
 `listallagentidentities` for the binding layer (below).
 
-**UI:** Armory "Accounts" tab, `frontend/app/view/accounts/accounts-manager.tsx`.
+**UI:** Armory "Accounts" tab, [`frontend/app/view/accounts/accounts-manager.tsx`](../../frontend/app/view/accounts/accounts-manager.tsx).
 
 **Binding mechanism:** a single FK **per provider**, not a list —
 `db_agent_identity_links(agent_id, provider) → account_id`, composite-keyed so
 each agent has at most one bound account per provider
 (`agentmux-srv/src/backend/storage/identities.rs`, `agent_identity_link()`).
 Written **only** by the agent-launch flow
-(`frontend/app/view/agent/components/AgentLaunchModal.tsx` →
-`frontend/app/view/agent/agent-model.ts:611-619` →
+([`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) →
+[`frontend/app/view/agent/agent-model.ts:611-619`](../../frontend/app/view/agent/agent-model.ts) →
 `linkagentidentity` RPC) — there is no write path from any Armory or
 agent-pane UI; both are read-only views of this table. This is the pattern
 the removed Armory "Identities" tab used to show and the agent pane's own
@@ -116,7 +116,7 @@ intentional decoupling of Rust API naming from SQL table naming.
 
 **UI:** Armory "Bundles" tab, `frontend/app/view/memory/memory-manager.tsx`,
 built on the shared `PrimitiveListDetail` primitive
-(`frontend/app/element/primitive-list-detail.tsx`) — a flat list-or-detail
+([`frontend/app/element/primitive-list-detail.tsx`](../../frontend/app/element/primitive-list-detail.tsx)) — a flat list-or-detail
 stack shared with Skills and MCP Servers (§3, §4). The edit form has **no**
 `is_global` toggle; that flag is preserved-but-not-editable from this tab
 (promoted/demoted elsewhere, e.g. seeding or the separate "Memories"/brain tab,
@@ -172,9 +172,9 @@ rows and forbids mutating a global one; `skill.catalog.upsert` always creates
 `is_global: true` rows and cannot promote a private skill. All mutations
 publish `skills:changed`.
 
-**UI:** Armory "Skills" tab (`frontend/app/view/skill/skill-manager.tsx`,
+**UI:** Armory "Skills" tab ([`frontend/app/view/skill/skill-manager.tsx`](../../frontend/app/view/skill/skill-manager.tsx),
 `SkillCatalogModel`) plus an agent-setup-modal tab
-(`frontend/app/view/agent/components/AgentSkillsModal.tsx`, `AgentSkillModel`)
+([`frontend/app/view/agent/components/AgentSkillsModal.tsx`](../../frontend/app/view/agent/components/AgentSkillsModal.tsx), `AgentSkillModel`)
 scoped to one agent — global skills are read-only there (edit/delete blocked
 client-side, "managed in the Armory"), only Bind/Unbind exposed. Both use
 `PrimitiveListDetail`.
@@ -217,7 +217,7 @@ MCP handshake check); catalog `mcp.catalog.list/upsert/delete` +
 `mcp.catalog.probe`. `mcp.upsert` forbids the reserved name `"agentmux"` and
 mutating global rows. All mutations publish `mcp:changed`.
 
-**UI:** Armory "MCP Servers" tab (`frontend/app/view/mcp/mcp-manager.tsx`,
+**UI:** Armory "MCP Servers" tab ([`frontend/app/view/mcp/mcp-manager.tsx`](../../frontend/app/view/mcp/mcp-manager.tsx),
 `McpCatalogModel`) — adds a live connectivity status pill
 (`McpStatusPill`/`watchMcpCapability`) and a "+ Browse catalog" preset picker
 (`McpCatalogPicker`) beyond the base pattern — plus an agent-setup-modal tab
@@ -242,7 +242,7 @@ all — `.mcp.json` is their only materialization path.
 ## 5. Startup Instructions (not currently an Armory entity)
 
 The "Custom Startup Instructions" section of Session Context
-(`frontend/app/view/agent/startup/buildStartupPayload.ts`) is sourced from
+([`frontend/app/view/agent/startup/buildStartupPayload.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.ts)) is sourced from
 `content_type: "startup"` in `db_agent_content` — a generic per-agent-definition
 key/value blob table (also holding `soul`/`agentmd`/`mcp`/`env`). This is a
 **freeform blob with no binding mechanism and no live authoring UI anywhere**:
@@ -251,8 +251,8 @@ key/value blob table (also holding `soul`/`agentmd`/`mcp`/`env`). This is a
   (`frontend/app/view/agent-def/` — `AgentDefViewModel`, `CONTENT_TABS =
   ["soul","agentmd","mcp","env"]`, notably not including `"startup"`,
   `AgentContentSection.tsx`/`ContentEditor.tsx`) is **orphaned dead code**: not
-  registered in `frontend/app/block/block-registry.ts`, no barrel/index file,
-  zero external imports anywhere in `frontend/app`.
+  registered in [`frontend/app/block/block-registry.ts`](../../frontend/app/block/block-registry.ts), no barrel/index file,
+  zero external imports anywhere in [`frontend/app`](../../frontend/app).
 - Today, setting startup instructions requires a raw RPC call or the seed
   manifest — there is no UI path at all.
 

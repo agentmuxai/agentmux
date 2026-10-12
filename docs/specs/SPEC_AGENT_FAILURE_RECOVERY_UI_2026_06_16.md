@@ -3,7 +3,7 @@
 - **Status:** Draft / proposed
 - **Date:** 2026-06-16
 - **Author:** AgentA
-- **Area:** `frontend/app/view/agent` (pane UI + state), `frontend/app/view/accounts` (Armory), `agentmux-srv` agent failure event
+- **Area:** [`frontend/app/view/agent`](../../frontend/app/view/agent) (pane UI + state), [`frontend/app/view/accounts`](../../frontend/app/view/accounts) (Armory), `agentmux-srv` agent failure event
 - **Related:** `SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` (the classifier — Phase 1/2, shipped #1353 + #1464), Armory / Accounts (#1478)
 
 ---
@@ -26,7 +26,7 @@ actions for the rest.
 |---|---|---|
 | Failure taxonomy `AgentFailure { code, title, detail, exitCode?, signal?, stderrTail?, retryable }` | `agentmux-srv/src/agents/failure.rs`; TS `frontend/types/gotypes.d.ts:78` | 11 classes; `retryable` already true for transient classes |
 | `agentfailure` wave event (per block) | `wps::EVENT_AGENT_FAILURE`; emitted in `subprocess.rs` process-waiter | classified on non-zero exit OR stdout error `result` frame |
-| Event → pane | `frontend/app/view/agent/hooks/useControllerStatusEvents.ts:42` | currently only `opts.log(...)` red text lines |
+| Event → pane | [`frontend/app/view/agent/hooks/useControllerStatusEvents.ts:42`](../../frontend/app/view/agent/hooks/useControllerStatusEvents.ts) | currently only `opts.log(...)` red text lines |
 | Re-run a turn | `sendMessage()` `hooks/useAgentCommands.ts:231` → `RpcApi.AgentInputCommand` (`rpc-api.ts:1202`) → backend `agentinput` → `spawn_turn` (`subprocess.rs:345`) | resumes via `--resume <session_id>`; busy turns queue + drain on exit |
 | Last user message | `documentAtom` last `UserMessageNode` (`view/agent/types.ts:279`) | the text to re-submit for "Retry" |
 | Armory → Accounts | `openBundleManager()` (`modals/bundle-manager-modal.tsx:255`) | singleton modal; "Accounts" is the default section |
@@ -196,9 +196,9 @@ button becomes a **countdown that fires itself**:
     than a typical 429/529 episode, so genuinely transient failures exhausted
     the budget while still retryable; jitter keeps a Fleet/cron burst from
     retrying in lockstep. The live value is `AUTO_RETRY_BACKOFF_S` in
-    `frontend/app/view/agent/hooks/useAgentFailure.ts` — treat that as the
+    [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts) — treat that as the
     source of truth over this line. See
-    `docs/reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md`.
+    [`docs/reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md`](../reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md).
 - Implementation: a `createSignal` countdown + `setInterval`/`setTimeout` in the banner,
   cleaned up on `onCleanup` and on `lastFailure` change. Attempt count tracked on
   `AgentPaneState` (e.g. `failureAutoRetries: number`, reset on `TurnReset`).

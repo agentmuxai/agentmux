@@ -12,9 +12,9 @@ request: "we want to eliminate those lines that span under the tab bar").
 `.tab-colored` in `tab.scss`) is unaffected; only this full-strip
 underline is gone. Kept here as historical record of the geometry
 decision, not current behavior.
-**Scope:** `frontend/app/tab/tabbar.tsx` (the `measureLine`/`active-tab-color-line` mechanism only — no other tab-bar behavior).
+**Scope:** [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) (the `measureLine`/`active-tab-color-line` mechanism only — no other tab-bar behavior).
 **Related (must-read first):**
-`docs/specs/SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03.md` §10.6 (the plain hairline-boundary mechanic this feature extends with color),
+[`docs/specs/SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03.md`](SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03.md) §10.6 (the plain hairline-boundary mechanic this feature extends with color),
 commit `99738cd1` / PR #1979 (feature introduction: "active tab's custom color traces the tab strip's boundary line"),
 commit `d1e990d9` (the right-edge-to-viewport decision this spec reverses — see §2),
 commit `dbe5ce48` / PR #1988 (the companion left-edge fix — already correct, unaffected by this spec).

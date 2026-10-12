@@ -7,7 +7,7 @@
 
 ## 1. Why
 
-The first cross-platform run of `scripts/verify-shortcuts.mjs` found bugs, which #4603 fixed. It also turned up kinks that aren't single bugs:
+The first cross-platform run of [`scripts/verify-shortcuts.mjs`](../../scripts/verify-shortcuts.mjs) found bugs, which #4603 fixed. It also turned up kinks that aren't single bugs:
 - App API behaviour that surprises an agent;
 - a macOS gap users share;
 - a crash whose cause isn't confirmed;
@@ -44,10 +44,10 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
 ### Masty@starpower (macOS)
 
 - **M1. Restore from the Trash on macOS** (K4).
-  - `crates/srv/src/backend/fs_ops/trash_worker.rs`: the macOS `restore_paths` returns "isn't supported".
+  - [`crates/srv/src/backend/fs_ops/trash_worker.rs`](../../crates/srv/src/backend/fs_ops/trash_worker.rs): the macOS `restore_paths` returns "isn't supported".
   - Trash through `NSFileManager.trashItemAtURL`, which returns the item's new URL, and keep that per operation. Then restore moves it back, refusing on a name collision like the other platforms.
   - `files:undo` after `files:newFolder` also moves the folder to the Trash (Masty's rerun), so it hits the same gap; restore covers it.
-  - When it lands, lift #4603's macOS refusal of `files:trash` (`frontend/app/keybindings/app-api.ts` `API_REFUSED_MAC`, `crates/srv/src/server/ui_shortcuts.rs`).
+  - When it lands, lift #4603's macOS refusal of `files:trash` ([`frontend/app/keybindings/app-api.ts`](../../frontend/app/keybindings/app-api.ts) `API_REFUSED_MAC`, [`crates/srv/src/server/ui_shortcuts.rs`](../../crates/srv/src/server/ui_shortcuts.rs)).
   - Tests: trash then undo in a temp dir, run on macOS.
 - **M2. L3 on macOS**, once the owner grants Accessibility.
   - Press ⌃⇧Arrow (`pane:focus:*`; Mission Control ids 34/35/80/82), the Files pane's ⌘A/C/X/V/Z against the Edit menu, and the fn+arrow Page keys.

@@ -3,8 +3,8 @@
 **Date:** 2026-07-30
 **Type:** UI responsiveness spec
 **Status:** implemented — PR #2372 (container-query two-row grid); verified in code 2026-08-10.
-**Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` +
-`frontend/app/view/agent/styles/_composer-strip.scss`
+**Scope:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) +
+[`frontend/app/view/agent/styles/_composer-strip.scss`](../../frontend/app/view/agent/styles/_composer-strip.scss)
 **Trigger:** User request — *"refine the responsiveness of the stats bar above the agent pane's
 input; when the pane is made thinner it should move to 2 lines."*
 **Related:** `SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02.md` (progressive-collapse

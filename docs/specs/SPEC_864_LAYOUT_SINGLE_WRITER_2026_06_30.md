@@ -209,7 +209,7 @@ optimization if `db_layout` row size makes full-tree writes costly. **Do not gat
   `persist.rs:130-165`, `persist_subscriber.rs:187-298,664-716`, `backend/obj.rs:398-416`,
   `backend/storage/store.rs:381-424`, `backend/wcore/{mod,block,dnd,tab,window}.rs`,
   `server/wave_obj_bridge.rs:184-244,440-443`, `main.rs:1320-1349`.
-- `docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` (the deferred "Option B" decision this
-  finishes), `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` §4/§7 (why this gates
-  Pillar 1), `docs/specs/SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` §2.3 (layout
+- [`docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) (the deferred "Option B" decision this
+  finishes), [`docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`](SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md) §4/§7 (why this gates
+  Pillar 1), [`docs/specs/SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md`](SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md) §2.3 (layout
   split-brain finding).

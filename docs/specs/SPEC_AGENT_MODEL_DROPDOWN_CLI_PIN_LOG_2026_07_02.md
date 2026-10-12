@@ -18,7 +18,7 @@
 
 ### Current state
 `pinned_version` is **install-only** and duplicated by hand in two registries that must stay in sync:
-- `frontend/app/view/agent/providers/index.ts:156` → `pinnedVersion: "2.1.185"`
+- [`frontend/app/view/agent/providers/index.ts:156`](../../frontend/app/view/agent/providers/index.ts) → `pinnedVersion: "2.1.185"`
 - `agentmux-srv/src/backend/providers.rs:146` → `pinned_version: "2.1.185"`
 
 Consumed only at install (`install_handlers.rs:416-419`, `cli_handlers.rs:153,240` → `npm install <pkg>@<pinned>`; empty ⇒ `@latest`). Latest on npm today is **2.1.198**. Nothing compares installed-vs-pinned (the toolchain view compares installed vs npm-`latest`, not vs the pin).
@@ -76,7 +76,7 @@ Add `models` to the **Rust** `ProviderConfig` (`providers.rs` — currently abse
 Since enumeration isn't available, make the catalog **version-aware and best-effort-validated**:
 1. **Version-key the catalog.** Each model entry may carry `minCliVersion`. The dropdown filters to models the **installed** CLI supports, using the already-present `get_cli_version` detection. So on an older CLI, newer models don't show; after a pin bump, they do.
 2. **Best-effort validation (optional, per provider).** Where a CLI *does* surface hints (e.g. `claude --help` text, a config file, or a cheap `--model <id> --print` dry-probe that errors on unknown models), add a per-provider `listModels()` adapter that **validates/annotates** the curated list against the installed CLI and logs drift ("catalog lists X but the installed CLI rejects it"). This is validation, not enumeration — the curated list stays the source; the probe catches staleness. Structure it as a per-provider hook so each provider implements what its CLI allows (the "practice for every provider").
-3. **Documented sync process.** When `pinned_version` bumps (Part A), the catalog is reviewed against the new CLI's models — reference `docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md` and update it.
+3. **Documented sync process.** When `pinned_version` bumps (Part A), the catalog is reviewed against the new CLI's models — reference [`docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md`](../providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md) and update it.
 
 ### B.4 — Effort dropdown (leave as-is, note the coupling)
 The Effort `<select>` sits alongside Model (`AgentComposerStrip.tsx:226-235`) with `EffortLevel = low|medium|high|xhigh|max`. `--effort` is skipped on Haiku (`buildRuntimeArgs.ts:110-112`; Haiku 400s on `--effort`). If model values become concrete IDs, re-verify the Haiku skip keys off the right thing (family, not the old `haiku` alias). No other effort change in scope.
@@ -125,6 +125,6 @@ The Effort `<select>` sits alongside Model (`AgentComposerStrip.tsx:226-235`) wi
 ## Sources
 - Registry: `frontend/app/view/agent/providers/index.ts:36-42,96-105,156,185-189`; Rust `agentmux-srv/src/backend/providers.rs:71-83,146`.
 - Dropdowns: `components/AgentComposerStrip.tsx:43-55,189,214-246`; `components/AgentControlBar.tsx:44-49,165,294-312`; `commands/global/runtime.ts:58-72`; `runtime-apply.ts:36-60`; `buildRuntimeArgs.ts:50-142`; `types.ts:626,636`.
-- CLI introspection: `agentmux-srv/src/server/cli_handlers.rs:635-675,734-750`; `install_handlers.rs:416-419`; `frontend/app/view/toolchain/toolchain-view.tsx:187-234` (#1873).
+- CLI introspection: `agentmux-srv/src/server/cli_handlers.rs:635-675,734-750`; `install_handlers.rs:416-419`; [`frontend/app/view/toolchain/toolchain-view.tsx:187-234`](../../frontend/app/view/toolchain/toolchain-view.tsx) (#1873).
 - Log UI: `components/ActivityLogPanel.tsx:25-117`; `components/AgentComposerStrip.tsx:237-245`; `agent-view.tsx:1267-1283`. Separate (do not touch): `ActivityRow.tsx`, `ActivityDock.tsx`.
 - Model IDs (verify against pinned CLI): Opus 4.8 `claude-opus-4-8`, Sonnet 4.6 `claude-sonnet-4-6`, Haiku 4.5 `claude-haiku-4-5-20251001`, Fable 5 `claude-fable-5`.

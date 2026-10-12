@@ -111,7 +111,7 @@ content only. Ruled out in the 08-17 addendum; re-proposed and re-ruled-out on
 **3.3 — The recurring ~251–252px shrink is not a fixed-height component.**
 `FINDINGS_..._LIVE_INSTANCE_DATA_2026_08_22.md` §5 recommended grepping for a
 component with a 251–252px height constant. Done, 08-31: no such constant
-exists anywhere under `frontend/app/view/agent/`. Consistent with that doc's
+exists anywhere under [`frontend/app/view/agent/`](../../frontend/app/view/agent). Consistent with that doc's
 own caveat that a repeated *net* delta between two pin-checks cannot establish
 a single discrete element. This lead is closed; it needs mutation-level
 instrumentation (§5) or nothing.

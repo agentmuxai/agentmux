@@ -21,7 +21,7 @@ border appears — because the click is a real DOM event that bubbles up to
 `handleBlockClick` in `block/block.tsx` → `nodeModel.focusNode()`).
 
 A **browser pane** doesn't work this way: per
-`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`, its content is a second,
+[`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md), its content is a second,
 sibling `CefBrowserView` layered on top of the main window's DOM via CEF's
 Views `AddOverlayView`, not an iframe. Once a page is loaded, the pixels and
 input for that page belong to a separate native Chromium instance — a click

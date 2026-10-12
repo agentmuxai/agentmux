@@ -4,8 +4,8 @@
 **Type:** Feature (shipped — see Status)
 **Status:** implemented — #2599 (2026-08-16), the PR this doc was added in. `agentmux-cef/src/client/context_menu.rs` is the `ContextMenuHandler` body, scoped to `is_browser_pane` exactly as "Scope / caveats" requires so the main app's own right-click menu is untouched, and `getBodyContextMenuItems()` is wired through `blockframe.tsx`. The v1 exclusions (Save As, Save Image As, spell-check, Cast) are still excluded, and the Linux question that section raises was left as written — it was flagged for verification during implementation, not decided here.
 **Scope:** `agentmux-cef` (new `ContextMenuHandler` impl, browser-pane only) +
-`frontend/app/view/browser/browser-model.ts` (new `getBodyContextMenuItems`
-implementation) + `frontend/app/block/blockframe.tsx` (no change expected —
+[`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts) (new `getBodyContextMenuItems`
+implementation) + [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) (no change expected —
 existing extension point should just work, see below).
 
 ## Problem
@@ -28,7 +28,7 @@ extension, using the extension point that already exists for this purpose.
 
 Same root cause family as the click-to-select and click-dismisses-menus
 issues (see the two sibling specs). Per
-`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`, a browser pane's content
+[`docs/specs/SPEC_NATIVE_BROWSER_PANE_2026_04_17.md`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md), a browser pane's content
 is a native, sibling `CefBrowserView` (CEF Views `AddOverlayView`), not DOM.
 `blockframe.tsx`'s body already has an `onContextMenu` handler
 (`onBodyContextMenu`, `blockframe.tsx:866`) that builds exactly the menu we
@@ -43,7 +43,7 @@ interface at all today — confirmed, zero references to
 ## Existing extension point (reuse, don't invent a new one)
 
 `ViewModel` already supports pane-type-specific context menu items via two
-optional methods (`frontend/types/custom.d.ts:517-518`):
+optional methods ([`frontend/types/custom.d.ts:517-518`](../../frontend/types/custom.d.ts)):
 
 ```ts
 getSettingsMenuItems?: () => ContextMenuItem[];      // header right-click, appended

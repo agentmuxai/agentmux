@@ -2,12 +2,12 @@
 
 **Date:** 2026-09-20
 **Status:** implemented — PR #3445.
-**Related:** `docs/specs/SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md` (original
+**Related:** [`docs/specs/SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md`](SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md) (original
 2026-04-17 proposal — Draft, its tool names never built, superseded in
 spirit by this doc's design against the architecture that actually shipped),
-`docs/specs/SPEC_BROWSER_DOM_API.md` (implemented, PR #453 — delivered the
+[`docs/specs/SPEC_BROWSER_DOM_API.md`](SPEC_BROWSER_DOM_API.md) (implemented, PR #453 — delivered the
 CDP-backed control layer this spec exposes, explicitly scoped agent-driven
-use as future work), `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`
+use as future work), [`docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`](SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
 (implemented — the own-pane-only scoping precedent this spec follows).
 
 ---

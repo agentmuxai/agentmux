@@ -162,7 +162,7 @@ Smoke test, manual:
    - On host respawn, new sagas work normally.
 6. No `#[allow(dead_code)]` markers on `PipeTarget::Host`, `SagaAction::Failed`, `pool_respawn::promoted_label`, or `SagaCtx::saga_id` (Phase F.7 explicitly retained these as "reserved for future cross-process sagas" — that future is now).
 
-If all 6 pass, mark Thread 3 done in `docs/retro/phase-fg-status-2026-05-01.md`. End of saga reducer architecture migration.
+If all 6 pass, mark Thread 3 done in [`docs/retro/phase-fg-status-2026-05-01.md`](../retro/phase-fg-status-2026-05-01.md). End of saga reducer architecture migration.
 
 ---
 
@@ -209,7 +209,7 @@ When the user says "go", the sequencer should:
 5. **End-to-end smoke** — only after all 9 PRs merge:
    - Run `task package` to build a portable.
    - Notify user with the §7 checklist for manual verification.
-   - Update `docs/retro/phase-fg-status-2026-05-01.md` to mark Thread 3 closed.
+   - Update [`docs/retro/phase-fg-status-2026-05-01.md`](../retro/phase-fg-status-2026-05-01.md) to mark Thread 3 closed.
    - Stop the loop.
 
 ---

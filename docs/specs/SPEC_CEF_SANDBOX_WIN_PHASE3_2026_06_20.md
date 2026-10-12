@@ -240,7 +240,7 @@ non-null sandbox_info. CEF honours `no_sandbox = 1` regardless of what
 | `agentmux-cef/src/lib.rs` | **New** — all logic from main.rs; `run(sandbox_info)`; `RunWinMain` export |
 | `agentmux-cef/src/main.rs` | Shrink to 3-line wrapper calling `agentmux_cef::run(null_mut())` |
 | `Taskfile.yml` | Windows staging: bootstrap.exe + DLL rename |
-| `.changesets/` | New patch entry |
+| [`.changesets/`](../../.changesets) | New patch entry |
 
 ---
 

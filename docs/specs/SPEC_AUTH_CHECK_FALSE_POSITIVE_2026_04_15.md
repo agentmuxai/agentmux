@@ -114,7 +114,7 @@ In `launch-flow.ts`, the `auth_method` field already carries `"claude.ai oauth"`
 | `agentmux-srv/src/server/cli_handlers.rs` | Remove fast-path file-read block for Claude; let it fall through to the slow-path CLI runner |
 | `agentmux-srv/src/backend/rpc_types.rs` | Optionally add `subscription: Option<String>` to `CheckCliAuthResult` |
 | `agentmux-srv/src/server/cli_handlers.rs` | Add `emailAddress` → `email` fallback in slow-path JSON parser |
-| `frontend/app/view/agent/flows/launch-flow.ts` | Update log message to include subscription if present |
+| [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) | Update log message to include subscription if present |
 
 ---
 
