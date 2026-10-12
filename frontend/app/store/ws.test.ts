@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WSControl } from "./ws";
 
 class FakeSocket {
     sent: string[] = [];
@@ -22,8 +23,6 @@ vi.mock("@/util/wsutil", () => ({
         return lastSocket;
     },
 }));
-
-const { WSControl } = await import("./ws");
 
 describe("WSControl message queue", () => {
     afterEach(() => {
