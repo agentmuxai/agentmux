@@ -476,6 +476,9 @@ Our patch symbols are **local, not exported**. Use full `nm`. `nm -gU`
 # macOS
 BIN="Chromium Embedded Framework.framework/Versions/Current/Chromium Embedded Framework"
 nm "$BIN" | grep BeginWindowDrag      # expect __ZN13CefWindowImpl15BeginWindowDragEv (type 't')
+# agentmuxai/cef#11 (CefWidgetImpl observes each ThemeService once): no named
+# function, but its std::map keyed by raw_ptr<ThemeService> is the only one.
+nm "$BIN" | grep -c __value_typeIN4base7raw_ptrI12ThemeService   # expect > 0 (2 on 154 r2)
 
 # Layer A landed at all? These come only from CEF's Chromium-side patches.
 for s in IsUniqueForCEF IsAlloyContents HasExternalParent; do

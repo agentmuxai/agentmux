@@ -12,6 +12,20 @@ Every entry says what was done, what was seen, whether it reproduced, and what i
 
 ## F1. Tearing off a tab that holds a browser pane crashes the host (existing bug)
 
+**Root cause (found 2026-10-12): the test Mac's local CEF framework predates agentmuxai/cef#11; the app code is right.** Fixed for dev and local packaging by making `scripts/verify-cef-framework-darwin.sh` check for #11.
+
+- Since #4599 (2026-10-10) a browser pane in the default jar keeps the default Profile in every window. A secondary window's own page runs on a unique off-the-record Profile (`commands::create_isolated_request_context`). So a pane in a secondary window puts two Profiles in one widget. A tear-off lands the tab in a pool window, which is a secondary window.
+- In stock CEF, `CefWidgetImpl::AddAssociatedProfile` adds the widget as an observer of `ThemeServiceFactory::GetForProfile(profile)` once per new `Profile*`. `ThemeServiceFactory` redirects an off-the-record Profile to its original's service (`kRedirectedToOriginal`), so the second Profile adds the same observer again: `Observers can only be added once!`. The stack names `ModalDialogHostObserver` only because identical `ObserverList::AddObserver` instantiations are folded into one symbol.
+- agentmuxai/cef#11 (merged 2026-10-10, fork commit `6fba204`) counts observed ThemeServices instead. The pinned runtime `cef-macos-arm64-154.0.8037.58-codecs-r2` carries it, and #4599 relies on it.
+- `task dev` on macOS takes the framework from `~/cef-build/darwin/aarch64` when one is there. On the test Mac that framework was built from the fork on 2026-09-29, before #11. The framework check looked only for `BeginWindowDrag`, which it has, so it passed, and the bundle step's warning about #11 never printed.
+
+**Proof:**
+- Old framework, no tear-off: a browser pane created (through the page) in an ordinary second window aborted the host 20 ms after `browser_view_create`, with the same FATAL and stack (third macOS crash report, 2026-10-12 02:30 local). The pane in the main window, whose page also runs on the default Profile, was fine.
+- Pinned r2 framework (SHA-256 matches its release note), same dev build: a browser pane in a pool window (`own_jar=false`) returned its `OverlayController` and the host stayed up.
+- Symbols: r2 has two local `std::map` symbols keyed by `raw_ptr<ThemeService>` (the map #11 adds); the old framework has none.
+
+**Who is affected:** builds bundling a fork framework from before #11, that is `task dev` and a local `task package:macos` on a Mac with an old `~/cef-build/darwin/aarch64`. The released v0.59.20 DMG has r2's code: its framework's `__text` hash equals r2's. A locally packaged 0.59.20 DMG on the test Mac has the old framework's code, so that build crashes the same way.
+
 **Seen:** 2026-10-11 07:46 local, a `task dev` build of `main` plus #4688 (so without #4657's pane move and #4690), CEF 154.0.8037.58, macOS 26.5.2, Apple M2.
 
 **What was done:** a tab holding a browser pane (an `https://example.com` page) was grabbed by its tab-strip entry and released a short way below the strip. The test driver (a synthetic mouse drag) had meant to move the window by its header and landed on the tab. The tab was torn off into a new window.
@@ -47,17 +61,17 @@ The app restarted itself and restored its windows. macOS wrote a crash report (`
 
 Host log, 22:22:05.7 to 06.5 UTC: a pool window was created and promoted for the torn-off tab (`tear_off_pool_promote`), the page there registered its backend window, then `BrowserPaneCreateRequested` for the same block id with a new label (`...-2`, window `window-pool-3ba64...`) at 06.464, `browser_view_create succeeded` at 06.464, `[on-after-created] registering browser via reducer` for the new pane at 06.521, and the `FATAL ... observer_list.h:371 Observers can only be added once!` at 06.5315, ~11 ms after the new pane's browser was created. The pane for the old window (`...-1`) was still being closed (`on_before_close: no backend window ID registered ... after 5 retries`).
 
-So in both occurrences the crash comes right after the pane for the same block is created in a window a tab was just torn off into, while the pane's old copy in the source window is still closing. Not yet known: whether the shared `pane jar` profile of the old pane and the new one is the object added twice, or whether the new window already holds a pane. Evidence kept in the agent workspace: both macOS crash reports, the host-log sequence and the fatal stack.
+So in both occurrences the crash comes right after the pane for the same block is created in a window a tab was just torn off into, while the pane's old copy in the source window is still closing. Not yet known: whether the shared `pane jar` profile of the old pane and the new one is the object added twice, or whether the new window already holds a pane (answered 2026-10-12, see the root cause at the top of F1). Evidence kept in the agent workspace: both macOS crash reports, the host-log sequence and the fatal stack.
 
 **Known / not known:**
 - The crash is inside CEF's Views code while our `add_overlay_view` call attaches a pane's `BrowserView` to a window. The assertion says the same associated-profile observer was added to the widget twice, so the view or its profile was attached to that widget already.
 - It is **not** caused by the macOS pane changes in this series: the build had none of #4657 or #4690, only the edge-resize fix, which only changes mouse-event routing.
-- **Unverified:** whether it needs the warm-pool window (a pool window may already hold the pane's profile association), a pane that was just closed in the old window (the deferred destroy racing the new create), or just any tab move with a pane. A pane that is already in a pool window, or a tab without a pane, was not tried.
+- **Unverified:** whether it needs the warm-pool window (a pool window may already hold the pane's profile association), a pane that was just closed in the old window (the deferred destroy racing the new create), or just any tab move with a pane. A pane that is already in a pool window, or a tab without a pane, was not tried. **Answered 2026-10-12:** none of these; any default-jar pane in a secondary window crashes on a framework without cef#11, and the closing old copy plays no part.
 - `close_browser(force=1)` and `OverlayController` destroy are deliberately deferred in `browser_pane/creation_views.rs` (`detach_browser_pane_view`) because of an earlier crash of the same family (`weak_ptr.h:250`, tab tear-off); this one may be the same race from the other side.
 
 **Other agent's data point (2026-10-11):** Masty reported 7 tab tear-offs (window tabs and pane tabs, none holding a browser pane) on a dev build of `main` with no crash. That fits the crash needing a tab with a browser pane in it, but is not proof.
 
-**To do:** reproduce on `main` with the log level raised; try (a) a tab with a pane torn off to a new window, (b) the same with no warm pool, (c) a tab with two panes; then find which object is attached twice.
+**To do:** ~~reproduce on `main` with the log level raised; find which object is attached twice~~ done, see the root cause above. Left: replace the stale framework in `~/cef-build/darwin/aarch64` on the test Mac with r2 (a shared folder outside any repo, so it needs the owner's go-ahead). A real tab tear-off on r2 has not been tried; the pane-in-a-pool-window run above is the same path without the drag.
 
 ---
 

@@ -614,6 +614,13 @@ jobs:
       - name: Windows CEF runtime guard self-test
         run: bash scripts/cef-build/verify-cef-runtime-windows.test.sh
 
+      # bundle:darwin (advisory) and package-macos.sh (hard gate) check the CEF
+      # framework for our patches by symbol. A fork build without agentmuxai/cef#11
+      # passed the old BeginWindowDrag-only check and crashed the first browser
+      # pane opened in a second window. Fake nm; runs on Linux.
+      - name: macOS CEF framework check self-test
+        run: bash scripts/verify-cef-framework-darwin.test.sh
+
       # Hash files from stdin, never by name: given a path containing `\` (every
       # Windows path), coreutils prefixes the hash with `\` and a pin check
       # refuses the right file -- the guard above did, for the correct r2 runtime.
