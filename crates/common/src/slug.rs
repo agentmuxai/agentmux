@@ -57,6 +57,20 @@ pub fn definition_slug(name: &str) -> String {
     dashed(&name.to_lowercase())
 }
 
+/// A fork's slug: its lineage root's slug and its own label, never its
+/// source's slug, so forking a fork doesn't chain every generation
+/// (`loap-loap-2-loap-3`, REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F4). A
+/// label that already starts with the root's name isn't prefixed twice
+/// (`Loap #3` → `loap-3`); capped like any definition slug.
+pub fn fork_slug(root_slug: &str, branch_label: &str) -> String {
+    let label = definition_slug(branch_label);
+    if label == root_slug || label.starts_with(&format!("{root_slug}-")) {
+        label
+    } else {
+        definition_slug(&format!("{root_slug}-{label}"))
+    }
+}
+
 /// The name an agent is registered and addressed by: `AGENTMUX_AGENT_ID`, the
 /// registry's display binding, a message's target. A valid agent id stays as
 /// it is, natural casing included (`Agent2`, which PR titles and git authors
@@ -123,6 +137,17 @@ pub fn js_ascii_slug(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fork's slug is its root's plus its own label, for every generation:
+    /// `Loap #3` is `loap-3` whether forked from Loap or from Loap #2.
+    #[test]
+    fn fork_slugs_never_chain() {
+        assert_eq!(fork_slug("loap", "Loap #3"), "loap-3");
+        assert_eq!(fork_slug("loap", "Loap"), "loap");
+        assert_eq!(fork_slug("loap", "experiment"), "loap-experiment");
+        assert_eq!(fork_slug("loap", "Loapish"), "loap-loapish", "a prefix of the name isn't the root's");
+        assert_eq!(fork_slug(&"r".repeat(60), "Long Branch Label").len(), 64);
+    }
 
     /// Every rule over the same inputs: the differences, stated.
     #[test]

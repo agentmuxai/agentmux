@@ -905,6 +905,25 @@ mod bundle_provisioning_store_separation_tests {
     // runtime-provisioned agent unbound and unconditionally aborting
     // m0021's entire backfill loop on the first collision.
 
+    /// A collision suffix keeps a slug a valid agent id: a 64-char slug plus
+    /// "-2" used to make a 66-char one that failed every registration
+    /// (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F4).
+    #[test]
+    fn a_collision_suffixed_slug_stays_within_64_chars() {
+        let store = Store::open_in_memory().unwrap();
+        let long = "a".repeat(64);
+        let mut first = test_agent_def("id-1", "First", "claude", "host", 1, "");
+        first.slug = long.clone();
+        store.agent_def_insert(&mut first).unwrap();
+        let mut second = test_agent_def("id-2", "Second", "claude", "host", 2, "");
+        second.slug = long.clone();
+        store.agent_def_insert(&mut second).unwrap();
+        assert_eq!(first.slug, long);
+        assert_ne!(second.slug, long);
+        assert!(agentmux_common::slug::is_agent_id(&second.slug), "{} is a valid id", second.slug);
+        assert!(second.slug.ends_with("-2"));
+    }
+
     #[test]
     fn resolve_unique_bundle_name_returns_the_base_name_when_no_collision() {
         let store = Store::open_in_memory().unwrap();

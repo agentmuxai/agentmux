@@ -48,7 +48,12 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
         if count == 0 {
             return Ok(candidate);
         }
-        candidate = format!("{base}-{n}");
+        // Trimmed so the suffixed slug stays a valid agent id (at most 64
+        // chars); an over-long one fails every registration.
+        let suffix = format!("-{n}");
+        let room = agentmux_common::slug::AGENT_ID_MAX_LEN.saturating_sub(suffix.len());
+        let stem: String = base.chars().take(room).collect();
+        candidate = format!("{}{suffix}", stem.trim_end_matches('-'));
         n += 1;
     }
 }
