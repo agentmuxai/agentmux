@@ -61,11 +61,13 @@ fn fork_lineage_root<'a>(defs: &'a [AgentDefinition], source: &'a AgentDefinitio
     defs.iter().find(|a| a.id == root_id).unwrap_or(source)
 }
 
-/// Whether a user agent (not a seeded template) already has `name`,
-/// case-insensitively. Names are unique among user agents: the picker lists
-/// them by name, and name-keyed registrations collide otherwise.
+/// Whether a user agent (not a seeded template) already goes by `name`,
+/// case-insensitively: as its name, or as its branch label, which is what a
+/// renamed fork shows. Names are unique among user agents: the picker lists
+/// them by name, and name-keyed registrations collide otherwise. A launched
+/// agent's instance name is the store's to check (`agents_matching_name`).
 fn name_taken(defs: &[AgentDefinition], name: &str) -> bool {
-    defs.iter().any(|a| a.is_seeded == 0 && a.name.eq_ignore_ascii_case(name))
+    defs.iter().any(|a| a.is_seeded == 0 && (a.name.eq_ignore_ascii_case(name) || a.branch_label.eq_ignore_ascii_case(name)))
 }
 
 /// Build the flat, lineage-wide "#N" auto-suggestion for forking `source`.
@@ -74,19 +76,21 @@ fn name_taken(defs: &[AgentDefinition], name: &str) -> bool {
 /// (possibly already-suffixed) name — forking "AgentX #2" gives "AgentX #3",
 /// not "AgentX #2 #3" (`SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md`
 /// §4.5). The number is one past the highest "#N" any fork in the lineage
-/// already carries, not a count of them: a count handed a deleted fork's
-/// number to the next one while a later fork still had it, so two live
-/// forks could share a name (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F4).
-/// A name some other agent already has is skipped.
-fn suggest_fork_name(defs: &[AgentDefinition], source: &AgentDefinition) -> String {
+/// already carries, or any deleted agent carried (`retired`, the store's
+/// `retired_agent_names`), not a count of the live ones: a count handed a
+/// deleted fork's number to the next fork, so two agents could share a name
+/// over time, and live ones too while a later fork still had it
+/// (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F4). A name some other agent
+/// already has is skipped.
+fn suggest_fork_name(defs: &[AgentDefinition], retired: &[String], source: &AgentDefinition) -> String {
     let root = fork_lineage_root(defs, source);
     let prefix = format!("{} #", root.name);
-    let highest = defs
+    let number = |name: &str| name.get(..prefix.len()).filter(|p| p.eq_ignore_ascii_case(&prefix)).and_then(|_| name[prefix.len()..].trim().parse::<u32>().ok());
+    let live = defs
         .iter()
         .filter(|a| a.is_seeded == 0 && !a.branch_label.is_empty() && fork_lineage_root_id(defs, &a.id) == root.id)
-        .filter_map(|a| a.name.strip_prefix(&prefix)?.trim().parse::<u32>().ok())
-        .max()
-        .unwrap_or(1);
+        .filter_map(|a| number(&a.name));
+    let highest = live.chain(retired.iter().filter_map(|n| number(n))).max().unwrap_or(1);
     let mut n = highest.max(1) + 1;
     while name_taken(defs, &format!("{prefix}{n}")) {
         n += 1;
@@ -410,7 +414,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // When empty, auto-generate a flat, lineage-wide "Name #N"
                 // (see suggest_fork_name's doc comment).
                 let fork_name = if cmd.branch_label.is_empty() {
-                    suggest_fork_name(&all_defs, &source)
+                    suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &source)
                 } else {
                     cmd.branch_label.clone()
                 };
@@ -419,7 +423,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     cmd.branch_label.clone()
                 };
-                if !cmd.branch_label.is_empty() && name_taken(&all_defs, &fork_name) {
+                let named_elsewhere = mstore.agents_matching_name(&fork_name).map(|m| !m.is_empty()).unwrap_or(false);
+                if !cmd.branch_label.is_empty() && (name_taken(&all_defs, &fork_name) || named_elsewhere) {
                     return Err(format!("forkagentdefinition: an agent named {fork_name:?} already exists"));
                 }
                 // The root's slug and this fork's label: never the source's
@@ -540,7 +545,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .find(|a| a.id == cmd.source_id)
                     .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
 
-                let suggested_label = suggest_fork_name(&all, source);
+                let suggested_label = suggest_fork_name(&all, &mstore.retired_agent_names().unwrap_or_default(), source);
 
                 Ok(ForkAgentDefinitionSuggestResult { suggested_label })
             }
@@ -994,9 +999,9 @@ mod tests {
     #[test]
     fn a_fork_number_is_one_past_the_highest_not_a_count() {
         let defs = lineage(&[("f3", "Loap #3")]);
-        assert_eq!(suggest_fork_name(&defs, &defs[0]), "Loap #4");
+        assert_eq!(suggest_fork_name(&defs, &[], &defs[0]), "Loap #4");
         let first = lineage(&[]);
-        assert_eq!(suggest_fork_name(&first, &first[0]), "Loap #2");
+        assert_eq!(suggest_fork_name(&first, &[], &first[0]), "Loap #2");
     }
 
     /// A suggested name another agent already has is skipped.
@@ -1006,7 +1011,24 @@ mod tests {
         let mut other = crate::backend::storage::agents::test_agent_def("other", "Loap #2", "claude", "host", 3, "");
         other.is_seeded = 0;
         defs.push(other);
-        assert_eq!(suggest_fork_name(&defs, &defs[0]), "Loap #3");
+        assert_eq!(suggest_fork_name(&defs, &[], &defs[0]), "Loap #3");
         assert!(name_taken(&defs, "loap #2"), "case-insensitively");
+    }
+
+    /// Deleting the highest fork must not hand its number out again (#4746).
+    /// Deleted agents' names are tombstoned, lowercased.
+    #[test]
+    fn a_deleted_forks_number_is_not_handed_out_again() {
+        let defs = lineage(&[]);
+        assert_eq!(suggest_fork_name(&defs, &["loap #2".to_string()], &defs[0]), "Loap #3");
+    }
+
+    /// A renamed fork shows its branch label, which a new fork must not take
+    /// (#4746).
+    #[test]
+    fn a_renamed_forks_label_is_taken() {
+        let mut defs = lineage(&[("f2", "Loap #2")]);
+        defs[1].branch_label = "Experiment".to_string();
+        assert!(name_taken(&defs, "experiment"));
     }
 }

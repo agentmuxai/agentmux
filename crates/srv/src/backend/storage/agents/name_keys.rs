@@ -332,6 +332,17 @@ pub(crate) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(Stri
 }
 
 impl Store {
+    /// The names deleted agents were known by, lowercased as they were
+    /// tombstoned before each delete. A fork's automatic number counts them,
+    /// so a deleted fork's number is never handed out again, even the
+    /// highest one (`suggest_fork_name`).
+    pub fn retired_agent_names(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT name FROM db_agent_key_tombstones")?;
+        let names = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(names)
+    }
+
     /// The slugs of every row whose slug equals `name` trimmed and folded
     /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
     /// "Aria" and "aria" are two rows).
