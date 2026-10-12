@@ -208,8 +208,3 @@ mod tests {
         assert!(!lock_is_free(&lock));
     }
 }
-
-
-
-
-
