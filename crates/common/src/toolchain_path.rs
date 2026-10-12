@@ -69,7 +69,7 @@ pub fn resolve_login_path() -> EnrichedPath {
 
     #[cfg(unix)]
     {
-        let login_shell = capture_login_shell_path(&resolve_user_shell());
+        let login_shell = capture_login_shell_path(&resolve_user_shell(), None);
         build_enriched(&inherited, login_shell.as_deref(), &wellknown_dirs())
     }
 }
@@ -101,6 +101,185 @@ pub fn enrich_current_process_path() -> PathSource {
     enriched.source
 }
 
+/// What [`enrich_current_process_path_cached`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnrichOutcome {
+    pub source: PathSource,
+    /// The login-shell PATH came from the cache, not a fresh shell spawn.
+    /// The caller should refresh the cache in the background
+    /// ([`refresh_login_path_cache`]).
+    pub from_cache: bool,
+}
+
+/// Like [`enrich_current_process_path`], but reuses the login-shell PATH
+/// captured by an earlier launch when nothing it depends on has changed:
+/// the shell, the inherited PATH, and the size and mtime of every shell
+/// startup file and `/etc/paths{,.d}`. On a hit no shell is spawned, which
+/// takes the 1-2 s an interactive login shell costs (oh-my-zsh, conda, nvm)
+/// off the boot path. A miss spawns the shell as before and writes the cache.
+///
+/// Startup files can source other files (a plugin, `nvm alias default`) whose
+/// changes the fingerprint can't see, so a hit is only as fresh as the last
+/// launch: run [`refresh_login_path_cache`] after boot so the next launch
+/// picks such a change up.
+pub fn enrich_current_process_path_cached(cache_file: Option<&Path>) -> EnrichOutcome {
+    let current = std::env::var("PATH").unwrap_or_default();
+    if !looks_like_launchd_default(&current) {
+        return EnrichOutcome { source: PathSource::Inherited, from_cache: false };
+    }
+    match cache_file {
+        #[cfg(unix)]
+        Some(cache_file) => enrich_from_cache_or_shell(cache_file, &current),
+        _ => EnrichOutcome { source: enrich_current_process_path(), from_cache: false },
+    }
+}
+
+#[cfg(unix)]
+fn enrich_from_cache_or_shell(cache_file: &Path, current: &str) -> EnrichOutcome {
+    let shell = resolve_user_shell();
+    let fingerprint = login_path_fingerprint(&shell, current);
+    let (login, from_cache) = match cache::read(cache_file, &fingerprint) {
+        Some(login) => (Some(login), true),
+        None => {
+            let login = capture_login_shell_path(&shell, None);
+            if let Some(login) = login.as_deref() {
+                cache::write(cache_file, &fingerprint, login);
+            }
+            (login, false)
+        }
+    };
+    let enriched = build_enriched(current, login.as_deref(), &wellknown_dirs());
+    if enriched.source != PathSource::Inherited {
+        std::env::set_var("PATH", &enriched.path);
+    }
+    EnrichOutcome { source: enriched.source, from_cache }
+}
+
+/// Re-run the login shell and rewrite the cache that
+/// [`enrich_current_process_path_cached`] read. `inherited` is the PATH the
+/// process started with (before enrichment), so the fingerprint matches the
+/// next launch's. Returns the freshly captured enriched PATH when it differs
+/// from `current_enriched`, `None` when nothing changed or the shell
+/// couldn't be read. Never touches this process' environment.
+#[cfg(unix)]
+pub fn refresh_login_path_cache(
+    cache_file: &Path,
+    inherited: &str,
+    current_enriched: &str,
+) -> Option<String> {
+    let shell = resolve_user_shell();
+    let fingerprint = login_path_fingerprint(&shell, inherited);
+    // Start the shell from the PATH this process inherited, as the boot-time
+    // capture did, not the enriched one now in the environment: a startup
+    // file that appends to $PATH would otherwise carry every cached entry
+    // forward, and a directory removed from the user's setup would never
+    // drop out of the cache.
+    let login = capture_login_shell_path(&shell, Some(inherited))?;
+    cache::write(cache_file, &fingerprint, &login);
+    let enriched = build_enriched(inherited, Some(&login), &wellknown_dirs());
+    (enriched.path != current_enriched).then_some(enriched.path)
+}
+
+/// Everything the login shell's PATH can depend on that is cheap to check:
+/// the shell, the PATH it was started with, and the size + mtime of each
+/// startup file bash/zsh read and of `path_helper`'s inputs. A changed or
+/// newly created file changes the fingerprint.
+#[cfg(unix)]
+fn login_path_fingerprint(shell: &str, inherited: &str) -> String {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        dirs.push(home.into());
+    }
+    if let Ok(zdot) = std::env::var("ZDOTDIR") {
+        dirs.push(zdot.into());
+    }
+    fingerprint_with_dirs(shell, inherited, &dirs)
+}
+
+/// [`login_path_fingerprint`] with the per-user startup-file directories
+/// passed in, so tests don't have to change `HOME`.
+#[cfg(unix)]
+fn fingerprint_with_dirs(shell: &str, inherited: &str, dirs: &[std::path::PathBuf]) -> String {
+    use std::fmt::Write as _;
+
+    let mut files: Vec<std::path::PathBuf> = [
+        "/etc/zshenv", "/etc/zprofile", "/etc/zshrc", "/etc/zlogin",
+        "/etc/profile", "/etc/bashrc", "/etc/paths", "/etc/paths.d",
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    for dir in dirs {
+        for name in [
+            ".zshenv", ".zprofile", ".zshrc", ".zlogin",
+            ".bash_profile", ".bash_login", ".profile", ".bashrc",
+        ] {
+            files.push(dir.join(name));
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir("/etc/paths.d") {
+        let mut extra: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+        extra.sort();
+        files.extend(extra);
+    }
+
+    let mut fp = format!("shell={shell}\ninherited={inherited}\n");
+    for f in &files {
+        match std::fs::metadata(f) {
+            Ok(m) => {
+                let mtime = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let _ = writeln!(fp, "{}={}:{}", f.display(), m.len(), mtime);
+            }
+            Err(_) => {
+                let _ = writeln!(fp, "{}=-", f.display());
+            }
+        }
+    }
+    fp
+}
+
+#[cfg(unix)]
+mod cache {
+    use std::path::Path;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Entry {
+        fingerprint: String,
+        login_path: String,
+    }
+
+    pub(super) fn read(file: &Path, fingerprint: &str) -> Option<String> {
+        let text = std::fs::read_to_string(file).ok()?;
+        let entry: Entry = serde_json::from_str(&text).ok()?;
+        (entry.fingerprint == fingerprint && !entry.login_path.is_empty())
+            .then_some(entry.login_path)
+    }
+
+    /// Best effort: a cache that can't be written only costs the next launch
+    /// a shell spawn. Written via a temp file + rename so a concurrent reader
+    /// (another channel's srv starting) never sees half a file.
+    pub(super) fn write(file: &Path, fingerprint: &str, login_path: &str) {
+        let Some(dir) = file.parent() else { return };
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        let entry = Entry {
+            fingerprint: fingerprint.to_string(),
+            login_path: login_path.to_string(),
+        };
+        let Ok(json) = serde_json::to_string(&entry) else { return };
+        let tmp = file.with_extension(format!("tmp.{}", std::process::id()));
+        if std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, file).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
 /// The user's login shell, falling back to a per-OS default.
 #[cfg(unix)]
 fn resolve_user_shell() -> String {
@@ -121,7 +300,7 @@ fn resolve_user_shell() -> String {
 /// the user's rc files to stdout can't corrupt the parse. Bounded by a 2s hard
 /// timeout so a slow/hung rc file can never block startup.
 #[cfg(unix)]
-fn capture_login_shell_path(shell: &str) -> Option<String> {
+fn capture_login_shell_path(shell: &str, path: Option<&str>) -> Option<String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
@@ -131,7 +310,11 @@ fn capture_login_shell_path(shell: &str) -> Option<String> {
     // banner the rc files emit to stdout.
     let script = r#"printf '__AMUX_PATH__%s__AMUX_END__' "$PATH""#;
 
-    let mut child = Command::new(shell)
+    let mut cmd = Command::new(shell);
+    if let Some(path) = path {
+        cmd.env("PATH", path);
+    }
+    let mut child = cmd
         .args(["-lic", script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -405,9 +588,50 @@ mod tests {
     fn capture_via_real_sh_roundtrips_path() {
         // /bin/sh honors -c; -lic is accepted (login+interactive flags are
         // tolerated). The script echoes $PATH between the sentinels.
-        let got = capture_login_shell_path("/bin/sh");
+        let got = capture_login_shell_path("/bin/sh", None);
         // On any unix dev/CI box /bin/sh exists and $PATH is non-empty.
         assert!(got.is_some(), "expected a captured PATH from /bin/sh");
         assert!(!got.unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn login_path_cache_hits_only_on_the_same_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("cache").join("login-path.json");
+        assert_eq!(cache::read(&file, "fp-a"), None, "no file yet");
+
+        cache::write(&file, "fp-a", "/opt/homebrew/bin:/usr/bin");
+        assert_eq!(
+            cache::read(&file, "fp-a").as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+        assert_eq!(cache::read(&file, "fp-b"), None, "another fingerprint is a miss");
+
+        std::fs::write(&file, "not json").unwrap();
+        assert_eq!(cache::read(&file, "fp-a"), None, "a corrupt file is a miss");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fingerprint_changes_when_a_startup_file_changes() {
+        let home = tempfile::tempdir().unwrap();
+        let dirs = vec![home.path().to_path_buf()];
+        let base = fingerprint_with_dirs("/bin/zsh", "/usr/bin:/bin", &dirs);
+        assert_eq!(base, fingerprint_with_dirs("/bin/zsh", "/usr/bin:/bin", &dirs), "stable");
+
+        std::fs::write(home.path().join(".zshrc"), "export PATH=/x:$PATH\n").unwrap();
+        let created = fingerprint_with_dirs("/bin/zsh", "/usr/bin:/bin", &dirs);
+        assert_ne!(base, created, "a new startup file must miss the cache");
+
+        std::fs::write(home.path().join(".zshrc"), "export PATH=/longer/x:$PATH\n").unwrap();
+        assert_ne!(
+            created,
+            fingerprint_with_dirs("/bin/zsh", "/usr/bin:/bin", &dirs),
+            "an edited startup file must miss the cache"
+        );
+
+        assert_ne!(base, fingerprint_with_dirs("/bin/bash", "/usr/bin:/bin", &dirs), "shell");
+        assert_ne!(base, fingerprint_with_dirs("/bin/zsh", "/usr/bin", &dirs), "inherited PATH");
     }
 }
