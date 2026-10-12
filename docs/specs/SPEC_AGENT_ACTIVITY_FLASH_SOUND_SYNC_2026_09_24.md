@@ -23,7 +23,7 @@ timing**. They hear roughly three sounds: one is a **single hard knock**, anothe
 **three smaller knocks**. Both must be recognizable in the flash.
 
 Today every tool tone produces the same flash: an instant jump to full strength, a
-40 ms hold, then a 300 ms `ease-out` fade ([`frontend/app/notification/activity-flash.ts:69-81`](../../frontend/app/notification/activity-flash.ts#L69-L81)).
+40 ms hold, then a 300 ms `ease-out` fade ([`frontend/app/notification/activity-flash.ts:69-81`](../../frontend/app/notification/activity-flash.ts)).
 Every syllable looks identical, whether it has two strikes or three.
 
 ## 2. Exact timing of every sound

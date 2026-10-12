@@ -191,7 +191,7 @@ due to the history-animation gate (§4.2):
 
 - [`docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`](../analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md) — pane reflow animation
   (separate, harder problem; this spec is independent of it)
-- [`frontend/app/view/agent/styles/_document-nodes.scss:253-298`](../../frontend/app/view/agent/styles/_document-nodes.scss#L253-L298) — existing tool-panel
+- [`frontend/app/view/agent/styles/_document-nodes.scss:253-298`](../../frontend/app/view/agent/styles/_document-nodes.scss) — existing tool-panel
   collapse animation (the reference implementation)
-- [`frontend/layout/lib/tilelayout.scss:201-231`](../../frontend/layout/lib/tilelayout.scss#L201-L231) — placeholder enter/exit (another
+- [`frontend/layout/lib/tilelayout.scss:201-231`](../../frontend/layout/lib/tilelayout.scss) — placeholder enter/exit (another
   reference for `@keyframes` enter patterns in this codebase)

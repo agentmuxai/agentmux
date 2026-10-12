@@ -9,7 +9,7 @@
 
 ## 1. Problem statement
 
-[`frontend/app/view/mcp/mcp-manager.tsx:70`](../../frontend/app/view/mcp/mcp-manager.tsx#L70) renders `"No MCP servers yet"` on a fresh install, and stays that way indefinitely — `db_mcp_servers` (`agentmux-srv/src/backend/storage/migrations.rs:437-446`) is created empty by the v10 migration and **no code path anywhere in the backend ever inserts a seed row into it.** Confirmed by grep: no `INSERT INTO db_mcp_servers` exists outside the user-driven `mcp_server_upsert*` methods (`agentmux-srv/src/backend/storage/mcp_servers.rs:149-282`), and none of `agent_seed.rs`, `identity/migration.rs`, or any `m00XX_*.rs` migration touches this table.
+[`frontend/app/view/mcp/mcp-manager.tsx:70`](../../frontend/app/view/mcp/mcp-manager.tsx) renders `"No MCP servers yet"` on a fresh install, and stays that way indefinitely — `db_mcp_servers` (`agentmux-srv/src/backend/storage/migrations.rs:437-446`) is created empty by the v10 migration and **no code path anywhere in the backend ever inserts a seed row into it.** Confirmed by grep: no `INSERT INTO db_mcp_servers` exists outside the user-driven `mcp_server_upsert*` methods (`agentmux-srv/src/backend/storage/mcp_servers.rs:149-282`), and none of `agent_seed.rs`, `identity/migration.rs`, or any `m00XX_*.rs` migration touches this table.
 
 The one thing in the codebase that looks like a seed list is not one:
 

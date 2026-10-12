@@ -35,7 +35,7 @@ with a visible countdown so a pending question can never stall work forever.
   `control_response` is sent back via `answer_question()` (`persistent.rs:1695`).
 - The frontend surfaces this as a `ToolNode` with `status: "awaiting_answer"`
   and a populated `question` field
-  ([`frontend/app/view/agent/types.ts:591-618`](../../frontend/app/view/agent/types.ts#L591-L618) for the wire shapes). It is
+  ([`frontend/app/view/agent/types.ts:591-618`](../../frontend/app/view/agent/types.ts) for the wire shapes). It is
   rendered by `AgentQuestionPanel.tsx`, collected via
   `pendingQuestions()`/`handleAnswer()` in
   [`frontend/app/view/agent/hooks/useAgentQuestions.ts`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts), mounted from

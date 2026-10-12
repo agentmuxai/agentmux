@@ -12,7 +12,7 @@ chrome, it just acts normal zoom."*
 Ctrl+Scroll already zooms exactly one target — whichever pane is under the
 cursor, or the chrome (title bar + status bar) as a single unit if the
 cursor is over `.window-header` / `.status-bar` / `.block-frame-default-header`
-(`AppZoomHandler`, [`frontend/app/app.tsx:189-227`](../../frontend/app/app.tsx#L189-L227)). There is no gesture that
+(`AppZoomHandler`, [`frontend/app/app.tsx:189-227`](../../frontend/app/app.tsx)). There is no gesture that
 zooms every pane in the window together. Doing that today means either
 repeatedly zooming each pane one at a time, or living with mismatched zoom
 levels across panes.
@@ -29,7 +29,7 @@ Add a second wheel handler, `Ctrl+Shift+Scroll`, alongside the existing
 - **Over chrome** (same hit-test `AppZoomHandler` already uses:
   `.window-header`, `.status-bar`, `.block-frame-default-header`): behaves
   exactly like plain Ctrl+Scroll over chrome does today — `chromeZoomIn`/
-  `chromeZoomOut` ([`frontend/app/store/zoom.ts:151-157`](../../frontend/app/store/zoom.ts#L151-L157)). Shift changes
+  `chromeZoomOut` ([`frontend/app/store/zoom.ts:151-157`](../../frontend/app/store/zoom.ts)). Shift changes
   nothing here; this is "acts normal zoom" from the request.
 - **Everywhere else in the window**: step the zoom of **every pane in the
   current window**, each relative to its own current level — not to a

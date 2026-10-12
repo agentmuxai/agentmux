@@ -78,7 +78,7 @@ data-loss surprise nobody chose. This spec fixes that as a side effect
 
 - Host IPC `browser_pane_create` args: `block_id, url, x, y, width,
   height, window_label` — `agentmux-cef/src/ipc.rs:443-461`.
-- Frontend caller: [`frontend/app/view/browser/use-pane-rect-sync.ts:164-187`](../../frontend/app/view/browser/use-pane-rect-sync.ts#L164-L187).
+- Frontend caller: [`frontend/app/view/browser/use-pane-rect-sync.ts:164-187`](../../frontend/app/view/browser/use-pane-rect-sync.ts).
 - Block meta for a browser block is `view` + `url` (+
   `browser:show_controls`): `agentmux-srv/src/server/app_api/pane.rs:246-251`,
   `agentmux-srv/src/config/widgets.json` (Discord/Slack/Telegram/
@@ -370,10 +370,10 @@ the indicator lives in pane chrome:
 
 **Model plumbing.** `BrowserViewModel` reads
 `meta["browser:identity"]` the way it reads `browser:show_controls`
-([`frontend/app/view/browser/browser-model.ts:363`](../../frontend/app/view/browser/browser-model.ts#L363)), and
+([`frontend/app/view/browser/browser-model.ts:363`](../../frontend/app/view/browser/browser-model.ts)), and
 `use-pane-rect-sync.ts:168` forwards it in the `browser_pane_create`
 args. The menu writes it through the existing `SetMetaCommand`
-([`frontend/app/store/rpc-api/workspace.ts:139`](../../frontend/app/store/rpc-api/workspace.ts#L139)), then triggers the
+([`frontend/app/store/rpc-api/workspace.ts:139`](../../frontend/app/store/rpc-api/workspace.ts)), then triggers the
 recreate.
 
 **Platform gating.** The menu group and widget are hidden when the host

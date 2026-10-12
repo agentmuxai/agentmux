@@ -16,7 +16,7 @@ Switching between tabs that each host an agent pane is **noticeably slow** — l
 
 ### Tabs stay mounted
 
-Per [`frontend/app/workspace/workspace.tsx:46`](../../frontend/app/workspace/workspace.tsx#L46), inactive tabs use `display: none` rather than unmounting. From the inline comment:
+Per [`frontend/app/workspace/workspace.tsx:46`](../../frontend/app/workspace/workspace.tsx), inactive tabs use `display: none` rather than unmounting. From the inline comment:
 
 > Inactive tabs are `display: none` already.
 
@@ -198,7 +198,7 @@ Established the 500-600ms long-task pattern per tab switch — see §"Tab-switch
 
 ### Phase 1 — markdown memoization (skipped after investigation)
 
-The original hypothesis assumed `<Markdown>` had no memoization. Inspection of [`frontend/app/element/markdown.tsx:466`](../../frontend/app/element/markdown.tsx#L466) revealed an existing `createMemo` on the unified pipeline keyed via `transformedText() → resolvedText() → props.text`. **The hypothesis was already implemented.** Skipped. No PR shipped.
+The original hypothesis assumed `<Markdown>` had no memoization. Inspection of [`frontend/app/element/markdown.tsx:466`](../../frontend/app/element/markdown.tsx) revealed an existing `createMemo` on the unified pipeline keyed via `transformedText() → resolvedText() → props.text`. **The hypothesis was already implemented.** Skipped. No PR shipped.
 
 ### Phase 1 (revised) — instrument hot spots (measured negative results)
 
@@ -252,7 +252,7 @@ JS-side suspects exhausted. Browser-side layout cost remains. Next candidates:
 ## References
 
 ### Internal
-- [`frontend/app/workspace/workspace.tsx:40-48`](../../frontend/app/workspace/workspace.tsx#L40-L48) — display:none + visibility reveal gate
+- [`frontend/app/workspace/workspace.tsx:40-48`](../../frontend/app/workspace/workspace.tsx) — display:none + visibility reveal gate
 - `frontend/app/tab/tab-reveal.ts` — frame-budget detector that lifts the gate
 - [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) — unified-pipeline markdown renderer
 - [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) — virtualizer + partition logic

@@ -45,8 +45,8 @@ hasn't internalized "this one's different, it waits for you" may not think
 to reach for `Esc` or click elsewhere — an explicit, visible close button
 removes that ambiguity and matches the one first-class precedent already in
 the codebase for "stays open, dismiss when you're done" panels: `Modal`'s
-`showCloseButton` ([`frontend/app/element/modal.tsx:416-426`](../../frontend/app/element/modal.tsx#L416-L426),
-`.modal-panel-close-btn` in [`frontend/app/element/modal.scss:164-190`](../../frontend/app/element/modal.scss#L164-L190)).
+`showCloseButton` ([`frontend/app/element/modal.tsx:416-426`](../../frontend/app/element/modal.tsx),
+`.modal-panel-close-btn` in [`frontend/app/element/modal.scss:164-190`](../../frontend/app/element/modal.scss)).
 
 No non-modal popover in this codebase has a close button today
 (`HostPopover`, `TokenBreakdownPopover`, generic `PopoverMenu` all rely on

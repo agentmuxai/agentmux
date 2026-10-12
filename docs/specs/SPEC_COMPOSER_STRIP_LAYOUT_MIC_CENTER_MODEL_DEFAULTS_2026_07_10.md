@@ -13,7 +13,7 @@ This bundles four independent, small UI fixes discovered/designed in one investi
 
 ### Current behavior
 
-`AgentRuntimeDropup`'s trigger button ([`frontend/app/view/agent/components/AgentRuntimeDropup.tsx:281-295`](../../frontend/app/view/agent/components/AgentRuntimeDropup.tsx#L281-L295)) renders a live `"Mode · Model · Effort"` summary (e.g. `"Auto · Sonnet 5 · Medium"`) inside `.agent-runtime-dropup-trigger-label`. The trigger and label are styled in [`frontend/app/view/agent/styles/_composer-strip.scss:48-79`](../../frontend/app/view/agent/styles/_composer-strip.scss#L48-L79):
+`AgentRuntimeDropup`'s trigger button ([`frontend/app/view/agent/components/AgentRuntimeDropup.tsx:281-295`](../../frontend/app/view/agent/components/AgentRuntimeDropup.tsx)) renders a live `"Mode · Model · Effort"` summary (e.g. `"Auto · Sonnet 5 · Medium"`) inside `.agent-runtime-dropup-trigger-label`. The trigger and label are styled in [`frontend/app/view/agent/styles/_composer-strip.scss:48-79`](../../frontend/app/view/agent/styles/_composer-strip.scss):
 
 ```scss
 .agent-runtime-dropup-trigger {
@@ -155,7 +155,7 @@ Recommend starting with option 1 and only adding option 2 if manual testing at v
 
 ### Current behavior
 
-[`frontend/app/view/agent/styles/_pending-footer.scss:78-88`](../../frontend/app/view/agent/styles/_pending-footer.scss#L78-L88):
+[`frontend/app/view/agent/styles/_pending-footer.scss:78-88`](../../frontend/app/view/agent/styles/_pending-footer.scss):
 
 ```scss
 .agent-input-mic {
@@ -203,7 +203,7 @@ Confirmed live in this session: the srv log shows `model catalog: HTTP 401 Unaut
 
 ### Current curated list
 
-[`frontend/app/view/agent/providers/index.ts:198-202`](../../frontend/app/view/agent/providers/index.ts#L198-L202):
+[`frontend/app/view/agent/providers/index.ts:198-202`](../../frontend/app/view/agent/providers/index.ts):
 
 ```ts
 models: [

@@ -418,7 +418,7 @@ A milestone upgrade is not "bump a number." It is "forward-port every patch, reb
 | # | Patch | Upstream status | Used by | Port required? |
 |---|---|---|---|---|
 | 1 | `agentmux_process_requirement.patch` (`GetPeerValidationPolicy() → kNoValidation`, the -67030 renderer fix) | Not upstream | ~~All platforms~~ → **macOS only** ⁽¹⁾ | **Yes** — mandatory; ~~registered in `patch/patch.cfg`~~ → **was not registered or merged until 2026-09-08** ⁽²⁾ |
-| 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | **Linux only.** Windows uses its own Win32 path (`post_win32_begin_move`) and never calls this — [`scripts/cef-build/args-windows.gn:4`](../../scripts/cef-build/args-windows.gn#L4) states the patch "never [was] needed" there; macOS uses AppKit drag regions. Gated by the `patched-libcef` feature | **Yes, if Linux native drag stays in scope** — nothing else depends on it |
+| 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | **Linux only.** Windows uses its own Win32 path (`post_win32_begin_move`) and never calls this — [`scripts/cef-build/args-windows.gn:4`](../../scripts/cef-build/args-windows.gn) states the patch "never [was] needed" there; macOS uses AppKit drag regions. Gated by the `patched-libcef` feature | **Yes, if Linux native drag stays in scope** — nothing else depends on it |
 | 3 | HTCAPTION right-click fall-through to renderer | Not upstream as of 148 — **re-check against 152** | Title-bar right-click menus | Yes, if that UX is kept |
 | 4 | Transparency cascade (RWHView/WebContents bg) | **Partial** upstream since 148 | Window opacity | Re-verify; may be droppable |
 

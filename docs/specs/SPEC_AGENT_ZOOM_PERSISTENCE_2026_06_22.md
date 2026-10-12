@@ -26,11 +26,11 @@ a throwaway object (the block), so it cannot outlive a single pane.
 
 Agent zoom lives in the **block's `meta`** under the key `term:zoom`:
 
-- **Read / apply:** [`frontend/app/view/agent/agent-view.tsx:917`](../../frontend/app/view/agent/agent-view.tsx#L917) reads
+- **Read / apply:** [`frontend/app/view/agent/agent-view.tsx:917`](../../frontend/app/view/agent/agent-view.tsx) reads
   `meta?.["term:zoom"]` into a memo and applies it as the CSS `zoom` on
   `.agent-view` (`:1000`). The terminal view reads the same key
-  ([`frontend/app/view/term/term.tsx:75`](../../frontend/app/view/term/term.tsx#L75)).
-- **Write:** [`frontend/app/view/term/term.tsx:222-226`](../../frontend/app/view/term/term.tsx#L222-L226) handles Ctrl+Wheel and
+  ([`frontend/app/view/term/term.tsx:75`](../../frontend/app/view/term/term.tsx)).
+- **Write:** [`frontend/app/view/term/term.tsx:222-226`](../../frontend/app/view/term/term.tsx) handles Ctrl+Wheel and
   calls `SetMetaCommand` on `block:<id>` with `{ "term:zoom": next }` (or `null`
   at 1.0, by convention, so a default pane carries no key). This routes through
   the block-meta update path (`UpdateBlockMeta` reducer,

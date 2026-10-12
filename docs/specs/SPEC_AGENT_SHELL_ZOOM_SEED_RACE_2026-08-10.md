@@ -30,7 +30,7 @@ standalone Terminal widget (`view: "term"`) does not have this problem.
 Font size *is* correctly persisted per-shell, across drawer close/reopen and
 app restarts. It is **not** lost on drawer close (`DeleteSubBlockCommand` is
 only fired when the whole agent pane closes —
-[`frontend/app/view/agent/agent-view.tsx:579-581`](../../frontend/app/view/agent/agent-view.tsx#L579-L581) — not when just the drawer
+[`frontend/app/view/agent/agent-view.tsx:579-581`](../../frontend/app/view/agent/agent-view.tsx) — not when just the drawer
 is collapsed). So "each open uses a default" is not what's happening; the
 correct value exists and is fetched, it just doesn't win the race to be
 applied before first paint.
@@ -85,7 +85,7 @@ Sequence on drawer open:
    1`, since it's divided out). This is the "opens at a very small zoom"
    symptom.
 4. `TermWrap.init()` calls `this.terminal.open(this.connectElem)`
-   ([`frontend/app/view/term/termwrap.ts:221`](../../frontend/app/view/term/termwrap.ts#L221)) immediately — the terminal
+   ([`frontend/app/view/term/termwrap.ts:221`](../../frontend/app/view/term/termwrap.ts)) immediately — the terminal
    **paints at that (possibly wrong) size right away**.
 5. A correction effect exists (`AgentShellSubblock.tsx:111-117`):
    ```
@@ -140,7 +140,7 @@ class historically and was fixed by seeding the value **before** block
 creation:
 
 - `69de7d5e2` "fix(agent): seed term:zoom from ui:zoom when opening agent
-  pane" — [`frontend/app/store/command-registry.ts:416-450`](../../frontend/app/store/command-registry.ts#L416-L450) fetches the
+  pane" — [`frontend/app/store/command-registry.ts:416-450`](../../frontend/app/store/command-registry.ts) fetches the
   persisted zoom (`RpcApi.GetAgentContentCommand(..., content_type:
   "ui:zoom")`) **before** `createBlock(...)`, passing it as part of the
   block's **initial** meta. The block's reactive atom is therefore correct

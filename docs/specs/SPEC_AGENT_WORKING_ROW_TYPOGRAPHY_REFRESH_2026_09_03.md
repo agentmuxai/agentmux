@@ -3,8 +3,8 @@
 **Date:** 2026-09-03
 **Status:** Proposed. No code changed by this document.
 **Update 2026-10-02:** Typeface and color here were later changed: monospace like the composer, in the pane border color, no shimmer. See `SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md`.
-**Component:** `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx:146-347`](../../frontend/app/view/agent/components/AgentFooter.tsx#L146-L347))
-**Styles:** `.agent-working-row-anchor .agent-working-row` ([`frontend/app/view/agent/styles/_control-bar.scss:104-276`](../../frontend/app/view/agent/styles/_control-bar.scss#L104-L276))
+**Component:** `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx:146-347`](../../frontend/app/view/agent/components/AgentFooter.tsx))
+**Styles:** `.agent-working-row-anchor .agent-working-row` ([`frontend/app/view/agent/styles/_control-bar.scss:104-276`](../../frontend/app/view/agent/styles/_control-bar.scss))
 **Verified against:** `main` @ `ee327f631` (2026-09-03 pull)
 
 ---
@@ -108,7 +108,7 @@ Traced through the render path: a `thinking` node renders as
 sets `opacity`, `font-style: italic`, `color`, and border/background — but
 **does not** set `font-family` or `font-size`. Those are inherited from the
 `Markdown` component it wraps ([`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx), styled by
-[`frontend/app/element/markdown.scss:19-34`](../../frontend/app/element/markdown.scss#L19-L34)):
+[`frontend/app/element/markdown.scss:19-34`](../../frontend/app/element/markdown.scss)):
 
 ```scss
 // markdown.scss:26-34

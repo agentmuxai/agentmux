@@ -81,8 +81,8 @@ changed.
 
 | Action | Path | Backend gets | Every agent stopped? |
 |---|---|---|---|
-| A tab's own × | `closeBlockInStack` ([`frontend/layout/lib/layoutStack.ts:162`](../../frontend/layout/lib/layoutStack.ts#L162)) removes that member from the stack, then deletes its block; last member falls through to the pane path | `DeleteBlock` for that tab | Yes, for that tab |
-| **The pane's ×** | `closeNode` ([`frontend/layout/lib/layoutMagnify.ts:41-76`](../../frontend/layout/lib/layoutMagnify.ts#L41-L76)) removes the whole leaf, then calls `onNodeDelete(nodeToDelete.data)` **once**; `onNodeDelete` ([`frontend/app/tab/tabcontent.tsx:55-65`](../../frontend/app/tab/tabcontent.tsx#L55-L65)) deletes `data.blockId` only | `DeleteBlock` for the **visible tab only** | **No — every other tab is orphaned** |
+| A tab's own × | `closeBlockInStack` ([`frontend/layout/lib/layoutStack.ts:162`](../../frontend/layout/lib/layoutStack.ts)) removes that member from the stack, then deletes its block; last member falls through to the pane path | `DeleteBlock` for that tab | Yes, for that tab |
+| **The pane's ×** | `closeNode` ([`frontend/layout/lib/layoutMagnify.ts:41-76`](../../frontend/layout/lib/layoutMagnify.ts)) removes the whole leaf, then calls `onNodeDelete(nodeToDelete.data)` **once**; `onNodeDelete` ([`frontend/app/tab/tabcontent.tsx:55-65`](../../frontend/app/tab/tabcontent.tsx)) deletes `data.blockId` only | `DeleteBlock` for the **visible tab only** | **No — every other tab is orphaned** |
 | Close a window tab | `delete_tab` saga (`agentmux-srv/src/sagas/delete_tab.rs`) | `CloseTab` | Yes, loops over the tab's `block_ids` (sequentially, hard kill) |
 | `ClosePane` MCP tool | `agentmux-srv/src/server/app_api/pane.rs:416-481` → `delete_block` saga, whose `LayoutDeleteNodeByBlock` step removes the whole leaf (`find_node_id_by_block`, `agentmux-srv/src/backend/layout/mod.rs:145`) | one block | **No** — issue #3202 |
 
@@ -139,11 +139,11 @@ exists.
 
 `useAgentCloseConfirm` (in [`frontend/app/view/agent/hooks/`](../../frontend/app/view/agent/hooks), removed in Phase 3 — §10.3)
 replaces `onClose` on the agent's own `nodeModel`. That object is a spread copy
-made by `PaneLeafChrome` ([`frontend/app/tab/pane-leaf-chrome.tsx:181`](../../frontend/app/tab/pane-leaf-chrome.tsx#L181), or `:238`
+made by `PaneLeafChrome` ([`frontend/app/tab/pane-leaf-chrome.tsx:181`](../../frontend/app/tab/pane-leaf-chrome.tsx), or `:238`
 for kept-alive tabs, which agent panes use since
 `SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md`); the
 pane header's × calls `onClose` on the pane's `nodeModel`
-([`frontend/app/block/blockframe.tsx:251-256`](../../frontend/app/block/blockframe.tsx#L251-L256)). The replacement is never reached.
+([`frontend/app/block/blockframe.tsx:251-256`](../../frontend/app/block/blockframe.tsx)). The replacement is never reached.
 Even when it was, it counted only the visible tab's tracked processes and
 ignored other tabs and a turn in progress. (Verified by reading the code, not
 yet reproduced live.)
@@ -154,7 +154,7 @@ yet reproduced live.)
   seeds no session id — the agent starts fresh (continuity lost, but
   announced) (`agent_open.rs:524-545`).
 - The My Agents picker's reattach (`handleReattach`,
-  [`frontend/app/view/agent/components/AgentPicker.tsx:390-437`](../../frontend/app/view/agent/components/AgentPicker.tsx#L390-L437)) passes
+  [`frontend/app/view/agent/components/AgentPicker.tsx:390-437`](../../frontend/app/view/agent/components/AgentPicker.tsx)) passes
   `continueSessionId: row.session_id` with no such check. Reopening an orphan
   from there starts a second `claude --resume` on the same session.
 
@@ -240,7 +240,7 @@ Keep removing the pane from the UI immediately; a 5s wait before the pane
 disappears would feel broken. The backend saga owns completion:
 
 - A failed or rejected close is reported to the user, not swallowed (today
-  `onClose` runs `closeNode` through `fireAndForget`, [`frontend/util/util.ts:87`](../../frontend/util/util.ts#L87),
+  `onClose` runs `closeNode` through `fireAndForget`, [`frontend/util/util.ts:87`](../../frontend/util/util.ts),
   which catches the error, logs it to the console, and shows the user nothing).
 - If the saga cannot complete, the reaper (§4.9) finishes the job.
 

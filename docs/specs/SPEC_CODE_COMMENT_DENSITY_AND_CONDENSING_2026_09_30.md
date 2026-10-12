@@ -140,7 +140,7 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
   - These counts are marker lines only; the narration around them adds more (§2.2).
 - **Stale file references:** comments reference file names 8,146 times. 326 of those, in 203 files, name one of 160 file names that exist nowhere in the tree. This excludes names AgentMux generates at runtime, such as `CLAUDE.md` and `GEMINI.md`.
   - The top misses are modules split into directories: `persistent.rs` (46), `app.rs` (12), `app_api.rs` (11), `browser_panes.rs` (10), `shell.rs` (9).
-  - Treat 326 as an upper bound. Some are deliberate history ("Split from the original rpc-api.ts.", [`frontend/app/store/rpc-api/workspace.ts:5`](../../frontend/app/store/rpc-api/workspace.ts#L5)).
+  - Treat 326 as an upper bound. Some are deliberate history ("Split from the original rpc-api.ts.", [`frontend/app/store/rpc-api/workspace.ts:5`](../../frontend/app/store/rpc-api/workspace.ts)).
   - `check-spec-citations.sh` already catches dead `docs/**.md` paths, but only in changed files, and not source-file names.
 - **Verbatim duplication is small:** 1,127 duplicate comment lines of 60+ characters, mostly ruler lines. Paraphrased duplication is what costs, and a script cannot find it (§5.2).
 
@@ -150,33 +150,33 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
 
 **(a) Invariant / constraint: keep.**
 - `useAgentCommands.ts:697-699`: "This destructive action requires POSITIVE proof of idle, not just absence of proof of activity."
-- [`frontend/layout/lib/TileLayout.core.tsx:327-330`](../../frontend/layout/lib/TileLayout.core.tsx#L327-L330): "Keeping them together is deliberate: the cursor grab-offset must be derived from the size the image actually has, and a separate nominal constant is exactly how the two drift and the ghost detaches from the cursor."
+- [`frontend/layout/lib/TileLayout.core.tsx:327-330`](../../frontend/layout/lib/TileLayout.core.tsx): "Keeping them together is deliberate: the cursor grab-offset must be derived from the size the image actually has, and a separate nominal constant is exactly how the two drift and the ghost detaches from the cursor."
 - `agentmux-srv/src/backend/layout/mod.rs:698-699`: "I2 — the `minimized` flag and the legacy minimizedSize/slipMinimize markers are leaf-only."
 
 **(b) Why-not / rejected alternative: keep, short.**
-- [`frontend/app/util/pointer-drag-state.ts:35-41`](../../frontend/app/util/pointer-drag-state.ts#L35-L41): "Iterating the live Set on purpose, NOT a copy. … A defensive `[...releaseListeners]` copy would call it anyway, which is worse, not safer."
+- [`frontend/app/util/pointer-drag-state.ts:35-41`](../../frontend/app/util/pointer-drag-state.ts): "Iterating the live Set on purpose, NOT a copy. … A defensive `[...releaseListeners]` copy would call it anyway, which is worse, not safer."
 - `agentmux-common/src/runtime_mode.rs:95-97`: "sanitize it directly, do NOT call detect_branch (which has its own git fallback …"
 - `useAgentCommands.ts:691-692`: "Deliberately `!isBackendTurnConfirmedIdle()`, NOT `isBackendTurnActive()`".
 
 **(c) Review-history narration: move to git/PR.**
 - `useAgentCommands.ts:780`: "codex P1 on PR #2338 (sixteenth re-review) pins that flag"
-- [`frontend/app/view/agent/hooks/useSubagentBackfillGate.ts:19`](../../frontend/app/view/agent/hooks/useSubagentBackfillGate.ts#L19): "reagentx P1 + codex P1 (PR #2781, round 2): an earlier version defaulted"
+- [`frontend/app/view/agent/hooks/useSubagentBackfillGate.ts:19`](../../frontend/app/view/agent/hooks/useSubagentBackfillGate.ts): "reagentx P1 + codex P1 (PR #2781, round 2): an earlier version defaulted"
 - `agentmux-srv/src/backend/blockcontroller/app_server_controller.rs:323`: "ReAgent P1 on PR #3215's second review: don't just log and"
 
 **(d) Restating the code: delete.**
 - `agentmux-srv/src/backend/blockcontroller/persistent/spawn.rs:502`: "// Create stdin writer channel"
 - `agentmux-srv/src/backend/reactive/sanitize.rs:83`: "// Keep printable characters and valid UTF-8"
-- [`frontend/layout/lib/layoutResize.ts:264`](../../frontend/layout/lib/layoutResize.ts#L264): "Callback that is invoked when the TileLayout container is being resized."
+- [`frontend/layout/lib/layoutResize.ts:264`](../../frontend/layout/lib/layoutResize.ts): "Callback that is invoked when the TileLayout container is being resized."
 
 **(e) Incident narrative / design essay: move to [`docs/`](..), leave a pointer.**
 - `agentmux-srv/src/migrations/m0013_agent_direct_bindings.rs:4-23`: a 20-line module doc on a retired, no-op migration. Keep the one constraint ("the migration id stays registered") and the spec pointer.
 - `agent-view.tsx:1080-1107`: a 28-line essay on the focus re-poll, including "(removed per direct user request — …)".
-- [`frontend/app/store/block-atom-cache.ts:51`](../../frontend/app/store/block-atom-cache.ts#L51): "Diagnostic-only snapshot — added while investigating a 2026-09-20 latency/memory report."
+- [`frontend/app/store/block-atom-cache.ts:51`](../../frontend/app/store/block-atom-cache.ts): "Diagnostic-only snapshot — added while investigating a 2026-09-20 latency/memory report."
 
 **(f) Cross-reference to a spec: keep, one line.**
-- [`frontend/app-init.ts:1015`](../../frontend/app-init.ts#L1015): "Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3."
-- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:736-739`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx#L736-L739): route through the CEF clipboard wrapper, then "SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3."
-- [`frontend/app/store/agent-pane-state/types.ts:567`](../../frontend/app/store/agent-pane-state/types.ts#L567): "See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md."
+- [`frontend/app-init.ts:1015`](../../frontend/app-init.ts): "Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3."
+- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:736-739`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx): route through the CEF clipboard wrapper, then "SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3."
+- [`frontend/app/store/agent-pane-state/types.ts:567`](../../frontend/app/store/agent-pane-state/types.ts): "See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md."
 
 **(g) Stale: fix.**
 - `agent-view.tsx:1103`: "persistent.rs's spawn_status_heartbeat". The function is now at `agentmux-srv/src/backend/blockcontroller/persistent/status.rs:65`.
@@ -186,7 +186,7 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
 **(h) Interface / contract doc: keep.** Added because about a third of the sample fits none of (a)–(g). It covers what a field, parameter or return value means.
 - `agentmux-srv/src/backend/storage/filestore/lines.rs:37-41`
 - `agentmux-srv/src/backend/gh_guard.rs:75-80`: "Never fails the spawn: if the directory can't be prepared the variable is still set …"
-- [`frontend/app/view/agent/attachments/AttachmentLightbox.tsx:31`](../../frontend/app/view/agent/attachments/AttachmentLightbox.tsx#L31): "Still copying or processing (composer only): no id yet, but not gone."
+- [`frontend/app/view/agent/attachments/AttachmentLightbox.tsx:31`](../../frontend/app/view/agent/attachments/AttachmentLightbox.tsx): "Still copying or processing (composer only): no id yet, but not gone."
 
 ### 2.2 Share by kind (sample)
 
@@ -570,7 +570,7 @@ Same length; the pointer now resolves.
 
 ## 6. Enforcement
 
-This repo deliberately has no agent-instructions file: #3403 removed `CLAUDE.md` on the principle that agent instructions belong in each agent's own provider configuration (`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md` §1). Its gates run on changed files only, because repo-wide gates were switched off in the past ([`scripts/check-spec-citations.sh:19-27`](../../scripts/check-spec-citations.sh#L19-L27)). The options below follow both constraints.
+This repo deliberately has no agent-instructions file: #3403 removed `CLAUDE.md` on the principle that agent instructions belong in each agent's own provider configuration (`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md` §1). Its gates run on changed files only, because repo-wide gates were switched off in the past ([`scripts/check-spec-citations.sh:19-27`](../../scripts/check-spec-citations.sh)). The options below follow both constraints.
 
 | Option | What | For | Against |
 |---|---|---|---|

@@ -71,7 +71,7 @@ reachable seconds later, so the app should **self-heal**, not wedge.
 The codebase already solves this exact shape for two adjacent failures; the fix
 should reuse their patterns:
 
-- **WebGL context loss** ([`frontend/bootstrap.ts:59-73`](../../frontend/bootstrap.ts#L59-L73)): a `webglcontextlost`
+- **WebGL context loss** ([`frontend/bootstrap.ts:59-73`](../../frontend/bootstrap.ts)): a `webglcontextlost`
   listener that reads a **`sessionStorage` reload counter**, auto-reloads after
   1s if under `CONTEXT_LOSS_MAX_RELOADS`, **suppresses** past the cap (logs
   "possible driver issue"), and **resets the counter after 60s** of stability.

@@ -41,13 +41,13 @@ main window.
 ## 2. Why — six gaps
 
 **G0. My agents can only see the window it is drawn in — the trigger.** [verified] A row's "active" state is
-`openDefinitions.has(row.definition_id)` ([`frontend/app/view/agent/components/MyAgentsList.tsx:998`](../../frontend/app/view/agent/components/MyAgentsList.tsx#L998)). The map comes from
-`getOpenDefinitionMap()` ([`frontend/app/store/agent-pane-state-store.ts:467`](../../frontend/app/store/agent-pane-state-store.ts#L467)), which walks `slots`, a module-local `Map`
+`openDefinitions.has(row.definition_id)` ([`frontend/app/view/agent/components/MyAgentsList.tsx:998`](../../frontend/app/view/agent/components/MyAgentsList.tsx)). The map comes from
+`getOpenDefinitionMap()` ([`frontend/app/store/agent-pane-state-store.ts:467`](../../frontend/app/store/agent-pane-state-store.ts)), which walks `slots`, a module-local `Map`
 (`:107`) holding the panes registered in **this renderer only**. Every floating/pool window is a separate renderer with
 its own `slots`. The file says so itself at `:486`: *"Scope: THIS renderer only … a pane showing the same agent in another
 window is not listed here."* So an agent open in a floating window, or in any other window, shows as not active. Clicking
 it then skips the fork / "switch to existing" prompt and reattaches, creating the second pane that §1 fails on. The same
-blind spot affects the identity bind menu ([`frontend/app/view/identity/bind-to-agent-menu.ts:90`](../../frontend/app/view/identity/bind-to-agent-menu.ts#L90), `runningBlockId`) and
+blind spot affects the identity bind menu ([`frontend/app/view/identity/bind-to-agent-menu.ts:90`](../../frontend/app/view/identity/bind-to-agent-menu.ts), `runningBlockId`) and
 the delete sweep (`getOpenBlockIdsForDefinition`, `:492`). The srv already knows every agent pane in the process:
 `AgentTrackedBlocks` ([`crates/srv/src/server/app_api/agent_io.rs`](../../crates/srv/src/server/app_api/agent_io.rs), `ProcessBroker::list_agent_panes()` over
 `get_all_controllers()`). It returns block ids only, and no UI surface uses it for this.

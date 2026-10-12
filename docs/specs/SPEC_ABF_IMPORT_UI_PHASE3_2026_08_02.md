@@ -747,7 +747,7 @@ union keeps each step's props typed and testable independently.
   opening the modal at this step.
 - File picker: **codex P1 on PR #2381 — `showOpenFileDialog()` cannot be
   reused as originally specified.** It takes no arguments
-  ([`frontend/util/cef-api.ts:392-394`](../../frontend/util/cef-api.ts#L392-L394)) and its host-side handler
+  ([`frontend/util/cef-api.ts:392-394`](../../frontend/util/cef-api.ts)) and its host-side handler
   (`agentmux-cef/src/commands/platform.rs`, `show_open_file_dialog`) has a
   hard-coded `rfd::FileDialog` filter list of image/video/audio extensions
   only — there's no way to make it show `.abf` files through the existing

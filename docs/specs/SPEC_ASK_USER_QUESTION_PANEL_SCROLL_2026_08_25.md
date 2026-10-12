@@ -25,7 +25,7 @@ governed separately by `SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md`)
 [`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) renders the
 live AskUserQuestion prompt (`AgentQuestionPanel`, JSX at lines 512-650),
 mounted as a normal-flow sibling inside `.agent-view`
-([`frontend/app/view/agent/agent-view.tsx:2273-2277`](../../frontend/app/view/agent/agent-view.tsx#L2273-L2277)), directly below
+([`frontend/app/view/agent/agent-view.tsx:2273-2277`](../../frontend/app/view/agent/agent-view.tsx)), directly below
 `AgentDecisionPanel` and directly above the message queue / composer.
 
 Structure (lines 541-645):
@@ -65,7 +65,7 @@ short or split agent pane's available height.
 
 **Established precedent for the fix already exists in a sibling panel**:
 `AgentDecisionPanel`'s tool-arg preview
-([`frontend/app/view/agent/styles/_decision-panel.scss:150-167`](../../frontend/app/view/agent/styles/_decision-panel.scss#L150-L167),
+([`frontend/app/view/agent/styles/_decision-panel.scss:150-167`](../../frontend/app/view/agent/styles/_decision-panel.scss),
 `.agent-decision-panel-preview`) already uses `max-height: 160px;
 overflow-y: auto;` for exactly this reason, just on a much smaller content
 block. This spec applies the same idea to the whole panel, with header/footer
@@ -213,7 +213,7 @@ PR/tests, not just in this doc.
 ### 3.4 Scrollbar styling
 
 No new work needed: `*::-webkit-scrollbar-track` / `*::-webkit-scrollbar-thumb`
-/ `*::-webkit-scrollbar-thumb:hover` ([`frontend/app/app.scss:104-116`](../../frontend/app/app.scss#L104-L116)) are
+/ `*::-webkit-scrollbar-thumb:hover` ([`frontend/app/app.scss:104-116`](../../frontend/app/app.scss)) are
 already global wildcard selectors — any new scrollable element, including
 `.agent-question-panel-scroll`, automatically inherits the app's custom
 scrollbar coloring with no extra rule. Only *width* is ever customized

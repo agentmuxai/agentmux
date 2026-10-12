@@ -43,7 +43,7 @@ interface at all today — confirmed, zero references to
 ## Existing extension point (reuse, don't invent a new one)
 
 `ViewModel` already supports pane-type-specific context menu items via two
-optional methods ([`frontend/types/custom.d.ts:517-518`](../../frontend/types/custom.d.ts#L517-L518)):
+optional methods ([`frontend/types/custom.d.ts:517-518`](../../frontend/types/custom.d.ts)):
 
 ```ts
 getSettingsMenuItems?: () => ContextMenuItem[];      // header right-click, appended

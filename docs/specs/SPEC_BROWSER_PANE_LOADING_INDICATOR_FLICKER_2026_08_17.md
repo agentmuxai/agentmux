@@ -23,7 +23,7 @@ hard, visible full-pane hide/reveal.
 
 ### Cause 1 — the loading signal isn't scoped to the main frame
 
-`model.loadingAtom()` ([`frontend/app/view/browser/browser-model.ts:118-120`](../../frontend/app/view/browser/browser-model.ts#L118-L120)),
+`model.loadingAtom()` ([`frontend/app/view/browser/browser-model.ts:118-120`](../../frontend/app/view/browser/browser-model.ts)),
 which drives the spinner, is set directly from CEF's `is_loading` flag,
 forwarded verbatim end-to-end:
 

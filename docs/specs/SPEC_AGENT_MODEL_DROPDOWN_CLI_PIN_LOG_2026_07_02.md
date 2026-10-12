@@ -18,7 +18,7 @@
 
 ### Current state
 `pinned_version` is **install-only** and duplicated by hand in two registries that must stay in sync:
-- [`frontend/app/view/agent/providers/index.ts:156`](../../frontend/app/view/agent/providers/index.ts#L156) → `pinnedVersion: "2.1.185"`
+- [`frontend/app/view/agent/providers/index.ts:156`](../../frontend/app/view/agent/providers/index.ts) → `pinnedVersion: "2.1.185"`
 - `agentmux-srv/src/backend/providers.rs:146` → `pinned_version: "2.1.185"`
 
 Consumed only at install (`install_handlers.rs:416-419`, `cli_handlers.rs:153,240` → `npm install <pkg>@<pinned>`; empty ⇒ `@latest`). Latest on npm today is **2.1.198**. Nothing compares installed-vs-pinned (the toolchain view compares installed vs npm-`latest`, not vs the pin).
@@ -125,6 +125,6 @@ The Effort `<select>` sits alongside Model (`AgentComposerStrip.tsx:226-235`) wi
 ## Sources
 - Registry: `frontend/app/view/agent/providers/index.ts:36-42,96-105,156,185-189`; Rust `agentmux-srv/src/backend/providers.rs:71-83,146`.
 - Dropdowns: `components/AgentComposerStrip.tsx:43-55,189,214-246`; `components/AgentControlBar.tsx:44-49,165,294-312`; `commands/global/runtime.ts:58-72`; `runtime-apply.ts:36-60`; `buildRuntimeArgs.ts:50-142`; `types.ts:626,636`.
-- CLI introspection: `agentmux-srv/src/server/cli_handlers.rs:635-675,734-750`; `install_handlers.rs:416-419`; [`frontend/app/view/toolchain/toolchain-view.tsx:187-234`](../../frontend/app/view/toolchain/toolchain-view.tsx#L187-L234) (#1873).
+- CLI introspection: `agentmux-srv/src/server/cli_handlers.rs:635-675,734-750`; `install_handlers.rs:416-419`; [`frontend/app/view/toolchain/toolchain-view.tsx:187-234`](../../frontend/app/view/toolchain/toolchain-view.tsx) (#1873).
 - Log UI: `components/ActivityLogPanel.tsx:25-117`; `components/AgentComposerStrip.tsx:237-245`; `agent-view.tsx:1267-1283`. Separate (do not touch): `ActivityRow.tsx`, `ActivityDock.tsx`.
 - Model IDs (verify against pinned CLI): Opus 4.8 `claude-opus-4-8`, Sonnet 4.6 `claude-sonnet-4-6`, Haiku 4.5 `claude-haiku-4-5-20251001`, Fable 5 `claude-fable-5`.

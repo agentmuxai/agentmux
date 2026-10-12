@@ -23,8 +23,8 @@ This spec wires both to live data from CEF. After this change the pane header sh
 
 | Component | Status | File |
 |-----------|--------|------|
-| `TitleChanged` reducer command | ✅ Fully implemented | [`frontend/app/store/browser-pane-state/reducer.ts:172`](../../frontend/app/store/browser-pane-state/reducer.ts#L172) |
-| `title` cell in `BrowserPaneState` | ✅ Fully implemented | [`frontend/app/store/browser-pane-state/types.ts:73`](../../frontend/app/store/browser-pane-state/types.ts#L73) |
+| `TitleChanged` reducer command | ✅ Fully implemented | [`frontend/app/store/browser-pane-state/reducer.ts:172`](../../frontend/app/store/browser-pane-state/reducer.ts) |
+| `title` cell in `BrowserPaneState` | ✅ Fully implemented | [`frontend/app/store/browser-pane-state/types.ts:73`](../../frontend/app/store/browser-pane-state/types.ts) |
 | `title` projection → `setTitle(next)` | ✅ Wired in `BrowserViewModel` | `browser-model.ts:234` |
 | `viewName` returns `titleAtom()` | ✅ Plumbed to header | `browser-model.ts:250` |
 | `faviconUrl` cell in state | ✅ Exists, derived from URL | `types.ts:91` |

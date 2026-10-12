@@ -17,15 +17,15 @@ Nothing in the app handles images. The prompt is one plain string all the way fr
 
 | Piece | Today | Where |
 |---|---|---|
-| Composer | A plain uncontrolled `<textarea class="agent-input">`. Handlers: keydown, input, composition, context menu. **No `onPaste`, no `onDrop`.** Drafts are strings in a per-pane `composerDrafts` Map. | [`frontend/app/view/agent/components/AgentFooter.tsx:1140-1165`](../../frontend/app/view/agent/components/AgentFooter.tsx#L1140-L1165), `:55` |
+| Composer | A plain uncontrolled `<textarea class="agent-input">`. Handlers: keydown, input, composition, context menu. **No `onPaste`, no `onDrop`.** Drafts are strings in a per-pane `composerDrafts` Map. | [`frontend/app/view/agent/components/AgentFooter.tsx:1140-1165`](../../frontend/app/view/agent/components/AgentFooter.tsx), `:55` |
 | Send | `handleSend` reads the textarea value → `onSendMessage(message)` → `useAgentCommands.sendMessage` → `RpcApi.AgentInputCommand({blockid, message, message_id})`. | `AgentFooter.tsx:855-895`, `agent-view.tsx:1846-1894`, `hooks/useAgentCommands.ts:945, 1535-1539` |
 | RPC payload | `CommandAgentInputData` has `message: string`, `message_id?`, `hidden?`. **No attachments field.** | [`frontend/types/rpc/CommandAgentInputData.ts`](../../frontend/types/rpc/CommandAgentInputData.ts), `agentmux-srv/src/backend/rpc_types/block.rs:367` |
 | Ctrl+V with an image | Browser default text paste. **An image does nothing.** | — |
-| Right-click → Paste | Menu item is `{label:"Paste", role:"paste"}` with no click handler. Nothing in the JS menu path handles `role`, so **Paste from the menu appears to do nothing, even for text** (read from code; confirm live). | [`frontend/app/store/contextmenu.ts:151`](../../frontend/app/store/contextmenu.ts#L151), [`frontend/util/cef-api.ts:410-413`](../../frontend/util/cef-api.ts#L410-L413) |
+| Right-click → Paste | Menu item is `{label:"Paste", role:"paste"}` with no click handler. Nothing in the JS menu path handles `role`, so **Paste from the menu appears to do nothing, even for text** (read from code; confirm live). | [`frontend/app/store/contextmenu.ts:151`](../../frontend/app/store/contextmenu.ts), [`frontend/util/cef-api.ts:410-413`](../../frontend/util/cef-api.ts) |
 | Clipboard bridge | Text only on every OS (`CF_UNICODETEXT`, `pbpaste`, `wl-paste`/`xclip`). | `agentmux-cef/src/commands/clipboard.rs` |
 | Drop onto an agent pane | CEF `on_drag_enter` stashes OS paths (single slot, 5 s TTL). On drop, the pane copies every file into the agent's `cmd:cwd` and types `@basename` into the box. No size cap, no progress, never reads file bytes. | `hooks/useAgentDropAttach.ts:109-210`, `agentmux-cef/src/client/handlers.rs:162-178`, `agentmux-cef/src/drag_stash.rs:22`, `agentmux-cef/src/commands/providers.rs:720-755` |
 | Sent message in the transcript | `UserMessageBlock` renders `<pre><LinkifiedText/></pre>`. No image slot. On reload, `replayedUserMessage` drops non-string user content, so image blocks would vanish. | `UserMessageBlock.tsx:197`, `providers/translator.ts:48-54`, `claude-translator.ts:303-315` |
-| Showing a local image | `GET /agentmux/stream-local-file?path=` works (500 MB cap, needs `X-AuthKey`); the Media pane fetches a blob and uses an object URL. | `agentmux-srv/src/server/files.rs:37, 199-264`, [`frontend/app/view/media/media.tsx:81-103`](../../frontend/app/view/media/media.tsx#L81-L103) |
+| Showing a local image | `GET /agentmux/stream-local-file?path=` works (500 MB cap, needs `X-AuthKey`); the Media pane fetches a blob and uses an object URL. | `agentmux-srv/src/server/files.rs:37, 199-264`, [`frontend/app/view/media/media.tsx:81-103`](../../frontend/app/view/media/media.tsx) |
 | Moving bytes frontend → backend | No upload RPC. The only binary POST is voice (`POST /api/v1/voice/transcribe`). The repo never sets `DefaultBodyLimit`, so axum's **2 MB** default applies to srv routes and CEF `/ipc`. | `agentmux-srv/src/server/voice.rs:42-50` |
 | Image decoding in Rust | **No `image` crate** in any `Cargo.toml`. `sha2` is already a srv dependency. | `agentmux-srv/Cargo.toml:69` |
 | Nearest storage precedent | UI screenshots in `<data>/tmp/ui-screenshots/<uuid>.png`, pruned after 1 h. | `agentmux-srv/src/server/ui_handlers.rs:170-276` |
@@ -248,7 +248,7 @@ The numbering in every preamble matches the tile badges (§5.1).
 
 ### 6.7 Recording and replay
 
-- `UserMessageNode` gains `attachments?: AttachmentRef[]` ([`frontend/app/view/agent/types.ts:378`](../../frontend/app/view/agent/types.ts#L378)).
+- `UserMessageNode` gains `attachments?: AttachmentRef[]` ([`frontend/app/view/agent/types.ts:378`](../../frontend/app/view/agent/types.ts)).
 - AgentMux's own user-message record for the block stores the refs (not base64), so replay and `replayedUserMessage` (`providers/translator.ts:48-54`) rebuild the strip without parsing the provider's transcript. Claude's translator must also stop dropping array-form user content that contains image blocks (`claude-translator.ts:303-315`), rendering it as refs when the data matches a stored blob hash and as a generic "image" chip otherwise.
 - Drafts: `composerDrafts` holds `{text, attachments}` instead of a string (`AgentFooter.tsx:55`). Drafts are in memory, so an app restart drops unsent attachments from the tray. No startup reconciliation is needed: nothing records draft references on disk, and never-sent attachments age out after 7 days (§6.3).
 

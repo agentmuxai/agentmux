@@ -68,7 +68,7 @@ Self-quit reuses this unchanged. It does **not** use `ctrl.stop()`: `PersistentS
 
 ### 2.3 `/quit` today goes to the model as a chat message
 
-The slash dispatcher ([`frontend/app/view/agent/commands/dispatch.ts:51`](../../frontend/app/view/agent/commands/dispatch.ts#L51)) returns `passthrough` for unknown names, and `hooks/useAgentCommands.ts:1043-1083` then sends the text to the CLI as an ordinary user message. There is no `/quit`, `/exit` or `/close` in the registry (`commands/global/index.ts:19-29`). Typing `/exit` out of Claude Code habit today just asks the model a question.
+The slash dispatcher ([`frontend/app/view/agent/commands/dispatch.ts:51`](../../frontend/app/view/agent/commands/dispatch.ts)) returns `passthrough` for unknown names, and `hooks/useAgentCommands.ts:1043-1083` then sends the text to the CLI as an ordinary user message. There is no `/quit`, `/exit` or `/close` in the registry (`commands/global/index.ts:19-29`). Typing `/exit` out of Claude Code habit today just asks the model a question.
 
 ### 2.4 A stopped agent pane is not "quit"
 
@@ -106,7 +106,7 @@ One server operation, `self_quit::run(state, block_id, origin)`, used by both en
 { "auth": { ... }, "reason": "string, required", "user_instruction": "string, required" }
 ```
 
-The frontend entry point (`/quit`) calls a service method, `ObjectService.QuitAgent(blockId)`, over the existing trusted UI channel — same trust as the pane × that already calls `ObjectService.ClosePane` ([`frontend/app/tab/tabcontent.tsx:100`](../../frontend/app/tab/tabcontent.tsx#L100)). Both land in `self_quit::run`.
+The frontend entry point (`/quit`) calls a service method, `ObjectService.QuitAgent(blockId)`, over the existing trusted UI channel — same trust as the pane × that already calls `ObjectService.ClosePane` ([`frontend/app/tab/tabcontent.tsx:100`](../../frontend/app/tab/tabcontent.tsx)). Both land in `self_quit::run`.
 
 ### 4.2 Timing: finish the turn first, then shut down
 
@@ -179,7 +179,7 @@ The tab disappears, so feedback that lives in the tab is lost. Show a toast in t
 
 > **Superseded by §5.5 (2026-09-25).** Once the × itself shuts agents down gracefully and shows what it stopped, a tip steering the user from × to `/quit` points at the same behaviour. The confirmation stays (§5.5, "Busy panes"); the tip is dropped. The original text is kept below for the record.
 
-Closing a busy pane shows `ConfirmModal` ("Close this pane?", [`frontend/app/tab/tabcontent.tsx:181-189`](../../frontend/app/tab/tabcontent.tsx#L181-L189)), listing each busy agent via `describeBusyMember` ([`frontend/app/tab/pane-close-guard.ts:52`](../../frontend/app/tab/pane-close-guard.ts#L52)), e.g. "Camper — 2 processes running". The repo owner hit exactly this on 2026-09-24 when trying to close an agent that still had background processes, and asked that the modal point at `/quit`.
+Closing a busy pane shows `ConfirmModal` ("Close this pane?", [`frontend/app/tab/tabcontent.tsx:181-189`](../../frontend/app/tab/tabcontent.tsx)), listing each busy agent via `describeBusyMember` ([`frontend/app/tab/pane-close-guard.ts:52`](../../frontend/app/tab/pane-close-guard.ts)), e.g. "Camper — 2 processes running". The repo owner hit exactly this on 2026-09-24 when trying to close an agent that still had background processes, and asked that the modal point at `/quit`.
 
 Add one line under the busy list:
 

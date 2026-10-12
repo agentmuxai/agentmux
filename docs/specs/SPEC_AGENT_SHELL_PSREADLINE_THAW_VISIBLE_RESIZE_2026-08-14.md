@@ -20,7 +20,7 @@ font-size formula's second input, the parent agent pane's own zoom
 (`props.agentPaneZoom()`), could still be resolving asynchronously when the
 shell mounts. A fix was written and unit-tested, but a codex review on that
 PR correctly identified — and this was independently re-verified by reading
-[`frontend/app/block/block.tsx:252-274`](../../frontend/app/block/block.tsx#L252-L274) directly — that the parent block's
+[`frontend/app/block/block.tsx:252-274`](../../frontend/app/block/block.tsx) directly — that the parent block's
 `useWaveObjectValue` fetch is *already guaranteed resolved* by the time
 `AgentShellSubblock` can even mount at all: `Block`'s own ViewModel-creation
 effect (which is what eventually renders the agent pane, and everything

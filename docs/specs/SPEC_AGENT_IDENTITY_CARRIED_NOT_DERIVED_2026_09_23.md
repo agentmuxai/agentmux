@@ -53,7 +53,7 @@ treats it as one.
 Revision 1's table asserted it is the slug. It depends on the launch path:
 
 - `server/agent_handlers/input.rs:341-353` — the **display name**.
-- [`frontend/app/view/agent/agent-model.ts:545`](../../frontend/app/view/agent/agent-model.ts#L545) — the **slug**.
+- [`frontend/app/view/agent/agent-model.ts:545`](../../frontend/app/view/agent/agent-model.ts) — the **slug**.
 
 One variable, two meanings, two launch paths. `AGENTMUX_AGENT_SLUG` also
 already exists in `pane_env.rs:74` and revision 1 never reconciled it. Any plan

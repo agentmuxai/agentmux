@@ -88,7 +88,7 @@ not something tied to an individual turn.
 
 ## 2. `log()` — mostly a dead channel today
 
-`LogFn` type: [`frontend/app/view/agent/types.ts:675`](../../frontend/app/view/agent/types.ts#L675).
+`LogFn` type: [`frontend/app/view/agent/types.ts:675`](../../frontend/app/view/agent/types.ts).
 
 `agent-view.tsx:501-509`:
 ```ts

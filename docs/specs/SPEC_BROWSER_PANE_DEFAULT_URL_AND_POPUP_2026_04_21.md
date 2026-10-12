@@ -27,7 +27,7 @@ Blank-spawned browser panes load **`https://agentmux.ai`** unless the widget cal
 
 ### Frontend fallback
 
-[`frontend/app/view/browser/browser-model.ts:78`](../../frontend/app/view/browser/browser-model.ts#L78) already reads `meta.url` and calls `navigate()` when truthy. An empty string is falsy, so historically these panes do nothing until the user types a URL. With the default filled in, `navigate()` runs on mount.
+[`frontend/app/view/browser/browser-model.ts:78`](../../frontend/app/view/browser/browser-model.ts) already reads `meta.url` and calls `navigate()` when truthy. An empty string is falsy, so historically these panes do nothing until the user types a URL. With the default filled in, `navigate()` runs on mount.
 
 One defensive tweak: if a block is created with no `url` meta at all (not just empty string), fall back to the default URL constant rather than leaving the pane blank. Single source of truth in the frontend:
 

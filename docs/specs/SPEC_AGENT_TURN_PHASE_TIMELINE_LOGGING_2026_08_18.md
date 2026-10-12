@@ -126,7 +126,7 @@ this question required.
 
 Add a `[wave-turn] watchdog: tick` line the periodic `StreamWatchdogTick`
 handler already dispatches every 5s
-([`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts#L233-L239)) — gated to
+([`frontend/app/view/agent/hooks/useTurnLifecycle.ts:233-239`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts)) — gated to
 avoid noise (see Design questions) rather than one line per tick
 unconditionally. This directly removes the exact evidentiary gap the Aug
 14 report had to reason around ("we'd see a line if it were ticking, we

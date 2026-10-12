@@ -20,7 +20,7 @@ the prior conversation**, while the pane itself reported the session as *continu
 independent failures lined up. Any one of the first two alone makes native resume impossible. The
 third is a real bug that removed the designed safety net.
 
-1. **Every local build forces a re-login** (by policy). [`scripts/package.sh:103`](../../scripts/package.sh#L103) gives each build
+1. **Every local build forces a re-login** (by policy). [`scripts/package.sh:103`](../../scripts/package.sh) gives each build
    its own channel. The spawn gate looks the bound account up **only in the current channel's
    store** (`identity/resolver/inject.rs:362`, `:691`), so the account bound in the previous
    channel is "row not found" and the spawn is refused (`inject.rs:702`).
@@ -65,7 +65,7 @@ records each segment's config dir. None of it relocates transcripts or fixes the
 
 ## 2. Failure 1 — per-build channels + per-channel spawn gate = forced re-login
 
-- [`scripts/package.sh:103`](../../scripts/package.sh#L103): `CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"`, where
+- [`scripts/package.sh:103`](../../scripts/package.sh): `CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"`, where
   `BUILD_ID` hashes the build label (SHA + timestamp + PID). The script's own comment says this is
   safe "now that agents + auth are GLOBAL … stays logged in". **That is no longer true** for
   spawning.

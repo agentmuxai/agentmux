@@ -164,7 +164,7 @@ New branch alongside the `tearoff:merge` handler in `tabbar.tsx`, ~90% shared co
 - [`docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`](SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md) — warm-pool window creation.
 - `agentmux-cef/src/commands/tear_off_hook.rs` — the WH_MOUSE_LL hook this spec extends.
 - `agentmux-srv/src/sagas/restore_torn_off_tab.rs`, `agentmux-srv/src/reducer/tab.rs` (`handle_move_tab`) — the move machinery reused as-is.
-- [`frontend/app/tab/tabbar.tsx:437-679`](../../frontend/app/tab/tabbar.tsx#L437-L679) — the Phase-4 event handlers the new events slot into.
+- [`frontend/app/tab/tabbar.tsx:437-679`](../../frontend/app/tab/tabbar.tsx) — the Phase-4 event handlers the new events slot into.
 - `specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` — the in-window sibling feature (pane→tab); its §7 payload-clearing rules also apply to any new drop consumption added here.
 - [`docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md) — the quit/drain lifecycle this spec's window-close path now runs through (§9).
 

@@ -8,7 +8,7 @@ written ("default every tool to the caller's own window/pane") turned out to
 be stricter than intended once built — the muxbus sign-in chip that
 motivated this whole spec (§0/§7) lives in the status bar, which is app-wide
 chrome rendered as a *sibling* of the pane-content tree
-([`frontend/app/workspace/workspace.tsx:85`](../../frontend/app/workspace/workspace.tsx#L85)), not a descendant of any pane's
+([`frontend/app/workspace/workspace.tsx:85`](../../frontend/app/workspace/workspace.tsx)), not a descendant of any pane's
 `[data-blockid]` wrapper. Strict pane-subtree scoping made it structurally
 unreachable — the exact motivating scenario couldn't work. Resolved
 (repo-owner confirmed): `UIClick`/`UIQuery` allow an element if it's either

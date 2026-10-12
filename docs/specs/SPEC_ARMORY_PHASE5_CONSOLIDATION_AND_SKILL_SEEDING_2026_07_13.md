@@ -52,8 +52,8 @@ launches with (agent picker → Provider/Account/Status table, backed by
 The natural-looking replacement — the agent-pane's own **"Identity" tab** (`view: "identity"`,
 distinct from Armory's tab; CLAUDE.md already calls this out as the intended per-agent surface)
 — does **not currently work**. It renders `BundleSummaryPanel kind="Identity"`
-([`frontend/app/view/identity/identity-pane-view.tsx:27`](../../frontend/app/view/identity/identity-pane-view.tsx#L27)), whose own code comment
-([`frontend/app/view/bundle-summary.tsx:18-25`](../../frontend/app/view/bundle-summary.tsx#L18-L25)) documents an explicit **DATA GAP**: it can't
+([`frontend/app/view/identity/identity-pane-view.tsx:27`](../../frontend/app/view/identity/identity-pane-view.tsx)), whose own code comment
+([`frontend/app/view/bundle-summary.tsx:18-25`](../../frontend/app/view/bundle-summary.tsx)) documents an explicit **DATA GAP**: it can't
 resolve "this agent uses Identity: X" because the launched identity id lives on the
 `AgentInstance` row, not reachable from this settings block. It degrades to a pointer-only
 stub — body text + a button that calls `openOrFocusPaneByView("armory")` with **no section

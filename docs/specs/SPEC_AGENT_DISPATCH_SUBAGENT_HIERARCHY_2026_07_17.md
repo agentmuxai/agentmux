@@ -26,7 +26,7 @@ This conflation is visible in three places:
    workflow *run* is being modeled as a kind of subagent-list query, when
    conceptually it's the container one level up.
 2. **The frontend had to invent the missing entity itself.**
-   [`frontend/app/view/swarm/swarm-model.ts:59-72`](../../frontend/app/view/swarm/swarm-model.ts#L59-L72) defines `WorkflowGroup`, a
+   [`frontend/app/view/swarm/swarm-model.ts:59-72`](../../frontend/app/view/swarm/swarm-model.ts) defines `WorkflowGroup`, a
    client-only wrapper, with the comment *"backend has no separate
    workflow-name concept."* Because this wrapper has no backend-issued stable
    ID, the frontend then needs `shallowEqualGroup` / `stabilizeGroupIdentity`
@@ -298,7 +298,7 @@ multi-modal sweeps) — a single dispatch legitimately produces far more
 members than a human would ever want listed as individual rows.
 
 **Current behavior falls short at this scale.** `WorkflowGroupRow`
-([`frontend/app/view/swarm/swarm-view.tsx:315-354`](../../frontend/app/view/swarm/swarm-view.tsx#L315-L354)) already collapses the
+([`frontend/app/view/swarm/swarm-view.tsx:315-354`](../../frontend/app/view/swarm/swarm-view.tsx)) already collapses the
 *top-level* row — one row per `workflow_id`, not one per member, matching
 `REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`'s "group, not truncate"
 approach. But its expand state (L345-350) still renders one `<SubagentRow>`
@@ -428,7 +428,7 @@ phase independently shippable:
   doc comment, `Abandoned` dangling citation)
 - `agentmux-srv/src/server/service/misc.rs:47-88`, `agentmux-srv/src/server/app_api/session.rs:195-279`
   (RPC surface)
-- [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts), [`frontend/app/view/swarm/swarm-view.tsx:315-354`](../../frontend/app/view/swarm/swarm-view.tsx#L315-L354) (current per-member expand rendering), `frontend/app/view/subagent/subagent-model.ts`
+- [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts), [`frontend/app/view/swarm/swarm-view.tsx:315-354`](../../frontend/app/view/swarm/swarm-view.tsx) (current per-member expand rendering), `frontend/app/view/subagent/subagent-model.ts`
 - [`docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md`](../retro/retro-subagent-backfill-storm-oom-2026-07-17.md) (this session — the crash that motivated re-examining this schema)
 - [`docs/specs/SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md), `REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`, `REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`
 - GitHub Actions docs (Workflow Run → Job → Step): https://runs-on.com/github-actions/jobs-and-steps/

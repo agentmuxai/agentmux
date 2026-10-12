@@ -44,7 +44,7 @@ class" framing.
 Investigating this, it was initially assumed the hamburger menu (where
 "Armory" lives for humans) is a native OS/Electron menu unreachable by
 `UIClick`/`UIQuery` (which only see the web DOM). **That's wrong, checked
-directly:** [`frontend/app/window/hamburger-menu.tsx:117-121`](../../frontend/app/window/hamburger-menu.tsx#L117-L121) is a plain
+directly:** [`frontend/app/window/hamburger-menu.tsx:117-121`](../../frontend/app/window/hamburger-menu.tsx) is a plain
 SolidJS-rendered flyout — `onClick: () => fireAndForget(() =>
 openOrFocusPaneByView("armory"))`. It's reachable by web-DOM automation tools
 after all. This doesn't change the motivation (an agent still has no
@@ -56,8 +56,8 @@ this," not "the menu is unreachable."
 **(a) Low-level, unvalidated — `object.CreateBlock`** (WebSocket RPC only,
 no HTTP route, not usable by an MCP tool without adding one):
 - Used by the hamburger menu (`openOrFocusPaneByView`,
-  [`frontend/app/store/block-component-registry.ts:71-89`](../../frontend/app/store/block-component-registry.ts#L71-L89)) and the widget bar
-  ([`frontend/app/window/action-widgets-config.ts:220-222`](../../frontend/app/window/action-widgets-config.ts#L220-L222), blockdefs sourced
+  [`frontend/app/store/block-component-registry.ts:71-89`](../../frontend/app/store/block-component-registry.ts)) and the widget bar
+  ([`frontend/app/window/action-widgets-config.ts:220-222`](../../frontend/app/window/action-widgets-config.ts), blockdefs sourced
   from `agentmux-srv/src/config/widgets.json`).
 - Backend: `agentmux-srv/src/server/service/object.rs:44-148`, the
   `"CreateBlock"` case of the `"object"` WSH service. Takes an arbitrary
@@ -98,7 +98,7 @@ whitelist), one not (whatever the frontend hands it), doing the same job.
 
 ### 1.3 Authoritative view-type list
 
-[`frontend/app/block/block-registry.ts:25-47`](../../frontend/app/block/block-registry.ts#L25-L47) (`blockViewRegistry`), the
+[`frontend/app/block/block-registry.ts:25-47`](../../frontend/app/block/block-registry.ts) (`blockViewRegistry`), the
 ground truth for what actually renders:
 
 ```
@@ -347,4 +347,4 @@ that precedent (none) unless this changes for `OpenEditor`/`OpenMedia` too.
 | `agentmux-mcp/src/main.rs:1719-1747` | Test `defs` array + count assertion — add `OPEN_PANE_TOOL`, bump count |
 | `frontend/app/view/armory/armory-model.ts:14` | `ArmorySection` — the enum `section` validates against |
 | `frontend/app/view/armory/armory-view.tsx:33-37` | Existing `SetMeta` pattern for `armory:section` — reference for §3.1's open question |
-| [`frontend/app/block/block-registry.ts:25-47`](../../frontend/app/block/block-registry.ts#L25-L47) | `blockViewRegistry` — authoritative view-type list this spec's whitelist widening targets |
+| [`frontend/app/block/block-registry.ts:25-47`](../../frontend/app/block/block-registry.ts) | `blockViewRegistry` — authoritative view-type list this spec's whitelist widening targets |

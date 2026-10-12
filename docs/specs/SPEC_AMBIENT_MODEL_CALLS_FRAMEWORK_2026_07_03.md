@@ -37,7 +37,7 @@ mistakes.
 
 ### 1.1 The one real LLM call site
 
-- Trigger: [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts:42-71`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts#L42-L71) — on
+- Trigger: [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts:42-71`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts) — on
   `TurnPhase.kind === "Done"`, calls `RpcApi.AgentActivitySummaryCommand` (20s
   frontend timeout, no retry).
 - Backend: `agentmux-srv/src/server/app_api/session.rs:109`
@@ -46,8 +46,8 @@ mistakes.
   (`session.rs:198-267`) spawns the CLI with `--model claude-haiku-4-5-20251001`,
   15s timeout.
 - Result is written to block meta key `"term:activity"`.
-- Consumers: [`frontend/app/view/agent/agent-model.ts:106-122`](../../frontend/app/view/agent/agent-model.ts#L106-L122) (`viewText()`, the
-  pane header text) and [`frontend/app/view/swarm/swarm-model.ts:221-222`](../../frontend/app/view/swarm/swarm-model.ts#L221-L222)
+- Consumers: [`frontend/app/view/agent/agent-model.ts:106-122`](../../frontend/app/view/agent/agent-model.ts) (`viewText()`, the
+  pane header text) and [`frontend/app/view/swarm/swarm-model.ts:221-222`](../../frontend/app/view/swarm/swarm-model.ts)
   (`AgentTreeNode.activitySummary`, the Swarm tree).
 
 This is a **singleton pattern** — grepping for `haiku` and for
@@ -70,7 +70,7 @@ of it instead of copied from it.
 `ActivitySummaryResult` has no token-count field to carry it back
 (`session.rs:242-266`). The app's total-tokens counter
 ([`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts)'s `recordTurn()`) is fed exclusively by
-[`frontend/app/view/agent/useAgentStream.ts:426-444`](../../frontend/app/view/agent/useAgentStream.ts#L426-L444) from the *main* agent turn's
+[`frontend/app/view/agent/useAgentStream.ts:426-444`](../../frontend/app/view/agent/useAgentStream.ts) from the *main* agent turn's
 `session_end` event. The Haiku subprocess is a real, billed API call that never
 touches this counter — a structural under-count, not a display lag.
 
@@ -79,7 +79,7 @@ touches this counter — a structural under-count, not a display lag.
 `term:activity` has two independent writers with no merge/precedence protocol
 (last-write-wins via plain `UpdateObjectMeta`):
 
-1. [`frontend/app/view/agent/hooks/useBlockActivity.ts:39-83`](../../frontend/app/view/agent/hooks/useBlockActivity.ts#L39-L83) — subscribes to a
+1. [`frontend/app/view/agent/hooks/useBlockActivity.ts:39-83`](../../frontend/app/view/agent/hooks/useBlockActivity.ts) — subscribes to a
    `block:activity` WPS event sourced from **OSC 0 terminal-title escape
    sequences** the CLI itself emits (parsed by
    `agentmux-srv/src/backend/osc_extractor.rs`, a pure state machine, no LLM, no
@@ -98,10 +98,10 @@ noted, not fixed, before.
 
 ### 1.4 Bug 3 — Swarm renders "idle"/blank for actually-active agents
 
-[`frontend/app/view/swarm/swarm-view.tsx:163-167`](../../frontend/app/view/swarm/swarm-view.tsx#L163-L167) (`phaseToDisplayStatus`):
+[`frontend/app/view/swarm/swarm-view.tsx:163-167`](../../frontend/app/view/swarm/swarm-view.tsx) (`phaseToDisplayStatus`):
 `if (!phaseAccessor) return "idle";` — if a block's `TurnPhase` was never
 registered in the *current renderer's* registry
-([`frontend/app/store/agentActivity.ts:55-57`](../../frontend/app/store/agentActivity.ts#L55-L57), populated only by `registerActivity()`
+([`frontend/app/store/agentActivity.ts:55-57`](../../frontend/app/store/agentActivity.ts), populated only by `registerActivity()`
 from a *mounted* agent-pane component), the status defaults to `"idle"`
 regardless of actual backend state. A subagent running in an unmounted pane,
 a background tab, or another workspace has no registry entry — it reads as idle.

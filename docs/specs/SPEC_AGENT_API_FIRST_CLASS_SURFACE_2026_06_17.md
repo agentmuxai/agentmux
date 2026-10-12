@@ -200,7 +200,7 @@ Each phase ships independently; Phase 1 alone delivers the requested window nami
 Requested alongside this spec. **Verdict: working as of `main`.**
 
 - Shipped in **#1497** (`73ce2ec3`, 2026-06-16) — "feat(pane.open): OpenEditor collapse_tree + floating-pane support".
-- Full path verified end-to-end: `OpenEditor{floating:true}` → `POST /api/v1/pane/open` → `app_api.rs::open_pane()` floating branch (~L911) → `open_pane_floating()` (~L1011-1186) reuses the `tear_off_block` saga → publishes scoped `openfloatingpane` WPS event → [`frontend/app/store/global.ts:307-344`](../../frontend/app/store/global.ts#L307-L344) → host `open_floating_pane_window` (`agentmux-cef/src/commands/floating_pane.rs:81-231`) → chromeless `FloatingPaneWorkspace`.
+- Full path verified end-to-end: `OpenEditor{floating:true}` → `POST /api/v1/pane/open` → `app_api.rs::open_pane()` floating branch (~L911) → `open_pane_floating()` (~L1011-1186) reuses the `tear_off_block` saga → publishes scoped `openfloatingpane` WPS event → [`frontend/app/store/global.ts:307-344`](../../frontend/app/store/global.ts) → host `open_floating_pane_window` (`agentmux-cef/src/commands/floating_pane.rs:81-231`) → chromeless `FloatingPaneWorkspace`.
 - **Known limitations (by design, not bugs):** Windows = owned floating panes only (Phase 1, no cross-window redock); macOS/Linux = Phase A frameless windows. If the source window isn't in `state.windows`, the floater silently no-ops (logged) — safe.
 - **Gap:** no automated test — the cross-process CEF path requires a manual smoke (the spec for #1497 calls this out). Recommend adding a smoke step to the verification checklist; full automation needs a CEF build harness.
 

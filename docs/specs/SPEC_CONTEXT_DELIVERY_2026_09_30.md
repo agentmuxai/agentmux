@@ -57,7 +57,7 @@ becomes an item in a context delivery (`backend/continuity_state.rs:51,
 |---|---|
 | model calls AgentMux makes itself | `ambient/`, `term:ambient_summary`, the `__ambient__` token bucket |
 | the host's own CLI login and home dir | `use_ambient_login` (189 occurrences), `AmbientHomeDirNotAllowed` (`identity/resolver/errors.rs:47`) |
-| a sound | "looping ambient tone" ([`frontend/app/view/settings/sections/sounds-section.tsx:99`](../../frontend/app/view/settings/sections/sounds-section.tsx#L99)) |
+| a sound | "looping ambient tone" ([`frontend/app/view/settings/sections/sounds-section.tsx:99`](../../frontend/app/view/settings/sections/sounds-section.tsx)) |
 
 None of the mechanisms that send content to the agent is called ambient
 today. Between them they use four names instead: "hidden turn",

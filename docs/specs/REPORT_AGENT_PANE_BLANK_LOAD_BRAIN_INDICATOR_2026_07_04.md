@@ -18,7 +18,7 @@ There are two independent causes, and they stack for content-heavy panes.
 
 ### 1. `block.tsx` renders literally nothing until the pane object resolves
 
-[`frontend/app/block/block.tsx:299`](../../frontend/app/block/block.tsx#L299) — the `ready` memo:
+[`frontend/app/block/block.tsx:299`](../../frontend/app/block/block.tsx) — the `ready` memo:
 ```ts
 const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
 ```

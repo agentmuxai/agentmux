@@ -63,7 +63,7 @@ off to (or run in parallel) immediately, in its own tab. Today:
   no agent semantics at all).
 - **Corrected below (reagent + Codex review of PR #2721 caught this — an
   earlier draft of this spec had the current state wrong in two ways):**
-  `ForkAgentDefinitionCommand` **is already implemented** ([`frontend/app/store/rpc-api/agent.ts:331`](../../frontend/app/store/rpc-api/agent.ts#L331),
+  `ForkAgentDefinitionCommand` **is already implemented** ([`frontend/app/store/rpc-api/agent.ts:331`](../../frontend/app/store/rpc-api/agent.ts),
   backend handler in `agentmux-srv/src/server/agent_handlers/template.rs`),
   not "designed but not built" — the codebase has moved on since
   `SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md` was written. It's invoked
@@ -100,7 +100,7 @@ field, no fork flag, nowhere to put `--fork-session`.** Codex's review of PR
 arguments shown here."
 
 **The real spawn mechanism with fork/resume support is frontend-internal:
-`launchAgentDefinition`** ([`frontend/app/view/agent/agent-model.ts:320`](../../frontend/app/view/agent/agent-model.ts#L320)),
+`launchAgentDefinition`** ([`frontend/app/view/agent/agent-model.ts:320`](../../frontend/app/view/agent/agent-model.ts)),
 called as `launchAgentDefinition(agent, overrides?, targetBlockId?)`. Its
 `overrides` (`LaunchOverrides`) carries `continueSessionId` (resume target)
 and a separate `forkSession: boolean` flag; `agent-model.ts:426-428` only
@@ -116,7 +116,7 @@ already does (see next finding).
 
 **The existing fork-prompt flow (`AgentPicker.tsx`) proves the definition-fork
 half works, and proves the history-carryover half is not actually wired up
-today.** `handleFork` ([`frontend/app/view/agent/components/AgentPicker.tsx:386-413`](../../frontend/app/view/agent/components/AgentPicker.tsx#L386-L413)):
+today.** `handleFork` ([`frontend/app/view/agent/components/AgentPicker.tsx:386-413`](../../frontend/app/view/agent/components/AgentPicker.tsx)):
 calls `RpcApi.ForkAgentDefinitionCommand({source_id, branch_label})` (real,
 implemented — see above), then `launchAgentDefinition(forkedDef, {
 instanceName, agentType, environment, accountId, memoryId })`. **Notice what's

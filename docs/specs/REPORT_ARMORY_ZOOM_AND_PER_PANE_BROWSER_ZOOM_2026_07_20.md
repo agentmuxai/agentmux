@@ -32,7 +32,7 @@ Fixing one does not fix the other, and (per §5) they don't share an implementat
 
 ### 2.1 Current behavior, traced exactly
 
-`AppZoomHandler` ([`frontend/app/app.tsx:261-299`](../../frontend/app/app.tsx#L261-L299)) is the single global Ctrl+Wheel listener,
+`AppZoomHandler` ([`frontend/app/app.tsx:261-299`](../../frontend/app/app.tsx)) is the single global Ctrl+Wheel listener,
 attached to `window` with `{ passive: false }`. On every Ctrl/Cmd+wheel event it:
 
 1. Calls `e.preventDefault()` unconditionally (line 270) — this is what suppresses the
@@ -43,7 +43,7 @@ attached to `window` with `{ passive: false }`. On every Ctrl/Cmd+wheel event it
    `zoomBlockIn`/`zoomBlockOut(blockId, WHEEL_STEP)` (lines 287-288).
 
 `data-blockid` is set on **every** block frame regardless of view type
-([`frontend/app/block/blockframe.tsx:880`](../../frontend/app/block/blockframe.tsx#L880)), so Armory panes have the attribute and the handler does
+([`frontend/app/block/blockframe.tsx:880`](../../frontend/app/block/blockframe.tsx)), so Armory panes have the attribute and the handler does
 fire — this part works.
 
 The actual dead end is one level deeper, in `getBlockZoom()`
@@ -162,7 +162,7 @@ tab-zoom-sharing semantics into a product where that's surprising.
 **unrelated** to this bug, despite the name. It only drives the **chrome** `--zoomfactor` CSS
 variable (title bar/status bar — see `zoom-architecture.md` §1) and explicitly does *not* call
 `host.set_zoom_level()` — the code comment at `meta.rs:41-43` notes that doing so "deadlocks from
-the IPC thread." [`frontend/util/cef-api.ts:408-409`](../../frontend/util/cef-api.ts#L408-L409) is its only caller. Worth ruling out early since
+the IPC thread." [`frontend/util/cef-api.ts:408-409`](../../frontend/util/cef-api.ts) is its only caller. Worth ruling out early since
 the name is misleading, but this global scalar is not why browser-pane page zoom is shared.
 
 ### 3.4 Fix directions (tradeoffs, not a decision)
@@ -294,16 +294,16 @@ entirely, regardless of which native-side fix is chosen.
 
 ## 7. Sources
 
-- [`frontend/app/app.tsx:261-299`](../../frontend/app/app.tsx#L261-L299) (`AppZoomHandler`)
+- [`frontend/app/app.tsx:261-299`](../../frontend/app/app.tsx) (`AppZoomHandler`)
 - `frontend/app/store/zoom.win32.ts:64,99-109` (`getBlockZoom`, `zoomBlockIn/Out` allow-list gate)
-- [`frontend/app/block/blockframe.tsx:880`](../../frontend/app/block/blockframe.tsx#L880) (`data-blockid` attribute)
+- [`frontend/app/block/blockframe.tsx:880`](../../frontend/app/block/blockframe.tsx) (`data-blockid` attribute)
 - `frontend/app/view/armory/armory-view.tsx`, `armory-view.scss:36,98`
 - `agentmux-cef/src/browser_pane/hwnd.rs:377-395` (`WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL` logged-only)
 - `agentmux-cef/src/browser_pane/creation_views.rs:140-164` (shared parent `RequestContext`)
 - `agentmux-cef/src/browser_pane/creation.rs:192` (legacy path, `None` request_context)
 - `agentmux-cef/src/commands/window/meta.rs:19-49`, `agentmux-cef/src/state.rs:545,1289`
   (`zoom_factor` — chrome-only, ruled out as unrelated)
-- [`frontend/util/cef-api.ts:408-409`](../../frontend/util/cef-api.ts#L408-L409)
+- [`frontend/util/cef-api.ts:408-409`](../../frontend/util/cef-api.ts)
 - [`docs/specs/zoom-architecture.md`](zoom-architecture.md) (chrome-zoom options analysis; §5 per-pane architecture reference)
 - [`docs/specs/per-pane-zoom-hover.md`](per-pane-zoom-hover.md) (original hover-wheel-zoom spec; documents the
   non-terminal-pane gap as unresolved "TBD" at design time)

@@ -26,7 +26,7 @@ actions for the rest.
 |---|---|---|
 | Failure taxonomy `AgentFailure { code, title, detail, exitCode?, signal?, stderrTail?, retryable }` | `agentmux-srv/src/agents/failure.rs`; TS `frontend/types/gotypes.d.ts:78` | 11 classes; `retryable` already true for transient classes |
 | `agentfailure` wave event (per block) | `wps::EVENT_AGENT_FAILURE`; emitted in `subprocess.rs` process-waiter | classified on non-zero exit OR stdout error `result` frame |
-| Event → pane | [`frontend/app/view/agent/hooks/useControllerStatusEvents.ts:42`](../../frontend/app/view/agent/hooks/useControllerStatusEvents.ts#L42) | currently only `opts.log(...)` red text lines |
+| Event → pane | [`frontend/app/view/agent/hooks/useControllerStatusEvents.ts:42`](../../frontend/app/view/agent/hooks/useControllerStatusEvents.ts) | currently only `opts.log(...)` red text lines |
 | Re-run a turn | `sendMessage()` `hooks/useAgentCommands.ts:231` → `RpcApi.AgentInputCommand` (`rpc-api.ts:1202`) → backend `agentinput` → `spawn_turn` (`subprocess.rs:345`) | resumes via `--resume <session_id>`; busy turns queue + drain on exit |
 | Last user message | `documentAtom` last `UserMessageNode` (`view/agent/types.ts:279`) | the text to re-submit for "Retry" |
 | Armory → Accounts | `openBundleManager()` (`modals/bundle-manager-modal.tsx:255`) | singleton modal; "Accounts" is the default section |

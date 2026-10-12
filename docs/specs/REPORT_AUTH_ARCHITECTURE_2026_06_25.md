@@ -199,9 +199,9 @@ CEF CliLogin (fix)
 | `agentmux-srv/src/server/muxbus_handlers.rs:50` | `muxbus.login` / `inject_muxbus_env` |
 | `agentmux-srv/src/muxbus/pkce.rs:26` | Cognito PKCE browser flow |
 | `agentmux-cef/src/commands/platform.rs:656` | `run_cli_login_pty` — the crashing PTY path |
-| [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:171`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts#L171) | "Login Again" button handler |
-| [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:212`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts#L212) | "Use Existing Login" (the working path) |
-| [`frontend/app/view/accounts/AgentMuxConnectPanel.tsx:59`](../../frontend/app/view/accounts/AgentMuxConnectPanel.tsx#L59) | `useMuxBusStatus` hook |
+| [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:171`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts) | "Login Again" button handler |
+| [`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:212`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts) | "Use Existing Login" (the working path) |
+| [`frontend/app/view/accounts/AgentMuxConnectPanel.tsx:59`](../../frontend/app/view/accounts/AgentMuxConnectPanel.tsx) | `useMuxBusStatus` hook |
 | [`docs/specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md`](SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md) | FD crash investigation |
 | `specs/SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md` | Token presence vs validity bug |
 | [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) | OAuth session lifecycle design |

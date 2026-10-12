@@ -50,14 +50,14 @@ can't silently break history continuity again.
 
 ### 1.1 Every local/dev/portable build mints a new channel — by design
 
-[`scripts/package.sh:99-103`](../../scripts/package.sh#L99-L103):
+[`scripts/package.sh:99-103`](../../scripts/package.sh):
 
 ```
 BUILD_ID=$(printf '%s' "$LABEL" | sha1sum | cut -c1-8)
 CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"
 ```
 
-with the comment at [`scripts/package.sh:27-31`](../../scripts/package.sh#L27-L31) stating plainly: *"PER-BUILD: the build-id ... makes each
+with the comment at [`scripts/package.sh:27-31`](../../scripts/package.sh) stating plainly: *"PER-BUILD: the build-id ... makes each
 build its own data dir ... so a freshly-built binary launches as its own instance."* Confirmed by a passing
 test, `agentmux-launcher/src/hash.rs:147-163`
 (`per_build_channels_isolate_data_dir_even_at_same_version`): two builds of the *same branch, same semver*

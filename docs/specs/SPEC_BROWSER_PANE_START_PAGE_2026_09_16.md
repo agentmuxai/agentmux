@@ -28,7 +28,7 @@ exchange for exactly the two properties asked for.
 > bookmarks button, it is to set the start page. Make it the first entry."
 
 A new item at the **top** of the bookmarks dropdown
-([`frontend/app/view/browser/browser-nav-bar.tsx:285-329`](../../frontend/app/view/browser/browser-nav-bar.tsx#L285-L329),
+([`frontend/app/view/browser/browser-nav-bar.tsx:285-329`](../../frontend/app/view/browser/browser-nav-bar.tsx),
 `bookmarkMenuItems`) that saves the active tab's URL as the page a **new**
 browser pane opens to, replacing the hardcoded fallback that exists today.
 
@@ -98,14 +98,14 @@ already:
 - loads once at srv startup, before any client connects
   (`bootstrap.rs:1048`, `wconfig::build_default_config()`),
 - is already fetched by the frontend and awaited **before the app even
-  renders** ([`frontend/app-init.ts:1122`](../../frontend/app-init.ts#L1122), `RpcApi.GetFullConfigCommand`),
+  renders** ([`frontend/app-init.ts:1122`](../../frontend/app-init.ts), `RpcApi.GetFullConfigCommand`),
   so this is genuinely free — not "one more parallel call," zero additional
   round trips of any kind,
 - already has a live file-watch → in-memory-update → WebSocket-broadcast
   pipeline for exactly this "a config file changed on disk, tell every
   connected window" problem
   (`agentmux-srv/src/backend/config_watcher_fs.rs`, `WpsEvent.Config` on
-  the frontend, [`frontend/app/store/global.ts:242-246`](../../frontend/app/store/global.ts#L242-L246):
+  the frontend, [`frontend/app/store/global.ts:242-246`](../../frontend/app/store/global.ts):
   `setFullConfigAtom(fullConfig)` on every push).
 
 This is the same infrastructure `settings.json` itself uses, and — unlike
@@ -272,7 +272,7 @@ that already separates actions from the saved list.
 own UI section named as available for exactly this ("a check/star state on
 the pinned first row") but never used. `FlyoutMenu`'s existing renderer
 already draws a check glyph for `checked: true`
-([`frontend/types/custom.d.ts:463-477`](../../frontend/types/custom.d.ts#L463-L477)) — no new rendering code.
+([`frontend/types/custom.d.ts:463-477`](../../frontend/types/custom.d.ts)) — no new rendering code.
 
 `setCurrentAsStartPage` — an optimistic local update for instant feedback
 in the clicking window (mirroring `toggleCurrentBookmark`/
@@ -365,7 +365,7 @@ already use on the bookmarks button (`bookmarksError()`,
   mirrors)
 - `agentmux-srv/src/bootstrap.rs:1048-1057` (boot wiring, where the two new
   calls are added)
-- [`frontend/app/store/config-signals.ts`](../../frontend/app/store/config-signals.ts), [`frontend/app/store/global.ts:242-246`](../../frontend/app/store/global.ts#L242-L246)
+- [`frontend/app/store/config-signals.ts`](../../frontend/app/store/config-signals.ts), [`frontend/app/store/global.ts:242-246`](../../frontend/app/store/global.ts)
   (`fullConfigAtom`'s boot-time population and live `WpsEvent.Config`
   update — the mechanism this spec rides instead of building a parallel one)
 - [`docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md`](SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md) (design

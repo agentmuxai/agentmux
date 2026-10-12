@@ -55,7 +55,7 @@ Two related complaints about the same rendering gap:
 
 ### Answered-question rendering
 
-[`frontend/app/view/agent/hooks/useAgentQuestions.ts:109-138`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts#L109-L138) (`handleAnswer`) flips
+[`frontend/app/view/agent/hooks/useAgentQuestions.ts:109-138`](../../frontend/app/view/agent/hooks/useAgentQuestions.ts) (`handleAnswer`) flips
 the node on answer:
 
 ```ts
@@ -83,13 +83,13 @@ the flattened text loses real newlines (`\n` → `; `).
 
 ### User-input color
 
-[`frontend/app/theme.scss:81`](../../frontend/app/theme.scss#L81):
+[`frontend/app/theme.scss:81`](../../frontend/app/theme.scss):
 
 ```scss
 --user-input-color: #e07832; // warm amber, complementary to --accent-color
 ```
 
-[`frontend/app/view/agent/styles/_document-nodes.scss:975-980`](../../frontend/app/view/agent/styles/_document-nodes.scss#L975-L980):
+[`frontend/app/view/agent/styles/_document-nodes.scss:975-980`](../../frontend/app/view/agent/styles/_document-nodes.scss):
 
 ```scss
 .agent-user-message {

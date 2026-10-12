@@ -30,7 +30,7 @@ moment its `result` line is read, with no dependency on reopening anything.
 
 ## 2. What the UI actually shows
 
-`subagentDisplayStatus` ([`frontend/app/view/swarm/swarm-view.tsx:209-215`](../../frontend/app/view/swarm/swarm-view.tsx#L209-L215)):
+`subagentDisplayStatus` ([`frontend/app/view/swarm/swarm-view.tsx:209-215`](../../frontend/app/view/swarm/swarm-view.tsx)):
 
 ```ts
 export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "running" | "idle"): AgentDisplayStatus {

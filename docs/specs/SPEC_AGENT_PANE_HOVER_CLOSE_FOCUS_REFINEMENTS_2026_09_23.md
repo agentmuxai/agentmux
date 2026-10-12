@@ -34,7 +34,7 @@ way to read the full call.
 
 ### 1.2 Root cause — one JSX condition
 
-[`frontend/app/view/agent/components/ToolBlock.tsx:498`](../../frontend/app/view/agent/components/ToolBlock.tsx#L498):
+[`frontend/app/view/agent/components/ToolBlock.tsx:498`](../../frontend/app/view/agent/components/ToolBlock.tsx):
 
 ```tsx
 <Show when={cmdText() && !expanded()}>
@@ -132,7 +132,7 @@ The agent pane overrides the shared `PaneChrome` close handler through
 - `handleTabClose` is at `439-443`.
 - It is wired as `onClose` at `471-474`.
 
-It calls `closeBlockInStack` ([`frontend/layout/lib/layoutStack.ts:162-202`](../../frontend/layout/lib/layoutStack.ts#L162-L202)),
+It calls `closeBlockInStack` ([`frontend/layout/lib/layoutStack.ts:162-202`](../../frontend/layout/lib/layoutStack.ts)),
 which behaves as follows:
 
 | Case | Today |

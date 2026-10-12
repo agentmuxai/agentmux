@@ -25,7 +25,7 @@ across all queries in the session, resetting only when the pane/session resets.
 ## Root Cause
 
 There is exactly one piece of state involved, `AgentPaneState.sessionStats`
-([`frontend/app/store/agent-pane-state/types.ts:167`](../../frontend/app/store/agent-pane-state/types.ts#L167)), and it is *correctly*
+([`frontend/app/store/agent-pane-state/types.ts:167`](../../frontend/app/store/agent-pane-state/types.ts)), and it is *correctly*
 per-turn:
 
 - `TurnStart` nulls it (`reducer.ts:382`).
@@ -36,10 +36,10 @@ per-turn:
 
 Both consumers bind to the identical projected atom:
 
-- `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx:66-141`](../../frontend/app/view/agent/components/AgentFooter.tsx#L66-L141)),
-  wired at [`frontend/app/view/agent/agent-view.tsx:822-828`](../../frontend/app/view/agent/agent-view.tsx#L822-L828) via
+- `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx:66-141`](../../frontend/app/view/agent/components/AgentFooter.tsx)),
+  wired at [`frontend/app/view/agent/agent-view.tsx:822-828`](../../frontend/app/view/agent/agent-view.tsx) via
   `sessionStats={agentAtoms().sessionStatsAtom[0]()}`.
-- `AgentComposerStrip` ([`frontend/app/view/agent/components/AgentComposerStrip.tsx:97-160`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx#L97-L160)),
+- `AgentComposerStrip` ([`frontend/app/view/agent/components/AgentComposerStrip.tsx:97-160`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx)),
   wired at `agent-view.tsx:984-985` via the same
   `sessionStats={agentAtoms().sessionStatsAtom[0]()}`.
 

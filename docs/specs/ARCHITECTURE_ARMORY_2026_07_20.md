@@ -71,7 +71,7 @@ each agent has at most one bound account per provider
 (`agentmux-srv/src/backend/storage/identities.rs`, `agent_identity_link()`).
 Written **only** by the agent-launch flow
 ([`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) →
-[`frontend/app/view/agent/agent-model.ts:611-619`](../../frontend/app/view/agent/agent-model.ts#L611-L619) →
+[`frontend/app/view/agent/agent-model.ts:611-619`](../../frontend/app/view/agent/agent-model.ts) →
 `linkagentidentity` RPC) — there is no write path from any Armory or
 agent-pane UI; both are read-only views of this table. This is the pattern
 the removed Armory "Identities" tab used to show and the agent pane's own

@@ -344,7 +344,7 @@ and a `checked` field per item for the selected mark. So each control becomes:
   selects, gating).
 - `frontend/app/view/agent/components/AgentControlBar.tsx:28-58,60-61,68-102,197-349` (full current
   component, to be split).
-- [`frontend/app/view/agent/agent-view.tsx:1005-1016`](../../frontend/app/view/agent/agent-view.tsx#L1005-L1016) (mount site).
+- [`frontend/app/view/agent/agent-view.tsx:1005-1016`](../../frontend/app/view/agent/agent-view.tsx) (mount site).
 - [`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) Part C (origin of the (a)/(b) decision
   this spec resolves).
 - [`docs/retro/retro-composer-strip-log-controls-nesting-2026-07-02.md`](../retro/retro-composer-strip-log-controls-nesting-2026-07-02.md) (root cause).

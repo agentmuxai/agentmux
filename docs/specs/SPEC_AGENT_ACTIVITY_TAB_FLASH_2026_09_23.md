@@ -83,7 +83,7 @@ This revision **replaces** §2.1 (routing), the color and envelope parts of
 
 Tool-call tones play for **every** agent pane in the window by default
 (`notify:tooltones:scope` defaults to `"all"`,
-[`frontend/app/notification/sound/sound-service.ts:317`](../../frontend/app/notification/sound/sound-service.ts#L317)), including panes in
+[`frontend/app/notification/sound/sound-service.ts:317`](../../frontend/app/notification/sound/sound-service.ts)), including panes in
 tabs you are not looking at. When several agents are working, you hear a
 steady stream of tones and have no way to tell which pane or tab they come
 from. Nothing on screen changes, because the source is usually in a
@@ -128,7 +128,7 @@ as a table (§6).
 A flash fires **exactly when a tool tone passes its policy gates**: the master
 sound switch, `notify:tooltones:enabled`, and `notify:tooltones:scope`.
 The hook point is `playToolToneIfAllowed()`
-([`frontend/app/notification/sound/sound-service.ts:311-335`](../../frontend/app/notification/sound/sound-service.ts#L311-L335)). The flash is
+([`frontend/app/notification/sound/sound-service.ts:311-335`](../../frontend/app/notification/sound/sound-service.ts)). The flash is
 emitted right after the scope check at `:318-326`, **before** the
 `ctx`/`isAttached()` check at `:329`. That way it still works before the
 AudioContext is primed, and at volume 0.
@@ -141,7 +141,7 @@ Consequences, all intended:
   [`frontend/app/view/settings/sections/sounds-section.tsx`](../../frontend/app/view/settings/sections/sounds-section.tsx) (the section around
   `:211-235`).
 - Replaying old history never flashes. Tones only come from live `tool_call`
-  events ([`frontend/app/view/agent/useAgentStream.ts:746`](../../frontend/app/view/agent/useAgentStream.ts#L746)), so neither the
+  events ([`frontend/app/view/agent/useAgentStream.ts:746`](../../frontend/app/view/agent/useAgentStream.ts)), so neither the
   tone nor the flash is triggered by a history reload. See §7.3 for a
   pre-existing gap in the tone side of this.
 
@@ -159,8 +159,8 @@ depends on it.
 - **Shape:** an overlay across the whole tab (or pane header) surface, not a
   border or dot. A tab is small, and a fill reads at a glance where a 1–2 px
   line does not.
-- **Color:** `var(--accent-color)` ([`frontend/app/theme.scss:71`](../../frontend/app/theme.scss#L71)), the same
-  token as the active-tab top stripe ([`frontend/app/tab/tab.scss:72-80`](../../frontend/app/tab/tab.scss#L72-L80)). No
+- **Color:** `var(--accent-color)` ([`frontend/app/theme.scss:71`](../../frontend/app/theme.scss)), the same
+  token as the active-tab top stripe ([`frontend/app/tab/tab.scss:72-80`](../../frontend/app/tab/tab.scss)). No
   raw hex/rgba; `color-no-hex` in `.stylelintrc.json` and the theme-token
   rules would reject it anyway.
 - **Envelope:** jump to peak opacity **0.22**, hold for **80 ms**, then fade
@@ -170,7 +170,7 @@ depends on it.
 - **Layering:** a pseudo-element **overlay** with an animated `opacity`, not a
   change to `background`. Two reasons:
   1. User-colored tabs force their background with `!important`
-     ([`frontend/app/tab/tab.scss:142-155`](../../frontend/app/tab/tab.scss#L142-L155)), so a background-based flash would
+     ([`frontend/app/tab/tab.scss:142-155`](../../frontend/app/tab/tab.scss)), so a background-based flash would
      be invisible on exactly the tabs people color to track agents. An
      overlay composites on top of any fill.
   2. `opacity` on its own layer is compositor-only: no layout, no paint of
@@ -208,9 +208,9 @@ Guard rails:
 ### 3.3 Reduced motion
 
 The app already has two reduced-motion paths: the `.prefers-reduced-motion`
-class ([`frontend/app/app.scss:193`](../../frontend/app/app.scss#L193), set from [`frontend/app/app.tsx:418`](../../frontend/app/app.tsx#L418)) and
+class ([`frontend/app/app.scss:193`](../../frontend/app/app.scss), set from [`frontend/app/app.tsx:418`](../../frontend/app/app.tsx)) and
 an OS-level `@media (prefers-reduced-motion: reduce)` block
-([`frontend/app/app.scss:306`](../../frontend/app/app.scss#L306)). The class path only zeroes `transition-*`, not
+([`frontend/app/app.scss:306`](../../frontend/app/app.scss)). The class path only zeroes `transition-*`, not
 `animation-*` or the Web Animations API (the comment at `app.scss:298-305`
 explains this), so it won't suppress this flash by itself.
 
@@ -275,7 +275,7 @@ A dimmed label would be a regression.
 ### 4.3 Pane-header side
 
 The generic header is `.block-frame-default-header`
-([`frontend/app/block/blockframe.tsx:725`](../../frontend/app/block/blockframe.tsx#L725)). Agent panes may render hoisted
+([`frontend/app/block/blockframe.tsx:725`](../../frontend/app/block/blockframe.tsx)). Agent panes may render hoisted
 chrome through `renderPaneChrome` instead
 ([`frontend/app/tab/pane-leaf-chrome.tsx`](../../frontend/app/tab/pane-leaf-chrome.tsx), see its header comment and
 [`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md)). The
@@ -294,7 +294,7 @@ reduced-motion rule.
   window that renders the pane. If so, the flashing tab is always in the
   window that made the sound, and there's nothing to do across windows.
 - **Overflowed tab bar:** the tab bar scrolls horizontally
-  ([`frontend/app/tab/tabbar.scss:32-44`](../../frontend/app/tab/tabbar.scss#L32-L44)). A flash on a tab scrolled out of
+  ([`frontend/app/tab/tabbar.scss:32-44`](../../frontend/app/tab/tabbar.scss)). A flash on a tab scrolled out of
   view is invisible. A follow-up could flash the overflow edge. Don't
   auto-scroll the bar; that would move things under the user's cursor.
 

@@ -502,7 +502,7 @@ decision *goes* once it's made.
 ## 13. Cross-references
 
 - agentmuxai/agentmux#551 — parent issue (this spec extends it)
-- [`frontend/app/view/agent/buildRuntimeArgs.ts:18-24`](../../frontend/app/view/agent/buildRuntimeArgs.ts#L18-L24) —
+- [`frontend/app/view/agent/buildRuntimeArgs.ts:18-24`](../../frontend/app/view/agent/buildRuntimeArgs.ts) —
   pre-turn PermissionMode → flag mapping
 - [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) — `ToolCallEvent`
   definition to extend

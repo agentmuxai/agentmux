@@ -40,7 +40,7 @@ the way a PR title would.
 
 ### What generates it
 
-- Frontend trigger: [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts:88-113`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts#L88-L113)
+- Frontend trigger: [`frontend/app/view/agent/hooks/useAgentActivitySummary.ts:88-113`](../../frontend/app/view/agent/hooks/useAgentActivitySummary.ts)
   — fires once per genuine, backend-confirmed turn completion (the
   `turn_active: true→false` edge, not `TurnPhase.kind === "Done"` — see
   [`docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md`](REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md) for why that
@@ -74,7 +74,7 @@ the way a PR title would.
   ```
 
 - Consumption: the result is written to block meta key `term:ambient_summary`;
-  [`frontend/app/store/activitySummary.ts:19-25`](../../frontend/app/store/activitySummary.ts#L19-L25) (`readActivitySummary`) prefers
+  [`frontend/app/store/activitySummary.ts:19-25`](../../frontend/app/store/activitySummary.ts) (`readActivitySummary`) prefers
   it over the free CLI-emitted `term:osc_title` OSC signal, and both
   `agent-model.ts` (pane title) and `swarm-model.ts` read through that same
   function. This is the **only** consumer found — there is no separate

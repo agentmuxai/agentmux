@@ -112,7 +112,7 @@ mislabeled in its own header.
 | Snapshot storage | **Shipped** | JSON blob at `Client.meta["session:last_topology"]` — `SNAPSHOT_META_KEY`, `session_restore.rs:41`. Generic `meta` sidecar, no schema migration needed |
 | Named saved "Layouts" (Feature 2 of the 08-13 spec) | Not built | Proposed only; **out of scope here** (§6.2) |
 | Shutdown countdown + progress modal | **Proposed, not built** | `SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md` (PR #2981) |
-| Continuous/debounced auto-persist of the *layout tree* | **Shipped** | [`frontend/layout/lib/layoutPersistence.ts:396-420`](../../frontend/layout/lib/layoutPersistence.ts#L396-L420) — 100ms debounce |
+| Continuous/debounced auto-persist of the *layout tree* | **Shipped** | [`frontend/layout/lib/layoutPersistence.ts:396-420`](../../frontend/layout/lib/layoutPersistence.ts) — 100ms debounce |
 | Interval + dirty-gated snapshot with serialized writer | **Shipped** | `frontend/app/view/agent/hooks/useSnapshotPersistence.ts:43,51,73,139` — `SNAPSHOT_INTERVAL_MS = 30_000` |
 
 **The new work in this spec is narrow and specific**: make the *session

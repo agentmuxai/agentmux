@@ -13,7 +13,7 @@ for implementation**.
 
 ### Current state
 
-`BrowserNavBar` ([`frontend/app/view/browser/browser-nav-bar.tsx:117-193`](../../frontend/app/view/browser/browser-nav-bar.tsx#L117-L193)) renders
+`BrowserNavBar` ([`frontend/app/view/browser/browser-nav-bar.tsx:117-193`](../../frontend/app/view/browser/browser-nav-bar.tsx)) renders
 four controls: Back (`←`), Forward (`→`), Reload (`↻`) — all single-glyph,
 icon-only, with a `title=` tooltip for accessibility — and then a text-labeled
 `Go` button (line 190):
@@ -196,17 +196,17 @@ containing:
 the hamburger menu, the widget bar's "More" dropdown, and right-click
 context menus, so using it here is a DRY win, not just a style match:
 
-- Its `MenuItem` shape ([`frontend/types/custom.d.ts:463-477`](../../frontend/types/custom.d.ts#L463-L477)) already
+- Its `MenuItem` shape ([`frontend/types/custom.d.ts:463-477`](../../frontend/types/custom.d.ts)) already
   supports `icon`, `label`, `onClick`, `divider` (for the separator above),
   and `checked` (could show a check/star state on the pinned first row) —
   no new prop shape to invent.
 - **"Expands to the bottom of the window, then scrolls" is already built
   in, not something to implement.** `FlyoutMenu`'s positioning goes through
-  `computeMenuPosition` ([`frontend/app/util/menu-position.ts:228-296`](../../frontend/app/util/menu-position.ts#L228-L296)),
+  `computeMenuPosition` ([`frontend/app/util/menu-position.ts:228-296`](../../frontend/app/util/menu-position.ts)),
   whose `size()` middleware measures `availableHeight` down to the window's
   paintable-area boundary and returns it as `maxHeight`
   (`menu-position.ts:279`); `styleToString`
-  ([`frontend/app/element/flyoutmenu.tsx:38-44`](../../frontend/app/element/flyoutmenu.tsx#L38-L44)) applies that as
+  ([`frontend/app/element/flyoutmenu.tsx:38-44`](../../frontend/app/element/flyoutmenu.tsx)) applies that as
   `max-height:${maxHeight}px; overflow-y:auto` on the menu's own root. Every
   existing `FlyoutMenu` consumer already gets "grow until it hits the
   window edge, then scroll internally" for free — the bookmarks menu needs

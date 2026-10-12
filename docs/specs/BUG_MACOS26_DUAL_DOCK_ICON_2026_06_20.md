@@ -59,7 +59,7 @@ CEF then claims a `Regular` (Dock-visible) activation policy.
 
 ### 3. Info.plist — no `LSUIElement` declared
 
-**[`scripts/package-macos.sh:210–241`](../../scripts/package-macos.sh#L210-L241)** — the generated Info.plist contains:
+**[`scripts/package-macos.sh:210–241`](../../scripts/package-macos.sh)** — the generated Info.plist contains:
 ```xml
 <key>CFBundleExecutable</key><string>agentmux-launcher</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>

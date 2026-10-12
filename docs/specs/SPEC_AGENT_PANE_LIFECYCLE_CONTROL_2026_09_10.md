@@ -432,7 +432,7 @@ server-side. `LayoutState.magnifiednodeid` (`agentmux-srv/src/backend/obj.rs:441
 is a real, persisted column, round-tripped through `persist_subscriber.rs`
 and mirrored on `TabRecord`. Minimize is real too, if less directly: a
 minimized leaf is `node.minimized = true` — a **top-level** field on
-`LayoutNode` itself ([`frontend/layout/lib/layoutMinimize.ts:111`](../../frontend/layout/lib/layoutMinimize.ts#L111)), not
+`LayoutNode` itself ([`frontend/layout/lib/layoutMinimize.ts:111`](../../frontend/layout/lib/layoutMinimize.ts)), not
 nested under its `.data`. **Codex P1 on PR #3195, a follow-up correction to
 this same paragraph:** `LayoutNode` and `LayoutNodeData` each carry their
 *own*, separate `extra` catch-all (`agentmux-common/src/layout_types.rs:90`

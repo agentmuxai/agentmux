@@ -290,7 +290,7 @@ changes; step 4 is the external-identity coupling.
 
 ### Step 2 — Launch: use slug for filesystem paths
 
-- **Touch:** [`frontend/app/view/agent/agent-model.ts:236-271`](../../frontend/app/view/agent/agent-model.ts#L236-L271),
+- **Touch:** [`frontend/app/view/agent/agent-model.ts:236-271`](../../frontend/app/view/agent/agent-model.ts),
   backend `WriteAgentConfigCommand` handler.
 - Change `workDir` default to
   `~/.agentmux/agents/${agent.slug}/` (no fallback to `name`).
@@ -470,8 +470,8 @@ After all five steps land:
 - `agentmux-srv/forge-seed.json` — add slug to every entry
 
 **Launch path:**
-- [`frontend/app/view/agent/agent-model.ts:236-271`](../../frontend/app/view/agent/agent-model.ts#L236-L271) — derivations
-- [`frontend/app/view/agent/agent-model.ts:380-487`](../../frontend/app/view/agent/agent-model.ts#L380-L487) — template vars
+- [`frontend/app/view/agent/agent-model.ts:236-271`](../../frontend/app/view/agent/agent-model.ts) — derivations
+- [`frontend/app/view/agent/agent-model.ts:380-487`](../../frontend/app/view/agent/agent-model.ts) — template vars
 
 **UI components:**
 - [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx) — rename affordance

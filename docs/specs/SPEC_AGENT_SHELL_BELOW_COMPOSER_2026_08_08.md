@@ -28,7 +28,7 @@ floating popup with a `placement: "top-start"` option), the Shell drawer has
 `display:flex; flex-direction:column` container, and it renders above the
 composer purely because it appears *earlier* in the JSX.
 
-[`frontend/app/view/agent/agent-view.tsx:1814-1899`](../../frontend/app/view/agent/agent-view.tsx#L1814-L1899) — current structure
+[`frontend/app/view/agent/agent-view.tsx:1814-1899`](../../frontend/app/view/agent/agent-view.tsx) — current structure
 inside `.agent-composer-region`:
 
 ```tsx
@@ -51,7 +51,7 @@ inside `.agent-composer-region`:
 </div>
 ```
 
-[`frontend/app/view/agent/styles/_control-bar.scss:409-414`](../../frontend/app/view/agent/styles/_control-bar.scss#L409-L414):
+[`frontend/app/view/agent/styles/_control-bar.scss:409-414`](../../frontend/app/view/agent/styles/_control-bar.scss):
 
 ```scss
 .agent-composer-region {

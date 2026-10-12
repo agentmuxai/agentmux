@@ -126,7 +126,7 @@ const getTextContent = (children: any): string => {
 };
 ```
 
-But [`frontend/app/element/markdown.tsx:17`](../../frontend/app/element/markdown.tsx#L17) builds this markdown renderer's
+But [`frontend/app/element/markdown.tsx:17`](../../frontend/app/element/markdown.tsx) builds this markdown renderer's
 elements via `solid-js/h/jsx-runtime` (feeding `hast-util-to-jsx-runtime`).
 Solid has no virtual DOM — this runtime creates **real DOM nodes** eagerly.
 `children` passed into `CodeBlock` is an actual `<code>` `HTMLElement` (with

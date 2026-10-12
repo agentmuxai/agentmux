@@ -28,7 +28,7 @@ zero new rendering code, by reusing the pane frame's existing
 | Block-meta seeding at open | `register_agent_open` (`server/app_api/agent_open.rs:297`) already seeds `term:zoom` from `agent_content("ui:zoom")` | The exact pattern for seeding `frame:bordercolor` from `ui:color`. |
 | Pane frame color rendering | `blockframe.tsx:733` styles the block border from `meta["frame:bordercolor"]`; right-click pane-header swatch palette already writes this key | The display surface — colors show on every agent pane's frame with **no frontend changes**. The user can still override per pane via the existing palette. |
 | Migration framework | `agentmux-srv/src/migrations/` (m0000–m0019), once-per-channel tracking in `db_migrations` | The codebase's mechanism for exactly-once backfills — the requested "one-time script". |
-| 14-hue palette | `TAB_COLORS` ([`frontend/app/tab/tab.tsx:20`](../../frontend/app/tab/tab.tsx#L20)) — also used for random tab colors (`tab-actions.ts:31`) | Color values to assign from. Duplicated as hexes in the Rust migration (a one-time list; drift is inconsequential since assigned colors are stored, not derived). |
+| 14-hue palette | `TAB_COLORS` ([`frontend/app/tab/tab.tsx:20`](../../frontend/app/tab/tab.tsx)) — also used for random tab colors (`tab-actions.ts:31`) | Color values to assign from. Duplicated as hexes in the Rust migration (a one-time list; drift is inconsequential since assigned colors are stored, not derived). |
 
 ## 3. Design
 

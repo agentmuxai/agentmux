@@ -40,7 +40,7 @@ the row's final settled text — not one restart per intermediate value.
 
 Three pieces compose the bug, none of which is itself wrong in isolation:
 
-1. **[`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts#L352-L628)** — the
+1. **[`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts)** — the
    `fileSubject.subscribe(...)` callback body. One "append" notification
    can carry several newline-delimited raw lines (`lineBuffer.split("\n")`,
    line 360); `for (const line of lines)` (line 371) processes all of them
@@ -205,15 +205,15 @@ fix, to keep the initial change small and easy to verify in isolation.
 
 ## 5. Sources
 
-- [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts#L352-L628) (the
+- [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts) (the
   `fileSubject.subscribe` callback), `:371` (outer per-line loop — the
   correct batch boundary), `:540` (inner per-event loop — insufficient
   boundary, see §2.1 revision note), `:581–592`
   (`ToolStart`/`ToolEnd` dispatch sites), `:17–35`
   (existing `StreamFlushQueue`/`batch()` precedent for document nodes)
-- [`frontend/app/store/agent-pane-state-store.ts:222`](../../frontend/app/store/agent-pane-state-store.ts#L222) (`dispatch()`),
+- [`frontend/app/store/agent-pane-state-store.ts:222`](../../frontend/app/store/agent-pane-state-store.ts) (`dispatch()`),
   `:337`, `:351` (unbatched `proj(...)` signal writes)
-- [`frontend/app/view/agent/components/AgentFooter.tsx:113–128`](../../frontend/app/view/agent/components/AgentFooter.tsx#L113-L128)
+- [`frontend/app/view/agent/components/AgentFooter.tsx:113–128`](../../frontend/app/view/agent/components/AgentFooter.tsx)
   (`loadingLeftText`), `:155` (`leftText` memo), `:181–202` (reveal effect)
 - [`docs/retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md`](../retro/retro-agent-working-row-reveal-interrupted-by-tool-burst-2026-08-21.md)
   (full investigation, including what was ruled out)

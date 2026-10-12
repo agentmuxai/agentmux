@@ -6,7 +6,7 @@
 // relative link, so a reader on GitHub can click through to the file.
 //
 //   `crates/srv/src/main.rs`      ->  [`crates/srv/src/main.rs`](crates/srv/src/main.rs)
-//   `scripts/release.sh:183`      ->  [`scripts/release.sh:183`](scripts/release.sh#L183)
+//   `scripts/release.sh:183`      ->  [`scripts/release.sh:183`](scripts/release.sh)
 //
 //   node scripts/link-md-paths.mjs FILE...      rewrite these files
 //   node scripts/link-md-paths.mjs --all        rewrite every tracked .md file
@@ -22,8 +22,9 @@
 // heading, paths that don't exist (stale ones are for a person to fix), and
 // bare file names (`mod.rs`) in a file below the repo root, where they usually
 // mean a file next to the code being discussed, not a file at the root.
-// A `:N` or `:N-M` suffix becomes a `#LN` / `#LN-LM` anchor, except on a .md
-// target, which GitHub renders and so has no line anchors.
+// A `:N` or `:N-M` suffix stays in the text but gets no `#LN` anchor: a line
+// number in a doc dates from when it was written, and an anchor that lands on
+// whatever sits at that line today looks right and isn't.
 // The agentmux-docs site does the same at build time with remark plugins; this repo
 // is read on GitHub as written, so the links have to be in the source.
 
@@ -62,7 +63,6 @@ export function trackedIndex(repoRoot) {
 export function resolveTarget(value, mdFile, tracked) {
   const m = PATH_RE.exec(value);
   if (!m) return null;
-  const [, start, end] = m;
   const p = value
     .replace(/:\d+(?:[-–]\d+)?$/, "")
     .replace(/^\.\//, "")
@@ -84,11 +84,7 @@ export function resolveTarget(value, mdFile, tracked) {
   }
   if (!repoPath) return null;
 
-  let target = path.posix.relative(mdDir === "." ? "" : mdDir, repoPath) || ".";
-  if (start && !repoPath.endsWith(".md")) {
-    target += end ? `#L${start}-L${end}` : `#L${start}`;
-  }
-  return target;
+  return path.posix.relative(mdDir === "." ? "" : mdDir, repoPath) || ".";
 }
 
 /** Rewrite one Markdown text. Returns { text, changes: [{ line, value, target }] }. */

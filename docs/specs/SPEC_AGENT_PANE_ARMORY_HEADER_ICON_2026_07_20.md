@@ -63,7 +63,7 @@ this.endIconButtons = () => {
 
 Hidden until an agent is loaded (empty array on the picker screen). Icons are
 rendered through the shared `IconButton` component
-([`frontend/app/element/iconbutton.tsx:12`](../../frontend/app/element/iconbutton.tsx#L12)) via the declarative `IconButtonDecl`
+([`frontend/app/element/iconbutton.tsx:12`](../../frontend/app/element/iconbutton.tsx)) via the declarative `IconButtonDecl`
 type — `icon: "vault"` resolves to `fa fa-solid fa-vault fa-fw` via
 `makeIconClass`. Changing the icon is a one-line edit; the click handler,
 gating, and everything else about the button stays exactly as-is.
@@ -226,7 +226,7 @@ been misread twice.
 
 This modal opens **pane-scoped** (`useModalLayer()` inside a per-agent-pane
 component, `agent-view.tsx:194-218`) — its root sits inside the originating
-pane's own mount node ([`frontend/app/element/ModalLayer.tsx:104-107`](../../frontend/app/element/ModalLayer.tsx#L104-L107),
+pane's own mount node ([`frontend/app/element/ModalLayer.tsx:104-107`](../../frontend/app/element/ModalLayer.tsx),
 `.modal-layer-mount`), not the whole browser window. `92vw`/`85vh` are
 computed against the **viewport**, not that mount node — so on a narrow pane
 inside a wide window, `92vw` evaluates to something far larger than the

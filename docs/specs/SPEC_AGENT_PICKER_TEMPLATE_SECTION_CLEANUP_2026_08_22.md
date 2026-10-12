@@ -31,7 +31,7 @@ RPC, different rows) and is untouched by either change.
 
 ### 1. Header text
 
-[`frontend/app/view/agent/components/AgentPicker.tsx:898-905`](../../frontend/app/view/agent/components/AgentPicker.tsx#L898-L905) — change
+[`frontend/app/view/agent/components/AgentPicker.tsx:898-905`](../../frontend/app/view/agent/components/AgentPicker.tsx) — change
 the `<span>` text from `"+ New from template"` to `"New Agent"`. The
 hint paragraph directly below it (`.agent-picker-templates-hint`,
 "Each card is a harness...") stays as-is — it's still accurate and
@@ -78,7 +78,7 @@ swap lands (avoid leaving a dead import).
 
 ## Testing
 
-- [`frontend/app/view/agent/components/AgentPicker.test.tsx:217-221`](../../frontend/app/view/agent/components/AgentPicker.test.tsx#L217-L221)
+- [`frontend/app/view/agent/components/AgentPicker.test.tsx:217-221`](../../frontend/app/view/agent/components/AgentPicker.test.tsx)
   currently asserts `toHaveTextContent("New from template")` — update
   to `"New Agent"`.
 - Add/update an `AgentCard` render test (or extend an existing one) to

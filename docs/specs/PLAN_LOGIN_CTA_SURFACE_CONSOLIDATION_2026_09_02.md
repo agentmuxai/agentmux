@@ -21,7 +21,7 @@ independently; neither blocks the other.
 
 Three distinct login call-to-action surfaces exist in the agent pane today, all
 three of which ultimately call the **same** function — `status.relogin()`
-([`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:499`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts#L499)). They differ
+([`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:499`](../../frontend/app/view/agent/hooks/useAgentControllerStatus.ts)). They differ
 only in chrome, placement, trigger condition, and one boolean argument.
 
 | # | Surface | Rendered at | Looks like | Gate |

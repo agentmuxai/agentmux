@@ -58,7 +58,7 @@ of what "a big mess... handling state gracefully" is pointing at.
 
 - `registerPane()` seeds every (re)mounted pane's `turnPhase` to
   `{kind:"Idle"}` unconditionally
-  ([`frontend/app/store/agent-pane-state/types.ts:287`](../../frontend/app/store/agent-pane-state/types.ts#L287), via
+  ([`frontend/app/store/agent-pane-state/types.ts:287`](../../frontend/app/store/agent-pane-state/types.ts), via
   `agent-pane-state-store.ts:154`) — regardless of whether the underlying
   agent process is mid-turn, idle, or something else.
 - `agent-view.tsx`'s `onMount` **does** call a real reconciliation-shaped

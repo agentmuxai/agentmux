@@ -14,7 +14,7 @@ Also answers a standing question about the light/white theme's status, since it 
 
 ## 1. "Working" indicator — current state
 
-Component: `AgentWorkingRow` in [`frontend/app/view/agent/components/AgentFooter.tsx:69-171`](../../frontend/app/view/agent/components/AgentFooter.tsx#L69-L171), rendered directly below `AgentDocumentView` in the conversation area. Structure:
+Component: `AgentWorkingRow` in [`frontend/app/view/agent/components/AgentFooter.tsx:69-171`](../../frontend/app/view/agent/components/AgentFooter.tsx), rendered directly below `AgentDocumentView` in the conversation area. Structure:
 
 ```
 <span class="agent-spinner-dot" />
@@ -25,9 +25,9 @@ CSS: [`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/vie
 - `.agent-working-row--loading` (~line 171-173): `color: var(--accent-color); background: color-mix(in srgb, var(--accent-color) 4%, transparent);`
 - `.agent-spinner-dot` (~line 241-251): `background: var(--accent-color); box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);`
 
-**Correction to the initial premise:** this is *already* a CSS custom property, not a hardcoded literal. `--accent-color` is defined per-theme — [`frontend/app/theme.scss:49`](../../frontend/app/theme.scss#L49) sets the default to `rgb(65, 159, 224)` (blue), and every theme under [`frontend/app/themes/`](../../frontend/app/themes) (`catppuccin.scss`, `dracula.scss`, `monokai.scss`, `nord.scss`, `tokyo-night.scss`, `gruvbox.scss`, `midnight.scss`, `high-contrast.scss`) overrides it to its own hue. So switching `window:theme` already recolors the Working indicator today — it *reads* as "always blue" only because the default theme's accent happens to be blue and most sessions run on default. No binding work needed here; flag as a live QA item (cycle through each theme, confirm the indicator visibly changes) rather than a code fix.
+**Correction to the initial premise:** this is *already* a CSS custom property, not a hardcoded literal. `--accent-color` is defined per-theme — [`frontend/app/theme.scss:49`](../../frontend/app/theme.scss) sets the default to `rgb(65, 159, 224)` (blue), and every theme under [`frontend/app/themes/`](../../frontend/app/themes) (`catppuccin.scss`, `dracula.scss`, `monokai.scss`, `nord.scss`, `tokyo-night.scss`, `gruvbox.scss`, `midnight.scss`, `high-contrast.scss`) overrides it to its own hue. So switching `window:theme` already recolors the Working indicator today — it *reads* as "always blue" only because the default theme's accent happens to be blue and most sessions run on default. No binding work needed here; flag as a live QA item (cycle through each theme, confirm the indicator visibly changes) rather than a code fix.
 
-There's already a related animated element to build on: `.agent-pane-progress-bar` ([`frontend/app/view/agent/agent-view.tsx:873-887`](../../frontend/app/view/agent/agent-view.tsx#L873-L887)), a 2px gradient bar pinned to the pane top, active under the identical `status.isLoading() || workingFromPhase(...)` condition as the Working row. Its CSS (`_control-bar.scss`, ~line 97-140+) derives an "aurora" sweep via `color-mix()` and CSS relative-color syntax (`hsl(from var(--accent-color) calc(h + 180) ...)`) for a complementary-hue animation — the established house pattern for "animated, theme-adaptive, off of `--accent-color`." The shimmer effect below reuses this pattern rather than inventing a new one.
+There's already a related animated element to build on: `.agent-pane-progress-bar` ([`frontend/app/view/agent/agent-view.tsx:873-887`](../../frontend/app/view/agent/agent-view.tsx)), a 2px gradient bar pinned to the pane top, active under the identical `status.isLoading() || workingFromPhase(...)` condition as the Working row. Its CSS (`_control-bar.scss`, ~line 97-140+) derives an "aurora" sweep via `color-mix()` and CSS relative-color syntax (`hsl(from var(--accent-color) calc(h + 180) ...)`) for a complementary-hue animation — the established house pattern for "animated, theme-adaptive, off of `--accent-color`." The shimmer effect below reuses this pattern rather than inventing a new one.
 
 ## 2. Two-phase "Anthropic-style" text animation
 
@@ -80,9 +80,9 @@ Whether the shimmer should restart from Phase A on *every* phrase change (e.g. "
 
 ### Current state
 
-The mic button is **not** Agent-pane-specific code — it's the shared `MicButton` component ([`frontend/app/element/MicButton.tsx`](../../frontend/app/element/MicButton.tsx)), rendered from the generic frame chrome ([`frontend/app/block/blockframe.tsx:255-267`](../../frontend/app/block/blockframe.tsx#L255-L267)) for *any* pane whose view model exposes `voiceHandle`:
+The mic button is **not** Agent-pane-specific code — it's the shared `MicButton` component ([`frontend/app/element/MicButton.tsx`](../../frontend/app/element/MicButton.tsx)), rendered from the generic frame chrome ([`frontend/app/block/blockframe.tsx:255-267`](../../frontend/app/block/blockframe.tsx)) for *any* pane whose view model exposes `voiceHandle`:
 
-- Conditional on `props.viewModel?.voiceHandle` (`blockframe.tsx:255`), placed in the pane's title-bar icon row (`.block-frame-end-icons`, [`frontend/app/block/block.scss:272-306`](../../frontend/app/block/block.scss#L272-L306) — a `display:flex` group, `justify-content: space-between`; no `position:absolute`, it's just flex order).
+- Conditional on `props.viewModel?.voiceHandle` (`blockframe.tsx:255`), placed in the pane's title-bar icon row (`.block-frame-end-icons`, [`frontend/app/block/block.scss:272-306`](../../frontend/app/block/block.scss) — a `display:flex` group, `justify-content: space-between`; no `position:absolute`, it's just flex order).
 - **Confirmed exactly two view models implement `voiceHandle`** — `frontend/app/view/term/termViewModel.ts:78,301` (Terminal) and `frontend/app/view/agent/agent-model.ts:43,49` (Agent). No other view model in the codebase defines it, so the mic button today appears **only** on Terminal and Agent panes — not "any pane" as this spec first stated. Every other pane type never shows a `MicButton` at all, so there's nothing to touch there.
 - The Agent-specific tooltip ("Speak into this agent (Ctrl+Shift+V)") is chosen inline via `props.blockView === "agent"` (`blockframe.tsx:262-263`), so the component already has an agent-aware branch to hook into.
 
@@ -92,7 +92,7 @@ The mic button is **not** Agent-pane-specific code — it's the shared `MicButto
 
 ### Target state
 
-Agent pane's composer: [`frontend/app/view/agent/components/AgentFooter.tsx:721-722`](../../frontend/app/view/agent/components/AgentFooter.tsx#L721-L722):
+Agent pane's composer: [`frontend/app/view/agent/components/AgentFooter.tsx:721-722`](../../frontend/app/view/agent/components/AgentFooter.tsx):
 
 ```
 <div class="agent-footer">
@@ -111,7 +111,7 @@ Agent pane's composer: [`frontend/app/view/agent/components/AgentFooter.tsx:721-
 ### Why the move is safe (behavior-wise)
 
 - `AgentFooter` already owns the voice wiring independent of where the button renders: it registers a `PaneVoiceHandle` on `AgentViewModel.voiceTargetRef` (`AgentFooter.tsx:489-542`, tied into `agent-model.ts:41-51`) so transcripts land in this textarea regardless of the button's DOM position. `MicButton` takes `blockId` + `handle` props and has no positioning assumptions itself.
-- The global `Ctrl+Shift+V` shortcut ([`frontend/app/store/keymodel.ts:555-581`](../../frontend/app/store/keymodel.ts#L555-L581)) toggles voice independent of button position — no change needed, but its click semantics must stay in sync with `MicButton.tsx:46-63` if that logic is ever touched.
+- The global `Ctrl+Shift+V` shortcut ([`frontend/app/store/keymodel.ts:555-581`](../../frontend/app/store/keymodel.ts)) toggles voice independent of button position — no change needed, but its click semantics must stay in sync with `MicButton.tsx:46-63` if that logic is ever touched.
 - No z-index conflict expected: the composer's `.slash-autocomplete` dropdown opens *above* the input (`_slash.scss:84-88`, `bottom: calc(100% + 2px)`), so a mic pinned at the input's right edge doesn't compete with it.
 - `MicButton`'s internal `<Show>` (line 73) hides it entirely when voice is unavailable — the composer layout must not reserve fixed space assuming the icon is always present (avoid hard-coding a permanent gap that looks empty when voice is off).
 
