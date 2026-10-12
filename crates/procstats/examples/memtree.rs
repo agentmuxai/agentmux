@@ -161,6 +161,16 @@ fn tree<'a>(all: &'a [ProcInfo], root: &'a ProcInfo) -> Vec<&'a ProcInfo> {
     out
 }
 
+/// Whether `stem` names a pane root. Linux reports the kernel's `comm`,
+/// cut to 15 characters ("agentmux-bashwrap" reads "agentmux-bashwr"),
+/// so a 15-character name also matches a root it is the start of.
+fn is_pane_root<'a>(stem: &str, roots: impl IntoIterator<Item = &'a str>) -> bool {
+    const COMM_LEN: usize = 15;
+    roots
+        .into_iter()
+        .any(|r| r == stem || (stem.len() == COMM_LEN && r.starts_with(stem)))
+}
+
 /// The executable's name, lowercased, without `.exe`.
 fn stem(name: &str) -> String {
     let lower = base_name(name).to_lowercase();
@@ -299,7 +309,7 @@ fn list(needle: &str) -> std::io::Result<()> {
     // copies of the app.
     let matches = |p: &ProcInfo| {
         p.name.to_lowercase().contains(needle)
-            && !DEFAULT_PANE_ROOTS.contains(&stem(&p.name).as_str())
+            && !is_pane_root(&stem(&p.name), DEFAULT_PANE_ROOTS.iter().copied())
     };
     for root in all.iter().filter(|p| matches(p)) {
         if all.iter().any(|q| root.is_child_of(q) && matches(q)) {
@@ -409,7 +419,7 @@ fn main() {
                 .iter()
                 .any(|q| in_pane.contains(&q.key()) && p.is_child_of(q));
             let pane = p.pid != root.pid
-                && (parent_in_pane || pane_roots.contains(stem(&p.name).as_str()));
+                && (parent_in_pane || is_pane_root(&stem(&p.name), pane_roots.iter().copied()));
             if pane {
                 in_pane.insert(p.key());
             }
