@@ -22,7 +22,7 @@ Spec covers UX, backend RPCs (one new + one helper), frontend component breakdow
 
 ## Current state
 
-The editor pane (`frontend/app/view/editor/`) is ~380 lines across four files:
+The editor pane ([`frontend/app/view/editor/`](../../frontend/app/view/editor)) is ~380 lines across four files:
 
 | File | Role |
 |------|------|
@@ -164,7 +164,7 @@ Buttons are 24×24 px, transparent background, icon-only. Hover gives a subtle b
 
 #### Tooltips — **0 ms show delay**
 
-Use the existing **`data-tip` CSS pattern** that the status bar already uses (`frontend/app/statusbar/StatusBar.scss`). It's a pure-CSS `:hover::after` reveal with `content: attr(data-tip)` — **no JS, no delay, no animation**. Mouse enters the button → tooltip is visible the same frame.
+Use the existing **`data-tip` CSS pattern** that the status bar already uses ([`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss)). It's a pure-CSS `:hover::after` reveal with `content: attr(data-tip)` — **no JS, no delay, no animation**. Mouse enters the button → tooltip is visible the same frame.
 
 The toolbar's SCSS adds a scoped `[data-tip]:hover::after` block (don't reach for the existing status-bar one — keep scope tight to the editor). Markup is plain:
 
@@ -247,8 +247,8 @@ Resolved server-side via Rust `dirs::home_dir()` (already a dependency). Lets th
 
 | File | Role |
 |------|------|
-| `frontend/app/view/editor/file-tree.tsx` | `FileTree` component — recursive tree rendering, expand/collapse state, click handlers |
-| `frontend/app/view/editor/file-tree-model.ts` | Tree state — Map of `path → { expanded, loading, entries }`; lazy-load on expand |
+| [`frontend/app/view/editor/file-tree.tsx`](../../frontend/app/view/editor/file-tree.tsx) | `FileTree` component — recursive tree rendering, expand/collapse state, click handlers |
+| [`frontend/app/view/editor/file-tree-model.ts`](../../frontend/app/view/editor/file-tree-model.ts) | Tree state — Map of `path → { expanded, loading, entries }`; lazy-load on expand |
 | `frontend/app/view/editor/file-tree-types.ts` | `DirEntry`, tree node types |
 
 ### Files modified

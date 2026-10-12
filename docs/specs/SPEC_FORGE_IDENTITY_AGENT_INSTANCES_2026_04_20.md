@@ -219,6 +219,6 @@ A portable `.agentbundle` file (gzipped JSON):
 | `agentmux-srv/src/backend/storage/migrations.rs` | Add migration v6 |
 | `agentmux-srv/src/backend/rpc_types.rs` | New RPC commands for identity CRUD, instance CRUD, bundle export/import |
 | `agentmux-srv/src/server/forge_handlers.rs` | Implement new handlers |
-| `frontend/app/view/identity/identity-model.ts` | Replace localStorage with DB-backed RPCs |
-| `frontend/app/view/agent/agent-model.ts` | Track instance on launch; support branch |
+| [`frontend/app/view/identity/identity-model.ts`](../../frontend/app/view/identity/identity-model.ts) | Replace localStorage with DB-backed RPCs |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Track instance on launch; support branch |
 | `frontend/types/gotypes.d.ts` | Add `AgentInstance`, `IdentityAccount` TS types |

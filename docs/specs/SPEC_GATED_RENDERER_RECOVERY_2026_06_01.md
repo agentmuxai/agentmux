@@ -337,14 +337,14 @@ recovery truly zero-loss.
   renderer-level, memory-aware refinement of §4's Chromium-children manager.
 - `SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` — the existing recovery page +
   crash budget this spec extends.
-- `docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md` — the GPU-process FATAL
+- [`docs/analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md`](../analysis/CRASH_GPU_PROCESS_FATAL_2026_05_20.md) — the GPU-process FATAL
   cascade (6 GPU crashes → host `LOG(FATAL)` → 0x80000003 modal). Same
   memory-exhaustion root; different subprocess. The load-shedding in §6.D also
   reduces GPU-process pressure.
-- `docs/retro/retro-portable-rm-running-install-2026-05-28.md` — the 139k-crash
+- [`docs/retro/retro-portable-rm-running-install-2026-05-28.md`](../retro/retro-portable-rm-running-install-2026-05-28.md) — the 139k-crash
   / 884 MB log-spam incident that motivated the rate-limit + crash budget this
   spec preserves.
-- `docs/MEMORY_HEARTBEAT_SPEC.md` — the heartbeat this spec reads from.
+- [`docs/MEMORY_HEARTBEAT_SPEC.md`](../MEMORY_HEARTBEAT_SPEC.md) — the heartbeat this spec reads from.
 
 ---
 

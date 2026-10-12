@@ -63,7 +63,7 @@ restored.**
   `…-27a8ae9b`, fresh DB). The account (`72682785…`) and cwd were the same, so
   the old transcript was on disk and reachable.
 - The frontend launch path sets `"agent:sessionid": continueSid`
-  (`frontend/app/view/agent/agent-model.ts:815`). `continueSid` is empty unless
+  ([`frontend/app/view/agent/agent-model.ts:815`](../../frontend/app/view/agent/agent-model.ts#L815)). `continueSid` is empty unless
   the user picks a "Continue" row. The server-side registry lookup that would
   have supplied the id (`agentmux-srv/src/server/app_api/agent_open.rs:647-667`,
   `agent_live_elsewhere` / `resume_session_id`) is not on that path.

@@ -179,7 +179,7 @@ AgentMuxError::from_io_with_path(&path, err)
 
 ### 5.3 Frontend translator
 
-`frontend/app/errors/catalog.ts`:
+[`frontend/app/errors/catalog.ts`](../../frontend/app/errors/catalog.ts):
 
 ```ts
 export interface ErrorEntry {
@@ -259,7 +259,7 @@ Three PRs:
 - `agentmux-common/src/errors.rs` — the enum + serde derives + `From<std::io::Error>`.
 - `agentmux-common/src/errors_test.rs` — unit tests covering the OS-code routing and serde round-trip.
 - `agentmux-srv` RPC engine: accept both `Result<_, AgentMuxError>` and `Result<_, String>` handlers (wraps strings in `AMX-LEGACY`).
-- `frontend/app/errors/catalog.ts` + `translateError` + `<ErrorBanner>`.
+- [`frontend/app/errors/catalog.ts`](../../frontend/app/errors/catalog.ts) + `translateError` + `<ErrorBanner>`.
 - One use site: the install modal's failure path migrates to render `<ErrorBanner code={...} />` for the `AMX-IO-*` and `AMX-CLI-*` codes the install handler now returns. Everything else keeps the legacy renderer.
 - Tests: install handler returns `AMX-IO-001` on simulated disk-full; install modal renders the friendly message.
 

@@ -48,7 +48,7 @@ processes. Other platforms keep the plain `drop(runtime)`.
 ## 1. The close path today (what *should* happen)
 
 1. **Frontend:** the macOS traffic-light close calls `getApi().closeWindow()`
-   (`frontend/app/window/window-controls.darwin.tsx`).
+   ([`frontend/app/window/window-controls.darwin.tsx`](../../frontend/app/window/window-controls.darwin.tsx)).
 2. **IPC → host:** `close_window` (`commands/window/lifecycle.rs:38`) → on non-Windows,
    `ui_tasks::post_close_window(label)`.
 3. **UI task:** `CloseWindowTask` calls `host.try_close_browser()` (deliberately not
@@ -188,7 +188,7 @@ leaves the others intact and the process alive.
 ## 6. Open questions
 
 - Exact reason the prior macOS `std::process::exit(0)` was reverted (git history /
-  `docs/retro/b9-3-quit-thread-analysis.md`) — what broke, so we don't repeat it.
+  [`docs/retro/b9-3-quit-thread-analysis.md`](../retro/b9-3-quit-thread-analysis.md)) — what broke, so we don't repeat it.
 - Is the symptom intermittent (race) or deterministic? (Earlier in dev, last-window-close
   *did* exit cleanly — so this may be state-dependent: multi-window, a torn-off pane, or a
   pool window present.)
@@ -208,4 +208,4 @@ leaves the others intact and the process alive.
   (task-drop during last-window-closed)
 - `agentmux-cef/src/commands/window/lifecycle.rs:38` (`close_window`)
 - `agentmux-launcher/src/splash_mac.rs:232` (supervisor owns process lifetime)
-- `docs/retro/b9-3-quit-thread-analysis.md` (prior quit-thread analysis)
+- [`docs/retro/b9-3-quit-thread-analysis.md`](../retro/b9-3-quit-thread-analysis.md) (prior quit-thread analysis)

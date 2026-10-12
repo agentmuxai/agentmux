@@ -4,8 +4,8 @@
 **Status:** Implemented (scoped — see §3 for what's deferred) — #2764
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-srv`, `agentmux-common`)
-**Related:** `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
-(the design this implements a slice of), `docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
+**Related:** [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md)
+(the design this implements a slice of), [`docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`](SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md)
 (the confirmed jekt rules this enforces)
 
 ## 1. What shipped

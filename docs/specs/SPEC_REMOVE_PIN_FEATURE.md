@@ -22,7 +22,7 @@ After the change, pinning is no longer a concept. Every tab is a regular tab; ev
 ### Data model
 
 - Workspace type in `agentmux-srv/src/backend/obj.rs:358` has `pub pinnedtabids: Vec<String>`. `tabids` holds the regular tabs. The effective order is `[...pinnedtabids, ...tabids]` (pinned first).
-- `UpdateTabIds(workspaceId, tabIds, pinnedTabIds)` RPC at `frontend/app/store/services.ts:177` — frontend writes both lists.
+- `UpdateTabIds(workspaceId, tabIds, pinnedTabIds)` RPC at [`frontend/app/store/services.ts:177`](../../frontend/app/store/services.ts#L177) — frontend writes both lists.
 - Backend DnD (`agentmux-srv/src/backend/wcore/dnd.rs`) treats the two lists separately when reordering, cross-window tear-off, and validation.
 
 ### UI
@@ -38,11 +38,11 @@ After the change, pinning is no longer a concept. Every tab is a regular tab; ev
 
 | File | Lines | Purpose |
 |---|---|---|
-| `frontend/app/store/command-registry.ts` | 81 | Pin-aware tab list for commands |
-| `frontend/app/store/global.ts` | 74, 830 | `activetabid` fallback + order construction |
-| `frontend/app/store/keymodel.ts` | 158, 242 | `isPinned()` check for some shortcuts + ordered id list |
-| `frontend/app/tab/droppable-tab.tsx` | 31-127 | Pin flag + DnD payload |
-| `frontend/app/tab/tabbar.tsx` | 38-186 | Render, reorder, auto-colour-first-pin |
+| [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) | 81 | Pin-aware tab list for commands |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | 74, 830 | `activetabid` fallback + order construction |
+| [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) | 158, 242 | `isPinned()` check for some shortcuts + ordered id list |
+| [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) | 31-127 | Pin flag + DnD payload |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | 38-186 | Render, reorder, auto-colour-first-pin |
 | `agentmux-srv/src/backend/wcore/dnd.rs` | 61, 118, 130, 158, 166, 171, 267, 296, 304, 309 | Pin-aware DnD accounting |
 | `agentmux-srv/src/backend/obj.rs` | 358, 557, 566 | Schema + tests |
 | `agentmux-srv/src/backend/wcore/mod.rs` | 190 | Tests |
@@ -153,15 +153,15 @@ No separate migration script is required — the lazy drain is sufficient becaus
 
 Frontend:
 
-- [ ] `frontend/app/tab/tabbar.tsx` — remove pin render, togglePin, two-pass For, divider.
-- [ ] `frontend/app/tab/tab.tsx` — remove isPinned prop, pin context-menu item, pinned branches.
-- [ ] `frontend/app/tab/droppable-tab.tsx` — remove isPinned prop/payload.
-- [ ] `frontend/app/tab/tab.scss` — new inter-tab separator using old pinned-spacer look.
-- [ ] `frontend/app/tab/tabbar.scss` — delete `.pinned-tab-spacer`.
-- [ ] `frontend/app/store/global.ts` — drop pinned in active/order fallbacks.
-- [ ] `frontend/app/store/command-registry.ts` — drop pinned concat.
-- [ ] `frontend/app/store/keymodel.ts` — delete `isPinned()`, drop pinned concat.
-- [ ] `frontend/app/store/services.ts` — shrink `UpdateTabIds` signature.
+- [ ] [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — remove pin render, togglePin, two-pass For, divider.
+- [ ] [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) — remove isPinned prop, pin context-menu item, pinned branches.
+- [ ] [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) — remove isPinned prop/payload.
+- [ ] [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) — new inter-tab separator using old pinned-spacer look.
+- [ ] [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) — delete `.pinned-tab-spacer`.
+- [ ] [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) — drop pinned in active/order fallbacks.
+- [ ] [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) — drop pinned concat.
+- [ ] [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) — delete `isPinned()`, drop pinned concat.
+- [ ] [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts) — shrink `UpdateTabIds` signature.
 
 Backend:
 

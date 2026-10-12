@@ -22,7 +22,7 @@ AgentMux runs as **three cooperating processes** on the same machine, plus the r
 | **launcher** (`agentmux-launcher`) | top-level native Rust binary; spawns srv + host under Job Object J0 (KILL_ON_JOB_CLOSE); runs launcher reducer + saga coordinator | window/pane state machine, pool of pre-warmed CEF windows, IPC pipes |
 | **srv** (`agentmux-srv`, sidecar) | RPC server for the renderer; state-of-record | workspaces, tabs, blocks, controllers, srv saga durability log |
 | **host** (`agentmux-cef`, CEF main) | CEF process; spawns + manages CEF render workers; executes window/pane operations on launcher's behalf | live CEF state — render-worker pool, per-pane DevTools, browser profiles |
-| **renderer** (`frontend/`, JS/TS) | UI inside each CEF render worker | client-side view-model; sends RPCs to srv |
+| **renderer** ([`frontend/`](../../frontend), JS/TS) | UI inside each CEF render worker | client-side view-model; sends RPCs to srv |
 
 These processes share state through **named-pipe IPC** (Windows; UDS on other OSes) carrying a stream of `Command` requests and `Event` responses, both encoded as newline-delimited JSON.
 

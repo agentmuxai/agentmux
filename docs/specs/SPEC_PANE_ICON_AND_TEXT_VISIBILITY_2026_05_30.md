@@ -143,16 +143,16 @@ Default terminal/agent font size goes from 12/13 → **15** for first-launch use
 
 | File | Change |
 |---|---|
-| `frontend/app/theme.scss` | `--header-icon-size` and `--header-icon-width` only — **`--header-height` is NOT touched** |
-| `frontend/app/block/block.scss` | `.block-frame-end-icons .wave-iconbutton` width + icon size; verify view-icon dim is preserved |
-| `frontend/app/element/iconbutton.scss` | `.wave-iconbutton` rest opacity 0.7 → 0.85 |
-| `frontend/app/block/blockframe.tsx` | Default end-icon `icon` strings: prefix `xmark-large`, `circle-plus` with the sharp-solid class (via `makeIconClass` — confirm it already routes `fa-sharp` for "solid sharp" entries, otherwise pass an explicit prefix) |
-| `frontend/app/tab/tabbar.tsx` | Inline SVG `width`/`height`/`viewBox`/rect dims for hamburger |
-| `frontend/app/tab/tabbar.scss` | `.hamburger-btn` width/height |
+| [`frontend/app/theme.scss`](../../frontend/app/theme.scss) | `--header-icon-size` and `--header-icon-width` only — **`--header-height` is NOT touched** |
+| [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) | `.block-frame-end-icons .wave-iconbutton` width + icon size; verify view-icon dim is preserved |
+| [`frontend/app/element/iconbutton.scss`](../../frontend/app/element/iconbutton.scss) | `.wave-iconbutton` rest opacity 0.7 → 0.85 |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Default end-icon `icon` strings: prefix `xmark-large`, `circle-plus` with the sharp-solid class (via `makeIconClass` — confirm it already routes `fa-sharp` for "solid sharp" entries, otherwise pass an explicit prefix) |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | Inline SVG `width`/`height`/`viewBox`/rect dims for hamburger |
+| [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) | `.hamburger-btn` width/height |
 | `frontend/app/view/term/termSettingsMenu.ts` | Default font size 12 → 15 |
-| `frontend/app/view/term/termViewModel.ts` | Default font size fallback 12 → 15 |
-| `frontend/app/view/agent/agent-view.scss` | `--termfontsize` fallback 13 → 15 |
-| `frontend/app/view/term/term.scss` | Status row 10 → 12 |
+| [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts) | Default font size fallback 12 → 15 |
+| [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) | `--termfontsize` fallback 13 → 15 |
+| [`frontend/app/view/term/term.scss`](../../frontend/app/view/term/term.scss) | Status row 10 → 12 |
 
 No Rust changes. No backend changes. No new components.
 

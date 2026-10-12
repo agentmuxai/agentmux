@@ -170,7 +170,7 @@ the memory reinjection.
 Only `PreToolUse(Bash)` and `PreCompact` (`agentmux-bashwrap precompact`, a
 "compaction started" ping) are installed (`agent_config.rs`,
 `agent-config-builder.ts`). **There is no `SessionStart` hook.** (The
-`SessionStart` matches in `frontend/app/store/agent-document/` are the
+`SessionStart` matches in [`frontend/app/store/agent-document/`](../../frontend/app/store/agent-document) are the
 reducer's own session events, not Claude Code hooks.)
 
 ## 4. Coverage today, and what has been verified
@@ -443,7 +443,7 @@ P0–P2 are done (P2 awaits live verification); P3–P5 not started.
   - memory following an agent across accounts/channels: `SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md`;
   - export/import: `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`, #3148;
   - the Armory Memory UI specs;
-  - `docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md`.
+  - [`docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md`](../status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md).
 
 ### 8.3 Issues
 

@@ -4,7 +4,7 @@
 **Status:** superseded by `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (same day): the window-level controller and `fileDrop` manifest hook carry over there as §5.3, terminal panes join phase 1, and the thick-border look is replaced by the established drop-zone pattern (§4 there). Kept for history. Written against `main` @ `ade4ea16f`; file:line citations are from that commit.
 **Superseded-by:** ./SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md
 **Author:** Korp@narko
-**Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop into Terminal and Agent panes: the CEF drag handler, the path stash, copy to the working folder), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` and `SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with a drop), `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md` (why a window-level drop guard exists), `SPEC_PANE_TAB_CONTRACT_V1` (the pane manifest this extends).
+**Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop into Terminal and Agent panes: the CEF drag handler, the path stash, copy to the working folder), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` and `SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with a drop), [`docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`](../retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md) (why a window-level drop guard exists), `SPEC_PANE_TAB_CONTRACT_V1` (the pane manifest this extends).
 
 ---
 
@@ -19,10 +19,10 @@
   - The agent pane listens on `.agent-view` (`useAgentDropAttach.ts:104-126`, `:261-268`).
   - The terminal pane listens on `.view-term` (`term.tsx:374-439`).
   - Both cover only the pane's content. A drop on the pane header or its tab strip isn't handled.
-- **Detecting a file drag.** `isFileDrag(e)` checks `dataTransfer.types` for `"Files"` (`frontend/util/dnd.ts:87-90`). Internal drags carry no `"Files"`, so the check can't misfire on them. Pane moves, pane tabs and window tabs all use pragmatic-dnd (`setData("application/vnd.pdnd")`), and the drone canvas uses `application/x-drone-kind`.
+- **Detecting a file drag.** `isFileDrag(e)` checks `dataTransfer.types` for `"Files"` ([`frontend/util/dnd.ts:87-90`](../../frontend/util/dnd.ts#L87-L90)). Internal drags carry no `"Files"`, so the check can't misfire on them. Pane moves, pane tabs and window tabs all use pragmatic-dnd (`setData("application/vnd.pdnd")`), and the drone canvas uses `application/x-drone-kind`.
 - **Paths.** CEF's drag handler stashes the OS paths on drag-enter (`agentmux-cef/src/client/handlers.rs:162-178`, `drag_stash.rs`). The pane fetches them on drop with `consumeDragPaths()` (`dnd.ts:29-36`).
-- **The window guard.** `installGlobalDropGuard()` (`frontend/app-init.ts:1029-1036`) prevents the default action for any file drag that no pane handles, so a stray drop can't navigate the window. Every window, including floaters and tear-offs, runs it.
-- **Pane chrome.** Every pane's root is `div.pane-stack[data-role="pane"][data-blockid]` (`frontend/app/element/PaneChrome.tsx:390-397`). Its ring is `.pane-stack::after` with a `2px solid` border, in `--border-color` or the focused `--accent-color` (`PaneChrome.scss:42-56`). The ring is hidden when the pane is alone in its tab (`:68-70`).
+- **The window guard.** `installGlobalDropGuard()` ([`frontend/app-init.ts:1029-1036`](../../frontend/app-init.ts#L1029-L1036)) prevents the default action for any file drag that no pane handles, so a stray drop can't navigate the window. Every window, including floaters and tear-offs, runs it.
+- **Pane chrome.** Every pane's root is `div.pane-stack[data-role="pane"][data-blockid]` ([`frontend/app/element/PaneChrome.tsx:390-397`](../../frontend/app/element/PaneChrome.tsx#L390-L397)). Its ring is `.pane-stack::after` with a `2px solid` border, in `--border-color` or the focused `--accent-color` (`PaneChrome.scss:42-56`). The ring is hidden when the pane is alone in its tab (`:68-70`).
 - **Two gaps the highlight would expose:**
   - **Windows floating panes can't take a drop.** They are built with `is_browser_pane = true` (`agentmux-cef/src/floating_pane.rs:246-250`, `:468-472`), and `drag_handler()` returns `None` for such clients (`handlers.rs:57-60`). Paths are never stashed, and the drop fails with "Couldn't read the OS paths".
   - **Native browser panes paint above the renderer.** While the cursor is over one, the renderer gets no drag events (`frontend/app/drag/element-drag-state.ts:8-13`).

@@ -9,7 +9,7 @@ Related: `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md`
 
 ## Problem
 
-The editor pane's file tree (`frontend/app/view/editor/file-tree.tsx`) supports
+The editor pane's file tree ([`frontend/app/view/editor/file-tree.tsx`](../../frontend/app/view/editor/file-tree.tsx)) supports
 single-click (preview open) and double-click (pin tab) — nothing else. Users have
 no way to create, rename, delete, or copy file paths from inside the tree. Every
 such action requires switching to a terminal. This is a significant friction point

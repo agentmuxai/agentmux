@@ -3,8 +3,8 @@
 **Date:** 2026-09-27
 **Status:** implemented — #3919 (spec #3916; see §7 for where the implementation differs from the first draft)
 **Author:** Manoz
-**Repos touched:** `agentmux` (`agentmux-srv/src/backend/shellintegration/muxlog.mjs`, `docs/MUXLOG.md`)
-**Related:** `docs/MUXLOG.md`; `SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md` (same "recipe + verdict" pattern); the one-live-instance-per-agent work and its take-over fixes (#3897, #3899, #3903, #3908)
+**Repos touched:** `agentmux` (`agentmux-srv/src/backend/shellintegration/muxlog.mjs`, [`docs/MUXLOG.md`](../MUXLOG.md))
+**Related:** [`docs/MUXLOG.md`](../MUXLOG.md); `SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md` (same "recipe + verdict" pattern); the one-live-instance-per-agent work and its take-over fixes (#3897, #3899, #3903, #3908)
 
 ## 1. Problem
 
@@ -70,7 +70,7 @@ That table is exactly what one command should print.
 
 ### 3.5 Docs
 
-`docs/MUXLOG.md`: document `--instances`, `--agent`, `--until`, the rotated-file behavior, and the `admission` recipe, with this incident as the worked example.
+[`docs/MUXLOG.md`](../MUXLOG.md): document `--instances`, `--agent`, `--until`, the rotated-file behavior, and the `admission` recipe, with this incident as the worked example.
 
 ## 4. Acceptance
 

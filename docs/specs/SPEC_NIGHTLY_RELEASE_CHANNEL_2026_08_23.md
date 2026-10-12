@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-23 (revised twice same-day — see §0 and §0.1)
 **Status:** Draft — spec only, no implementation yet
-**Scope:** agentmuxai/agentmux (new `.github/workflows/nightly-release.yml`,
+**Scope:** agentmuxai/agentmux (new [`.github/workflows/nightly-release.yml`](../../.github/workflows/nightly-release.yml),
 tag-and-push only — no email code lives here). Landing page
 (`agentmuxai/agentmux-landing`) is now **in scope as a consequence**, not as
 new work — see §6. Notification is delivered by extending the existing
@@ -193,7 +193,7 @@ worried about doesn't arise in the new design at all.
 
 ### 3.1 `ci-nightly-build.yml` — still the quality gate
 
-`.github/workflows/ci-nightly-build.yml` (`schedule: '0 7 * * *'` UTC +
+[`.github/workflows/ci-nightly-build.yml`](../../.github/workflows/ci-nightly-build.yml) (`schedule: '0 7 * * *'` UTC +
 `workflow_dispatch`) runs `cargo build --release --workspace` +
 `cargo test --workspace` + `vitest` across windows/ubuntu/macos, Windows
 required/blocking, Linux/macOS `continue-on-error`. This remains the
@@ -230,7 +230,7 @@ changesets at all. By the time nightly runs, `task release` already
 consumed and deleted them, and already wrote their content into
 `VERSION_HISTORY.md`'s new top section as part of the `chore: release`
 commit (confirmed structure, see §5.5). Nightly's email sources from that
-file, not from `.changesets/`.
+file, not from [`.changesets/`](../../.changesets).
 
 ### 3.4 No email infrastructure in this repo — and none is needed (§0.1)
 
@@ -574,9 +574,9 @@ exactly the intended effect.
 
 | File | Repo | Action |
 |---|---|---|
-| `.github/workflows/nightly-release.yml` | agentmuxai/agentmux | **Create** — the single detect-and-tag job described in §5.1; no email code |
-| `.github/workflows/release.yml`, `container-image.yml` | agentmuxai/agentmux | **No change** — nightly pushes a tag matching their existing patterns exactly, by design |
-| `.github/workflows/build-windows.yml` / `build-linux.yml` / `build-macos.yml` | agentmuxai/agentmux | **No change** — never invoked directly by nightly at all (§5.4) |
+| [`.github/workflows/nightly-release.yml`](../../.github/workflows/nightly-release.yml) | agentmuxai/agentmux | **Create** — the single detect-and-tag job described in §5.1; no email code |
+| [`.github/workflows/release.yml`](../../.github/workflows/release.yml), `container-image.yml` | agentmuxai/agentmux | **No change** — nightly pushes a tag matching their existing patterns exactly, by design |
+| [`.github/workflows/build-windows.yml`](../../.github/workflows/build-windows.yml) / `build-linux.yml` / `build-macos.yml` | agentmuxai/agentmux | **No change** — never invoked directly by nightly at all (§5.4) |
 | `agentmux-landing` (any file) | agentmuxai/agentmux-landing | **No change** — §6 |
 | Scheduled internal report (outside this repo) | internal | **Modify** — add the `nightly_release` section: `nightly-release.yml` run polling + `releases/latest` check, and move its schedule later (§5.5) |
 

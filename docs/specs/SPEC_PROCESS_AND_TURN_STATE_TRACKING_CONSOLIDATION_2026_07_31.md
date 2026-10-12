@@ -18,10 +18,10 @@ The user's diagnosis is correct, and it's a pattern, not a coincidence: **this a
 | # | Mechanism | What it tracks | Where it lives | Status found this session |
 |---|-----------|-----------------|----------------|---------------------------|
 | A | `agentmux-bashwrap` idle-timeout | Raw PTY byte silence for a wrapped OS process | `agentmux-bashwrap/src/bash_wrap.rs` | Working as designed for its original case (pager hangs); **false-positive on GUI/daemon launches** — fixed operationally this session (§2) |
-| B | `ActivityDock` | Conversation-transcript `ToolNode`/`ShellNode` status | `frontend/app/view/agent/components/ActivityDock.tsx` + adapters | No OS visibility at all — **by design**, but this makes it invisible to a detached process (§2) and vulnerable to orphaned entries (§3) |
+| B | `ActivityDock` | Conversation-transcript `ToolNode`/`ShellNode` status | [`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) + adapters | No OS visibility at all — **by design**, but this makes it invisible to a detached process (§2) and vulnerable to orphaned entries (§3) |
 | C | `AgentProcessRegistry` | Real OS processes inside the agent's own Job Object | `agentmux-srv/src/backend/process_tracker/registry.rs` | Separate data model from B — "none of them talk to each other" (already named in `REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` §2.3/§2.5) |
 | D | Background-task/task-notification bookkeeping | Whether a `run_in_background` Bash tool call has finished | Tied to the Claude Code process's own lifecycle | **Newly observed this session: does not survive a session/process restart**, even when the underlying OS process does (§4) |
-| E | Agent-pane `TurnPhase` reducer + `settled-grace.ts` + liveness watchdog | Is the agent "Working" on the current turn | `frontend/app/store/agent-pane-state/reducer.ts`, `frontend/app/view/agent/settled-grace.ts` | **Confirmed real gap: can get stuck "Working" indefinitely** when resumption rounds are tool-call-only and arrive faster than the 3-minute watchdog (§5) — **fix already fully designed, not yet implemented** |
+| E | Agent-pane `TurnPhase` reducer + `settled-grace.ts` + liveness watchdog | Is the agent "Working" on the current turn | [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts), `frontend/app/view/agent/settled-grace.ts` | **Confirmed real gap: can get stuck "Working" indefinitely** when resumption rounds are tool-call-only and arrive faster than the 3-minute watchdog (§5) — **fix already fully designed, not yet implemented** |
 
 None of A–E were built together or share a design. Each was added independently to solve one narrow, previously-reported symptom (a pager hang, a dock-visibility spec, a process-registry badge, background-task result delivery, a stuck turn indicator) — and each one's own "is it still alive" heuristic is different: PTY byte counts, transcript message shape, OS Job Object membership, the calling process's own lifetime, and message-content-block classification, respectively. That's the actual root cause behind "it seems like they are always leaking": **there is no single answer anywhere in this codebase to "is X still running," so every consumer maintains its own approximation, and every approximation has edge cases.**
 
@@ -45,13 +45,13 @@ Full writeup: `RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md`.
   )
   ```
   This is independently-precedented — another agent session solved the identical problem the same way (`retro-persistent-agent-working-status-stuck-2026-07-16.md`), without either session knowing about the other's fix. **That itself is a symptom of the root problem**: the correct workaround has now been rediscovered twice because it isn't written down anywhere a caller would find it before hitting the bug.
-- **Status:** fixed operationally (no app code changed). Follow-up (not yet done): bake the heartbeat into `scripts/dev-agent.cmd` itself, and/or document the pattern in `CLAUDE.md`, so a third rediscovery doesn't happen.
+- **Status:** fixed operationally (no app code changed). Follow-up (not yet done): bake the heartbeat into [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) itself, and/or document the pattern in `CLAUDE.md`, so a third rediscovery doesn't happen.
 
 ---
 
 ## 3. Mechanism B — orphaned `ToolNode`s never resolve mid-session
 
-- **The bug:** a Bash tool call rejected by the harness *before* it ever runs (e.g. a built-in guardrail against standalone `sleep <N>` — confirmed external to this repo; no matching validator exists anywhere in `agentmux-srv`/`agentmux-bashwrap`'s source) can leave its `ToolNode` permanently at `status: "running"` in the dock. The only cleanup, `scrubOrphanedInProgress` (`frontend/app/store/agent-document/reducer.ts`), only runs at a session boundary (`SessionEnd`, `HistoryRestored`, `HistoryLoaded`) — not immediately when the rejection happens.
+- **The bug:** a Bash tool call rejected by the harness *before* it ever runs (e.g. a built-in guardrail against standalone `sleep <N>` — confirmed external to this repo; no matching validator exists anywhere in `agentmux-srv`/`agentmux-bashwrap`'s source) can leave its `ToolNode` permanently at `status: "running"` in the dock. The only cleanup, `scrubOrphanedInProgress` ([`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts)), only runs at a session boundary (`SessionEnd`, `HistoryRestored`, `HistoryLoaded`) — not immediately when the rejection happens.
 - **Why:** the dock's entire model is "trust the transcript's own status field, with no independent liveness check" — the same root pattern as every other row in the table in §1.
 - **Status:** diagnosed, not fixed. See §7 for a proposed direction (a max-age fallback even for `"running"` status).
 
@@ -116,7 +116,7 @@ Mechanisms A–E in §1 are the frontend/process-tracking analogue of exactly th
 ## 7. Open items (not fixed by this spec, flagged for follow-up)
 
 - [x] ~~Implement `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md`~~ — already merged (PR #2369), see §5.4.
-- [ ] Bake the heartbeat-loop pattern (§2) into `scripts/dev-agent.cmd` itself, or document it prominently in `CLAUDE.md`, so it isn't rediscovered a third time.
+- [ ] Bake the heartbeat-loop pattern (§2) into [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) itself, or document it prominently in `CLAUDE.md`, so it isn't rediscovered a third time.
 - [ ] Give `scrubOrphanedInProgress` (or a new mechanism) a way to expire an orphaned `"running"` `ToolNode` sooner than the next session boundary (§3).
 - [ ] Mechanism D (§4) has no fix available from inside this repo — document as a standing operational caveat: cross-check ground truth (`tasklist`/`muxlog`) before trusting a background-task "no completion record"/"failed" notification.
 - [ ] Add the distinct "long-running attached process" pane status (§6, item 2).

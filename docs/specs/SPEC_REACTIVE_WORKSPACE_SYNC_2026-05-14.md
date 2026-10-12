@@ -29,11 +29,11 @@ For comparison: **window display-name renames work fine** — they go through a 
 
 | # | Layer | File:line | What happens |
 |---|-------|-----------|--------------|
-| 1 | Frontend mutation call | `frontend/app/store/services.ts:172-173` | `WorkspaceService.UpdateWorkspace(workspaceId, name)` over RPC |
+| 1 | Frontend mutation call | [`frontend/app/store/services.ts:172-173`](../../frontend/app/store/services.ts#L172-L173) | `WorkspaceService.UpdateWorkspace(workspaceId, name)` over RPC |
 | 2 | Backend RPC handler | `agentmux-srv/src/server/service.rs:1274-1307` | Dispatches `RenameWorkspace` → reducer; applies emitted `WorkspaceRenamed` event to SQLite via `apply_event_to_wstore` (line 1298); publishes event to internal `srv_events_tx` channel (line 1305); **returns `WebReturnType::success_empty()` (line 1306)** ← bug |
 | 3 | Response broadcast loop | `agentmux-srv/src/server/service.rs:39-52` | Iterates `result.updates` and broadcasts each to all connected WS clients as `waveobj:update`. **Empty response → nothing to broadcast.** |
 | 4 | Frontend WS event handler | `frontend/app/store/wos.ts:259-279` | `updateWaveObject()` would call `wov.setData()`, triggering SolidJS signal reactivity. **Never invoked because no event arrives.** |
-| 5 | Reactive consumers | `frontend/app/store/global.ts:62-66` (`atoms.workspace()`), `frontend/app-init.ts:518-544` (title effect), `frontend/app/statusbar/InstancePanel.tsx:142-153` (panel `resolveName`) | All depend on the WOS-cached `Workspace` signal. **Signal never changes → memos/effects never re-run.** |
+| 5 | Reactive consumers | [`frontend/app/store/global.ts:62-66`](../../frontend/app/store/global.ts#L62-L66) (`atoms.workspace()`), [`frontend/app-init.ts:518-544`](../../frontend/app-init.ts#L518-L544) (title effect), [`frontend/app/statusbar/InstancePanel.tsx:142-153`](../../frontend/app/statusbar/InstancePanel.tsx#L142-L153) (panel `resolveName`) | All depend on the WOS-cached `Workspace` signal. **Signal never changes → memos/effects never re-run.** |
 
 ### 2.2 Why `window:displayname` works (the working comparison)
 

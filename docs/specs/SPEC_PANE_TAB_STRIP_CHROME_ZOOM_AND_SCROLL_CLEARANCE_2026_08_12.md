@@ -28,14 +28,14 @@ fixed, not yet independently re-verified live a third time. History: — #2566
    the padding-top fix is to drop the zoom multiplication entirely (same
    reason). Terminal was re-checked and confirmed to have no ambient
    `zoom` anywhere in its tree, so its wiring was correct as shipped.
-**Related:** `docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md` (agent
-strip floats over content), `docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`
+**Related:** [`docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`](SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md) (agent
+strip floats over content), [`docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`](SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md)
 (shipped — made the agent strip a full-width, 28px-tall blurred band,
 which is what makes Part B below worse than before that change),
-`docs/specs/zoom-architecture.md` (stale — see §A.0).
+[`docs/specs/zoom-architecture.md`](zoom-architecture.md) (stale — see §A.0).
 
 This is two related asks from the same conversation, both about
-`frontend/app/element/PaneTabStrip.tsx`/`.scss`. They're bundled in one
+[`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx)/`.scss`. They're bundled in one
 doc because Part B's fix needs a value Part A introduces (the strip's
 real height as a computable formula) — implementing B first with a
 hardcoded `28px` would just go stale the moment A ships.
@@ -56,7 +56,7 @@ implementations, all reading the same underlying meta key but computed
 differently per pane type:
 
 - **Agent**: `zoomFactor` — a `createMemo` inside `AgentPresentationView`
-  (`frontend/app/view/agent/agent-view.tsx:1772-1777`):
+  ([`frontend/app/view/agent/agent-view.tsx:1772-1777`](../../frontend/app/view/agent/agent-view.tsx#L1772-L1777)):
   ```ts
   const zoomFactor = createMemo(() => {
       const meta = block()?.meta;
@@ -89,7 +89,7 @@ neighbor at 100%. That's the intended behavior for content zoom, not a
 bug (chrome zoom would've kept them uniform; that's not what was asked
 for here).
 
-`docs/specs/zoom-architecture.md` is stale (references `wave.ts`/
+[`docs/specs/zoom-architecture.md`](zoom-architecture.md) is stale (references `wave.ts`/
 `blockframe.tsx`/`tab.scss`, none of which match current file names) —
 treat it as history either way, not a guide for this change.
 
@@ -255,18 +255,18 @@ render its tabs at `1.5² = 2.25×`.
 
 ## A.5 Files touched
 
-- `frontend/app/element/PaneTabStrip.tsx` — new `zoomFactor?: Accessor<number>`
+- [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx) — new `zoomFactor?: Accessor<number>`
   prop; wrap `<For>`+`<Show>` in `.pane-tab-strip-inner`; set
   `--pane-tab-strip-zoom` inline on the outer div.
-- `frontend/app/element/PaneTabStrip.scss` — split base rule per §A.2.
-- `frontend/app/theme.scss` — `--pane-tab-strip-height: 28px` (unchanged
+- [`frontend/app/element/PaneTabStrip.scss`](../../frontend/app/element/PaneTabStrip.scss) — split base rule per §A.2.
+- [`frontend/app/theme.scss`](../../frontend/app/theme.scss) — `--pane-tab-strip-height: 28px` (unchanged
   from the prior draft — still needed, still not zoom-related itself).
 - `frontend/app/view/editor/editor-tab-strip.tsx` — touched, but
   deliberately does **not** pass `zoomFactor` (§A.3 correction) — a
   comment explaining why, so a future reader doesn't "fix" the
   omission.
-- `frontend/app/view/term/term.tsx` — pass `zoomFactor={model.termZoomAtom}`.
-- `frontend/app/view/agent/agent-view.tsx` — new `tabStripZoomFactor`
+- [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) — pass `zoomFactor={model.termZoomAtom}`.
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — new `tabStripZoomFactor`
   memo in `AgentViewWrapper`, keyed off `activeBlockId()`, passed to the
   `<PaneTabStrip>` call.
 - **No `theme.scss`/global `--zoomfactor` involvement at all** — that
@@ -298,7 +298,7 @@ they render permanently underneath the strip.
 
 ## B.1 Root cause
 
-`.agent-document` (`frontend/app/view/agent/styles/_document.scss:100-141`)
+`.agent-document` ([`frontend/app/view/agent/styles/_document.scss:100-141`](../../frontend/app/view/agent/styles/_document.scss#L100-L141))
 had only 2px of top clearance (`var(--space-0-5)`) against a 28px-tall
 strip — the first `.agent-document-row` rendered essentially flush to
 y=0, directly behind the strip's full width, whenever the conversation
@@ -310,7 +310,7 @@ didn't overflow past ~26px of missing clearance.
 targeting, not resting layout — a conversation that never scrolls never
 triggers a scroll operation, so it would do nothing for exactly the case
 being fixed. (Zero existing uses of `scroll-padding` anywhere in
-`frontend/` either way — not an established pattern here.)
+[`frontend/`](../../frontend) either way — not an established pattern here.)
 
 This codebase already solves the identical problem symmetrically at the
 *bottom* of the same scroll region: `AgentWorkingRow` floats over the
@@ -377,7 +377,7 @@ row for `PaneTabStrip` — no overlap, no gap to fix there.
 
 ## B.5 Files touched
 
-- `frontend/app/view/agent/styles/_document.scss` — `padding-top` (§B.3),
+- [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) — `padding-top` (§B.3),
   corrected alongside Part A to reference `--agent-pane-zoom`.
 
 ---

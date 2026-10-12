@@ -52,7 +52,7 @@ The `column` footer direction keeps the primary action (typically `submit` / `gr
 
 ## 3. Per-panel opt-in (the rare case)
 
-The compact rules live in `frontend/app/element/modal.scss` keyed on the universal chrome classes (`.modal-panel-*`). All consumers that use the canonical chrome get the variant for free — no per-panel JS needed.
+The compact rules live in [`frontend/app/element/modal.scss`](../../frontend/app/element/modal.scss) keyed on the universal chrome classes (`.modal-panel-*`). All consumers that use the canonical chrome get the variant for free — no per-panel JS needed.
 
 A modal panel that has body content with hard min-widths (e.g., the install modal's xterm at 560×240) must declare its own override. Pattern:
 
@@ -159,7 +159,7 @@ The `:where()` wrapper keeps the *wrapper* at zero specificity so per-panel SCSS
 
 ### 6.2 Component test
 
-`frontend/app/element/ModalLayer.test.tsx` (new file) renders `<ModalLayer scope="pane">` with a wrapping div of variable width, asserts `.modal-layer-mount--compact` toggles correctly. Use `ResizeObserver` mock; advance dimensions; check class.
+[`frontend/app/element/ModalLayer.test.tsx`](../../frontend/app/element/ModalLayer.test.tsx) (new file) renders `<ModalLayer scope="pane">` with a wrapping div of variable width, asserts `.modal-layer-mount--compact` toggles correctly. Use `ResizeObserver` mock; advance dimensions; check class.
 
 ## 7. Out of scope
 
@@ -171,10 +171,10 @@ The `:where()` wrapper keeps the *wrapper* at zero specificity so per-panel SCSS
 ## 8. Delivery
 
 Single PR:
-- `frontend/app/element/ModalLayer.tsx` — add ResizeObserver + class toggle.
-- `frontend/app/element/modal.scss` — append `:where(.modal-layer-mount--compact)` ruleset.
+- [`frontend/app/element/ModalLayer.tsx`](../../frontend/app/element/ModalLayer.tsx) — add ResizeObserver + class toggle.
+- [`frontend/app/element/modal.scss`](../../frontend/app/element/modal.scss) — append `:where(.modal-layer-mount--compact)` ruleset.
 - `frontend/app/view/agent/components/AgentInstallModal.scss` — relax `.agent-install-modal-body` `min-width` in compact mode (xterm-specific).
-- `frontend/app/element/ModalLayer.test.tsx` — new test.
+- [`frontend/app/element/ModalLayer.test.tsx`](../../frontend/app/element/ModalLayer.test.tsx) — new test.
 - Spec ships with the PR (`feedback_no_doc_only_prs`).
 
 Reagent + codex review. Manual smoke on the verified 240px browser pane scenario.

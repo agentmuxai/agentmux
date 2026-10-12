@@ -6,7 +6,7 @@
 **Related:** `SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md` §2.3 (Swarm select-to-focus),
 `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (token popover → agent pane), the OS-notification
 rich-content spec (`notification:activate`, `os-notify-bridge.ts`), the in-pane tabs work
-(`frontend/layout/lib/layoutStack.ts`, `stackMembers.ts`).
+([`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts), `stackMembers.ts`).
 
 All line numbers are against `main` at `135251326`.
 
@@ -71,7 +71,7 @@ and just lacks the stack step. That's the base to build on.
 
 ### 4.1 One function: `revealBlock`
 
-New module `frontend/app/util/reveal-block.ts`, replacing `focus-block.ts`:
+New module [`frontend/app/util/reveal-block.ts`](../../frontend/app/util/reveal-block.ts), replacing `focus-block.ts`:
 
 ```ts
 export interface RevealOptions {
@@ -134,7 +134,7 @@ itself.** Phase 3 reuses it rather than adding a second mechanism.
 
 **RPC `block.reveal`** (`agentmux-srv/src/server/notify_handlers.rs`, registered next to
 `notify.takeactivation`; params `BlockRevealParams { block_id }`, result
-`BlockRevealResult { found: bool, window_id?: string }`, both ts-rs generated into `frontend/types/rpc/`,
+`BlockRevealResult { found: bool, window_id?: string }`, both ts-rs generated into [`frontend/types/rpc/`](../../frontend/types/rpc),
 client `RpcApi.BlockRevealCommand` in `rpc-api/notify.ts`). It lives with the notification Router because the
 Router is what knows which windows are open (each window's `notify.focus` reports):
 
@@ -156,7 +156,7 @@ launcher does it from the `notify.ack` response — so `revealBlock` raises the 
 `getApi().focusWindow(label)`, the label found by matching `windowId` in `getApi().listWindowInstances()`.
 The caller is the foreground window, which is also the one the OS lets hand focus over.
 
-**Receiving side** (`frontend/app/util/reveal-block-events.ts`, installed once per window in `app-init.ts`
+**Receiving side** ([`frontend/app/util/reveal-block-events.ts`](../../frontend/app/util/reveal-block-events.ts), installed once per window in `app-init.ts`
 next to the notification bridge): subscribes to `block:reveal` and acts only when `window_id` equals this
 window's `windowId()`, calling `revealBlockLocally(block_id, { tabId: tab_id })`.
 

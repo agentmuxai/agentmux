@@ -94,7 +94,7 @@ Browser-pane state is reducer-managed on **both** sides:
   `EnqueueBrowserPaneClose`. The reducer is the authority; `browser_panes.rs`
   is a thin executor. Late IPCs against a `Closing` pane are deliberately
   no-op'd.
-- **Frontend reducer** (`frontend/app/store/browser-pane-state/`) — slice #9;
+- **Frontend reducer** ([`frontend/app/store/browser-pane-state/`](../../frontend/app/store/browser-pane-state)) — slice #9;
   a pane must be `registerPane`'d synchronously in the `BrowserViewModel`
   constructor.
 

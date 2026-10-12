@@ -5,9 +5,9 @@
 **Status:** implemented — PR #3737 (native key-window handoff + split focus + claim-on-create + unhandled-key loop guards). Test plan verified live 2026-09-25 (all items except the background-tab case, which is covered by unit tests).
 **Scope:** `agentmux-cef/src/ui_tasks/{platform_macos,pane_geometry,window}.rs`,
 `agentmux-cef/src/browser_panes/clip.rs` (macOS only), and on the frontend
-`frontend/layout/lib/layoutPersistence.ts` and
-`frontend/app/view/browser/use-pane-rect-sync.ts`.
-**Related:** `docs/analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md` (#1819,
+[`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts) and
+[`frontend/app/view/browser/use-pane-rect-sync.ts`](../../frontend/app/view/browser/use-pane-rect-sync.ts).
+**Related:** [`docs/analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md`](../analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md) (#1819,
 the June click fix this builds on), `SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16.md`
 and `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (claim-on-mount), and
 `SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md` (found in the same

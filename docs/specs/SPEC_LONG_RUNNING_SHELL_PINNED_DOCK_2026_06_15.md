@@ -6,7 +6,7 @@
 **(shell · cron · subagent · …)**
 
 **Date:** 2026-06-15
-**Status:** active — most of it is built. Phase 1 (the shell adapter) shipped in #1428, the PR this doc was added in; `frontend/app/view/agent/activity/` now holds shell, subagent, tool and background adapters, the `PinnedActivity` types of §3, and Part B's auto-detect work (`sleep-detect.ts`, whose own header records that `REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` §4.2 rejected text-matching as the classifier). **Part C (cron / "stays active") has no adapter** — `types.ts` says so directly: `cron` is in `ActivityKind` but nothing produces it.
+**Status:** active — most of it is built. Phase 1 (the shell adapter) shipped in #1428, the PR this doc was added in; [`frontend/app/view/agent/activity/`](../../frontend/app/view/agent/activity) now holds shell, subagent, tool and background adapters, the `PinnedActivity` types of §3, and Part B's auto-detect work (`sleep-detect.ts`, whose own header records that `REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` §4.2 rejected text-matching as the classifier). **Part C (cron / "stays active") has no adapter** — `types.ts` says so directly: `cron` is in `ActivityKind` but nothing produces it.
 **Builds on:** `SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md` (Phases 1–2),
 `SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md` (stop / tree-kill, PR #1422),
 MSYS cwd fix (#1415), and the existing subagent stack
@@ -122,11 +122,11 @@ Status colors/sigils unify in `_shell-node.scss` → renamed/extended to
 ### Components / files
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/ActivityDock.tsx` *(new)* | merges adapters → sorted activity list → rows |
-| `frontend/app/view/agent/components/ActivityRow.tsx` *(new)* | uniform collapsed row + inline `Expanded` slot |
+| [`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) *(new)* | merges adapters → sorted activity list → rows |
+| [`frontend/app/view/agent/components/ActivityRow.tsx`](../../frontend/app/view/agent/components/ActivityRow.tsx) *(new)* | uniform collapsed row + inline `Expanded` slot |
 | `frontend/app/view/agent/activity/adapters.ts` *(new)* | shell / subagent / cron → `PinnedActivity` |
-| `frontend/app/view/agent/agent-view.tsx` | mount `<ActivityDock>` |
-| `frontend/app/view/agent/styles/_shell-node.scss` → `_activity-dock.scss` | shared row/sigil/status styles |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | mount `<ActivityDock>` |
+| [`frontend/app/view/agent/styles/_shell-node.scss`](../../frontend/app/view/agent/styles/_shell-node.scss) → `_activity-dock.scss` | shared row/sigil/status styles |
 | `PersistentShellBlock.tsx`, `SubagentLinkBlock.tsx` | "pinned above" compact mode while running |
 
 ---

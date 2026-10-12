@@ -8,10 +8,10 @@ v2.1.198+: live probes that day showed the pinned CLI now prints the full PKCE a
 our PTY spawn and accepts a pasted code on stdin, auto-completing on browser authorize with no
 paste needed in the happy path. §5.5 (seed-from-global) remains a fast secondary path (no browser
 round-trip when a valid global login exists), but §5.2/§5.6 are revived as the primary flow. See
-`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md` for the current design; §0 below is kept
+[`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md`](SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md) for the current design; §0 below is kept
 verbatim as the historical record of what v2.1.183 actually did and why §5.5 was the only option
 at the time.
-**Related:** SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 (frontend force-login, merged #1604); retro `docs/retro/retro-claude-v2-1-auth-spawn-2026-06-23.md`
+**Related:** SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 (frontend force-login, merged #1604); retro [`docs/retro/retro-claude-v2-1-auth-spawn-2026-06-23.md`](../retro/retro-claude-v2-1-auth-spawn-2026-06-23.md)
 
 ---
 

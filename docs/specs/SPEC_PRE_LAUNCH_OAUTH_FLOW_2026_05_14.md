@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-14
 **Author:** AgentA
-**Status:** implemented — #840 (2026-05-14), the PR this doc was added in. All four of §7's RPCs (`StartProviderAuth`, `PollProviderAuth`, `SubmitAuthCallback`, `CancelProviderAuth`) exist in `identity_handlers.rs` and `frontend/app/store/rpc-api/identity.ts`, with the session manager in `identity/auth_session.rs` and §4's per-provider landscape encoded in `identity/auth_patterns.rs`. §2's "Today's state" describes the world before that PR.
+**Status:** implemented — #840 (2026-05-14), the PR this doc was added in. All four of §7's RPCs (`StartProviderAuth`, `PollProviderAuth`, `SubmitAuthCallback`, `CancelProviderAuth`) exist in `identity_handlers.rs` and [`frontend/app/store/rpc-api/identity.ts`](../../frontend/app/store/rpc-api/identity.ts), with the session manager in `identity/auth_session.rs` and §4's per-provider landscape encoded in `identity/auth_patterns.rs`. §2's "Today's state" describes the world before that PR.
 **Companion to:** [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — that spec covers *where* OAuth tokens are stored and how they refresh. This spec covers *when in the user flow* OAuth happens and how it binds to the agent.
 
 ---
@@ -17,7 +17,7 @@ In short: **auth gates launch**, not the other way around. Today the launch flow
 
 ## 2. Today's state (problem statement)
 
-The launch sequence in `frontend/app/view/agent/flows/launch-flow.ts`:
+The launch sequence in [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts):
 
 1. **Phase 0** — container runtime check (host agents skip)
 2. **Phase 1** — CLI detection / npm install
@@ -143,7 +143,7 @@ Clicking re-runs OAuth scoped to **add a new account row to the existing bundle*
 
 ## 4. Per-provider auth landscape
 
-`frontend/app/view/agent/providers/index.ts` defines 7 providers. Auth flow varies meaningfully:
+[`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) defines 7 providers. Auth flow varies meaningfully:
 
 | Provider | `authType` | Real-world flow | Browser-open? | URL fallback? |
 |---|---|---|---|---|
@@ -421,7 +421,7 @@ Selecting a bundle from the dropdown:
 
 Current code path (delete after this lands):
 
-- `frontend/app/view/agent/flows/launch-flow.ts` Phase 2 — auth-during-launch loop. **Becomes a no-op** because pre-launch enforces that auth has already happened. Keep it as a defensive fallback for one release (logs a warning + does the existing behavior) before removing in a follow-up.
+- [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) Phase 2 — auth-during-launch loop. **Becomes a no-op** because pre-launch enforces that auth has already happened. Keep it as a defensive fallback for one release (logs a warning + does the existing behavior) before removing in a follow-up.
 
 What stays:
 
@@ -450,7 +450,7 @@ A user who upgrades and already had agents running with the old flow:
 
 ### PR B — Launch modal pre-auth UX
 
-- `frontend/app/view/launcher/launcher.tsx` — new `AuthState` machine, Connect CTA, URL panel, device-code panel, API-key modal
+- [`frontend/app/view/launcher/launcher.tsx`](../../frontend/app/view/launcher/launcher.tsx) — new `AuthState` machine, Connect CTA, URL panel, device-code panel, API-key modal
 - Identity dropdown enriched with bundle status (✓ / ⚠ / not connected)
 - Launch button gated on `authState().kind === "ready"`
 - Vitest unit tests for the state transitions
@@ -528,8 +528,8 @@ PRs A–C ship the user-visible feature. D–F harden + clean up.
 - Companion spec: [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — token storage + refresh
 - v7 schema: [PR #746](https://github.com/agentmuxai/agentmux/pull/746) — Identity bundles + Memory
 - Identity pane: [PR #750](https://github.com/agentmuxai/agentmux/pull/750)
-- Launch modal current state: `frontend/app/view/launcher/launcher.tsx`, `frontend/app/view/agent/flows/launch-flow.ts`
-- Provider table: `frontend/app/view/agent/providers/index.ts`
+- Launch modal current state: [`frontend/app/view/launcher/launcher.tsx`](../../frontend/app/view/launcher/launcher.tsx), [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts)
+- Provider table: [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts)
 - Spawn-time resolver: `agentmux-srv/src/identity/resolver.rs`
 - RFC 8628 — OAuth 2.0 Device Authorization Grant
 - RFC 8252 — OAuth 2.0 for Native Apps (best practices for CLI tools)

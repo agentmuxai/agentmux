@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date:** 2026-05-18
 **Author:** AgentA
-**Related:** [`SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](./SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) (the modal whose terminal is wrong), `frontend/app/view/term/termutil.ts` (the theme source of truth)
+**Related:** [`SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](./SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) (the modal whose terminal is wrong), [`frontend/app/view/term/termutil.ts`](../../frontend/app/view/term/termutil.ts) (the theme source of truth)
 
 ---
 
@@ -69,7 +69,7 @@ DefaultTermTheme = "default-dark"  fallback
             xterm.js renders with the resolved palette
 ```
 
-**Files involved (all in `frontend/app/view/term/`):**
+**Files involved (all in [`frontend/app/view/term/`](../../frontend/app/view/term)):**
 
 - `termutil.ts:13` — `computeTheme(fullConfig, themeName, transparency)` resolves theme object + bg color, with fallback to `DefaultTermTheme` (`"default-dark"`) and transparency blending.
 - `termViewModel.ts:202` — `termThemeNameAtom` memoizes the 3-tier override chain (block-meta → conn-config → settings) via `getOverrideConfigAtom(blockId, "term:theme")`.
@@ -170,7 +170,7 @@ Any new xterm consumer must:
 2. Read `atoms.fullConfigAtom()` as the input.
 3. Never construct `theme: {...}` literals.
 
-A grep for `new Terminal(` covering the entire `frontend/` tree should return exactly two callers: `termwrap.ts` and `AgentInstallModal.tsx`. Both go through `computeTheme`. CI can enforce this with a lint rule if drift becomes a concern (out of scope for this spec).
+A grep for `new Terminal(` covering the entire [`frontend/`](../../frontend) tree should return exactly two callers: `termwrap.ts` and `AgentInstallModal.tsx`. Both go through `computeTheme`. CI can enforce this with a lint rule if drift becomes a concern (out of scope for this spec).
 
 ---
 
@@ -178,12 +178,12 @@ A grep for `new Terminal(` covering the entire `frontend/` tree should return ex
 
 ### 4.1 Edits
 
-1. **`frontend/app/view/term/termutil.ts`** — add `computeTermThemeFromSettings`, export it.
-2. **`frontend/app/view/agent/components/AgentInstallModal.tsx`** —
+1. **[`frontend/app/view/term/termutil.ts`](../../frontend/app/view/term/termutil.ts)** — add `computeTermThemeFromSettings`, export it.
+2. **[`frontend/app/view/agent/components/AgentInstallModal.tsx`](../../frontend/app/view/agent/components/AgentInstallModal.tsx)** —
    - Remove the hardcoded `theme: { background, foreground }` block.
    - Compute initial theme via `computeTermThemeFromSettings(atoms.fullConfigAtom())`.
    - Add a `createEffect` that re-applies the theme on `fullConfigAtom` change.
-3. **`docs/specs/SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md`** — this file.
+3. **[`docs/specs/SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md`](SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md)** — this file.
 
 ### 4.2 Changeset
 

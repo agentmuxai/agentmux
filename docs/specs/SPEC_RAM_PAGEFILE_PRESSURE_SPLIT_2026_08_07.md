@@ -1,21 +1,21 @@
 # Split the low-memory banner into independent RAM and Page File warnings
 
 **Date:** 2026-08-07
-**Amended by:** `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md` (2026-10-08): the top-of-window banner is gone; the signals turn the status bar's backend dot yellow and show as notices at the top of its panel, and the event is now `health-signal`.
+**Amended by:** [`docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md`](../reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md) (2026-10-08): the top-of-window banner is gone; the signals turn the status bar's backend dot yellow and show as notices at the top of its panel, and the event is now `health-signal`.
 **Status:** implemented — PR #2451 (P0 + P1); verified in code 2026-08-10.
 **Affected:** `agentmux-cef` (memory heartbeat, pressure classifier, banner emit) and
 `frontend` (banner component), Windows only.
 
 > **Read first — this builds on prior work, it does not replace it:**
-> - `docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md` — the original
+> - [`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) — the original
 >   `PressureTracker`/banner design this spec splits in two.
-> - `docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md` — established that free
+> - [`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`](SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md) — established that free
 >   disk on the pagefile volume, and whether the pagefile is system-managed, gates
 >   whether Windows can actually grow it. §5.2 P0 ("track free disk on the pagefile
 >   volume ... warn when free disk is low *and* page file is system-managed") is the
 >   item this spec finally wires up into a user-facing signal.
-> - `docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md` and
->   `docs/retro/retro-commit-restart-reclaim-2026-07-16.md` — background on why the
+> - [`docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`](SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md) and
+>   [`docs/retro/retro-commit-restart-reclaim-2026-07-16.md`](../retro/retro-commit-restart-reclaim-2026-07-16.md) — background on why the
 >   pressure classifier is ratio-based, not absolute-MB.
 >
 > **Already shipped** (confirmed in tree, reused as-is by this spec): `PressureTracker`
@@ -232,7 +232,7 @@ const MESSAGE = {
 | **P0** | Wire `disk:pagefile_volume:*` + `disk:pagefile_system_managed` (already computed in `sysinfo.rs`) into the Page File banner's message selection. | This is the literal P0 item `SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2` asked for and that never got a user-facing consumer — currently StatusBar-only. | New code in `agentmux-cef`, extracting shared logic per §4 |
 | **P1** | Extract `pagefile_watch_target`/`read_paging_files_registry`/`drive_free_total_gb`/`PagingFileEntry` into `agentmux-common`. | Avoids a second independently-drifting copy of ~120 lines of registry/disk logic — the exact class of bug issue #2218 already caused once between two pipelines computing "the same" ratio differently. | `agentmux-common` (new module), `agentmux-srv/src/backend/sysinfo.rs`, `agentmux-cef/src/memory_heartbeat.rs` |
 | **P1** | Split `MemoryPressureBanner` into per-`kind` instances with independent dismiss state and a `kind`-aware `MESSAGE` map (§5). | RAM and Page File pressure are uncorrelated; today's single banner can only ever show one framing at a time. | `frontend/app/notification/memory-pressure-banner.tsx` |
-| **P2** | Relabel the existing StatusBar `commitColor` gauge tooltip/label if it currently says "memory" anywhere ambiguous, for consistency with the banner's new correct wording. | Not blocking, but leaving the StatusBar using old wording while the banner uses new wording would be a fresh (smaller) version of the same mislabeling bug this spec fixes. | `frontend/app/statusbar/SystemStats.tsx` |
+| **P2** | Relabel the existing StatusBar `commitColor` gauge tooltip/label if it currently says "memory" anywhere ambiguous, for consistency with the banner's new correct wording. | Not blocking, but leaving the StatusBar using old wording while the banner uses new wording would be a fresh (smaller) version of the same mislabeling bug this spec fixes. | [`frontend/app/statusbar/SystemStats.tsx`](../../frontend/app/statusbar/SystemStats.tsx) |
 
 ## 8. Verification
 

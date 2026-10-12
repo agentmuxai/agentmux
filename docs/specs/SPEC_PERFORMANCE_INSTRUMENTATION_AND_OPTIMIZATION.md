@@ -189,7 +189,7 @@ Each PR:
 2. Implement the targeted fix.
 3. Capture an after-trace under the same workload.
 4. Prove the improvement quantitatively (P75 dropped from X to Y).
-5. Ship as a single PR with the trace-pair attached as a `docs/retro/` entry.
+5. Ship as a single PR with the trace-pair attached as a [`docs/retro/`](../retro) entry.
 
 **No "let me also fix this thing" combos.** One bottleneck per PR; bundling makes regression bisection painful and review complexity grows superlinearly.
 

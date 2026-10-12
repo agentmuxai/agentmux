@@ -46,7 +46,7 @@ This is the second of two adjacent macOS gaps. The first (compile) is fixed by #
 ## TL;DR
 
 - Implement `bundle:darwin` to place a real `Chromium Embedded Framework.framework` at `dist/Frameworks/` so the host launched at `dist/cef/agentmux-cef` finds it via cef-rs's `../Frameworks/...` relative lookup.
-- Resolve the Framework via a `scripts/resolve-cef-runtime-darwin.sh` helper that mirrors the Linux pattern (`scripts/resolve-cef-runtime.sh`): three-tier lookup with explicit override, standard cef-build layout, and the cef-dll-sys cargo cache as last-resort fallback (unpatched, no drag support — same caveat as Linux).
+- Resolve the Framework via a [`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh) helper that mirrors the Linux pattern ([`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh)): three-tier lookup with explicit override, standard cef-build layout, and the cef-dll-sys cargo cache as last-resort fallback (unpatched, no drag support — same caveat as Linux).
 - Add an architecture detection so Apple Silicon and Intel each get the right Framework binary. cef-rs's `Cargo.lock` resolves to the same crate version (`146.7.0+146.0.12`) for both, but the prebuilt Framework binary differs.
 - Defer `task package:macos` (the full `.app`/`.dmg` flow) to a follow-up spec — the Framework bundling is the load-bearing piece, and packaging is mechanical layering once `task dev` boots.
 - Estimated change: 1 new ~50-line shell helper, ~30 lines added to `Taskfile.yml::bundle:darwin`, no Rust changes, no new dependencies.
@@ -69,7 +69,7 @@ So while the *shape* of the resolver helper script will be similar to Linux's, t
 | Platform | Compile | Bundle step | Where libcef comes from | Status |
 |---|---|---|---|---|
 | **Windows** | OK | `bundle:windows` (Taskfile.yml:473–505) | cef-dll-sys cargo cache (`target/.../out/cef_windows_x86_64/`); `repair-cef-extract.sh` retries on Defender races | Working |
-| **Linux** | Broken at HEAD (PR #1131 fixes) | `bundle:linux` (Taskfile.yml:513–536) | `scripts/resolve-cef-runtime.sh` (3-tier) | Working post-#1131 with feature gate, drag deferred |
+| **Linux** | Broken at HEAD (PR #1131 fixes) | `bundle:linux` (Taskfile.yml:513–536) | [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) (3-tier) | Working post-#1131 with feature gate, drag deferred |
 | **macOS** | Fixed by PR #1131 | `bundle:darwin` (Taskfile.yml:507–511) — **stub** | **Nothing** | **This spec** |
 
 cef-rs already supports the macOS Framework loading model natively. It is only the AgentMux build pipeline that has nothing in place.

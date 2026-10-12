@@ -13,19 +13,19 @@ in the status bar, migrations and an app restart would happen then" +
 possible."
 
 **Consolidates / supersedes in part:**
-- `docs/specs/SPEC_UPGRADE_PANEL_2026_06_27.md` — the Maintenance section UI
+- [`docs/specs/SPEC_UPGRADE_PANEL_2026_06_27.md`](SPEC_UPGRADE_PANEL_2026_06_27.md) — the Maintenance section UI
   (partially shipped; its header still says "not yet implemented", which is
   stale). **Its "Post-restart migrations (automatic)" data flow is the thing
   this spec replaces.** Its panel states A–K are reused as-is.
-- `docs/specs/app-update-check.md` — update detection + per-install-type
+- [`docs/specs/app-update-check.md`](app-update-check.md) — update detection + per-install-type
   install flows (entirely unimplemented; `install_update` is still a stub at
   `agentmux-cef/src/commands/stubs.rs:36,56`). **This spec adds a scheduling
   constraint it doesn't currently have: the check must never sit on the boot
   path.**
-- `docs/reports/REPORT_STARTUP_MIGRATION_AUDIT_AND_DEFERRAL_2026_09_15.md` —
+- [`docs/reports/REPORT_STARTUP_MIGRATION_AUDIT_AND_DEFERRAL_2026_09_15.md`](../reports/REPORT_STARTUP_MIGRATION_AUDIT_AND_DEFERRAL_2026_09_15.md) —
   the migration half of the audit, including the two prior attempts and why
   they were reverted. Read that first; this spec is its design follow-through.
-- `docs/reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md`
+- [`docs/reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md`](../reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md)
   — the splash symptom that goes away once migrations leave the boot path.
 
 ---

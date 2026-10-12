@@ -32,29 +32,29 @@
 `agentmux-srv/src/backend/blockcontroller/{mod,core,persistent,acp}.rs`,
 `agentmux-srv/src/backend/blockcontroller/subprocess/{mod,host_spawn,container_spawn}.rs`,
 `agentmux-srv/src/agents/failure.rs`, `agentmux-srv/src/server/mod.rs`,
-`frontend/app/view/agent/failure/failure-accessory.ts`,
+[`frontend/app/view/agent/failure/failure-accessory.ts`](../../frontend/app/view/agent/failure/failure-accessory.ts),
 `frontend/app/view/agent/hooks/{useAgentFailure,useAgentControllerStatus}.ts`,
-`frontend/app/view/agent/agent-view.tsx`, `frontend/types/gotypes.d.ts`,
+[`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), `frontend/types/gotypes.d.ts`,
 `frontend/app/store/wps-events.ts`.
-**Scope — Part 2:** `frontend/app/view/agent/components/AgentComposerStrip.tsx`,
-`frontend/app/view/agent/components/AgentFooter.tsx` (the `AgentWorkingRow`
-it renders), `frontend/app/view/agent/agent-view.tsx`,
-`frontend/app/view/agent/hooks/useResumeRetryStream.ts`,
+**Scope — Part 2:** [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx),
+[`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) (the `AgentWorkingRow`
+it renders), [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx),
+[`frontend/app/view/agent/hooks/useResumeRetryStream.ts`](../../frontend/app/view/agent/hooks/useResumeRetryStream.ts),
 `frontend/app/store/agent-pane-state/{store,types}.ts` (or wherever the
 `retrying`/`resolved` resume-retry state actually lives, per implementer's
 own re-verification at build time).
-**Related:** `docs/specs/archive/agent-health-design.md` (original design — to be
-archived), `docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`
-(§2.7/§4 — where the Restart banner shipped), `docs/specs/archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`
+**Related:** [`docs/specs/archive/agent-health-design.md`](archive/agent-health-design.md) (original design — to be
+archived), [`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`](../reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md)
+(§2.7/§4 — where the Restart banner shipped), [`docs/specs/archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`](archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md)
 (the compaction false-positive patch — to be archived; **its own header
 still says "Implementation status: Not started," which is stale — the fix
 is fully shipped per `VERSION_HISTORY.md:58`; flagging the drift here so
-it isn't a source of confusion later**), `docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`
+it isn't a source of confusion later**), [`docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`](SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md)
 (the broader error-classification framework this sits inside — unaffected
 by this removal except for losing one taxonomy entry),
-`docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md`
+[`docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md`](../status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md)
 (§6.2 — where "Reconnecting…" was designed, by analogy to "Compacting…
-Ns," Part 2 revisits this), `docs/specs/SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md`
+Ns," Part 2 revisits this), [`docs/specs/SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md`](SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md)
 (§140 — the prior worry about a `Disconnected` state showing misleading
 "Reconnecting" text; already avoided in the shipped `Disconnected` UI,
 noted here only because Part 2 touches the same neighborhood).
@@ -132,7 +132,7 @@ detail of the unresponsive detector** — it's the sole source of truth for:
 - `agentmux-srv/src/broker/process.rs`'s `lifecycle_from()` — the public
   `Lifecycle::Running/Idle/Done/Error` enum consumed by the Agent pane,
   the Swarm pane, and `muxspect describe`.
-- `frontend/app/view/swarm/swarm-model.ts:813-820`'s
+- [`frontend/app/view/swarm/swarm-model.ts:813-820`](../../frontend/app/view/swarm/swarm-model.ts#L813-L820)'s
   `derivedRunningStatus()` — the Swarm pane's per-agent running/idle badge
   ("For `is_agent_pane` panes, trust `turn_active` alone").
 - `agentmux-srv/src/backend/subagent_watcher/scan.rs`'s stale-subagent
@@ -294,15 +294,15 @@ of stale data until it's next cleared.
 
 ## 5. Docs to archive
 
-Move to `docs/specs/archive/` (or annotate "superseded by this spec," per
+Move to [`docs/specs/archive/`](archive) (or annotate "superseded by this spec," per
 existing repo convention) once the removal ships:
-- `docs/specs/archive/agent-health-design.md`
-- `docs/specs/archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`
+- [`docs/specs/archive/agent-health-design.md`](archive/agent-health-design.md)
+- [`docs/specs/archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`](archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md)
   (correct its stale "Implementation status: Not started" header on the
   way in, so the archive doesn't preserve a wrong claim)
 
-`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`
-and `docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md` stay as-is — both
+[`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`](../reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md)
+and [`docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`](SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md) stay as-is — both
 cover broader ground (the general error-classification framework, and an
 incident report) that outlives this one feature's removal; leave a note in
 each pointing at this spec for what changed.

@@ -1,7 +1,7 @@
 # SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes
 
 **Date:** 2026-08-26
-**Status:** implemented — #2822 (2026-08-27), the day after this was written. §2's flip (plain drag group-resizes, Shift resizes a single border) is cited from `frontend/layout/lib/layoutResize.ts:368`, and §3.4's window-edge handling from `agentmux-cef/src/client/wndproc.rs`. §3.6's out-of-scope items are unchanged; the Chrome-style drag-to-top maximize that arrived later in #2986 is separate work on the same surface.
+**Status:** implemented — #2822 (2026-08-27), the day after this was written. §2's flip (plain drag group-resizes, Shift resizes a single border) is cited from [`frontend/layout/lib/layoutResize.ts:368`](../../frontend/layout/lib/layoutResize.ts#L368), and §3.4's window-edge handling from `agentmux-cef/src/client/wndproc.rs`. §3.6's out-of-scope items are unchanged; the Chrome-style drag-to-top maximize that arrived later in #2986 is separate work on the same surface.
 **Author:** Loap (agent)
 **Tracking discussion:** repo owner, this session — "the default should be the
 relative resize that currently shift-resize does. The new feature is that when
@@ -45,7 +45,7 @@ to add a shift+resize to the edge panes that make pane size change on it's own
   `groupSiblingStartSizes` regardless of the modifier, precisely so Shift can
   be toggled mid-drag with no context rebuild. **This means the flip is
   near-free** — both formulas already run off the same context.
-- Discoverability surface: `frontend/app/element/quicktips.tsx:213-215` —
+- Discoverability surface: [`frontend/app/element/quicktips.tsx:213-215`](../../frontend/app/element/quicktips.tsx#L213-L215) —
   "Resize All Panes Together — Shift + Drag".
 
 ### 1.2 Window resize — proportional by construction, no code involved
@@ -282,12 +282,12 @@ window edges — incoherent. After it, one rule covers both surfaces.
 ## 6. Sources (code read for this spec)
 
 - `frontend/layout/lib/layoutResize.ts:18-36, 54-96, 165-211, 216-229, 238-341`
-- `frontend/layout/lib/TileLayout.win32.tsx:516`, `TileLayout.darwin.tsx:433`,
+- [`frontend/layout/lib/TileLayout.win32.tsx:516`](../../frontend/layout/lib/TileLayout.win32.tsx#L516), `TileLayout.darwin.tsx:433`,
   `TileLayout.linux.tsx:457`
-- `frontend/layout/lib/layoutModelHooks.ts:69`
+- [`frontend/layout/lib/layoutModelHooks.ts:69`](../../frontend/layout/lib/layoutModelHooks.ts#L69)
 - `frontend/app/element/quicktips.tsx:53-58, 213-215`
 - `agentmux-cef/src/commands/drag.rs:244-245`, `agentmux-cef/src/ui_tasks/drag.rs:337-349`
   (GetAsyncKeyState precedent); repo-wide grep confirming no
   `WM_SIZING`/`WM_ENTERSIZEMOVE` handling exists yet
-- `docs/specs/SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md`,
-  `docs/specs/SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md`
+- [`docs/specs/SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md`](SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md),
+  [`docs/specs/SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md`](SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md)

@@ -3,7 +3,7 @@
 **Date:** 2026-09-17
 **Status:** implemented — PR #3360 (`404f8c9f`).
 **Related:** #3343 (`87d86ef1`, the vim/DECRQM fix that added the override),
-`docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md`,
+[`docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md`](../retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md),
 evanw/esbuild#4508
 
 ---
@@ -118,7 +118,7 @@ in CEF (bundled Chromium) on every platform since. It is gone, and there is no
 target left in the build that triggers lowering.
 
 The parser-wedge recovery added by #3343
-(`frontend/app/view/term/parser-wedge.ts`) is untouched by this change and
+([`frontend/app/view/term/parser-wedge.ts`](../../frontend/app/view/term/parser-wedge.ts)) is untouched by this change and
 remains the defense-in-depth layer for the *class* of bug.
 
 ## 5. Alternatives considered and rejected

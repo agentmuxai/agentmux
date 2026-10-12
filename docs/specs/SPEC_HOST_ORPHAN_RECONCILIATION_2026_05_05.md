@@ -7,7 +7,7 @@ months despite `agentmux-cef/src/commands/orphan_reconcile.rs` shipping
 and being actively maintained since (most recently touched by #3141,
 2026-09-09) — found stale while researching #1569, which fixes a gap in
 that same file. Note this spec's own design has since evolved further
-under `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` (#2081)
+under [`docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md) (#2081)
 — that later spec is the more current description of the module's
 "sanitize-then-decide" shape.
 **Layer:** 2 (host) — coordinates with Layer 1 (launcher) via existing event bus

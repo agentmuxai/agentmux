@@ -3,10 +3,10 @@
 **Status:** active — §1 Tier-2b same-host cross-channel discovery shipped (PR #2350); §2 LAN pinned identity, §3 cloud directory, §4 typed RPC invocation layer not started. Verified 2026-08-10.
 **Author:** AgentY
 **Date:** 2026-07-29
-**Related:** `docs/specs/SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`,
-`docs/specs/SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md`,
+**Related:** [`docs/specs/SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md),
+[`docs/specs/SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md`](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md),
 issue #1916 / PR #2350 (Tier 2b same-host cross-channel delivery — see §2 row
-below), `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`,
+below), [`docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md),
 `agentmux-srv/src/backend/lan_discovery.rs`,
 `agentmux-srv/src/muxbus/cloud_subscriber.rs`.
 

@@ -3,10 +3,10 @@
 **Status:** implemented — Phases 1-4 implemented (see §6) — #2768
 **Owner:** AgentX
 **Date:** 2026-08-22
-**Scope:** `frontend/layout/lib/layoutStack.ts`, `layoutNodeModels.ts`'s `activeKeyFor`,
-`frontend/layout/lib/tilelayout-shared.tsx`, `frontend/app/block/block.tsx`,
-`frontend/app/store/tab-reveal.ts`, `frontend/app/element/PaneTabStrip.*`,
-`frontend/app/view/agent/agent-view.tsx` (`handleNewAgentTab`), `quick-fork.ts`
+**Scope:** [`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts), `layoutNodeModels.ts`'s `activeKeyFor`,
+[`frontend/layout/lib/tilelayout-shared.tsx`](../../frontend/layout/lib/tilelayout-shared.tsx), [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx),
+[`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts), `frontend/app/element/PaneTabStrip.*`,
+[`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (`handleNewAgentTab`), `quick-fork.ts`
 **Related:** `SPEC_TAB_CONTENT_REVEAL_GATE.md` (the whole-tab-switch analog this
 spec generalizes — read that one first, this spec assumes its mechanism),
 `REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md` (a different flicker

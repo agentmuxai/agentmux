@@ -38,7 +38,7 @@ What we DON'T have:
 - No visual feedback when dragging the floater over a target window's
   layout.
 
-The existing tile-drag flow (`frontend/layout/lib/TileLayout.win32.tsx`)
+The existing tile-drag flow ([`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx))
 DOES highlight drop targets via pragmatic-dnd's `dropTargetForElements`
 when a pane is dragged within a window. We want to extend that across
 windows for floating-pane re-dock.
@@ -213,7 +213,7 @@ new IPC.
    sourceWindowLabel }`.
 
 2. **Cross-window drag observation**.
-   `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` already
+   [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) already
    coordinates cross-window observation for tab tear-off; extend its
    `dragend` switch to handle `kind: "floating-pane"`:
    - Dropped over a target window's TileLayout leaf → fire
@@ -302,21 +302,21 @@ as Phase 7 of the original spec.
 
 ## Cross-references
 
-- `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` §5 (re-dock
+- [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) §5 (re-dock
   acceptance criteria), §9 (Phase 4 scope).
-- `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` —
+- [`docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) —
   why we have JS-driven drag today and the trade-offs vs. pragmatic-dnd
   for the floater header.
 - `ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md (no longer in this repo)`
   — why external apps still show "accept" cursors during cross-window
   drag; the floating pane re-dock will inherit this limitation
   (cosmetic).
-- `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` — existing
+- [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) — existing
   cross-window drag orchestrator for tab tear-off; extends for
   floating-pane re-dock.
-- `frontend/layout/lib/TileLayout.win32.tsx` — drop targets and
+- [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) — drop targets and
   drag-preview templates we reuse.
-- `frontend/app/tab/tabbar.tsx` — Phase 4c reference (cross-tab drop).
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — Phase 4c reference (cross-tab drop).
 - `agentmux-srv` — host-side `RedockFloatingPane` RPC (new).
 
 ## Open questions

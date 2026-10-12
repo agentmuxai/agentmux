@@ -16,7 +16,7 @@ AgentMux currently uses a rounded-corner radius scale of `3 / 6 / 10 / 16 px` (`
 
 ## 1. Current state
 
-`frontend/app/theme.scss` defines:
+[`frontend/app/theme.scss`](../../frontend/app/theme.scss) defines:
 
 ```scss
 --radius-sm:   3px;   // chips, small buttons
@@ -64,7 +64,7 @@ Sharp corners across all *interactive* elements. Curved corners only where they 
 
 ### Step A — token flip (low-risk, instant propagation)
 
-In `frontend/app/theme.scss`:
+In [`frontend/app/theme.scss`](../../frontend/app/theme.scss):
 
 ```scss
 --radius-sm:   0px;
@@ -148,7 +148,7 @@ The chrome-style tabs at the top use a custom shape (`border-radius: 8px 8px 0 0
 
 Single small PR:
 
-- `frontend/app/theme.scss` — token flip (sm/md/lg/xl → `0px`).
+- [`frontend/app/theme.scss`](../../frontend/app/theme.scss) — token flip (sm/md/lg/xl → `0px`).
 - ~25-50 grep/edit sweeps across `frontend/**/*.scss` for hard-coded radii on interactive surfaces.
 - Visual smoke per §3D.
 - This spec rides with the code in the same PR (`feedback_no_doc_only_prs`).

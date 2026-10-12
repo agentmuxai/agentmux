@@ -19,11 +19,11 @@ PR #880 swapped `StatusBar.tsx:91` from rendering `windowInstanceNumAtom` (per-w
 - Window 2: `(2)`
 - Window 3: `(3)`
 
-All three should read `(3)`. Each window's `windowCountAtom` is stuck at its boot-time snapshot value. `frontend/app/store/launcher-event-reducer.ts:101-105` `project()` is the only writer to `windowCountAtom`, and it's only called when launcher events arrive through the reducer's `dispatch` path. In dev, no launcher events arrive after boot.
+All three should read `(3)`. Each window's `windowCountAtom` is stuck at its boot-time snapshot value. [`frontend/app/store/launcher-event-reducer.ts:101-105`](../../frontend/app/store/launcher-event-reducer.ts#L101-L105) `project()` is the only writer to `windowCountAtom`, and it's only called when launcher events arrive through the reducer's `dispatch` path. In dev, no launcher events arrive after boot.
 
 ### 1.2 Opacity slider missing in dev
 
-The per-window opacity slider in `frontend/app/statusbar/InstancePanel.tsx:414-450` is gated on `entry.windowId` being truthy. `entry.windowId` is populated only by the `BackendWindowIdRegistered` launcher event hitting the frontend reducer at `frontend/app/store/launcher-event/reducer.ts:186-211`. In dev, that event never arrives, so the gate is permanently false and the slider hides for every window.
+The per-window opacity slider in [`frontend/app/statusbar/InstancePanel.tsx:414-450`](../../frontend/app/statusbar/InstancePanel.tsx#L414-L450) is gated on `entry.windowId` being truthy. `entry.windowId` is populated only by the `BackendWindowIdRegistered` launcher event hitting the frontend reducer at [`frontend/app/store/launcher-event/reducer.ts:186-211`](../../frontend/app/store/launcher-event/reducer.ts#L186-L211). In dev, that event never arrives, so the gate is permanently false and the slider hides for every window.
 
 Both symptoms trace to the same gap: **launcher events stop arriving at the frontend after boot in `task dev`**.
 
@@ -125,7 +125,7 @@ Implementation: Windows `CreateToolhelp32Snapshot` + `Process32FirstW/NextW` in 
 
 **Why two accepted stems** (codex P1 on PR #882 round 1 caught this):
 - `agentmux-launcher` — Cargo bin name. Used in dev (`task dev` copies `target/release/agentmux-launcher.exe` to `dist/cef-dev/agentmux-launcher.exe`).
-- `agentmux` — user-facing name in portable / installed builds. `scripts/package-portable.sh:38` copies the launcher binary to `agentmux.exe` so the user-facing icon reads as "AgentMux", not "AgentMux Launcher". `QueryFullProcessImageNameW` returns the on-disk path, so the parent's stem from a production launch is `agentmux`, not `agentmux-launcher`. Accepting only the Cargo bin name would regress every portable build's IPC connection.
+- `agentmux` — user-facing name in portable / installed builds. [`scripts/package-portable.sh:38`](../../scripts/package-portable.sh#L38) copies the launcher binary to `agentmux.exe` so the user-facing icon reads as "AgentMux", not "AgentMux Launcher". `QueryFullProcessImageNameW` returns the on-disk path, so the parent's stem from a production launch is `agentmux`, not `agentmux-launcher`. Accepting only the Cargo bin name would regress every portable build's IPC connection.
 
 ### 5.2 New guard
 

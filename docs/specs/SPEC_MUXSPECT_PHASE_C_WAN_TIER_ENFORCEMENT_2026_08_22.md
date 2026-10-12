@@ -4,8 +4,8 @@
 **Status:** Implemented (scoped — see §2 for why this is small) — #2765
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-srv`)
-**Related:** `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
-(Phase C's design), `docs/specs/SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md`
+**Related:** [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md)
+(Phase C's design), [`docs/specs/SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md`](SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md)
 (Phase B, this extends)
 
 ## 1. The one real gap Phase B left for WAN

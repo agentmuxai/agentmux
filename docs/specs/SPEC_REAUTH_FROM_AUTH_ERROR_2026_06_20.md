@@ -214,7 +214,7 @@ This gives the user two entry points to re-auth — the persistent failure banne
 
 ## 8. Provider Contract
 
-Each provider definition (`frontend/app/view/agent/providers/`) already has `authLoginCommand` and `requiresLoginTty`. No new fields needed — the existing `runCliLogin()` RPC returns `auth_url: Option<String>`, which drives the branching:
+Each provider definition ([`frontend/app/view/agent/providers/`](../../frontend/app/view/agent/providers)) already has `authLoginCommand` and `requiresLoginTty`. No new fields needed — the existing `runCliLogin()` RPC returns `auth_url: Option<String>`, which drives the branching:
 
 ```
 auth_url present → openOAuthBrowserPane (in-app pane, system-browser fallback)
@@ -228,7 +228,7 @@ No backend changes required for this spec.
 ## 9. Implementation Plan
 
 ### P2.1 — In-app browser pane on re-auth ✅ (this PR)
-- New file: `frontend/app/view/agent/flows/open-oauth-pane.ts` — `openOAuthBrowserPane(url)`
+- New file: [`frontend/app/view/agent/flows/open-oauth-pane.ts`](../../frontend/app/view/agent/flows/open-oauth-pane.ts) — `openOAuthBrowserPane(url)`
   returns `"pane" | "external" | "failed"` (createBlock → openExternal → nothing).
 - `launch-flow.ts`: replace the `openExternal(loginUrl)` call with `openOAuthBrowserPane(loginUrl)`;
   log which path opened. No `isReauthContext` gate needed — improving all logins is desired.

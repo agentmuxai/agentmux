@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** proposed; nothing in this spec is implemented. It supersedes `SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md`: its window-level controller and per-pane `accept`/`drop` hook carry over as §5.3 (now registered per block, not on the manifest), and its thick-border look is replaced by §4. It revives the unlanded `SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md` as phase 4. Written against `main` @ `135251326`; spot-verify file:line citations before trusting them.
 **Author:** Korp@narko
-**Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop: the CEF drag handler and the path stash), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with files), `SPEC_TAB_WINDOW_DRAG_CONSOLIDATION_2026_07_13.md` (landed-vs-open map of window drags), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (pane tabs, and `pane-tab-tearoff.ts`, the pattern §5.6 generalises), `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md` (shelved), `docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`.
+**Related:** `SPEC_PANE_FILE_DROP_2026_05_30.md` (OS file drop: the CEF drag handler and the path stash), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (what an agent pane does with files), `SPEC_TAB_WINDOW_DRAG_CONSOLIDATION_2026_07_13.md` (landed-vs-open map of window drags), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (pane tabs, and `pane-tab-tearoff.ts`, the pattern §5.6 generalises), `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md` (shelved), [`docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md`](../retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md).
 
 ---
 
@@ -206,7 +206,7 @@ Right-click Paste doesn't consult `dnd:enabled`, `dnd:concurrency` or `dnd:agent
 - **Why the tint, not a thicker border:** the tint is what makes the target unmistakable against every pane border, focused or not. The border only frames it, so it keeps the standard 2px width.
 - **Alone in its tab:** the indicator draws on a layer above the pane content inside `.pane-stack`, not on the focus-ring pseudo-element. It shows even when the pane is alone in its tab and the ring is hidden (`PaneChrome.scss:68-70`).
 - **Motion:** 100 ms fade in and out, and nothing under `prefers-reduced-motion`. No strobe or pulse on the file-drop states, because a file drag can last seconds.
-- **Tokens:** one partial, `frontend/app/drag/drop-indicators.scss`, defines them, all derived from the theme's `--accent-color` / `--accent-color-rgb` and `--warning-color`:
+- **Tokens:** one partial, [`frontend/app/drag/drop-indicators.scss`](../../frontend/app/drag/drop-indicators.scss), defines them, all derived from the theme's `--accent-color` / `--accent-color-rgb` and `--warning-color`:
   - `--drop-zone-armed-border`
   - `--drop-target-bg`
   - `--drop-target-border`
@@ -219,7 +219,7 @@ Sources: [NN/g: Drag-and-drop](https://www.nngroup.com/articles/drag-drop/) · [
 
 ## 5. Architecture
 
-Everything below lives under `frontend/app/drag/` unless noted. A module is created once per renderer: each main window, tear-off and floater has its own.
+Everything below lives under [`frontend/app/drag/`](../../frontend/app/drag) unless noted. A module is created once per renderer: each main window, tear-off and floater has its own.
 
 ### 5.1 `drag-session.ts`: one answer to "what is being dragged"
 

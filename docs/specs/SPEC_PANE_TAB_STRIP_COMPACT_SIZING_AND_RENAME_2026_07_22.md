@@ -2,16 +2,16 @@
 
 **Date:** 2026-07-22
 **Status:** Implemented — §4 resolved via option 2 (dedicated `renameagentdefinitiontitle` RPC) — #2282
-**Scope:** `frontend/app/element/PaneTabStrip.tsx` / `.scss` (shared strip), agent-pane fork
-tabs (`frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/fork/**`), terminal-pane
-tabs (`frontend/app/view/term/term.tsx`)
+**Scope:** [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx) / `.scss` (shared strip), agent-pane fork
+tabs ([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), `frontend/app/view/agent/fork/**`), terminal-pane
+tabs ([`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx))
 **Author:** Agent3
 **Related:**
-`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` (introduced the shared
+[`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) (introduced the shared
 `PaneTabStrip` component and both consumers this spec refines — Phases 1–5, all merged),
-`frontend/app/tab/tab-measure.ts` (the window-tab-bar's existing content-width-measurement
+[`frontend/app/tab/tab-measure.ts`](../../frontend/app/tab/tab-measure.ts) (the window-tab-bar's existing content-width-measurement
 precedent, reused conceptually below),
-`frontend/app/block/titlebar.tsx` (the existing per-block click-to-rename precedent, reused
+[`frontend/app/block/titlebar.tsx`](../../frontend/app/block/titlebar.tsx) (the existing per-block click-to-rename precedent, reused
 conceptually below)
 
 ---
@@ -34,7 +34,7 @@ Three follow-up polish items on the tab strip shipped by
 
 ### 2.1 Why the strip shows dead space today
 
-`frontend/app/element/PaneTabStrip.scss`:
+[`frontend/app/element/PaneTabStrip.scss`](../../frontend/app/element/PaneTabStrip.scss):
 
 ```scss
 .pane-tab-strip {
@@ -73,7 +73,7 @@ not content).
 
 ### 2.3 Existing precedent for content-sized tabs: `frontend/app/tab/tab-measure.ts`
 
-The *window*-level tab bar (`frontend/app/tab/tab.tsx`, a different, older tab strip — the
+The *window*-level tab bar ([`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx), a different, older tab strip — the
 outer app's workspace switcher, not `PaneTabStrip`) already solves "tab width = label width" via
 `measureTabWidth(label)`: a singleton `<canvas>` 2D context measures the label's rendered text
 width (no DOM reflow), adds a fixed non-text padding budget (52px — left/right pad + gap +
@@ -98,7 +98,7 @@ Two real, shipped patterns to choose between:
   Save-As, not rename) with a local `SaveAsInput` component: autofocuses on mount, tracks value
   via a signal, commits on Enter, cancels on Escape, commits-as-cancel on blur, with a
   `committed` flag guarding double-fire between blur and Enter.
-- **`contentEditable` toggle** (`frontend/app/tab/tab.tsx`'s window-tab rename): a
+- **`contentEditable` toggle** ([`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx)'s window-tab rename): a
   `contentEditable={isEditable()}` div toggled on `onDblClick`, auto-selected on entry, commits
   via `ObjectService.UpdateTabName` on blur, Enter confirms + blurs, Escape reverts text + blurs.
 
@@ -110,7 +110,7 @@ component are needed** — rename is entirely a per-consumer concern, following 
 
 ### 2.5 Persistence: where would a renamed label actually get saved?
 
-**Agent fork tabs** — `ForkSetEntry.title` (`frontend/app/view/agent/fork/fork-set.ts`,
+**Agent fork tabs** — `ForkSetEntry.title` ([`frontend/app/view/agent/fork/fork-set.ts`](../../frontend/app/view/agent/fork/fork-set.ts),
 `titleOf()`) resolves to `branch_label` when set, else `AgentDefinition.name`. The only mutation
 RPC is `updateagent` (`agentmux-srv/src/server/agent_handlers/core.rs`,
 `RpcApi.UpdateAgentDefinitionCommand`), which can change `name` — but **`branch_label` is
@@ -129,7 +129,7 @@ fork except a lineage root), renaming via `name` would have zero visible effect*
 `titleOf()` prefers `branch_label` over `name` unconditionally. §4 calls this out as an open
 question — it needs a product decision, not a workaround.
 
-**Terminal tabs** — `frontend/app/view/term/term.tsx`'s `termTabs` memo synthesizes
+**Terminal tabs** — [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx)'s `termTabs` memo synthesizes
 `Terminal ${i+1}` unconditionally today; there is no persisted label at all. The code already
 anticipates this as a follow-up:
 
@@ -142,7 +142,7 @@ anticipates this as a follow-up:
 
 A real persistence mechanism already exists and fits without inventing anything new: per-block
 `meta["pane-title"]`, set via `RpcApi.SetMetaCommand(client, { oref: WOS.makeORef("block", id),
-meta: {"pane-title": title} })` — this is exactly what `frontend/app/block/titlebar.tsx`'s
+meta: {"pane-title": title} })` — this is exactly what [`frontend/app/block/titlebar.tsx`](../../frontend/app/block/titlebar.tsx)'s
 existing click-to-edit pane title already does. Block meta is readable independent of whether a
 block's view is mounted (`WOS.getObjectValue(oref)`), which matters here: a dormant (non-active)
 terminal tab's block has no live `TermViewModel` to read a title from (per `termTabs`'s own

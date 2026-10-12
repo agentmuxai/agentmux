@@ -50,7 +50,7 @@ A message for a **running** agent is written to its live input at once, whatever
 
 What the agent does with a message that arrives mid-turn is the CLI's behaviour, unchanged from before
 09-23: Claude Code reads it at its next inference step, typically after the running tool returns, and may
-change course (`docs/specs/evidence/steer-probe-claude-run1.txt`). That is the point: it gets the message
+change course ([`docs/specs/evidence/steer-probe-claude-run1.txt`](evidence/steer-probe-claude-run1.txt)). That is the point: it gets the message
 as soon as it can act on it.
 
 ### 2.2 Display: the pane never splits a streaming block

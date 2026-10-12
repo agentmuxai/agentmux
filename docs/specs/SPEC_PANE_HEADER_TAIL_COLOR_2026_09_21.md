@@ -4,14 +4,14 @@
 **Status:** implemented in #3492 — see §6 for what shipped and how it was verified
 **Author:** AgentO
 **Related:**
-`docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md` (established
+[`docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`](SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) (established
 the one header-background rule this refines),
-`docs/analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md` (the
+[`docs/analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md`](../analysis/ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md) (the
 root-cause analysis for the sibling bug — uncolored *pills* showing the
 header tint through — fixed in `agento/pane-tab-color-consolidation`),
-`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` (the
+[`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) (the
 redesign that made a multi-color pane the normal case),
-`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`
+[`docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md)
 
 ---
 
@@ -56,7 +56,7 @@ in the pane (§3.1 defines "effective"), in tab order.
 | Two or more tabs, exactly one identity among them, the rest uncoloured | **That identity's color** — fixed, independent of which tab is active (amended 2026-10-02, below) |
 | Two or more tabs, two or more distinct effective colors | **App default** — fixed, independent of which tab is active |
 
-> **Amended 2026-10-02** (`docs/reports/REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md` §6 P2, owner request): an uncoloured tab is no longer counted as a colour of its own. A pane with one agent plus utility tabs (the owner's example: Accounts beside AgentX) is about that agent, so its tail keeps that agent's tint. Still the same for every active tab, so the tail never moves on a tab switch, which is this spec's point. Two or more identities stay neutral, and a pane with no identity at all keeps §3.1's view-keyed rule. §3.1's "one coloured + one uncoloured = neutral" bullet is superseded by this row.
+> **Amended 2026-10-02** ([`docs/reports/REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md`](../reports/REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md) §6 P2, owner request): an uncoloured tab is no longer counted as a colour of its own. A pane with one agent plus utility tabs (the owner's example: Accounts beside AgentX) is about that agent, so its tail keeps that agent's tint. Still the same for every active tab, so the tail never moves on a tab switch, which is this spec's point. Two or more identities stay neutral, and a pane with no identity at all keeps §3.1's view-keyed rule. §3.1's "one coloured + one uncoloured = neutral" bullet is superseded by this row.
 
 Every pill keeps its own color. The **active** pill needed one follow-up
 change to make that true — see §2.2.

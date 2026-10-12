@@ -63,7 +63,7 @@ had the same root shape as §2.4.
 
 ### 1.1 What Help is
 Plain DOM. `HelpViewModel` sets only `viewType`, `renderPaneChrome` and
-`noHeader` (`frontend/app/view/helpview/helpview.tsx:23-42`). `HelpView` is a
+`noHeader` ([`frontend/app/view/helpview/helpview.tsx:23-42`](../../frontend/app/view/helpview/helpview.tsx#L23-L42)). `HelpView` is a
 scrollable div around `<QuickTips />` with CSS `zoom` (`:87-101`). No iframe,
 no webview, no native surface, no browser-pane code.
 
@@ -81,7 +81,7 @@ no webview, no native surface, no browser-pane code.
 ### 1.3 Root cause
 - QuickTips' four section cards use Tailwind `transition-all duration-300`
   (`frontend/app/element/quicktips.tsx:101, 143, 220, 253`). These are the
-  only four `transition-all` uses in `frontend/app`.
+  only four `transition-all` uses in [`frontend/app`](../../frontend/app).
 - `visibility` is animatable. When it transitions from `visible` to
   `hidden`, the computed value stays `visible` until the transition ends,
   and a transition starts on an *inherited* change too. So when the slot
@@ -361,7 +361,7 @@ working throughout through a legacy adapter.
    `KEEP_ALIVE_TYPES`, aliases and `PaneTabDescriptor` from it. Migrate in
    this order: help, sysinfo, swarm, drone, warden, armory, media, editor,
    then browser, then term and agent.
-   - **2a (implemented):** `frontend/app/block/pane-tab-registry.ts` (pure,
+   - **2a (implemented):** [`frontend/app/block/pane-tab-registry.ts`](../../frontend/app/block/pane-tab-registry.ts) (pure,
      imports no view) holds `PaneTabManifest`, `registerPaneTab` (returns
      unregister; refuses a taken view or alias) and `legacyAdapter`.
      `block-registry.ts` registers all 17 built-ins through `legacyAdapter`;
@@ -506,7 +506,7 @@ working throughout through a legacy adapter.
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
    restore onto it. Make keep-alive per tab.
    - **3a (implemented):** `usePaneTabVisibility(blockId)`
-     (`frontend/app/block/pane-tab-visibility.ts`) →
+     ([`frontend/app/block/pane-tab-visibility.ts`](../../frontend/app/block/pane-tab-visibility.ts)) →
      `"active" | "dormant" | "windowHidden"`, from pane-stack dormancy and a
      new per-window-tab `useWindowTabDisplayed` (`workspace.tsx` provides
      it; true in BOTH window-tab modes, and outside any window tab). A native
@@ -606,7 +606,7 @@ working throughout through a legacy adapter.
        widget, a built-in's key replaces it — loaded at startup and reloaded
        on change like `settings.json` (`backend/user_widgets.rs`). A parse
        error keeps the previous widgets.
-     - **Loading** (`frontend/app/block/widget-loader.ts`). For each such
+     - **Loading** ([`frontend/app/block/widget-loader.ts`](../../frontend/app/block/widget-loader.ts)). For each such
        entry the loader reads the module's text through the existing
        `readeditorfile` RPC (a trusted local file, like any file the editor
        opens), rewrites its bare `solid-js`, `solid-js/web` and
@@ -630,7 +630,7 @@ working throughout through a legacy adapter.
        pass before the first render: a persisted `ext:` pane that mounted
        before its widget registered would build the default view model and
        never rebuild, since `Block` only does on a view change.
-     - **Sample** (`docs/examples/widgets/hello/`): a dependency-free widget
+     - **Sample** ([`docs/examples/widgets/hello/`](../examples/widgets/hello)): a dependency-free widget
        using only `solid-js` primitives and DOM nodes, exercising `ctx.meta`,
        `ctx.setMeta`, `ctx.visibility`, `liveTitle` and `onActivate`. Tests
        cover the import rewrite, a version-mismatch and a view-mismatch

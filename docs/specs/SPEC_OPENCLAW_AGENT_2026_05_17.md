@@ -67,11 +67,11 @@ not a clone target, and not something to graft Claude-Code semantics onto.
 | `agentmux-srv/src/backend/providers.rs` | 207-226 | `OPENCLAW` `ProviderConfig` — `cli_command: "acpx"`, `controller_type: Acp`, `launch_args: ["--agent", "openclaw"]`, `auth_config_dir_env_var: "OPENCLAW_HOME"`, `npm_package: "@openclaw/acpx"`. |
 | `agentmux-srv/src/backend/blockcontroller/acp.rs` | 11 | Doc-comment lists `acpx --agent openclaw` as a canonical example of an ACP-protocol agent the controller drives. Same JSON-RPC lifecycle as `gemini --acp` and `copilot --acp`. |
 | `agentmux-srv/src/identity/auth_patterns.rs` | 57, 71 | `openclaw` listed in `is_api_key_provider()` and in the empty-matcher branch of `patterns_for()`. No OAuth URL extraction — credentials come from OpenClaw's own onboarding. |
-| `frontend/app/view/agent/providers/index.ts` | 127-150 | `PROVIDERS.openclaw` entry — `cliCommand: "acpx"`, `authType: "api-key"`, `authCheckCommand: ["openclaw", "doctor"]`, `authLoginCommand: ["openclaw", "onboard"]`, `controllerType: "acp"`. |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | 127-150 | `PROVIDERS.openclaw` entry — `cliCommand: "acpx"`, `authType: "api-key"`, `authCheckCommand: ["openclaw", "doctor"]`, `authLoginCommand: ["openclaw", "onboard"]`, `controllerType: "acp"`. |
 | `frontend/app/view/forge/forge-constants.ts` | 115-126 | Agent-card metadata: blurb "ACP orchestration platform" + popover describing OpenClaw as a coordinator that runs other agents. |
 | `agentmux-srv/forge-seed.json` | 124-147 | Seed agent persona for `openclaw` with startup skill. |
-| `docs/specs/openclaw-agent-runtime.md` | — | Earlier spec describing `openclaw tui` (interactive TUI backed by the gateway) and `openclaw acp client` (sub-agent protocol bridge) as the two integration surfaces. |
-| `docs/specs/openclaw-widget.md` | — | Companion spec for embedding OpenClaw's web dashboard at `localhost:18789` as an AgentMux widget. |
+| [`docs/specs/openclaw-agent-runtime.md`](openclaw-agent-runtime.md) | — | Earlier spec describing `openclaw tui` (interactive TUI backed by the gateway) and `openclaw acp client` (sub-agent protocol bridge) as the two integration surfaces. |
+| [`docs/specs/openclaw-widget.md`](openclaw-widget.md) | — | Companion spec for embedding OpenClaw's web dashboard at `localhost:18789` as an AgentMux widget. |
 
 **Status of the scaffold:** wired but unverified end-to-end. The
 `cli_command: "acpx"` value is an early guess at the binary name; current
@@ -93,12 +93,12 @@ new provider is **which seams it plugs into vs which it routes around**.
 
 | Seam | What it is | Where it lives | What it normalizes |
 |---|---|---|---|
-| **DocumentNode model** | The renderable tree the agent pane displays — assistant text blocks, tool-call blocks, tool-result blocks, markdown sections, thinking sections, cost banner. | `frontend/app/view/agent/types.ts`, `virtualization/state.ts`, `virtualization/renderers.ts`, `components/ToolBlock.tsx` | What appears on screen and how it's structured / collapsible / styled. |
-| **StreamEvent union** | The provider-agnostic event shape translators emit. Variants: `text`, `tool_call`, `tool_result`, `thinking`, `cost`, `error`, `done`. | `frontend/app/view/agent/stream-parser.ts` + `state.ts` | What translators must produce. ACP, claude-stream-json, codex-json, gemini-json all funnel through here. |
-| **Translator interface** | Per-provider parser that consumes the CLI's wire format and emits `StreamEvent`s. | `frontend/app/view/agent/providers/translator.ts` + `*-translator.ts` files | The boundary between provider-specific wire formats and the shared event model. |
-| **Launch flow** | 3-phase modal: resolve binary → check/run auth → register controller. | `frontend/app/view/agent/flows/launch-flow.ts` + `components/PreLaunchAuthPanel.tsx` + `auth/auth-flow-controller.ts` | When and how the user authenticates and what the modal shows during onboarding. |
+| **DocumentNode model** | The renderable tree the agent pane displays — assistant text blocks, tool-call blocks, tool-result blocks, markdown sections, thinking sections, cost banner. | [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts), `virtualization/state.ts`, `virtualization/renderers.ts`, `components/ToolBlock.tsx` | What appears on screen and how it's structured / collapsible / styled. |
+| **StreamEvent union** | The provider-agnostic event shape translators emit. Variants: `text`, `tool_call`, `tool_result`, `thinking`, `cost`, `error`, `done`. | [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) + `state.ts` | What translators must produce. ACP, claude-stream-json, codex-json, gemini-json all funnel through here. |
+| **Translator interface** | Per-provider parser that consumes the CLI's wire format and emits `StreamEvent`s. | [`frontend/app/view/agent/providers/translator.ts`](../../frontend/app/view/agent/providers/translator.ts) + `*-translator.ts` files | The boundary between provider-specific wire formats and the shared event model. |
+| **Launch flow** | 3-phase modal: resolve binary → check/run auth → register controller. | [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) + `components/PreLaunchAuthPanel.tsx` + `auth/auth-flow-controller.ts` | When and how the user authenticates and what the modal shows during onboarding. |
 | **Auth-URL pattern matchers** | Per-provider regex pack that pulls OAuth URLs or device codes from CLI stdout. | `agentmux-srv/src/identity/auth_patterns.rs` | The seam between "CLI prints stuff" and "AgentMux opens a browser." |
-| **Identity / Memory tabs** | Per-agent identity bundle dropdown + persistent memory tab inside the agent pane. | `frontend/app/view/agent/` settings panel; `db_identities`, `db_memories` schema. | Multi-account hygiene and conversation persistence — provider-independent. |
+| **Identity / Memory tabs** | Per-agent identity bundle dropdown + persistent memory tab inside the agent pane. | [`frontend/app/view/agent/`](../../frontend/app/view/agent) settings panel; `db_identities`, `db_memories` schema. | Multi-account hygiene and conversation persistence — provider-independent. |
 | **Bash-stream overlay** | `agentmux-bashwrap` hook + the streaming output viewer that shows partial stdout while a tool runs. | `.claude/settings.json` PreToolUse hook → `agentmux-bashwrap` crate; `BashOutputViewer.tsx`. | Mid-tool-execution streaming UX — only fires if the provider routes its shell tool through a hookable boundary. |
 | **Container path** | Per-agent containerized run inside `agentmux/<provider>:latest`. | `cli-catalog.ts` `containerSupported` flag + container build configs. | Sandboxed execution (defer for openclaw v1). |
 
@@ -256,7 +256,7 @@ output renders in the agent pane.
    (or `openclaw acp serve`) is the canonical AgentMux launch invocation in
    today's openclaw release. Update `agentmux-srv/src/backend/providers.rs`
    lines 210, 212, 222 if the answer is `openclaw acp …` instead of `acpx`.
-   Mirror in `frontend/app/view/agent/providers/index.ts` lines 130-149.
+   Mirror in [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) lines 130-149.
 
 2. **Verify ACP handshake.** Spawn `openclaw acp …` (or `acpx`) by hand from
    a shell, send the `initialize` / `initialized` / `session/create` /
@@ -269,7 +269,7 @@ output renders in the agent pane.
    agent-pane DocumentNode renderer accepts OpenClaw's `session/update`
    notifications without translator changes. If OpenClaw emits an ACP variant
    that doesn't map cleanly, scope a small OpenClaw-flavored ACP translator
-   in `frontend/app/view/agent/providers/`.
+   in [`frontend/app/view/agent/providers/`](../../frontend/app/view/agent/providers).
 
 4. **Forge card copy.** Update `frontend/app/view/forge/forge-constants.ts`
    lines 116-126 — the "ACP orchestration platform" blurb is technically
@@ -344,7 +344,7 @@ Scope:
 
 - Verify `OPENCLAW_HOME` redirect actually points `~/.openclaw/` somewhere
   inside `{dataDir}/auth/openclaw/<bundle>/` per
-  `docs/specs/provider-auth-isolation.md`. Test: switch identity bundles in
+  [`docs/specs/provider-auth-isolation.md`](provider-auth-isolation.md). Test: switch identity bundles in
   the launcher, confirm each bundle has its own `~/.openclaw/`-shaped tree.
 - Confirm the agent-pane Memory tab (cog → settings → Memory) reads/writes
   to a `db_memories` row keyed by OpenClaw's identity bundle. The seed row
@@ -390,13 +390,13 @@ unified-runner work, not a v1 OpenClaw blocker.
 | Phase | File | Action |
 |---|---|---|
 | α | `agentmux-srv/src/backend/providers.rs` | Verify + correct `cli_command`, `npm_package`, `launch_args` for openclaw if `acpx` is not the right value. |
-| α | `frontend/app/view/agent/providers/index.ts` | Mirror the providers.rs correction. |
+| α | [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Mirror the providers.rs correction. |
 | α | `frontend/app/view/forge/forge-constants.ts` | Rewrite OpenClaw blurb + popover (lines 115-126). |
 | α | `agentmux-srv/forge-seed.json` | Refresh OpenClaw seed description (line 130) to match new blurb. |
 | α | `frontend/app/view/agent/providers/openclaw-translator.ts` | NEW *(only if OpenClaw's ACP variant differs from Gemini/Copilot ACP enough to need provider-specific shaping)*. |
-| β | `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx` | "Onboard with OpenClaw" copy + handoff CTA for the `openclaw onboard` flow (β.A path). |
+| β | [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx) | "Onboard with OpenClaw" copy + handoff CTA for the `openclaw onboard` flow (β.A path). |
 | β | `frontend/app/view/agent/auth/auth-state.ts` | New `awaiting_openclaw_onboard` sub-state if β.A's "open a Terminal pane and poll doctor" requires explicit FSM step. |
-| γ | `frontend/app/view/agent/agent-view.tsx` (settings panel) | Read-only "backing model" pill + "reconfigure" action. |
+| γ | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (settings panel) | Read-only "backing model" pill + "reconfigure" action. |
 | δ | (no new files — exercises existing identity/memory plumbing) | |
 
 Estimated **+1 file (translator, contingent)**, **5 modified**, **~300 LoC**
@@ -512,17 +512,17 @@ After Phase δ:
 - `agentmux-srv/src/backend/blockcontroller/acp.rs` — ACP controller (mentions `acpx --agent openclaw` at line 11)
 - `agentmux-srv/src/identity/auth_patterns.rs` — `is_api_key_provider` list (line 57), `patterns_for` dispatch (line 62-74)
 - `agentmux-srv/src/agents/runner.rs` — workflow Agent block runner, hardcoded to `claude` (lines 82-117). Phase ε decoupling target, not v1 blocker.
-- `frontend/app/view/agent/providers/index.ts` — frontend provider metadata (openclaw at 127-150)
-- `frontend/app/view/agent/providers/translator.ts` + `*-translator.ts` — translator interface and per-provider implementations
-- `frontend/app/view/agent/stream-parser.ts` — StreamEvent model
-- `frontend/app/view/agent/virtualization/state.ts` + `renderers.ts` + `DocumentRow.tsx` — DocumentNode rendering
-- `frontend/app/view/agent/components/ToolBlock.tsx` — tool overlay
-- `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx` — launch modal
-- `frontend/app/view/agent/flows/launch-flow.ts` — 3-phase launch flow
+- [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) — frontend provider metadata (openclaw at 127-150)
+- [`frontend/app/view/agent/providers/translator.ts`](../../frontend/app/view/agent/providers/translator.ts) + `*-translator.ts` — translator interface and per-provider implementations
+- [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) — StreamEvent model
+- [`frontend/app/view/agent/virtualization/state.ts`](../../frontend/app/view/agent/virtualization/state.ts) + `renderers.ts` + `DocumentRow.tsx` — DocumentNode rendering
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — tool overlay
+- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx) — launch modal
+- [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts) — 3-phase launch flow
 - `frontend/app/view/forge/forge-constants.ts` — agent-card metadata (openclaw at 115-126)
 - `agentmux-srv/forge-seed.json` — seed personas (openclaw at 124-147)
-- `docs/specs/openclaw-agent-runtime.md` — earlier `openclaw tui` integration spec; useful gateway-lifecycle context
-- `docs/specs/openclaw-widget.md` — openclaw web dashboard widget spec (companion, not in scope here)
-- `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` — launch flow + auth pattern reference
-- `docs/specs/provider-auth-isolation.md` — per-provider `{dataDir}/auth/<provider>/` model
-- `docs/specs/SPEC_ACP_CONTROLLER_2026_04_16.md` — ACP controller design
+- [`docs/specs/openclaw-agent-runtime.md`](openclaw-agent-runtime.md) — earlier `openclaw tui` integration spec; useful gateway-lifecycle context
+- [`docs/specs/openclaw-widget.md`](openclaw-widget.md) — openclaw web dashboard widget spec (companion, not in scope here)
+- [`docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) — launch flow + auth pattern reference
+- [`docs/specs/provider-auth-isolation.md`](provider-auth-isolation.md) — per-provider `{dataDir}/auth/<provider>/` model
+- [`docs/specs/SPEC_ACP_CONTROLLER_2026_04_16.md`](SPEC_ACP_CONTROLLER_2026_04_16.md) — ACP controller design

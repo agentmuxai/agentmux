@@ -8,7 +8,7 @@
 
 ## 1. Why
 
-Every uncaught error, unhandled promise rejection, and `console.error` call inside the renderer is already piped to the host log via `fe_log_structured` (see `frontend/log/error-forwarder.ts` + `frontend/log/log-pipe.ts`). The stack we forward is whatever `Error.stack` was at the moment of capture — which is the **minified bundle position** (line + column inside the rolled-up chunk). Chromium/V8 only apply source maps to stacks shown in DevTools; the runtime `error.stack` string stays raw.
+Every uncaught error, unhandled promise rejection, and `console.error` call inside the renderer is already piped to the host log via `fe_log_structured` (see [`frontend/log/error-forwarder.ts`](../../frontend/log/error-forwarder.ts) + [`frontend/log/log-pipe.ts`](../../frontend/log/log-pipe.ts)). The stack we forward is whatever `Error.stack` was at the moment of capture — which is the **minified bundle position** (line + column inside the rolled-up chunk). Chromium/V8 only apply source maps to stacks shown in DevTools; the runtime `error.stack` string stays raw.
 
 To debug a renderer crash from a host log, we currently:
 
@@ -63,7 +63,7 @@ Frames the resolver can't map (e.g. native frames, frames in chunks without a `.
 
 ## 4. Caching + fetch strategy
 
-**One-cache-per-chunk.** Parsed `SourceMapConsumer` objects are kept in a `Map<chunkName, SourceMapConsumer | Promise<SourceMapConsumer>>`. The map is module-scope in `frontend/log/source-map-resolver.ts`.
+**One-cache-per-chunk.** Parsed `SourceMapConsumer` objects are kept in a `Map<chunkName, SourceMapConsumer | Promise<SourceMapConsumer>>`. The map is module-scope in [`frontend/log/source-map-resolver.ts`](../../frontend/log/source-map-resolver.ts).
 
 **Lazy load on first error in a chunk.** No upfront fetch. The first error pays a one-time `fetch(/*.map url*/)` + `new SourceMapConsumer(json)`. After that, lookups are synchronous.
 
@@ -94,7 +94,7 @@ Frames the resolver can't map (e.g. native frames, frames in chunks without a `.
 
 ### 6.1 New module
 
-`frontend/log/source-map-resolver.ts`:
+[`frontend/log/source-map-resolver.ts`](../../frontend/log/source-map-resolver.ts):
 
 ```ts
 import { SourceMapConsumer } from "source-map-js";
@@ -208,7 +208,7 @@ CEF serves the portable's `runtime/frontend/` over `http://127.0.0.1:<port>/asse
 
 ## 10. Testing
 
-`frontend/log/source-map-resolver.test.ts`:
+[`frontend/log/source-map-resolver.test.ts`](../../frontend/log/source-map-resolver.test.ts):
 
 1. **Happy path.** Inline a synthetic `.map` JSON; verify `resolveStack(rawStack)` rewrites frames to `original.tsx:42:0 (functionName)`.
 2. **Cache hit.** Two stacks in the same chunk; second call must not refetch.

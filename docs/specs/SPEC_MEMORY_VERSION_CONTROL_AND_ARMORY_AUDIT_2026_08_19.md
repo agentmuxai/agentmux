@@ -20,18 +20,18 @@ bundle-pointer-fragmentation priority) remain genuinely open — none were
 silently decided during implementation.
 **Author:** Agent1 (agent1-06309)
 **Related:**
-`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md`,
-`docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`,
-`docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` (defers the
+[`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md),
+[`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md),
+[`docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md),
+[`docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md`](SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md) (defers the
 Bundle↔Memory question — this spec deliberately leaves it deferred, §4.2),
-`docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`,
-`docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md` (Stash vs. Armory
+[`docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md),
+[`docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md`](../reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md) (Stash vs. Armory
 naming split this spec builds on),
 `specs/SPEC_WARDEN_WIDGET_2026-05-25.md` (original Warden ambition — §5
 below explicitly hands its unbuilt governance pieces to a *separate* future
 spec, not this one),
-`docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` and its
+[`docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`](SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) and its
 descendants in `amx/CLAUDE.md` (the trust-tier system whose gap this spec's
 motivating incident exposed).
 
@@ -147,7 +147,7 @@ automatically.
 `db_bundles` has no foreign key to an agent. The link is the soft
 `db_agents.memory_id` / `db_agents.default_memory_id` column, empty-string
 meaning "unbound" by convention, not DB-enforced
-(`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.1, §7).
+([`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) §3.1, §7).
 
 `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` proposes Bundle↔MCP-server and
 Bundle↔Skill reference tables but explicitly defers Bundle↔Memory(native)
@@ -198,7 +198,7 @@ jekt).
 ### 2.3 Warden
 
 Warden (`defwidget@warden`) is real and shipped, with Host / LAN / Internet
-/ Audit / Supervisor sections (`frontend/app/view/warden/warden-model.ts`).
+/ Audit / Supervisor sections ([`frontend/app/view/warden/warden-model.ts`](../../frontend/app/view/warden/warden-model.ts)).
 Its "Audit" section (`warden-audit-manager.tsx`) renders **jekt delivery
 and Supervisor decision events only** — not a general config/credential/
 memory audit trail. The backing store is
@@ -218,9 +218,9 @@ implementation covers a narrower domain (jekts) with a weaker guarantee
 
 ### 2.4 Agent Stash ↔ Armory — already the intended per-agent/global split
 
-`AgentStashModal.tsx` (`frontend/app/view/agent/components/AgentStashModal.tsx`)
+`AgentStashModal.tsx` ([`frontend/app/view/agent/components/AgentStashModal.tsx`](../../frontend/app/view/agent/components/AgentStashModal.tsx))
 is explicitly documented as "the per-agent-scoped analogue of the global
-Armory pane" (module doc, `docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md`).
+Armory pane" (module doc, [`docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md`](../reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md)).
 It's a tabbed modal opened from an agent pane's own header, with tabs:
 Accounts (read-only linked identities), **Memory** (`AgentNativeMemoryModal`
 — the native-memory browser), MCP Servers, Skills, and Startup

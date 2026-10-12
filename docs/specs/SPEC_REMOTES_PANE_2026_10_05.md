@@ -8,13 +8,13 @@
 - "lets use Remotes .. write the spec to file".
 
 **Affects:**
-- `frontend/app/view/remotes/` (new);
+- [`frontend/app/view/remotes/`](../../frontend/app/view/remotes) (new);
 - the pane registry (`block/block-registry.ts`, `block/pane-tab-registry.ts`);
 - the connection picker (`modals/conntypeahead.tsx`);
 - the block frame;
 - Hangar (`view/files/`);
-- `crates/srv/src/backend/remote/`;
-- `crates/srv/src/server/app_api/connections.rs`.
+- [`crates/srv/src/backend/remote/`](../../crates/srv/src/backend/remote);
+- [`crates/srv/src/server/app_api/connections.rs`](../../crates/srv/src/server/app_api/connections.rs).
 
 **Builds on:** `SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md`, which owns the connection model (§4), the helper (§6), durable sessions (§7), agent access (§8.2) and the open decisions (§11.2). This spec adds the place where the user sees and manages all of it. Pattern: `SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md` (the inline detail panel under a row, no modals).
 

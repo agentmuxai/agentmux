@@ -14,7 +14,7 @@
 - **Reference, don't copy.** A Bundle stores primitive **IDs**, not inline JSON.
 - **Compatibility window.** Keep `preset.*` / `db_memory_bundles` as **read aliases for one release**; new writes go to Bundle names.
 - **No user-visible regression.** The Armory IA gains no new required step; direct bindings remain the base, Bundle is optional sugar.
-- **Contract-test discipline.** Renaming App API commands changes the rpc-contract surface (`test/contract/rpc-contract.test.ts`) — every phase updates the baselines in lockstep (this is the guard that caught the mcp/skill drift in #1896).
+- **Contract-test discipline.** Renaming App API commands changes the rpc-contract surface ([`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts)) — every phase updates the baselines in lockstep (this is the guard that caught the mcp/skill drift in #1896).
 
 ---
 
@@ -39,8 +39,8 @@ The cheap, high-value, mostly-reversible layer. No storage migration yet — Bun
 
 ### 2.2 Frontend command bindings + types
 
-- `frontend/app/store/rpc-api/` — rename the `Preset*Command` bindings to `Bundle*Command` targeting `bundle.*`. (After the rpc-api domain split, these live in the appropriate domain file — `identity.ts`/`memory.ts`; grep `preset` under `rpc-api/`.)
-- Types: `frontend/app/view/bundle-summary.tsx` already speaks "bundle" for the panel but its `kind` union is `"Identity" | "Preset"` → `"Identity" | "Bundle"` (and per Phase 3, "Identity" as a *kind* goes away — see §3). Title map line 41 `"Presets"` → `"Bundles"`.
+- [`frontend/app/store/rpc-api/`](../../frontend/app/store/rpc-api) — rename the `Preset*Command` bindings to `Bundle*Command` targeting `bundle.*`. (After the rpc-api domain split, these live in the appropriate domain file — `identity.ts`/`memory.ts`; grep `preset` under `rpc-api/`.)
+- Types: [`frontend/app/view/bundle-summary.tsx`](../../frontend/app/view/bundle-summary.tsx) already speaks "bundle" for the panel but its `kind` union is `"Identity" | "Preset"` → `"Identity" | "Bundle"` (and per Phase 3, "Identity" as a *kind* goes away — see §3). Title map line 41 `"Presets"` → `"Bundles"`.
 
 ### 2.3 User-facing strings (Preset → Bundle)
 
@@ -48,13 +48,13 @@ The cheap, high-value, mostly-reversible layer. No storage migration yet — Bun
 |------|--------|
 | `frontend/app/view/trust/trust-view.tsx` (line 17) | tab `{ id: "memories", label: "Presets" }` → `label: "Bundles"` (keep internal id `"memories"` in Phase 2; retire in Phase 4). Icon `sliders` → consider `layer-group`/`box` |
 | `frontend/app/view/memory/memory-model.ts` (131, 178) | `viewText … "Presets"` → `"Bundles"`; frame-title fallback `"Presets"` → `"Bundles"` |
-| `frontend/app/view/agent/components/AgentLaunchModal.tsx` (811, 892, 920) | "Preset" label/aria → "Bundle" |
+| [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) (811, 892, 920) | "Preset" label/aria → "Bundle" |
 | `frontend/app/view/agent/components/AgentNewMemoryModal.tsx` (92) | `New Preset` → `New Bundle` (consider renaming the modal component too) |
 | `AgentLaunchModal.integration.test.tsx` (176) | `findByLabelText("Preset")` → `"Bundle"` (test asserts the label) |
 
 ### 2.4 Contract test + persisted view key
 
-- `test/contract/rpc-contract.test.ts` baselines: move the five `preset.*` entries → `bundle.*` in `KNOWN_REGISTERED_UNDECLARED` (once frontend binds `bundle.*`, they'll be *declared* and drop out — verify direction). Keep `preset.*` aliases acknowledged if they remain registered.
+- [`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts) baselines: move the five `preset.*` entries → `bundle.*` in `KNOWN_REGISTERED_UNDECLARED` (once frontend binds `bundle.*`, they'll be *declared* and drop out — verify direction). Keep `preset.*` aliases acknowledged if they remain registered.
 - Persisted pane `view: "memory"` key stays (Phase 2) — the view still resolves; the label change is cosmetic. (Renaming the view key is optional Phase 4 cleanup, gated by a `block.tsx` shim like `trust`/`forge`.)
 
 **Phase 2 deliverable:** one PR. UI + App API say "Bundle"; storage untouched; `preset.*` aliased. `tsc` + `vitest` (esp. contract + AgentLaunchModal) green.
@@ -77,10 +77,10 @@ The proposal's "one real refactor" (§3.3, §7). Today: `instance → identity_b
 
 ### 3.2b Agent-pane header: consolidate to a single icon (product-owner decision 2026-07-02)
 
-Replace the agent pane's **two** title-bar icons (`brain`/"Agent memory" + `id-card`/"Agent identity") with **one `id-card` icon** that opens a **unified per-agent management modal** — a tabbed surface over all of this agent's bound primitives: **Accounts · Memory · MCP · Skills · Briefs · Bundle** (the Armory, scoped to this agent). Details + rationale in `docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` §4.
+Replace the agent pane's **two** title-bar icons (`brain`/"Agent memory" + `id-card`/"Agent identity") with **one `id-card` icon** that opens a **unified per-agent management modal** — a tabbed surface over all of this agent's bound primitives: **Accounts · Memory · MCP · Skills · Briefs · Bundle** (the Armory, scoped to this agent). Details + rationale in [`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md`](archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md) §4.
 
 Implementation:
-- `frontend/app/view/agent/agent-model.ts` `endIconButtons` (~line 141): replace the two-button array with a single `id-card` button (title "Agent setup"/"Manage agent") whose `click` opens the unified modal.
+- [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) `endIconButtons` (~line 141): replace the two-button array with a single `id-card` button (title "Agent setup"/"Manage agent") whose `click` opens the unified modal.
 - Retire `_openMemoryModal` / `_openIdentityModal` (agent-model.ts:36-37, agent-view.tsx wiring) in favor of one `_openAgentSetupModal`, or reuse the Armory's tabbed manager component filtered to the agent's bindings with "add from library / create new" deep-linking to the full Armory.
 - Keep the icon as `id-card` (reads as "who/what this agent is + carries"); not `brain`, not `key`.
 
@@ -151,7 +151,7 @@ Drop the `preset.*` command aliases and any `db_memory_bundles` read-alias once 
 ## Docs to update (across the phases)
 
 - **`CLAUDE.md`** line 29 (`db_memory_bundles, not yet globalized`) → `db_bundles`; line 171 ("Backend names stay `db_memory_bundles` / `bundle_memory_*`") → rewrite to the new names + note "preset" retired in favor of "Bundle". Update the "Not widgets" **Presets** row → **Bundles**.
-- `docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md` — reconcile with the composable model (or supersede).
+- [`docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md`](archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md) — reconcile with the composable model (or supersede).
 - Leave historical specs (`SPEC_TRUST_CENTER_*`, older bundle specs) as record.
 
 ## Interaction with the Armory rename (`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`)

@@ -5,7 +5,7 @@ the startup file, which lives in the system prompt). The recommendation against
 reinjecting (§4.5) and the "index only" non-goal (§5) were overridden by the
 repo owner on 2026-09-22 and shipped otherwise in #3502/#3512. The unbuilt
 §4.3/§4.4 items are carried as G9 in the doc below.
-**Superseded-by:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`
+**Superseded-by:** [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md)
 **Date:** 2026-09-05 (empirical findings added 2026-09-06)
 **Author:** Manoz@Area54
 
@@ -23,7 +23,7 @@ repo owner on 2026-09-22 and shipped otherwise in #3502/#3512. The unbuilt
 > AgentMux composes is empty in practice. §3 and §4 are rewritten
 > accordingly. The measurements are recorded in full because several
 > contradict a previously-accepted conclusion in
-> `docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md` (§2.7).
+> [`docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md`](../analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md) (§2.7).
 
 ---
 
@@ -68,7 +68,7 @@ remove it. This is structural, not incidental.
 ### 2.2 Both memory paths survive compaction
 
 Follows from §2.1 for System A. For System B, independently corroborated by
-`docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md:111`, whose table records CLI
+[`docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md:111`](../analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md), whose table records CLI
 auto-memory loading at **"Fresh session + post-compact"**.
 
 Directly confirmed first-hand: the session that produced this spec is itself
@@ -154,7 +154,7 @@ one measured empty in §2.5.** "Memory doesn't carry over on a new build" and
 
 ### 2.7 A previously-accepted conclusion is now stale
 
-`docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md:16` records the
+[`docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md:16`](../analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md) records the
 two-memory-systems question as **"Already resolved — Option A shipped"**:
 `autoMemoryEnabled: false` written *"whenever the file's settings block is
 (re)written"*, on the reasoning that *"AgentMux owns memory itself via
