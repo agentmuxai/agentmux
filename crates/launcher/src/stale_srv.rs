@@ -139,18 +139,11 @@ fn wait_for_free(lock_path: &Path, within: Duration) -> bool {
 }
 
 /// The process that has `lock_path` open, for a lock file without a recorded
-/// PID: an agentmux-srv among `lsof`'s answers if there is one, else the
-/// first. The checks in [`reclaim_stale_srv_lock`] still apply to it.
+/// PID: an agentmux-srv among the holders if there is one, else the first.
+/// The checks in [`reclaim_stale_srv_lock`] still apply to it.
 fn lock_holder_via_lsof(lock_path: &Path) -> Option<i32> {
-    let out = std::process::Command::new("lsof")
-        .arg("-t")
-        .arg("--")
-        .arg(lock_path)
-        .output()
-        .ok()?;
-    let pids: Vec<i32> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.trim().parse::<i32>().ok())
+    let pids: Vec<i32> = processes_with_file_open(lock_path)
+        .into_iter()
         .filter(|pid| *pid > 1 && *pid != std::process::id() as i32)
         .collect();
     pids.iter()
@@ -161,6 +154,46 @@ fn lock_holder_via_lsof(lock_path: &Path) -> Option<i32> {
                 .unwrap_or(false)
         })
         .or_else(|| pids.first().copied())
+}
+
+/// PIDs with `path` open. macOS: `lsof -t`, part of the base system.
+#[cfg(not(target_os = "linux"))]
+fn processes_with_file_open(path: &Path) -> Vec<i32> {
+    let Ok(out) = std::process::Command::new("/usr/sbin/lsof")
+        .arg("-t")
+        .arg("--")
+        .arg(path)
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse::<i32>().ok())
+        .collect()
+}
+
+/// PIDs with `path` open. Linux: read `/proc/<pid>/fd` directly, since
+/// `lsof` isn't installed everywhere (the AppImage doesn't bundle it and the
+/// packages declare no dependencies). Only this user's processes are
+/// readable, which is all an srv we could stop can be.
+#[cfg(target_os = "linux")]
+fn processes_with_file_open(path: &Path) -> Vec<i32> {
+    let Ok(target) = std::fs::canonicalize(path) else {
+        return Vec::new();
+    };
+    let Ok(procs) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    procs
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|pid| {
+            std::fs::read_dir(format!("/proc/{pid}/fd"))
+                .map(|fds| fds.flatten().any(|fd| std::fs::read_link(fd.path()).is_ok_and(|l| l == target)))
+                .unwrap_or(false)
+        })
+        .collect()
 }
 
 /// One `ps` field for `pid` (`ww`: untruncated; `with_env`: append the
