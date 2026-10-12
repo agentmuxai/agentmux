@@ -108,6 +108,12 @@ describe("linkPaths", () => {
       "---\ndescription: see `Cargo.toml`\n---\n\nBody [`Cargo.toml`](Cargo.toml).\n",
     );
   });
+  it("turns a two-space hard break on an edited line into a backslash", () => {
+    const md = "**File:** `Cargo.toml`  \nnext line  \n\nend `Cargo.toml`  \n";
+    expect(linkPaths(md, "README.md").text).toBe(
+      "**File:** [`Cargo.toml`](Cargo.toml)\\\nnext line  \n\nend [`Cargo.toml`](Cargo.toml)\n",
+    );
+  });
   it("is idempotent", () => {
     const once = linkPaths("`crates/srv/src/main.rs`\n", "README.md").text;
     expect(linkPaths(once, "README.md").changes).toHaveLength(0);

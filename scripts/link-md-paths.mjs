@@ -37,8 +37,10 @@ import remarkGfm from "remark-gfm";
 
 const PATH_RE = /^(?:\.\/)?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)*\/?(?::(\d+)(?:[-–](\d+))?)?$/;
 const SKIP_ANCESTORS = new Set(["link", "linkReference", "heading", "definition"]);
-// Written only by the release flow (scripts/release.sh), never by hand in a feature PR.
-const NOT_OURS = (f) => f === "VERSION_HISTORY.md" || f.startsWith(".changesets/");
+// Written only by the release flow (scripts/release.sh), never by hand in a feature PR,
+// or generated (docs/specs/INDEX.md, by scripts/gen-docs-index.mjs, which CI re-checks).
+const NOT_OURS = (f) =>
+  f === "VERSION_HISTORY.md" || f.startsWith(".changesets/") || f === "docs/specs/INDEX.md";
 
 /** Index of tracked files and the folders that hold them. */
 export function trackedIndex(repoRoot) {
@@ -120,7 +122,25 @@ export function linkPaths(text, mdFile, tracked) {
     const code = out.slice(e.start, e.end);
     out = `${out.slice(0, e.start)}[${code}](${e.target})${out.slice(e.end)}`;
   }
-  return { text: out, changes: edits.map(({ line, value, target }) => ({ line, value, target })) };
+  return { text: hardBreaksAsBackslash(out, edits), changes: edits.map(({ line, value, target }) => ({ line, value, target })) };
+}
+
+// A line this script edits that ends in a two-space hard break would fail the
+// pre-commit `git diff --check`; a trailing backslash is the same break in
+// CommonMark and GitHub. Trailing spaces with no line after them break nothing,
+// so they are just dropped.
+function hardBreaksAsBackslash(text, edits) {
+  const lines = text.split("\n");
+  for (const n of new Set(edits.map((e) => e.line))) {
+    const i = n - 1;
+    const cr = lines[i].endsWith("\r") ? "\r" : "";
+    const body = cr ? lines[i].slice(0, -1) : lines[i];
+    const core = body.replace(/[ \t]+$/, "");
+    if (core === body) continue;
+    const next = (lines[i + 1] ?? "").trim();
+    lines[i] = (next && body.length - core.length >= 2 ? `${core}\\` : core) + cr;
+  }
+  return lines.join("\n");
 }
 
 function main(argv) {
