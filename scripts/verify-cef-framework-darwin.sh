@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify a macOS "Chromium Embedded Framework.framework" carries AgentMux's
-# BeginWindowDrag patch.
+# BeginWindowDrag patch and the agentmuxai/cef#11 ThemeService fix.
 #
 # Why
 # ---
@@ -24,16 +24,29 @@
 # this check is only meaningful on the UNSTRIPPED framework (the cef-build tree, or
 # the freshly-downloaded release asset), BEFORE package-macos.sh strips it.
 #
+# The cef#11 fix (CefWidgetImpl observes each ThemeService once) adds no named
+# function, but its `observed_theme_services_` map instantiates std::map code
+# keyed by raw_ptr<ThemeService>, also emitted as local symbols. No other code
+# in the framework has such a map (0 matches on the 154 build without the fix,
+# 2 with it). Without the fix, a browser pane whose Profile differs from its
+# window's (any default-jar pane in a second window, including a torn-off tab)
+# aborts the host: "Observers can only be added once!". A framework built from
+# the fork before 2026-10-10 has BeginWindowDrag but not this, so checking
+# BeginWindowDrag alone passed it.
+#
 # Usage:  verify-cef-framework-darwin.sh <dir-containing-framework | framework path | framework binary>
 #   Accepts any of:
 #     - a directory that contains "Chromium Embedded Framework.framework"
 #     - the "…/Chromium Embedded Framework.framework" bundle itself
 #     - the inner Mach-O binary directly
 #
-# Exit:   0  patch present (symbol found)
-#         1  UNPATCHED — symbol table present but no BeginWindowDrag slot (the
-#            upstream prebuilt CEF; native drag will silently no-op)
+# Exit:   0  both present
+#         1  symbol table present but a patch missing: no BeginWindowDrag slot
+#            (the upstream prebuilt CEF; native drag will silently no-op), or
+#            no cef#11 (a fork build older than it; second-window panes crash)
 #         2  cannot verify — stripped binary, missing file, or no nm available
+#
+# Tests: scripts/verify-cef-framework-darwin.test.sh (fake nm, runs anywhere).
 #
 # NOTE: no `set -o pipefail` — `grep -q` short-circuits on first match and SIGPIPEs
 # the symbol reader, which pipefail would surface as a spurious pipeline failure.
@@ -71,18 +84,23 @@ if ! command -v nm >/dev/null 2>&1; then
     exit 2
 fi
 
-PATTERN='BeginWindowDrag'
+DRAG_MARKER='BeginWindowDrag'
+THEME_MARKER='__value_typeIN4base7raw_ptrI12ThemeService'
 
-# Plain nm = full symbol table (local + external). REQUIRED: the patch symbol is
-# a local symbol; nm -gU would not see it.
-read_syms() { nm "$BIN" 2>/dev/null; }
+# Plain nm = full symbol table (local + external). REQUIRED: the patch symbols
+# are local symbols; nm -gU would not see them. -p (symbol-table order, no sort)
+# and a fixed-string grep that stops at the first match: about 1 s per marker on
+# the ~1.2M-symbol unstripped framework, against ~5 s for one sorted nm.
+has_sym() { nm -p "$BIN" 2>/dev/null | LC_ALL=C grep -qF -- "$1" && echo 1 || echo 0; }
+has_drag="$(has_sym "$DRAG_MARKER")"
+has_theme="$(has_sym "$THEME_MARKER")"
 
-if read_syms | grep -qE "$PATTERN"; then
-    echo "verify-cef-framework-darwin: ✓ $BIN carries the BeginWindowDrag patch" >&2
+if [ "$has_drag" = 1 ] && [ "$has_theme" = 1 ]; then
+    echo "verify-cef-framework-darwin: ✓ $BIN carries the BeginWindowDrag patch and the cef#11 ThemeService fix" >&2
     exit 0
 fi
 
-# No match. Distinguish "has symbols but unpatched" from "stripped".
+# A patch is missing. Distinguish "has symbols but unpatched" from "stripped".
 #
 # `strip` on macOS removes LOCAL symbols and keeps the external/dynamic ones, so
 # a stripped framework still prints thousands of nm lines. Testing for "any
@@ -93,14 +111,25 @@ fi
 # UNPATCHED upstream CEF" and exited 0 -- a confident, alarming, wrong answer
 # about a correct build.
 #
-# The patch symbol is local, so the real question is whether ANY local symbols
+# The patch symbols are local, so the real question is whether ANY local symbols
 # survive. nm marks local symbols with a lowercase type letter.
-if [ "$(read_syms | awk '$2 ~ /^[a-z]$/' | head -1 | wc -l | tr -d ' ')" != "0" ]; then
-    echo "verify-cef-framework-darwin: ✗ $BIN has a symbol table but NO BeginWindowDrag slot." >&2
-    echo "                  This is the UNPATCHED upstream CEF — native window drag /" >&2
-    echo "                  floating-pane resize will silently no-op. Use the patched" >&2
-    echo "                  framework (docs/cef-build/build-patched-framework-macos.md), or" >&2
-    echo "                  point AGENTMUX_CEF_RUNTIME_DIR_DARWIN at a patched Release_GN_arm64." >&2
+if nm -p "$BIN" 2>/dev/null | LC_ALL=C grep -qE '^[0-9a-f]+ [a-z] '; then
+    if [ "$has_drag" != 1 ]; then
+        echo "verify-cef-framework-darwin: ✗ $BIN has a symbol table but NO BeginWindowDrag slot." >&2
+        echo "                  This is the UNPATCHED upstream CEF — native window drag /" >&2
+        echo "                  floating-pane resize will silently no-op." >&2
+    fi
+    if [ "$has_theme" != 1 ]; then
+        echo "verify-cef-framework-darwin: ✗ $BIN lacks the agentmuxai/cef#11 ThemeService fix." >&2
+        echo "                  A browser pane in a second window (or a torn-off tab holding" >&2
+        echo "                  one) aborts the host: \"Observers can only be added once!\"." >&2
+        echo "                  A fork build from before 2026-10-10 looks like this." >&2
+    fi
+    echo "                  Use the pinned runtime (CEF_MACOS_RUNTIME_TAG in" >&2
+    echo "                  scripts/cef-build/cef-runtime-pins.sh, an agentmuxai/cef release)" >&2
+    echo "                  or a framework built from the fork at 6fba204 or later" >&2
+    echo "                  (docs/cef-build/build-patched-framework-macos.md): stage it at" >&2
+    echo "                  ~/cef-build/darwin/aarch64 or point AGENTMUX_CEF_RUNTIME_DIR_DARWIN at it." >&2
     exit 1
 fi
 
