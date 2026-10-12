@@ -35,6 +35,7 @@ class WSControl {
     reconnectTimes: number = 0;
     msgQueue: any[] = [];
     msgQueueTimer: ReturnType<typeof setTimeout> = null;
+    inReconnectHandlers: boolean = false;
     tabId: string;
     messageCallback: WSEventCallback;
     watchSessionId: string = null;
@@ -169,8 +170,16 @@ class WSControl {
             this.reconnectTimes = 0;
             dlog("clear reconnect times");
         }, StableConnTime);
-        for (let handler of reconnectHandlers) {
-            handler();
+        // What the reconnect handlers send (re-subscriptions above all) goes
+        // out straight away, ahead of anything queued while disconnected, so
+        // the new connection is subscribed before queued input or RPCs run.
+        this.inReconnectHandlers = true;
+        try {
+            for (let handler of reconnectHandlers) {
+                handler();
+            }
+        } finally {
+            this.inReconnectHandlers = false;
         }
         this.runMsgQueue();
     }
@@ -248,8 +257,9 @@ class WSControl {
     }
 
     pushMessage(data: WSCommandType) {
-        // Behind a queue that is still draining, so order is kept.
-        if (!this.open || this.msgQueue.length > 0) {
+        // Behind a queue that is still draining, so order is kept; except
+        // from the reconnect handlers, which go first (see onopen).
+        if (!this.open || (this.msgQueue.length > 0 && !this.inReconnectHandlers)) {
             this.msgQueue.push(data);
             return;
         }

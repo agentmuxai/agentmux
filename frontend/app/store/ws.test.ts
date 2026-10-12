@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WSControl } from "./ws";
+import { WSControl, addWSReconnectHandler } from "./ws";
 
 class FakeSocket {
     sent: string[] = [];
@@ -76,6 +76,24 @@ describe("WSControl message queue", () => {
 
         ws.pushMessage(cmd({ wscommand: "rpc", tag: "direct" }));
         expect(tags().at(-1)).toBe("direct");
+    });
+
+    it("sends what the reconnect handlers push before the queued backlog", () => {
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        let resubscribe = false;
+        addWSReconnectHandler(() => {
+            if (resubscribe) {
+                ws.pushMessage(cmd({ wscommand: "eventsub", tag: "resub" }));
+            }
+        });
+        ws.connectNow("test");
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "queued-input" }));
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "queued-rpc" }));
+        resubscribe = true;
+
+        lastSocket.onopen(new Event("open"));
+
+        expect(lastSocket.sent.map((m) => JSON.parse(m).tag)).toEqual(["resub", "queued-input"]);
     });
 
     it("sends directly once open", () => {
