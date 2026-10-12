@@ -8,7 +8,6 @@ import { basicTermModels } from "@/app/view/term/term-models";
 import {
     atoms,
     createTab,
-    getApi,
     getBlockComponentModel,
     getFocusedBlockId,
     openOrFocusPaneByView,
@@ -42,6 +41,7 @@ import {
 import { setUserKeybindings } from "@/app/keybindings/registry";
 import { createEffect, createRoot } from "solid-js";
 import { commandRegistry } from "./command-registry";
+import { openNewWindowFromHere } from "./window-appearance";
 
 function countTermBlocks(): number {
     return basicTermModels().length;
@@ -74,9 +74,7 @@ function registerGlobalKeys() {
     // Declined (false) on a host without multiWindow, so the key goes on to the terminal.
     on("window:new", () => {
         if (!hostHas("multiWindow")) return false;
-        getApi()
-            .openNewWindow()
-            .catch((e: unknown) => console.error("[keymodel] Failed to open new window:", e));
+        openNewWindowFromHere().catch((e: unknown) => console.error("[keymodel] Failed to open new window:", e));
         return true;
     });
     on("tab:new", run(() => createTab()));

@@ -20,7 +20,7 @@ export const APPEARANCE_SETTINGS = {
     theme: {
         id: "appearance.theme",
         label: "Theme",
-        description: "UI color theme for all windows",
+        description: "Default UI color theme, for windows without one of their own (the ☰ menu sets one window's)",
         section: "appearance",
         keywords: ["dark mode", "light mode", "color scheme", "appearance mode", "window:theme"],
     },
@@ -41,7 +41,7 @@ export const APPEARANCE_SETTINGS = {
     opacity: {
         id: "appearance.opacity",
         label: "Opacity",
-        description: "Window background opacity (35–100%)",
+        description: "Default window opacity (35–100%), for windows without one of their own (the ☰ menu sets one window's)",
         section: "appearance",
         keywords: ["window opacity", "transparency level", "glass opacity", "window:opacity"],
     },

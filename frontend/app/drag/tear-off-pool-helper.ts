@@ -19,6 +19,7 @@
 
 import type { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
+import { inheritAppearanceInto } from "@/app/store/window-appearance";
 
 type Api = ReturnType<typeof getApi>;
 
@@ -161,12 +162,14 @@ export async function openTearOffWindow(
             tabAnchorY,
             snapshot,
         );
+        inheritAppearanceInto(label);
         return { label, pooled: true };
     } catch (poolErr) {
         Logger.warn("dnd:cross", "pool promote failed, cold-pathing", {
             error: String(poolErr),
         });
         const label = await api.openWindowAtPosition(screenX, screenY, newWsId, width, height, tabAnchorX, tabAnchorY);
+        inheritAppearanceInto(label);
         return { label, pooled: false };
     }
 }

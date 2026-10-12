@@ -39,6 +39,9 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
         "SetWindowPosAndSize" => handle_set_window_pos_and_size(state, call).await,
         "SetWindowOpacity" => handle_set_window_opacity(state, call).await,
         "SetWindowTopology" => handle_set_window_topology(state, call).await,
+        "InheritWindowAppearance" => {
+            super::window_inherit::handle_inherit_window_appearance(state, call).await
+        }
         _ => WebReturnType::error(format!("unknown window method: {}", call.method)),
     }
 }

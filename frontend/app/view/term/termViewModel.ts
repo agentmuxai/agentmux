@@ -9,6 +9,7 @@ import { appHandleKeyDown } from "@/app/store/keymodel";
 import { isChordActive, resolveKeyEvent } from "@/app/store/keymodel-dispatch";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import { appliedWindowTheme } from "@/app/store/window-appearance";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sendWSCommand } from "@/app/store/ws";
 import { makeFeBlockRouteId } from "@/app/store/rpc-router";
@@ -224,6 +225,7 @@ class TermViewModel {
 
         this.blockBg = createMemo(() => {
             const fullConfig = atoms.fullConfigAtom();
+            appliedWindowTheme(); // see TermThemeUpdater
             const themeName = this.termThemeNameAtom();
             const termTransparency = this.termTransparencyAtom();
             const [_, bgcolor] = computeTheme(fullConfig, themeName, termTransparency);

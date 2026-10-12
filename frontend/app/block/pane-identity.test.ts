@@ -12,6 +12,12 @@ const [settings, setSettings] = createSignal<Record<string, unknown>>({});
 vi.mock("@/app/store/block-atom-cache", () => ({
     getSettingsKeyAtom: (key: string) => () => settings()[key],
 }));
+// The window's theme, which window-appearance.ts resolves from the window's
+// own value or the default; this test drives it directly.
+const [windowTheme, setWindowTheme] = createSignal("default");
+vi.mock("@/app/store/window-appearance", () => ({
+    currentWindowTheme: () => windowTheme(),
+}));
 
 import { blockRoleColor, isLightThemeActive, resolvePaneIdentity, widgetColorView, widgetHueFor } from "./pane-identity";
 import { paneRoleColor } from "./pane-color-scheme";
@@ -117,12 +123,13 @@ describe("blockRoleColor", () => {
 });
 
 describe("isLightThemeActive", () => {
-    it("is true only for a light theme id", () => {
-        setSettings({ "window:theme": "light" });
+    it("is true only when this window's theme is a light one", () => {
+        setWindowTheme("light");
         expect(isLightThemeActive()).toBe(true);
-        setSettings({ "window:theme": "default" });
+        setWindowTheme("default");
         expect(isLightThemeActive()).toBe(false);
-        setSettings({});
+        // The setting is only the default; the window's own theme decides.
+        setSettings({ "window:theme": "light" });
         expect(isLightThemeActive()).toBe(false);
     });
 });

@@ -12,15 +12,22 @@
 // Every menu action resolves to a module-level store/RPC primitive, so the
 // component is fully self-contained (no TabBar state coupling).
 
-import { createTab, getApi, openOrFocusPaneByView, settingsAtom } from "@/store/global";
+import { createTab, getApi, openOrFocusPaneByView } from "@/store/global";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { hostHas } from "@/app/host/host-caps";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
+import {
+    currentWindowLabel,
+    currentWindowOpacity,
+    currentWindowTheme,
+    openNewWindowFromHere,
+    setCurrentWindowTheme,
+} from "@/app/store/window-appearance";
+import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
+import { windowId } from "@/app/store/window-identity";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { shortcutFor } from "@/app/keybindings";
 import { saveCurrentLayout } from "./save-layout";
@@ -41,28 +48,28 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
     const menuItems = createMemo((): MenuItem[] => {
         // Theme and Opacity stay open while the user tries values (keepOpen),
         // so a choice must not rebuild the items: that would remount the open
-        // submenu under the cursor. The memo doesn't read settings; only each
-        // item's `checked` getter does, and FlyoutMenu reads it in JSX.
-        const settings = (): Record<string, unknown> => settingsAtom() ?? {};
-
-        const currentTheme = (): string => (settings()["window:theme"] as string) || "default";
+        // submenu under the cursor. The memo reads no reactive state; only
+        // each item's `checked` getter does, and FlyoutMenu reads it in JSX.
+        //
+        // Both act on this window only (SPEC_PER_WINDOW_THEME_AND_OPACITY_
+        // 2026_10_12). Settings → Appearance holds the default for windows
+        // that have no value of their own.
         const themeSubItems: MenuItem[] = THEME_OPTIONS.map((opt) => ({
             label: opt.label,
             get checked() {
-                return currentTheme() === opt.id;
+                return currentWindowTheme() === opt.id;
             },
             keepOpen: true,
-            onClick: () => {
-                fireAndForget(() =>
-                    RpcApi.SetConfigCommand(TabRpcClient, { "window:theme": opt.id } as any),
-                );
-            },
+            onClick: () => fireAndForget(() => setCurrentWindowTheme(opt.id)),
         }));
 
+        // The status bar panel's slider sets the same value, so the check
+        // follows a drag in progress too. A value between steps checks the
+        // nearest one.
         const opacityStep = (): number => {
-            const rawOpacity = (settings()["window:opacity"] as number) ?? 0.8;
-            const isTransparent = (settings()["window:transparent"] as boolean) ?? false;
-            return Math.round((isTransparent ? rawOpacity : 1.0) * 20) / 20;
+            const label = currentWindowLabel();
+            const live = label ? liveWindowOpacity(label) : undefined;
+            return Math.round((live ?? currentWindowOpacity()) * 20) / 20;
         };
         const opacitySubItems: MenuItem[] = [];
         for (let pct = 100; pct >= 35; pct -= 5) {
@@ -74,17 +81,9 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 },
                 keepOpen: true,
                 onClick: () => {
-                    fireAndForget(() =>
-                        value < 1.0
-                            ? RpcApi.SetConfigCommand(TabRpcClient, {
-                                  "window:opacity": value,
-                                  "window:transparent": true,
-                              } as any)
-                            : RpcApi.SetConfigCommand(TabRpcClient, {
-                                  "window:opacity": 1.0,
-                                  "window:transparent": false,
-                              } as any),
-                    );
+                    const label = currentWindowLabel();
+                    if (!label) return;
+                    setWindowOpacityFor({ label, windowId: windowId() || null }, value, "commit");
                 },
             });
         }
@@ -105,7 +104,7 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                           label: "New Window",
                           icon: "window-restore",
                           shortcut: shortcutFor("window:new"),
-                          onClick: () => getApi().openNewWindow().catch(console.error),
+                          onClick: () => openNewWindowFromHere().catch(console.error),
                       },
                       { label: "", divider: true },
                   ]

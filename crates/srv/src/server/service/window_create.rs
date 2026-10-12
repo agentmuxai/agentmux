@@ -395,10 +395,23 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         }
         evs
     };
+    // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6 — the window that
+    // opened this one may already have asked for its appearance to be
+    // copied here (`InheritWindowAppearance`, keyed by host label). Taken
+    // only after the crumb is written, so a request arriving in between
+    // finds the row instead (see window_inherit.rs).
+    let inherit_events = match (!host_label.is_empty())
+        .then(|| super::window_inherit::take_pending(&host_label))
+        .flatten()
+    {
+        Some(source) => super::window_inherit::apply_inheritance(state, &source, &window_id).await,
+        None => Vec::new(),
+    };
     // Publish all events from this multi-step (workspace + tab + window).
     let mut all_events = fresh_workspace_events;
     all_events.extend(win_events);
     all_events.extend(crumb_events);
+    all_events.extend(inherit_events);
     publish_events(state, &all_events);
     // Return the Window struct (matches the prior RPC contract).
     match store.must_get::<Window>(&window_id) {

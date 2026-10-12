@@ -26,6 +26,8 @@ vi.mock("@/app/store/services", () => ({
         UpdateObjectMeta: vi.fn(() => Promise.resolve()),
     },
 }));
+// Pane colours read the window's theme; this window has the default one.
+vi.mock("@/app/store/window-appearance", () => ({ currentWindowTheme: () => "default" }));
 vi.mock("@/app/store/mos", () => ({
     makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
     useMuxObjectValue: () => [

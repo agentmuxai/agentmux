@@ -10,6 +10,7 @@
 
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
+import { currentWindowTheme } from "@/app/store/window-appearance";
 import { paneRoleColor, type PaneColorRole } from "./pane-color-scheme";
 import { getPaneTab, type PaneTabManifest } from "./pane-tab-registry";
 
@@ -109,6 +110,6 @@ export function widgetRoleColor(
 
 /** Whether the current theme is a light one. Reactive. */
 export function isLightThemeActive(): boolean {
-    const themeId = getSettingsKeyAtom("window:theme")();
+    const themeId = currentWindowTheme();
     return typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
 }
