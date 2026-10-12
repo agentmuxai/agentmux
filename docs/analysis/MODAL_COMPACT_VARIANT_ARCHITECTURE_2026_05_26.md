@@ -394,23 +394,23 @@ A robust redesign must satisfy ALL of:
 ## 12. Files this redesign would touch
 
 Phase 1:
-- `frontend/app/element/modal.scss` (Layers B + C)
-- `frontend/app/view/agent/components/AgentInstallModal.tsx` (Layer D1)
+- [`frontend/app/element/modal.scss`](../../frontend/app/element/modal.scss) (Layers B + C)
+- [`frontend/app/view/agent/components/AgentInstallModal.tsx`](../../frontend/app/view/agent/components/AgentInstallModal.tsx) (Layer D1)
 - `frontend/app/view/agent/styles/_install-modal.scss` (delete per-body compact block — Layer C makes it redundant)
-- `frontend/app/view/agent/styles/_launch-modal-body.scss` (same)
-- `frontend/app/view/agent/components/AgentNewBundleModal.scss` (same)
-- `frontend/app/view/agent/components/AgentPrereqModal.scss` (same)
-- `frontend/app/view/browser/components/BrowserAuthModal.scss` (same)
+- [`frontend/app/view/agent/styles/_launch-modal-body.scss`](../../frontend/app/view/agent/styles/_launch-modal-body.scss) (same)
+- [`frontend/app/view/agent/components/AgentNewBundleModal.scss`](../../frontend/app/view/agent/components/AgentNewBundleModal.scss) (same)
+- [`frontend/app/view/agent/components/AgentPrereqModal.scss`](../../frontend/app/view/agent/components/AgentPrereqModal.scss) (same)
+- [`frontend/app/view/browser/components/BrowserAuthModal.scss`](../../frontend/app/view/browser/components/BrowserAuthModal.scss) (same)
 
 Phase 2:
-- `frontend/app/element/ModalLayer.tsx` (delete COMPACT_THRESHOLD_PX, isCompact, mount ResizeObserver)
-- `frontend/app/element/modal.scss` (`:where(.modal-layer-mount--compact)` → `@container modal-mount`)
+- [`frontend/app/element/ModalLayer.tsx`](../../frontend/app/element/ModalLayer.tsx) (delete COMPACT_THRESHOLD_PX, isCompact, mount ResizeObserver)
+- [`frontend/app/element/modal.scss`](../../frontend/app/element/modal.scss) (`:where(.modal-layer-mount--compact)` → `@container modal-mount`)
 
 ---
 
 ## 13. Spec updates after Phase 1 lands
 
-- `docs/specs/SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md` — update §3 to reflect Layer C + D as canonical, mark per-body opt-in section as deprecated
+- [`docs/specs/SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md`](../specs/SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md) — update §3 to reflect Layer C + D as canonical, mark per-body opt-in section as deprecated
 - Add a §5: "Content-managed surfaces and the shrinkable-content contract"
 
 ---

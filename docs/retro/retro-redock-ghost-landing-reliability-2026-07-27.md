@@ -10,7 +10,7 @@
 
 ## TL;DR
 
-This is not a pinpoint regression the way the resize-hit-target and tear-off-cursor issues were. Redock (dragging a torn-off floating pane back into the tiled layout, with a "ghost" preview showing where it will land) is a subsystem that **already has its own architecture doc** (`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`), written specifically to stop a regression cycle that had already happened once by late May. That doc names 5 recurring structural themes and proposes 6 fixes (P1-P6) — only some of which were ever executed. The pipeline's last confirmed-working, deliberately-fixed state was **2026-07-05** (PR #1968, "redock lands at the ghost's exact rect"). Since then, no PR has touched redock on purpose, but several large unrelated refactors have touched code the pipeline depends on, and the two most architecturally significant proposed fixes — **replacing floaters' raw Win32-popup model** and **making redock an atomic backend operation** — were both explicitly deferred and never scheduled.
+This is not a pinpoint regression the way the resize-hit-target and tear-off-cursor issues were. Redock (dragging a torn-off floating pane back into the tiled layout, with a "ghost" preview showing where it will land) is a subsystem that **already has its own architecture doc** ([`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md)), written specifically to stop a regression cycle that had already happened once by late May. That doc names 5 recurring structural themes and proposes 6 fixes (P1-P6) — only some of which were ever executed. The pipeline's last confirmed-working, deliberately-fixed state was **2026-07-05** (PR #1968, "redock lands at the ghost's exact rect"). Since then, no PR has touched redock on purpose, but several large unrelated refactors have touched code the pipeline depends on, and the two most architecturally significant proposed fixes — **replacing floaters' raw Win32-popup model** and **making redock an atomic backend operation** — were both explicitly deferred and never scheduled.
 
 ## What "working well" looked like, and when
 
@@ -58,11 +58,11 @@ Not a code fix yet — this needs a scoping pass before implementation, per the 
 
 - `agentmux-cef/src/commands/window/motion.rs` (`resolve_window_at_cursor`, `update_floating_redock_hover`, `set_floating_redock_target`/`get_floating_redock_target`) — hover-detection and cross-process ghost hand-off
 - `agentmux-cef/src/ui_tasks/drag.rs` (`Win32BeginMoveTask`) — native Windows move loop, source of hover events during floater drag
-- `frontend/app-init.ts` (`installFloatingRedockHoverListener`) — ghost/preview rendering
-- `frontend/app/workspace/floating-pane-workspace.tsx` — drag state machine, dwell/velocity gate (duplicated per-platform), redock trigger (`tryRedockAtCursor`)
+- [`frontend/app-init.ts`](../../frontend/app-init.ts) (`installFloatingRedockHoverListener`) — ghost/preview rendering
+- [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) — drag state machine, dwell/velocity gate (duplicated per-platform), redock trigger (`tryRedockAtCursor`)
 - `agentmux-srv/src/server/service/tear_off.rs` (`handle_redock_floating_pane`), `agentmux-srv/src/sagas/redock_floating_pane.rs`, `agentmux-srv/src/server/service/layout_helpers.rs` — backend RPC, saga, layout insertion
-- `frontend/layout/lib/layoutPersistence.ts`, `layoutTree.ts`, `layoutGeometry.ts` (`applySizeFraction`) — frontend layout application
-- `frontend/layout/lib/crossTabDrag.ts` — the second, newer `RedockFloatingPane` caller (#2079)
-- `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — existing living doc, P1-P6 proposals (P3/P4/P6 still open)
-- `docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md` — R1/R3 done, R2 (CEF-Views floaters) explicitly deferred, never rescheduled
-- `docs/analysis/ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md` — the analysis that drove the last functional fix (#1968)
+- [`frontend/layout/lib/layoutPersistence.ts`](../../frontend/layout/lib/layoutPersistence.ts), `layoutTree.ts`, `layoutGeometry.ts` (`applySizeFraction`) — frontend layout application
+- [`frontend/layout/lib/crossTabDrag.ts`](../../frontend/layout/lib/crossTabDrag.ts) — the second, newer `RedockFloatingPane` caller (#2079)
+- [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) — existing living doc, P1-P6 proposals (P3/P4/P6 still open)
+- [`docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md`](../specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) — R1/R3 done, R2 (CEF-Views floaters) explicitly deferred, never rescheduled
+- [`docs/analysis/ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md`](../analysis/ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md) — the analysis that drove the last functional fix (#1968)

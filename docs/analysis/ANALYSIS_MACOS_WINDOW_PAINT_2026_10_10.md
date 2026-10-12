@@ -1,7 +1,7 @@
 # macOS window paint: what the Windows work already gives us, and what macOS still needs
 
 **Date:** 2026-10-10
-**Status:** analysis. §2 is the status of the Windows paint work, §3 what carries over, §5 the macOS measurements, §6 the causes, §7 the recommendations. Nothing in this PR changes product code; the only code is the measurement scripts in `scripts/perf/macos-paint/`.
+**Status:** analysis. §2 is the status of the Windows paint work, §3 what carries over, §5 the macOS measurements, §6 the causes, §7 the recommendations. Nothing in this PR changes product code; the only code is the measurement scripts in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint).
 **Author:** AgentO
 **Trigger:** Repo owner, 2026-10-10: *"we did extensive work on windows optimizing the agentmux windows paint, find that work, whats the status, and I want you to investigate how we can improve macos. research, write report to file."*
 **Related:** `ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md` (the Windows resize work), `ANALYSIS_BROWSER_PANE_RESIZE_ARCHITECTURE_2026_10_06.md`, `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md`, `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md`, `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md`.
@@ -114,7 +114,7 @@ The last row matters for how to read slowness. The Windows analysis found that a
 - **Build:** `task dev` of `main` @ `fd6eae06f` (v0.59.18), CEF 154.0.8037.58, `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER=1`. `SystemInfo.getInfo`: `ANGLE (Apple, ANGLE Metal Renderer: Apple M2)`, `gpu_compositing`, `rasterization` and `skia_graphite` enabled. Every window reports alpha 1 in `CGWindowList`. macOS Reduce Motion was on.
 - **Shared machine:** other agents' dev builds, compiles and the installed app ran throughout. The 1-minute load average was 3.2–7.7 for most runs and spiked to 17 once (that run was discarded). The same scenario varied by ±10–15 frames from this alone.
 - **Driver:** the host's own `set_window_rect` command, called from Node (so it adds no work to the page's main thread), 80 steps of 10 points every 16 ms, shrinking 400 points and growing back, like the Windows `SetWindowPos` stepping. **It is not a mouse drag**: it sets bounds directly and does not enter AppKit's live-resize loop. The same command exists on Windows (`SetWindowPos`), so these probes also run there.
-- **Probes:** per-frame `requestAnimationFrame` gaps, `resize` events and long-animation-frame entries in the page; Chromium traces of all processes with wall and thread-CPU time; `CGWindowListCopyWindowInfo` sampling of the native windows at ~120–170 Hz (needs no Screen Recording or Accessibility permission, since it reads bounds only). Scripts are in `scripts/perf/macos-paint/` (§11).
+- **Probes:** per-frame `requestAnimationFrame` gaps, `resize` events and long-animation-frame entries in the page; Chromium traces of all processes with wall and thread-CPU time; `CGWindowListCopyWindowInfo` sampling of the native windows at ~120–170 Hz (needs no Screen Recording or Accessibility permission, since it reads bounds only). Scripts are in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint) (§11).
 - **What I could not measure:** a real mouse drag; how far the page trails the window edge (that needs pixels, which needs Screen Recording permission, which I did not request); a ProMotion display; an Intel Mac; the installed (packaged) build.
 
 ### 5.2 Frames during the stepped resize
@@ -245,7 +245,7 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 - **One pane-geometry apply path.** `apply()` has a Windows branch (`apply_windows`, one deferred move per parent) and a loop for everything else that calls the per-pane function. The batch and its dedupe are shared; the platform step should be one function per platform behind the same signature, so macOS and Linux get the same "once per window per frame" shape as Windows by construction.
 - **One "window is resizing" signal.** `windowResizing()` (from the DOM `resize` event) is cross-platform and drives the tab skip. The host's `windowresize:begin|tick|end` exist on Windows only and serve just the Shift-edge resize. Either derive that feature from the DOM signal or provide the events on all platforms, so the two do not drift.
 - **One resize scheduler.** The Windows analysis (§6) proposed `platform/resize-scheduler.ts` with an every-frame lane and a settle lane. It is still unbuilt, and `liveRefits`, the System Info 100 ms throttle and the agent list's debounce each decide their own policy. M1's frame-budget logic belongs there.
-- **One measurement driver.** `set_window_rect` is the host's own command on every platform. The probes in `scripts/perf/macos-paint/` use it, so the Windows `resizesteps.ps1` can be retired and Windows numbers re-taken with the same scripts. Only the two Swift samplers are macOS-specific.
+- **One measurement driver.** `set_window_rect` is the host's own command on every platform. The probes in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint) use it, so the Windows `resizesteps.ps1` can be retired and Windows numbers re-taken with the same scripts. Only the two Swift samplers are macOS-specific.
 
 ---
 
@@ -284,7 +284,7 @@ My driver sets bounds directly. A mouse drag goes through AppKit's live-resize l
 
 ## 11. Reproducing, and recording a real drag
 
-The scripts are in `scripts/perf/macos-paint/` and need a dev build (CDP on port 9223) and Node. They use `scripts/ui-screenshots/lib/cdp-client.mjs`. Compile the samplers once (`swiftc -O panesampler.swift -o panesampler`, the same for `winlist.swift`) and run from that directory.
+The scripts are in [`scripts/perf/macos-paint/`](../../scripts/perf/macos-paint) and need a dev build (CDP on port 9223) and Node. They use [`scripts/ui-screenshots/lib/cdp-client.mjs`](../../scripts/ui-screenshots/lib/cdp-client.mjs). Compile the samplers once (`swiftc -O panesampler.swift -o panesampler`, the same for `winlist.swift`) and run from that directory.
 
 | Script | What it does |
 |---|---|
@@ -294,7 +294,7 @@ The scripts are in `scripts/perf/macos-paint/` and need a dev build (CDP on port
 | `drag.mjs <cef pid> --mode armed` | The same for a **real mouse drag**: it waits for the first resize, records until 1.5 s after the last, and reports |
 | `move-lag.mjs <cef pid>` | The window-move test of §5.5 |
 | `tab-switch.mjs` | Warm tab switches (§5.5) |
-| `trace-cpu.mjs`, `trace-threads.mjs` | Wall and CPU attribution of a trace from `scripts/ui-screenshots/trace-capture.mjs` |
+| `trace-cpu.mjs`, `trace-threads.mjs` | Wall and CPU attribution of a trace from [`scripts/ui-screenshots/trace-capture.mjs`](../../scripts/ui-screenshots/trace-capture.mjs) |
 | `setup-state.mjs`, `setcfg.mjs`, `gototab.mjs` | Build the tab and terminal state, flip a setting, select a tab |
 
 Keep the total at 16 terminals or fewer (M4).

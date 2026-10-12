@@ -5,7 +5,7 @@
 **Goal:** Replace per-turn subprocess with persistent long-running CLI process
 using `--input-format stream-json` for bidirectional communication.
 
-**Spec:** `docs/specs/persistent-process-mode.md`
+**Spec:** [`docs/specs/persistent-process-mode.md`](../specs/persistent-process-mode.md)
 **Implementation:** `agentmux-srv/src/backend/blockcontroller/persistent.rs`
 
 ---
@@ -146,6 +146,6 @@ using `--input-format stream-json` for bidirectional communication.
 | `agentmux-srv/src/server/cli_handlers.rs` | Removed system scanner (-219 lines), npm gate fix |
 | `agentmux-srv/src/backend/blockcontroller/persistent.rs` | make_cli_cmd, stderr capture, args logging |
 | `agentmux-common/src/cli.rs` | Shared make_cli_cmd + .cmd parser |
-| `frontend/app/view/agent/providers/index.ts` | Claude → controllerType: "persistent" |
-| `frontend/app/view/agent/agent-model.ts` | persistentLaunchArgs routing |
-| `frontend/app/view/agent/agent-view.tsx` | Loading spinner clears on failure |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Claude → controllerType: "persistent" |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | persistentLaunchArgs routing |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Loading spinner clears on failure |

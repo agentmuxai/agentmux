@@ -82,7 +82,7 @@ Compared to the mounted-flag pattern (which requires the caller to remember to `
 
 ## 4. Site-by-site audit
 
-Catalog produced by reading every dispatch call site in `frontend/app/`. Risk re-evaluated under the cascade lens (an async-context with even one un-guarded dispatch is a risk; a synchronous body that does multiple dispatches in sequence after a signal write is also a risk because the first write can cascade).
+Catalog produced by reading every dispatch call site in [`frontend/app/`](../../frontend/app). Risk re-evaluated under the cascade lens (an async-context with even one un-guarded dispatch is a risk; a synchronous body that does multiple dispatches in sequence after a signal write is also a risk because the first write can cascade).
 
 ### 4.1 HIGH RISK — directly implicated in tonight's crash
 
@@ -162,7 +162,7 @@ Today the latency of the failing RPC effectively covers the race. *But*: a synch
 
 ### 4.5 LOW RISK — guarded via mounted-flag
 
-`frontend/app/view/agent/hooks/useHistoryPagination.ts` — six dispatch sites, all preceded by `if (!mounted) return;` after every `await`. **Safe today** *for the dispatch-after-await scenario*. **Not safe** against the mid-callback cascade — if a `dispatchDoc(HistoryRestored)` cascade-disposes the pane, the immediately-following `dispatchPane(InitReady)` would still throw. (No evidence this happens in practice, but the pattern is fragile.)
+[`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts) — six dispatch sites, all preceded by `if (!mounted) return;` after every `await`. **Safe today** *for the dispatch-after-await scenario*. **Not safe** against the mid-callback cascade — if a `dispatchDoc(HistoryRestored)` cascade-disposes the pane, the immediately-following `dispatchPane(InitReady)` would still throw. (No evidence this happens in practice, but the pattern is fragile.)
 
 ### 4.6 SAFE — `drone-model.ts`
 
@@ -237,7 +237,7 @@ The two open questions from the original draft — *how do we confirm the cascad
 
 ### 8.1 What was installed
 
-**`frontend/app/store/agent-pane-state-store.ts:103-132`** — the dispatch() function now wraps each of the eight projection setters in a small `proj()` helper. After each setter call, it checks whether `slots.has(blockId)` is still true. The first setter that loses the slot is recorded as `cascadeSetter`. After the projection block, if `cascadeSetter` is set, a single warning is logged:
+**[`frontend/app/store/agent-pane-state-store.ts:103-132`](../../frontend/app/store/agent-pane-state-store.ts#L103-L132)** — the dispatch() function now wraps each of the eight projection setters in a small `proj()` helper. After each setter call, it checks whether `slots.has(blockId)` is still true. The first setter that loses the slot is recorded as `cascadeSetter`. After the projection block, if `cascadeSetter` is set, a single warning is logged:
 
 ```
 [agent-pane-state] CASCADE_DETECTED: '<setterName>' setter disposed pane mid-dispatch
@@ -246,7 +246,7 @@ A reactive subscriber on the '<setterName>' atom unmounted the pane during dispa
 Subsequent dispatches in the same callback will throw.
 ```
 
-**`frontend/app/store/agent-document-store.ts:115-128`** — same check around `slot.setter(slot.state.nodes)`. There is only one setter (the document atom) so the message is simpler:
+**[`frontend/app/store/agent-document-store.ts:115-128`](../../frontend/app/store/agent-document-store.ts#L115-L128)** — same check around `slot.setter(slot.state.nodes)`. There is only one setter (the document atom) so the message is simpler:
 
 ```
 [agent-document-store] CASCADE_DETECTED: slot disposed mid-dispatch

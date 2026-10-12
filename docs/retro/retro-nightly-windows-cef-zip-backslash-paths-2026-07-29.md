@@ -10,7 +10,7 @@ produced in that window.
 
 ## TL;DR
 
-`docs/cef-build/build-patched-cef-windows.md` §7 instructs creating the
+[`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) §7 instructs creating the
 codec-enabled CEF runtime release zip with PowerShell's `Compress-Archive`.
 That cmdlet stores internal zip entries with backslash (`\`) path separators
 for nested directories (notably `locales\*.pak`). Both `ci-nightly-artifacts.yml`
@@ -56,10 +56,10 @@ pipeline crossing this same boundary.
 
 ## Files
 
-- `.github/workflows/ci-nightly-artifacts.yml` — Windows job's CEF-runtime
+- [`.github/workflows/ci-nightly-artifacts.yml`](../../.github/workflows/ci-nightly-artifacts.yml) — Windows job's CEF-runtime
   download/extract step, switched to `pwsh`/`Expand-Archive`.
-- `.github/workflows/build-windows.yml` — same fix, same pattern.
-- `docs/cef-build/build-patched-cef-windows.md:208-228` — the
+- [`.github/workflows/build-windows.yml`](../../.github/workflows/build-windows.yml) — same fix, same pattern.
+- [`docs/cef-build/build-patched-cef-windows.md:208-228`](../cef-build/build-patched-cef-windows.md) — the
   `Compress-Archive` step that produces the backslash-path zip (unchanged;
   the fix is entirely on the consuming side).
 - `Taskfile.yml`'s `bundle:windows` task — second, distinct bug found while

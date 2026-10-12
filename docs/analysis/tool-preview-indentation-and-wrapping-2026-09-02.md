@@ -15,9 +15,9 @@ verified by eye in a live pane — see §7.
 **Prior work being followed up:** PR #2785 / commit `aa1d0a14`,
 *"fix(agent-pane): render tool-preview tabs at 2 spaces instead of the inherited
 4"* — a one-line CSS change adding `tab-size: 2` to `.agent-tool-panel`
-(`frontend/app/view/agent/styles/_document-nodes.scss:393`), overriding the
-app-wide `tab-size: 4` in `frontend/app/reset.scss:26`. Documented as a
-follow-up inside `docs/specs/SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md`.
+([`frontend/app/view/agent/styles/_document-nodes.scss:393`](../../frontend/app/view/agent/styles/_document-nodes.scss#L393)), overriding the
+app-wide `tab-size: 4` in [`frontend/app/reset.scss:26`](../../frontend/app/reset.scss#L26). Documented as a
+follow-up inside [`docs/specs/SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md`](../specs/SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md).
 
 ---
 
@@ -111,7 +111,7 @@ before the tab **grows with the line number**. (Had the CLI right-aligned to a
 fixed width, `cat -n` style, this whole finding would not exist.)
 
 `stripCommonIndentNumbered` deliberately preserves that prefix verbatim
-(`frontend/app/view/agent/components/dedent.ts:134-149`) and dedents only the
+([`frontend/app/view/agent/components/dedent.ts:134-149`](../../frontend/app/view/agent/components/dedent.ts#L134-L149)) and dedents only the
 code portion.
 
 That gutter tab is subject to the same `tab-size`. Because a tab advances to the

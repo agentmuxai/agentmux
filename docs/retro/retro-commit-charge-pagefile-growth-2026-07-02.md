@@ -9,7 +9,7 @@ follow-ups captured in `SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`
 **2026-07-16 update:** §6.1's open question (driver *leak* vs live per-context commit) is resolved by a
 controlled restart experiment — the commit is **live, not leaked**, tied to the renderer fleet, and
 released cleanly on teardown (~43.6 GB reclaimed). See
-`docs/retro/retro-commit-restart-reclaim-2026-07-16.md`; recommendation §6.2 (GPU driver update) is
+[`docs/retro/retro-commit-restart-reclaim-2026-07-16.md`](retro-commit-restart-reclaim-2026-07-16.md); recommendation §6.2 (GPU driver update) is
 thereby de-prioritized, and §B.5 renderer reclaim is promoted to the primary fix.
 **Reporter:** asaf ("the pagefile is growing too large … architectural problem in AgentMux")
 **Component:** Windows commit/pagefile behavior; AgentMux CEF fleet + agent subprocesses (contributors,
@@ -143,5 +143,5 @@ worthwhile defensively, but its attribution of the commit budget is wrong.
   no `vmmem`).
 - Code: `agentmux-cef/src/commands/mod.rs:25-30`, `agentmux-cef/src/browser_panes.rs:365-387`,
   `agentmux-srv/src/backend/wps.rs:172`, `agentmux-srv/src/backend/eventbus.rs:84`.
-- Prior art (corrected/built-on): `docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`,
-  `docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`, `docs/analysis/oom-filestore-cache.md`.
+- Prior art (corrected/built-on): [`docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`](../specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md),
+  [`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`](../specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md), [`docs/analysis/oom-filestore-cache.md`](../analysis/oom-filestore-cache.md).

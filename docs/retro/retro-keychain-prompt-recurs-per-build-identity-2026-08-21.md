@@ -3,7 +3,7 @@
 **Status:** retro
 
 **Date:** 2026-08-21
-**Area:** `scripts/package-macos.sh` (bundle identity), `agentmux-srv/src/identity/secret_store.rs`
+**Area:** [`scripts/package-macos.sh`](../../scripts/package-macos.sh) (bundle identity), `agentmux-srv/src/identity/secret_store.rs`
 **Context:** continues the same investigation as
 [retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md](retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md)
 and

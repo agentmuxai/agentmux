@@ -3,7 +3,7 @@
 **Date:** 2026-09-17
 **Status:** proposed — root cause confirmed; nothing shipped. Recommendations in §6.
 **Related:** `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (per-channel
-identity isolation, the mechanism this rides on), `docs/MUXSPECT.md`,
+identity isolation, the mechanism this rides on), [`docs/MUXSPECT.md`](../MUXSPECT.md),
 `mcp__agentmux__SearchHistory`
 
 ---

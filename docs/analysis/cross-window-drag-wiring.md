@@ -171,11 +171,11 @@ Remove lines 423-433 (the first set of stub definitions). They're all overwritte
 
 | File | Change | Risk |
 |------|--------|------|
-| `frontend/util/cef-api.ts:423-433` | Remove stubs, add `getMouseButtonState` + `getCursorPoint` to real block | Low |
+| [`frontend/util/cef-api.ts:423-433`](../../frontend/util/cef-api.ts#L423-L433) | Remove stubs, add `getMouseButtonState` + `getCursorPoint` to real block | Low |
 | `frontend/util/tauri-api.ts` | Add `getCursorPoint` + `getMouseButtonState` if missing | Low |
-| `frontend/app/drag/CrossWindowDragMonitor.win32.tsx:68-75` | Replace `import("@tauri-apps/api/core")` with `getApi()` | Low |
-| `frontend/app/drag/CrossWindowDragMonitor.win32.tsx:146-149` | Replace `import("@tauri-apps/api/core")` with `getApi()` | Low |
-| `frontend/types/custom.d.ts` | Add `getCursorPoint` + `getMouseButtonState` to `AppApi` interface | Low |
+| [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx:68-75`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx#L68-L75) | Replace `import("@tauri-apps/api/core")` with `getApi()` | Low |
+| [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx:146-149`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx#L146-L149) | Replace `import("@tauri-apps/api/core")` with `getApi()` | Low |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Add `getCursorPoint` + `getMouseButtonState` to `AppApi` interface | Low |
 
 ---
 
@@ -198,6 +198,6 @@ Remove lines 423-433 (the first set of stub definitions). They're all overwritte
 
 ## Related Specs
 
-- `docs/specs/cef-drag-window-management.md` — full 5-system analysis
-- `docs/specs/pane-popout-to-new-window.md` — pop-out button design (magnify → popout)
-- `docs/retro/2026-03-20-secondary-window-dnd-regression.md` — WebView2 DnD fix history and Pragmatic DnD migration
+- [`docs/specs/cef-drag-window-management.md`](../specs/cef-drag-window-management.md) — full 5-system analysis
+- [`docs/specs/pane-popout-to-new-window.md`](../specs/pane-popout-to-new-window.md) — pop-out button design (magnify → popout)
+- [`docs/retro/2026-03-20-secondary-window-dnd-regression.md`](../retro/2026-03-20-secondary-window-dnd-regression.md) — WebView2 DnD fix history and Pragmatic DnD migration

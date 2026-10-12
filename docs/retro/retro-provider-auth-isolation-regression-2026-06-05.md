@@ -35,7 +35,7 @@ instances.**
 
 ## What we set up (the design that worked)
 
-`docs/specs/provider-auth-isolation.md` — **2026-03-21**:
+[`docs/specs/provider-auth-isolation.md`](../specs/provider-auth-isolation.md) — **2026-03-21**:
 
 - Auth dir = `~/.agentmux/instances/v{version}/auth/{provider}/`, keyed on the
   **AgentMux version** and **shared across all agents/data-dirs of that

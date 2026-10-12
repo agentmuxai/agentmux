@@ -10,7 +10,7 @@
 
 ## What Happened
 
-User reported that AgentMux processes were not grouped in Task Manager. The earlier analysis doc (`docs/analysis/process-tree-grouping.md`, written 2026-04-05) had already modelled this as a real bug caused by the launcher architecture.
+User reported that AgentMux processes were not grouped in Task Manager. The earlier analysis doc ([`docs/analysis/process-tree-grouping.md`](process-tree-grouping.md), written 2026-04-05) had already modelled this as a real bug caused by the launcher architecture.
 
 I immediately moved to implement the recommended fix (Option A — DETACHED_PROCESS spawn in the launcher). Before the build completed, the user opened v0.33.57 and confirmed grouping was working fine.
 
@@ -62,7 +62,7 @@ The launcher is an orphan entry in Background processes — that is expected and
 
 ## What Was NOT Reverted
 
-The launcher source was edited and immediately reverted before any commit. No build was produced. The `docs/analysis/process-tree-grouping.md` file remains as historical context but its Option A recommendation is no longer needed and should not be acted on without fresh evidence that grouping is actually broken.
+The launcher source was edited and immediately reverted before any commit. No build was produced. The [`docs/analysis/process-tree-grouping.md`](process-tree-grouping.md) file remains as historical context but its Option A recommendation is no longer needed and should not be acted on without fresh evidence that grouping is actually broken.
 
 ---
 

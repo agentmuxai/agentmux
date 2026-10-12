@@ -12,7 +12,7 @@ best practice" version they remembered.
 
 ## TL;DR
 
-`FLOATER_EDGE_RESIZE_BORDER` (`frontend/app/workspace/floater-resize.ts`)
+`FLOATER_EDGE_RESIZE_BORDER` ([`frontend/app/workspace/floater-resize.ts`](../../frontend/app/workspace/floater-resize.ts))
 drives two different things with one constant: (1) how wide the invisible
 mouse hit-test band is for resizing a floating pane by its edge, and (2) how
 much a floating *browser* pane's separate OS child window is inset so that
@@ -64,6 +64,6 @@ usages before changing its value, not just before deleting it.
 
 ## Files
 
-- `frontend/app/workspace/floater-resize.ts` — the constant + updated doc-comment
-- `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — stale 12px reference
-- `docs/specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md` — stale 12px reference
+- [`frontend/app/workspace/floater-resize.ts`](../../frontend/app/workspace/floater-resize.ts) — the constant + updated doc-comment
+- [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) — stale 12px reference
+- [`docs/specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md`](../specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) — stale 12px reference

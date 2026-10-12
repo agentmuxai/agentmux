@@ -112,7 +112,7 @@ WER matches by **exact filename**, so this registration has silently
 matched nothing for months — **no crash of the real binary, this bug or any
 other, has been diagnosable via minidump since the rename.**
 
-Fixed by `scripts/register-crash-dumps.ps1` (new, this PR), which reads the
+Fixed by [`scripts/register-crash-dumps.ps1`](../../scripts/register-crash-dumps.ps1) (new, this PR), which reads the
 current version from `package.json` and (re-)registers the LocalDumps key
 for the exact current binary name. It's idempotent and self-elevates via
 UAC. **Limitation:** because WER matches by exact filename and this repo's
@@ -162,7 +162,7 @@ consistent ~9.5 minute window if the trigger is itself deterministic
 | Ruled out srv's own stdin-EOF shutdown | Confirmed (expected log line absent) |
 | Ruled out srv's own intentional exit calls | Confirmed (all startup-only) |
 | Ruled out a known internal `.kill()` call site | Confirmed (all startup/shutdown-only, no heartbeat-driven kill exists) |
-| Fixed WER LocalDumps to match the current binary name | Done — `scripts/register-crash-dumps.ps1` |
+| Fixed WER LocalDumps to match the current binary name | Done — [`scripts/register-crash-dumps.ps1`](../../scripts/register-crash-dumps.ps1) |
 | Reproduced with corrected WER config to test for a dump | Done — still zero dumps |
 | Checked Windows Application event log for any trace | Done — zero agentmux-related entries |
 

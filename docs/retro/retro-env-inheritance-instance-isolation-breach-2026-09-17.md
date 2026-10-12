@@ -39,7 +39,7 @@ one branch of one function (`shell/lifecycle.rs:717-725`).
 All four were observed live on 2026-09-16/17, not inferred.
 
 ### 2.1 A freshly built AppImage ran the wrong binary
-`AGENTMUX_EXTRACTED_RUN=1` is exported by `scripts/linux-apprun.sh` before it
+`AGENTMUX_EXTRACTED_RUN=1` is exported by [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) before it
 re-execs from its extraction cache. It is read by nothing else. Inherited into
 panes, it made a newly built AppImage take AppRun's "already extracted" branch
 and run from its FUSE mount — no extraction, no cache check, no message. The
@@ -143,11 +143,11 @@ ambient environment.
 
 | Document | What it already said |
 |---|---|
-| `docs/specs/dev-build-env-isolation.md` (2026-05-06) | The canonical original: `task dev` from a pane inherited `AGENTMUX_DATA_DIR` "and the rest of the `AGENTMUX_*` family"; resolution was "dev builds never inherit `AGENTMUX_*` env vars" |
-| `docs/specs/SPEC_DEV_ENV_ISOLATION.md` (2026-06-24) §2.4 | Documents the `AGENTMUX=1` sentinel guard verbatim |
-| `docs/retro/retro-per-build-launch-isolation-2026-06-13.md:54` | "Env leaks cross the process boundary. `AGENTMUX_CHANNEL` set for a pane shell silently redirects anything launched from it." |
-| `docs/specs/SPEC_DEV_BADGE_RUNTIME_MODE_2026_06_12.md:226` | Open question 3, **never answered**: "Scrub-list scope — exactly which `AGENTMUX_*` vars are 'instance identity' (must not inherit) vs legitimately inheritable?" |
-| `docs/retro/retro-portable-0496-pool-window-false-close-2026-06-27.md:143-145` | Predicted this precise hole: the guard "only fires when `AGENTMUX=1` is set… a portable launched from a terminal that inherited `AGENTMUX_RUNTIME_MODE=dev:main` but NOT `AGENTMUX=1` would mis-classify" |
+| [`docs/specs/dev-build-env-isolation.md`](../specs/dev-build-env-isolation.md) (2026-05-06) | The canonical original: `task dev` from a pane inherited `AGENTMUX_DATA_DIR` "and the rest of the `AGENTMUX_*` family"; resolution was "dev builds never inherit `AGENTMUX_*` env vars" |
+| [`docs/specs/SPEC_DEV_ENV_ISOLATION.md`](../specs/SPEC_DEV_ENV_ISOLATION.md) (2026-06-24) §2.4 | Documents the `AGENTMUX=1` sentinel guard verbatim |
+| [`docs/retro/retro-per-build-launch-isolation-2026-06-13.md:54`](retro-per-build-launch-isolation-2026-06-13.md) | "Env leaks cross the process boundary. `AGENTMUX_CHANNEL` set for a pane shell silently redirects anything launched from it." |
+| [`docs/specs/SPEC_DEV_BADGE_RUNTIME_MODE_2026_06_12.md:226`](../specs/SPEC_DEV_BADGE_RUNTIME_MODE_2026_06_12.md) | Open question 3, **never answered**: "Scrub-list scope — exactly which `AGENTMUX_*` vars are 'instance identity' (must not inherit) vs legitimately inheritable?" |
+| [`docs/retro/retro-portable-0496-pool-window-false-close-2026-06-27.md:143-145`](retro-portable-0496-pool-window-false-close-2026-06-27.md) | Predicted this precise hole: the guard "only fires when `AGENTMUX=1` is set… a portable launched from a terminal that inherited `AGENTMUX_RUNTIME_MODE=dev:main` but NOT `AGENTMUX=1` would mis-classify" |
 
 So the honest finding is not "we never considered it". It is: **the problem was
 identified five times, mitigated once (partially), the scoping question was asked
@@ -198,7 +198,7 @@ documents as unreliable.
 ## 7. Documentation contradiction to reconcile
 
 `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md:36` asserts `AGENTMUX_AUTH_KEY` is
-"*not* a PTY env var for trust reasons". `docs/MUXSH.md:40`,
+"*not* a PTY env var for trust reasons". [`docs/MUXSH.md:40`](../MUXSH.md),
 `agent-identity-bootstrap.md:49` (since moved to the private
 shared-infrastructure repo) and
 `SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md:169-178` all state it is
@@ -234,7 +234,7 @@ next investigation.
 - **Mechanism note**: Rust's `Command::env_clear()` is the documented idiom, but on
   Windows it strips `SystemRoot` and many programs then fail to start
   (rust-lang/rust#114737); this repo already hit that
-  (`docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md:218`). So:
+  ([`docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md:218`](2026-05-11-live-log-streaming-wrapper-failures.md)). So:
   allowlist on Unix, allowlist-plus-forced-system-vars on Windows. Must-preserve
   includes `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `TERMINFO`, `COLORTERM`,
   `LANG`/`LC_*`, `TZ`, `TMPDIR`, `XDG_*`, `DISPLAY`, `WAYLAND_DISPLAY`,
@@ -281,7 +281,7 @@ Ranked, and deliberately separable.
    three was actually wrong: `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28`
    claimed the key is "not a PTY env var for trust reasons", sourced to
    `internals/env-vars.md` — a file that does not exist in this repo.
-   `docs/MUXSH.md` and `agent-identity-bootstrap.md` were both accurate:
+   [`docs/MUXSH.md`](../MUXSH.md) and `agent-identity-bootstrap.md` were both accurate:
    they describe agent panes, which is exactly where the key is injected. The
    stale paragraph now carries a dated correction rather than being deleted, so
    the next reader sees what changed and why.

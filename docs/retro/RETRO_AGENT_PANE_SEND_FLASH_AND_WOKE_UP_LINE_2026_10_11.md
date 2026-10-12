@@ -28,7 +28,7 @@ On replay the persisted user record is a normal line ahead of the `init`, so the
 
 ### 2.2 That row brings back the "flash on send"
 
-New rows in the live tail fade in (opacity 0 to 1 and an 8px rise, 180 ms, `@starting-style` in `frontend/app/view/agent/styles/_document.scss`). The user's own message is exempt, because the fade on it *was* the flash on send: the row mounts invisible, the pinned pane scrolls up to make room (an empty strip), then the row fades in. That was measured and fixed on 2026-10-01 (`REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30` §7: layout shift 0.09 → 0.00, three changing frames → one), and the rule's comment describes it.
+New rows in the live tail fade in (opacity 0 to 1 and an 8px rise, 180 ms, `@starting-style` in [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss)). The user's own message is exempt, because the fade on it *was* the flash on send: the row mounts invisible, the pinned pane scrolls up to make room (an empty strip), then the row fades in. That was measured and fixed on 2026-10-01 (`REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30` §7: layout shift 0.09 → 0.00, three changing frames → one), and the rule's comment describes it.
 
 The false "Woke up" row is an `ambient_narration` row, not a `user_message`, and it arrives at the pass's `init`, a moment after the send. It lands at the bottom of the tail, directly under the message (`StreamFlush` only appends, `store/agent-document/reducer.ts`), and gets the fade. So on a send that followed a turn with a Bash call, the pane did exactly what the 10-01 fix removed: an empty strip under the message, then a row fading in. That is the flash.
 
@@ -109,4 +109,4 @@ On a build with this fix, in a Claude Code pane:
 
 The operator asked for the token counts at the right of the status bar to look like the stats on the left. They didn't. The counts were set in the monospace font at 10px, at 70% opacity, with arrows at 55%. The left section's readouts (`.stat-mono`, `.stat-disk-arrow`, `.system-stats` in `StatusBar.scss`) use the sans font at 11px with -0.02em letter spacing, 60% opacity and arrows at 50%. `.stat-mono` is deliberately sans; see `retro-statusbar-metrics-font-change-2026-09-16`.
 
-`frontend/app/statusbar/_token-usage.scss` now sets the counts the same way: `var(--font-sans)`, 11px, -0.02em, arrows at 0.5, and the indicator at 0.6 opacity at rest (hover still 1, the zero state still 0.35). The breakdown popover is unchanged.
+[`frontend/app/statusbar/_token-usage.scss`](../../frontend/app/statusbar/_token-usage.scss) now sets the counts the same way: `var(--font-sans)`, 11px, -0.02em, arrows at 0.5, and the indicator at 0.6 opacity at rest (hover still 1, the zero state still 0.35). The breakdown popover is unchanged.

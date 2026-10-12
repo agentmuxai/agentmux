@@ -133,7 +133,7 @@ Validate via Chrome DevTools Performance tab:
 
 ## What's NOT in this PR
 
-Left for future work (tracked in `docs/analysis/agent-pane-typing-lag-2026-04-12.md`):
+Left for future work (tracked in [`docs/analysis/agent-pane-typing-lag-2026-04-12.md`](agent-pane-typing-lag-2026-04-12.md)):
 
 - Virtualized list (windowing) — only needed if 500 nodes isn't enough
 - Consolidating the dual launch paths (frontend vs backend)

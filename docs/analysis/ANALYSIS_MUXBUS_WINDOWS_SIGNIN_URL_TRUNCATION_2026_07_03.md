@@ -57,11 +57,11 @@ for the whole string (§3). Deduplicated the two copies of `open_browser()` into
 
 ## 1. Where the two flows call the vulnerable code
 
-`frontend/app/view/accounts/AgentMuxConnectPanel.tsx` is the single shared
+[`frontend/app/view/accounts/AgentMuxConnectPanel.tsx`](../../frontend/app/view/accounts/AgentMuxConnectPanel.tsx) is the single shared
 implementation for AgentMux Cloud connect, rendered from three places:
 - `MuxBusConnectSection` — per-agent identity panel (`AgentIdentityPanel.tsx`)
 - `AgentMuxConnectPanel` — Armory → Accounts gallery tile (`accounts-manager.tsx`)
-- `frontend/app/statusbar/HostPopover.tsx` — the statusbar popover ("status panel")
+- [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx) — the statusbar popover ("status panel")
 
 All three call the same `useMuxBusStatus().connect()`, which RPCs `muxbus.login` →
 `agentmux-srv/src/server/muxbus_handlers.rs` → `crate::muxbus::pkce::run_pkce_login()`

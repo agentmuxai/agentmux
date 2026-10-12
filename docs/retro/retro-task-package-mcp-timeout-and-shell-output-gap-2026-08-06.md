@@ -17,7 +17,7 @@ Producing a `task package` build (compiles the CEF-linked `agentmux-cef` host bi
 2. **1× via `nohup ... & disown`** from inside a Bash tool call, attempting to escape the tool call's own lifetime — the output log came back empty and the process was gone almost immediately, meaning the detach did not survive.
 3. **2× via `mcp__agentmux__Shell`** — both exited near-instantly (`exit_code: 1`, 1–2 lines) with **no way to retrieve the actual output content** through any available tool.
 
-The eventual fix that worked: `scripts/package-agent.cmd` (a bridge script that fixes exactly this class of problem) **already exists in this repo** and would have avoided both MCP Shell failures — but it is referenced nowhere except itself, so it wasn't found until an explicit source-code investigation turned it up.
+The eventual fix that worked: [`scripts/package-agent.cmd`](../../scripts/package-agent.cmd) (a bridge script that fixes exactly this class of problem) **already exists in this repo** and would have avoided both MCP Shell failures — but it is referenced nowhere except itself, so it wasn't found until an explicit source-code investigation turned it up.
 
 ---
 
@@ -73,7 +73,7 @@ Neither exposed its actual stdout/stderr through any tool available: `ShellStatu
 | `retro-agentmux-srv-9min-crash-2026-07-26.md` | Jul 2026 | `agentmux-srv` dies ~9m37s into idle instances, no crash evidence | Still open — "current working theory (unproven)" names Windows Job Object teardown as leading suspect |
 | **This retro** | Aug 2026 | `task package` unbuildable via any agent-tool mechanism: Bash-call timeout (external, unfixable here), `nohup` doesn't detach (Job Object semantics), MCP Shell output is unreadable (confirmed product gap) | See Fix Plan below |
 
-The June 27 retro's recommended follow-up — *"Add a `task dev:agent` wrapper... a thin `.cmd` or PowerShell script that prepends `Git\bin`"* — **was actually built**, for both `task dev` (`scripts/dev-agent.cmd`) and `task package` (`scripts/package-agent.cmd`). `dev-agent.cmd` is documented in CLAUDE.md ("Launching `task dev` from an agent / MCP Shell (Windows)"). **`package-agent.cmd` has no equivalent documentation anywhere and is referenced nowhere except its own file** — which is almost certainly why attempts 5–6 improvised broken inline commands instead of using it. The fix from the last retro shipped; the doc update that would have made it discoverable didn't.
+The June 27 retro's recommended follow-up — *"Add a `task dev:agent` wrapper... a thin `.cmd` or PowerShell script that prepends `Git\bin`"* — **was actually built**, for both `task dev` ([`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd)) and `task package` ([`scripts/package-agent.cmd`](../../scripts/package-agent.cmd)). `dev-agent.cmd` is documented in CLAUDE.md ("Launching `task dev` from an agent / MCP Shell (Windows)"). **`package-agent.cmd` has no equivalent documentation anywhere and is referenced nowhere except its own file** — which is almost certainly why attempts 5–6 improvised broken inline commands instead of using it. The fix from the last retro shipped; the doc update that would have made it discoverable didn't.
 
 ---
 
@@ -81,12 +81,12 @@ The June 27 retro's recommended follow-up — *"Add a `task dev:agent` wrapper..
 
 ### Immediate (this session)
 
-1. Use `scripts/package-agent.cmd` directly as the MCP Shell `cmd` argument (not wrapped in an additional `cmd /C "..."`), from the repo-relative path — this sidesteps both attempt-5/6 mistakes.
+1. Use [`scripts/package-agent.cmd`](../../scripts/package-agent.cmd) directly as the MCP Shell `cmd` argument (not wrapped in an additional `cmd /C "..."`), from the repo-relative path — this sidesteps both attempt-5/6 mistakes.
 2. Redirect the command's own output to a file (`... > C:\...\pkg.log 2>&1`) so the *build's own shell redirection* — not `ShellStatus` — is the read path, then poll `ShellStatus` for `running: false` and `Read` the log file directly. This works around the confirmed "no output retrieval" gap without needing a product fix first.
 
 ### Documentation (do now, low-risk, high-value)
 
-3. Add a **"Launching `task package` from an agent / MCP Shell (Windows)"** section to CLAUDE.md, mirroring the existing `task dev` section exactly, pointing at `scripts/package-agent.cmd`. This is the single highest-leverage fix here: the correct tool already existed and this retro would not have needed attempts 5–6 at all if it had been documented like its sibling.
+3. Add a **"Launching `task package` from an agent / MCP Shell (Windows)"** section to CLAUDE.md, mirroring the existing `task dev` section exactly, pointing at [`scripts/package-agent.cmd`](../../scripts/package-agent.cmd). This is the single highest-leverage fix here: the correct tool already existed and this retro would not have needed attempts 5–6 at all if it had been documented like its sibling.
 4. Cross-link `package-agent.cmd`'s own header comment to CLAUDE.md (currently says "see dev-agent.cmd for full explanation" but not vice versa) so either file leads a future reader to the other.
 
 ### Product gap (real, worth fixing, not urgent)
@@ -103,4 +103,4 @@ The June 27 retro's recommended follow-up — *"Add a `task dev:agent` wrapper..
 
 ## What Worked, For The Record
 
-**Confirmed, not just theorized:** invoking `scripts/package-agent.cmd` directly (no extra `cmd /C` wrapper) via `mcp__agentmux__Shell`, with its own output redirected to a file (`package-agent.cmd > C:\...\pkg-build.log 2>&1`), produced a shell that `ShellStatus` reported as genuinely `running` (not an instant `exit_code: 1`) and whose progress was readable in real time via a plain `Read` on the log file — `npm:install` skip, `build:frontend` (vite) running, real compiler/bundler output flowing. This validates both fix-plan items 1–2 in one shot: the correct wrapper script plus file-redirection-as-output-workaround is a fully working path for a build this long, on the first attempt using it.
+**Confirmed, not just theorized:** invoking [`scripts/package-agent.cmd`](../../scripts/package-agent.cmd) directly (no extra `cmd /C` wrapper) via `mcp__agentmux__Shell`, with its own output redirected to a file (`package-agent.cmd > C:\...\pkg-build.log 2>&1`), produced a shell that `ShellStatus` reported as genuinely `running` (not an instant `exit_code: 1`) and whose progress was readable in real time via a plain `Read` on the log file — `npm:install` skip, `build:frontend` (vite) running, real compiler/bundler output flowing. This validates both fix-plan items 1–2 in one shot: the correct wrapper script plus file-redirection-as-output-workaround is a fully working path for a build this long, on the first attempt using it.

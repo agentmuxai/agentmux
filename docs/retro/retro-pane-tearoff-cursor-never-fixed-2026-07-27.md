@@ -20,7 +20,7 @@
 > tuning or cursor-polling can reliably out-race that. The follow-up session
 > explored eliminating the OLE session entirely (native Pointer Events +
 > `setPointerCapture`, no `draggable()`) instead — see
-> `docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md` for
+> [`docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md`](retro-native-pointer-drag-tearoff-shelved-2026-07-29.md) for
 > that attempt's own outcome (also not shipped, but for different, unrelated
 > reasons — drop-zone/ghost regressions from rebuilding pragmatic-dnd's
 > functionality from scratch, not the cursor mechanism itself). That
@@ -53,7 +53,7 @@ This app uses `@atlaskit/pragmatic-drag-and-drop` (standard HTML5 DnD under the 
 
 ## Why this wasn't caught as "the same bug, twice"
 
-PR #2175's own commit message and PR description scope the fix explicitly to tabs ("kill drag circle-slash (Windows)" in the tab-reorder context) and don't cross-reference the pane drag path, even though both live under `frontend/layout/lib/` and share the exact same underlying DnD library and Windows constraint. There was also an earlier, unrelated attempt at this exact problem in March 2026 (`origin/agenta/fix-tab-drag-cursor` branch, commits `71603a88`/`acb8ab17`/`2c17fea3`) that covered *both* tabs and panes via a native `SetSystemCursor` polling-thread approach — but that branch was never merged, and a partial backend port of its API (`agentmux-cef/src/commands/drag.rs`'s `set_drag_cursor`/`restore_drag_cursor`, `cef-api.ts`'s wrapper) survived as dead code that nothing calls today. Neither the abandoned branch nor the dead backend API should be revived — the July fix's approach (pure `dropEffect`, no native cursor override) is simpler and already proven to work for tabs.
+PR #2175's own commit message and PR description scope the fix explicitly to tabs ("kill drag circle-slash (Windows)" in the tab-reorder context) and don't cross-reference the pane drag path, even though both live under [`frontend/layout/lib/`](../../frontend/layout/lib) and share the exact same underlying DnD library and Windows constraint. There was also an earlier, unrelated attempt at this exact problem in March 2026 (`origin/agenta/fix-tab-drag-cursor` branch, commits `71603a88`/`acb8ab17`/`2c17fea3`) that covered *both* tabs and panes via a native `SetSystemCursor` polling-thread approach — but that branch was never merged, and a partial backend port of its API (`agentmux-cef/src/commands/drag.rs`'s `set_drag_cursor`/`restore_drag_cursor`, `cef-api.ts`'s wrapper) survived as dead code that nothing calls today. Neither the abandoned branch nor the dead backend API should be revived — the July fix's approach (pure `dropEffect`, no native cursor override) is simpler and already proven to work for tabs.
 
 ## Fix direction (not yet implemented)
 
@@ -65,6 +65,6 @@ When a fix addresses "gesture X shows the wrong cursor/behavior on platform Y," 
 
 ## Files
 
-- `frontend/layout/lib/TileLayout.win32.tsx:148-175` (`checkForCursorBounds`/`onWindowDragOver`) — where the fix belongs
-- `frontend/app/tab/tab-reorder.ts:95-134` — the working reference implementation for tabs
-- `agentmux-cef/src/commands/drag.rs:253-282`, `frontend/util/cef-api.ts:788-793` — dead `setDragCursor`/`restoreDragCursor` API, do not revive
+- [`frontend/layout/lib/TileLayout.win32.tsx:148-175`](../../frontend/layout/lib/TileLayout.win32.tsx#L148-L175) (`checkForCursorBounds`/`onWindowDragOver`) — where the fix belongs
+- [`frontend/app/tab/tab-reorder.ts:95-134`](../../frontend/app/tab/tab-reorder.ts#L95-L134) — the working reference implementation for tabs
+- `agentmux-cef/src/commands/drag.rs:253-282`, [`frontend/util/cef-api.ts:788-793`](../../frontend/util/cef-api.ts#L788-L793) — dead `setDragCursor`/`restoreDragCursor` API, do not revive

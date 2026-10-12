@@ -90,7 +90,7 @@ The "minimum" host reducer = skeleton + the two cleanest-lifecycle migrations:
 
 ### Scope
 
-`frontend/util/srv-events.ts` ships scaffolding only — single-source consumption. E.6 layers in:
+[`frontend/util/srv-events.ts`](../../frontend/util/srv-events.ts) ships scaffolding only — single-source consumption. E.6 layers in:
 
 1. **Per-source version tracking** — `launcher_event_version` and `srv_event_version` (and now `host_event_version` from step 1) tracked separately so dropped events are detectable per pipe.
 2. **Saga buffering** — when `SagaStarted { saga_id }` arrives, buffer subsequent saga_id-tagged events in a per-saga queue. Flush atomically on `SagaCompleted`. Renderer atom updates inside a saga are all-or-nothing from the user's perspective.

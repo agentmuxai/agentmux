@@ -59,5 +59,5 @@ The launcher already has commit-aware "wait for memory to recover" handling for 
 - `~/.agentmux/logs/agentmuxsrv-v0.53.5.log.2026-07-17` (subagent-spawn burst)
 - `agentmux-srv/src/backend/subagent_watcher.rs` (`scan_session_subagents`, `scan_subagents_dir`, `process_jsonl_change`)
 - `agentmux-launcher/src/mem_supervisor.rs`, `agentmux-launcher/src/supervisor/windows.rs`
-- `docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`, `docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`
+- [`docs/specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`](../specs/SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md), [`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`](../specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md)
 - `[[agentmux-swarm-duplicate-subagent-groups]]`, `[[agentmux-pagefile-oom-crash-crossref]]`, `[[agentmux-memory-commit-vs-virtual]]` (memory)

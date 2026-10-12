@@ -35,7 +35,7 @@ Methodology: a read-only codebase survey (Explore agent, 53 tool calls, direct g
 - **Heuristic (regex-based, not exact):** ~310 JSX text nodes, ~1,351 quoted strings tree-wide (this last figure overcounts — it includes non-copy strings like class names).
 - **Extrapolated total: roughly 1,500–3,000 distinct user-facing strings.** This is a range, not a count; both the miss rate (multi-line/template-literal copy) and overcount rate (non-UI strings) work against precision here.
 - **Density is uneven and file-dependent**, not domain-dependent: sampling 9 representative view files across agent/browser/terminal/editor/settings/armory/swarm found 1–15 strings per file with no pattern by feature area.
-- **Easy-extraction files already exist**, and this matters for phase sequencing: `frontend/app/errors/catalog.ts` and its siblings (`accounts-catalog.ts`, `oauth-catalog.ts`, `cli-catalog.ts`, three provider catalogs, `mcp-preload-catalog.ts`) are already `Record<string, {title, message, retry}>` keyed by stable codes — a near-drop-in shape for an i18n key table.
+- **Easy-extraction files already exist**, and this matters for phase sequencing: [`frontend/app/errors/catalog.ts`](../../frontend/app/errors/catalog.ts) and its siblings (`accounts-catalog.ts`, `oauth-catalog.ts`, `cli-catalog.ts`, three provider catalogs, `mcp-preload-catalog.ts`) are already `Record<string, {title, message, retry}>` keyed by stable codes — a near-drop-in shape for an i18n key table.
 - **Hard-extraction files** are the large, deeply-nested views — `swarm-view.tsx` (1,041 lines) and `editor-view.tsx` (961 lines) have copy inline in JSX markup with no existing key structure.
 
 ### 3.2 Native/OS-level strings (Rust host) — small in count, large in complexity
@@ -72,7 +72,7 @@ All 456 fall through `AgentMuxError::Legacy(String)` → wire code `AMX-LEGACY`,
 - 22 `toLocaleDateString`/`toLocaleTimeString`/`toLocaleString` call sites across 18 files. **Zero** uses of `Intl.NumberFormat`/`Intl.DateTimeFormat`.
 - **Two sites hardcode `"en-US"`** explicitly (`statusbar/InstancePanel.tsx:68`, `statusbar/MaintenanceSection.tsx:33`) — these force US formatting regardless of OS locale today and need a direct fix regardless of the broader i18n timeline. Most other sites already pass `undefined` correctly (OS-locale-respecting).
 - One `dayjs` usage with a hardcoded format string (`"h:mm:ss A"`, sysinfo plot).
-- **`frontend/app/notification/usenotification.tsx` hand-builds relative-time copy** ("Just now", "X mins ago", "X hrs ago", "X days ago") with hardcoded English singular/plural and no ICU plural rules. This is the single highest-cost formatting item found: English's 2 plural forms don't generalize — Polish has 4, Arabic has 6, Russian's rule depends on the last two digits of the number — so this code needs a real plural-rules library, not a bigger switch statement.
+- **[`frontend/app/notification/usenotification.tsx`](../../frontend/app/notification/usenotification.tsx) hand-builds relative-time copy** ("Just now", "X mins ago", "X hrs ago", "X days ago") with hardcoded English singular/plural and no ICU plural rules. This is the single highest-cost formatting item found: English's 2 plural forms don't generalize — Polish has 4, Arabic has 6, Russian's rule depends on the last two digits of the number — so this code needs a real plural-rules library, not a bigger switch statement.
 
 ### 3.5 RTL readiness
 
@@ -86,7 +86,7 @@ One useful precedent exists: `platformResolve()`, a custom Vite plugin resolving
 
 ### 3.7 CI integration point
 
-`.github/workflows/ci-pr.yml` already runs a `docs` job with several grep-gate scripts (`check-menu-positioning.sh`, `check-scrollbar-cursor.sh`, `check-muxbus-credential-store.sh`, etc.) — bash scripts that grep for a pattern and fail the build on a match, with an allowlist for sanctioned exceptions. A future "no raw JSX text" / "missing translation key" gate fits this exact, already-established pattern. `eslint.config.js` is currently minimal (no i18n plugin wired in), so this would be new tooling, not a config tweak.
+[`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml) already runs a `docs` job with several grep-gate scripts (`check-menu-positioning.sh`, `check-scrollbar-cursor.sh`, `check-muxbus-credential-store.sh`, etc.) — bash scripts that grep for a pattern and fail the build on a match, with an allowlist for sanctioned exceptions. A future "no raw JSX text" / "missing translation key" gate fits this exact, already-established pattern. `eslint.config.js` is currently minimal (no i18n plugin wired in), so this would be new tooling, not a config tweak.
 
 ---
 

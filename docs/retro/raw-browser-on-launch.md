@@ -46,8 +46,8 @@ If the sidecar **never starts** (wrong binary path, permission error, AV blockin
 | `agentmux-cef/src/app.rs` | 174-200 | URL resolution: portable checks `frontend/index.html`, dev falls back to `localhost:5173` |
 | `agentmux-cef/src/app.rs` | 206-210 | IPC port/token appended as query params |
 | `agentmux-cef/src/sidecar.rs` | 23-262 | Sidecar spawning + endpoint detection |
-| `frontend/util/cef-api.ts` | 35-64 | `setupCefApi()` — tries `get_backend_endpoints`, waits 30s for `backend-ready` |
-| `frontend/cef-init.ts` | 20-43 | Detects CEF mode from `ipc_port` query param |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | 35-64 | `setupCefApi()` — tries `get_backend_endpoints`, waits 30s for `backend-ready` |
+| [`frontend/cef-init.ts`](../../frontend/cef-init.ts) | 20-43 | Detects CEF mode from `ipc_port` query param |
 
 ## URL Resolution Can Also Fail
 

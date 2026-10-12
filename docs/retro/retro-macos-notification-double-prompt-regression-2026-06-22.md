@@ -164,7 +164,7 @@ launching the helper as an XPC service registered in the main bundle's `Info.pli
    Did CEF update between 0.47.3 and 0.48.1?
 
 4. **Test removing the Alerts helper entirely:**
-   In `scripts/package-macos.sh`, remove `AgentMux Helper (Alerts).app` from the bundle
+   In [`scripts/package-macos.sh`](../../scripts/package-macos.sh), remove `AgentMux Helper (Alerts).app` from the bundle
    before signing. If the 2 prompts disappear, the helper is being launched by the OS
    independently of `--disable-notifications`. This is the strongest evidence for H1/H4.
 
@@ -193,7 +193,7 @@ comment explaining why the helper is excluded.
 
 ## 8. Durable guard
 
-Once fixed, add to `scripts/package-macos.sh` verify step:
+Once fixed, add to [`scripts/package-macos.sh`](../../scripts/package-macos.sh) verify step:
 
 ```bash
 # No AgentMux Helper (Alerts).app should be in the signed bundle

@@ -10,7 +10,7 @@ forced-synchronous-layout fix for a reveal-gate/content-visibility timing gap
 found during live testing. Not yet benchmarked against the recorded 500-600ms
 baseline (§5) — deliberately deferred per the repo owner's own call to let
 this settle before re-approaching with numbers.
-**Scope:** window-level tabs (`frontend/app/workspace/workspace.tsx`, the
+**Scope:** window-level tabs ([`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx), the
 top bar's own tab strip — analogous to Chrome's own tab strip, NOT the
 in-pane terminal/agent tab strip inside a single pane, which is a related
 but separately-tracked surface — see §6).
@@ -26,8 +26,8 @@ but separately-tracked surface — see §6).
 
 Short answer up front: **this has already been investigated, with real
 measurements, twice** —
-`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` (the perf
-investigation) and `docs/specs/SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md`
+[`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](../specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) (the perf
+investigation) and [`docs/specs/SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md`](../specs/SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md)
 (a UX-perception fix built on top of it, shipped). The May investigation
 measured a **500-600ms browser-side layout+paint cost per tab switch**,
 methodically eliminated every JS-level hypothesis, and landed on a single
@@ -71,7 +71,7 @@ purpose-built for exactly this UX.
 
 One CEF-hosted renderer, one DOM, one SolidJS reactive tree, for the
 **entire window** — every tab's content lives in the same render tree at
-once. `frontend/app/workspace/workspace.tsx:50-55`:
+once. [`frontend/app/workspace/workspace.tsx:50-55`](../../frontend/app/workspace/workspace.tsx#L50-L55):
 
 ```tsx
 <For each={allTabIds()}>
@@ -120,7 +120,7 @@ elimination, not left unverified.
 
 ### 2.2 A second-order effect the same report documents
 
-`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md` §3.4
+[`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md`](../reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md) §3.4
 adds: because a hidden tab's container measures 0×0 while `display:none`,
 becoming visible fires a burst of `ResizeObserver` callbacks (0×0 → real
 size) that re-lay-out the **entire pane tree**, on top of the base
@@ -244,9 +244,9 @@ and does not need to be built:
 
 | Tap | Where | Threshold |
 |---|---|---|
-| Long-task observer | `frontend/perf/observers.ts` | ≥50ms, logged `[perf] long-task` |
+| Long-task observer | [`frontend/perf/observers.ts`](../../frontend/perf/observers.ts) | ≥50ms, logged `[perf] long-task` |
 | Tab-reveal gate timing | `tab-reveal.ts` | per-switch mark |
-| IPC roundtrip | `frontend/perf/observers.ts` | >16ms |
+| IPC roundtrip | [`frontend/perf/observers.ts`](../../frontend/perf/observers.ts) | >16ms |
 
 **Repro, verbatim from the existing Phase 0 method** (reuse it exactly,
 so the result is directly comparable to the recorded 500-600ms baseline
@@ -292,17 +292,17 @@ change looks on paper.
 
 ## 7. References
 
-- `docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` — the
+- [`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](../specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) — the
   profiling investigation this analysis leans on most heavily
-- `docs/specs/SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md` —
+- [`docs/specs/SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md`](../specs/SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) —
   shipped fix for the tab-*bar* perception, doesn't touch the pane cost
-- `docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md` §3.4 —
+- [`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md`](../reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md) §3.4 —
   the 0×0-measurement/ResizeObserver second-order cost
-- `docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md` — the original reveal-gate
+- [`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md`](../specs/SPEC_TAB_CONTENT_REVEAL_GATE.md) — the original reveal-gate
   mechanism both of the above build on
-- `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md` — the
+- [`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](../specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) — the
   related-but-distinct in-pane surface, see §6
-- `frontend/app/workspace/workspace.tsx:50-83` — current `display:none`
+- [`frontend/app/workspace/workspace.tsx:50-83`](../../frontend/app/workspace/workspace.tsx#L50-L83) — current `display:none`
   mechanism, verified against `main` as of this pass
 - MDN / Chromium `content-visibility` explainers — the "tab-like UI"
   use case this analysis proposes matching against

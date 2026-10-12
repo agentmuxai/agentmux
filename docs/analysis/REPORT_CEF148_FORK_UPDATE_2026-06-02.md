@@ -29,7 +29,7 @@ the patched-framework build was **not reproducible** off this one machine.
 - Also created **`7778`** in the fork (upstream mirror) so the fork tracks the
   148 line. (Created via the GitHub shared-fork object network — no large push.)
 - Commit message documents the **`dcheck_always_on=false`** build requirement (see
-  `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`).
+  [`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`](../retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md)).
 
 ### To reproduce the patched CEF 148 framework now
 ```

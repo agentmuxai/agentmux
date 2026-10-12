@@ -7,7 +7,7 @@ tests-verified before this attempt — this was a *visual* confirmation only).
 **Outcome:** the code change was never in question. Getting a stable, titled,
 visually-checkable window up took roughly an hour and was eventually abandoned.
 **Scope note up front:** nothing here is a violation of the isolation invariants
-in `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` (I1–I6).
+in [`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](../specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) (I1–I6).
 Every kill this session issued was scoped to a PID whose own `CommandLine` was
 first confirmed to reference this agent's own workspace path; no other agent's
 window, pipe, or data dir was ever touched. What follows is friction in the
@@ -26,11 +26,11 @@ by prior work in this repo, none of them fully closed for the "agent scripting
 case:
 
 1. **Windows `MAX_PATH` broke the native CEF build**, for the exact reason
-   `docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md` already
+   [`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`](RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md) already
    diagnosed and fixed with `subst`. That retro's fix is real, but nothing
    applies it automatically — every agent whose workspace path is long enough
    has to rediscover and manually re-apply it, every time.
-2. **The per-clone Vite port (`docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`'s
+2. **The per-clone Vite port ([`docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`](../analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md)'s
    own suggested follow-up, since shipped as `AGENTMUX_VITE_PORT`) still
    collided in practice**, and its collision-recovery logic has two real gaps
    this session hit directly: a liveness check that can't see a half-dead
@@ -168,7 +168,7 @@ log content) held regardless of which mechanism turns out to be responsible:
 - Confirming *readiness*, not just *aliveness*, was harder still: the window
   exists and shows `Responding: True` from the moment the CEF process starts,
   long before the frontend has actually connected to anything. The custom
-  window title (`frontend/app-init.ts`'s `VITE_DEV_TITLE` application, gated
+  window title ([`frontend/app-init.ts`](../../frontend/app-init.ts)'s `VITE_DEV_TITLE` application, gated
   on `await initMuxWrap(initOpts)` completing) is actually a decent proxy for
   "fully up," precisely *because* it's one of the last things `app-init.ts`
   does — but nothing documents that, so this session spent real time confused
@@ -258,7 +258,7 @@ roughly an hour. Write one, covering:
   `Get-Process | Where MainWindowTitle -like "$expectedTitle*"`, not log
   tailing. **Correction (Codex): don't match by exact equality.** The `TITLE`
   value becomes the window *display name*, not the whole title; the actual
-  OS title is built by `frontend/util/window-title.ts`'s `formatWindowTitle()`
+  OS title is built by [`frontend/util/window-title.ts`](../../frontend/util/window-title.ts)'s `formatWindowTitle()`
   as `"<displayName> - <tabName> - AgentMux"` (or `"<displayName> - AgentMux"`
   with no tab — see `window-title.test.ts`, and the real examples this
   session observed, `"Lark - Tab 1 - AgentMux"` / `"Korp - Tab 1 - AgentMux"`).
@@ -343,21 +343,21 @@ without incident, and is the safer known-working pattern today.
 
 ## References
 
-- `docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md` — the
+- [`docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`](RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md) — the
   `MAX_PATH` root cause and the `subst` fix this session re-applied.
-- `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — the
+- [`docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`](../analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md) — the
   `clone_id` isolation work, and the Vite-port follow-up that shipped as
   `AGENTMUX_VITE_PORT`.
-- `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` — the
+- [`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](../specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) — the
   I1–I6 invariant contract; scope note above explains why this retro doesn't
   claim a violation of it.
-- `docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`
-  and `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`
+- [`docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`](../analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md)
+  and [`docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`](RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md)
   — a different, already-analysed multi-agent collision class (shared working
   directories, session/turn ownership); not what this session hit, but the
   same "multi-agent on one host" territory.
 - `Taskfile.yml` (`dev` task, Vite port derivation and reaping logic) —
   exact lines quoted in §2 above.
-- `frontend/app-init.ts` — `VITE_DEV_TITLE` application point referenced in
+- [`frontend/app-init.ts`](../../frontend/app-init.ts) — `VITE_DEV_TITLE` application point referenced in
   §3.
-- `.claude/skills/run/` (does not yet exist) — the gap P1 proposes to close.
+- [`.claude/skills/run/`](../../.claude/skills/run) (does not yet exist) — the gap P1 proposes to close.

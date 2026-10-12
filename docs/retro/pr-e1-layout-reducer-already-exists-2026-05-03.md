@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-03
 **Status:** retro — Stop-condition triggered (second time today). Writing this BEFORE any more code.
-**Plan reference:** `docs/specs/frontend-reducer-implementation-plan-2026-05-03.md` PR-E
+**Plan reference:** [`docs/specs/frontend-reducer-implementation-plan-2026-05-03.md`](../specs/frontend-reducer-implementation-plan-2026-05-03.md) PR-E
 **Decision context:** User picked E1 (refactor-only) over E2 (refactor + srv sync) for smaller blast radius
 
 ## What I assumed for PR-E1
@@ -11,11 +11,11 @@ A clean greenfield reducer for local focused/magnified state, similar in shape t
 
 ## What's actually there
 
-`frontend/layout/` has a **complete tree reducer architecture already**:
+[`frontend/layout/`](../../frontend/layout) has a **complete tree reducer architecture already**:
 
 | Component | Where | What |
 |---|---|---|
-| Action types enum | `frontend/layout/lib/types.ts` | 15+ types: FocusNode, MagnifyNodeToggle, Move, Insert, Delete, Resize, Swap, ComputeMove, ResizeNode, etc. |
+| Action types enum | [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts) | 15+ types: FocusNode, MagnifyNodeToggle, Move, Insert, Delete, Resize, Swap, ComputeMove, ResizeNode, etc. |
 | Action dispatcher | `layoutModel.ts:486 (treeReducer)` | Switch-by-action-type, ~75 LOC |
 | Pure-ish action handlers | `layoutTree.ts` | 544 LOC, 11 functions, e.g. `focusNode(state, action)` mutates passed-in state |
 | Projection | `layoutModel.ts:571` | `localTreeStateAtom._set({ ...this.treeState })` after each reducer run |
@@ -109,6 +109,6 @@ Three options:
 
 1. **Stop the slice migration here.** Pivot to other work. Pick up E2 when multi-window focus sync becomes a user-visible priority (or when the user explicitly asks for it).
 2. **Write the E2 spec now.** ~1 day of design work; doesn't commit to implementing. Captures the multi-window focus-sync design while context is fresh.
-3. **Pivot to one of the other named follow-ups** from the implementation plan: diagnostics panel surface (PR-C follow-up, ~0.5d) or the README/architecture docs for `frontend/app/store/`.
+3. **Pivot to one of the other named follow-ups** from the implementation plan: diagnostics panel surface (PR-C follow-up, ~0.5d) or the README/architecture docs for [`frontend/app/store/`](../../frontend/app/store).
 
 My recommendation: **option 1 (stop)** + **option 3's diagnostics panel** as a small completion. Stops the migration cleanly with a tangible user-visible feature (the audit log surface) and avoids the trap of inventing more work to keep the queue moving.

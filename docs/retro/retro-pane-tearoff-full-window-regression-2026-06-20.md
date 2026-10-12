@@ -5,7 +5,7 @@
 **Date**: 2026-06-20  
 **Severity**: P1 regression — core floating-pane UX broken  
 **Introduced by**: PR #1610 — Pane tear-off pool (macOS/Linux), merged ~2026-06-19  
-**Fixed in**: `frontend/app/app.tsx` — move `IS_FLOATING_PANE` evaluation from module load to component mount  
+**Fixed in**: [`frontend/app/app.tsx`](../../frontend/app/app.tsx) — move `IS_FLOATING_PANE` evaluation from module load to component mount\
 **Reported by**: User (manual testing immediately after pool work)
 
 ---
@@ -75,7 +75,7 @@ PR #1610 violated the assumption by making the URL mutable (via `replaceState`) 
 
 Remove the module-level IIFE. Move the URL check inside `AppInner`, which is a SolidJS component function called at render time — after `awaitPanePoolPromote()` has updated the URL and after `render(App, elem)` is called.
 
-**`frontend/app/app.tsx`**:
+**[`frontend/app/app.tsx`](../../frontend/app/app.tsx)**:
 
 ```typescript
 // BEFORE (module level, fires at parse time):

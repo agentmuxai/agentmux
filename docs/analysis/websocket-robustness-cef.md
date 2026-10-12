@@ -7,7 +7,7 @@
 
 ## Current State
 
-The WebSocket layer (`frontend/app/store/ws.ts`) has reconnect logic from the Tauri era:
+The WebSocket layer ([`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts)) has reconnect logic from the Tauri era:
 
 ### What exists (PR #233, #223)
 - `WSControl.reconnect()` — exponential backoff up to 60s, max 20 attempts then gives up
@@ -74,6 +74,6 @@ Show a banner when WS is disconnected so the user knows the UI is stale.
 ## References
 - PR #233: `fix(ws): reconnect to new backend endpoint after restart`
 - PR #223: `feat: sidecar modularization + backend crash recovery`
-- `frontend/app/store/ws.ts` — WSControl class
-- `frontend/app/store/backendStatus.ts` — backend status signals
+- [`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) — WSControl class
+- [`frontend/app/store/backendStatus.ts`](../../frontend/app/store/backendStatus.ts) — backend status signals
 - `agentmux-cef/src/sidecar.rs` — sidecar spawning

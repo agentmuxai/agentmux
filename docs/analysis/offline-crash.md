@@ -149,8 +149,8 @@ After a Type A (abort) crash, the DB files may be corrupted. There is no pre-lau
 |------|---------|-------|
 | `src-tauri/src/sidecar.rs` | 388–413 | `CommandEvent::Stderr` not handled → panic messages lost |
 | `src-tauri/src/sidecar.rs` | 401–408 | `backend-terminated` emitted but no restart triggered |
-| `frontend/app/store/global.ts` | 102 | Initial state `"running"` should be `"connecting"` |
-| `frontend/app/store/global.ts` | 235–247 | No retry/restart on `"backend-terminated"` |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | 102 | Initial state `"running"` should be `"connecting"` |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | 235–247 | No retry/restart on `"backend-terminated"` |
 | `agentmuxsrv-rs/src/main.rs` | 232–291 | `process::exit(1)` paths with no DB recovery attempt |
 | `agentmuxsrv-rs/src/backend/ai/openai.rs` | 339 | `panic!("expected error event")` in stream handler |
 | `agentmuxsrv-rs/src/backend/ai/anthropic.rs` | 358 | `panic!("expected error event")` in stream handler |
@@ -214,7 +214,7 @@ Focus on `FileStore`, `WaveStore`, and the `UpdateObjectMeta` call path — this
 
 ### Gap 5: WebSocket reconnect is orthogonal to backend process death
 
-`frontend/app/store/ws.ts` has a WS reconnect loop (exponential backoff `[0,0,2,5,10,10,30,60]s`, max 20 retries). This handles transient network blips. However, when the backend **process** dies, there is nothing to reconnect to. The `"backend-terminated"` Tauri event fires in parallel, permanently setting the atom to `"crashed"` — so the WS reconnect loop becomes moot. The two paths (WS drop vs. process death) are not coordinated.
+[`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) has a WS reconnect loop (exponential backoff `[0,0,2,5,10,10,30,60]s`, max 20 retries). This handles transient network blips. However, when the backend **process** dies, there is nothing to reconnect to. The `"backend-terminated"` Tauri event fires in parallel, permanently setting the atom to `"crashed"` — so the WS reconnect loop becomes moot. The two paths (WS drop vs. process death) are not coordinated.
 
 ### Gap 6: Backend resilience spec exists but is unimplemented
 

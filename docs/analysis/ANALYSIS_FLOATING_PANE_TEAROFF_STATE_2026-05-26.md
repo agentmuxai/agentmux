@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-26
 **Status:** analysis — Investigation (no code change yet)
-**Companion to:** `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`
+**Companion to:** [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md)
 
 ## TL;DR
 
@@ -33,11 +33,11 @@ The MVP is three small follow-ups on top of Phase 1, all spec'd.
 
 | File | Date | Status | Summary |
 |---|---|---|---|
-| `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` | 2026-05-11 | Proposed; Phase 1 merged | **Directly addresses this feature.** Owned `WS_POPUP \| WS_EX_TOOLWINDOW` child window, no taskbar, shared sidecar. 6-phase rollout. |
-| `docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md` | 2026-05-07 | Ready to implement | Native Win32 drag loop with pointer capture for **tab** tear-off. Replaces pragmatic-dnd's HTML5 drag. |
-| `docs/specs/RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md` | 2026-05-07 | Decision | Cross-platform drag-preview research. Recommends bitmap snapshot (static, all platforms) over per-platform custom drag loops. |
-| `docs/specs/tearoff-pane-size.md` | 2026-04-07 | Draft | Capture source pane's rect + grab offset on drag start, position torn window so the cursor lands at the same relative point. |
-| `docs/specs/cef-drag-window-management.md` | 2026-03-29 | Analysis + phased plan | Earliest cross-window-drag analysis; Phase 3 (multi-window + cross-window drag) is the umbrella that the per-pane and per-tab specs nest under. |
+| [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | 2026-05-11 | Proposed; Phase 1 merged | **Directly addresses this feature.** Owned `WS_POPUP \| WS_EX_TOOLWINDOW` child window, no taskbar, shared sidecar. 6-phase rollout. |
+| [`docs/specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md`](../specs/PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) | 2026-05-07 | Ready to implement | Native Win32 drag loop with pointer capture for **tab** tear-off. Replaces pragmatic-dnd's HTML5 drag. |
+| [`docs/specs/RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md`](../specs/RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md) | 2026-05-07 | Decision | Cross-platform drag-preview research. Recommends bitmap snapshot (static, all platforms) over per-platform custom drag loops. |
+| [`docs/specs/tearoff-pane-size.md`](../specs/tearoff-pane-size.md) | 2026-04-07 | Draft | Capture source pane's rect + grab offset on drag start, position torn window so the cursor lands at the same relative point. |
+| [`docs/specs/cef-drag-window-management.md`](../specs/cef-drag-window-management.md) | 2026-03-29 | Analysis + phased plan | Earliest cross-window-drag analysis; Phase 3 (multi-window + cross-window drag) is the umbrella that the per-pane and per-tab specs nest under. |
 
 ## 2. Currently shipped tear-off (tabs)
 
@@ -45,8 +45,8 @@ The tab tear-off the user has now:
 
 - **Gesture detect** (frontend) — drag a tab below the tab bar by
   ≥5 px or release-outside-window.
-  - `frontend/app/tab/tabbar.tsx` — `requestTearOff` around line 232.
-  - `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` — `performTearOff`
+  - [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — `requestTearOff` around line 232.
+  - [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) — `performTearOff`
     around line 123. Listens for `dragend` outside-the-window and routes.
 - **Drag payload** — `setCurrentDragPayload({ kind: "tab" | "tile", … })`
   established on drag start. The pane case uses `kind: "tile"`.
@@ -85,7 +85,7 @@ with `dragType === "tile"` and routes to the same
   set — same plumbing the regular panes already use.
 
 The IPC entry point is `open_floating_pane_window(paneId, x, y, w, h)`
-in `frontend/util/cef-api.ts`.
+in [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts).
 
 The frontend shell mounted inside that browser is currently a
 placeholder card at `frontend/app/floating-pane/floating-pane-shell.tsx`
@@ -100,7 +100,7 @@ showing `Floating pane: <id>` — that's Phase 1's stub.
 - `CrossWindowDragMonitor.win32.tsx` (lines ~42-211) watches for
   drag-end outside the window and calls `performTearOff`.
 - No `ResizeObserver` is wired to pane-tear geometry; only used by
-  `frontend/app/block/pane-size-badge.tsx` for the WxH badge during
+  [`frontend/app/block/pane-size-badge.tsx`](../../frontend/app/block/pane-size-badge.tsx) for the WxH badge during
   resize.
 
 So there's already a working pane drag path; it's just terminating at
@@ -138,7 +138,7 @@ it predates the spec.
 2. **CEF host primitive for owned child HWND** (Phase 1 shipped):
    `open_floating_pane_window` creates the no-taskbar window, embeds
    the CEF browser, handles focus + DPI.
-3. **Block renderer** (`frontend/app/block/block.tsx`) is mode-agnostic
+3. **Block renderer** ([`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx)) is mode-agnostic
    — same component works docked or floating.
 
 ### Missing for MVP (Phases 2 + 3)
@@ -219,7 +219,7 @@ Phases 4–6 (re-dock, geometry persistence, polish) are follow-ups.
 
 The existing spec (§10) explicitly defers cross-platform. The
 companion spec at
-`docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md`
+[`docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md)
 covers the macOS (`NSPanel.addChildWindow`) and Linux X11/GTK
 (`set_transient_for` + utility type hint + skip-taskbar) recipes, with
 a Wayland note (deferred — CEF Wayland support is still maturing and
@@ -227,7 +227,7 @@ agentmux uses CEF Ozone-X11 today).
 
 ## 9. References
 
-- `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` — canonical
+- [`docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](../specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) — canonical
   spec; 6-phase plan.
 - `agentmux-cef/src/floating_pane.rs` — Phase 1 host primitive.
 - `agentmux-cef/src/commands/floating_pane.rs` — Phase 1 IPC entry.
@@ -236,10 +236,10 @@ agentmux uses CEF Ozone-X11 today).
 - `agentmux-cef/src/commands/drag.rs::open_window_at_position` —
   current new-top-level-window spawn used by tab tear-off + (today)
   pane tear-off.
-- `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` —
+- [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) —
   `performTearOff` routing logic; Phase 3 modifies this.
-- `frontend/app/tab/tabbar.tsx` — tab tear-off gesture detection.
-- `frontend/layout/lib/TileLayout.win32.tsx` — current pane drag (via
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — tab tear-off gesture detection.
+- [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) — current pane drag (via
   pragmatic-dnd).
 - `agentmux-cef/src/browser_pane/hwnd.rs` — focus-redirect subclass
   hook reused by Phase 1 floaters.

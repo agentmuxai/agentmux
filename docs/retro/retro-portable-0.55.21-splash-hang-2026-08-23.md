@@ -161,7 +161,7 @@ wrong thing.
   occurrence self-diagnosing without needing to remember to `procdump`
   before killing it.
 - **Consider whether this machine's very high concurrent-instance count is
-  itself worth trimming** — `docs/specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`
+  itself worth trimming** — [`docs/specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`](../specs/SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md)
   already exists for pruning stale per-build channels; if ~30 live instances
   is typical for this dev machine rather than a one-off pile-up, running
   that pruner (or just closing unused older builds) reduces the concurrent

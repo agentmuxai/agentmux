@@ -3,11 +3,11 @@
 **Date:** 2026-06-17
 **Status:** retro — Post-mortem. The original bug is **still live**, in a new shape, and the
 guardrail we shipped now *blocks* the correct fix.
-**Scope:** `frontend/` cursor styling on scrollbars, app-wide.
+**Scope:** [`frontend/`](../../frontend) cursor styling on scrollbars, app-wide.
 **Subjects:** PR #1453 (`fix(ui): scrollbars use the arrow cursor, not the link hand`)
 and PR #1455 (`chore(ui): cursor design tokens + utilities + scrollbar lint guard`),
 both landed 2026-06-15.
-**Prior art:** `docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md` (the plan these
+**Prior art:** [`docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md`](../archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md) (the plan these
 two PRs executed).
 
 ---
@@ -44,7 +44,7 @@ strictly harder to notice and reason about.
 
 **PR #1453 — the "fix".** Removed two `cursor: pointer` declarations:
 
-`frontend/app/app.scss:68-75` (current state):
+[`frontend/app/app.scss:68-75`](../../frontend/app/app.scss#L68-L75) (current state):
 ```scss
 *::-webkit-scrollbar-thumb {
     // No cursor override: a scrollbar is a scroll affordance, not a link, so it
@@ -58,7 +58,7 @@ strictly harder to notice and reason about.
 
 The OverlayScrollbars handle was treated **differently** — it got an *explicit* value:
 
-`frontend/app/app.scss:105-112`:
+[`frontend/app/app.scss:105-112`](../../frontend/app/app.scss#L105-L112):
 ```scss
 .os-scrollbar-handle {
     cursor: var(--cursor-default);   // explicit arrow — CORRECT
@@ -103,7 +103,7 @@ With no declaration on the thumb, there is nothing to override that inheritance.
 The main agent conversation scroll container is a **native** scrollbar (not
 OverlayScrollbars):
 
-`frontend/app/view/agent/styles/_document.scss:8-16`:
+[`frontend/app/view/agent/styles/_document.scss:8-16`](../../frontend/app/view/agent/styles/_document.scss#L8-L16):
 ```scss
 .agent-document {
     flex: 1;
@@ -126,7 +126,7 @@ of its own to stop it. **→ text I-beam over the main scrollbar.** Confirmed.
 
 ### 2.2 Live-tool log scrollbar → link hand
 
-`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-37`:
+[`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-37`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss#L34-L37):
 ```scss
 .agent-tool-overlay-log {
     overflow-y: auto;        // ← live-log scroll container, sets NO cursor
@@ -135,7 +135,7 @@ of its own to stop it. **→ text I-beam over the main scrollbar.** Confirmed.
 ```
 nested inside
 
-`frontend/app/view/agent/styles/_document-nodes.scss:132-141`:
+[`frontend/app/view/agent/styles/_document-nodes.scss:132-141`](../../frontend/app/view/agent/styles/_document-nodes.scss#L132-L141):
 ```scss
 .agent-tool-block {
     ...
@@ -268,21 +268,21 @@ pseudo-elements**, because inheritance from the scroll host is otherwise unavoid
 | # | Action | Status |
 |---|--------|--------|
 | 1 | Pin `cursor: var(--cursor-default)` on `*::-webkit-scrollbar`, `-track`, `-thumb`, `-corner` (§5.1) | ✅ done — `app.scss` |
-| 2 | Replace the inverted stylelint ban with a value-scoped grep gate that forbids `pointer`/`text` and allows the arrow (§5.2) | ✅ done — removed `.stylelintrc.json` entry; added `scripts/check-scrollbar-cursor.sh`, wired into `task build:frontend` |
+| 2 | Replace the inverted stylelint ban with a value-scoped grep gate that forbids `pointer`/`text` and allows the arrow (§5.2) | ✅ done — removed `.stylelintrc.json` entry; added [`scripts/check-scrollbar-cursor.sh`](../../scripts/check-scrollbar-cursor.sh), wired into `task build:frontend` |
 | 3 | Correct the `app.scss` comment, the `theme.scss` token comment, and the analysis doc — strike "inherits the arrow" | ✅ done |
 | 4 | Manually verify all three surfaces × both themes before merge (§5.4) | ✅ done — verified in `task dev` (2026-06-17): main conversation scrollbar = arrow (was I-beam), live-tool log scrollbar = arrow (was hand), other surfaces = arrow |
 | 5 | Note on the cursor token block: "scroll pseudo-elements must pin the cursor; they inherit otherwise" | ✅ done — `theme.scss` |
 
-> **Guard self-test (2026-06-17).** `scripts/check-scrollbar-cursor.sh` was
+> **Guard self-test (2026-06-17).** [`scripts/check-scrollbar-cursor.sh`](../../scripts/check-scrollbar-cursor.sh) was
 > verified against a fixture: it flags `cursor: pointer`, `cursor: text`,
 > `var(--cursor-interactive)`, and `var(--cursor-text)` on scrollbar selectors
 > (including multi-line selectors and nested component rules), and passes
 > `var(--cursor-default)`, cursor-less scrollbar blocks, and `pointer` on
 > non-scrollbar selectors. It is green on the current tree.
 
-**Files referenced:** `frontend/app/app.scss` (59-112), `frontend/app/theme.scss`
-(301-312), `frontend/app/view/agent/styles/_document.scss` (8-16),
-`frontend/app/view/agent/styles/_document-nodes.scss` (132-141),
-`frontend/app/view/agent/styles/_tool-overlay-portal.scss` (34-37),
+**Files referenced:** [`frontend/app/app.scss`](../../frontend/app/app.scss) (59-112), [`frontend/app/theme.scss`](../../frontend/app/theme.scss)
+(301-312), [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) (8-16),
+[`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) (132-141),
+[`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) (34-37),
 `.stylelintrc.json` (15-22),
-`docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md`.
+[`docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md`](../archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md).
