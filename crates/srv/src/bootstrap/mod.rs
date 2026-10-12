@@ -39,6 +39,19 @@ use crate::registry;
 use crate::server::{self, AppState};
 use crate::state;
 
+/// `eprintln!` that can't panic. srv's stderr is a pipe the launcher reads, so
+/// once the launcher is gone a write fails with EPIPE (Rust ignores SIGPIPE),
+/// and `eprintln!` panics on a failed write. On the paths that must run when
+/// the launcher has died, the parent and stdin watchers, that panic killed
+/// the watcher thread before it could shut srv down, which left srv running
+/// with no launcher, holding `srv.lock`, so the app could not be opened again.
+macro_rules! eprintln_lossy {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
 mod watchers;
 mod logging;
 mod stores;
