@@ -18,6 +18,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/services", () => ({ ObjectService: { UpdateObjectMeta: () => Promise.resolve() } }));
 
 import { AgentStatusChip, chipStatus, type AgentDisplayStatus } from "./swarm-view";
+import { SPINNER_FRAMES, SPINNER_STILL } from "@/app/element/AsciiSpinner";
 import {
     noteQuestionActivity,
     resetQuestionTimersForTests,
@@ -61,13 +62,15 @@ describe("AgentStatusChip: question", () => {
     afterEach(() => vi.useRealTimers());
 
     const chip = (container: HTMLElement) => container.querySelector(".swarm-status-chip")!;
+    const label = (container: HTMLElement) => chip(container).querySelector(".swarm-status-label")!.textContent;
     const countdown = (container: HTMLElement) => chip(container).querySelector(".swarm-status-countdown");
 
-    it("is labelled question, with the question class and a pulsing dot", () => {
+    it("is labelled question, with the question class and the ASCII spinner", () => {
         const { container } = render(() => <AgentStatusChip status="working" awaitingUser />);
-        expect(chip(container).textContent).toBe("question");
+        expect(label(container)).toBe("question");
         expect(chip(container).classList.contains("swarm-status-chip--question")).toBe(true);
-        expect(chip(container).querySelector(".swarm-status-dot--question")).not.toBeNull();
+        expect(chip(container).querySelector(".swarm-status-spinner")).not.toBeNull();
+        expect(chip(container).querySelector(".swarm-status-dot")).toBeNull();
     });
 
     it("shows the question timer's seconds and band, ticking", () => {
@@ -99,14 +102,14 @@ describe("AgentStatusChip: question", () => {
 
     it("shows plain question without timer state", () => {
         const { container } = render(() => <AgentStatusChip status="working" awaitingUser blockId="nobody" />);
-        expect(chip(container).textContent).toBe("question");
+        expect(label(container)).toBe("question");
         expect(countdown(container)).toBeNull();
     });
 
     it("shows no countdown unless it's in the question state", () => {
         startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn() });
         const { container } = render(() => <AgentStatusChip status="idle" awaitingUser blockId="b1" />);
-        expect(chip(container).textContent).toBe("idle");
+        expect(label(container)).toBe("idle");
     });
 
     // One timer surfaced in two places: the panel and the chip never disagree.
@@ -146,21 +149,39 @@ describe("AgentStatusChip", () => {
     it("labels and classes the chip with one of the two states; 'tools' never appears", () => {
         const { container } = render(() => <AgentStatusChip status="tools" />);
         const chip = container.querySelector(".swarm-status-chip")!;
-        expect(chip.textContent).toBe("working");
+        expect(chip.querySelector(".swarm-status-label")!.textContent).toBe("working");
         expect(chip.classList.contains("swarm-status-chip--working")).toBe(true);
-        expect(chip.querySelector(".swarm-status-dot--working")).not.toBeNull();
+        expect(chip.querySelector(".swarm-status-spinner")).not.toBeNull();
+        expect(chip.querySelector(".swarm-status-dot")).toBeNull();
     });
 
     it("follows the status as it changes (props read reactively, not destructured once)", () => {
         const [status, setStatus] = createSignal<AgentDisplayStatus>("working");
         const { container } = render(() => <AgentStatusChip status={status()} />);
         const chip = () => container.querySelector(".swarm-status-chip")!;
-        expect(chip().textContent).toBe("working");
+        const text = () => chip().querySelector(".swarm-status-label")!.textContent;
+        expect(text()).toBe("working");
         setStatus("idle");
-        expect(chip().textContent).toBe("idle");
+        expect(text()).toBe("idle");
         expect(chip().classList.contains("swarm-status-chip--idle")).toBe(true);
         setStatus("tools");
-        expect(chip().textContent).toBe("working");
+        expect(text()).toBe("working");
+    });
+
+    // User, 2026-10-11: the animated states show the composer's ASCII spinner
+    // instead of a pulsing dot; the resting state keeps a still dot.
+    it("idle keeps a still dot and no spinner; the animated states swap it for the spinner", () => {
+        const [status, setStatus] = createSignal<AgentDisplayStatus>("idle");
+        const { container } = render(() => <AgentStatusChip status={status()} />);
+        const chip = () => container.querySelector(".swarm-status-chip")!;
+        expect(chip().querySelector(".swarm-status-dot")).not.toBeNull();
+        expect(chip().querySelector(".swarm-status-spinner")).toBeNull();
+        setStatus("working");
+        expect(chip().querySelector(".swarm-status-dot")).toBeNull();
+        expect([...SPINNER_FRAMES, SPINNER_STILL]).toContain(chip().querySelector(".swarm-status-spinner")?.textContent ?? "");
+        setStatus("idle");
+        expect(chip().querySelector(".swarm-status-dot")).not.toBeNull();
+        expect(chip().querySelector(".swarm-status-spinner")).toBeNull();
     });
 });
 

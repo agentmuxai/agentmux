@@ -18,7 +18,7 @@ import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { ActivityState, CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
 import { presentStatus, TIMING, type StatusMemory } from "../status/present-status";
-import { AsciiSpinner } from "./AsciiSpinner";
+import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionEstimate, compactionProgress, readCompactionSamples, samplesForModel } from "../compaction-estimate";

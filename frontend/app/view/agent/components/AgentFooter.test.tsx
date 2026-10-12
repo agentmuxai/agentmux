@@ -18,6 +18,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
+import { SPINNER_FRAMES, SPINNER_STILL } from "@/app/element/AsciiSpinner";
 import { recordCompactionSample } from "../compaction-estimate";
 import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
 import { ObjectService } from "@/app/store/services";
@@ -880,7 +881,7 @@ describe("AgentWorkingRow type-out follows the clock", () => {
     it("shows an ASCII spinner, not the pulsing dot", () => {
         const { container } = render(() => <AgentWorkingRow loading={true} activitySummary="Fix it" />);
         expect(container.querySelector(".agent-working-row .agent-spinner-dot")).toBeNull();
-        expect(container.querySelector(".agent-working-row .agent-spinner-ascii")?.textContent).toMatch(/^[|/\*-]$/);
+        expect([...SPINNER_FRAMES, SPINNER_STILL]).toContain(container.querySelector(".agent-working-row .agent-spinner-ascii")?.textContent ?? "");
     });
 });
 

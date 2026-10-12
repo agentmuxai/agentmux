@@ -36,6 +36,7 @@ import { SwarmStatsPanel } from "./swarm-stats";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isModKey } from "@/util/platformutil";
+import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -1345,8 +1346,12 @@ export function AgentStatusChip(props: {
     const countdown = () => (chip() === "question" && props.blockId ? questionCountdown(props.blockId) : null);
     return (
         <span class={`swarm-status-chip swarm-status-chip--${chip()}`}>
-            <span class={`swarm-status-dot swarm-status-dot--${chip()}`} />
-            {chip()}
+            {/* The two animated states carry the ASCII spinner (the composer's
+                mark, one shared timer); the resting state keeps a still dot. */}
+            <Show when={chip() !== "idle"} fallback={<span class="swarm-status-dot" />}>
+                <AsciiSpinner class="swarm-status-spinner" />
+            </Show>
+            <span class="swarm-status-label">{chip()}</span>
             <Show when={countdown()}>
                 {(cd) => (
                     <Show
