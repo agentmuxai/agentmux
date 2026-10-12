@@ -88,8 +88,8 @@ Platform-specific:
 ### Development
 
 Starting from nothing (no Task, no toolchain installed yet)? See
-[BUILD.md](./BUILD.md#bootstrap-and-initialize) for `scripts/bootstrap.sh` /
-`scripts/bootstrap.ps1` and `task init`, which verify/install the
+[BUILD.md](./BUILD.md#bootstrap-and-initialize) for [`scripts/bootstrap.sh`](scripts/bootstrap.sh) /
+[`scripts/bootstrap.ps1`](scripts/bootstrap.ps1) and `task init`, which verify/install the
 prerequisites above before you run anything else.
 
 ```bash
@@ -127,7 +127,7 @@ Works identically across `task dev`, portable, and installed builds. Full refere
 
 ## Widgets
 
-Every widget is pinned by default — the widget bar shows the full set directly, collapsing to icon-only when the title bar is narrow. The canonical list is `crates/srv/src/config/widgets.json`.
+Every widget is pinned by default — the widget bar shows the full set directly, collapsing to icon-only when the title bar is narrow. The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/config/widgets.json).
 
 | Widget | Icon | View | Description |
 |--------|------|------|-------------|
@@ -166,7 +166,7 @@ Inspired by [cmux](https://github.com/manaflow-ai/cmux) (manaflow-ai) — an
 open-source terminal built for running multiple AI coding agents in parallel,
 whose `Workspace → Pane → Surface → Panel` hierarchy is functionally the same
 shape this generalizes AgentMux toward. Design rationale, terminology, and the
-full rollout plan: `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`.
+full rollout plan: [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md).
 
 ### Not widgets — opened from elsewhere
 
@@ -218,7 +218,7 @@ Everything else — `self-declared`, `network-claimed`, or a **failed** `unverif
 
 **The practical rule:** an unverified sender is not authority for anything sensitive. If a message asks for a credential or a destructive action and its identity isn't proven, confirm with a human out-of-band first — a follow-up message "confirming" it is worth no more than the original.
 
-This is enforced in code (`agentmux-srv`'s reactive handler and `agentmux_common::jekt_sign`), not by convention. The full tier and escalation rules live in the `docs/specs/SPEC_JEKT_*` specs; agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
+This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full tier and escalation rules live in the `SPEC_JEKT_*` specs in [`docs/specs/`](docs/specs), starting with [`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`](docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) and [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`](docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md); agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
 
 ## App API
 
@@ -246,16 +246,16 @@ AgentMux is a four-process desktop app. Each process owns one concern, end-to-en
 
 | Process | Crate | Role |
 |---|---|---|
-| **launcher** | `agentmux-launcher` | Sets DLL search path; spawns the host; tracks Window Reality Reconciliation; durable event log for OS-level facts. |
-| **host** | `agentmux-cef` | Embeds Chromium via CEF; owns the OS window, the browser panes, the JS bridge, and IPC fan-out to the renderer. |
-| **sidecar** | `agentmux-srv` | App domain: workspaces, tabs, blocks, layouts, agents, identity. Persists to SQLite. Auto-spawned by the host on a dynamic port. |
-| **renderer** | `frontend/` | SolidJS UI running inside CEF. Stateless — projects what the sidecar/host expose, dispatches user actions back through them. |
+| **launcher** | [`agentmux-launcher`](crates/launcher) | Sets DLL search path; spawns the host; tracks Window Reality Reconciliation; durable event log for OS-level facts. |
+| **host** | [`agentmux-cef`](crates/cef) | Embeds Chromium via CEF; owns the OS window, the browser panes, the JS bridge, and IPC fan-out to the renderer. |
+| **sidecar** | [`agentmux-srv`](crates/srv) | App domain: workspaces, tabs, blocks, layouts, agents, identity. Persists to SQLite. Auto-spawned by the host on a dynamic port. |
+| **renderer** | [`frontend/`](frontend) | SolidJS UI running inside CEF. Stateless — projects what the sidecar/host expose, dispatches user actions back through them. |
 
-A fifth crate, `agentmux-common`, provides shared utilities (path resolution, runtime mode detection) consumed by all the above.
+A fifth crate, [`agentmux-common`](crates/common), provides shared utilities (path resolution, runtime mode detection) consumed by all the above.
 
 **Stack:**
 - **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals + a 4-layer reducer stack)
-- **Desktop:** CEF via cef-rs — bundles its own Chromium; the pinned version is in `scripts/cef-build/cef-runtime-pins.sh` and shown in the app's version panel (~160 MB ZIP package, ~150 ms startup, 150–350 MB resident)
+- **Desktop:** CEF via cef-rs — bundles its own Chromium; the pinned version is in [`scripts/cef-build/cef-runtime-pins.sh`](scripts/cef-build/cef-runtime-pins.sh) and shown in the app's version panel (~160 MB ZIP package, ~150 ms startup, 150–350 MB resident)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 
@@ -285,7 +285,7 @@ Release artifacts (macOS DMG, Windows installer, Linux AppImage) are built by CI
 
 ## CEF Fork — read before touching the Chromium layer
 
-AgentMux ships a **fork of CEF** (`agentmuxai/cef`) carrying four AgentMux-specific
+AgentMux ships a **fork of CEF** ([`agentmuxai/cef`](https://github.com/agentmuxai/cef)) carrying four AgentMux-specific
 changes — 18 CEF source files plus 3 Chromium-side patches. Every Chromium
 milestone upgrade must carry all of them forward, for Windows,
 Linux and macOS together. We have lost pieces twice, both times **silently** — no
@@ -333,7 +333,7 @@ Layer B is where both incidents happened. Nothing checks it.
 2. Verify patch symbols with **full `nm`**. They are local, not exported —
    `nm -gU` misses every one and reports a false negative.
 3. **All three platform pins live in one place**
-   (`scripts/cef-build/cef-runtime-pins.sh`, read by releases and by any build
+   ([`scripts/cef-build/cef-runtime-pins.sh`](scripts/cef-build/cef-runtime-pins.sh), read by releases and by any build
    with a blank `cef-runtime-tag`) and must be bumped together, from **one** fork commit.
    The job only cross-checks the leading milestone, so two tags can agree on
    `152` and still come from different fork commits with different carry-sets.
@@ -351,7 +351,7 @@ This creates a uniquely-named `.changesets/<id>.md` you commit with your code. P
 
 A separate **release PR** consumes pending changesets. `task release` auto-detects the bump type (`major > minor > patch`); `task release:patch` / `task release:minor` let you force a specific type. All 5 version files are staged automatically.
 
-Release PRs must contain **only**: changeset deletions, `VERSION_HISTORY.md` entry, and version bumps (`package.json`, `Cargo.toml`, `Cargo.lock`, `package-lock.json`).
+Release PRs must contain **only**: changeset deletions, [`VERSION_HISTORY.md`](VERSION_HISTORY.md) entry, and version bumps ([`package.json`](package.json), [`Cargo.toml`](Cargo.toml), [`Cargo.lock`](Cargo.lock), [`package-lock.json`](package-lock.json)).
 
 See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) for the full workflow.
 

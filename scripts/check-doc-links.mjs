@@ -71,8 +71,10 @@ if (explicit.length) targets = explicit;
 else if (ALL) targets = [...tracked];
 else targets = changedFiles();
 
+// Every tracked .md, not just docs/: README.md and BUILD.md are the most-read
+// docs in the repo, and scripts/link-md-paths.mjs writes links into them too.
 targets = targets.filter(
-  (f) => f.endsWith(".md") && f.startsWith("docs/") && tracked.has(f),
+  (f) => f.endsWith(".md") && tracked.has(f),
 );
 
 // Inline links `](target)` and reference definitions `[id]: target`.
