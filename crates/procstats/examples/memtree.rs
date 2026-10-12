@@ -9,26 +9,65 @@
 //
 // `--list <name>` prints every top-level process whose name contains <name>
 // (one per running copy of the app), so you can pick the right `--pid`.
-// Sampling then walks everything under that process. Each process is "app"
-// when its name contains the app token (default: the root's own name up to
-// its first '-', ' ' or '.') and isn't a per-pane helper, otherwise "child"
-// (shells, agent CLIs, language servers the app started). Totals are given
-// for both. The metrics are each OS's own (`agentmux_procstats::MEMORY_METRIC`):
-// Windows private working set and private commit, macOS phys_footprint,
-// Linux anonymous resident + swap, plus PSS and USS from smaps_rollup.
+// Sampling then walks everything under that process. A process is "child"
+// when it is, or runs under, a pane root: a shell, a console host or a
+// per-pane helper (`--pane-roots` changes the list). Everything else the app
+// started, its own helpers and language servers included, is "app". Totals
+// are given for both. The metrics are each OS's own
+// (`agentmux_procstats::MEMORY_METRIC`): Windows private working set and
+// private commit, macOS phys_footprint, Linux anonymous resident + swap,
+// plus PSS and USS from smaps_rollup.
+//
+// A total is null when the OS doesn't provide the metric, and null and
+// listed in "partial" when some processes had it and others didn't (one
+// exited mid-read), so a total is never silently short. On macOS the
+// per-process footprints are summed, which can count a region shared between
+// processes more than once; the run ends with `footprint`'s own total over the
+// same processes, which counts each once.
 
-use agentmux_procstats::{base_name, command_line_of, snapshot, ProcInfo, MEMORY_METRIC};
-use std::collections::HashSet;
+use agentmux_procstats::{base_name, command_line_of, snapshot, ProcInfo, ProcKey, MEMORY_METRIC};
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_PANE_HELPERS: &[&str] = &["agentmux-bashwrap", "agentmux-mcp"];
+/// Executable stems that start a pane's own subtree: agent CLIs (AgentMux
+/// starts them without a shell on Windows), shells, console hosts and
+/// AgentMux's per-pane helpers.
+const DEFAULT_PANE_ROOTS: &[&str] = &[
+    "claude",
+    "codex",
+    "gemini",
+    "kimi",
+    "opencode",
+    "qwen",
+    "aider",
+    "goose",
+    "amp",
+    "copilot",
+    "cursor-agent",
+    "agentmux-bashwrap",
+    "agentmux-mcp",
+    "bash",
+    "zsh",
+    "sh",
+    "dash",
+    "fish",
+    "nu",
+    "pwsh",
+    "powershell",
+    "cmd",
+    "conhost",
+    "openconsole",
+    "tmux",
+    "login",
+];
+
+const METRICS: [&str; 5] = ["private", "resident", "commit", "pss", "uss"];
 
 struct Args {
     list: Option<String>,
     pid: Option<u32>,
-    app_token: Option<String>,
-    pane_helpers: Vec<String>,
+    pane_roots: Vec<String>,
     samples: usize,
     interval: Duration,
     json: Option<String>,
@@ -38,8 +77,7 @@ fn parse_args() -> Result<Args, String> {
     let mut a = Args {
         list: None,
         pid: None,
-        app_token: None,
-        pane_helpers: DEFAULT_PANE_HELPERS.iter().map(|s| s.to_string()).collect(),
+        pane_roots: DEFAULT_PANE_ROOTS.iter().map(|s| s.to_string()).collect(),
         samples: 60,
         interval: Duration::from_millis(1000),
         json: None,
@@ -50,9 +88,8 @@ fn parse_args() -> Result<Args, String> {
         match arg.as_str() {
             "--list" => a.list = Some(val()?.to_lowercase()),
             "--pid" => a.pid = Some(val()?.parse().map_err(|e| format!("--pid: {e}"))?),
-            "--app-token" => a.app_token = Some(val()?.to_lowercase()),
-            "--pane-helpers" => {
-                a.pane_helpers = val()?
+            "--pane-roots" => {
+                a.pane_roots = val()?
                     .split(',')
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_lowercase())
@@ -114,13 +151,10 @@ fn tree<'a>(all: &'a [ProcInfo], root: &'a ProcInfo) -> Vec<&'a ProcInfo> {
     out
 }
 
-fn default_token(name: &str) -> String {
-    let lower = name.to_lowercase();
-    lower
-        .split(['-', ' ', '.', '_'])
-        .next()
-        .unwrap_or(&lower)
-        .to_string()
+/// The executable's name, lowercased, without `.exe`.
+fn stem(name: &str) -> String {
+    let lower = base_name(name).to_lowercase();
+    lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
 }
 
 /// CEF/Electron subprocess role from `--type=`, else "main".
@@ -135,49 +169,65 @@ fn role(p: &ProcInfo) -> String {
         .unwrap_or_else(|| "main".into())
 }
 
-/// Sums over a set of processes. A field is `None` when no process in the
-/// set had it (the OS doesn't provide it), so the raw data never shows an
-/// unmeasured metric as 0. `unmeasured` counts processes the OS wouldn't
-/// measure at all (another user's, on macOS), which the sums leave out.
+/// One metric summed over a set of processes, with how many had it.
 #[derive(Default, Clone, Copy)]
-struct Totals {
-    private: Option<u64>,
-    resident: Option<u64>,
-    commit: Option<u64>,
-    pss: Option<u64>,
-    uss: Option<u64>,
-    procs: usize,
-    unmeasured: usize,
+struct Sum {
+    total: u64,
+    have: usize,
+    missing: usize,
 }
 
-fn add_to(total: &mut Option<u64>, v: Option<u64>) {
-    if let Some(v) = v {
-        *total = Some(total.unwrap_or(0) + v);
+impl Sum {
+    fn add(&mut self, v: Option<u64>) {
+        match v {
+            Some(v) => {
+                self.total += v;
+                self.have += 1;
+            }
+            None => self.missing += 1,
+        }
     }
+    /// The total, only when every process had the metric: `None` when the
+    /// OS doesn't provide it, or when some processes lacked it (partial).
+    fn value(&self) -> Option<u64> {
+        (self.have > 0 && self.missing == 0).then_some(self.total)
+    }
+    fn partial(&self) -> bool {
+        self.have > 0 && self.missing > 0
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct Totals {
+    sums: [Sum; 5],
+    procs: usize,
 }
 
 impl Totals {
     fn add(&mut self, r: &Row) {
-        add_to(&mut self.private, r.private);
-        add_to(&mut self.resident, r.resident);
-        add_to(&mut self.commit, r.commit);
-        add_to(&mut self.pss, r.pss);
-        add_to(&mut self.uss, r.uss);
-        self.procs += 1;
-        if r.private.is_none() {
-            self.unmeasured += 1;
+        let values = [r.private, r.resident, r.commit, r.pss, r.uss];
+        for (sum, v) in self.sums.iter_mut().zip(values) {
+            sum.add(v);
         }
+        self.procs += 1;
     }
     fn json(&self) -> String {
+        let fields: Vec<String> = METRICS
+            .iter()
+            .zip(&self.sums)
+            .map(|(name, sum)| format!("\"{name}\":{}", opt(sum.value())))
+            .collect();
+        let partial: Vec<String> = METRICS
+            .iter()
+            .zip(&self.sums)
+            .filter(|(_, sum)| sum.partial())
+            .map(|(name, _)| format!("\"{name}\""))
+            .collect();
         format!(
-            "{{\"procs\":{},\"unmeasured\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{}}}",
+            "{{\"procs\":{},{},\"partial\":[{}]}}",
             self.procs,
-            self.unmeasured,
-            opt(self.private),
-            opt(self.resident),
-            opt(self.commit),
-            opt(self.pss),
-            opt(self.uss)
+            fields.join(","),
+            partial.join(",")
         )
     }
 }
@@ -224,16 +274,23 @@ fn median(mut v: Vec<u64>) -> u64 {
     }
 }
 
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
 fn list(needle: &str) -> std::io::Result<()> {
     let all = snapshot()?;
-    // Per-pane helpers (found under a pane's agent, not the app) aren't roots.
+    // Pane roots (a shell or a per-pane helper whose name matches) aren't
+    // copies of the app.
     let matches = |p: &ProcInfo| {
-        let lname = p.name.to_lowercase();
-        lname.contains(needle) && !DEFAULT_PANE_HELPERS.iter().any(|h| lname.starts_with(h))
+        p.name.to_lowercase().contains(needle)
+            && !DEFAULT_PANE_ROOTS.contains(&stem(&p.name).as_str())
     };
     for root in all.iter().filter(|p| matches(p)) {
-        let parent_matches = all.iter().any(|q| root.is_child_of(q) && matches(q));
-        if parent_matches {
+        if all.iter().any(|q| root.is_child_of(q) && matches(q)) {
             continue;
         }
         let members = tree(&all, root);
@@ -252,6 +309,38 @@ fn list(needle: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The run's raw-data file: one run per file, so an existing file is
+/// refused rather than mixed with this run's samples. It starts with a line
+/// saying what the run was.
+fn open_json(path: &str, args: &Args, root_pid: u32) -> std::fs::File {
+    let fail = |e: std::io::Error| -> ! {
+        eprintln!("memtree: {path}: {e} (use a new file per run)");
+        std::process::exit(1);
+    };
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .unwrap_or_else(|e| fail(e));
+    let roots: Vec<String> = args
+        .pane_roots
+        .iter()
+        .map(|r| format!("\"{}\"", esc(r)))
+        .collect();
+    writeln!(
+        f,
+        "{{\"run\":{{\"started_ms\":{},\"os\":\"{}\",\"metric\":\"{}\",\"root\":{root_pid},\"samples\":{},\"interval_ms\":{},\"pane_roots\":[{}]}}}}",
+        now_ms(),
+        std::env::consts::OS,
+        MEMORY_METRIC,
+        args.samples,
+        args.interval.as_millis(),
+        roots.join(",")
+    )
+    .unwrap_or_else(|e| fail(e));
+    f
+}
+
 fn main() {
     let args = match parse_args() {
         Ok(a) => a,
@@ -259,7 +348,7 @@ fn main() {
             if !e.is_empty() {
                 eprintln!("memtree: {e}");
             }
-            eprintln!("usage: memtree --list <name> | --pid <pid> [--app-token <t>] [--pane-helpers a,b] [--samples 60] [--interval-ms 1000] [--json out.jsonl]");
+            eprintln!("usage: memtree --list <name> | --pid <pid> [--pane-roots a,b] [--samples 60] [--interval-ms 1000] [--json out.jsonl]");
             std::process::exit(2);
         }
     };
@@ -271,18 +360,10 @@ fn main() {
         return;
     }
     let root_pid = args.pid.expect("checked in parse_args");
-    let mut json = args.json.as_ref().map(|p| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(p)
-            .unwrap_or_else(|e| {
-                eprintln!("memtree: {p}: {e}");
-                std::process::exit(1);
-            })
-    });
+    let mut json = args.json.as_deref().map(|p| open_json(p, &args, root_pid));
+    let pane_roots: HashSet<&str> = args.pane_roots.iter().map(|s| s.as_str()).collect();
 
-    let mut roles = std::collections::HashMap::new();
+    let mut roles = HashMap::new();
     let mut app_series: Vec<Totals> = Vec::new();
     let mut child_series: Vec<Totals> = Vec::new();
     let mut last_rows: Vec<Row> = Vec::new();
@@ -307,23 +388,26 @@ fn main() {
             break;
         };
         root_key = Some(root.key());
-        let token = args
-            .app_token
-            .clone()
-            .unwrap_or_else(|| default_token(&root.name));
-        let helpers: HashSet<&str> = args.pane_helpers.iter().map(|s| s.as_str()).collect();
+        // A process is a pane's when it is a pane root or runs under one.
+        // `tree` lists parents before children, so a parent's verdict is in.
+        let mut in_pane: HashSet<ProcKey> = HashSet::new();
         let mut rows = Vec::new();
         for p in tree(&all, root) {
-            let lname = p.name.to_lowercase();
-            let stem = lname.trim_end_matches(".exe");
-            let helper = helpers.iter().any(|h| stem.starts_with(h));
+            let parent_in_pane = all
+                .iter()
+                .any(|q| in_pane.contains(&q.key()) && p.is_child_of(q));
+            let pane = p.pid != root.pid
+                && (parent_in_pane || pane_roots.contains(stem(&p.name).as_str()));
+            if pane {
+                in_pane.insert(p.key());
+            }
             let (pss, uss) = pss_uss(p.pid);
             let role = roles.entry(p.key()).or_insert_with(|| role(p)).clone();
             rows.push(Row {
                 pid: p.pid,
                 name: base_name(&p.name).to_string(),
                 role,
-                app: lname.contains(&token) && !helper,
+                app: !pane,
                 private: p.mem_private,
                 resident: p.mem_resident,
                 commit: p.mem_commit,
@@ -340,10 +424,6 @@ fn main() {
             }
         }
         if let Some(f) = json.as_mut() {
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0);
             let procs: Vec<String> = rows
                 .iter()
                 .map(|r| {
@@ -357,16 +437,18 @@ fn main() {
             // rather than leaving a summary over a missing or cut-short file.
             if let Err(e) = writeln!(
                 f,
-                "{{\"ts_ms\":{ts},\"os\":\"{}\",\"metric\":\"{}\",\"root\":{root_pid},\"app\":{},\"child\":{},\"procs\":[{}]}}",
-                std::env::consts::OS,
-                MEMORY_METRIC,
+                "{{\"ts_ms\":{},\"app\":{},\"child\":{},\"procs\":[{}]}}",
+                now_ms(),
                 app.json(),
                 child.json(),
                 procs.join(",")
             )
             .and_then(|_| f.flush())
             {
-                eprintln!("\nmemtree: writing {}: {e}", args.json.as_deref().unwrap_or("?"));
+                eprintln!(
+                    "\nmemtree: writing {}: {e}",
+                    args.json.as_deref().unwrap_or("?")
+                );
                 std::process::exit(1);
             }
         }
@@ -377,7 +459,7 @@ fn main() {
             "\rsample {}/{}  app private {} MB",
             i + 1,
             args.samples,
-            mb(app.private.unwrap_or(0))
+            mb(app.sums[0].total)
         );
     }
     eprintln!();
@@ -411,32 +493,61 @@ fn main() {
         app_series.len()
     );
     // A metric this OS doesn't provide (commit off Windows, PSS/USS off
-    // Linux) has no samples and is left out.
+    // Linux) has no samples and is left out. A partial sample (a process
+    // lacked the metric) is left out of the median and counted.
     for (label, series) in [("app", &app_series), ("child", &child_series)] {
-        let stat = |name: &str, f: fn(&Totals) -> Option<u64>| {
-            let v: Vec<u64> = series.iter().filter_map(f).collect();
-            let (Some(&lo), Some(&hi)) = (v.iter().min(), v.iter().max()) else {
-                return String::new();
-            };
-            format!("  {name} {} [{}, {}]", mb(median(v)), mb(lo), mb(hi))
-        };
         let last = series.last().copied().unwrap_or_default();
         let mut line = format!("  {label:<5} procs {:>3}", last.procs);
-        for (name, f) in [
-            (
-                "private",
-                (|t: &Totals| t.private) as fn(&Totals) -> Option<u64>,
-            ),
-            ("resident", |t| t.resident),
-            ("commit", |t| t.commit),
-            ("pss", |t| t.pss),
-            ("uss", |t| t.uss),
-        ] {
-            line += &stat(name, f);
-        }
-        if last.unmeasured > 0 {
-            line += &format!("  ({} not measurable, left out)", last.unmeasured);
+        for (i, name) in METRICS.iter().enumerate() {
+            let v: Vec<u64> = series.iter().filter_map(|t| t.sums[i].value()).collect();
+            let partial = series.iter().filter(|t| t.sums[i].partial()).count();
+            let (Some(&lo), Some(&hi)) = (v.iter().min(), v.iter().max()) else {
+                if partial > 0 {
+                    line += &format!("  {name} partial in all {partial} samples");
+                }
+                continue;
+            };
+            line += &format!("  {name} {} [{}, {}]", mb(median(v)), mb(lo), mb(hi));
+            if partial > 0 {
+                line += &format!(" ({partial} partial samples left out)");
+            }
         }
         println!("{line}");
     }
+    footprint_cross_check(&last_rows);
 }
+
+/// macOS: `footprint`'s own total over the app processes of the last
+/// sample. It counts a region shared between processes once, where the
+/// per-process sum above can count it in each.
+#[cfg(target_os = "macos")]
+fn footprint_cross_check(rows: &[Row]) {
+    let app: Vec<&Row> = rows.iter().filter(|r| r.app).collect();
+    let mut cmd = std::process::Command::new("footprint");
+    for r in &app {
+        cmd.arg("-p").arg(r.pid.to_string());
+    }
+    println!();
+    match cmd.output() {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let lines: Vec<&str> = text.lines().collect();
+            println!(
+                "footprint over the {} app processes (last 25 lines):",
+                app.len()
+            );
+            for l in &lines[lines.len().saturating_sub(25)..] {
+                println!("  {l}");
+            }
+        }
+        Ok(out) => println!(
+            "footprint failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+        Err(e) => println!("footprint not run: {e}"),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn footprint_cross_check(_rows: &[Row]) {}
