@@ -37,7 +37,7 @@ Every single one is dark-background/light-text. "High-contrast" is the classic b
 
 Two things that looked like they might be existing light themes, checked and ruled out:
 - **`catppuccin-latte` JS chunk** (seen in build output) — this is the Shiki syntax-highlighter's bundled Catppuccin *Latte* flavor (VSCode-theme-JSON format, `"activityBar.background":"#dce0e8"` etc.), used only for code-block syntax highlighting. It's entirely unrelated to the app-chrome theme system — [`frontend/app/themes/catppuccin.scss`](../../frontend/app/themes/catppuccin.scss) only implements Mocha.
-- **`prefers-color-scheme: light`** — exactly one hit in the whole frontend, [`frontend/app/window/window-controls.win32.scss:55-61`](../../frontend/app/window/window-controls.win32.scss#L55-L61), and it only retints the Win11 caption-button hover/press overlay (white↔black tint), unconnected to `data-theme`/`window:theme`. A separate spec doc (`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md`) flags OS-light-mode-aware coloring as an explicit *design target, not yet implemented*.
+- **`prefers-color-scheme: light`** — exactly one hit in the whole frontend, [`frontend/app/window/window-controls.win32.scss:55-61`](../../frontend/app/window/window-controls.win32.scss), and it only retints the Win11 caption-button hover/press overlay (white↔black tint), unconnected to `data-theme`/`window:theme`. A separate spec doc (`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md`) flags OS-light-mode-aware coloring as an explicit *design target, not yet implemented*.
 
 ### Mechanism (for building a light theme against)
 

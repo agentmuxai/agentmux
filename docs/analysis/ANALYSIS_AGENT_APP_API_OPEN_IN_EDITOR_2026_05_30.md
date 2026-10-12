@@ -24,7 +24,7 @@ Plus a broader framing question: this is the *first* shipped agent → app callb
 | Capability | Status | Reference |
 |---|---|---|
 | `pane.open` RPC — high-level intent: open a pane with `view`, `file`, `cwd`, `title`, `tab_id`, `split_direction`, `focus` | ✅ implemented | `COMMAND_PANE_OPEN` const at `agentmux-srv/src/backend/rpc_types.rs:407`, `CommandPaneOpenData` struct at `:809`, handler in `agentmux-srv/src/server/app_api.rs` |
-| Editor pane backed by multi-tab state (`tabs[]`, `activeTabId`, `recentlyClosed[]`) | ✅ shipped | [`frontend/app/store/editor-pane-state-store.ts:64-69`](../../frontend/app/store/editor-pane-state-store.ts#L64-L69) |
+| Editor pane backed by multi-tab state (`tabs[]`, `activeTabId`, `recentlyClosed[]`) | ✅ shipped | [`frontend/app/store/editor-pane-state-store.ts:64-69`](../../frontend/app/store/editor-pane-state-store.ts) |
 | `createblock` low-level RPC (returns `ORef`) | ✅ shipped | `frontend/app/store/rpc-api.ts:105` |
 | `open_agent` callback (CEF → frontend via `CustomEvent`) — proves the agent→app pattern works | ✅ shipped | `agentmux-cef/src/commands/palette.rs:60` |
 | `WshRpcEngine` handler registration framework on the sidecar | ✅ shipped | `agentmux-srv/src/backend/rpc/engine.rs:189` |

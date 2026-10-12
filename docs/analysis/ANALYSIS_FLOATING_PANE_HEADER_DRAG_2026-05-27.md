@@ -32,7 +32,7 @@ the click as a non-client event, owns the drag loop, never lets the
 click reach CEF.
 
 The 33 CSS-px figure matches `--header-height` in
-[`frontend/app/theme.scss:97`](../../frontend/app/theme.scss#L97) — the height of `BlockFrame_Header`
+[`frontend/app/theme.scss:97`](../../frontend/app/theme.scss) — the height of `BlockFrame_Header`
 itself. But the pane header isn't at `Y=0` of the window. Between the
 window's client-area top and the header's first pixel, there's:
 
@@ -78,7 +78,7 @@ current window position, drives moves via IPC. Same pattern as
 |---|---|
 | **Pros** | Selective: `target.matches('button, a, input, ...')` cleanly skips interactive elements. Anchors to the **actual header DOM element** via `closest('[data-role="block-header"]')` — no Y-coordinate guesswork, immune to layout padding. **Same pattern as the main window** — consistent codebase. `e.preventDefault()` on mousedown suppresses HTML5 dragstart → blocks pragmatic-dnd's tear-off cleanly without any frontend gating. All header buttons (close, magnify, mic, view-specific endIconButtons) just work. |
 | **Cons** | IPC roundtrip on every mousemove (~5-15 ms latency per move). Small but theoretically visible lag — well-mitigated by the existing one-in-flight + coalesce throttling in `useWindowDrag.win32.ts:107-125`. Doesn't get free OS niceties (Win+arrow snap, edge drag-to-maximize). Depends on `find_own_top_level_window` returning the floating window's HWND — works by Z-order (the floater is foreground when you click it), but fragile if a second floater later sits on top. More code (mousedown/move/up state machine — though `useWindowDrag` is a working template). |
-| **Layout coupling** | Zero — anchors to a stable DOM attribute (`data-role="block-header"` set in [`frontend/app/block/blockframe.tsx:420`](../../frontend/app/block/blockframe.tsx#L420)). |
+| **Layout coupling** | Zero — anchors to a stable DOM attribute (`data-role="block-header"` set in [`frontend/app/block/blockframe.tsx:420`](../../frontend/app/block/blockframe.tsx)). |
 | **Tear-off conflict** | Resolved by `e.preventDefault()` on mousedown in the JS handler — HTML5 dragstart never fires, pragmatic-dnd's draggable() never engages. |
 | **Code touchpoints** | [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) (new drag listener, ~60 LOC). `agentmux-cef/src/floating_pane.rs::floating_pane_wndproc` — strip the HTCAPTION block, keep edge resize (~20 LOC removed). |
 | **Latent bug** | `set_window_position` / `get_window_position` ignore their `label` arg on Windows (see `agentmux-cef/src/commands/window.rs:223,162`) and use `find_own_top_level_window` — works for the floater because of Z-order but should be fixed properly. Tracked as a follow-up. |
@@ -234,7 +234,7 @@ require threading floating-context awareness through to the shared
 - [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts) — main-window drag
   reference implementation (one-in-flight + coalesce, DPR scaling,
   catch-up move on IPC resolution).
-- [`frontend/layout/lib/TileLayout.win32.tsx:443-471`](../../frontend/layout/lib/TileLayout.win32.tsx#L443-L471) — pragmatic-dnd
+- [`frontend/layout/lib/TileLayout.win32.tsx:443-471`](../../frontend/layout/lib/TileLayout.win32.tsx) — pragmatic-dnd
   `draggable()` setup on the pane header that we want to suppress
   for floating-context drags.
 - [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) — orchestrates
@@ -251,9 +251,9 @@ require threading floating-context awareness through to the shared
   `get_window_position`, `set_window_position`, `start_window_drag`
   IPC handlers; the latent `label`-vs-`find_own_top_level_window` bug
   lives here.
-- [`frontend/app/block/blockframe.tsx:420`](../../frontend/app/block/blockframe.tsx#L420) — `data-role="block-header"`
+- [`frontend/app/block/blockframe.tsx:420`](../../frontend/app/block/blockframe.tsx) — `data-role="block-header"`
   attribute used to anchor the drag listener.
-- [`frontend/app/theme.scss:97`](../../frontend/app/theme.scss#L97) — `--header-height: 33px`.
+- [`frontend/app/theme.scss:97`](../../frontend/app/theme.scss) — `--header-height: 33px`.
 - PR #1082 — original Phase 6 polish (HTCAPTION approach).
 - PR #1089 — chrome cleanup (drop custom title bar, drop `WS_CAPTION`,
   add `DwmExtendFrameIntoClientArea`, auto-close on empty workspace).

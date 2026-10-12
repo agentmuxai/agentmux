@@ -119,7 +119,7 @@ Spec §7.4: Unregister `ForgeView` and `IdentityView` in [`frontend/app/block/bl
 
 Spec §7.4: "Saved panes with `view: \"forge\"` or `view: \"identity\"` now resolve to `view: \"agent\"`."
 
-- **On main ([`frontend/app/block/block.tsx:55`](../../frontend/app/block/block.tsx#L55)):** `const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;` in `makeViewModel`. **✓ delivered.**
+- **On main ([`frontend/app/block/block.tsx:55`](../../frontend/app/block/block.tsx)):** `const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;` in `makeViewModel`. **✓ delivered.**
 
 ### 2.8 Command palette cleanup
 

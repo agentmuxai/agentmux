@@ -40,7 +40,7 @@ The srv log for this instance (`agentmuxsrv-v0.58.3.log.2026-09-30`, block
 | 02:54:04.224 | first `AgentInput` (the owner's "u there"). The per-send rebuild now writes `--model sonnet --effort high` into `cmd:args`. The process is already running and never re-reads them. |
 
 The spawned argv is exactly the Claude provider's `persistentLaunchArgs`
-([`frontend/app/view/agent/providers/catalog.ts:150`](../../frontend/app/view/agent/providers/catalog.ts#L150)), plus the resume and fork
+([`frontend/app/view/agent/providers/catalog.ts:150`](../../frontend/app/view/agent/providers/catalog.ts)), plus the resume and fork
 flags. By the time of the investigation the block's `cmd:args` did contain
 `--model sonnet --effort high`, written at the first send, after the spawn.
 
@@ -49,7 +49,7 @@ flags. By the time of the investigation the block's `cmd:args` did contain
 Three things combine.
 
 1. **The launch path writes `cmd:args` without the runtime flags.**
-   `launchAgentDefinition` ([`frontend/app/view/agent/agent-model.ts:517-530`](../../frontend/app/view/agent/agent-model.ts#L517-L530))
+   `launchAgentDefinition` ([`frontend/app/view/agent/agent-model.ts:517-530`](../../frontend/app/view/agent/agent-model.ts))
    builds `cliArgs` from `selectLaunchArgs(provider, mode)` + `provider_flags` +
    `--fork-session`. It never calls `buildRuntimeArgs`, even though a few lines
    later (`:794-822`) it writes `agent:runtime` (the model/effort/mode the strip

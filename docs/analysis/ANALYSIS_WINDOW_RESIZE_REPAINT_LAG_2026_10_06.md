@@ -82,7 +82,7 @@ So the forced read is a symptom, not the cost. The cost is laying out every tab'
 
 ### 3.1 Every window tab relays out on every resize frame (the main cause)
 
-- **The setting:** `window:keepinactivetabslaidout` is on unless set to `false` ([`frontend/app/workspace/window-tab-visibility.ts:18-26`](../../frontend/app/workspace/window-tab-visibility.ts#L18-L26)). Inactive tabs are hidden with `visibility: hidden; opacity: 0` and stay `content-visibility: visible`. That makes a tab switch one frame (`ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md`).
+- **The setting:** `window:keepinactivetabslaidout` is on unless set to `false` ([`frontend/app/workspace/window-tab-visibility.ts:18-26`](../../frontend/app/workspace/window-tab-visibility.ts)). Inactive tabs are hidden with `visibility: hidden; opacity: 0` and stay `content-visibility: visible`. That makes a tab switch one frame (`ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md`).
 - **The cost on resize:** every tab is sized by the window, so each width change invalidates layout and container-query styles in every tab. Every tab's own ResizeObservers fire too: the tile layout, terminals, agent document lists and tab strips.
 - **How it scales:** cost grows with the total number of panes in the window, not with what's on screen. Most users who leave tabs open will hit it, and it is the one setting that took the measured case from 30 to 96 frames.
 

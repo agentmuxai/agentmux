@@ -3,7 +3,7 @@
 **Author:** AgentA
 **Status:** analysis — Bug confirmed, root cause identified, fix proposed.
 **Reported by:** user (this session) — "it flashes a 'send now' panel even when the agent isn't busy."
-**Affected file:** [`frontend/app/view/agent/agent-view.tsx:811-825`](../../frontend/app/view/agent/agent-view.tsx#L811-L825)
+**Affected file:** [`frontend/app/view/agent/agent-view.tsx:811-825`](../../frontend/app/view/agent/agent-view.tsx)
 **Related spec:** [`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](../specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md)
 
 ---
@@ -28,7 +28,7 @@ After a user types into the composer and hits Send from an idle pane, the "Send 
 />
 ```
 
-`workingFromPhase` (defined in [`frontend/app/store/agent-pane-state/types.ts:288`](../../frontend/app/store/agent-pane-state/types.ts#L288)) returns `true` for `{Submitting, Streaming, Interrupting}`:
+`workingFromPhase` (defined in [`frontend/app/store/agent-pane-state/types.ts:288`](../../frontend/app/store/agent-pane-state/types.ts)) returns `true` for `{Submitting, Streaming, Interrupting}`:
 
 ```ts
 export function workingFromPhase(phase: TurnPhase): boolean {

@@ -28,7 +28,7 @@ It's a **dead shape bug**: the `EditResult` type exists in
 
 ### Trace through the code
 
-1. **[`frontend/app/view/agent/types.ts:120`](../../frontend/app/view/agent/types.ts#L120)** declares:
+1. **[`frontend/app/view/agent/types.ts:120`](../../frontend/app/view/agent/types.ts)** declares:
    ```ts
    export interface EditResult {
        linesChanged: number;
@@ -36,7 +36,7 @@ It's a **dead shape bug**: the `EditResult` type exists in
    }
    ```
 
-2. **[`frontend/app/view/agent/components/DiffViewer.tsx:17`](../../frontend/app/view/agent/components/DiffViewer.tsx#L17)** reads:
+2. **[`frontend/app/view/agent/components/DiffViewer.tsx:17`](../../frontend/app/view/agent/components/DiffViewer.tsx)** reads:
    ```tsx
    const diff = result?.diff;
    if (!diff) {
@@ -50,7 +50,7 @@ It's a **dead shape bug**: the `EditResult` type exists in
    }
    ```
 
-3. **[`frontend/app/view/agent/stream-parser.ts:207-234`](../../frontend/app/view/agent/stream-parser.ts#L207-L234)** populates the
+3. **[`frontend/app/view/agent/stream-parser.ts:207-234`](../../frontend/app/view/agent/stream-parser.ts)** populates the
    tool node:
    ```ts
    return {
@@ -65,7 +65,7 @@ It's a **dead shape bug**: the `EditResult` type exists in
    };
    ```
 
-4. **[`frontend/app/view/agent/providers/claude-translator.ts:179-188`](../../frontend/app/view/agent/providers/claude-translator.ts#L179-L188)**
+4. **[`frontend/app/view/agent/providers/claude-translator.ts:179-188`](../../frontend/app/view/agent/providers/claude-translator.ts)**
    takes Claude's `tool_result` block and passes its content through
    as-is. Claude's Edit tool API response is a plain-text string:
 

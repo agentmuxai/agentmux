@@ -17,12 +17,12 @@ tracking issue #3338, PR #4428 (graceful window close / app quit).
 
 - **Linux and macOS have no process tracker.** `process_tracker::new_tracker`
   returns `StubTracker` on every non-Windows OS
-  ([`crates/srv/src/backend/process_tracker/mod.rs:197-201`](../../crates/srv/src/backend/process_tracker/mod.rs#L197-L201)): it lists nothing,
+  ([`crates/srv/src/backend/process_tracker/mod.rs:197-201`](../../crates/srv/src/backend/process_tracker/mod.rs)): it lists nothing,
   kills nothing, and reports confidence `none`. The teardown, the close dialog,
   the Processes panel and the `agent.kill-tree` RPC all sit on top of it.
 - **So on Linux and macOS, ending an agent ends only its CLI.** Close, `/quit`
   and app exit use policies with `stop_background: false`, relying on "the
-  tracker takes them" ([`crates/srv/src/sagas/agent_teardown.rs:69-111`](../../crates/srv/src/sagas/agent_teardown.rs#L69-L111)). The
+  tracker takes them" ([`crates/srv/src/sagas/agent_teardown.rs:69-111`](../../crates/srv/src/sagas/agent_teardown.rs)). The
   tracker is the stub, so declared background tasks (`task dev`, dev servers),
   still-running Bash commands and anything they daemonized keep running,
   reparented to `systemd --user` or init. Nothing in AgentMux sees them again.

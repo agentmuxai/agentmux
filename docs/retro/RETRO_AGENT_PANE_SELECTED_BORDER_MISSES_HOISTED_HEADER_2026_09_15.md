@@ -21,7 +21,7 @@ it starts partway down the pane instead of at the very top. Other pane types
 ## Root cause
 
 The selection ring is not a border on the pane's outer box — it's a separate
-overlay element, `.block-mask` ([`frontend/app/block/block.scss:242-334`](../../frontend/app/block/block.scss#L242-L334)),
+overlay element, `.block-mask` ([`frontend/app/block/block.scss:242-334`](../../frontend/app/block/block.scss)),
 absolutely positioned (`inset: 0`) *relative to `.block`*
 (`.block { position: relative; ... }`, same file, line 13), and painted
 accent-colored via `.block-focused .block-mask { border-color:

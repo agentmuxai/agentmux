@@ -178,4 +178,4 @@ The agent pane is, by the criterion that matters (every rendering-state write go
 - agent-document reducer: [`frontend/app/store/agent-document/`](../../frontend/app/store/agent-document)
 - Phase-1 agent state machine refinements: PR #752
 - State module: [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) (read/render projection)
-- Stream consumer: [`frontend/app/view/agent/useAgentStream.ts:87`](../../frontend/app/view/agent/useAgentStream.ts#L87) (dispatch-only contract)
+- Stream consumer: [`frontend/app/view/agent/useAgentStream.ts:87`](../../frontend/app/view/agent/useAgentStream.ts) (dispatch-only contract)

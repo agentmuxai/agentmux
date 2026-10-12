@@ -27,7 +27,7 @@ The "Retry Login" button in `agent-view.tsx`:
 </button>
 ```
 
-([`frontend/app/view/agent/agent-view.tsx:1002-1007`](../../frontend/app/view/agent/agent-view.tsx#L1002-L1007)) calls `startLaunchFlow`
+([`frontend/app/view/agent/agent-view.tsx:1002-1007`](../../frontend/app/view/agent/agent-view.tsx)) calls `startLaunchFlow`
 — the **gated launch flow** (`runLaunchFlow`,
 [`frontend/app/view/agent/flows/launch-flow.ts`](../../frontend/app/view/agent/flows/launch-flow.ts)) — not `relogin`. This is a
 third, independent implementation of "log the provider in," and it was never

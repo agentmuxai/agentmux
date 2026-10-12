@@ -32,7 +32,7 @@ footer's props are read from.
 ## 2. Root cause — confirmed via direct code reading
 
 1. **The event loop that fires tool transitions synchronously, unbatched:**
-   [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts#L352-L628) — the
+   [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts) — the
    `fileSubject.subscribe(...)` callback. One "append" notification can
    carry several newline-delimited raw lines; `for (const line of lines)`
    (line 371) processes all of them in one synchronous pass, and for each
@@ -165,18 +165,18 @@ append notification in a single synchronous pass. See
 
 ## 6. Sources
 
-- [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts#L352-L628) (the
+- [`frontend/app/view/agent/useAgentStream.ts:352-628`](../../frontend/app/view/agent/useAgentStream.ts) (the
   `fileSubject.subscribe` callback), `:371` (outer per-line loop — the
   actual burst boundary), `:540` (inner per-event loop — insufficient in
   isolation, see §5 correction note), `:581–592` (`ToolStart`/`ToolEnd`
   dispatch sites), `:17–35` (existing `StreamFlushQueue`/`batch()`
   precedent for document nodes)
-- [`frontend/app/store/agent-pane-state-store.ts:222`](../../frontend/app/store/agent-pane-state-store.ts#L222) (`dispatch()`),
+- [`frontend/app/store/agent-pane-state-store.ts:222`](../../frontend/app/store/agent-pane-state-store.ts) (`dispatch()`),
   `:337`, `:351` (`proj("currentTool"/"currentToolArg", ...)`) — no
   `batch(` anywhere in the file
-- [`frontend/app/view/agent/components/AgentFooter.tsx:113–128`](../../frontend/app/view/agent/components/AgentFooter.tsx#L113-L128)
+- [`frontend/app/view/agent/components/AgentFooter.tsx:113–128`](../../frontend/app/view/agent/components/AgentFooter.tsx)
   (`loadingLeftText`), `:155` (`leftText` memo), `:181–202` (reveal effect)
-- [`frontend/app/view/agent/stream-parser.ts:340–343`](../../frontend/app/view/agent/stream-parser.ts#L340-L343), `:411–438`
+- [`frontend/app/view/agent/stream-parser.ts:340–343`](../../frontend/app/view/agent/stream-parser.ts), `:411–438`
   (thinking-node accumulation, ruled out as the cause)
 - [`docs/specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md`](../specs/SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md)
   (existing shimmer/type-out design)

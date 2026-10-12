@@ -22,7 +22,7 @@ unresponsive.
 
 ## Root cause
 
-In [`frontend/app/view/agent/useAgentStream.ts:164`](../../frontend/app/view/agent/useAgentStream.ts#L164):
+In [`frontend/app/view/agent/useAgentStream.ts:164`](../../frontend/app/view/agent/useAgentStream.ts):
 
 ```typescript
 try {

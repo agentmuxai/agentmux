@@ -40,7 +40,7 @@ Because Window Name falls back to the workspace name (tier 2), a window with no 
 `window:displayname` is written **only** from the frontend UI, via the generic object-meta RPC:
 
 - `ObjectService.UpdateObjectMeta(makeORef("window", id), { "window:displayname": name })`
-  - InstancePanel rename: double-click a window row or **F2** ([`frontend/app/statusbar/InstancePanel.tsx:226`](../../frontend/app/statusbar/InstancePanel.tsx#L226))
+  - InstancePanel rename: double-click a window row or **F2** ([`frontend/app/statusbar/InstancePanel.tsx:226`](../../frontend/app/statusbar/InstancePanel.tsx))
 - `UpdateObjectMeta` is a **backend service call routed through the reducer** (`agentmux-srv/src/server/service.rs:311`), reached via `WOS.callBackendService("object", "UpdateObjectMeta", …)` — i.e. over the **WebSocket `/ws` RPC**, not a REST endpoint.
 
 ## 4. What the agent API exposes today — and the gap
@@ -84,11 +84,11 @@ e.g. `task dev -- --name "X"` that just sets `AGENTMUX_WINDOW_NAME` for the chil
 
 | What | File:line |
 |---|---|
-| Title format + 3-tier resolution | [`frontend/util/window-title.ts:11-55`](../../frontend/util/window-title.ts#L11-L55) |
+| Title format + 3-tier resolution | [`frontend/util/window-title.ts:11-55`](../../frontend/util/window-title.ts) |
 | Reactive `document.title` effect | [`frontend/app-init.ts`](../../frontend/app-init.ts) ~675-750, ~877 |
 | Native caption set (Win32 `SetWindowTextW`) | `agentmux-cef/src/client/mod.rs:205-243` |
 | Default "Starter workspace" name | `agentmux-srv/src/backend/wcore/mod.rs:85` |
-| Rename UI (writes `window:displayname`) | [`frontend/app/statusbar/InstancePanel.tsx:226`](../../frontend/app/statusbar/InstancePanel.tsx#L226) |
+| Rename UI (writes `window:displayname`) | [`frontend/app/statusbar/InstancePanel.tsx:226`](../../frontend/app/statusbar/InstancePanel.tsx) |
 | `UpdateObjectMeta` reducer route (WS RPC) | `agentmux-srv/src/server/service.rs:311` |
 | Window-meta host commands (no displayname setter) | `agentmux-cef/src/commands/window/meta.rs` |
 | HTTP router (no window/title route) | `agentmux-srv/src/server/mod.rs` (`.route(` set) |

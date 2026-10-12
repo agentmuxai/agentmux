@@ -30,7 +30,7 @@ have that prompt."
   this investigation: "can even trigger a macOS permission prompt on first
   access" — the mechanism was known; what wasn't caught was where it's
   called from.
-- [`frontend/app-init.ts:1108`](../../frontend/app-init.ts#L1108) calls `providers.models` **fire-and-forget, on
+- [`frontend/app-init.ts:1108`](../../frontend/app-init.ts) calls `providers.models` **fire-and-forget, on
   every app launch**, unconditionally, as part of the main init wave — not
   gated behind opening the model dropdown or any other user action.
 

@@ -178,7 +178,7 @@ independent sources of that shrink:
 
 ## 2. Source A (primary suspect) — the running→terminal DOM-shape swap, only half-mitigated
 
-`mergeReplacement()` ([`frontend/app/store/agent-document/reducer.ts:906-926`](../../frontend/app/store/agent-document/reducer.ts#L906-L926))
+`mergeReplacement()` ([`frontend/app/store/agent-document/reducer.ts:906-926`](../../frontend/app/store/agent-document/reducer.ts))
 flips a tool's `status` out of `"running"` **and** force-clears
 `log.open` to `false` in the same reducer tick when a `tool_result` lands:
 
@@ -279,7 +279,7 @@ identical-length `spinnerSlot` entry), so on its own it's a weaker fit for
 
 ## 4. Source C — MarkdownBlock's throttled highlight re-render (documented, unfixed, still live)
 
-[`frontend/app/view/agent/components/MarkdownBlock.tsx:64-80`](../../frontend/app/view/agent/components/MarkdownBlock.tsx#L64-L80) — confirmed by
+[`frontend/app/view/agent/components/MarkdownBlock.tsx:64-80`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) — confirmed by
 direct read, unchanged since `REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`
 §2.1 flagged it (no commits to this file touch this logic since; `git log`
 confirms). During streaming, markdown re-parses render a cheap intermediate
@@ -429,12 +429,12 @@ scroll alone already reads as "no scrollback" to a user.
 | File | Role |
 |---|---|
 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx:167-171, 464-565` | The three pin mechanisms + the un-eased `scrollToTrueBottom()` |
-| [`frontend/app/store/agent-document/reducer.ts:906-926`](../../frontend/app/store/agent-document/reducer.ts#L906-L926) | `mergeReplacement()` — couples `status` + `log.open` on one tick |
+| [`frontend/app/store/agent-document/reducer.ts:906-926`](../../frontend/app/store/agent-document/reducer.ts) | `mergeReplacement()` — couples `status` + `log.open` on one tick |
 | `frontend/app/view/agent/components/ToolOverlayLog.tsx:91-108, 202-289, 310-323, 328-363` | The `<Switch>` DOM-shape swap + its partial FLIP mitigation + the `heightStale` bypass |
 | `frontend/app/view/agent/components/ToolBlock.tsx:227-279, 390-434` | `resultPill()` / live-tail — unmitigated sibling-swap in the summary row |
-| [`frontend/app/view/agent/components/output-cap.ts:343-433`](../../frontend/app/view/agent/components/output-cap.ts#L343-L433) | `createSpinnerCollapser` — retroactive reclassification |
+| [`frontend/app/view/agent/components/output-cap.ts:343-433`](../../frontend/app/view/agent/components/output-cap.ts) | `createSpinnerCollapser` — retroactive reclassification |
 | `frontend/app/view/agent/components/MarkdownBlock.tsx:32, 64-80` | Throttled streaming re-parse/highlight commit |
-| [`frontend/app/view/agent/virtualization/anchor.ts:66-85`](../../frontend/app/view/agent/virtualization/anchor.ts#L66-L85) | `isNearBottom` / `STICK_TO_BOTTOM_THRESHOLD_PX = 200` |
+| [`frontend/app/view/agent/virtualization/anchor.ts:66-85`](../../frontend/app/view/agent/virtualization/anchor.ts) | `isNearBottom` / `STICK_TO_BOTTOM_THRESHOLD_PX = 200` |
 
 ## Related prior docs (read in full, not just referenced)
 

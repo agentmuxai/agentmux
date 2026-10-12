@@ -133,14 +133,14 @@ recoverable long-timeout (B).
 ---
 
 ## 6. Reference index
-- [`frontend/app/store/agent-pane-state/types.ts:445`](../../frontend/app/store/agent-pane-state/types.ts#L445) — `StreamStalled` command (dead)
+- [`frontend/app/store/agent-pane-state/types.ts:445`](../../frontend/app/store/agent-pane-state/types.ts) — `StreamStalled` command (dead)
 - `…/types.ts:623` — `schedule-stream-watchdog` event (emitted, **unconsumed**)
 - `…/types.ts:713` — `STREAMING_IDLE_TIMEOUT_MS = 60_000` (used only by the dead path)
 - `…/reducer.ts:55-63` — `streamWatchdogEvent()` (emits the unconsumed schedule)
 - `…/reducer.ts:678` — `StreamStalled` arm → `Done.errored("stream-stalled")` (never runs)
 - `…/reducer.ts:151,252,464,476,494,512` — the 6 `streamWatchdogEvent()` call sites
 - `…/agent-pane-state-store.ts:208` — `EventSink` fan-out (no `schedule-stream-watchdog` handler)
-- [`frontend/app/notification/sound/sound-service.ts:156`](../../frontend/app/notification/sound/sound-service.ts#L156) — `stream-stalled` consumer (unreachable)
+- [`frontend/app/notification/sound/sound-service.ts:156`](../../frontend/app/notification/sound/sound-service.ts) — `stream-stalled` consumer (unreachable)
 - `frontend/app/view/agent/useAgentStream.ts:585,590` — the 5 s `StreamWatchdogTick` (alive) emitting
   the diagnostic `stream-stuck` (also unconsumed)
 - Prior context: [`docs/analysis/ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER_2026_06_17.md`](ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER_2026_06_17.md),

@@ -183,7 +183,7 @@ the paint path entirely. The user-perceived delay is items 1–3.
 
 ### A. Skip `updateTree()` for FocusNode actions ★★★ (2 lines, low risk)
 
-**File:** [`frontend/layout/lib/layoutModel.ts:587-591`](../../frontend/layout/lib/layoutModel.ts#L587-L591)
+**File:** [`frontend/layout/lib/layoutModel.ts:587-591`](../../frontend/layout/lib/layoutModel.ts)
 
 Current:
 ```ts
@@ -283,7 +283,7 @@ console-relay sink is hot.
 
 ### D. Skip `main_window_focus` IPC when target is already in focus window ★
 
-**File:** [`frontend/app/block/block.tsx:212-214`](../../frontend/app/block/block.tsx#L212-L214)
+**File:** [`frontend/app/block/block.tsx:212-214`](../../frontend/app/block/block.tsx)
 
 Add a guard: if `document.hasFocus()` and the click was within the
 same window, don't send the IPC. (Today every DOM focus event sends
@@ -361,14 +361,14 @@ in; their wins are smaller and they touch more code.
 
 - [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) — `handleBlockClick`,
   `handleChildFocus`, `setFocusTarget`.
-- [`frontend/layout/lib/layoutModel.ts:504-591`](../../frontend/layout/lib/layoutModel.ts#L504-L591) — `treeReducer` with
+- [`frontend/layout/lib/layoutModel.ts:504-591`](../../frontend/layout/lib/layoutModel.ts) — `treeReducer` with
   FocusNode case and the post-action `if (setState)` block.
-- [`frontend/layout/lib/layoutFocus.ts:152`](../../frontend/layout/lib/layoutFocus.ts#L152) — `focusNode` exported.
+- [`frontend/layout/lib/layoutFocus.ts:152`](../../frontend/layout/lib/layoutFocus.ts) — `focusNode` exported.
 - `frontend/layout/lib/layoutGeometry.ts::updateTree` — the tree
   walker that's hot today.
-- [`frontend/layout/lib/layoutNodeModels.ts:47`](../../frontend/layout/lib/layoutNodeModels.ts#L47) — `isFocused` memo
+- [`frontend/layout/lib/layoutNodeModels.ts:47`](../../frontend/layout/lib/layoutNodeModels.ts) — `isFocused` memo
   binding.
-- [`frontend/app/block/block.scss:476-501`](../../frontend/app/block/block.scss#L476-L501) — focused-border CSS,
+- [`frontend/app/block/block.scss:476-501`](../../frontend/app/block/block.scss) — focused-border CSS,
   `backdrop-filter` comment.
 - `agentmux-cef/src/ipc.rs:475` — `main_window_focus` IPC handler
   and the UI-thread task it posts.

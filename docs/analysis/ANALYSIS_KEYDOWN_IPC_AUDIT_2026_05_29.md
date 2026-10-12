@@ -15,7 +15,7 @@ The input-first review identified the renderer↔host IPC layer as the highest-s
 
 ## What "synchronous IPC on the input path" means here
 
-The host IPC transport is **async by construction** — `invokeCommand()` ([`frontend/app/platform/ipc.ts:30`](../../frontend/app/platform/ipc.ts#L30)) issues `fetch("http://127.0.0.1:${port}/ipc", …)` and returns a Promise. So a keystroke handler that *dispatches* a command fire-and-forget is **compliant** with I2 — it returns immediately and the result settles later. The violations are the **blocking** shapes:
+The host IPC transport is **async by construction** — `invokeCommand()` ([`frontend/app/platform/ipc.ts:30`](../../frontend/app/platform/ipc.ts)) issues `fetch("http://127.0.0.1:${port}/ipc", …)` and returns a Promise. So a keystroke handler that *dispatches* a command fire-and-forget is **compliant** with I2 — it returns immediately and the result settles later. The violations are the **blocking** shapes:
 
 1. `await invokeCommand(...)` / `await fetch(...)` inside an input handler — stalls the handler on a round-trip before paint.
 2. An `async` `keyDownHandler` (returns a Promise) — the central dispatch in `store/keymodel.ts` treats the return as a synchronous boolean; making it async breaks that contract and invites awaited IPC.
@@ -23,7 +23,7 @@ The host IPC transport is **async by construction** — `invokeCommand()` ([`fro
 
 ## How the input path actually dispatches
 
-Central dispatch is `appHandleKeyDown()` ([`frontend/app/store/keymodel.ts:369`](../../frontend/app/store/keymodel.ts#L369), entry via `:433`):
+Central dispatch is `appHandleKeyDown()` ([`frontend/app/store/keymodel.ts:369`](../../frontend/app/store/keymodel.ts), entry via `:433`):
 
 ```
 keydown → appHandleKeyDown(waveEvent): boolean

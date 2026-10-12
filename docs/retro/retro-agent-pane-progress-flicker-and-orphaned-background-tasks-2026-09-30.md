@@ -25,10 +25,10 @@ The two are linked: symptom 2 makes symptom 1 permanent for the affected pane (Â
 ## 2. Root cause 1: "no tool call running" was taken to mean "the agent is idle"
 
 The ring is `agent-pane-progress-bar--active` when `paneBusy()` is true
-([`frontend/app/view/agent/agent-view.tsx:2541-2549`](../../frontend/app/view/agent/agent-view.tsx#L2541-L2549)). `paneBusy` is
+([`frontend/app/view/agent/agent-view.tsx:2541-2549`](../../frontend/app/view/agent/agent-view.tsx)). `paneBusy` is
 `paneBusyForInput` (`agent-view.tsx:1727-1737`), which since #3340 (2026-09-17,
 shipped in v0.56.5) goes false for a Streaming turn when
-`turnHeldOnlyByBackgroundWork` holds ([`frontend/app/view/agent/working-indicator.ts:113-138`](../../frontend/app/view/agent/working-indicator.ts#L113-L138)):
+`turnHeldOnlyByBackgroundWork` holds ([`frontend/app/view/agent/working-indicator.ts:113-138`](../../frontend/app/view/agent/working-indicator.ts)):
 
 ```ts
 if (input.turnPhase.kind !== "Streaming") return false;
@@ -38,7 +38,7 @@ return !input.hasBlockingForegroundToolCall;
 
 `hasBlockingForegroundToolCall` is true only while some tool node is
 `running`, `pending_approval` or `awaiting_answer`
-([`frontend/app/view/agent/activity/tool-adapter.ts:130-154`](../../frontend/app/view/agent/activity/tool-adapter.ts#L130-L154)).
+([`frontend/app/view/agent/activity/tool-adapter.ts:130-154`](../../frontend/app/view/agent/activity/tool-adapter.ts)).
 
 The intent was right, and owner-confirmed on 2026-09-17: a turn that is still
 open **only** because of accepted background work shouldn't read as busy, so the

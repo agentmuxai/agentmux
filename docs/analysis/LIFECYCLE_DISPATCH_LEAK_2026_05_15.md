@@ -237,7 +237,7 @@ The two open questions from the original draft — *how do we confirm the cascad
 
 ### 8.1 What was installed
 
-**[`frontend/app/store/agent-pane-state-store.ts:103-132`](../../frontend/app/store/agent-pane-state-store.ts#L103-L132)** — the dispatch() function now wraps each of the eight projection setters in a small `proj()` helper. After each setter call, it checks whether `slots.has(blockId)` is still true. The first setter that loses the slot is recorded as `cascadeSetter`. After the projection block, if `cascadeSetter` is set, a single warning is logged:
+**[`frontend/app/store/agent-pane-state-store.ts:103-132`](../../frontend/app/store/agent-pane-state-store.ts)** — the dispatch() function now wraps each of the eight projection setters in a small `proj()` helper. After each setter call, it checks whether `slots.has(blockId)` is still true. The first setter that loses the slot is recorded as `cascadeSetter`. After the projection block, if `cascadeSetter` is set, a single warning is logged:
 
 ```
 [agent-pane-state] CASCADE_DETECTED: '<setterName>' setter disposed pane mid-dispatch
@@ -246,7 +246,7 @@ A reactive subscriber on the '<setterName>' atom unmounted the pane during dispa
 Subsequent dispatches in the same callback will throw.
 ```
 
-**[`frontend/app/store/agent-document-store.ts:115-128`](../../frontend/app/store/agent-document-store.ts#L115-L128)** — same check around `slot.setter(slot.state.nodes)`. There is only one setter (the document atom) so the message is simpler:
+**[`frontend/app/store/agent-document-store.ts:115-128`](../../frontend/app/store/agent-document-store.ts)** — same check around `slot.setter(slot.state.nodes)`. There is only one setter (the document atom) so the message is simpler:
 
 ```
 [agent-document-store] CASCADE_DETECTED: slot disposed mid-dispatch

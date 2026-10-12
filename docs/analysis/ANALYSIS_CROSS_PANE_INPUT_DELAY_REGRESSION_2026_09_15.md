@@ -106,7 +106,7 @@ handler's name and its position in the WS loop without checking what actually
 calls it. Verified afterwards, in the frontend:
 
 - **Keystrokes go through the `blockinput` WS command, not this handler.**
-  [`frontend/app/view/term/termViewModel.ts:407`](../../frontend/app/view/term/termViewModel.ts#L407), `termsticker.tsx:86`, and the
+  [`frontend/app/view/term/termViewModel.ts:407`](../../frontend/app/view/term/termViewModel.ts), `termsticker.tsx:86`, and the
   agent pane's drawer shell `AgentShellSubblock.tsx:365` all send
   `wscommand: "blockinput"`. `termViewModel.ts:412` says so explicitly: "Use
   the blockinput wscommand, not the controllerinput RPC."

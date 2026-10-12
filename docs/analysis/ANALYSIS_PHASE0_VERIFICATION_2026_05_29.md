@@ -34,7 +34,7 @@ The statistical core, aggregation, baseline-delta logic, and CI wiring are done 
 
 ### 0.3a — Browser-pane keydown handler → **needs runtime verification (likely a non-goal as stated)**
 
-**Verified (code read):** only the address bar ([`frontend/app/view/browser/browser-view.tsx:421`](../../frontend/app/view/browser/browser-view.tsx#L421), `handleAddressKeyDown`) and the auth modal (`components/BrowserAuthModal.tsx`) have `onKeyDown`. `browser-model.ts` defines **no** `keyDownHandler` on the view model, so `appHandleKeyDown` (`store/keymodel.ts:412`) finds no block handler for a focused browser pane.
+**Verified (code read):** only the address bar ([`frontend/app/view/browser/browser-view.tsx:421`](../../frontend/app/view/browser/browser-view.tsx), `handleAddressKeyDown`) and the auth modal (`components/BrowserAuthModal.tsx`) have `onKeyDown`. `browser-model.ts` defines **no** `keyDownHandler` on the view model, so `appHandleKeyDown` (`store/keymodel.ts:412`) finds no block handler for a focused browser pane.
 
 **But:** a browser pane's content is a native `CefBrowserView` child window. When it has focus, keystrokes go to Chromium's browser view — DOM `keydown` very likely **never reaches** the host SolidJS `appHandleKeyDown` at all. So adding a `keyDownHandler` to `browser-model.ts` may never fire, and intercepting at the host could *break* native input (find-in-page, text fields inside the page). The critique flagged exactly this: "every surface must have a handler" is an invariant inversion — the goal is fast input, not uniform handlers.
 

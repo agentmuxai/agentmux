@@ -44,7 +44,7 @@ strictly harder to notice and reason about.
 
 **PR #1453 — the "fix".** Removed two `cursor: pointer` declarations:
 
-[`frontend/app/app.scss:68-75`](../../frontend/app/app.scss#L68-L75) (current state):
+[`frontend/app/app.scss:68-75`](../../frontend/app/app.scss) (current state):
 ```scss
 *::-webkit-scrollbar-thumb {
     // No cursor override: a scrollbar is a scroll affordance, not a link, so it
@@ -58,7 +58,7 @@ strictly harder to notice and reason about.
 
 The OverlayScrollbars handle was treated **differently** — it got an *explicit* value:
 
-[`frontend/app/app.scss:105-112`](../../frontend/app/app.scss#L105-L112):
+[`frontend/app/app.scss:105-112`](../../frontend/app/app.scss):
 ```scss
 .os-scrollbar-handle {
     cursor: var(--cursor-default);   // explicit arrow — CORRECT
@@ -103,7 +103,7 @@ With no declaration on the thumb, there is nothing to override that inheritance.
 The main agent conversation scroll container is a **native** scrollbar (not
 OverlayScrollbars):
 
-[`frontend/app/view/agent/styles/_document.scss:8-16`](../../frontend/app/view/agent/styles/_document.scss#L8-L16):
+[`frontend/app/view/agent/styles/_document.scss:8-16`](../../frontend/app/view/agent/styles/_document.scss):
 ```scss
 .agent-document {
     flex: 1;
@@ -126,7 +126,7 @@ of its own to stop it. **→ text I-beam over the main scrollbar.** Confirmed.
 
 ### 2.2 Live-tool log scrollbar → link hand
 
-[`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-37`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss#L34-L37):
+[`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-37`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss):
 ```scss
 .agent-tool-overlay-log {
     overflow-y: auto;        // ← live-log scroll container, sets NO cursor
@@ -135,7 +135,7 @@ of its own to stop it. **→ text I-beam over the main scrollbar.** Confirmed.
 ```
 nested inside
 
-[`frontend/app/view/agent/styles/_document-nodes.scss:132-141`](../../frontend/app/view/agent/styles/_document-nodes.scss#L132-L141):
+[`frontend/app/view/agent/styles/_document-nodes.scss:132-141`](../../frontend/app/view/agent/styles/_document-nodes.scss):
 ```scss
 .agent-tool-block {
     ...

@@ -12,7 +12,7 @@
 | | |
 |---|---|
 | Component | `frontend/app/view/agent/components/NodeHoverStrip.tsx` (renders `<div class="node-strip">`) |
-| Rendered by | [`frontend/app/view/agent/virtualization/DocumentRow.tsx:136`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx#L136) (every conversation row) and `components/ActivityLogPanel.tsx:90` (activity-log rows) |
+| Rendered by | [`frontend/app/view/agent/virtualization/DocumentRow.tsx:136`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) (every conversation row) and `components/ActivityLogPanel.tsx:90` (activity-log rows) |
 | Styled in | [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) (`.node-strip`, ~line 41) |
 | Shows on hover | Yes — but via **pure CSS**, no JS show/hide signal |
 

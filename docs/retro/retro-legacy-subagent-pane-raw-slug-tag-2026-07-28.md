@@ -74,7 +74,7 @@ the raw slug unconditionally:**
   **completely separate code path** from the Swarm pane — clicking a link in
   a transcript never goes anywhere near `swarm-model.ts`.
 - The view is still fully registered and reachable:
-  [`frontend/app/block/block-registry.ts:34`](../../frontend/app/block/block-registry.ts#L34) —
+  [`frontend/app/block/block-registry.ts:34`](../../frontend/app/block/block-registry.ts) —
   `blockViewRegistry.set("subagent", SubagentViewModel as any)` — and
   `blockutil.tsx:21` gives it the label `"Subagent"`.
 
@@ -193,8 +193,8 @@ there. Documenting this option for completeness only; **not recommended.**
    - `frontend/app/view/subagent/subagent-view.scss`
    - `frontend/app/store/subagent-pane-manager.ts`
    - the `"subagent"` view registration:
-     [`frontend/app/block/block-registry.ts:34`](../../frontend/app/block/block-registry.ts#L34) and the `VIEW_LABELS["subagent"]`
-     entry in [`frontend/app/block/blockutil.tsx:21`](../../frontend/app/block/blockutil.tsx#L21)
+     [`frontend/app/block/block-registry.ts:34`](../../frontend/app/block/block-registry.ts) and the `VIEW_LABELS["subagent"]`
+     entry in [`frontend/app/block/blockutil.tsx:21`](../../frontend/app/block/blockutil.tsx)
    - `handleSubagentClick`'s now-dead imports (`isSubagentPaneOpen`,
      `openSubagentPane`) in `agent-view.tsx`
 3. **Correct `CLAUDE.md`'s "Not widgets" table** — either delete the

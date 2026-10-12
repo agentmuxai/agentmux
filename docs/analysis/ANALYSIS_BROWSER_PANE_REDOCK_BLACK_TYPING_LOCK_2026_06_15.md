@@ -88,7 +88,7 @@ Also clear the dead entry: on destroy, remove `LAST_FOCUSED_BY_ROOT[root]` if it
 A redock = backend saga moves the block to the target tab; the floater auto-closes; the target window re-renders the block and calls `browser_pane_create`. Relevant pieces:
 
 - Frontend re-create + slot init: [`frontend/app/store/browser-pane-state-store.ts`](../../frontend/app/store/browser-pane-state-store.ts) — `registerPane()` seeds `initialState()` with **`url: ""`**.
-- Frontend create: [`frontend/app/view/browser/browser-view.tsx:191`](../../frontend/app/view/browser/browser-view.tsx#L191) (`createPane`) — on success sets `paneCreated(true)` + `model.onLoad()`, **with no retry on the deferred case**.
+- Frontend create: [`frontend/app/view/browser/browser-view.tsx:191`](../../frontend/app/view/browser/browser-view.tsx) (`createPane`) — on success sets `paneCreated(true)` + `model.onLoad()`, **with no retry on the deferred case**.
 - Host create gate: `agentmux-cef/src/browser_panes.rs:242` — if the floater's old pane is still `Closing`, create returns `RegisterResult::Closing` and **stashes** the create; the IPC still resolves `Ok(())`, so the frontend believes it succeeded.
 - Deferred replay: `browser_panes.rs:454` (`replay_pending_create`) re-issues the create on close-completion (`CompleteBrowserPaneClose` / `DrainBrowserPaneByLabel`).
 
@@ -120,7 +120,7 @@ The **slot re-init to `url:""` + lack of re-navigation** survives the mitigation
 - mutate the layout tree (frontend persists that locally — `sagas/redock_floating_pane.rs` "saga does not touch LayoutState"), or
 - clear/repoint `focused_node_id`. Compare `layout.rs::handle_layout_delete_node` (which *does* validate + clear stale focus) — there is **no equivalent on move**. So after redock, `focused_node_id` can point at a node id from the pre-move tree.
 
-[`frontend/layout/lib/layoutFocus.ts:15`](../../frontend/layout/lib/layoutFocus.ts#L15) (`validateFocusedNode`) clears a focused node that's gone from the tree, but it runs on the frontend's local tree recompute — timing-dependent relative to the move persist.
+[`frontend/layout/lib/layoutFocus.ts:15`](../../frontend/layout/lib/layoutFocus.ts) (`validateFocusedNode`) clears a focused node that's gone from the tree, but it runs on the frontend's local tree recompute — timing-dependent relative to the move persist.
 
 ### Three sources of truth drift
 Per issue #768 there are three lifecycle authorities:
@@ -131,7 +131,7 @@ Per issue #768 there are three lifecycle authorities:
 A redock that **bypasses the block-removal saga** doesn't dispose the slice-#9 slot, so the old slot lingers (`closed` never flips) while the host tears the HWND down — the divergence #768 describes. `BrowserViewModel.closed` reads `bpSnapshot(blockId)?.closed ?? true` (`browser-model.ts:165`), which can sit in a not-closed-yet state.
 
 ### Node remount vs. block keep-alive
-[`frontend/layout/lib/TileLayout.win32.tsx:324`](../../frontend/layout/lib/TileLayout.win32.tsx#L324) keys the tile `<Key>` by **`node.id`**, but `block.tsx` caches the ViewModel by **`blockId`** (`getBlockComponentModel`). On redock the LayoutNode id changes → the `DisplayNode` DOM remounts while the `BrowserViewModel` survives. If disposal/recreate timing doesn't align with the DOM unmount, IPC can fire into a half-alive pane — another route into Defects A/B.
+[`frontend/layout/lib/TileLayout.win32.tsx:324`](../../frontend/layout/lib/TileLayout.win32.tsx) keys the tile `<Key>` by **`node.id`**, but `block.tsx` caches the ViewModel by **`blockId`** (`getBlockComponentModel`). On redock the LayoutNode id changes → the `DisplayNode` DOM remounts while the `BrowserViewModel` survives. If disposal/recreate timing doesn't align with the DOM unmount, IPC can fire into a half-alive pane — another route into Defects A/B.
 
 ### Fix (Defect C)
 - Add a **focus-validation arm to `handle_move_block`** (mirror `handle_layout_delete_node`) so `focused_node_id` is repointed/cleared on move.
@@ -182,8 +182,8 @@ A redock that **bypasses the block-removal saga** doesn't dispose the slice-#9 s
 - `agentmux-srv/src/reducer/block.rs:77` — `handle_move_block` (no layout/focus mutation).
 - `agentmux-srv/src/reducer/layout.rs` — `handle_set_focused_node`, `handle_layout_delete_node` (has focus validation move lacks).
 - `agentmux-srv/src/sagas/redock_floating_pane.rs` — redock saga (`MoveBlock`, no LayoutState touch).
-- [`frontend/layout/lib/TileLayout.win32.tsx:324`](../../frontend/layout/lib/TileLayout.win32.tsx#L324) — tile keyed by `node.id`; `block.tsx` caches VM by `blockId`.
-- [`frontend/layout/lib/layoutFocus.ts:15`](../../frontend/layout/lib/layoutFocus.ts#L15) — `validateFocusedNode`.
+- [`frontend/layout/lib/TileLayout.win32.tsx:324`](../../frontend/layout/lib/TileLayout.win32.tsx) — tile keyed by `node.id`; `block.tsx` caches VM by `blockId`.
+- [`frontend/layout/lib/layoutFocus.ts:15`](../../frontend/layout/lib/layoutFocus.ts) — `validateFocusedNode`.
 
 **Prior analysis / specs**
 - [`docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`](ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md)

@@ -28,7 +28,7 @@ There are three classes of "new surface opens" event, each with its own entry pa
 The `+` button referenced in earlier writeups does not exist — `agenta/menu unify` (PR #796) moved tab actions into the hamburger menu. There are now three call sites:
 
 1. **Hamburger menu → "New Tab"**
-   [`frontend/app/tab/tabbar.tsx:643-645`](../../frontend/app/tab/tabbar.tsx#L643-L645)
+   [`frontend/app/tab/tabbar.tsx:643-645`](../../frontend/app/tab/tabbar.tsx)
    ```ts
    label: "New Tab",
    onClick: () => createTab(),
@@ -36,13 +36,13 @@ The `+` button referenced in earlier writeups does not exist — `agenta/menu un
    Same `createTab()` as everywhere else — the menu chrome (per PR #796) is the only thing that changed.
 
 2. **Agent App API: `tab.open`-style flow** (less common today)
-   [`frontend/app-init.ts:336`](../../frontend/app-init.ts#L336) (`getApi().onAgentMuxInit(initWaveWrap)`). Non-host mode waits for the host app to emit `agentmux-init`; the event triggers `initWaveWrap` (line 428) → `initWave` (line 502). This path is for existing tabs being shown in a new window — no `CreateTab` here.
+   [`frontend/app-init.ts:336`](../../frontend/app-init.ts) (`getApi().onAgentMuxInit(initWaveWrap)`). Non-host mode waits for the host app to emit `agentmux-init`; the event triggers `initWaveWrap` (line 428) → `initWave` (line 502). This path is for existing tabs being shown in a new window — no `CreateTab` here.
 
 3. **Keyboard / context-menu shortcut** (Ctrl-T, tab-bar right-click → New Tab)
    Same `createTab()` entry; just different UI surface.
 
 The common path:
-- [`frontend/app/store/global.ts:848-869`](../../frontend/app/store/global.ts#L848-L869) (`createTab`).
+- [`frontend/app/store/global.ts:848-869`](../../frontend/app/store/global.ts) (`createTab`).
 - Dispatches `WorkspaceService.CreateTab(ws.oid, "", true, false)`; sets default colour via `ObjectService.UpdateObjectMeta`.
 - Line 863 invokes `applyTabPreset(tabId, DEFAULT_TAB_PRESET)` — **async, fire-and-forget**. The preset applies the default layout (agent left, sysinfo/swarm right) *after* `CreateTab` returns; blocks are added one by one over the next ~200–600 ms.
 - Backend broadcasts `waveobj:update` events; the WS subscriber in `global.ts:250-254` hydrates the WOS cache.
@@ -50,7 +50,7 @@ The common path:
 ### B. New window (independent top-level instance)
 
 1. **Hamburger menu → "New Window"**
-   [`frontend/app/tab/tabbar.tsx:649-651`](../../frontend/app/tab/tabbar.tsx#L649-L651)
+   [`frontend/app/tab/tabbar.tsx:649-651`](../../frontend/app/tab/tabbar.tsx)
    ```ts
    label: "New Window",
    onClick: () => getApi().openNewWindow().catch(console.error),
@@ -67,10 +67,10 @@ Per spec, a new full instance gets its own backend sidecar process. This is the 
 
 ### C. First window boot (app launch / cold start)
 
-[`frontend/bootstrap.ts:87-148`](../../frontend/bootstrap.ts#L87-L148) (`bootstrap()`) is the entry. The sequence:
+[`frontend/bootstrap.ts:87-148`](../../frontend/bootstrap.ts) (`bootstrap()`) is the entry. The sequence:
 - `initLogPipe()` → `initPerf()` → `setupCefApi()` (waits for CEF API shim).
 - (New floating-pane branch in this same file branches to the floating-pane shell if `?floatingPaneId` is in the URL — see PR #811. Not relevant here.)
-- `initApp()` → `initHostWave()` ([`frontend/app-init.ts:114-189`](../../frontend/app-init.ts#L114-L189)) for the primary window OR `initHostNewWindow()` (`:208-280`) for a window opened from path **B**.
+- `initApp()` → `initHostWave()` ([`frontend/app-init.ts:114-189`](../../frontend/app-init.ts)) for the primary window OR `initHostNewWindow()` (`:208-280`) for a window opened from path **B**.
   - Primary window: `WindowService.GetWindow(windowId)` → `WorkspaceService.GetWorkspace(...)` → reads `workspace.activetabid` or first tab from `workspace.tabids[]`.
   - New window: `WindowService.CreateWindow(null, tearOffWsId)` creates a new workspace + tab server-side, then `GetWorkspace` retrieves the auto-created tab ID.
 - Renders the App tree via `render(App, elem)` (line 588) once all WOS objects are loaded.
@@ -94,11 +94,11 @@ All three converge on the **block-mount cascade** described below — that's whe
 
 When a tab becomes active, the UI mounts in this order:
 
-1. **Workspace container** — [`frontend/app/workspace/workspace.tsx:14-54`](../../frontend/app/workspace/workspace.tsx#L14-L54). All tabs are mounted; inactive tabs are hidden via `display:none` (line 37). No unmount/remount on switch.
-2. **TabContent** — [`frontend/app/tab/tabcontent.tsx:42-137`](../../frontend/app/tab/tabcontent.tsx#L42-L137). Two `<Show>` gates: tab-exists (line 105) and tab-non-empty (line 109).
+1. **Workspace container** — [`frontend/app/workspace/workspace.tsx:14-54`](../../frontend/app/workspace/workspace.tsx). All tabs are mounted; inactive tabs are hidden via `display:none` (line 37). No unmount/remount on switch.
+2. **TabContent** — [`frontend/app/tab/tabcontent.tsx:42-137`](../../frontend/app/tab/tabcontent.tsx). Two `<Show>` gates: tab-exists (line 105) and tab-non-empty (line 109).
 3. **TabModalLayer** — `frontend/app/tab/TabModalLayer.tsx:58-127`. Wraps TileLayout with `display:contents`; ResizeObserver dispatches a synthetic `window.resize` when inactive tabs collapse.
-4. **TileLayout** — [`frontend/layout/lib/TileLayout.win32.tsx:59-152`](../../frontend/layout/lib/TileLayout.win32.tsx#L59-L152). `onMount` (line 65) sets a **50 ms timer** before flipping `animate: true`. Before then, transitions are disabled (`animate: false` class).
-5. **Block components** — [`frontend/app/block/block.tsx:281-320`](../../frontend/app/block/block.tsx#L281-L320). Each block waits for `blockData()`, `blockView`, and a registered `viewModel` (line 290, line 293). Gated by `<Show when={ready()}>` (line 313).
+4. **TileLayout** — [`frontend/layout/lib/TileLayout.win32.tsx:59-152`](../../frontend/layout/lib/TileLayout.win32.tsx). `onMount` (line 65) sets a **50 ms timer** before flipping `animate: true`. Before then, transitions are disabled (`animate: false` class).
+5. **Block components** — [`frontend/app/block/block.tsx:281-320`](../../frontend/app/block/block.tsx). Each block waits for `blockData()`, `blockView`, and a registered `viewModel` (line 290, line 293). Gated by `<Show when={ready()}>` (line 313).
 6. **View-specific renderer** — `block.tsx:73-88` (`getViewElem()`). Routes to AgentViewModel / TermViewModel / BrowserViewModel / etc. Each has its own async setup.
 
 ### Jitter-causing steps in order
@@ -118,7 +118,7 @@ When a tab becomes active, the UI mounts in this order:
 ## Identified jitter sources
 
 ### 1. Block data resolution fallback — High severity
-**[`frontend/app/block/block.tsx:310-319`](../../frontend/app/block/block.tsx#L310-L319)**
+**[`frontend/app/block/block.tsx:310-319`](../../frontend/app/block/block.tsx)**
 ```tsx
 const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId)
     && blockData() != null && viewModel() != null);
@@ -129,10 +129,10 @@ Inside the view component, a Suspense boundary wraps the actual render (`block.t
 **Jitter:** 0-100 ms of "Loading…" text before the agent / terminal / browser view mounts. Visible on every new tab open and every tab switch when blocks aren't cached.
 
 ### 2. TabContent "Tab Not Found" fallback — Low severity
-**[`frontend/app/tab/tabcontent.tsx:105-107`](../../frontend/app/tab/tabcontent.tsx#L105-L107)** — falls back to "Tab Not Found" if the Tab object hasn't propagated from backend yet. Typically <5 ms; rarely visible.
+**[`frontend/app/tab/tabcontent.tsx:105-107`](../../frontend/app/tab/tabcontent.tsx)** — falls back to "Tab Not Found" if the Tab object hasn't propagated from backend yet. Typically <5 ms; rarely visible.
 
 ### 3. TileLayout animate gate (50 ms delay) — Very high severity
-**[`frontend/layout/lib/TileLayout.win32.tsx:65-71`](../../frontend/layout/lib/TileLayout.win32.tsx#L65-L71)**
+**[`frontend/layout/lib/TileLayout.win32.tsx:65-71`](../../frontend/layout/lib/TileLayout.win32.tsx)**
 ```tsx
 const [animate, setAnimate] = createSignal(false);
 onMount(() => {
@@ -147,12 +147,12 @@ Transitions are disabled for 50 ms. Panes render at final computed positions wit
 **Jitter:** Nodes snap to final position (sometimes noticeably wrong because measurements aren't done), then animate. The **single most visible artifact** on tab open.
 
 ### 4. Block content offset measurement — Medium severity
-**[`frontend/app/block/block.tsx:217-228`](../../frontend/app/block/block.tsx#L217-L228)** — `getBoundingClientRect()` on mount; before mount, `blockContentOffset` is `null` and CSS applies `width: calc(rect.width - 0)`. After mount, offset is set, causing a layout recalc.
+**[`frontend/app/block/block.tsx:217-228`](../../frontend/app/block/block.tsx)** — `getBoundingClientRect()` on mount; before mount, `blockContentOffset` is `null` and CSS applies `width: calc(rect.width - 0)`. After mount, offset is set, causing a layout recalc.
 
 **Jitter:** Pane content shifts by a few px (typically header height ~40 px). More visible in narrow panes.
 
 ### 5. Virtual list height estimator miss — High severity (agent pane)
-**[`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx:91-99`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx#L91-L99)**
+**[`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx:91-99`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx)**
 ```tsx
 const virtualizer = createVirtualizer({
     estimateSize: (index) => {
@@ -167,7 +167,7 @@ First paint uses estimates from `renderers.ts`. After `measureElement()` runs po
 **Jitter:** Agent pane document scrolls up/down by accumulated estimate misses (0–200 px). Specific to the agent pane.
 
 ### 6. Browser pane HWND visibility — Medium severity
-**[`frontend/app/view/browser/browser-view.tsx:98-116`](../../frontend/app/view/browser/browser-view.tsx#L98-L116)** — before `setPaneCreated(true)`, a placeholder `<div>` is visible. After IPC returns and the host creates the native HWND, the placeholder is hidden via `<Show when={!paneCreated()}>` (line 172). DPR conversion (`:68-77`) can produce 1–2 px misalignment.
+**[`frontend/app/view/browser/browser-view.tsx:98-116`](../../frontend/app/view/browser/browser-view.tsx)** — before `setPaneCreated(true)`, a placeholder `<div>` is visible. After IPC returns and the host creates the native HWND, the placeholder is hidden via `<Show when={!paneCreated()}>` (line 172). DPR conversion (`:68-77`) can produce 1–2 px misalignment.
 
 **Jitter:** Browser chrome (address bar, loading spinner) visible briefly before HWND appears, or HWND misaligned. Timing-dependent.
 
@@ -218,7 +218,7 @@ No existing spec for *per-pane* jitter mitigation. No issue with "jitter" or "ja
 ## Tab switching vs tab opening
 
 ### Switching to an already-loaded tab
-**[`frontend/app/store/global.ts:880-914`](../../frontend/app/store/global.ts#L880-L914)** (`setActiveTab`). RPC → backend updates `Workspace.activetabid` → broadcast → `activeTabId()` signal updates → Solid fan-out → TabContent for the new tab transitions from `display:none` to `display:flex`.
+**[`frontend/app/store/global.ts:880-914`](../../frontend/app/store/global.ts)** (`setActiveTab`). RPC → backend updates `Workspace.activetabid` → broadcast → `activeTabId()` signal updates → Solid fan-out → TabContent for the new tab transitions from `display:none` to `display:flex`.
 
 - All blocks stay mounted in memory; xterm.js / virtualised lists / browser HWNDs preserved.
 - Only re-renders: focus highlight, opacity fade-in, ResizeObserver fires if viewport changed.
@@ -317,7 +317,7 @@ Created on demand (click in Swarm). Inserted into TileLayout, which re-arranges 
 ### Tier 1 — Ship immediately, near zero risk
 
 - **Implement the frame-budget visibility gate from spec #774.** Place it on the **App root** (not just TabContent) so it covers tab open, new window, and the tail end of first boot in one go. Honour `prefers-reduced-motion` (disable the gate; show content immediately for users who've opted out of animations).
-- **Bump TileLayout's `animate` delay from 50 → 150 ms** in [`frontend/layout/lib/TileLayout.win32.tsx:69`](../../frontend/layout/lib/TileLayout.win32.tsx#L69). One-line change. Combined with the gate, transitions begin after layout has actually stabilised instead of mid-settle.
+- **Bump TileLayout's `animate` delay from 50 → 150 ms** in [`frontend/layout/lib/TileLayout.win32.tsx:69`](../../frontend/layout/lib/TileLayout.win32.tsx). One-line change. Combined with the gate, transitions begin after layout has actually stabilised instead of mid-settle.
 - **Extend the first-boot visibility guard.** Today `app-init.ts:444` flips `document.body.style.visibility = "visible"` when `initWaveWrap` resolves. After implementing the frame-budget gate, gate this on **both** init completion **and** the same clean-frames signal — so the body reveal includes the first tab's content stabilising, not just data loading. Hard cap stays at 800 ms (matching the gate) plus the existing 30 s safety net.
 
 These three together should eliminate the visible snap-then-animate artifact for >90 % of cases across all three open paths.

@@ -65,6 +65,6 @@ When a fix addresses "gesture X shows the wrong cursor/behavior on platform Y," 
 
 ## Files
 
-- [`frontend/layout/lib/TileLayout.win32.tsx:148-175`](../../frontend/layout/lib/TileLayout.win32.tsx#L148-L175) (`checkForCursorBounds`/`onWindowDragOver`) — where the fix belongs
-- [`frontend/app/tab/tab-reorder.ts:95-134`](../../frontend/app/tab/tab-reorder.ts#L95-L134) — the working reference implementation for tabs
-- `agentmux-cef/src/commands/drag.rs:253-282`, [`frontend/util/cef-api.ts:788-793`](../../frontend/util/cef-api.ts#L788-L793) — dead `setDragCursor`/`restoreDragCursor` API, do not revive
+- [`frontend/layout/lib/TileLayout.win32.tsx:148-175`](../../frontend/layout/lib/TileLayout.win32.tsx) (`checkForCursorBounds`/`onWindowDragOver`) — where the fix belongs
+- [`frontend/app/tab/tab-reorder.ts:95-134`](../../frontend/app/tab/tab-reorder.ts) — the working reference implementation for tabs
+- `agentmux-cef/src/commands/drag.rs:253-282`, [`frontend/util/cef-api.ts:788-793`](../../frontend/util/cef-api.ts) — dead `setDragCursor`/`restoreDragCursor` API, do not revive

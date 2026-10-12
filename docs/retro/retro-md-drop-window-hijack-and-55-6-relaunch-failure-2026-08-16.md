@@ -124,7 +124,7 @@ Surface `show_fatal_dialog` on the srv-spawn-timeout path too, ideally including
 
 ## 4. Sources
 
-- [`frontend/app-init.ts`](../../frontend/app-init.ts), [`frontend/app/view/term/term.tsx:496-498`](../../frontend/app/view/term/term.tsx#L496-L498), [`frontend/app/view/agent/hooks/useAgentDropAttach.ts:212-214`](../../frontend/app/view/agent/hooks/useAgentDropAttach.ts#L212-L214)
+- [`frontend/app-init.ts`](../../frontend/app-init.ts), [`frontend/app/view/term/term.tsx:496-498`](../../frontend/app/view/term/term.tsx), [`frontend/app/view/agent/hooks/useAgentDropAttach.ts:212-214`](../../frontend/app/view/agent/hooks/useAgentDropAttach.ts)
 - [`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`](../specs/SPEC_PANE_FILE_DROP_2026_05_30.md), [`docs/specs/drag-drop-files-into-panes.md`](../specs/drag-drop-files-into-panes.md)
 - `agentmux-cef/src/client/lifecycle.rs:749-785` (`on_before_browse`)
 - `agentmux-cef/src/client/handlers.rs:113-176` (`DragHandler`)

@@ -42,7 +42,7 @@ Four phases as defined in the plan:
 
 | Item                                     | Status | Anchor                                                                  |
 |------------------------------------------|:------:|-------------------------------------------------------------------------|
-| 2.1 Virtualization via `content-visibility: auto` | ✅ | [`frontend/app/view/agent/components/AgentDocumentView.tsx:208`](../../frontend/app/view/agent/components/AgentDocumentView.tsx#L208)         |
+| 2.1 Virtualization via `content-visibility: auto` | ✅ | [`frontend/app/view/agent/components/AgentDocumentView.tsx:208`](../../frontend/app/view/agent/components/AgentDocumentView.tsx)         |
 | 2.2 Paginated history loading on mount   | ✅     | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (history load + prepend)       |
 | 2.2 Scroll-top "load older" with RAF position restore | ✅ | same                                                             |
 | 2.3 Reconnect recovery via history reload| ✅     | same                                                                    |

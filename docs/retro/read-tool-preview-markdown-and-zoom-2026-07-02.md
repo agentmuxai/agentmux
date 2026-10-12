@@ -23,7 +23,7 @@ Two rough edges in the agent pane's **Read-tool preview** (the file-path header 
 ### 2.1 The preview render path
 
 - `Read` results are rendered by **`renderRead()`** in
-  [`frontend/app/view/agent/components/ToolOverlayLog.tsx:270`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx#L270), registered as the
+  [`frontend/app/view/agent/components/ToolOverlayLog.tsx:270`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx), registered as the
   `Read` renderer (`registerToolRenderer({ … match: byKind("Read"), render: renderRead })`, line 383).
 - `renderRead` returns:
   ```
@@ -115,5 +115,5 @@ Implement Fixes #1–#3 (frontend-only, hot-reloadable), then verify:
 - [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — preview-zoom Ctrl+wheel handler (79–102), panel/overlay wiring (325–347)
 - [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) — passes `previewFontScale` → `ToolOverlayLog`
 - [`frontend/app/view/agent/components/HighlightedCode.tsx`](../../frontend/app/view/agent/components/HighlightedCode.tsx) — `<pre class="agent-highlighted-code">`
-- [`frontend/app/view/agent/styles/_document-nodes.scss:471`](../../frontend/app/view/agent/styles/_document-nodes.scss#L471) — `.agent-highlighted-code { font-size: 12px }` (the cascade-blocker)
+- [`frontend/app/view/agent/styles/_document-nodes.scss:471`](../../frontend/app/view/agent/styles/_document-nodes.scss) — `.agent-highlighted-code { font-size: 12px }` (the cascade-blocker)
 - [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — pane zoom (`term:zoom` → CSS `zoom`)

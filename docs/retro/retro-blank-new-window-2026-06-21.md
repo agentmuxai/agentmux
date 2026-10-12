@@ -29,9 +29,9 @@
 
 | Step | Code | Behaviour |
 |------|------|-----------|
-| 1. Button | [`frontend/app/statusbar/InstancePanel.tsx:527`](../../frontend/app/statusbar/InstancePanel.tsx#L527) → `handleOpenNewWindow` (`:270`) | calls `getApi().openNewWindow()` |
+| 1. Button | [`frontend/app/statusbar/InstancePanel.tsx:527`](../../frontend/app/statusbar/InstancePanel.tsx) → `handleOpenNewWindow` (`:270`) | calls `getApi().openNewWindow()` |
 | 2. Host | `agentmux-cef … open_new_window` → window pool | promotes a pre-spawned pool window via the **`pool:new-window`** event |
-| 3. Pool | [`frontend/app/init/pool.ts:33`](../../frontend/app/init/pool.ts#L33) | `pool:new-window` "removes `pool=1` but leaves `workspaceId` absent so `initHostNewWindow` creates a **fresh workspace**" |
+| 3. Pool | [`frontend/app/init/pool.ts:33`](../../frontend/app/init/pool.ts) | `pool:new-window` "removes `pool=1` but leaves `workspaceId` absent so `initHostNewWindow` creates a **fresh workspace**" |
 | 4. FE bootstrap | `frontend/app-init.ts:311/323/337` | `WindowService.CreateWindow(null, "")` — empty `workspaceId` |
 | 5. Backend | `agentmux-srv/src/server/service.rs:751` (`"CreateWindow"`) | empty ws → dispatch `Command::CreateWorkspace { name: "" }` (`:758`) + `CreateTab` |
 | 6. Tab | `agentmux-srv/src/backend/wcore/tab.rs:41,45` | tab created with `rootnode: None`, `pendingbackendactions: None` |
@@ -84,7 +84,7 @@ layout into the general new-window path:
 
 The dead giveaway that defaults were *meant* to be requestable: the frontend
 `WorkspaceService.CreateWorkspace(name, icon, color, **applyDefaults**)`
-([`frontend/app/store/services.ts:146`](../../frontend/app/store/services.ts#L146)) has carried an `applyDefaults` argument since
+([`frontend/app/store/services.ts:146`](../../frontend/app/store/services.ts)) has carried an `applyDefaults` argument since
 the **initial commit** (`4be0e8d4`, v0.31.20) — but the backend IPC
 `Command::CreateWorkspace { name }` (`agentmux-common/src/ipc.rs:257`) only ever
 carried `name`. `applyDefaults` (and `icon`/`color`, since removed as "unused" in

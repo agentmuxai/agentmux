@@ -89,9 +89,9 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   merges** (or coordinate). Re-check open PRs (§3.4).
 
 ### A3 — Break `global.ts` god-module + cycle 🟢
-- **Entry points:** [`frontend/app/store/global.ts:39`](../../frontend/app/store/global.ts#L39) ↔ `frontend/app/store/wos.ts:12` (bidirectional
+- **Entry points:** [`frontend/app/store/global.ts:39`](../../frontend/app/store/global.ts) ↔ `frontend/app/store/wos.ts:12` (bidirectional
   import cycle). `global.ts` = 87 exports, 95 importers, imports *up* into `@/app/modals` + `@/app/tab`.
-  Leaf violations: [`frontend/util/logger.ts:4`](../../frontend/util/logger.ts#L4), [`frontend/layout/lib/layoutModel.ts:4-7`](../../frontend/layout/lib/layoutModel.ts#L4-L7) import the store.
+  Leaf violations: [`frontend/util/logger.ts:4`](../../frontend/util/logger.ts), [`frontend/layout/lib/layoutModel.ts:4-7`](../../frontend/layout/lib/layoutModel.ts) import the store.
 - **Approach:** split `global.ts` by concern (selection / layout-glue / object-cache / modal-glue);
   invert the leaf→store imports (pass state in, don't import it). Break the wos cycle by extracting the
   shared piece both need into a third leaf module.
@@ -191,8 +191,8 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   `/.agentmux`. The board called this item "cleanup".
 
 ### A11 — Real `BlockRegistry` + registry-driven `ModalLayer` 🟢
-- **Entry points:** hardcoded `BlockRegistry` map at [`frontend/app/block/block.tsx:47-61`](../../frontend/app/block/block.tsx#L47-L61) (shadows the
-  real registry); [`frontend/app/element/ModalLayer.tsx:55-64`](../../frontend/app/element/ModalLayer.tsx#L55-L64) imports **9 concrete** agent-view modals.
+- **Entry points:** hardcoded `BlockRegistry` map at [`frontend/app/block/block.tsx:47-61`](../../frontend/app/block/block.tsx) (shadows the
+  real registry); [`frontend/app/element/ModalLayer.tsx:55-64`](../../frontend/app/element/ModalLayer.tsx) imports **9 concrete** agent-view modals.
 - **Approach:** use the real block registry instead of the hardcoded map; make `ModalLayer`
   registry-driven so a new modal registers itself instead of editing the layer.
 - **Acceptance:** no hardcoded block map; `ModalLayer` doesn't import concrete modals; adding a

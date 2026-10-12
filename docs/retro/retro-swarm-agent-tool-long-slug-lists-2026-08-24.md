@@ -55,7 +55,7 @@ something else, and thrown away.
 
 ## 2. Row count is already correct — this is a labeling problem, not a grouping problem
 
-Confirmed directly in [`frontend/app/view/swarm/swarm-model.ts:213-288`](../../frontend/app/view/swarm/swarm-model.ts#L213-L288)
+Confirmed directly in [`frontend/app/view/swarm/swarm-model.ts:213-288`](../../frontend/app/view/swarm/swarm-model.ts)
 (`buildDispatchBuckets`): every solo `Agent`/`Task`-tool call gets a
 permanently unique `dispatch_id` of `solo:<agent_id>`
 (`swarm-model.ts:26-33`), and `agentToolRows` is literally
@@ -130,7 +130,7 @@ in `scan.rs:433-495`, `jsonl.rs:35` — these are the only files it reads).
 The frontend *does* already parse this, but only for its own, unrelated
 purpose (rendering the calling pane's own transcript, live, in-memory,
 never persisted):
-- [`frontend/app/view/agent/stream-parser.ts:129-130`](../../frontend/app/view/agent/stream-parser.ts#L129-L130) — `extractToolDetail`
+- [`frontend/app/view/agent/stream-parser.ts:129-130`](../../frontend/app/view/agent/stream-parser.ts) — `extractToolDetail`
   reads `params.description || params.prompt`.
 - [`frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx`](../../frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx) +
   [`frontend/app/view/agent/activity/dispatch-correlation.ts`](../../frontend/app/view/agent/activity/dispatch-correlation.ts) correlate a
@@ -204,7 +204,7 @@ watch surface as a fast follow-up.
 
 ## 5. Secondary: port whichever fix lands here to the Activity Dock too
 
-[`frontend/app/view/agent/activity/subagent-adapter.ts:116`](../../frontend/app/view/agent/activity/subagent-adapter.ts#L116)
+[`frontend/app/view/agent/activity/subagent-adapter.ts:116`](../../frontend/app/view/agent/activity/subagent-adapter.ts)
 (`subagentToActivity`) has the exact same `display_name || slug || agent_id`
 fallback chain, confirmed still live today, with **no** disambiguation at
 all (not even the Swarm pane's old `${slug} · ${shortId}` suffix). Whatever
@@ -248,16 +248,16 @@ specifically), but the identical fix will eventually be wanted here too.
 - `agentmux-srv/src/server/service/misc.rs:129-152` — `subagent.ListActive`/
   `GetInfo`, confirmed already serializing the whole struct (no RPC change
   needed for §4.1).
-- [`frontend/app/view/agent/stream-parser.ts:129-130`](../../frontend/app/view/agent/stream-parser.ts#L129-L130),
+- [`frontend/app/view/agent/stream-parser.ts:129-130`](../../frontend/app/view/agent/stream-parser.ts),
   `frontend/app/view/agent/activity/dispatch-correlation.ts:5-9,12-77`,
   [`frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx`](../../frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx) —
   the frontend-only, ordinal-heuristic, never-persisted pipeline that
   already has `description`/`prompt` for its own unrelated purpose.
-- [`frontend/app/view/swarm/swarm-model.ts:213-288`](../../frontend/app/view/swarm/swarm-model.ts#L213-L288) (`buildDispatchBuckets`),
+- [`frontend/app/view/swarm/swarm-model.ts:213-288`](../../frontend/app/view/swarm/swarm-model.ts) (`buildDispatchBuckets`),
   `:26-33` (`dispatch_id` doc comment), `:424-430` (`subagentDisplayLabel`),
   `:432-445` (`shallowEqualSubagent`) — the Swarm pane's current row-count
   correctness (§2) and label priority chain (§4.1's edit target).
-- [`frontend/app/view/agent/activity/subagent-adapter.ts:116`](../../frontend/app/view/agent/activity/subagent-adapter.ts#L116),
+- [`frontend/app/view/agent/activity/subagent-adapter.ts:116`](../../frontend/app/view/agent/activity/subagent-adapter.ts),
   `frontend/app/view/agent/components/ActivityRow.tsx:198,282` — the
   Activity Dock's own, separate, still-unfixed instance of the same
   labeling gap (§5).

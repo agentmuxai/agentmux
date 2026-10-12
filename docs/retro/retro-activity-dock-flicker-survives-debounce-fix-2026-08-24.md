@@ -221,13 +221,13 @@ often") and shouldn't be presented as a full fix if implemented alone.
 - [`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts),
   `dispatch-source.ts` — confirmed both still wire every event through
   `createDebouncedRefresh` with identical (100, 1000) parameters.
-- [`frontend/app/view/swarm/swarm-model.ts:458-467`](../../frontend/app/view/swarm/swarm-model.ts#L458-L467) —
+- [`frontend/app/view/swarm/swarm-model.ts:458-467`](../../frontend/app/view/swarm/swarm-model.ts) —
   `mergeSubagentsPreservingIdentity`, confirmed to only preserve reference
   identity for unchanged items, not list membership.
-- [`frontend/app/view/agent/components/ActivityDock.tsx:250`](../../frontend/app/view/agent/components/ActivityDock.tsx#L250) — the keyed
+- [`frontend/app/view/agent/components/ActivityDock.tsx:250`](../../frontend/app/view/agent/components/ActivityDock.tsx) — the keyed
   `<For each={renderedIds()}>` render that turns a changed snapshot into
   real mount/unmount.
-- [`frontend/app/block/block.tsx:301`](../../frontend/app/block/block.tsx#L301) — `ready()`'s exact definition,
+- [`frontend/app/block/block.tsx:301`](../../frontend/app/block/block.tsx) — `ready()`'s exact definition,
   confirmed to have no dependency on Activity Dock data sources.
 - `agentmux-srv/src/backend/subagent_watcher/jsonl.rs:35,198,212-231` —
   `process_jsonl_change`'s `live` parameter, confirmed still not present in

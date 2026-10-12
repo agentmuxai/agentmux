@@ -35,7 +35,7 @@ The original window's frontend URL is passed by the launcher on the CLI — that
 
 | # | Gap | Where | Fix scope |
 |---|---|---|---|
-| 1 | `package-portable.sh` will wipe a running install | [`scripts/package-portable.sh:31`](../../scripts/package-portable.sh#L31) | This PR |
+| 1 | `package-portable.sh` will wipe a running install | [`scripts/package-portable.sh:31`](../../scripts/package-portable.sh) | This PR |
 | 2 | `resolve_frontend_base_url` silently degrades to a dev URL in production when assets are missing | `agentmux-cef/src/commands/window.rs:967` | Follow-up PR |
 | 3 | `on_render_process_terminated` has no crash budget, so a single bad load loops forever | `agentmux-cef/src/client/mod.rs:1247` | Follow-up PR |
 

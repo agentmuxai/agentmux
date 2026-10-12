@@ -38,7 +38,7 @@ There is no bug left to fix here in the narrow sense — the leak that accidenta
 
 ## 5. Sources
 
-- [`frontend/app-init.ts:317-345`](../../frontend/app-init.ts#L317-L345) (`initHostWave` cold-start path)
+- [`frontend/app-init.ts:317-345`](../../frontend/app-init.ts) (`initHostWave` cold-start path)
 - `agentmux-srv/src/server/service/window_create.rs:107-211` (`default_three_pane_tree` seed)
 - `agentmux-srv/src/backend/wcore/window.rs:139-161` / `agentmux-srv/src/backend/wcore/tab.rs` (cascade delete on close)
 - `agentmux-srv/src/server/service/window_close.rs:24-186` (`CloseWindow` RPC cascade)

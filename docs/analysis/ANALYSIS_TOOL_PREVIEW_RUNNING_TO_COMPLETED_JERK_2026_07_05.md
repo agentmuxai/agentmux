@@ -20,7 +20,7 @@ state, and nothing bridges the two.
 ## Root cause: one state update flips two independent DOM shapes at once, and neither is transitioned
 
 The `running`→terminal transition is driven by a single object replacement,
-`mergeReplacement()` ([`frontend/app/store/agent-document/reducer.ts:659-679`](../../frontend/app/store/agent-document/reducer.ts#L659-L679)). When a
+`mergeReplacement()` ([`frontend/app/store/agent-document/reducer.ts:659-679`](../../frontend/app/store/agent-document/reducer.ts)). When a
 `tool_result` arrives, the parser's replacement node is merged with the existing node's live-log
 buffer, and — critically — `log.open` is force-cleared to `false` in the same merge whenever the
 new status is terminal:
@@ -176,12 +176,12 @@ at line 180).
 
 | File | Role |
 |---|---|
-| [`frontend/app/store/agent-document/reducer.ts:659-679`](../../frontend/app/store/agent-document/reducer.ts#L659-L679) | `mergeReplacement` — the single state update that couples `status` and `log.open`, root cause of both A and B firing on the same tick |
-| [`frontend/app/view/agent/components/ToolBlock.tsx:177-322`](../../frontend/app/view/agent/components/ToolBlock.tsx#L177-L322) | Summary row — `resultPill()` (177-229), live-tail/elapsed-ticker (267-303), status icon (236), the flex row that gains/loses children (256-322) |
+| [`frontend/app/store/agent-document/reducer.ts:659-679`](../../frontend/app/store/agent-document/reducer.ts) | `mergeReplacement` — the single state update that couples `status` and `log.open`, root cause of both A and B firing on the same tick |
+| [`frontend/app/view/agent/components/ToolBlock.tsx:177-322`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Summary row — `resultPill()` (177-229), live-tail/elapsed-ticker (267-303), status icon (236), the flex row that gains/loses children (256-322) |
 | `frontend/app/view/agent/components/ToolOverlayLog.tsx:90, 187-220` | `isStreaming()` gate + the exclusive `<Switch>` that swaps `ChunkList` ↔ `ToolOverlayResult`; comment at 187-196 explains its crash-safety history |
-| [`frontend/app/view/agent/components/ToolBlockOverlay.tsx:49-63`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx#L49-L63) | Overlay header `display` toggle — secondary contributor for non-success terminations |
+| [`frontend/app/view/agent/components/ToolBlockOverlay.tsx:49-63`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) | Overlay header `display` toggle — secondary contributor for non-success terminations |
 | `frontend/app/view/agent/styles/_document-nodes.scss:142, 219-241, 297-307, 424-442` | `.agent-tool-block` hover transition (142, unrelated); live-tail rule (219-241, no transition); panel hidden↔flow transition (297-307, doesn't cover this case); result-pill rule (424-442, no transition) |
-| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-68`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss#L34-L68) | `.agent-tool-overlay-log` — the panel-body container; zero `transition` declarations anywhere in this file |
+| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-68`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | `.agent-tool-overlay-log` — the panel-body container; zero `transition` declarations anywhere in this file |
 
 ## Related docs (checked, confirmed unrelated or tangential)
 

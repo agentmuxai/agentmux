@@ -38,7 +38,7 @@ either way, so quoting was never the variable at play.
 
 This meant `{{.TITLE}}` inside `dev:serve` always rendered `''` regardless of
 what was passed at any call site, so `VITE_DEV_TITLE` was always baked in
-empty. [`frontend/app-init.ts:400-408`](../../frontend/app-init.ts#L400-L408) reads `import.meta.env.VITE_DEV_TITLE`
+empty. [`frontend/app-init.ts:400-408`](../../frontend/app-init.ts) reads `import.meta.env.VITE_DEV_TITLE`
 at startup and calls `ObjectService.UpdateObjectMeta` with it — with an empty
 string, the window's `window:displayname` meta is never set, so
 `resolveWindowName()` ([`frontend/util/window-title.ts`](../../frontend/util/window-title.ts)) falls through to its

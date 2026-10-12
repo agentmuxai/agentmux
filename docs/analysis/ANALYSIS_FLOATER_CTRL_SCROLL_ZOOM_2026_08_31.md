@@ -17,7 +17,7 @@ These were the obvious candidates. All three are dead, verified in source:
 
 | Candidate | Why it's out |
 |---|---|
-| Handler not mounted in the floater | `AppZoomHandler` ([`frontend/app/app.tsx:189`](../../frontend/app/app.tsx#L189)) is rendered at `app.tsx:355`, **above** the `<Show when={!IS_FLOATING_PANE}>` gate at line 359. It runs in floater windows. |
+| Handler not mounted in the floater | `AppZoomHandler` ([`frontend/app/app.tsx:189`](../../frontend/app/app.tsx)) is rendered at `app.tsx:355`, **above** the `<Show when={!IS_FLOATING_PANE}>` gate at line 359. It runs in floater windows. |
 | Armory's own handler missing | `armory-view.tsx:64` attaches a capture-phase `wheel` listener on `viewRef` and calls `stopPropagation()`, so it wins over the global one — identically in both docked and floating cases. |
 | `[data-blockid]` absent from the floater DOM | `floating-pane-workspace.tsx:1046` renders the standard `<TabContent>`, which renders the standard `BlockFrame`, which emits `data-blockid` at `blockframe.tsx:951`. No floater-specific gate. |
 | Meta write not round-tripping | Write (`SetMetaCommand` on `block:<id>`) and read (`armory-model.ts:87`, `blockAtom().meta["term:zoom"]`) use the same object. The floater's auto-close logic depends on receiving Tab object broadcasts and works, proving broadcasts reach floater windows. |

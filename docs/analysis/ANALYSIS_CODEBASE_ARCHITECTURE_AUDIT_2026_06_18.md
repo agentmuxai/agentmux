@@ -303,15 +303,15 @@ hand-synced mirrors with generated-or-tested contracts.
   `engine.rs` + `server/*_handlers.rs`.
 - **A2** — `agentmux-bashwrap/src/wps_client.rs:31-50`, `agentmux-srv/src/server/mod.rs:441-463`,
   `agentmux-srv/src/backend/wps.rs:72-82`, `agentmux-mcp/src/main.rs:356-782`.
-- **A3** — [`frontend/app/store/global.ts:39`](../../frontend/app/store/global.ts#L39), `frontend/app/store/wos.ts:12`,
-  [`frontend/util/logger.ts:4`](../../frontend/util/logger.ts#L4), [`frontend/layout/lib/layoutModel.ts:4-7`](../../frontend/layout/lib/layoutModel.ts#L4-L7).
+- **A3** — [`frontend/app/store/global.ts:39`](../../frontend/app/store/global.ts), `frontend/app/store/wos.ts:12`,
+  [`frontend/util/logger.ts:4`](../../frontend/util/logger.ts), [`frontend/layout/lib/layoutModel.ts:4-7`](../../frontend/layout/lib/layoutModel.ts).
 - **A4 / A5 / A8** — `agentmux-srv/src/server/service.rs:275-2547`,
   `…/blockcontroller/{persistent,subprocess,acp,shell}.rs`, `…/server/websocket.rs:944-2348`.
 - **A6 / A9** — [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), `…/store/agent-pane-state/`,
   `…/agent-pane-layout-store.ts`, `…/expansion-source.ts`.
 - **A7** — `frontend/app/view/agent/providers/{codex,gemini,kimi,acp,claude}-translator.ts`.
 - **A10** — `agentmux-common/src/data_paths.rs:4-7,271`, `agentmux-srv/src/backend/base.rs:16-154`.
-- **A11** — [`frontend/app/block/block.tsx:47-61`](../../frontend/app/block/block.tsx#L47-L61), [`frontend/app/element/ModalLayer.tsx:55-64`](../../frontend/app/element/ModalLayer.tsx#L55-L64).
+- **A11** — [`frontend/app/block/block.tsx:47-61`](../../frontend/app/block/block.tsx), [`frontend/app/element/ModalLayer.tsx:55-64`](../../frontend/app/element/ModalLayer.tsx).
 - **A12** — `frontend/app/store/agent-pane-state/reducer.ts:343,568` (submit/interrupt watchdogs);
   `agentmux-srv/src/backend/rpc_types.rs` unregistered `COMMAND_*` consts.
 - **A13** — [`docs/specs/`](../specs), `specs/`, `docs/retro(s)/`, `docs/analys(i/e)s/`.

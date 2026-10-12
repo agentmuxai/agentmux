@@ -54,12 +54,12 @@ was computed only in the target window's renderer and never reached the backend 
 always landed via a generic `InsertNode` at `DefaultNodeSize` regardless of which zone was
 highlighted. That gap is closed:
 
-- [`frontend/app-init.ts:263-270`](../../frontend/app-init.ts#L263-L270) — after computing `dir` and the hovered leaf's `blockId`, the
+- [`frontend/app-init.ts:263-270`](../../frontend/app-init.ts) — after computing `dir` and the hovered leaf's `blockId`, the
   target renderer pushes `{ window_label, block_id, dir }` to the CEF host via
   `set_floating_redock_target`.
 - `agentmux-cef/src/commands/window/motion.rs` — hosts a `floating_redock_ghost` map keyed by
   window label (per the 06-23 doc's "push-then-store" design).
-- [`frontend/app/workspace/floating-pane-workspace.tsx:512-519`](../../frontend/app/workspace/floating-pane-workspace.tsx#L512-L519) — the floater queries
+- [`frontend/app/workspace/floating-pane-workspace.tsx:512-519`](../../frontend/app/workspace/floating-pane-workspace.tsx) — the floater queries
   `get_floating_redock_target` at drop time and threads `target_block_id` + `direction` into
   `RedockFloatingPane`.
 - `agentmux-srv/src/server/service/layout_helpers.rs:109-148` (`queue_target_layout_split`) —
@@ -273,13 +273,13 @@ splice and wrap branches.
 
 | File | Role |
 |---|---|
-| [`frontend/app-init.ts:113-273`](../../frontend/app-init.ts#L113-L273) | Ghost geometry + push-then-store hand-off (Phase 4b, already shipped) |
+| [`frontend/app-init.ts:113-273`](../../frontend/app-init.ts) | Ghost geometry + push-then-store hand-off (Phase 4b, already shipped) |
 | `frontend/app/workspace/floating-pane-workspace.tsx:491-577, 889-1006` | Drop-time ghost query + `RedockFloatingPane` call |
 | `agentmux-srv/src/server/service/layout_helpers.rs:94-148` | Server-side direction→split-action mapping + hardcoded `nodesize` approximation (Root Cause 1) |
-| [`frontend/layout/lib/layoutPersistence.ts:105-274`](../../frontend/layout/lib/layoutPersistence.ts#L105-L274) | Frontend action handler — has `targetNode` with live size, currently unused for sizing (fix location for A) |
-| [`frontend/layout/lib/layoutTree.ts:462-544`](../../frontend/layout/lib/layoutTree.ts#L462-L544) | `splitHorizontal`/`splitVertical` — wrap vs. splice branches (Root Cause 2, fix location for B) |
-| [`frontend/layout/lib/layoutGeometry.ts:88-197`](../../frontend/layout/lib/layoutGeometry.ts#L88-L197) | `updateTreeHelper` — the shared-pool flex-ratio rendering model that makes splice-branch dilution mechanical, not incidental |
-| [`frontend/layout/lib/layoutNode.ts:16-34`](../../frontend/layout/lib/layoutNode.ts#L16-L34) | `newLayoutNode` — confirms `size` defaults to flat `DefaultNodeSize=10` when omitted |
+| [`frontend/layout/lib/layoutPersistence.ts:105-274`](../../frontend/layout/lib/layoutPersistence.ts) | Frontend action handler — has `targetNode` with live size, currently unused for sizing (fix location for A) |
+| [`frontend/layout/lib/layoutTree.ts:462-544`](../../frontend/layout/lib/layoutTree.ts) | `splitHorizontal`/`splitVertical` — wrap vs. splice branches (Root Cause 2, fix location for B) |
+| [`frontend/layout/lib/layoutGeometry.ts:88-197`](../../frontend/layout/lib/layoutGeometry.ts) | `updateTreeHelper` — the shared-pool flex-ratio rendering model that makes splice-branch dilution mechanical, not incidental |
+| [`frontend/layout/lib/layoutNode.ts:16-34`](../../frontend/layout/lib/layoutNode.ts) | `newLayoutNode` — confirms `size` defaults to flat `DefaultNodeSize=10` when omitted |
 
 ## Related prior docs
 

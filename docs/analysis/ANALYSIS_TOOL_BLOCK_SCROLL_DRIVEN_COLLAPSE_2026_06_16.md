@@ -31,7 +31,7 @@ new behavior *removes* a timer rather than adding one.
 
 ### 2.1 The timer is 3 s, not a minute
 
-[`frontend/app/view/agent/components/ToolBlock.tsx:82`](../../frontend/app/view/agent/components/ToolBlock.tsx#L82)
+[`frontend/app/view/agent/components/ToolBlock.tsx:82`](../../frontend/app/view/agent/components/ToolBlock.tsx)
 ```ts
 const POST_COMPLETION_HOLD_MS = 3000; // 1s (#988) → 5s (#1006) → 3s (2026-05-26)
 ```
@@ -67,7 +67,7 @@ const expanded = () => props.pinned || autoExpanded() || userHolding();
 The virtualization layout slice computes each row's height from a **separate**
 pure mapper, `currentExpansion()`:
 
-[`frontend/app/view/agent/virtualization/expansion-source.ts:50-56`](../../frontend/app/view/agent/virtualization/expansion-source.ts#L50-L56)
+[`frontend/app/view/agent/virtualization/expansion-source.ts:50-56`](../../frontend/app/view/agent/virtualization/expansion-source.ts)
 ```ts
 case "tool":
     if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };

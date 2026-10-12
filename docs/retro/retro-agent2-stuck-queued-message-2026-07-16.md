@@ -118,7 +118,7 @@ the held-message flush finally fires.
 
 | File | Relevance |
 |------|-----------|
-| [`frontend/app/view/agent/agent-view.tsx:704-713`](../../frontend/app/view/agent/agent-view.tsx#L704-L713) | Held-message auto-flush, gated on `turnIdle` (Idle/Done) — never fires while phase stuck at Streaming (**primary symptom site**) |
+| [`frontend/app/view/agent/agent-view.tsx:704-713`](../../frontend/app/view/agent/agent-view.tsx) | Held-message auto-flush, gated on `turnIdle` (Idle/Done) — never fires while phase stuck at Streaming (**primary symptom site**) |
 | [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) (`ReconcileTurnActive`) | Reconciles Idle→Streaming only; needs the Streaming→Idle direction (**primary fix site**) |
 | [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) (`heldQueue`, `flushHeldMessages`) | Frontend-only held-message queue |
 | `agentmux-srv/src/backend/blockcontroller/persistent.rs:293-356,845-867` | Persistent send writes straight to stdin + emits accepted immediately; `result` event flips backend `turn_active=false` and publishes it |

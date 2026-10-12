@@ -14,7 +14,7 @@ The plan assumed there was tab-related state on the frontend that needed to be m
 
 ## What I actually found
 
-After ~10 minutes of code inspection ([`frontend/app/store/global.ts:40–110`](../../frontend/app/store/global.ts#L40-L110), `command-registry.ts`, `keymodel.ts`, `layoutModel.ts`):
+After ~10 minutes of code inspection ([`frontend/app/store/global.ts:40–110`](../../frontend/app/store/global.ts), `command-registry.ts`, `keymodel.ts`, `layoutModel.ts`):
 
 1. **There are no local tab atoms.** All tab/workspace/window state is derived via `createMemo` over `WOS.getObjectValue`. Wstore already does the mirror.
    ```ts

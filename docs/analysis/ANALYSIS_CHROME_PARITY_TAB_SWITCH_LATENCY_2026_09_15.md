@@ -71,7 +71,7 @@ purpose-built for exactly this UX.
 
 One CEF-hosted renderer, one DOM, one SolidJS reactive tree, for the
 **entire window** — every tab's content lives in the same render tree at
-once. [`frontend/app/workspace/workspace.tsx:50-55`](../../frontend/app/workspace/workspace.tsx#L50-L55):
+once. [`frontend/app/workspace/workspace.tsx:50-55`](../../frontend/app/workspace/workspace.tsx):
 
 ```tsx
 <For each={allTabIds()}>
@@ -302,7 +302,7 @@ change looks on paper.
   mechanism both of the above build on
 - [`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](../specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) — the
   related-but-distinct in-pane surface, see §6
-- [`frontend/app/workspace/workspace.tsx:50-83`](../../frontend/app/workspace/workspace.tsx#L50-L83) — current `display:none`
+- [`frontend/app/workspace/workspace.tsx:50-83`](../../frontend/app/workspace/workspace.tsx) — current `display:none`
   mechanism, verified against `main` as of this pass
 - MDN / Chromium `content-visibility` explainers — the "tab-like UI"
   use case this analysis proposes matching against

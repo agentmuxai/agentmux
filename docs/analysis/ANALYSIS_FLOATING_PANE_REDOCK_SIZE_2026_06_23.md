@@ -98,7 +98,7 @@ The gap is that `queue_target_layout_insert` always uses `InsertNode` instead.
 
 This gap is explicitly noted in the source (added during Phase 4a MVP):
 
-- [`frontend/app-init.ts:106–109`](../../frontend/app-init.ts#L106-L109):
+- [`frontend/app-init.ts:106–109`](../../frontend/app-init.ts):
   ```
   // The block STILL lands as a sibling in the target tab's layout for
   // MVP (backend ignores the direction). Phase 4b will wire the

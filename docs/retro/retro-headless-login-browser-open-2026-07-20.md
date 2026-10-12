@@ -69,7 +69,7 @@ users never discover, and it is **Windows-only** —
 `platform.rs:1337-1342` returns `Err("open_login_terminal: not yet
 implemented on this platform")` on macOS/Linux.
 
-`/login`'s own handler ([`frontend/app/view/agent/commands/global/login.ts:44-59`](../../frontend/app/view/agent/commands/global/login.ts#L44-L59))
+`/login`'s own handler ([`frontend/app/view/agent/commands/global/login.ts:44-59`](../../frontend/app/view/agent/commands/global/login.ts))
 already knows this — when `forceProviderLogin` returns `"no-url"`, the error
 message it shows is literally:
 

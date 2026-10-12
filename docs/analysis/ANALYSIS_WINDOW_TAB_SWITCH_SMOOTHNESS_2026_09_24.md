@@ -25,7 +25,7 @@ Pane tabs and window tabs hide inactive content in two different ways, and
 that one difference explains the gap.
 
 - **Pane tabs** hide inactive members with `visibility: hidden`
-  ([`frontend/app/tab/pane-leaf-chrome.tsx:373`](../../frontend/app/tab/pane-leaf-chrome.tsx#L373)). Hidden members stay fully
+  ([`frontend/app/tab/pane-leaf-chrome.tsx:373`](../../frontend/app/tab/pane-leaf-chrome.tsx)). Hidden members stay fully
   laid out, so a switch is one local signal change. There's no layout to catch
   up on, no gate, no transition and no round trip.
 - **Window tabs** hide inactive tabs with `content-visibility: hidden`
@@ -69,7 +69,7 @@ had already declared settled.
 Two separate problems show up:
 
 1. **A fixed floor on every switch.** The gate never lifts sooner than about
-   85 ms after it's armed (`SETTLE_MS = 80`, [`frontend/app/store/tab-reveal.ts:77`](../../frontend/app/store/tab-reveal.ts#L77)),
+   85 ms after it's armed (`SETTLE_MS = 80`, [`frontend/app/store/tab-reveal.ts:77`](../../frontend/app/store/tab-reveal.ts)),
    even when there's nothing to settle. The 120 ms cross-fade
    (`app.scss`, `workspace-tab-content`) runs on top. So a window-tab switch
    takes at least ~200 ms to finish visually, while a pane-tab switch finishes

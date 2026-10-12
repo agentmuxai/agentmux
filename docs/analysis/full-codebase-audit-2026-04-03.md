@@ -64,7 +64,7 @@ The codebase is **solid but carries significant technical debt** from the Tauri�
 | Issue | File(s) | Details |
 |-------|---------|---------|
 | **Dead Jotai in BlockModel** | `frontend/app/block/block-model.ts:4-5, 14-32` | Still imports and uses `jotai.atom()` despite migration to SolidJS signals. Creates unmaintained dual-state system |
-| **Direct Tauri imports in active code** | [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx:14`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx#L14), `darwin.tsx:61`, [`frontend/app/view/term/term.tsx:274`](../../frontend/app/view/term/term.tsx#L274) | Hardcoded `import { invoke } from "@tauri-apps/api/core"` instead of using platform IPC abstraction — breaks on CEF |
+| **Direct Tauri imports in active code** | [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx:14`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx), `darwin.tsx:61`, [`frontend/app/view/term/term.tsx:274`](../../frontend/app/view/term/term.tsx) | Hardcoded `import { invoke } from "@tauri-apps/api/core"` instead of using platform IPC abstraction — breaks on CEF |
 
 ### HIGH
 
@@ -83,9 +83,9 @@ The codebase is **solid but carries significant technical debt** from the Tauri�
 | **52 `(window as any)` casts** | `wave.ts` (19 occurrences), `ipc.ts`, `cef-api.ts`, `tauri-api.ts` | Should use proper type declarations for window globals |
 | **Tauri-only features silently broken on CEF** | `frontend/util/notification.ts:56-71` — `sendNativeNotification()` no-ops on CEF; `frontend/wave.ts:68-106` — instance ID title no-ops on CEF | Features that work on Tauri but silently fail on CEF |
 | **Dead Tauri bootstrap files** | `frontend/tauri-bootstrap.ts` (210 lines), `frontend/tauri-init.ts` (31 lines) | Conditional on `__TAURI_INTERNALS__` — never active on CEF, but add weight |
-| **Leaked setInterval in TermViewModel** | [`frontend/app/view/term/termViewModel.ts:32-33`](../../frontend/app/view/term/termViewModel.ts#L32-L33) | Global `setInterval(() => ..., 60_000)` never cleaned up — accumulates on re-creation |
+| **Leaked setInterval in TermViewModel** | [`frontend/app/view/term/termViewModel.ts:32-33`](../../frontend/app/view/term/termViewModel.ts) | Global `setInterval(() => ..., 60_000)` never cleaned up — accumulates on re-creation |
 | **Global mutable state in drag handlers** | `CrossWindowDragMonitor.linux.tsx:23`, `darwin.tsx:22-30` | Module-level `let _currentDragPayload` — concurrent drags overwrite each other |
-| **Unbounded OSC buffer** | [`frontend/app/view/term/termosc.ts:45-100`](../../frontend/app/view/term/termosc.ts#L45-L100) | No size limit on JSON parsing from terminal escape sequences |
+| **Unbounded OSC buffer** | [`frontend/app/view/term/termosc.ts:45-100`](../../frontend/app/view/term/termosc.ts) | No size limit on JSON parsing from terminal escape sequences |
 
 ### LOW
 
