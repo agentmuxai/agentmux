@@ -587,3 +587,101 @@ async fn a_stale_pane_refused_by_the_agents_live_pane_is_held_elsewhere() {
     assert!(super::super::is_held_elsewhere_error(&err), "got: {err}");
     assert!(err.contains(&live_block), "names the live pane: {err}");
 }
+
+// ── A fork's first spawn: it starts from the conversation it was forked from ──
+// (the fork-isolation report in #4744, F5)
+
+const PARENT: &str = "gate-parent-1";
+const PARENT_WORK: &str = "/agents/parent";
+
+/// A store where [`UID`] is a fork of [`PARENT`].
+fn store_with_fork() -> Arc<crate::backend::storage::store::Store> {
+    let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+    let mut parent = crate::backend::storage::agents::test_agent_def(PARENT, "Loap", "claude", "host", 1, "");
+    parent.is_seeded = 0;
+    store.agent_def_insert(&mut parent).unwrap();
+    let mut fork = crate::backend::storage::agents::test_agent_def(UID, "Loap #2", "claude", "host", 2, "");
+    fork.is_seeded = 0;
+    fork.parent_id = PARENT.to_string();
+    fork.branch_label = "Loap #2".to_string();
+    store.agent_def_insert(&mut fork).unwrap();
+    Arc::new(store)
+}
+
+/// The parent's login, signed in as `account`/`org`, holding its complete
+/// session `sid` for its own working dir, and a chain for [`PARENT`] whose
+/// head is that session.
+fn parent_with_session(gfs: &FileStore, account: &str, org: &str, sid: &str) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".claude.json"),
+        format!(r#"{{"oauthAccount":{{"accountUuid":"{account}","organizationUuid":"{org}"}}}}"#),
+    )
+    .unwrap();
+    let dir = tmp.path().join("projects").join(crate::backend::claude_layout::project_dir_name(PARENT_WORK));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{sid}.jsonl")), b"{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n").unwrap();
+    let key = crate::identity::account_email::identity_key_from_oauth_dir("claude", &tmp.path().to_string_lossy());
+    let id = segs::record_start(
+        gfs,
+        segs::Start {
+            segment_id: String::new(),
+            agent_uid: PARENT.into(),
+            definition_id: None,
+            provider: "claude".into(),
+            config_dir: Some(tmp.path().to_string_lossy().to_string()),
+            provider_session_id: None,
+            cwd: PARENT_WORK.into(),
+            channel: "local-test".into(),
+            agentmux_version: "0.0.0".into(),
+            block_id: "parent-block".into(),
+            zone: None,
+            byte_start: None,
+            started_at_ms: 1_000,
+            continuity_rung: segs::Rung::Fresh,
+            predecessor_segment_id: None,
+            lease_epoch: None,
+            identity_key: key,
+            forked_from: None,
+        },
+    )
+    .unwrap();
+    segs::record_session(gfs, PARENT, &id, sid, 1_001).unwrap();
+    tmp
+}
+
+fn fork_holding(sid: &str) -> PersistentSubprocessController {
+    let c = PersistentSubprocessController::new("tab".into(), "block".into(), None, None, Some(store_with_fork()), None);
+    c.inner.lock().unwrap().session_id = Some(sid.to_string());
+    c
+}
+
+/// The fork works in its own directory, where the CLI can't find the
+/// parent's session: the gate copies it in and forks from the copy.
+#[test]
+fn a_forks_first_spawn_copies_the_conversation_it_was_forked_from() {
+    let f = fixture(&[]);
+    let _key = sign_in(&f, "acc-1", "org-1");
+    let parent = parent_with_session(&f.gfs, "acc-1", "org-1", "p1");
+    let c = fork_holding("p1");
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+
+    assert_eq!(held(&c).as_deref(), Some("p1"));
+    let inner = c.inner.lock().unwrap();
+    let copy = inner.fork_copy.clone().expect("a copy to fork from").copy;
+    assert_eq!(copy, here(&f, "p1"));
+    assert!(inner.fork_next, "resumed with --fork-session, so the parent's session is never written");
+    let original = parent.path().join("projects").join(crate::backend::claude_layout::project_dir_name(PARENT_WORK)).join("p1.jsonl");
+    assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(original).unwrap());
+}
+
+#[test]
+fn a_fork_under_another_identity_copies_nothing() {
+    let f = fixture(&[]);
+    let _key = sign_in(&f, "acc-1", "org-team");
+    let _parent = parent_with_session(&f.gfs, "acc-1", "org-personal", "p1");
+    let c = fork_holding("p1");
+    c.apply_resume_gate_with(&f.config, Some(&f.gfs), None);
+    assert!(c.inner.lock().unwrap().fork_copy.is_none());
+    assert!(!here(&f, "p1").exists(), "nothing copied");
+}

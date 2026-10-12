@@ -148,6 +148,8 @@ impl PersistentSubprocessController {
             tracing::info!(target: "continuity", block_id = %self.block_id, swept, "resume gate: removed relocated copies a dead spawn left");
         }
         let head = segs::chain_head(gfs, uid).map(segs::with_legacy_identity);
+        // A fork with no chain of its own starts from the agent it was forked from.
+        let fork_source = if head.is_none() { self.mstore.as_deref().and_then(|s| segs::fork_source_head(s, gfs, uid)) } else { None };
         let identity = crate::identity::account_email::identity_key_from_oauth_dir("claude", config_dir);
         let input = segs::GateInput {
             candidate: &candidate,
@@ -156,15 +158,22 @@ impl PersistentSubprocessController {
             poisoned: poisoned.as_deref(),
             config_dir,
             cwd,
+            fork_source: fork_source.as_ref(),
         };
         let decision = segs::resume_gate(
             &input,
             |sid| provider_file_size(config_dir, cwd, sid),
-            |dir, sid| {
-                crate::backend::continuity_relocate::source_file(dir, cwd, sid)
+            |dir, at_cwd, sid| {
+                crate::backend::continuity_relocate::source_file(dir, at_cwd, sid)
                     .is_some_and(|p| crate::backend::continuity_relocate::is_resumable_file(&p))
             },
         );
+        // Copy a session file in from where it was recorded, for `--fork-session`.
+        let place = |from_config_dir: &str, from_cwd: &str, head: &str| {
+            crate::backend::continuity_relocate::source_file(from_config_dir, from_cwd, head)
+                .ok_or_else(|| "source gone".to_string())
+                .and_then(|src| crate::backend::continuity_relocate::relocate(&src, config_dir, cwd, head, uid))
+        };
         let refuse = |head: &str, why: &str| {
             tracing::info!(
                 target: "continuity",
@@ -176,7 +185,7 @@ impl PersistentSubprocessController {
             );
             (None, None, false)
         };
-        if relocate_only && !matches!(decision, segs::ResumeGate::Relocate { .. }) {
+        if relocate_only && !matches!(decision, segs::ResumeGate::Relocate { .. } | segs::ResumeGate::ForkFrom { .. }) {
             return;
         }
         let (next, fork_copy, fork) = match decision {
@@ -203,10 +212,7 @@ impl PersistentSubprocessController {
             }
             segs::ResumeGate::Refuse { head } => refuse(&head, "out of reach, or another identity's"),
             segs::ResumeGate::Relocate { head, from_config_dir } => {
-                let placed = crate::backend::continuity_relocate::source_file(&from_config_dir, cwd, &head)
-                    .ok_or_else(|| "source gone".to_string())
-                    .and_then(|src| crate::backend::continuity_relocate::relocate(&src, config_dir, cwd, &head, uid));
-                match placed {
+                match place(&from_config_dir, cwd, &head) {
                     Ok(copy) => {
                         tracing::info!(
                             target: "continuity",
@@ -221,6 +227,19 @@ impl PersistentSubprocessController {
                     Err(e) => refuse(&head, &format!("relocation failed: {e}")),
                 }
             }
+            segs::ResumeGate::ForkFrom { head, from_config_dir, from_cwd } => match place(&from_config_dir, &from_cwd, &head) {
+                Ok(copy) => {
+                    tracing::info!(
+                        target: "continuity",
+                        block_id = %self.block_id,
+                        head = %head,
+                        from = %from_config_dir,
+                        "resume gate: a fork's first spawn; copied the conversation it was forked from to fork from"
+                    );
+                    (Some(head), Some(copy), true)
+                }
+                Err(e) => refuse(&head, &format!("copying the conversation it was forked from failed: {e}")),
+            },
         };
         {
             let mut inner = self.inner.lock().unwrap();
