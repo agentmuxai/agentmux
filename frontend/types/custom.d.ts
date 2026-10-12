@@ -460,6 +460,10 @@ declare global {
             screenY: number
         ) => Promise<void>;
         cancelCrossDrag: (dragId: string) => Promise<void>;
+        /** Linux: this window took a cross-window drop (its own DOM `drop`),
+         *  so the host answers it as the drag's target. Optional: a host
+         *  without cross-window drags (the web) leaves it out. */
+        claimCrossDragTarget?: (windowLabel: string) => Promise<void>;
         /** Cold-path tear-off / new top-level. `width`/`height` set the
          *  outer window dimensions when matching the source window's
          *  size on tab tear-off; omit for the historical default.

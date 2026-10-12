@@ -17,6 +17,7 @@ import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { markEscaped, onSessionEnded, session } from "@/app/drag/drag-session";
 import { onWindowDrag } from "@/app/drag/window-drag-events";
+import { maybeDroppedInAnotherWindow } from "@/app/drag/foreign-drop";
 import { endedByEscape } from "@/app/drag/native-cancel";
 import { endTileDrag } from "@/layout/lib/tile-drag";
 import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
@@ -185,6 +186,17 @@ export function useTabDragAndDrop(
                 endEffect = undefined;
                 const maybeCancelled = nativeEffect === "none";
                 endWindowTabDrag("drop");
+
+                // Linux: dropped onto another window, maybe. Not this window's
+                // release to act on; the cross-window drag-end decides
+                // (foreign-drop.ts), so leave the payload for it.
+                if (!escaped && maybeDroppedInAnotherWindow(nativeEffect)) {
+                    setInsertionPoint(null);
+                    Logger.info("dnd", "tab released outside this window; the cross-window drag-end decides", {
+                        draggedTabId: source.data.tabId,
+                    });
+                    return;
+                }
 
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;

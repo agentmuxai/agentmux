@@ -389,6 +389,7 @@ async fn route_command(
         "update_cross_drag" => commands::drag::update_cross_drag(state, args),
         "complete_cross_drag" => commands::drag::complete_cross_drag(state, args),
         "cancel_cross_drag" => commands::drag::cancel_cross_drag(state, args),
+        "claim_cross_drag_target" => commands::drag::claim_cross_drag_target(args),
         "get_cursor_point" => commands::drag::get_cursor_point(),
         "get_mouse_button_state" => commands::drag::get_mouse_button_state(),
         "set_drag_cursor" => commands::drag::set_drag_cursor(),

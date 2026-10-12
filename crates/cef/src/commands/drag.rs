@@ -196,9 +196,40 @@ fn hit_test_windows(state: &Arc<AppState>, screen_x: f64, screen_y: f64) -> Opti
     crate::commands::tear_off_hook::window_label_at(state, &browsers, screen_x.round() as i32, screen_y.round() as i32)
 }
 
+/// Linux/macOS: the window that last took a cross-window drop, from its own
+/// DOM `drop` (`claim_cross_drag_target`), and when. There's no window hit
+/// test off Windows; native Wayland gives no client its windows' positions.
+#[cfg(not(target_os = "windows"))]
+static CLAIMED_DROP_TARGET: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// How long a claim stays good for the drag-end that asks for it.
+#[cfg(not(target_os = "windows"))]
+const CLAIM_FRESH: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A window took a cross-window drop (frontend `foreign-drop.ts`): the next
+/// `update_cross_drag` answers it as the target. A no-op on Windows, which
+/// hit-tests windows directly.
+pub fn claim_cross_drag_target(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("windowLabel")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing windowLabel".to_string())?;
+    #[cfg(not(target_os = "windows"))]
+    {
+        tracing::info!(target: "dnd:cross", window_label = %label, "[dnd:cef] cross-window drop claimed");
+        *CLAIMED_DROP_TARGET.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((label.to_string(), std::time::Instant::now()));
+    }
+    #[cfg(target_os = "windows")]
+    let _ = label;
+    Ok(serde_json::Value::Null)
+}
+
+/// Off Windows: the window that claimed the drop, once, if the claim is fresh.
 #[cfg(not(target_os = "windows"))]
 fn hit_test_windows(_state: &Arc<AppState>, _screen_x: f64, _screen_y: f64) -> Option<String> {
-    None
+    let claim = CLAIMED_DROP_TARGET.lock().unwrap_or_else(|e| e.into_inner()).take();
+    claim.filter(|(_, at)| at.elapsed() < CLAIM_FRESH).map(|(label, _)| label)
 }
 
 /// Get the current cursor position on screen.

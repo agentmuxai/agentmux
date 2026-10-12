@@ -484,6 +484,9 @@ export function buildCefApi(): AppApi {
         cancelCrossDrag: async (dragId: string) => {
             await invokeCommand("cancel_cross_drag", { dragId });
         },
+        claimCrossDragTarget: async (windowLabel: string) => {
+            await invokeCommand("claim_cross_drag_target", { windowLabel });
+        },
         openWindowAtPosition: async (
             screenX: number,
             screenY: number,
