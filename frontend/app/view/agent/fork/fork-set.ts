@@ -161,3 +161,23 @@ export function computeForkSet(
 
     return out;
 }
+
+/** One pill in a pane's tab strip for a fork open in another pane. */
+export interface ForkPill {
+    blockId: string;
+    label: string;
+}
+
+/**
+ * The fork set's pills for one pane: each fork open in a pane of the same
+ * window tab, `inThisWindowTab` telling which blocks those are (the pane's own
+ * stack members are deduped by the strip). A fork open in another window tab
+ * gets no pill: drawn here it looked like a tab of this pane, its click
+ * switched window tabs and its × did nothing
+ * (the fork-isolation report in #4744, F1).
+ */
+export function forkPills(forks: ReadonlyArray<ForkSetEntry>, inThisWindowTab: (blockId: string) => boolean): ForkPill[] {
+    return forks
+        .filter((f): f is ForkSetEntry & { blockId: string } => !!f.blockId && inThisWindowTab(f.blockId))
+        .map((f) => ({ blockId: f.blockId, label: f.title }));
+}
