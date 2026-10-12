@@ -42,7 +42,7 @@ v0.33.435:
 | **Pool windows leak to taskbar** (Phase 6 incomplete) | Promote path clears `WS_EX_TOOLWINDOW` then `SetWindowPos(SWP_FRAMECHANGED)` then `ShowWindow` — Windows requires hide→show *cycle* to refresh the taskbar after a style change. (`window_pool.rs:440`) |
 | **Instance count inflates after tear-off crash** | `WindowInstanceRegistry::register()` happens at promote, but `unregister()` is also called from `on_pool_window_destroyed()` on labels that were never registered → silent no-op + leaked instance number. (`window_pool.rs:245-274`, `client.rs:307`) |
 | **Tab visible in window A but missing in window B** | Frontend ↔ srv state sync over WPS WebSocket is best-effort; no version stamping, no resync on reconnect. (`frontend/store/global.ts:66-75`) |
-| **InstancePanel flickers / shows wrong count** | Frontend polls `list_windows()` every 50ms × 6 after a count-changed event; no per-label event stream from host. (`frontend/app-init.ts:120-160`) |
+| **InstancePanel flickers / shows wrong count** | Frontend polls `list_windows()` every 50ms × 6 after a count-changed event; no per-label event stream from host. ([`frontend/app-init.ts:120-160`](../../frontend/app-init.ts)) |
 | **Burst tear-offs empty the pool** | `window_pool_respawn_in_flight: AtomicBool` is `swap(true)` on spawn-start, released on render-ready, not on spawn-complete; second spawn may see stale `false` mid-flight. (`window_pool.rs:239-241`) |
 
 Common thread: **no single owner of "what windows and processes exist right
@@ -594,7 +594,7 @@ Codebase mapping (2026-04-27, AgentC Explore agent):
   `commands/window_pool.rs:1-525`
 - `agentmux-launcher/src/main.rs:1-158`
 - `agentmux-srv/src/main.rs:28-236`
-- `frontend/app-init.ts:120-160`, `app/init/pool.ts:17-75`,
+- [`frontend/app-init.ts:120-160`](../../frontend/app-init.ts), `app/init/pool.ts:17-75`,
   `app/statusbar/InstancePanel.tsx:1-180`
 
 Best-practice prior art (2026-04-27, research agent):

@@ -115,7 +115,7 @@ Currently a three-slot layout (header, log, action-bar). Add a **fourth slot bel
 
 ### B. Suppress `NodeHoverStrip` for tool nodes
 
-In `frontend/app/view/agent/components/AgentDocumentView.tsx` (or wherever the strip is rendered), gate on `node.type !== "tool"`:
+In [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) (or wherever the strip is rendered), gate on `node.type !== "tool"`:
 
 ```tsx
 <Show when={node.type !== "tool"}>
@@ -144,7 +144,7 @@ Keep the inline `(0.3s)` next to the tool name in the collapsed row. It's not "t
 
 ## 5. Hover delay (the user's other question)
 
-Today: 150ms enter delay, 300ms leave delay (per `docs/specs/tool-collapse.md`).
+Today: 150ms enter delay, 300ms leave delay (per [`docs/specs/tool-collapse.md`](tool-collapse.md)).
 
 The 150ms is the spec'd value — "prevents flicker on scroll-through". Rationale:
 
@@ -162,7 +162,7 @@ If the user finds 150ms too slow on a deliberate hover: lower it to **80ms** (th
 
 ### Step 1 — `ToolBlockOverlay` footer
 
-`frontend/app/view/agent/components/ToolBlockOverlay.tsx`:
+[`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx):
 
 - Add a `timestamp?: number` prop (Unix ms).
 - Render a new `.agent-tool-overlay-footer` `<div>` below the action bar when `timestamp != null`.
@@ -171,7 +171,7 @@ If the user finds 150ms too slow on a deliberate hover: lower it to **80ms** (th
 
 ### Step 2 — `ToolBlock` passes timestamp through
 
-`frontend/app/view/agent/components/ToolBlock.tsx`:
+[`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx):
 
 - Add `timestamp?: number` to `ToolBlockProps`.
 - Forward to `ToolBlockOverlay`.
@@ -218,10 +218,10 @@ Should the **footer also show the `tool_use_id`** for power users who want to gr
 
 Single PR. Touches:
 
-- `frontend/app/view/agent/components/ToolBlockOverlay.tsx` (+~30 lines)
-- `frontend/app/view/agent/components/ToolBlock.tsx` (+~5 lines for prop forwarding)
+- [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) (+~30 lines)
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) (+~5 lines for prop forwarding)
 - `frontend/app/view/agent/components/ToolOverlayActions.tsx` (–~10 lines for bookmark removal)
-- `frontend/app/view/agent/components/AgentDocumentView.tsx` (+~3 lines for Show gate)
+- [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) (+~3 lines for Show gate)
 - `frontend/app/view/agent/styles/_tool-overlay.scss` (+~15 lines for footer styles)
 - Tests as listed in §6 step 6
 

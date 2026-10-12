@@ -56,7 +56,7 @@ All new kinds use `size="md"` (520 px) or `size="lg"` (720 px) depending on cont
 
 ### 2.3 Implementation — modal-layer.ts
 
-Add to `ModalLayerRequest` union in `frontend/app/element/modal-layer.ts`:
+Add to `ModalLayerRequest` union in [`frontend/app/element/modal-layer.ts`](../../../frontend/app/element/modal-layer.ts):
 
 ```typescript
 | { kind: "trust-center-account-detail"; accountId: string }
@@ -74,7 +74,7 @@ Add `requestLabel` and `renderRequest` cases. Each case renders the matching pan
 
 1. Remove the `accounts-chooser-overlay` `<div>` (and its `position: fixed` SCSS).
 2. Remove the inline `AccountForm` conditional render.
-3. Replace both with `openModal()` calls (import from `frontend/app/store/modalmodel.ts`).
+3. Replace both with `openModal()` calls (import from [`frontend/app/store/modalmodel.ts`](../../../frontend/app/store/modalmodel.ts)).
 4. Extract `AccountDetailPanel` and `AccountFormPanel` as standalone panel components to `frontend/app/modals/trust-center/`.
 5. Repeat the same extraction for `AgentMuxConnectPanel`.
 
@@ -399,8 +399,8 @@ Memory is written to the **host filesystem** in all cases (via `memory_dir_for_c
 | File | Role |
 |---|---|
 | `frontend/app/modals/bundle-manager-modal.tsx` | Trust Center root — contains AccountsManager, IdentityManager, MemoryManager |
-| `frontend/app/element/modal-layer.ts` | `ModalLayerRequest` union — add new kinds here |
-| `frontend/app/element/modal-dispatch.tsx` | `requestLabel` + `renderRequest` switch — add cases here |
+| [`frontend/app/element/modal-layer.ts`](../../../frontend/app/element/modal-layer.ts) | `ModalLayerRequest` union — add new kinds here |
+| [`frontend/app/element/modal-dispatch.tsx`](../../../frontend/app/element/modal-dispatch.tsx) | `requestLabel` + `renderRequest` switch — add cases here |
 | `frontend/app/modals/trust-center/` | New dir for extracted panel components |
 | `agentmux-srv/src/backend/storage/identities.rs` | Identity CRUD (Rust) |
 | `agentmux-srv/src/server/native_memory_handlers.rs` | Memory RPCs (Rust, complete) |

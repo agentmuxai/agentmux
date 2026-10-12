@@ -141,8 +141,8 @@ After `task dev` is running, test:
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/blockframe.tsx` | Remove `numBlocks`, `numBlocksInTab` prop, `block-no-highlight` class |
-| `frontend/app/block/blocktypes.ts` | Remove `numBlocksInTab?: number` |
-| `frontend/app/block/block.scss` | Remove `block-no-highlight` + `block-preview` CSS suppression rule |
-| `frontend/layout/lib/layoutFocus.ts` | Add bootstrap path in `validateFocusedNode` |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Remove `numBlocks`, `numBlocksInTab` prop, `block-no-highlight` class |
+| [`frontend/app/block/blocktypes.ts`](../../frontend/app/block/blocktypes.ts) | Remove `numBlocksInTab?: number` |
+| [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss) | Remove `block-no-highlight` + `block-preview` CSS suppression rule |
+| [`frontend/layout/lib/layoutFocus.ts`](../../frontend/layout/lib/layoutFocus.ts) | Add bootstrap path in `validateFocusedNode` |
 | `frontend/app/drag/DragOverlay.tsx` | Call `deleteLayoutModelForTab` after successful tab move |

@@ -3,13 +3,13 @@
 **Status:** Draft v2 (supersedes v1)
 **Author:** agent2
 **Date:** 2026-05-11
-**Scope:** `settings-template.jsonc`, `schema/settings.json`, `agentmux-srv/src/backend/wconfig/types.rs`, all frontend gotypes consumers.
+**Scope:** `settings-template.jsonc`, [`schema/settings.json`](../../schema/settings.json), `agentmux-srv/src/backend/wconfig/types.rs`, all frontend gotypes consumers.
 
 ---
 
 ## Problem (Updated)
 
-The first version of this spec only addressed *drift* (keys in code missing from the template). After a re-audit that distinguishes **declared** keys (in `wconfig/types.rs` / `schema/settings.json`) from **read** keys (i.e. something actually accesses them at runtime), the picture is much worse:
+The first version of this spec only addressed *drift* (keys in code missing from the template). After a re-audit that distinguishes **declared** keys (in `wconfig/types.rs` / [`schema/settings.json`](../../schema/settings.json)) from **read** keys (i.e. something actually accesses them at runtime), the picture is much worse:
 
 - **The `ai:*` namespace is waveterm leftover.** Zero call sites read any `ai:*` setting. AgentMux's agent pane stores its config in `db_forge_agents` / `db_memory_bundles`, not these keys.
 - **`autoupdate:*` is not implemented.** No code path reads any `autoupdate:*` field; there is no updater wired up.
@@ -29,12 +29,12 @@ The single-line summary: of 54 keys in `settings-template.jsonc`, **only 19 are 
 For every key declared on `SettingsType`, count call sites that **read** it:
 
 1. Direct string lookup: `"window:theme"`, `settings?.["term:fontsize"]`, etc.
-2. Atom accessor: `getSettingsKeyAtom("...")` in `frontend/app/store/global.ts`.
+2. Atom accessor: `getSettingsKeyAtom("...")` in [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts).
 3. Rust struct field access: `settings.term_fontsize`, etc.
 
 Excluded from the count: declarations in `types.rs`, schema files, gotypes.d.ts, test fixtures in `wconfig/mod.rs`, the template itself.
 
-Files searched: `agentmux-srv/`, `agentmux-cef/`, `frontend/`, `agentmux-common/`.
+Files searched: `agentmux-srv/`, `agentmux-cef/`, [`frontend/`](../../frontend), `agentmux-common/`.
 
 ---
 
@@ -160,7 +160,7 @@ widget:showhelp
 
 #### C7. Wrong file: `conn:*`
 
-`conn:wshenabled` and `conn:askbeforewshinstall` live in `schema/connections.json` — per-connection properties, not global settings. They appear in `settings-template.jsonc` but have no `SettingsType` field. Remove from the template.
+`conn:wshenabled` and `conn:askbeforewshinstall` live in [`schema/connections.json`](../../schema/connections.json) — per-connection properties, not global settings. They appear in `settings-template.jsonc` but have no `SettingsType` field. Remove from the template.
 
 ---
 
@@ -245,9 +245,9 @@ Three PRs, each independently shippable.
 ### PR 1 — Remove dead namespaces (`ai:*`, `autoupdate:*`, `editor:*`, `markdown:*`)
 
 1. Delete fields from `agentmux-srv/src/backend/wconfig/types.rs`.
-2. Delete entries from `schema/settings.json`.
+2. Delete entries from [`schema/settings.json`](../../schema/settings.json).
 3. Delete from `settings-template.jsonc`.
-4. Regenerate / hand-edit `frontend/types/gotypes.d.ts` to drop the keys (find the generation step in `build/` or `tools/`).
+4. Regenerate / hand-edit `frontend/types/gotypes.d.ts` to drop the keys (find the generation step in [`build/`](../../build) or [`tools/`](../../tools)).
 5. `cargo check && task build:frontend` to verify no consumer remains. Any compile error is a missed read site — investigate before removing.
 6. Update `wconfig/mod.rs` test fixtures that reference these keys.
 
@@ -278,7 +278,7 @@ Before merging, walk through `window:savelastwindow`, `window:dimensions`, `wind
 
 ## Schema-Side Cleanups (Bundled With PR 1)
 
-`schema/settings.json` will need:
+[`schema/settings.json`](../../schema/settings.json) will need:
 - Drop the `<namespace>:*` boolean wildcard entries for namespaces that are removed entirely.
 - Drop per-key entries removed above.
 - Add a `description` field per remaining key (one sentence). The modal (see `specs/settings-modal.md`) consumes these as tooltips, so getting them in during the cleanup avoids a follow-up touch.

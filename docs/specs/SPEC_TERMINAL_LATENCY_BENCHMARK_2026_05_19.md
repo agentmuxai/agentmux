@@ -3,7 +3,7 @@
 **Status:** Implemented — #926
 **Date:** 2026-05-19
 **Owner:** AgentY
-**Tracking:** PR #926 (writeInFlight fix), `tools/tests/bench-term-echo.mjs`
+**Tracking:** PR #926 (writeInFlight fix), [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs)
 
 ---
 
@@ -29,7 +29,7 @@ The benchmark was written to:
 
 ### 2.1 The fix — `termwrap.ts:scheduleRafWrite()`
 
-`frontend/app/view/term/termwrap.ts` schedules xterm.js writes two ways:
+[`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) schedules xterm.js writes two ways:
 
 - **Fast path** (`data.length ≤ 512 B, rafBuffer empty`): calls
   `terminal.write()` immediately, bypassing the RAF coalescing timer.
@@ -158,9 +158,9 @@ Full format documented in `SPEC_TEST_API_ACCESS.md` §5.
 | File | Purpose |
 |---|---|
 | ~~`scripts/bench-cdp.mjs`~~ | *(removed — scripts cleanup 2026-06-18)* |
-| `scripts/benchmarks/` | Startup time + memory + bundle size |
-| `tools/tests/authfile.ps1` | PowerShell helper to read `authkey.dev` |
-| `tools/tests/pane-focus-stress.ps1` | App API harness via service endpoint |
+| [`scripts/benchmarks/`](../../scripts/benchmarks) | Startup time + memory + bundle size |
+| [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1) | PowerShell helper to read `authkey.dev` |
+| [`tools/tests/pane-focus-stress.ps1`](../../tools/tests/pane-focus-stress.ps1) | App API harness via service endpoint |
 
 ---
 
@@ -330,8 +330,8 @@ This is left to a follow-up PR once baselines are established.
 
 - `SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md` — overall perf strategy, INP targets
 - `SPEC_TEST_API_ACCESS.md` — authkey.dev format, security model
-- `tools/tests/README.md` — test harness documentation
-- `tools/tests/authfile.ps1` — PowerShell equivalent helper
+- [`tools/tests/README.md`](../../tools/tests/README.md) — test harness documentation
+- [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1) — PowerShell equivalent helper
 - ~~`scripts/bench-cdp.mjs`~~ — removed (scripts cleanup 2026-06-18)
-- `frontend/app/view/term/termwrap.ts` — the fixed code
+- [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) — the fixed code
 - PR #926 — writeInFlight fix + perf marks

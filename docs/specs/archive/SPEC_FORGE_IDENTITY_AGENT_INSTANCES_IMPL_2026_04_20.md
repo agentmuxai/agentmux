@@ -100,7 +100,7 @@ ALTER TABLE db_forge_agents DROP COLUMN accounts;
 
 ### Forge seed update
 
-`scripts/gen-seed.js` + regenerated `agentmux-srv/forge-seed.json`:
+[`scripts/gen-seed.js`](../../../scripts/gen-seed.js) + regenerated `agentmux-srv/forge-seed.json`:
 
 - Default agents (agentx/y/z) get `parent_id = null`, `branch_label = null`.
 - No `accounts` field.
@@ -229,8 +229,8 @@ pub struct ForgeAgentIdentity {
 
 ### Files
 
-- `frontend/app/view/identity/identity-model.ts` — swap `localStorage` reads/writes for `RpcApi.UpsertIdentityAccountCommand` / `ListIdentityAccountsCommand` / etc.
-- `frontend/app/view/identity/identity-model.test.ts` — update tests; mock `RpcApi` instead of `localStorage`.
+- [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts) — swap `localStorage` reads/writes for `RpcApi.UpsertIdentityAccountCommand` / `ListIdentityAccountsCommand` / etc.
+- [`frontend/app/view/identity/identity-model.test.ts`](../../../frontend/app/view/identity/identity-model.test.ts) — update tests; mock `RpcApi` instead of `localStorage`.
 - `frontend/types/gotypes.d.ts` — add TS types matching Rust structs (`IdentityAccount`, `SecretRef`, `AgentInstance`, `InstanceStatus`, `GitHubContext`, `ForgeAgentIdentity`).
 - `frontend/app/store/rpc-api.ts` — bind the new commands.
 
@@ -245,7 +245,7 @@ pub struct ForgeAgentIdentity {
 
 ### Files
 
-- `frontend/app/view/agent/agent-model.ts` — in `launchAgent`, after the block has its CLI metadata set, call `createAgentInstance({ definition_id: agentId, block_id: this.blockId })` and stash the returned `instance.id` into block meta as `agentInstanceId`.
+- [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts) — in `launchAgent`, after the block has its CLI metadata set, call `createAgentInstance({ definition_id: agentId, block_id: this.blockId })` and stash the returned `instance.id` into block meta as `agentInstanceId`.
 - Hook controller status changes (`controllerstatus` events) to call `updateAgentInstance` with new `status`.
 - On agent stop / pane close, call `updateAgentInstance({ id, status: "stopped", ended_at: now() })`.
 
@@ -339,17 +339,17 @@ Bundle is gzip-compressed JSON encoded as base64 in the RPC payload (small enoug
 |---|---|---|
 | `agentmux-srv/src/backend/storage/migrations.rs` | 1 | Add migration v6 |
 | `agentmux-srv/forge-seed.json` | 1 | Drop `accounts` field, add `parent_id`/`branch_label` (null) |
-| `scripts/gen-seed.js` | 1 | Match seed schema |
+| [`scripts/gen-seed.js`](../../../scripts/gen-seed.js) | 1 | Match seed schema |
 | `agentmux-srv/src/backend/storage/wstore.rs` | 2 | New CRUD methods, struct definitions |
 | `agentmux-srv/src/backend/obj.rs` | 2 | New structs (`IdentityAccount`, `AgentInstance`, `ForgeAgentIdentity`); update `ForgeAgent` |
 | `agentmux-srv/src/backend/rpc_types.rs` | 3 | Command constants + payload structs |
 | `agentmux-srv/src/server/forge_handlers.rs` | 3 | Implement handlers (or split into `identity_handlers.rs` + `instance_handlers.rs`) |
 | `agentmux-srv/src/server/websocket.rs` | 3 | Register handlers |
-| `frontend/app/view/identity/identity-model.ts` | 4 | Swap localStorage for RPC |
-| `frontend/app/view/identity/identity-model.test.ts` | 4 | Update tests |
+| [`frontend/app/view/identity/identity-model.ts`](../../../frontend/app/view/identity/identity-model.ts) | 4 | Swap localStorage for RPC |
+| [`frontend/app/view/identity/identity-model.test.ts`](../../../frontend/app/view/identity/identity-model.test.ts) | 4 | Update tests |
 | `frontend/types/gotypes.d.ts` | 4 | TS types |
 | `frontend/app/store/rpc-api.ts` | 4 | Bind new commands |
-| `frontend/app/view/agent/agent-model.ts` | 5 | Create/update instance on launch/stop |
+| [`frontend/app/view/agent/agent-model.ts`](../../../frontend/app/view/agent/agent-model.ts) | 5 | Create/update instance on launch/stop |
 | `frontend/app/view/agent/components/AgentDefinitionMenu.tsx` | 6 | Fork action |
 | `frontend/app/view/agent/components/AgentLineageView.tsx` | 6 | New component |
 | `frontend/app/view/identity/IdentityPanel.tsx` | 7 | Export/import buttons |

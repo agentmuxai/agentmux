@@ -7,7 +7,7 @@
 > controller (`agentmux-srv/src/backend/blockcontroller/persistent.rs`),
 > foundational to how the app runs today.
 > Badly stale status for long-shipped, load-bearing code. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
 ## Summary
 
@@ -261,9 +261,9 @@ until their stdin streaming support is verified.
 |------|--------|
 | `agentmux-srv/src/backend/blockcontroller/mod.rs` | Register new controller type |
 | `agentmux-srv/src/server/websocket.rs` | Route agentinput to send_message() |
-| `frontend/app/view/agent/agent-model.ts` | Set controller type, update launchArgs |
-| `frontend/app/view/agent/providers/index.ts` | Add persistent-mode launchArgs |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | Allow send during streaming |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Set controller type, update launchArgs |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Add persistent-mode launchArgs |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | Allow send during streaming |
 
 ## Testing
 

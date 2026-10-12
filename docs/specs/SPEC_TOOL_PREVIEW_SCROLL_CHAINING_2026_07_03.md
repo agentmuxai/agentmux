@@ -4,9 +4,9 @@
 **Status:** active — Phase 1 shipped (d190dff7 / #1956) and found insufficient by live
 reproduction on 2026-07-04; Phase 2 implemented same day. See "Addendum"
 at the bottom. — #1963
-**Related:** `docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md` (owns
+**Related:** [`docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`](PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md) (owns
 `AgentDocumentVirtualList.handleScroll` — this spec must not fight its stick-to-bottom
-gating), `frontend/app/view/agent/components/ToolBlock.tsx` (existing Ctrl+wheel zoom
+gating), [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) (existing Ctrl+wheel zoom
 handler on the same element tree — must keep working unmodified).
 
 ---
@@ -34,9 +34,9 @@ behavior — standard on the modern web (chat apps, code review tools, IDE panel
 
 | Element | File | Has `overscroll-behavior`? | Has scroll-boundary JS? |
 |---|---|---|---|
-| Outer pane `.agent-document` | `frontend/app/view/agent/styles/_document.scss:8-32` | **No** | `onScroll` exists (`AgentDocumentVirtualList.tsx:696`) but it's for stick-to-bottom/pagination/tool-collapse, not chaining |
-| Primary tool scroller `.agent-tool-overlay-log` | `frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-39` | **Yes** — `overscroll-behavior: contain` already set | `onScroll` for stick-to-bottom only (`ToolOverlayLog.tsx:99-103`) |
-| ~10 secondary nested boxes (diff/read/search/compact-json/fetch previews) | `frontend/app/view/agent/styles/_document-nodes.scss` (lines ~376, 635, 919, 1118, 1172, 1229, 1243, 1285, ~1475, 1544) | **No** | No |
+| Outer pane `.agent-document` | [`frontend/app/view/agent/styles/_document.scss:8-32`](../../frontend/app/view/agent/styles/_document.scss) | **No** | `onScroll` exists (`AgentDocumentVirtualList.tsx:696`) but it's for stick-to-bottom/pagination/tool-collapse, not chaining |
+| Primary tool scroller `.agent-tool-overlay-log` | [`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-39`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | **Yes** — `overscroll-behavior: contain` already set | `onScroll` for stick-to-bottom only (`ToolOverlayLog.tsx:99-103`) |
+| ~10 secondary nested boxes (diff/read/search/compact-json/fetch previews) | [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) (lines ~376, 635, 919, 1118, 1172, 1229, 1243, 1285, ~1475, 1544) | **No** | No |
 | `.agent-recent-sessions` (unrelated picker) | `_recent-sessions.scss:65-68` | Yes, `contain` | — |
 
 So the primary tool-preview scroller already opted into `contain`, but every *secondary*
@@ -98,7 +98,7 @@ relevant if any JS boundary-check is ever needed):
 
 Add `overscroll-behavior: contain` (or `overscroll-behavior-y: contain` where the box is
 vertical-only) to every currently-uncontained nested scroll box in
-`frontend/app/view/agent/styles/_document-nodes.scss`:
+[`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss):
 
 - `.agent-tool-agent-result` (~line 376)
 - `.agent-tool-read-content` (~line 635)
@@ -108,7 +108,7 @@ vertical-only) to every currently-uncontained nested scroll box in
 - `.agent-fetch-content` (~line 1475)
 
 Also add it to the **outer pane**, `.agent-document`
-(`frontend/app/view/agent/styles/_document.scss:8-32`) and its wrapper
+([`frontend/app/view/agent/styles/_document.scss:8-32`](../../frontend/app/view/agent/styles/_document.scss)) and its wrapper
 `.pane-region--stream` (`PaneRegions.scss:18-25`). This isn't strictly required for the
 inner-preview-to-outer-pane handoff (the *inner* box's `contain` is what stops the chain
 from leaving the inner box), but it stops the chain from leaving `.agent-document` itself
@@ -155,9 +155,9 @@ unnecessary given CEF's fixed, modern Chromium.
 
 ## Edits (Phase 1)
 
-1. `frontend/app/view/agent/styles/_document-nodes.scss` — add
+1. [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) — add
    `overscroll-behavior: contain;` to the ~10 nested scroll-box selectors listed above.
-2. `frontend/app/view/agent/styles/_document.scss` — add to `.agent-document`.
+2. [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) — add to `.agent-document`.
 3. `frontend/app/view/agent/components/PaneRegions.scss` — **skipped**: `.pane-region--stream`
    is `overflow: hidden`, not an actual scroll container, so the property would be an inert
    no-op there (see Risks table below).
@@ -189,7 +189,7 @@ unnecessary given CEF's fixed, modern Chromium.
 
 ## Addendum (2026-07-04): Phase 1 was insufficient — this was a dead zone, not a jerk
 
-A same-day double-scrollbar fix (`frontend/app/view/agent/styles/_document-nodes.scss`)
+A same-day double-scrollbar fix ([`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss))
 removed the `max-height`/`overflow-y` from the ~8 secondary nested boxes this spec
 targeted (they shouldn't have been independently scrollable in the first place — that was
 the actual cause of the double-scrollbar bug). That left exactly one tool-preview scroll

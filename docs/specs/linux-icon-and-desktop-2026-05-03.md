@@ -13,7 +13,7 @@ The AgentMux icon shown in the GNOME taskbar/dock (and Activities overview, alt-
 
 1. **`task dev`** — the development binary launches with no icon registration; whatever stale `.desktop` exists in `~/.local/share/applications/` is what GNOME uses (currently broken, see below).
 2. **Production / portable bundle runs** (`dist/cef/agentmux-cef`) — same as `task dev`. There is no install step.
-3. **AppImage runs** — there is no current AppImage build (`task package:linux` is `[TODO]`). The legacy AppRun script (`scripts/linux-apprun.sh`) references files that no longer exist in the repo (`AgentMux.desktop`, `AgentMux.png`).
+3. **AppImage runs** — there is no current AppImage build (`task package:linux` is `[TODO]`). The legacy AppRun script ([`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh)) references files that no longer exist in the repo (`AgentMux.desktop`, `AgentMux.png`).
 
 The goal is: **the AgentMux logo appears as the taskbar/dock/launcher icon on Linux for all three run modes, both immediately on first launch and after a reboot, with no manual user action.**
 
@@ -24,7 +24,7 @@ The goal is: **the AgentMux logo appears as the taskbar/dock/launcher icon on Li
 - Source-of-truth icon (`assets/agentmux-logo.png`, 1200×1200) is correct and committed; the **failure is in the registration plumbing** (`.desktop` file and icon-theme install).
 - The currently-installed `~/.local/share/applications/agentmux.desktop` was written by a v0.33.42 AppImage and has `Icon=AgentMux` (capital). The installed icon file is `agentmux.png` (lowercase). Linux icon-theme lookup is case-sensitive → no match → cog fallback.
 - The registration template (`AgentMux.desktop`) and the multi-size icon source were deleted alongside `scripts/build-appimage.sh` during the Tauri→CEF migration. They need to be re-introduced as committed artifacts.
-- Fix surfaces: a committed `.desktop` template, a committed icon source-set (or a generation script), a small `scripts/install-linux-desktop.sh` helper, and Taskfile wiring to invoke it from `task dev`, the (future) `task package:linux`, and `scripts/linux-apprun.sh`.
+- Fix surfaces: a committed `.desktop` template, a committed icon source-set (or a generation script), a small [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) helper, and Taskfile wiring to invoke it from `task dev`, the (future) `task package:linux`, and [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh).
 - Estimated change: 3–4 new files (`.desktop` template, install script, possibly pre-generated icon sizes), ~80 LOC; plus 2–3 Taskfile.yml edits.
 
 ---
@@ -163,7 +163,7 @@ dev:serve:
         # ... rest unchanged ...
 ```
 
-For the `task package:linux` future work (and the existing `scripts/linux-apprun.sh`), the same script is invoked with the AppImage path: `bash scripts/install-linux-desktop.sh "$APPIMAGE"` — replacing the inline icon/desktop logic in `linux-apprun.sh:23-39`.
+For the `task package:linux` future work (and the existing [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh)), the same script is invoked with the AppImage path: `bash scripts/install-linux-desktop.sh "$APPIMAGE"` — replacing the inline icon/desktop logic in `linux-apprun.sh:23-39`.
 
 ### Per-run-mode `Exec=` resolution
 
@@ -171,7 +171,7 @@ For the `task package:linux` future work (and the existing `scripts/linux-apprun
 |---|---|---|
 | `task dev` | `<repo>/dist/cef-dev/agentmux-cef` (the dev session copy created by `dev:serve`) | `task dev:serve` runs `install:linux:desktop` with that path |
 | Direct portable run | `<wherever-bundle-lives>/agentmux-cef` | User runs `bash scripts/install-linux-desktop.sh <path>` once after extracting the bundle |
-| AppImage | `$APPIMAGE` env var (set by AppImage runtime) | `scripts/linux-apprun.sh` calls the installer on first run with `$APPIMAGE` |
+| AppImage | `$APPIMAGE` env var (set by AppImage runtime) | [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) calls the installer on first run with `$APPIMAGE` |
 
 Each mode writes to the **same** `~/.local/share/applications/agentmux.desktop`, so only the most-recently-launched mode "owns" the launcher entry. This is intentional — at any given moment, the user only has one preferred way to launch AgentMux. (The alternative — distinct `.desktop` per mode — multiplies the GNOME Shell entries and confuses the user.)
 
@@ -187,7 +187,7 @@ GNOME Shell reads the icon cache lazily. After `gtk-update-icon-cache` runs, **a
 
 `CLAUDE.md` memory asserts it's `"agentmux"`. The repo has no `set_app_id` / `set_class` call in `agentmux-cef/src/`. CEF on Linux/Ozone defaults to the basename of `argv[0]`, which is `agentmux-cef`, **not** `agentmux`. So either:
 
-- (a) The launcher renames/symlinks the binary to `agentmux` before exec (need to check `scripts/linux-apprun.sh:41` — it execs `usr/bin/agentmux`, suggesting the AppImage stage does install the binary as `agentmux`, not `agentmux-cef`), **or**
+- (a) The launcher renames/symlinks the binary to `agentmux` before exec (need to check [`scripts/linux-apprun.sh:41`](../../scripts/linux-apprun.sh) — it execs `usr/bin/agentmux`, suggesting the AppImage stage does install the binary as `agentmux`, not `agentmux-cef`), **or**
 - (b) The Wayland app_id is actually `agentmux-cef` and `CLAUDE.md` memory is wrong (or describes the AppImage path only), **or**
 - (c) CEF passes a `--class=agentmux` switch internally for some reason.
 
@@ -217,9 +217,9 @@ This spec is Linux-only. macOS uses `.app` bundle's `Info.plist` + `Icon.icns` (
 
 1. **Verify app_id** (Open question 1). Run agentmux, capture `xdg_toplevel.set_app_id` value via a Wayland tracer (`WAYLAND_DEBUG=1 ./agentmux-cef 2>&1 | grep set_app_id`) or by reading what CEF passes. Update spec if app_id ≠ "agentmux".
 2. **Generate the size set** of icons from `assets/agentmux-logo.png` using `convert` for sizes [16, 32, 48, 64, 128, 256, 512]. Commit under `assets/linux/icons/hicolor/...`. Also copy `frontend/logos/agentmux-logo.svg` to `assets/linux/icons/hicolor/scalable/apps/agentmux.svg`.
-3. **Commit the `.desktop` template** at `assets/linux/agentmux.desktop`.
-4. **Add `scripts/install-linux-desktop.sh`** (and `chmod +x`).
-5. **Refactor `scripts/linux-apprun.sh`** to call the new installer instead of the inline cp/sed (keeps a single source of truth).
+3. **Commit the `.desktop` template** at [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop).
+4. **Add [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh)** (and `chmod +x`).
+5. **Refactor [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh)** to call the new installer instead of the inline cp/sed (keeps a single source of truth).
 6. **Wire `Taskfile.yml`** — add `install:linux:desktop` task, invoke from `dev:serve`.
 7. **Migration cleanup of stale state** — the install script's `mv`/overwrite handles the existing broken `agentmux.desktop`. The `ai.agentmux.app.v0-32-{5,6}.desktop` files on this dev machine are orphans pointing to deleted AppImages; they're harmless (don't match app_id) but should be hand-removed by the user (out of repo scope).
 8. **Test plan** (next section).
@@ -231,7 +231,7 @@ This spec is Linux-only. macOS uses `.app` bundle's `Info.plist` + `Icon.icns` (
 For each of the three run modes, on a Linux/Wayland (GNOME) desktop:
 
 - [ ] Verify the installed `~/.local/share/applications/agentmux.desktop` has `Icon=agentmux` (lowercase), `Exec=` matching the run mode's binary path.
-- [ ] Verify `~/.local/share/icons/hicolor/256x256/apps/agentmux.png` exists and md5 matches the source `assets/linux/icons/hicolor/256x256/apps/agentmux.png`.
+- [ ] Verify `~/.local/share/icons/hicolor/256x256/apps/agentmux.png` exists and md5 matches the source [`assets/linux/icons/hicolor/256x256/apps/agentmux.png`](../../assets/linux/icons/hicolor/256x256/apps/agentmux.png).
 - [ ] Launch agentmux. The taskbar/dock entry shows the AgentMux logo (stacked rectangles), not a cog.
 - [ ] Open the Activities overview / app launcher — AgentMux entry shows the logo.
 - [ ] Alt-tab through windows — AgentMux thumbnail shows the logo.
@@ -254,13 +254,13 @@ For each of the three run modes, on a Linux/Wayland (GNOME) desktop:
 ## File-by-file change summary
 
 **New (committed):**
-- `assets/linux/agentmux.desktop` (~12 lines)
+- [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop) (~12 lines)
 - `assets/linux/icons/hicolor/{16,32,48,64,128,256,512}x<N>/apps/agentmux.png` (8 PNG files, generated from `assets/agentmux-logo.png`)
 - `assets/linux/icons/hicolor/scalable/apps/agentmux.svg` (copy of `frontend/logos/agentmux-logo.svg`)
-- `scripts/install-linux-desktop.sh` (~30 lines)
+- [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) (~30 lines)
 
 **Edited:**
-- `scripts/linux-apprun.sh` — replace lines 22-40 with a single call to `install-linux-desktop.sh "$APPIMAGE"`.
+- [`scripts/linux-apprun.sh`](../../scripts/linux-apprun.sh) — replace lines 22-40 with a single call to `install-linux-desktop.sh "$APPIMAGE"`.
 - `Taskfile.yml` — add `install:linux:desktop` task; call from `dev:serve` once before `build:host`.
 
 **No changes to:**
@@ -283,12 +283,12 @@ But it didn't work the obvious way: cef 146.7.0's `From<CefStringUtf16> for _cef
 
 ### 2. Build script for the AppImage was added
 
-The spec said `task package:linux` would stay `[TODO]`. The user wanted an AppImage build — added `scripts/build-appimage-linux.sh` and wired it into `Taskfile.yml`. Layout uses `usr/bin/agentmux` (renamed from `agentmux-cef`) with libcef.so + paks colocated; AppRun sets `LD_LIBRARY_PATH` so the dynamic linker finds libcef.so. `.DirIcon` is a real file copy (not a symlink) per the existing CLAUDE.md AppImage memory.
+The spec said `task package:linux` would stay `[TODO]`. The user wanted an AppImage build — added [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) and wired it into `Taskfile.yml`. Layout uses `usr/bin/agentmux` (renamed from `agentmux-cef`) with libcef.so + paks colocated; AppRun sets `LD_LIBRARY_PATH` so the dynamic linker finds libcef.so. `.DirIcon` is a real file copy (not a symlink) per the existing CLAUDE.md AppImage memory.
 
 ### 3. install-linux-desktop.sh layout-detect
 
-Original spec assumed REPO_ROOT-relative asset paths. Inside an AppImage the script lives at `AppDir/install-linux-desktop.sh` and assets at `AppDir/assets/linux/...` — no `..` parent with an `assets/` dir. Updated the script to try both `<script_dir>/assets/linux` (AppImage layout) and `<script_dir>/../assets/linux` (dev tree) before bailing.
+Original spec assumed REPO_ROOT-relative asset paths. Inside an AppImage the script lives at `AppDir/install-linux-desktop.sh` and assets at `AppDir/assets/linux/...` — no `..` parent with an [`assets/`](../../assets) dir. Updated the script to try both `<script_dir>/assets/linux` (AppImage layout) and `<script_dir>/../assets/linux` (dev tree) before bailing.
 
 ### 4. Brain vs stacked-rectangles icon
 
-`assets/agentmux-logo.png` was the brain logo; the user's intended app icon is the stacked-rectangles in `assets/favicon-300x300.png`. All brain assets were renamed to `*-brain-alternate*` so future agents pick the right source. The hicolor icon set was regenerated from `assets/favicon-300x300.png`.
+`assets/agentmux-logo.png` was the brain logo; the user's intended app icon is the stacked-rectangles in [`assets/favicon-300x300.png`](../../assets/favicon-300x300.png). All brain assets were renamed to `*-brain-alternate*` so future agents pick the right source. The hicolor icon set was regenerated from [`assets/favicon-300x300.png`](../../assets/favicon-300x300.png).

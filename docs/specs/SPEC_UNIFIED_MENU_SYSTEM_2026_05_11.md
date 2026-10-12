@@ -8,10 +8,10 @@
 > `ContextMenuModel`/`showJsContextMenu` still exist as two separate systems,
 > the exact duplication this spec proposed to unify. 3 months stale, likely
 > never actioned. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Driving observation:** *"I like the menu styles on the hamburger, but the right-click context menus are different. Let's reconcile them into a cohesive system."*
 
-The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhere route through `ContextMenuModel.showContextMenu()` → `showJsContextMenu()` (vanilla DOM with inline styles in `frontend/util/cef-api.ts`). The tab color/rename popover is yet a third surface (`TabContextPanel` in `tab.tsx`). All three look different. Goal: one visual system, one mental model.
+The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhere route through `ContextMenuModel.showContextMenu()` → `showJsContextMenu()` (vanilla DOM with inline styles in [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)). The tab color/rename popover is yet a third surface (`TabContextPanel` in `tab.tsx`). All three look different. Goal: one visual system, one mental model.
 
 ---
 
@@ -21,8 +21,8 @@ The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhe
 
 | | Detail |
 |---|---|
-| File | `frontend/app/element/flyoutmenu.tsx` |
-| Style | `frontend/app/element/flyoutmenu.scss` |
+| File | [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) |
+| Style | [`frontend/app/element/flyoutmenu.scss`](../../frontend/app/element/flyoutmenu.scss) |
 | Theming | CSS variables (`--main-bg-color`, `--hover-bg-color`, `--accent-color`, `--z-flyout-menu`, `--space-1`) |
 | Item shape | `MenuItem` = `{ label, icon?, subItems?, onClick?, checked?, divider? }` (global type) |
 | Submenus | `subItems` recursion, hover-driven, edge-flip |
@@ -36,7 +36,7 @@ The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhe
 
 | | Detail |
 |---|---|
-| File | `frontend/util/cef-api.ts:125-246` (renderer), `frontend/app/store/contextmenu.ts` (model) |
+| File | [`frontend/util/cef-api.ts:125-246`](../../frontend/util/cef-api.ts) (renderer), [`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts) (model) |
 | Style | **Inline styles** in `Object.assign(el.style, {...})` calls — not themable, not classed |
 | Theming | Partial CSS-var refs with hard-coded fallbacks (`var(--main-bg-color, #222)`, `var(--accent-color, #335)`) |
 | Item shape | `ContextMenuItem` = `{ label?, type?: "separator" \| "normal" \| "submenu" \| "checkbox" \| "radio", submenu?, click?, checked?, visible?, enabled?, sublabel? }` |
@@ -51,7 +51,7 @@ The hamburger uses `FlyoutMenu` (Solid + themed SCSS). Right-click menus elsewhe
 
 | | Detail |
 |---|---|
-| File | `frontend/app/tab/tab.tsx:31-103`, `tab.scss:234-320` |
+| File | [`frontend/app/tab/tab.tsx:31-103`](../../frontend/app/tab/tab.tsx), `tab.scss:234-320` |
 | Style | Bespoke SCSS, different radius (6px), shadow (`0 4px 16px rgba(0,0,0,0.5)`), padding (`var(--space-2)`) |
 | Item shape | Fixed layout — color swatches grid + Clear + Rename + Close. No `MenuItem` abstraction. |
 | Submenus | N/A |
@@ -178,7 +178,7 @@ Five phases, each independently shippable.
 
 Pure visual unification, no JS changes. Easiest landing.
 
-- Add `.menu-frame` mixin in a shared file (`frontend/app/element/menu-frame.scss` or in `flyoutmenu.scss`).
+- Add `.menu-frame` mixin in a shared file ([`frontend/app/element/menu-frame.scss`](../../frontend/app/element/menu-frame.scss) or in `flyoutmenu.scss`).
 - `flyoutmenu.scss` uses the mixin (no change in look since FlyoutMenu is canonical).
 - `showJsContextMenu` (cef-api.ts) **switches from inline styles to applying a class** (`menu` + `menu-frame`) and removes the inline `Object.assign(el.style, {...})` calls. Items get `menu-item` class. Separators get `menu-divider` class.
 - `TabContextPanel` adopts the mixin on its outer div.
@@ -268,27 +268,27 @@ Effort: ~200 LOC. Risk: medium (need cross-platform key handling, but contained 
 
 | Path | Change | Phase |
 |---|---|---|
-| `frontend/app/element/menu-frame.scss` (new) | `@mixin menu-frame` | 1 |
-| `frontend/app/element/flyoutmenu.scss` | Use `@include menu-frame` | 1 |
-| `frontend/util/cef-api.ts` | Replace inline styles with classes | 1, then full replace in Phase 2 |
-| `frontend/app/tab/tab.scss` | Adopt `menu-frame` mixin | 1 |
+| [`frontend/app/element/menu-frame.scss`](../../frontend/app/element/menu-frame.scss) (new) | `@mixin menu-frame` | 1 |
+| [`frontend/app/element/flyoutmenu.scss`](../../frontend/app/element/flyoutmenu.scss) | Use `@include menu-frame` | 1 |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | Replace inline styles with classes | 1, then full replace in Phase 2 |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | Adopt `menu-frame` mixin | 1 |
 | `frontend/app/element/menu.tsx` (new) | Solid `<Menu>` component | 2 |
 | `frontend/app/element/menu-mount.tsx` (new) | `mountMenuAtPosition` | 2 |
-| `frontend/app/store/contextmenu.ts` | Route through new mount | 2 |
-| `frontend/app/element/flyoutmenu.tsx` | Thin wrapper around `<Menu>` | 2 |
-| `frontend/types/custom.d.ts` | Add fields to `MenuItem`, alias `ContextMenuItem` | 3 |
+| [`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts) | Route through new mount | 2 |
+| [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) | Thin wrapper around `<Menu>` | 2 |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Add fields to `MenuItem`, alias `ContextMenuItem` | 3 |
 | All `.tsx` files referencing `ContextMenuItem` | Optional rename to `MenuItem` | 3 |
-| `frontend/app/tab/tab.tsx` | Custom Solid kept, frame styling unified | 1 (4 optional) |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Custom Solid kept, frame styling unified | 1 (4 optional) |
 
 ---
 
 ## 9. Cross-references
 
-- `frontend/app/element/flyoutmenu.tsx` / `flyoutmenu.scss`
-- `frontend/app/store/contextmenu.ts`
-- `frontend/util/cef-api.ts` (`showJsContextMenu`)
-- `frontend/app/tab/tab.tsx` (`TabContextPanel`)
-- `frontend/types/custom.d.ts` (`MenuItem`, `ContextMenuItem`)
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) / `flyoutmenu.scss`
+- [`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts)
+- [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) (`showJsContextMenu`)
+- [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) (`TabContextPanel`)
+- [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) (`MenuItem`, `ContextMenuItem`)
 - Recent menu work: PR #791 (Theme picker), PR #792 (snappy menu), PR #793 (data-pane-overlay), PR #794 (submenu z-order + state reset), PR #795 (TabContextPanel `data-pane-overlay`)
 
 ---

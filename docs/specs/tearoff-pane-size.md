@@ -77,7 +77,7 @@ The grab offset ensures the new window snaps to where the user's cursor was with
 
 ### 1. Frontend — capture pane rect at drag start
 
-**File:** `frontend/layout/lib/TileLayout.win32.tsx`
+**File:** [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx)
 
 At the point where `setCurrentDragPayload` is called (tile drag begins), read the pane element's bounding rect and compute screen coordinates. The pane's DOM element is the draggable tile; it is available as a ref at the drag handler site.
 
@@ -104,7 +104,7 @@ const grabOffset = {
 setCurrentDragPayload({ kind: "tile", node, paneRect, grabOffset });
 ```
 
-**Extend `DragItemPayload` type** (wherever it is defined — likely `frontend/types/` or inline in TileLayout):
+**Extend `DragItemPayload` type** (wherever it is defined — likely [`frontend/types/`](../../frontend/types) or inline in TileLayout):
 
 ```typescript
 interface DragItemPayload {
@@ -117,7 +117,7 @@ interface DragItemPayload {
 
 ### 2. Frontend — pass size through to `openWindowAtPosition`
 
-**File:** `frontend/app/drag/CrossWindowDragMonitor.win32.tsx`
+**File:** [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx)
 
 In `performTearOff`, read `paneRect` and `grabOffset` from the current drag payload and forward them:
 
@@ -144,7 +144,7 @@ async function performTearOff(...) {
 
 ### 3. Frontend — update `AppApi` interface and CEF API shim
 
-**File:** `frontend/types/custom.d.ts`
+**File:** [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)
 
 ```typescript
 openWindowAtPosition(
@@ -158,7 +158,7 @@ openWindowAtPosition(
 ): Promise<string>;
 ```
 
-**File:** `frontend/util/cef-api.ts`
+**File:** [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)
 
 ```typescript
 openWindowAtPosition: async (
@@ -237,10 +237,10 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
 
 | File | Change |
 |------|--------|
-| `frontend/layout/lib/TileLayout.win32.tsx` | Capture `paneRect` and `grabOffset` at drag start |
-| `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` | Forward `paneRect`/`grabOffset` to `openWindowAtPosition` |
-| `frontend/types/custom.d.ts` | Extend `AppApi.openWindowAtPosition` signature |
-| `frontend/util/cef-api.ts` | Pass width/height/grabOffset to IPC |
+| [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) | Capture `paneRect` and `grabOffset` at drag start |
+| [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) | Forward `paneRect`/`grabOffset` to `openWindowAtPosition` |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Extend `AppApi.openWindowAtPosition` signature |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | Pass width/height/grabOffset to IPC |
 | `agentmux-cef/src/commands/drag.rs` | Use passed size + grab offset; clamp minimum |
 
 No new dependencies. No new IPC commands — extends the existing `open_window_at_position` with optional fields.

@@ -3,9 +3,9 @@
 **Date:** 2026-10-02
 **Status:** active — Phase 1 (this machine's other channels) in PR #4239, Phase 2 (LAN hosts) in PR #4241, Phase 4's `status` (no `line`) built 2026-10-11; Phase 3 not started. Section 9 asks for decisions.
 **Author:** AgentX (narko), at the owner's request
-**Affects:** `frontend/app/view/swarm/` (`swarm-model.ts`, `swarm-view.tsx`), `crates/srv/src/server/http_health.rs` (`/agentmux/discovery`), `crates/srv/src/backend/lan_discovery.rs`, `crates/srv/src/server/reactive.rs`, `crates/srv/src/registry/`, and, for the cloud tier, `crates/srv/src/muxbus/` plus the separate `agentmux-cloud` repository
-**Builds on:** `docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` (the same-host registry), `docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (install identities), `docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md` (how LAN peers are found), `docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md` §3 (the per-account directory this needs)
-**Related:** `docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md` (the line a row shows)
+**Affects:** [`frontend/app/view/swarm/`](../../frontend/app/view/swarm) (`swarm-model.ts`, `swarm-view.tsx`), [`crates/srv/src/server/http_health.rs`](../../crates/srv/src/server/http_health.rs) (`/agentmux/discovery`), [`crates/srv/src/backend/lan_discovery.rs`](../../crates/srv/src/backend/lan_discovery.rs), [`crates/srv/src/server/reactive.rs`](../../crates/srv/src/server/reactive.rs), [`crates/srv/src/registry/`](../../crates/srv/src/registry), and, for the cloud tier, [`crates/srv/src/muxbus/`](../../crates/srv/src/muxbus) plus the separate `agentmux-cloud` repository
+**Builds on:** [`docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) (the same-host registry), [`docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) (install identities), [`docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) (how LAN peers are found), [`docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) §3 (the per-account directory this needs)
+**Related:** [`docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`](SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md) (the line a row shows)
 
 ## 1. What the owner asked for
 

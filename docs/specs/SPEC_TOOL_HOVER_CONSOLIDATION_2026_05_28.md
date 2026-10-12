@@ -3,18 +3,18 @@
 **Author:** AgentA
 **Reporter:** user (this session) — "in the agent pane, there appears to be 3 separate events happening on a tool hover, a small time popup, a larger log popup, and a fast expand/collapse. There should be NO expand/collapse on hover. It only is supposed to happen on new messages. We want the small popup (it's just the time) to be at the top of the larger popup, so it's just 1 popup. Also, in the large log popup, we repeat the same info in the line and in the popup, lets get rid of the dupe."
 **Affected files (primary):**
-- `frontend/app/view/agent/components/ToolBlock.tsx` (335 LOC)
-- `frontend/app/view/agent/components/ToolBlockOverlay.tsx` (80 LOC)
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx` (259 LOC — body only, no header change)
-- `frontend/app/view/agent/styles/_document-nodes.scss` (tool styling)
-- `frontend/app/view/agent/components/ToolBlock.test.tsx` (tests for hover behavior)
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) (335 LOC)
+- [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) (80 LOC)
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) (259 LOC — body only, no header change)
+- [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) (tool styling)
+- [`frontend/app/view/agent/components/ToolBlock.test.tsx`](../../frontend/app/view/agent/components/ToolBlock.test.tsx) (tests for hover behavior)
 
-**Supersedes/amends:** `docs/specs/tool-collapse.md` (the hover-expand model that this spec removes).
+**Supersedes/amends:** [`docs/specs/tool-collapse.md`](tool-collapse.md) (the hover-expand model that this spec removes).
 **Predecessors:**
-- `docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md` — three-slot overlay layout
-- `docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` — 150 ms enter delay, mouseleave-only collapse
-- `docs/specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md` — Phase B auto-expand for running/pending_approval
-- `docs/specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md` — hover-anchor mechanism (overlay direction picker)
+- [`docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) — three-slot overlay layout
+- [`docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md`](SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md) — 150 ms enter delay, mouseleave-only collapse
+- [`docs/specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md`](SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md) — Phase B auto-expand for running/pending_approval
+- [`docs/specs/SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md`](SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md) — hover-anchor mechanism (overlay direction picker)
 
 ---
 
@@ -128,7 +128,7 @@ Keep the surrounding `.agent-tool-overlay-header` div + `.agent-tool-overlay-met
 
 ### 4.4 Timestamp field — what to render
 
-The `ToolNode` type (path: `frontend/app/view/agent/types.ts`, search for `interface ToolNode`) already carries either `startedAt` / `timestamp` / equivalent. Use that. Render via a tiny helper:
+The `ToolNode` type (path: [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts), search for `interface ToolNode`) already carries either `startedAt` / `timestamp` / equivalent. Use that. Render via a tiny helper:
 
 ```ts
 function formatToolTime(ms: number | undefined): string {
@@ -186,7 +186,7 @@ Update / delete tests that assert hover behavior:
 - `UserMessageBlock` hover-anchor behavior (unchanged).
 - The "open in pane" / "open in window" / bookmark action bar at the bottom of the overlay (unchanged).
 - The `ToolOverlayLog` body — log rendering rules, chunk vs structured-result switch, scroll-stick behavior all unchanged.
-- The "AI Chat Panel" (`aitooluse.tsx`) referenced in `docs/specs/tool-collapse.md` §1 — this spec covers `ToolBlock` (agent view) only. If the AI Chat Panel has analogous hover behavior, file a follow-up.
+- The "AI Chat Panel" (`aitooluse.tsx`) referenced in [`docs/specs/tool-collapse.md`](tool-collapse.md) §1 — this spec covers `ToolBlock` (agent view) only. If the AI Chat Panel has analogous hover behavior, file a follow-up.
 
 ## 8. Estimated diff
 

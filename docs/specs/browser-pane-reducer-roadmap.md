@@ -19,7 +19,7 @@ The roadmap below is **strict sequence**. Each phase is its own PR. Each merge i
 
 Inventory of every state cell + read/write call site + focus interaction.
 
-**Status:** written, lives at `docs/specs/browser-pane-state-catalog.md` (or git history at `5af7474f` if not yet restored to main).
+**Status:** written, lives at [`docs/specs/browser-pane-state-catalog.md`](browser-pane-state-catalog.md) (or git history at `5af7474f` if not yet restored to main).
 
 **Action:** cherry-pick that single commit into a doc-only PR before starting Phase 1, so the catalog is the working reference.
 
@@ -31,7 +31,7 @@ Goal: every state write, every IPC event, every reactive read of the URL/title/f
 
 ### Logs to add
 
-All routed through `console.log` (which goes through `fe_log_structured` → host log per the console-logging convention (frontend `console.log` is bridged to the host log via `fe_log_structured`; see `docs/MUXLOG.md`) — formerly "Console Logs Go to the Backend" note). Tag every line with `[browser-pane:diag]` + the blockId prefix so they're greppable.
+All routed through `console.log` (which goes through `fe_log_structured` → host log per the console-logging convention (frontend `console.log` is bridged to the host log via `fe_log_structured`; see [`docs/MUXLOG.md`](../MUXLOG.md)) — formerly "Console Logs Go to the Backend" note). Tag every line with `[browser-pane:diag]` + the blockId prefix so they're greppable.
 
 #### In `BrowserViewModel`
 
@@ -123,7 +123,7 @@ Verify:
 
 ### Acceptance for Phase 2
 
-A short retro doc under `docs/retro/` describing each scenario's actual log sequence (never written — the filename previously given here pointed at nothing). This is the **baseline** — any future refactor must produce the same sequence (modulo stable refactor markers).
+A short retro doc under [`docs/retro/`](../retro) describing each scenario's actual log sequence (never written — the filename previously given here pointed at nothing). This is the **baseline** — any future refactor must produce the same sequence (modulo stable refactor markers).
 
 ### Phase 2 PR
 
@@ -171,7 +171,7 @@ Tiny, single-cell, gated on Phase 1 log parity. Reagent + codex review per usual
 
 Only after every cell is reducer-backed AND Phase 1 logs continue to match.
 
-- Move state ownership out of the model into `frontend/app/store/browser-pane-state-store.ts`.
+- Move state ownership out of the model into [`frontend/app/store/browser-pane-state-store.ts`](../../frontend/app/store/browser-pane-state-store.ts).
 - `registerPane(blockId, projections)` / `unregisterPane(blockId)` / `dispatch(blockId, cmd, source)`.
 - `recordDispatch` audit per slice convention.
 
@@ -227,9 +227,9 @@ Total: ~9 small PRs, ~6-9 calendar days. Compared to PR #737 (one giant attempt 
 
 ## Cross-references
 
-- `docs/specs/browser-pane-state-catalog.md` — Phase 0 inventory
-- `docs/specs/frontend-reducer-conventions-2026-05-03.md` — slot lifecycle / audit conventions to match in Phase 4
-- `docs/specs/agent-pane-document-reducer-2026-05-03.md` — slice #1 reference impl
-- `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md` — register browser-pane as slice #9 here when Phase 4 ships
+- [`docs/specs/browser-pane-state-catalog.md`](browser-pane-state-catalog.md) — Phase 0 inventory
+- [`docs/specs/frontend-reducer-conventions-2026-05-03.md`](frontend-reducer-conventions-2026-05-03.md) — slot lifecycle / audit conventions to match in Phase 4
+- [`docs/specs/agent-pane-document-reducer-2026-05-03.md`](agent-pane-document-reducer-2026-05-03.md) — slice #1 reference impl
+- [`docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md) — register browser-pane as slice #9 here when Phase 4 ships
 - GitHub Discussion #707 — append progress notes per phase
 - PR #737 (closed) — what not to do

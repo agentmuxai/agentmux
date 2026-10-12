@@ -321,12 +321,12 @@ Unit tests for `ToggleToolExpansion`:
 
 ### Code
 
-- `frontend/app/view/agent/components/ToolBlock.tsx` — current Portal-based overlay, lines 257–322
-- `frontend/app/view/agent/components/ToolBlockOverlay.tsx` — content unchanged in this spec
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx` — keep as-is (current scroll-to-bottom effect at line 122 still works inside inline panel)
-- `frontend/app/view/agent/state.ts` — `DocumentState` shape, `pinnedNodes` lines ~94
-- `frontend/app/store/agent-pane-state-store.ts` — where `ToggleToolExpansion` reducer lives
-- `frontend/app/view/agent/styles/_document-nodes.scss` — `.agent-tool-summary`, `.agent-tool-content--portal` rules (the portal rules can go)
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — current Portal-based overlay, lines 257–322
+- [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) — content unchanged in this spec
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — keep as-is (current scroll-to-bottom effect at line 122 still works inside inline panel)
+- [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) — `DocumentState` shape, `pinnedNodes` lines ~94
+- [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) — where `ToggleToolExpansion` reducer lives
+- [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) — `.agent-tool-summary`, `.agent-tool-content--portal` rules (the portal rules can go)
 
 ### Prior specs
 

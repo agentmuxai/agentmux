@@ -3,8 +3,8 @@
 **Date:** 2026-06-09  
 **Status:** Implemented — #1320
 **Files changed:**
-- `frontend/app/view/agent/components/ToolBlock.tsx`
-- `frontend/app/view/agent/components/CompactResult.tsx`
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)
+- [`frontend/app/view/agent/components/CompactResult.tsx`](../../frontend/app/view/agent/components/CompactResult.tsx)
 
 ---
 

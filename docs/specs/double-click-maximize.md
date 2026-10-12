@@ -27,9 +27,9 @@ windows. Needs a JS listener.
 
 | File | Change |
 |------|--------|
-| `frontend/app/hook/useWindowDrag.win32.ts` | Add `dblclick` listener in `installCefDragListener()` |
-| `frontend/app/hook/useWindowDrag.darwin.ts` | Add `dblclick` listener + `isInDragRegion()` |
-| `frontend/app/hook/useWindowDrag.linux.ts` | No change (already works natively) |
+| [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts) | Add `dblclick` listener in `installCefDragListener()` |
+| [`frontend/app/hook/useWindowDrag.darwin.ts`](../../frontend/app/hook/useWindowDrag.darwin.ts) | Add `dblclick` listener + `isInDragRegion()` |
+| [`frontend/app/hook/useWindowDrag.linux.ts`](../../frontend/app/hook/useWindowDrag.linux.ts) | No change (already works natively) |
 
 ## Implementation
 

@@ -2,7 +2,7 @@
 
 **Status:** proposed — Ready to implement
 **Date:** 2026-03-17
-**Component:** `frontend/app/statusbar/BackendStatus.tsx`
+**Component:** [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx)
 
 ---
 
@@ -122,7 +122,7 @@ acceptable if sysinfo subscription proves difficult to wire up in this component
 
 | File | Change |
 |------|--------|
-| `frontend/app/statusbar/BackendStatus.tsx` | Replace `setInterval` with `waveEventSubscribe` on `sysinfo` event; import `waveEventSubscribe` and `WaveEvent` from store |
+| [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx) | Replace `setInterval` with `waveEventSubscribe` on `sysinfo` event; import `waveEventSubscribe` and `WaveEvent` from store |
 
 No backend changes needed — `sysinfo` already carries `ts`.
 

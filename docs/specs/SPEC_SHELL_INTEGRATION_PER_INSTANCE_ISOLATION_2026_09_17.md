@@ -63,7 +63,7 @@ never-virtualised home path.
 
 ## 3. Second constraint: a documented user-facing path
 
-`docs/MUXSPECT.md` and `docs/MUXSH.md` document invoking the helpers directly:
+[`docs/MUXSPECT.md`](../MUXSPECT.md) and [`docs/MUXSH.md`](../MUXSH.md) document invoking the helpers directly:
 
 ```
 node ~/.agentmux/shell/muxspect.mjs list
@@ -135,7 +135,7 @@ Both load-bearing tests were confirmed failing before the fix:
   radius is a user running one ad-hoc command against the wrong version's
   helper. Fixing it means changing a documented path.
 - **This does not fix the vim/terminal-lock report** it was found while
-  investigating (`docs/reports/REPORT_VIM_PANE_LOCK_0562_VS_0563_2026_09_16.md`).
+  investigating ([`docs/reports/REPORT_VIM_PANE_LOCK_0562_VS_0563_2026_09_16.md`](../reports/REPORT_VIM_PANE_LOCK_0562_VS_0563_2026_09_16.md)).
   The deployed `.bashrc` defines on-demand functions and a prompt-time OSC 7
   hook, so there is no mid-alternate-screen write path. This is fixed on its own
   merits as an isolation defect.

@@ -5,7 +5,7 @@
 
 > **2026-08-07 audit note:** Implemented (`SlashAutocomplete.tsx`). Status
 > field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
 ---
 
@@ -189,8 +189,8 @@ Allow users to register custom slash commands via Forge skills:
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/AgentFooter.tsx` | Slash command detection + routing |
-| `frontend/app/view/agent/agent-view.tsx` | `handleSendMessage` slash routing |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | Slash command detection + routing |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | `handleSendMessage` slash routing |
 | `agentmux-srv/src/server/app_api.rs` | `agent.command` handler (Phase 2) |
 | `agentmux-srv/src/backend/blockcontroller/persistent.rs` | Raw command passthrough |
 

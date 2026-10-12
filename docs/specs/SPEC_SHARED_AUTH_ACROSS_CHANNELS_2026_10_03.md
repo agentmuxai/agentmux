@@ -5,7 +5,7 @@
 **Author:** AgentY, at the owner's request
 **Amended by:** `SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md` (2026-10-08): MuxBus sign-in is per channel again; everything else here still shares.
 **Amends:** `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (reverses its default), `SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (the opt-in mechanism stays), and the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` (#4190).
-**Related:** `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` (invariant INV-PC), `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`, `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`, `SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`, `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`, `SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md` (this spec is its prerequisite).
+**Related:** [`docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`](../analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md) (invariant INV-PC), `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`, `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`, `SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`, `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`, `SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md` (this spec is its prerequisite).
 
 ## 1. The request (owner, 2026-10-03)
 
@@ -15,7 +15,7 @@
 
 ### 2.1 What a channel is, and who gets isolated
 
-A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The rule (`isolated_auth_reason()`, `crates/common/src/data_paths.rs:787-801`):
+A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The rule (`isolated_auth_reason()`, [`crates/common/src/data_paths.rs:787-801`](../../crates/common/src/data_paths.rs)):
 
 | Channel | Auth |
 |---|---|
@@ -25,7 +25,7 @@ A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The
 | no override, any other channel | **isolated** (the 2026-08-06 default) |
 
 - **Releases bake `stable`** (`RELEASE_CHANNEL=stable` in the Windows, macOS and Linux build workflows). An installed release already shares auth.
-- **Every `task package` build makes a new channel**: `local-<branch>-<branch-hash>-<8 hex of the build label>` (`scripts/package.sh:102-103`; the same in `package-macos.sh` and `package-linux.sh`). The portable on the owner's Desktop (`agentmux-0.59.4+g0528545b5.…-x64-portable`, a label in the name) is one of these, so **each new build starts logged out**.
+- **Every `task package` build makes a new channel**: `local-<branch>-<branch-hash>-<8 hex of the build label>` ([`scripts/package.sh:102-103`](../../scripts/package.sh); the same in `package-macos.sh` and `package-linux.sh`). The portable on the owner's Desktop (`agentmux-0.59.4+g0528545b5.…-x64-portable`, a label in the name) is one of these, so **each new build starts logged out**.
 - **`task dev` uses `dev-<branch>-<clone>`**, stable across rebuilds of one branch and clone, so the re-login there is per new branch or clone.
 - `~/.agentmux/channels/` holds **46 per-channel identity stores** today, nearly all `local-main-b28b7a-*`. Nothing prunes them: the pruner spec is still Draft and no pruner code exists.
 
@@ -126,7 +126,7 @@ The danger is a one-time double login that is *worse* than today's: the owner's 
 
 ### 5.5 Docs and tests
 
-Update the isolation specs and the stale "isolated by default for every non-stable channel" statements in the per-build channel specs (invariant I6 in the Linux AppImage and macOS DMG specs), the comments in `scripts/package.sh`, and `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` (which this spec supersedes for the default case). A changeset records the behaviour change and the one-line opt-in.
+Update the isolation specs and the stale "isolated by default for every non-stable channel" statements in the per-build channel specs (invariant I6 in the Linux AppImage and macOS DMG specs), the comments in [`scripts/package.sh`](../../scripts/package.sh), and `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` (which this spec supersedes for the default case). A changeset records the behaviour change and the one-line opt-in.
 
 ## 6. Phases
 

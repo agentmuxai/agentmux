@@ -68,7 +68,7 @@ tail -f ~/.agentmux/logs/agentmux-host-v*.log | grep '\[fe\]'
 
 | File | Change |
 |------|--------|
-| `frontend/log/log-pipe.ts` (NEW) | Console monkey-patch, fires Tauri invoke |
+| [`frontend/log/log-pipe.ts`](../../frontend/log/log-pipe.ts) (NEW) | Console monkey-patch, fires Tauri invoke |
 | `frontend/tauri-bootstrap.ts` | Import + call `initLogPipe()` at startup |
 
 No Rust changes — reuses existing `fe_log_structured` command.

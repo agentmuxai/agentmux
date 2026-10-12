@@ -155,7 +155,7 @@ Zoom controls in AgentMux are currently broken or incomplete:
 
 #### 1. Zoom Manager Module
 
-**File:** `frontend/app/store/zoom.ts` (NEW)
+**File:** [`frontend/app/store/zoom.ts`](../../../frontend/app/store/zoom.ts) (NEW)
 
 ```typescript
 import { atom } from "jotai";
@@ -301,7 +301,7 @@ export function getZoomPercentage(): string {
 
 #### 2. Keyboard Shortcuts
 
-**File:** `frontend/app/store/keymodel.ts` (UPDATE)
+**File:** [`frontend/app/store/keymodel.ts`](../../../frontend/app/store/keymodel.ts) (UPDATE)
 
 Add to `registerGlobalKeys()`:
 
@@ -337,7 +337,7 @@ globalKeyMap.set("Cmd:0", (waveEvent) => {
 
 #### 3. Mouse Wheel Handler
 
-**File:** `frontend/app/app.tsx` (UPDATE)
+**File:** [`frontend/app/app.tsx`](../../../frontend/app/app.tsx) (UPDATE)
 
 Add wheel event listener:
 
@@ -381,7 +381,7 @@ function AppInner() {
 
 #### 4. Zoom Indicator Component
 
-**File:** `frontend/app/element/zoomindicator.tsx` (NEW)
+**File:** [`frontend/app/element/zoomindicator.tsx`](../../../frontend/app/element/zoomindicator.tsx) (NEW)
 
 ```typescript
 import { useAtomValue } from "jotai";
@@ -406,7 +406,7 @@ export function ZoomIndicator() {
 }
 ```
 
-**File:** `frontend/app/element/zoomindicator.scss` (NEW)
+**File:** [`frontend/app/element/zoomindicator.scss`](../../../frontend/app/element/zoomindicator.scss) (NEW)
 
 ```scss
 .zoom-indicator {

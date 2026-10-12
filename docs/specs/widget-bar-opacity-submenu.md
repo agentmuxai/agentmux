@@ -132,7 +132,7 @@ export function createTabBarMenu(fullConfig: any): MenuBuilder {
 
 `window:opacity` and `window:transparent` are already:
 - Declared in `agentmuxsrv-rs/src/backend/wconfig.rs`
-- Reactively applied in `frontend/app/app.tsx` via `AppSettingsUpdater`
+- Reactively applied in [`frontend/app/app.tsx`](../../frontend/app/app.tsx) via `AppSettingsUpdater`
 - Forwarded to the Tauri window via `setWindowTransparency`
 
 ### 3. No new config keys
@@ -145,7 +145,7 @@ Re-uses existing `window:opacity` (f64, 0.0–1.0) and `window:transparent` (boo
 
 | File | Change |
 |------|--------|
-| `frontend/app/menu/base-menus.ts` | Add `createOpacityMenu()`, update `createTabBarMenu()` |
+| [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) | Add `createOpacityMenu()`, update `createTabBarMenu()` |
 
 ---
 

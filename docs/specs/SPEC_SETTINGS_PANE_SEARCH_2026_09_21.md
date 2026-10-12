@@ -2,10 +2,10 @@
 
 **Date:** 2026-09-21
 **Status:** implemented — PR #3479.
-**Related:** `docs/specs/SPEC_SETTINGS_PANE_2026_06_25.md`, `docs/specs/SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md`,
-`docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md` (Settings pane history),
-`docs/specs/command-palette.md` (existing search-UX precedent, migrated onto this utility — §4),
-`docs/specs/SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md` (existing filter-bar precedent,
+**Related:** [`docs/specs/SPEC_SETTINGS_PANE_2026_06_25.md`](SPEC_SETTINGS_PANE_2026_06_25.md), [`docs/specs/SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md`](SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md),
+[`docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md`](SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md) (Settings pane history),
+[`docs/specs/command-palette.md`](command-palette.md) (existing search-UX precedent, migrated onto this utility — §4),
+[`docs/specs/SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md`](SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) (existing filter-bar precedent,
 also migrated onto this utility — §5; this spec follows its "Open questions with a
 recommendation" format).
 
@@ -40,8 +40,8 @@ Three real precedents, all converging on the same answer:
   alternate search terms (`NSPreferencePane`'s search-keywords mechanism), which the
   lexical index then matches literally.
 - **This repo's own closest precedents already do the "cheap" half of this pattern**:
-  the command palette (`frontend/app/modals/command-palette.tsx:33-43`, pre-refactor)
-  and the agent-picker filter (`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`,
+  the command palette ([`frontend/app/modals/command-palette.tsx:33-43`](../../frontend/app/modals/command-palette.tsx), pre-refactor)
+  and the agent-picker filter ([`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`](../../frontend/app/view/agent/components/MyAgentsList.tsx),
   pre-refactor) both did a hand-rolled `.toLowerCase().includes(q)` substring match —
   no fuzzy library, no synonyms. That's fine for short, predictable strings (command
   labels, agent names); it under-delivers for a ~59-item settings corpus with jargon-y
@@ -119,7 +119,7 @@ No new reactive primitive to learn — this is exactly the shape `command-palett
 
 ### 3.1 Current state (verified against the code)
 
-- `frontend/app/view/settings/` — viewType `"settings"`
+- [`frontend/app/view/settings/`](../../frontend/app/view/settings) — viewType `"settings"`
   (`settings-model.ts:28`). Left rail + body, six sections driven by
   `RAIL`/`SettingsSection` (`settings-view.tsx:49-56,110-127`): Appearance, Window &
   Panes, Terminal, Sounds, Recording, Advanced — one file per section under
@@ -171,7 +171,7 @@ today; only the label/description strings move to live in one place. This elimin
 drift architecturally (there is only one string) rather than detecting it after the
 fact with a lint gate.
 
-`frontend/app/view/settings/settings-index.ts` (new, small) aggregates all six:
+[`frontend/app/view/settings/settings-index.ts`](../../frontend/app/view/settings/settings-index.ts) (new, small) aggregates all six:
 
 ```ts
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
@@ -247,7 +247,7 @@ first.
 
 ## 4. Consumer 2: Command palette (migrated)
 
-`frontend/app/modals/command-palette.tsx:33-43`'s `filtered` memo currently does:
+[`frontend/app/modals/command-palette.tsx:33-43`](../../frontend/app/modals/command-palette.tsx)'s `filtered` memo currently does:
 
 ```ts
 return all.filter(
@@ -280,7 +280,7 @@ const filtered = createMemo(() => {
 
 ## 5. Consumer 3: Agent picker filter bar (migrated)
 
-`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`'s `filteredRows` memo
+[`frontend/app/view/agent/components/MyAgentsList.tsx:817-825`](../../frontend/app/view/agent/components/MyAgentsList.tsx)'s `filteredRows` memo
 currently does:
 
 ```ts

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-19  
 **Status:** proposed — Approved — implementing
-**Scope:** `frontend/app/element/popover-menu.tsx` (new), `frontend/app/element/popover-menu.scss` (new), `frontend/app/window/titlebar-context-menu.tsx` (new), `frontend/app/window/window-header.tsx`, `frontend/app/window/action-widgets.tsx`, `frontend/app/menu/base-menus.ts`
+**Scope:** [`frontend/app/element/popover-menu.tsx`](../../frontend/app/element/popover-menu.tsx) (new), [`frontend/app/element/popover-menu.scss`](../../frontend/app/element/popover-menu.scss) (new), [`frontend/app/window/titlebar-context-menu.tsx`](../../frontend/app/window/titlebar-context-menu.tsx) (new), [`frontend/app/window/window-header.tsx`](../../frontend/app/window/window-header.tsx), [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx), [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts)
 
 ---
 
@@ -61,7 +61,7 @@ Pin to bar / Unpin from bar   ← closes item menu; More dropdown stays open
 
 ### `PopoverMenu` component
 
-**New:** `frontend/app/element/popover-menu.tsx` + `popover-menu.scss`
+**New:** [`frontend/app/element/popover-menu.tsx`](../../frontend/app/element/popover-menu.tsx) + `popover-menu.scss`
 
 A cursor-positioned SolidJS component rendered into a `<Portal mount={document.body}>`. Gives full per-item control over whether clicking closes it.
 
@@ -190,12 +190,12 @@ Verify no remaining callers, then remove `createTabBarBaseMenu()` and `createTab
 
 | File | Change |
 |---|---|
-| `frontend/app/element/popover-menu.tsx` | **New** — reusable `PopoverMenu` component |
-| `frontend/app/element/popover-menu.scss` | **New** — section-header + indent styles only; item chrome inherited from flyoutmenu.scss |
-| `frontend/app/window/titlebar-context-menu.tsx` | **New** — title-bar-specific menu wrapper |
-| `frontend/app/window/window-header.tsx` | Replace native context menu with `TitleBarContextMenu` portal |
-| `frontend/app/window/action-widgets.tsx` | Fix More item context menu: remove `onClose()`, use `PopoverMenu` signal, guard outside-click |
-| `frontend/app/menu/base-menus.ts` | Remove dead exports |
+| [`frontend/app/element/popover-menu.tsx`](../../frontend/app/element/popover-menu.tsx) | **New** — reusable `PopoverMenu` component |
+| [`frontend/app/element/popover-menu.scss`](../../frontend/app/element/popover-menu.scss) | **New** — section-header + indent styles only; item chrome inherited from flyoutmenu.scss |
+| [`frontend/app/window/titlebar-context-menu.tsx`](../../frontend/app/window/titlebar-context-menu.tsx) | **New** — title-bar-specific menu wrapper |
+| [`frontend/app/window/window-header.tsx`](../../frontend/app/window/window-header.tsx) | Replace native context menu with `TitleBarContextMenu` portal |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | Fix More item context menu: remove `onClose()`, use `PopoverMenu` signal, guard outside-click |
+| [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) | Remove dead exports |
 
 ---
 

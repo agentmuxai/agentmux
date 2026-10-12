@@ -25,10 +25,10 @@ changes, no new persisted state beyond what a normal resize already writes.
 ## 2. Current behavior (baseline, verified by reading the code)
 
 Source: `frontend/layout/lib/TileLayout.{win32,darwin,linux}.tsx` (`ResizeHandle`,
-~line 492-532), `frontend/layout/lib/layoutResize.ts` (`onResizeMove`/`onResizeEnd`,
-line 56-142), `frontend/layout/lib/layoutGeometry.ts` (handle enumeration,
-line 414-447), `frontend/layout/lib/layoutTree.ts` (`resizeNode` reducer,
-line 431-453), `frontend/layout/lib/types.ts` (`LayoutNode`, `ResizeNodeOperation`,
+~line 492-532), [`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts) (`onResizeMove`/`onResizeEnd`,
+line 56-142), [`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts) (handle enumeration,
+line 414-447), [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) (`resizeNode` reducer,
+line 431-453), [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts) (`LayoutNode`, `ResizeNodeOperation`,
 `LayoutTreeResizeNodeAction`, line 72, 179-187, 203-272).
 
 - The layout is a **recursive tree**, not a grid: `LayoutNode { id, children?,
@@ -57,13 +57,13 @@ line 431-453), `frontend/layout/lib/types.ts` (`LayoutNode`, `ResizeNodeOperatio
   extension point already exists.
 - **No modifier-key logic exists anywhere in the drag/resize/tear-off code
   today.** A repo-wide grep for `shiftKey|altKey|ctrlKey|metaKey` under
-  `frontend/layout/` and the three `TileLayout.*.tsx` files returns zero
-  matches in this path. (The one unrelated hit elsewhere in `frontend/` —
+  [`frontend/layout/`](../../frontend/layout) and the three `TileLayout.*.tsx` files returns zero
+  matches in this path. (The one unrelated hit elsewhere in [`frontend/`](../../frontend) —
   `tab-reorder.ts:381`, `if (e.ctrlKey || e.metaKey) return;` — bails a
   *different* drag, tab reorder, out entirely when a modifier is held; it is
   not a resize precedent, but see §6 for why it's still worth a glance.)
 
-One existing doc, `docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`
+One existing doc, [`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md)
 §2.1, frames its "show the badge on every pane" rule around "every other pane
 in the same row/column also shifts proportionally, and users often want to
 see the cascade." Reading the actual resize math above, that cascade does
@@ -275,7 +275,7 @@ something any of the surveyed tools solved particularly well either.
   a handle (before or during drag) — e.g. a highlight across all the
   siblings that will participate, not just the one handle. Exact visual
   treatment is a follow-up design decision, not specified here.
-- `docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`'s `WxH`
+- [`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md)'s `WxH`
   badge already mounts on every pane during any splitter drag
   (`isSplitterDragging()`) — this should compose for free with a group
   resize (every participating pane already gets a live badge), no changes
@@ -325,7 +325,7 @@ list already uses for other drag-modifier or pane-layout entries.
   a loose end worth someone confirming separately.
 - Keyboard-driven resize (arrow-key resize with a group modifier) — the
   existing codebase has no keyboard resize path today per the pane-resize
-  overlay spec's own table (`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`
+  overlay spec's own table ([`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md)
   §2.1, "Pane being resized via keyboard — Optional follow-up"); out of
   scope here too for the same reason.
 - Persisting "this row prefers group-resize" as a per-layout setting —
@@ -335,7 +335,7 @@ list already uses for other drag-modifier or pane-layout entries.
 
 ## 10. Implementation surface (for whoever picks this up)
 
-All changes confined to `frontend/layout/lib/layoutResize.ts` (`onResizeMove`):
+All changes confined to [`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts) (`onResizeMove`):
 read the live modifier flag off the `PointerEvent`, branch between the
 existing 2-node math (§5.1, unchanged) and the new N-sibling proportional
 redistribution (§5.2-§5.3), and build the resulting `resizeOperations` array
@@ -358,10 +358,10 @@ applies it all-or-nothing per entry.
 
 ## 12. Sources
 
-- Code read for this spec: `frontend/layout/lib/TileLayout.win32.tsx:492-532`,
-  `frontend/layout/lib/layoutResize.ts:17-142`, `frontend/layout/lib/layoutGeometry.ts:414-447`,
-  `frontend/layout/lib/layoutTree.ts:431-453`, `frontend/layout/lib/types.ts:72,179-272`,
-  `frontend/app/tab/tab-reorder.ts:381`.
-- `docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md` (existing,
+- Code read for this spec: [`frontend/layout/lib/TileLayout.win32.tsx:492-532`](../../frontend/layout/lib/TileLayout.win32.tsx),
+  [`frontend/layout/lib/layoutResize.ts:17-142`](../../frontend/layout/lib/layoutResize.ts), [`frontend/layout/lib/layoutGeometry.ts:414-447`](../../frontend/layout/lib/layoutGeometry.ts),
+  [`frontend/layout/lib/layoutTree.ts:431-453`](../../frontend/layout/lib/layoutTree.ts), `frontend/layout/lib/types.ts:72,179-272`,
+  [`frontend/app/tab/tab-reorder.ts:381`](../../frontend/app/tab/tab-reorder.ts).
+- [`docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) (existing,
   related — cross-referenced in §2 and §7).
 - External prior-art sources listed inline in §3.

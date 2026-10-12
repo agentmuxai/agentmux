@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date:** 2026-05-18
 **Author:** AgentA
-**Related:** [`SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](./SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) (the install modal that surfaced this gap), `frontend/util/clipboard.ts` (existing CEF clipboard bridge).
+**Related:** [`SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](./SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) (the install modal that surfaced this gap), [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) (existing CEF clipboard bridge).
 
 ---
 
@@ -17,7 +17,7 @@ The user reports they can't copy text from the install modal's xterm.js terminal
 
 Today: clipboard works only in *some* surfaces (regular terminal pane, code blocks, context menu actions), and even then via four different paths. The install modal terminal has **zero** clipboard wiring — the audit found no `onSelectionChange`, no `term:copyonselect` read, no paste handler, no keyboard binding. xterm.js's `getSelection()` is never queried, and the container has `user-select: none` from the shared `xterm.css`, so browser-native selection-copy is blocked too.
 
-Fix: introduce a **selection-provider** abstraction at the pane level + **global keyboard / context-menu / action-bar** plumbing on top. Every selectable surface registers a provider; global commands (Copy / Copy All / Save As… / Open in Editor) query the focused provider. Single source of truth for clipboard writes (the existing `frontend/util/clipboard.ts` CEF wrapper); single source of truth for write-to-file and open-in-editor (new `RpcApi.WriteFile` + `RpcApi.OpenExternal` wiring).
+Fix: introduce a **selection-provider** abstraction at the pane level + **global keyboard / context-menu / action-bar** plumbing on top. Every selectable surface registers a provider; global commands (Copy / Copy All / Save As… / Open in Editor) query the focused provider. Single source of truth for clipboard writes (the existing [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) CEF wrapper); single source of truth for write-to-file and open-in-editor (new `RpcApi.WriteFile` + `RpcApi.OpenExternal` wiring).
 
 ---
 
@@ -44,7 +44,7 @@ Open install modal → install → try to select the log → either no selection
 
 Four different clipboard paths exist:
 
-1. `frontend/util/clipboard.ts` — CEF IPC wrapper (`read_clipboard` / `write_clipboard`). The "right" path.
+1. [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) — CEF IPC wrapper (`read_clipboard` / `write_clipboard`). The "right" path.
 2. xterm.js's built-in selection model (used by the terminal pane but the API isn't exposed to anyone else).
 3. `window.getSelection()` (used by agent doc view).
 4. `navigator.clipboard.writeText` directly (used in `PreLaunchAuthPanel.tsx:366`).
@@ -119,7 +119,7 @@ Activation follows DOM focus. The pane's container wires `onFocusIn` / `onFocusO
 
 ### 3.2 The three global commands
 
-Wired once at app root (`frontend/app/app.tsx`), keyed off the active provider:
+Wired once at app root ([`frontend/app/app.tsx`](../../frontend/app/app.tsx)), keyed off the active provider:
 
 | Command | Key | Action |
 |---|---|---|
@@ -131,10 +131,10 @@ All three also appear in the right-click context menu (`buildPaneContextMenu` ex
 
 ### 3.3 Clipboard write path
 
-All clipboard writes go through `frontend/util/clipboard.ts` → CEF IPC `write_clipboard` → `agentmux-cef/src/commands/clipboard.rs`. This is the existing path; the gap is enforcing it. Concretely:
+All clipboard writes go through [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) → CEF IPC `write_clipboard` → `agentmux-cef/src/commands/clipboard.rs`. This is the existing path; the gap is enforcing it. Concretely:
 
 - Audit + replace the one `navigator.clipboard.writeText` direct call in `PreLaunchAuthPanel.tsx:366`.
-- Add an ESLint rule (or comment-noted code review checkpoint) forbidding direct `navigator.clipboard` use outside `frontend/util/clipboard.ts`.
+- Add an ESLint rule (or comment-noted code review checkpoint) forbidding direct `navigator.clipboard` use outside [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts).
 
 ### 3.4 xterm.js providers
 

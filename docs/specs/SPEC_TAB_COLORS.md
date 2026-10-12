@@ -16,7 +16,7 @@ Replace the current 16-color free-pick palette with a curated 10-color set that:
 
 ## Current State
 
-- 16 colors defined in `TAB_COLORS` array in `frontend/app/tab/tab.tsx`
+- 16 colors defined in `TAB_COLORS` array in [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx)
 - No auto-assignment — tabs start with no color (null)
 - User must right-click → color swatch to set a color
 - Colors include too many similar hues (4 reds/oranges, 4 blues/purples)
@@ -90,11 +90,11 @@ function pickTabColor(usedColors: (string | null)[]): string {
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tab.tsx` | Replace 16-color `TAB_COLORS` with 10-color palette; remove "None" entry |
-| `frontend/app/tab/tab.tsx` | Keep context panel but remove palette None swatch; add separate "Clear color" button |
-| `frontend/app/store/global.ts` | `createTab()` — pick color from palette before calling backend |
-| `frontend/app/tab/tabbar.tsx` | `handlePinChange()` — if pinning the first tab, assign color if tab has none |
-| `frontend/app/tab/tab.scss` | No changes needed |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Replace 16-color `TAB_COLORS` with 10-color palette; remove "None" entry |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Keep context panel but remove palette None swatch; add separate "Clear color" button |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | `createTab()` — pick color from palette before calling backend |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | `handlePinChange()` — if pinning the first tab, assign color if tab has none |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | No changes needed |
 
 ---
 

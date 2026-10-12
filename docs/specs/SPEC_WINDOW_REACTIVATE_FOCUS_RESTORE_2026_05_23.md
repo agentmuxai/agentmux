@@ -42,15 +42,15 @@ A keystroke reaches the terminal only when **all four** are aligned: OS active �
 ### What is wired today
 
 - **Pane creation (`agentmux-cef/src/browser_pane/callbacks.rs:35-75`):** When a browser pane HWND is created, `install_browser_pane_focus_redirect()` is installed as a subclass — on `WM_SETFOCUS`, it forwards focus to `GetAncestor(hwnd, GA_ROOT)` *unless* the `ALLOW_BROWSER_PANE_FOCUS_ONCE` flag was set by a deliberate caller (`agentmux-cef/src/browser_pane/hwnd.rs:141-310`, esp. `:249-277`). Rationale: prevent pane HWNDs from stealing focus during navigation; `WM_MOUSEWHEEL` still routes correctly without the steal.
-- **Pane → Main focus IPC (`agentmux-cef/src/ui_tasks.rs`, `MainFocusReclaimTask::execute()`, ~`:100-180`):** When the frontend fires the `main_window_focus` command (`frontend/app/block/block.tsx:200-210`), the host calls `browser.host().set_focus(1)` on the main browser, walks the HWND tree via `find_main_render_widget()` to find `Chrome_RenderWidgetHostHWND`, calls `SetFocus(target)`, and calls `defocus_all()` on panes. **This path triggers only on DOM-input focus events inside main**, not on OS window re-activation.
-- **xterm focus method (`frontend/app/view/term/termViewModel.ts:375-388`):** `giveFocus()` calls `this.termRef.current.terminal.focus()` on xterm.js. It is **only called** when the in-pane search overlay closes (`frontend/app/view/term/term.tsx:142`).
-- **Active-pane signal (`frontend/app/store/focusManager.ts`, `nodeModel.isFocused()`):** The frontend knows which pane is the active one.
+- **Pane → Main focus IPC (`agentmux-cef/src/ui_tasks.rs`, `MainFocusReclaimTask::execute()`, ~`:100-180`):** When the frontend fires the `main_window_focus` command ([`frontend/app/block/block.tsx:200-210`](../../frontend/app/block/block.tsx)), the host calls `browser.host().set_focus(1)` on the main browser, walks the HWND tree via `find_main_render_widget()` to find `Chrome_RenderWidgetHostHWND`, calls `SetFocus(target)`, and calls `defocus_all()` on panes. **This path triggers only on DOM-input focus events inside main**, not on OS window re-activation.
+- **xterm focus method ([`frontend/app/view/term/termViewModel.ts:375-388`](../../frontend/app/view/term/termViewModel.ts)):** `giveFocus()` calls `this.termRef.current.terminal.focus()` on xterm.js. It is **only called** when the in-pane search overlay closes ([`frontend/app/view/term/term.tsx:142`](../../frontend/app/view/term/term.tsx)).
+- **Active-pane signal ([`frontend/app/store/focusManager.ts`](../../frontend/app/store/focusManager.ts), `nodeModel.isFocused()`):** The frontend knows which pane is the active one.
 
 ### What is missing
 
 - **No top-level `WM_ACTIVATE` handler** in the host window proc. When Windows reactivates the AgentMux HWND, no AgentMux code runs.
 - **No `WM_KILLFOCUS` tracking** on browser-pane HWNDs — the host has no record of "which child HWND last held focus."
-- **No frontend `window.addEventListener("focus", …)` listener.** `AppFocusHandler` in `frontend/app/app.tsx:195-230` exists but **early-returns `null`** — it is a debug-only stub.
+- **No frontend `window.addEventListener("focus", …)` listener.** `AppFocusHandler` in [`frontend/app/app.tsx:195-230`](../../frontend/app/app.tsx) exists but **early-returns `null`** — it is a debug-only stub.
 - **No connection between `nodeModel.isFocused()` and an `OnWindowReactivate` event** — even though the frontend knows the active pane, nothing fires `giveFocus()` on window-level focus.
 
 The focus chain is fully wired for *intra-app* focus transitions (pane → main, search close → terminal). It is **not wired** for *cross-app* re-activation. That is the entire bug.
@@ -211,7 +211,7 @@ It restores focus at the Win32 + CEF layers, which is where the chain is actuall
 
 ### 5.2 Frontend: `window` focus listener → `giveFocus()` on active pane (belt-and-braces)
 
-Add to `frontend/app/app.tsx` (replacing the disabled `AppFocusHandler` stub at `:195-230`):
+Add to [`frontend/app/app.tsx`](../../frontend/app/app.tsx) (replacing the disabled `AppFocusHandler` stub at `:195-230`):
 
 ```ts
 onMount(() => {
@@ -289,7 +289,7 @@ One commit per step, on a feature branch (`agentx/window-reactivate-focus-restor
 1. **Shipped (`04a736bd`).** Add `LAST_FOCUSED_CHILD: AtomicUsize` recording to the existing browser-pane subclass and to `MainFocusReclaimTask`. No behaviour change — pure instrumentation. Step 1 surfaced the multi-window evidence in §4.5.
 2. **Step 1.5 (new — added after the §4.5 finding).** Refactor storage to per-root `LAST_FOCUSED_BY_ROOT: HashMap<root_hwnd, child_hwnd>` (§5.1.1). Both write sites route through the `record_intentional_focus` helper (§5.1.2). Still no behavioural change; logs gain a `root=` field. Lands L1.1.
 3. Install the top-level `WM_ACTIVATE` handler (§5.1.3), reading from the per-root map. `SetFocus(child)` + `browser_host.set_focus(1)`. Resolves most occurrences. Lands L1.2-L1.6.
-4. Replace the disabled `AppFocusHandler` stub at `frontend/app/app.tsx:195-230` with an active `window` focus listener that calls `giveFocus()` on the active pane (§5.2). Lands L2 tests.
+4. Replace the disabled `AppFocusHandler` stub at [`frontend/app/app.tsx:195-230`](../../frontend/app/app.tsx) with an active `window` focus listener that calls `giveFocus()` on the active pane (§5.2). Lands L2 tests.
 5. Manual L3 verification on the dev build, including the L3.5 multi-window case. Ship behind no flag — this is pure recovery code, additive, with no negative path.
 
 Each commit is independently revertible; revert order is 5 → 1 if needed. Step 2 (1.5) MUST land before step 3 — the activate handler depends on the per-root map.
@@ -298,6 +298,6 @@ Each commit is independently revertible; revert order is 5 → 1 if needed. Step
 
 ## 9. Related
 
-- `docs/specs/SPEC_BROWSER_PANE_FOCUS_LOCK.md` (draft) — covers intra-app Chromium/Win32 focus desync. Adjacent, not overlapping; this spec depends only on the existing `ALLOW_BROWSER_PANE_FOCUS_ONCE` flag it introduced.
-- `docs/specs/SPEC_PANE_FOCUS_STRESS_TEST.md` — pre-existing focus reliability test surface; the §7 L3 cases should be folded in.
+- [`docs/specs/SPEC_BROWSER_PANE_FOCUS_LOCK.md`](SPEC_BROWSER_PANE_FOCUS_LOCK.md) (draft) — covers intra-app Chromium/Win32 focus desync. Adjacent, not overlapping; this spec depends only on the existing `ALLOW_BROWSER_PANE_FOCUS_ONCE` flag it introduced.
+- [`docs/specs/SPEC_PANE_FOCUS_STRESS_TEST.md`](SPEC_PANE_FOCUS_STRESS_TEST.md) — pre-existing focus reliability test surface; the §7 L3 cases should be folded in.
 - `agentmux-cef/src/ui_tasks.rs` `MainFocusReclaimTask` — the analogous reclaim path for the *inverse* direction (pane → main). The §5.1 activate handler mirrors its structure.

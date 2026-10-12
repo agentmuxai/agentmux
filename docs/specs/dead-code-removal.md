@@ -58,7 +58,7 @@ frontend/app/view/agent/api-client.ts  (257 lines)
 ```
 
 **Evidence it is safe to delete:**
-- Grep for `from.*api-client` across all `.ts` / `.tsx` files in `frontend/`: zero results
+- Grep for `from.*api-client` across all `.ts` / `.tsx` files in [`frontend/`](../../frontend): zero results
 - Grep for `ClaudeCodeApiClient`, `ClaudeCodeConfig`, `Conversation` (from this file): zero results outside the file itself
 - File exports are never consumed anywhere in the build
 
@@ -98,11 +98,11 @@ These were audited and confirmed in use:
 
 | Item | Location | Used by |
 |------|----------|---------|
-| `register_backend_window` | `agentmux-cef/src/commands/window.rs:363` | `frontend/util/cef-api.ts:401` — called during window init to populate `window_id_map` for shell cleanup in `on_before_close` |
-| `providers/claude-translator.ts` | `frontend/app/view/agent/providers/` | `translator-factory.ts` |
+| `register_backend_window` | `agentmux-cef/src/commands/window.rs:363` | [`frontend/util/cef-api.ts:401`](../../frontend/util/cef-api.ts) — called during window init to populate `window_id_map` for shell cleanup in `on_before_close` |
+| `providers/claude-translator.ts` | [`frontend/app/view/agent/providers/`](../../frontend/app/view/agent/providers) | `translator-factory.ts` |
 | `providers/codex-translator.ts` | same | `translator-factory.ts` |
 | `providers/gemini-translator.ts` | same | `translator-factory.ts` |
-| All other agent view files | `frontend/app/view/agent/` | Actively imported and used |
+| All other agent view files | [`frontend/app/view/agent/`](../../frontend/app/view/agent) | Actively imported and used |
 
 ---
 
@@ -130,7 +130,7 @@ PR 2 (iterative, larger):
 
 **After PR 1:**
 - `cargo build -p agentmux-srv` — must compile clean
-- `tsc --noEmit` in `frontend/` — must have no new errors
+- `tsc --noEmit` in [`frontend/`](../../frontend) — must have no new errors
 - `task dev` — app launches, agent pane works (Claude Code CLI launch, auth, message send)
 - `task cef:package:portable` — portable build completes
 

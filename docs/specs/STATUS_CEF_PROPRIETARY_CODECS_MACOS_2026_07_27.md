@@ -2,18 +2,18 @@
 
 **Author:** AgentO
 **Started:** 2026-07-27
-**Plan:** `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md`
+**Plan:** [`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md)
 **Issue:** [agentmuxai/agentmux#2311](https://github.com/agentmuxai/agentmux/issues/2311)
 
 Live-updated as this runs. Not a design doc — see the spec above for the plan
 and the "what/why" (root cause, GN flags, etc. are in
-`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md` and
-`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`).
+[`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md) and
+[`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md)).
 
 ## Progress
 
 - [x] Pulled `agentmux` to latest `main` (PR #2308 merged — codec GN flags
-      already in `scripts/cef-build/args-darwin.gn`).
+      already in [`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn)).
 - [x] Fixed stale paths in `~/cef-build/rebuild-mac-cef.sh` (`ARGS_SRC`/`VERIFY`
       were pointing at a different, prior agent workspace `maop-06067`; now
       point at this workspace `masty-06136`).
@@ -70,7 +70,7 @@ and the "what/why" (root cause, GN flags, etc. are in
     28797/28797 steps done, zero `FAILED` lines. Output: `Chromium Embedded
     Framework.framework`, 547 MB unstripped, Mach-O 64-bit arm64.
 - [x] Verify `BeginWindowDrag` patch survived —
-      `scripts/verify-cef-framework-darwin.sh` exit 0 on the fresh build.
+      [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh) exit 0 on the fresh build.
 - [x] Determine actual `CEF_VERSION` — **148.23.23** (`Info.plist`
       `CFBundleShortVersionString` = `148.23.23.0`; `cef_version.h`'s
       `CEF_VERSION` = `148.23.23-rebuild-7778-codecs.3533+g6c570e2+chromium-148.0.7778.180`,
@@ -105,7 +105,7 @@ No existing tooling covers this (the patch-verify script only checks
 **Test file:** `/Users/asafebgi/S-NDNfB8mwY24lBo.mp4` — confirmed via `mdls
 -name kMDItemCodecs` to be H.264 video + MPEG-4 AAC audio, the exact codec
 combo from the original bug report
-(`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`).
+([`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)).
 
 **Method:** Built an isolated local package
 (`AGENTMUX_CEF_RUNTIME_DIR_DARWIN=~/cef-build/chromium/chromium/src/out/Release_GN_arm64
@@ -122,7 +122,7 @@ UI.
 `stream-local-file` URL failed with `MEDIA_ERR_SRC_NOT_SUPPORTED` — looked
 like a codec failure but wasn't. `stream-local-file` lives in `authed_routes`
 and requires an `X-AuthKey` header that `<video src>` can't set (see
-`frontend/app/view/media/media.tsx`'s `fetchMediaBlob` comment). Fixed by
+[`frontend/app/view/media/media.tsx`](../../frontend/app/view/media/media.tsx)'s `fetchMediaBlob` comment). Fixed by
 matching the real Media pane's actual approach: `fetch()` the bytes with
 `window.api.getAuthKey()` in the header, then hand the video element a
 `URL.createObjectURL()` blob URL.
@@ -178,7 +178,7 @@ returns `cef-macos-arm64-148.23.23-codecs`, and the 2026-08-03 scheduled
 nightly run (`ci-nightly-artifacts.yml`, run `30803686278`) shows all three
 platforms' jobs actually downloading/caching their respective `-codecs`
 release tags. Full verification write-up:
-`docs/reports/REPORT_CEF_CODEC_RELEASE_RESOLUTION_RETRO_2026_08_03.md`.
+[`docs/reports/REPORT_CEF_CODEC_RELEASE_RESOLUTION_RETRO_2026_08_03.md`](../reports/REPORT_CEF_CODEC_RELEASE_RESOLUTION_RETRO_2026_08_03.md).
 
 ## Notes / findings as they come up
 

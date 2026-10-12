@@ -8,7 +8,7 @@
 
 ## 1. Problem
 
-The `Slack` messenger widget (`defwidget@slack` in `agentmux-srv/src/config/widgets.json`) is a plain CEF browser pane pointed at a static URL — same architecture as its four siblings (Discord/Telegram/WhatsApp/Teams), confirmed in `docs/status/STATUS_MESSENGER_APP_INTEGRATIONS_2026_07_07.md` §2: *"a CEF browser widget pointed at the platform's real web app, address bar hidden... no custom chat UI exists for any of them; the messaging app IS the UI."* No connection-state logic exists for any of these widgets — the URL is static config, not derived at runtime.
+The `Slack` messenger widget (`defwidget@slack` in `agentmux-srv/src/config/widgets.json`) is a plain CEF browser pane pointed at a static URL — same architecture as its four siblings (Discord/Telegram/WhatsApp/Teams), confirmed in [`docs/status/STATUS_MESSENGER_APP_INTEGRATIONS_2026_07_07.md`](../status/STATUS_MESSENGER_APP_INTEGRATIONS_2026_07_07.md) §2: *"a CEF browser widget pointed at the platform's real web app, address bar hidden... no custom chat UI exists for any of them; the messaging app IS the UI."* No connection-state logic exists for any of these widgets — the URL is static config, not derived at runtime.
 
 Today that URL is `https://app.slack.com/` — Slack's general sign-in/workspace-picker page. For a user who hasn't already got a Slack session/workspace, this page is a dead end: it asks for a workspace URL or email with no path forward to actually creating one. The widget's own description ("Slack — real interface, agent-connected") implies a user reaching for this widget for the first time is trying to get set up, not sign into an account that may not exist yet.
 

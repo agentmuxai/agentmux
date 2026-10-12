@@ -33,7 +33,7 @@ pub mod clipboard;  // Add this line
 
 ### 2. Frontend side: Route through CEF IPC when in CEF mode
 
-**File: `frontend/util/clipboard.ts`**
+**File: [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts)**
 
 Replace Tauri-only implementation with platform-aware routing:
 
@@ -69,7 +69,7 @@ Key: Use dynamic `import()` for Tauri so it doesn't fail at load time in CEF.
 
 ### 3. CEF API shim: Add clipboard commands
 
-**File: `frontend/util/cef-api.ts`** — Already has `invokeCommand` which handles IPC routing. No changes needed — `readText`/`writeText` in clipboard.ts call it directly.
+**File: [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)** — Already has `invokeCommand` which handles IPC routing. No changes needed — `readText`/`writeText` in clipboard.ts call it directly.
 
 ## Existing Callers (no changes needed)
 
@@ -94,8 +94,8 @@ One exception: `AgentDocumentView.tsx:115` uses `navigator.clipboard.writeText()
 | `agentmux-cef/src/commands/mod.rs` | Add `pub mod clipboard;` |
 | `agentmux-cef/src/ipc.rs` | Add 2 IPC routes |
 | `agentmux-cef/src/commands/clipboard.rs` | `git add` (already exists) |
-| `frontend/util/clipboard.ts` | CEF IPC routing + dynamic Tauri import |
-| `frontend/app/view/agent/components/AgentDocumentView.tsx` | Replace `navigator.clipboard` with util |
+| [`frontend/util/clipboard.ts`](../../frontend/util/clipboard.ts) | CEF IPC routing + dynamic Tauri import |
+| [`frontend/app/view/agent/components/AgentDocumentView.tsx`](../../frontend/app/view/agent/components/AgentDocumentView.tsx) | Replace `navigator.clipboard` with util |
 
 ## Test Plan
 

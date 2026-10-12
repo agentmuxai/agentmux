@@ -3,7 +3,7 @@
 **Author:** Agent3
 **Created:** 2026-09-10
 **Status:** Active — implementing — PRs touching this work, newest first: #3159
-**Related:** `Taskfile.yml` (`artifacts:winget:publish:*`), `.github/workflows/release.yml` (commented-out `winget` job), `docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md`, `docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md`, `docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md` (the **separate, already-published** MSIX/Store identity — see §2)
+**Related:** `Taskfile.yml` (`artifacts:winget:publish:*`), [`.github/workflows/release.yml`](../../.github/workflows/release.yml) (commented-out `winget` job), [`docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md`](SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md), [`docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md), [`docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md`](SPEC_MSIX_PACKAGING_2026_05_30.md) (the **separate, already-published** MSIX/Store identity — see §2)
 
 ---
 
@@ -27,7 +27,7 @@ different things that happen to look similar:**
 
 | Identity | Value | Status | Safe to rename? |
 |---|---|---|---|
-| MSIX `Identity/@Name` (Store) | `AgentMux.AgentMux` | **Already published** — Store ID `9P9QCXNNCRK3`, PFN `AgentMux.AgentMux_vqr1k32tkfk4y` (`packaging/msix/AppxManifest.xml.template`, `scripts/package-msix.ps1`) | **No** — changing it would break the update chain for existing Store installs. Out of scope here; untouched by this spec. |
+| MSIX `Identity/@Name` (Store) | `AgentMux.AgentMux` | **Already published** — Store ID `9P9QCXNNCRK3`, PFN `AgentMux.AgentMux_vqr1k32tkfk4y` ([`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template), [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1)) | **No** — changing it would break the update chain for existing Store installs. Out of scope here; untouched by this spec. |
 | WinGet `PackageIdentifier` | previously planned as `AgentMux.AgentMux` (`Taskfile.yml`'s `WINGET_PACKAGE` var, the disabled CI job) | **Never submitted** — no manifest exists in `microsoft/winget-pkgs` | **Yes** — nothing is published under it yet, so there is no compatibility cost to choosing a different identifier now, before the one-time bootstrap. |
 
 Decision (repo owner, 2026-09-10): the WinGet identifier is **`AgentMux.AI`**
@@ -38,7 +38,7 @@ manifest's identifier before it's created for the first time.
 ## 3. What changes in this repo
 
 - `Taskfile.yml`: `WINGET_PACKAGE: AgentMux.AgentMux` → `AgentMux.AI`.
-- `.github/workflows/release.yml`: fix the identifier in the commented-out
+- [`.github/workflows/release.yml`](../../.github/workflows/release.yml): fix the identifier in the commented-out
   `winget` job's `wingetcreate update` call for when it's re-enabled. **Not
   re-enabled in this PR** — `wingetcreate update` still requires the manifest
   to exist first; flipping it on now would just resume the same failure mode
@@ -56,7 +56,7 @@ doesn't own.
 1. Install `wingetcreate` (`winget install Microsoft.WingetCreate` or fetch
    the release binary directly).
 2. Run against the latest real GitHub Release asset — installer is Inno Setup
-   (`scripts/package-installer.ps1`), a native WinGet `InstallerType: inno`,
+   ([`scripts/package-installer.ps1`](../../scripts/package-installer.ps1)), a native WinGet `InstallerType: inno`,
    which WinGet handles with standard silent-install switches automatically.
    **Corrected 2026-09-10 (Codex, PR #3159 review):** `new`'s only positional
    argument is the installer URL(s) — there is no `--version`/`--urls`/
@@ -93,7 +93,7 @@ doesn't own.
 
 - `Taskfile.yml`/`release.yml` reference the new identifier consistently
   (`grep -rn "AgentMux.AgentMux"` should only still match the MSIX-specific
-  files listed in §2's table — `packaging/msix/`, `scripts/package-msix.ps1`,
+  files listed in §2's table — [`packaging/msix/`](../../packaging/msix), [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1),
   and historical/archive docs describing the Store identity).
 - `WINGET_TOKEN` repo secret already exists (confirmed via
   `gh api repos/agentmuxai/agentmux/actions/secrets`) — not re-verified for

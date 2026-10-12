@@ -23,14 +23,14 @@ of a portable build.
 The parent spec [`portable-data-dir.md`](./portable-data-dir.md) addresses the
 **CEF host and sidecar** data roots (db, config, logs, CEF cache). It does
 **not** address agent working directories — those are constructed by the
-**frontend** (`frontend/app/view/agent/agent-model.ts`) and serialized into
+**frontend** ([`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts)) and serialized into
 block metadata as `cmd:cwd` / `cmd:env`, bypassing `AGENTMUX_DATA_HOME`.
 
 ---
 
 ## Root cause
 
-`frontend/app/view/agent/agent-model.ts`:
+[`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts):
 
 - `agentmuxHome()` (~L413) unconditionally returns `${HOME}/.agentmux`. No
   portable awareness.
@@ -123,9 +123,9 @@ below.
 |------|--------|
 | `agentmux-cef/src/main.rs` | Add `dataHome` to the bootstrap IPC payload (same value used for `AGENTMUX_DATA_HOME`). |
 | `agentmux-cef/src/ipc.rs` | Serialize `dataHome` in `get_backend_endpoints` response. |
-| `frontend/app/view/agent/agent-model.ts` | Rewrite `agentmuxHome()` to consume `dataHome` from bootstrap. No change to `launchForgeAgent()`'s call sites. |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Rewrite `agentmuxHome()` to consume `dataHome` from bootstrap. No change to `launchForgeAgent()`'s call sites. |
 | `frontend/app/store/...` | Wire the bootstrap's `dataHome` into whatever global config atom/signal the agent view reads. |
-| `docs/specs/portable-data-dir.md` | Cross-reference this spec from the "What Does NOT Change" table (remove agents from scope or link here). |
+| [`docs/specs/portable-data-dir.md`](portable-data-dir.md) | Cross-reference this spec from the "What Does NOT Change" table (remove agents from scope or link here). |
 | `README.md` | Agents section's slug claim (`Drives ~/.agentmux/agents/<slug>/`) gains a note: portable instances use `<portable>/data/agents/<slug>/`. |
 
 No backend (Rust) handler changes. No rpc_types changes. No App API surface
@@ -145,7 +145,7 @@ changes.
    still used.
 6. Two portable instances side-by-side each get independent `data/agents/`.
 
-A future harness test under `tools/tests/` could assert (1)-(3)
+A future harness test under [`tools/tests/`](../../tools/tests) could assert (1)-(3)
 programmatically via the App API (`agent.open` → `agent.status` to read the
 resolved `cmd:cwd`).
 
@@ -197,4 +197,4 @@ multi-portable and portable-vs-installed coexistence gap.
 2. Add `dataHome` to the bootstrap IPC.
 3. Update `agent-model.ts` to consume it.
 4. Doc updates (README + parent spec cross-reference).
-5. Optional: harness test under `tools/tests/` asserting portable isolation.
+5. Optional: harness test under [`tools/tests/`](../../tools/tests) asserting portable isolation.

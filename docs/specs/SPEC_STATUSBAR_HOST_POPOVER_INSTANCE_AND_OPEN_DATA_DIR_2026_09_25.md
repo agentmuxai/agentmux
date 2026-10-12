@@ -16,7 +16,7 @@
 
 ## 2. What "Instance" is today
 
-The row lives in `frontend/app/statusbar/HostPopover.tsx` (the "Instance Info" block,
+The row lives in [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx) (the "Instance Info" block,
 directly under OS / IP):
 
 ```tsx
@@ -86,7 +86,7 @@ list), and a version-valued field named `instance_id` throughout the LAN layer.
 
 **Decided 2026-09-25 (user):** remove the `Instance` row and do not replace it. Users
 already have both values it could stand for, one click away in the version chip's
-panel (`frontend/app/statusbar/InstancePanel.tsx`):
+panel ([`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx)):
 
 - **Version** — `v{about().version}`, with a copy button;
 - **Channel** — `about().channel`, with a copy button (shown whenever a channel is set).
@@ -102,7 +102,7 @@ for `task dev` builds it is `~/.agentmux/dev/<branch>/…` (channel `dev-<branch
 ### 3.1 Backend change
 
 In `get_host_info` (`agentmux-cef/src/commands/platform.rs`), remove `"instanceId"` and
-`"hostType"`. Both are unread: in `frontend/`, the only reader of `instanceId` is the row
+`"hostType"`. Both are unread: in [`frontend/`](../../frontend), the only reader of `instanceId` is the row
 being removed, and `hostType` has no reader. No new fields.
 
 ### 3.2 Frontend change
@@ -240,7 +240,7 @@ The link *is* the Data path, inside the existing `<Show when={props.hostInfo()}>
 whole block — Data row included — is already hidden, so no extra "IPC unavailable"
 handling is needed.
 
-No type registry to update: `invokeCommand` (`frontend/app/platform/ipc.ts`) takes the
+No type registry to update: `invokeCommand` ([`frontend/app/platform/ipc.ts`](../../frontend/app/platform/ipc.ts)) takes the
 command name as a plain `string`.
 
 ---
@@ -270,7 +270,7 @@ command name as a plain `string`.
     macOS: `open`; Linux: `xdg-open`). The Linux `gio` fallback is a spawn-time retry, so
     it is covered by manual testing, not this helper.
 - **`get_host_info`**: assert the JSON no longer has `instanceId` / `hostType`.
-- **Frontend** — new file `frontend/app/statusbar/HostPopover.test.tsx` (none exists
+- **Frontend** — new file [`frontend/app/statusbar/HostPopover.test.tsx`](../../frontend/app/statusbar/HostPopover.test.tsx) (none exists
   today; `TokenBreakdownPopover.test.tsx` next to it is the pattern). Cases: no `Instance`
   label is present; the Data path renders as a `<button>` whose text is the path and
   which contains no icon element; clicking it (and pressing Enter on it) calls `invokeCommand("open_in_file_manager", { target: "data" })`;
@@ -301,5 +301,5 @@ None open. Resolved 2026-09-25 (user: "use best recommendations"):
 - [ ] `platform.rs`: `open_in_file_manager` + `resolve_file_manager_target` + `file_manager_command`; register in `ipc.rs` next to `open_in_editor`.
 - [ ] Tests per §6, including the new `HostPopover.test.tsx`.
 - [ ] Manual check on Windows, macOS, Linux; PR states which were actually exercised.
-- [ ] `task docs:index` to regenerate `docs/specs/INDEX.md`; flip this spec's **Status** to `implemented — PR #NNNN`.
+- [ ] `task docs:index` to regenerate [`docs/specs/INDEX.md`](INDEX.md); flip this spec's **Status** to `implemented — PR #NNNN`.
 - [ ] PR body includes the `<!-- agentmux:agent_id=agent4 -->` tag.

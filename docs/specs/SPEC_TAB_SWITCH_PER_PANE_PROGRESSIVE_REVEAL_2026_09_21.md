@@ -4,14 +4,14 @@
 **Author:** Oozp
 **Status:** draft — design, pre-implementation. §6's diagnostic logging is the one piece already shipped (this session, ahead of the rest of this spec, so Phase 0 data can start accumulating during review).
 **Related:**
-`frontend/app/store/tab-reveal.ts` (the gate this spec extends),
-`frontend/app/util/settle-detector.ts` (the per-instance settle primitive it extends),
-`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md` (original whole-tab gate design, #774),
-`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md` (added the leaf-scoped gate this spec wires up),
-`docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §9 (made the whole-tab gate targeted),
-`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` (the reveal-cascade cost inventory this spec's Phase 2/3 items build on),
-`docs/analysis/ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md` (the View Transition layer this spec sits underneath),
-`docs/specs/TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md` (umbrella — this is a new open item, not yet added there pending review)
+[`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts) (the gate this spec extends),
+[`frontend/app/util/settle-detector.ts`](../../frontend/app/util/settle-detector.ts) (the per-instance settle primitive it extends),
+[`docs/specs/SPEC_TAB_CONTENT_REVEAL_GATE.md`](SPEC_TAB_CONTENT_REVEAL_GATE.md) (original whole-tab gate design, #774),
+[`docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) (added the leaf-scoped gate this spec wires up),
+[`docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md`](SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md) §9 (made the whole-tab gate targeted),
+[`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) (the reveal-cascade cost inventory this spec's Phase 2/3 items build on),
+[`docs/analysis/ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md`](../analysis/ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md) (the View Transition layer this spec sits underneath),
+[`docs/specs/TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) (umbrella — this is a new open item, not yet added there pending review)
 
 ---
 
@@ -86,7 +86,7 @@ The `document.startViewTransition()` cross-fade + `fadeOutStartupSplash()` tie-i
 There was **no existing telemetry** for how often the whole-tab gate actually hits `MAX_GATE_MS` versus settles naturally — that absence was itself the first finding. Shipped now, additive and low-risk:
 
 - `settle-detector.ts`'s `scheduleOnSettle` callback now receives `{ hitCap: boolean; elapsedMs: number }` instead of nothing.
-- `tab-reveal.ts` logs every gate resolution via the existing `[perf]` console convention (`frontend/perf/observers.ts`'s prefix), tagged by scope (`whole-tab` / `leaf node=<id>`), `source` (`settle` vs `orphaned-hold` — the latter meaning the paired schedule call never arrived at all, a bug signal distinct from ordinary busy-ness), `hitCap`, and elapsed ms. Queryable via `muxlog host '[perf] tab-reveal'`.
+- `tab-reveal.ts` logs every gate resolution via the existing `[perf]` console convention ([`frontend/perf/observers.ts`](../../frontend/perf/observers.ts)'s prefix), tagged by scope (`whole-tab` / `leaf node=<id>`), `source` (`settle` vs `orphaned-hold` — the latter meaning the paired schedule call never arrived at all, a bug signal distinct from ordinary busy-ness), `hitCap`, and elapsed ms. Queryable via `muxlog host '[perf] tab-reveal'`.
 - Existing `tab-reveal.test.ts` suite (21 tests) passes unmodified against the new signature; `settle-detector`'s only other caller (`agent-view.tsx`) is unaffected — it ignores the callback argument.
 
 **Next action before Phase 1 lands:** collect real `[perf] tab-reveal` data across normal multi-tab, multi-busy-agent usage, to confirm (not assume) that cap-hits cluster around busy tabs as §3 predicts, and to get a real distribution of elapsed-ms for the "settle" case — which sizes how aggressive §4.3's stagger needs to be.

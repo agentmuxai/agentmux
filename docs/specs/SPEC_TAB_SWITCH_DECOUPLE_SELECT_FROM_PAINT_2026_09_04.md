@@ -3,9 +3,9 @@
 **Status:** implemented — #2993
 **Author:** Posa
 **Date:** 2026-09-04
-**Scope:** `frontend/app/tab/tabbar.tsx` (`handleSelect`, `displayActiveTabId`), `frontend/app/store/tab-actions.ts`
-(`setActiveTab`), `frontend/app/store/window-identity.ts` (`activeTabId`), `frontend/app/workspace/workspace.tsx`
-(the tab-content `<For>`'s `display`/`visibility` toggle), `frontend/app/store/tab-reveal.ts`
+**Scope:** [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) (`handleSelect`, `displayActiveTabId`), [`frontend/app/store/tab-actions.ts`](../../frontend/app/store/tab-actions.ts)
+(`setActiveTab`), [`frontend/app/store/window-identity.ts`](../../frontend/app/store/window-identity.ts) (`activeTabId`), [`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx)
+(the tab-content `<For>`'s `display`/`visibility` toggle), [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts)
 **Related:** `SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` (profiled the reveal cascade this
 spec's fix works around — read first, it's the source of the cost, not something this spec
 re-litigates), `SPEC_TAB_CONTENT_REVEAL_GATE.md` (the existing whole-tab visibility gate —
@@ -191,17 +191,17 @@ landing the change that makes it pass.
 Implemented as described in §5, with the decision extracted into a pure module
 rather than left inline:
 
-- **`frontend/app/tab/active-tab-display.ts`** (new) — `resolveDisplayActiveTabId()`,
+- **[`frontend/app/tab/active-tab-display.ts`](../../frontend/app/tab/active-tab-display.ts)** (new) — `resolveDisplayActiveTabId()`,
   the full precedence: optimistic select first (guarded on the tab still existing and
   not itself mid-close), then the pre-existing close-flow neighbor promotion, verbatim.
   Extracted for the same reason `view/agent/failure/synthetic-row.ts` was: the
   precedence between two optimistic overrides is worth asserting directly, and it was
   not reachable while inline in a component.
-- **`frontend/app/tab/active-tab-display.test.ts`** (new) — 10 tests. Mutation-checked:
+- **[`frontend/app/tab/active-tab-display.test.ts`](../../frontend/app/tab/active-tab-display.test.ts)** (new) — 10 tests. Mutation-checked:
   with the optimistic-select branch removed, exactly the 2 fix-specific tests fail while
   all 8 close-flow tests still pass, confirming the latter guard preserved behavior
   rather than the new behavior.
-- **`frontend/app/tab/tabbar.tsx`** — `pendingSelectedTabId` signal; `handleSelect`
+- **[`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx)** — `pendingSelectedTabId` signal; `handleSelect`
   writes it before issuing the RPC and clears it in a `finally`, guarded on the pending
   value still being this call's own target so a newer click during an in-flight RPC is
   not clobbered. `displayActiveTabId` now delegates to the pure function.
@@ -211,7 +211,7 @@ keeps reading the raw backend-authoritative `atoms.activeTabId`, so the content 
 still happens only on confirmed backend state. Only the strip's highlight is optimistic.
 
 **Verified:** `npx tsc --noEmit` clean for both touched files; 52/52 tests pass across
-all four `frontend/app/tab/` suites (the 42 pre-existing plus the 10 new).
+all four [`frontend/app/tab/`](../../frontend/app/tab) suites (the 42 pre-existing plus the 10 new).
 
 **Not measured:** the actual perceived latency improvement in a running build. The
 mechanism is verified by construction (the pill no longer reads a value that requires the

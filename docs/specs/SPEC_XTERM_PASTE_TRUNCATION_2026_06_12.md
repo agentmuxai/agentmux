@@ -14,7 +14,7 @@
 > (`termViewModel.ts` `PASTE_CHUNK_BYTES`/`PASTE_CHUNK_DELAY_MS`); (3)
 > bracketed paste mode now defaults to `true` (`term.tsx`,
 > `termBPMAtom() ?? true`). No live bug. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
 ---
 
@@ -63,7 +63,7 @@ are dropped — silently truncating the paste.
 
 ### Secondary bottleneck: xterm bracket-paste mode disabled by default
 
-**`frontend/app/view/term/term.tsx:160-162`**
+**[`frontend/app/view/term/term.tsx:160-162`](../../frontend/app/view/term/term.tsx)**
 ```typescript
 const termAllowBPM = termBPMAtom() ?? false;
 // ...
@@ -162,7 +162,7 @@ const SHELL_INPUT_CH_SIZE: usize = 256;
 
 ### Fix 2 — Frontend paste chunking + flow control (BELT-AND-SUSPENDERS)
 
-**File:** `frontend/app/view/term/termViewModel.ts`
+**File:** [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts)
 
 For pastes above a threshold (~16 KB decoded), split into fixed-size chunks
 (e.g. 4 KB) and send them sequentially, waiting for a configurable inter-chunk
@@ -192,7 +192,7 @@ Hook into the existing paste path in `sendDataToController()` or the `handleTerm
 
 ### Fix 3 — Enable bracketed paste mode by default (RECOMMENDED)
 
-**File:** `frontend/app/view/term/term.tsx`
+**File:** [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx)
 
 Change the default for `term:allowbracketedpaste` from `false` → `true`.
 Modern shells (bash 4+, zsh, fish) all support BPM. Enabling it:
@@ -207,7 +207,7 @@ Provide a per-pane setting to disable for shells that don't support BPM.
 
 ### Fix 4 — User feedback on paste size (UX)
 
-**File:** `frontend/app/view/term/termwrap.ts` or a toast/notification layer
+**File:** [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) or a toast/notification layer
 
 For pastes above ~32 KB, show a non-blocking toast:  
 _"Large paste (N KB) — sending in chunks…"_  
@@ -258,5 +258,5 @@ frontend/app/view/term/term.tsx                      (Fix 3)
 - xterm.js `Clipboard.ts` paste(): `node_modules/@xterm/xterm/src/browser/Clipboard.ts:51-56`
 - `SHELL_INPUT_CH_SIZE`: `agentmux-srv/src/backend/blockcontroller/shell.rs:44`
 - `send_input()` drop site: `agentmux-srv/src/backend/blockcontroller/shell.rs:565-589`
-- Bracketed paste mode: `frontend/app/view/term/term.tsx:160-162`
+- Bracketed paste mode: [`frontend/app/view/term/term.tsx:160-162`](../../frontend/app/view/term/term.tsx)
 - Related upstream Claude Code issue: `anthropics/claude-code#59622`

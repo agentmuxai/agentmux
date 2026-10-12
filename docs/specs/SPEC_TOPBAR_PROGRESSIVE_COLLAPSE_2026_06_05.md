@@ -316,15 +316,15 @@ Replace `<Show>` with `classList={{ hidden: props.iconOnly }}` on the label span
 
 ## 7. File-level change map
 
-- `frontend/app/window/action-widgets.tsx` — main change:
+- [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) — main change:
   - Add `iconMirrorRef` + icon-only mirror JSX
   - Add `tooIconOnly` signal
   - Update `measure()` with second threshold + new constants
   - Replace `effectiveIconOnly()` with `displayState()`
   - Update `showLabels()`, `showMoreBtn()` derived signals
   - Thread updated props through `ActionWidget` and More button
-- `frontend/app/window/action-widgets.scss` — optional: label fade CSS
-- `frontend/app/tab/tabbar.scss` — no changes needed (tab sizing is independent)
+- [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) — optional: label fade CSS
+- [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) — no changes needed (tab sizing is independent)
 - No backend changes
 
 ---

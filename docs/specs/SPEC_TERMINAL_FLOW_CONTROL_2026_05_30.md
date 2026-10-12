@@ -108,7 +108,7 @@ Parking the read loop stops draining the PTY master → kernel PTY ring fills �
 
 - **`agentmux-srv/src/backend/blockcontroller/shell.rs`** — read loop (~L770): add the pause check + `published` counter; `stop()`: wake on shutdown.
 - **`agentmux-srv/src/server/websocket.rs`** — WS command dispatch: parse `termack`, update `acked`, wake the loop. (There is no `ws/` directory; term WS handling lives here.)
-- **`frontend/app/view/term/term-rpc.tsx` / `termwrap.ts`** — accumulate consumed bytes (the `data64` decode point is `termwrap.handleNewFileSubjectData`, ~L449) and send `termack` per `ACK_GRANULARITY`.
+- **[`frontend/app/view/term/term-rpc.tsx`](../../frontend/app/view/term/term-rpc.tsx) / `termwrap.ts`** — accumulate consumed bytes (the `data64` decode point is `termwrap.handleNewFileSubjectData`, ~L449) and send `termack` per `ACK_GRANULARITY`.
 - **`handle_append_block_file`** — the inline-delivery entry point the read loop calls; the `published` counter increments alongside it.
 
 ---

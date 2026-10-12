@@ -3,7 +3,7 @@
 **Date:** 2026-07-01
 **Author:** analysis session (iTerm, macOS, outside AgentMux)
 **Status:** Proposed
-**Supersedes / builds on:** `docs/retro/cef-linux-transparency-consolidated.md` (2026-06-25), issue #1335 (macOS, shelved 2026-06-10), `docs/specs/SPEC_WINDOW_OPACITY_GPU_2026_05_21.md`, agentmuxai/cef#3
+**Supersedes / builds on:** [`docs/retro/cef-linux-transparency-consolidated.md`](../retro/cef-linux-transparency-consolidated.md) (2026-06-25), issue #1335 (macOS, shelved 2026-06-10), [`docs/specs/SPEC_WINDOW_OPACITY_GPU_2026_05_21.md`](SPEC_WINDOW_OPACITY_GPU_2026_05_21.md), agentmuxai/cef#3
 **Baseline:** agentmux main @ `a0040b9e`, fork `agentmux/7778-drag-rightclick-and-transparency` @ `2720ba103`
 
 ---
@@ -50,7 +50,7 @@ window itself can fade, every Track 2 improvement is purely additive.
 |---|---|
 | `set_window_transparency` effect body is `#[cfg(target_os = "windows")]`; macOS/Linux discard args | `agentmux-cef/src/commands/window/transparency.rs:35-61` |
 | `set_window_opacity` (per-window slider) side-effect loop likewise Windows-only | `transparency.rs:132` |
-| `window:blur` argument is sent by the frontend but read by **no** platform (April-era DWM Mica/Acrylic code no longer exists on main) | `frontend/util/cef-api.ts:430-433`; grep of agentmux-cef/src |
+| `window:blur` argument is sent by the frontend but read by **no** platform (April-era DWM Mica/Acrylic code no longer exists on main) | [`frontend/util/cef-api.ts:430-433`](../../frontend/util/cef-api.ts); grep of agentmux-cef/src |
 | Global `CefSettings.background_color = 0x00000000` unconditionally (arms the fork cascade) | `agentmux-cef/src/lib.rs:810` |
 | Main window `BrowserSettings.background_color` = `0x00000000` iff `window:transparent` | `app.rs:1036` |
 | Secondary windows/floaters (mac/linux path) = `0x00000000` unconditionally since #1313 | `ui_tasks.rs:1870` |
@@ -70,10 +70,10 @@ window itself can fade, every Track 2 improvement is purely additive.
 **Why macOS dev is unpatched — concrete wiring bug:** the freshly built patched framework
 (see 1.3) is staged at `~/cef-build/darwin/arm64` (both `rebuild-mac-cef.sh` and
 `rebuild-dcheck-off` stage there, and `BUILD_PLAN.md` says `arm64`), but
-`scripts/resolve-cef-runtime-darwin.sh` tier-2 checks `~/cef-build/darwin/aarch64`
+[`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh) tier-2 checks `~/cef-build/darwin/aarch64`
 (it maps `uname -m` arm64 → Rust's `aarch64`). Tier 2 therefore **always misses** and the
 resolver silently falls through to the cargo-cache **stock** framework
-(`148.0.9+g0d9d52a`, zero patches — verified by symbol check). `docs/cef-build/`'s
+(`148.0.9+g0d9d52a`, zero patches — verified by symbol check). [`docs/cef-build/`](../cef-build)'s
 build doc says `aarch64`, the build scripts say `arm64`. One of them must move (§5.1).
 
 ### 1.3 What was built on this machine (fresh!)
@@ -103,7 +103,7 @@ build doc says `aarch64`, the build scripts say `arm64`. One of them must move (
 
 ### 1.4 The three known missing pieces for per-pixel (Track 2)
 
-From `docs/retro/cef-linux-transparency-consolidated.md` (Linux, CONFIRMED 2026-06-08) and
+From [`docs/retro/cef-linux-transparency-consolidated.md`](../retro/cef-linux-transparency-consolidated.md) (Linux, CONFIRMED 2026-06-08) and
 issue #1335 (macOS, diagnosed + locally proven, patches lost since):
 
 1. **Renderer-side Blink page-base override** — platform-agnostic, THE confirmed Linux
@@ -131,7 +131,7 @@ issue #1335 (macOS, diagnosed + locally proven, patches lost since):
 3. **Promoted layers rasterize opaque** — the open research question. With #1+#2 applied
    locally on macOS (June 10), the window ROOT composited transparent (hamburger menu
    see-through — first real macOS transparency), but the `transform`-tiled panes stayed
-   opaque. Every pane is transform-positioned (`frontend/layout/lib/utils.ts:78`) → every
+   opaque. Every pane is transform-positioned ([`frontend/layout/lib/utils.ts:78`](../../frontend/layout/lib/utils.ts)) → every
    pane is its own compositing layer. Candidates ranked in #1335:
    a. `SetContentBackgroundColor(SK_ColorTRANSPARENT)` in the cascade observer (Electron
       parity — Electron sets it alongside `SetBackgroundColor`; RWHV prefers
@@ -240,7 +240,7 @@ Notes:
 
 ### 3.2 Linux: `_NET_WM_WINDOW_OPACITY`
 
-Default ozone platform is X11/XWayland (`docs/linux.md`), where the EWMH property is the
+Default ozone platform is X11/XWayland ([`docs/linux.md`](../linux.md)), where the EWMH property is the
 standard uniform-alpha mechanism and is honored by Mutter, KWin, picom, xfwm4 — including
 for XWayland clients.
 
@@ -331,7 +331,7 @@ rebuild loop is local):
    observe pane interiors. (#1335 candidate 1 — "small, targeted, research-backed".)
 2. **De-promotion diagnostic (no rebuild):** in DevTools on a transparency-armed build,
    rewrite the tile layout's pane `transform: translate(x,y)` to `top/left` positioning
-   (`frontend/layout/lib/utils.ts:78` produces the transform). If pane interiors go
+   ([`frontend/layout/lib/utils.ts:78`](../../frontend/layout/lib/utils.ts) produces the transform). If pane interiors go
    transparent → promotion confirmed as the trigger; evaluate a real layout-mode switch
    (perf risk: layout thrash on drag/resize; terminal canvases may re-promote anyway).
 3. **If both fail:** instrument `cc` tile rasterization (the session-2/3 diagnostic patches

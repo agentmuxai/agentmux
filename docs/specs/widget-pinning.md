@@ -17,7 +17,7 @@ losing access to the rest.
 - Ship sensible defaults for new installs — pinned set has changed since
   this doc was originally written; current authoritative default is
   `agent`, `swarm`, `armory`, `sysinfo` (in that order). See
-  `docs/specs/SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md` and
+  [`docs/specs/SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md`](SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) and
   `agentmux-srv/src/config/widgets.json`'s `display:pinned`/`display:order`
   fields for the live, current values — the `terminal`-era example below
   (and elsewhere in this doc) is original-design illustration only, not

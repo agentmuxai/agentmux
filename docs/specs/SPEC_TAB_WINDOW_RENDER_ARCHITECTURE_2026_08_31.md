@@ -10,13 +10,13 @@ That resolution validates this spec's thesis and **shrinks its urgency**: the
 cheap structural move beat the expensive one. Read §0 before funding any phase
 here.
 **Owner:** unassigned
-**Companion:** `docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md`
+**Companion:** [`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md`](../reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md)
 (the evidence and diagnosis this spec responds to — read it first)
-**Scope:** `frontend/app/store/wos.ts`, `frontend/app/store/global.ts`,
-`frontend/app/store/window-identity.ts`, `frontend/app/store/tab-reveal.ts`,
-`frontend/app/workspace/workspace.tsx`, `frontend/app/tab/*`,
+**Scope:** `frontend/app/store/wos.ts`, [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts),
+[`frontend/app/store/window-identity.ts`](../../frontend/app/store/window-identity.ts), [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts),
+[`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx), `frontend/app/tab/*`,
 `frontend/layout/lib/{layoutModel,layoutModelHooks,layoutResize}.ts`,
-`frontend/app/platform/pane-overlay.ts`,
+[`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts),
 `agentmux-srv/src/server/{wave_obj_bridge.rs,service/mod.rs}`,
 `agentmux-srv/src/backend/eventbus.rs`
 **Related:** `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` (the four-layer

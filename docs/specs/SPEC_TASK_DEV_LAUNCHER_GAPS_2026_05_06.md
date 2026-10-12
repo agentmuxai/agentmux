@@ -143,7 +143,7 @@ The launcher's `first_pipe_instance(true)` lock is per-pipe-name. In dev, the pi
 
 ### 6.5 Smoke test parity
 
-After this lands, the v0.33.643-style zombie scenario (last window closed, warm pool kept alive) should be reproducible in `task dev` and addressable by the same orphan reconciler PR #702 introduced. Add a smoke test note to `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md` confirming dev-mode applicability.
+After this lands, the v0.33.643-style zombie scenario (last window closed, warm pool kept alive) should be reproducible in `task dev` and addressable by the same orphan reconciler PR #702 introduced. Add a smoke test note to [`docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md`](SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md) confirming dev-mode applicability.
 
 ## 7. Out of scope
 

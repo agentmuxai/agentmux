@@ -105,7 +105,7 @@ Suspected causes worth investigating in a follow-up:
 - A unit test that mocks `getApi()` and verifies `tearOffPoolPromote` is called before `openWindowAtPosition` for both tab and pane dragtypes.
 - A manual smoke step in BUILD.md: tear off a tab, verify the new window's `BrowserRegistered` event has `is_pool: true` (confirming pool was used).
 
-For this PR, the manual smoke is the validating signal. Add it to `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`'s smoke section.
+For this PR, the manual smoke is the validating signal. Add it to [`docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md)'s smoke section.
 
 ## 7. Implementation order
 
@@ -121,8 +121,8 @@ For this PR, the manual smoke is the validating signal. Add it to `docs/specs/SP
 
 - `agentmux-cef/src/commands/drag.rs:304-340` — `tear_off_pool_promote` host handler
 - `agentmux-cef/src/commands/drag.rs:342-426` — `open_window_at_position` (cold path)
-- `frontend/app/tab/tabbar.tsx:600-710` — reference implementation (try-pool-first)
+- [`frontend/app/tab/tabbar.tsx:600-710`](../../frontend/app/tab/tabbar.tsx) — reference implementation (try-pool-first)
 - `frontend/app/drag/CrossWindowDragMonitor.win32.tsx:237,242` — current cold-path-only call sites
-- `frontend/util/cef-api.ts:589-594` — `openWindowAtPosition` + `tearOffPoolPromote` IPC bindings
+- [`frontend/util/cef-api.ts:589-594`](../../frontend/util/cef-api.ts) — `openWindowAtPosition` + `tearOffPoolPromote` IPC bindings
 - `agentmux-cef/src/client/mod.rs:1089` — `on_render_process_terminated` recovery handler
 - v0.33.647 portable smoke trace — `~/.agentmux/versions/0.33.647/logs/agentmux-host-v0.33.647.log.2026-05-06`

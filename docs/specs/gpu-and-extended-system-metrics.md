@@ -274,17 +274,17 @@ Currently per-core is only in the sysinfo pane plot ("All CPU"). Could add a com
 | 1 | `agentmuxsrv-rs/Cargo.toml` | Add `nvml-wrapper = { version = "0.10", optional = true }`, feature `gpu-nvidia` |
 | 2 | `agentmuxsrv-rs/src/backend/gpu.rs` | New module: `GpuSnapshot`, `GpuProvider` trait, `NvidiaProvider` |
 | 3 | `agentmuxsrv-rs/src/backend/sysinfo.rs` | Initialize GPU provider, collect + publish GPU keys per tick |
-| 4 | `frontend/app/statusbar/SystemStats.tsx` | Add GPU % display (conditional on data presence) |
-| 5 | `frontend/app/statusbar/StatusBar.scss` | Add `.stat-gpu` min-width |
-| 6 | `frontend/app/view/sysinfo/sysinfo-types.ts` | Add GPU plot types + meta |
+| 4 | [`frontend/app/statusbar/SystemStats.tsx`](../../frontend/app/statusbar/SystemStats.tsx) | Add GPU % display (conditional on data presence) |
+| 5 | [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | Add `.stat-gpu` min-width |
+| 6 | [`frontend/app/view/sysinfo/sysinfo-types.ts`](../../frontend/app/view/sysinfo/sysinfo-types.ts) | Add GPU plot types + meta |
 
 ### Phase 2: Extended Metrics (Target: v0.33.x)
 
 | Step | File | Change |
 |------|------|--------|
 | 7 | `agentmuxsrv-rs/src/backend/sysinfo.rs` | Collect disk I/O, swap, temperatures, load average |
-| 8 | `frontend/app/view/sysinfo/sysinfo-types.ts` | Add plot types for disk, temp, swap, load |
-| 9 | `docs/specs/status-bar-redesign.md` | Update spec with new metrics |
+| 8 | [`frontend/app/view/sysinfo/sysinfo-types.ts`](../../frontend/app/view/sysinfo/sysinfo-types.ts) | Add plot types for disk, temp, swap, load |
+| 9 | [`docs/specs/status-bar-redesign.md`](status-bar-redesign.md) | Update spec with new metrics |
 
 ### Phase 3: AMD GPU (Target: v0.34.x)
 

@@ -3,7 +3,7 @@
 **Date:** 2026-06-10
 **Status:** Draft / proposal
 **Author:** AgentA
-**Related:** `agentmux-srv/src/backend/history/claude_adapter.rs`, `agentmux-srv/src/backend/agent_session.rs`, `agentmux-srv/src/backend/providers.rs`, `agentmux-common/src/data_paths.rs`, `agentmux-srv/src/server/app_api.rs`, `scripts/import-agents.sh`
+**Related:** `agentmux-srv/src/backend/history/claude_adapter.rs`, `agentmux-srv/src/backend/agent_session.rs`, `agentmux-srv/src/backend/providers.rs`, `agentmux-common/src/data_paths.rs`, `agentmux-srv/src/server/app_api.rs`, [`scripts/import-agents.sh`](../../scripts/import-agents.sh)
 
 ---
 

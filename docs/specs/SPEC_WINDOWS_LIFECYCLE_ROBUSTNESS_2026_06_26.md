@@ -3,7 +3,7 @@
 **Date:** 2026-06-26  
 **Author:** AgentA  
 **Adversarial review:** 2026-06-26 (13 findings; see §7)  
-**Motivating incident:** `docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`  
+**Motivating incident:** [`docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`](../incident/INCIDENT_2026_06_26_APP_CLOSED.md)\
 **Complements:** `SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`
 
 ---
@@ -243,8 +243,8 @@ new work is emitting it as a WPS event instead of only to the log.
 | Document | Relationship |
 |---|---|
 | `SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md` | P0 OOM restart (ships first) |
-| `docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md` | Motivating incident |
-| `docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md` | Root-cause analysis |
+| [`docs/incident/INCIDENT_2026_06_26_APP_CLOSED.md`](../incident/INCIDENT_2026_06_26_APP_CLOSED.md) | Motivating incident |
+| [`docs/specs/SPEC_MEMORY_ANALYSIS_2026_06_26.md`](SPEC_MEMORY_ANALYSIS_2026_06_26.md) | Root-cause analysis |
 | `SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md` | Supervision contract |
 | `SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` | I1-I6 invariants |
 | `agentmux-launcher/src/mem_supervisor.rs` | OOM classifier |

@@ -60,7 +60,7 @@ pub struct BlockControllerRuntimeStatus {
 ## 3. Stream Event Handling (Frontend)
 
 ### Stream Subscription
-**File:** `frontend/app/view/agent/useAgentStream.ts`
+**File:** [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts)
 
 1. Subscribes to file subject via `getFileSubject(blockId, "output")`
 2. Decodes base64 WPS blockfile events into UTF-8 text
@@ -69,14 +69,14 @@ pub struct BlockControllerRuntimeStatus {
 5. Filters benign stderr warnings ("Fast mode is not available", etc.)
 
 ### Provider Translation
-**File:** `frontend/app/view/agent/providers/claude-translator.ts`
+**File:** [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts)
 
 - Translates Claude `stream_event` wrapper → StreamEvent format
 - Handles Anthropic API events: `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`
 - Extracts `is_error` flag from tool_result blocks → `status: "failed" | "success"`
 
 ### Stream Parser
-**File:** `frontend/app/view/agent/stream-parser.ts`
+**File:** [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
 
 - Event types: `text`, `thinking`, `tool_call`, `tool_result`, `agent_message`, `user_message`
 - **No explicit error event type** — errors only appear in tool_result nodes with `status: "failed"`

@@ -103,7 +103,7 @@ and config dirs, and user-initiated editor saves.
 
 ### 2.3 A gate so it stays that way
 
-`scripts/check-workdir-writes.mjs`, in `ci-pr.yml`'s "doc status + grep
+[`scripts/check-workdir-writes.mjs`](../../scripts/check-workdir-writes.mjs), in `ci-pr.yml`'s "doc status + grep
 gates" job next to `check-time-helpers.mjs`. It scans
 `backend/agent_config.rs` and `server/app_api/agent_open.rs` line by line,
 and in `server/editor_handlers.rs` only the `writeagentconfig` handler (the

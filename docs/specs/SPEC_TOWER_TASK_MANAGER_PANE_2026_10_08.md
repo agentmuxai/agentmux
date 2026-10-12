@@ -12,7 +12,7 @@ spec.
 **Related:**
 - `per-pane-cpu-memory.md` and `per-pane-process-tree-metrics.md`: the
   `blockstats` badge this builds on.
-- `docs/analysis/agent-spawned-process-tracking-2026-10-07.md`: the per-agent
+- [`docs/analysis/agent-spawned-process-tracking-2026-10-07.md`](../analysis/agent-spawned-process-tracking-2026-10-07.md): the per-agent
   process trackers (Job Object / cgroup / scan). Its §1/§2.1 predate the
   Linux cgroup and scan trackers.
 - `SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md`: lists "a general task
@@ -57,7 +57,7 @@ Most of the plumbing is there; the gaps are coverage and metric quality.
 | Process-tree walk | `blockcontroller/process_tree.rs` | Parent links only, so `setsid`/daemonized children drop out. Capped at `MAX_PIDS_PER_BLOCK = 64`. Pass 1 refreshes **every** process on the machine each tick. |
 | Per-agent containment | `backend/process_tracker/` (`windows.rs` Job Object per block, `cgroup_linux.rs` cgroup v2 per agent, `scan.rs` env-tag scan on macOS) | Used for teardown and the drawer list, not metrics. `TrackedProcess` has no CPU field; Windows `started_at_ms` is always 0. |
 | Process list RPCs | `server/app_api/agent_io.rs` (`agent.process-list`, `agent.tracked-blocks`) | Snapshot only, memory only. |
-| Event lanes | `backend/eventbus.rs:308`, `websocket.rs:347-360`, `frontend/app/store/mps.ts:181` | Ready to reuse: the background lane keeps telemetry from delaying terminal input. |
+| Event lanes | `backend/eventbus.rs:308`, `websocket.rs:347-360`, [`frontend/app/store/mps.ts:181`](../../frontend/app/store/mps.ts) | Ready to reuse: the background lane keeps telemetry from delaying terminal input. |
 
 Metric quality today: `blockstats.mem` is sysinfo's `memory()`, which is
 working set on Windows and RSS on macOS/Linux. Neither matches what the OS's
@@ -190,10 +190,10 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
 
 ### 6.1 Backend
 
-- **`crates/procstats`** (`agentmux-procstats`): the per-OS readers
+- **[`crates/procstats`](../../crates/procstats)** (`agentmux-procstats`): the per-OS readers
   (`windows-sys`; `libc` on Linux and macOS), `snapshot()`,
   `command_line(pid)`, `cpu_count()` and `RateMeter` (cumulative times to
-  rates). Dependency-light so the static remote helper (`crates/remote`) can
+  rates). Dependency-light so the static remote helper ([`crates/remote`](../../crates/remote)) can
   link the same code (§8.2): a remote Linux host and a local one report the
   same numbers. sysinfo is not used: its memory numbers match no OS task
   manager and it knows nothing about Job Objects or cgroups.
@@ -220,7 +220,7 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
 
 ### 6.2 Frontend
 
-- `frontend/app/view/tower/`: a native pane tab (`tower.tsx`), its model
+- [`frontend/app/view/tower/`](../../frontend/app/view/tower): a native pane tab (`tower.tsx`), its model
   (`tower-model.ts`: polls only while the tab is visible, keeps the view and
   CPU convention in block meta as `tower:view` / `tower:cpu`), the view and
   pure helpers (`tower-util.ts`). Controls are `element/ui`'s (`Tabs`,

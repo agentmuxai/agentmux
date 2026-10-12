@@ -71,7 +71,7 @@ Three identifiers, three semantics, used together in `WindowEntry = { label, win
 
 | Name | File | Notes |
 |------|------|-------|
-| `InstancePanel` (component) | `frontend/app/statusbar/InstancePanel.tsx` | The thing it shows is a list of WINDOWS, not instances |
+| `InstancePanel` (component) | [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx) | The thing it shows is a list of WINDOWS, not instances |
 | `.instance-panel-*` (CSS) | InstancePanel.tsx + scss | Implementation detail; safe to keep |
 
 ### 2.6 Specs
@@ -173,7 +173,7 @@ Mention in CHANGELOG / VERSION_HISTORY because consumers in non-frontend repos t
 
 Touches:
 - `frontend/types/custom.d.ts:130,139`
-- `frontend/util/cef-api.ts:428`
+- [`frontend/util/cef-api.ts:428`](../../frontend/util/cef-api.ts)
 - `agentmux-cef/src/...` (Rust handlers — find via `grep -rn "getInstanceNumber\|listWindowInstances" agentmux-cef/`)
 - `agentmux-launcher/src/...` if the launcher exposes these names
 
@@ -184,7 +184,7 @@ Needs a same-PR rename of both Rust and frontend; can't ship them split. Search 
 | Old | New |
 |-----|-----|
 | `InstancePanel` (component) | `WindowListPanel` |
-| `frontend/app/statusbar/InstancePanel.tsx` | `frontend/app/statusbar/WindowListPanel.tsx` |
+| [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx) | `frontend/app/statusbar/WindowListPanel.tsx` |
 | `.instance-panel-*` CSS classes | `.window-list-panel-*` (or leave as implementation detail) |
 | `SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md` | Add note "renamed to Window List in 2026-05" — don't rename the historic spec file |
 

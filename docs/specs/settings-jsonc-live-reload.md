@@ -32,7 +32,7 @@
 ### Settings Schema
 - **Rust struct:** `SettingsType` in `wconfig.rs:34-267` (all fields `Option<T>`)
 - **TypeScript:** `SettingsType` in `frontend/types/gotypes.d.ts:784-859`
-- **JSON Schema:** `schema/settings.json:1-238`
+- **JSON Schema:** [`schema/settings.json:1-238`](../../schema/settings.json)
 
 ### Available Setting Keys (from schema)
 | Prefix | Keys |

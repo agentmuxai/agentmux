@@ -44,11 +44,11 @@ This is the same UX as opening many files in the editor pane: each tab compresse
 ```
 
 Files:
-- `frontend/app/tab/tab.tsx`
-- `frontend/app/tab/tab.scss`
-- `frontend/app/tab/tabbar.tsx`
-- `frontend/app/tab/tabbar.scss`
-- `frontend/app/tab/droppable-tab.tsx`
+- [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx)
+- [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss)
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx)
+- [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss)
+- [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx)
 
 ### 2.2 Out-of-scope — explicitly untouched
 
@@ -136,7 +136,7 @@ The takeaway: `props.tabWidth` is dead-code plumbing still wired through `Tab` p
 
 ### 3.4 Editor tab strip — the reference
 
-`frontend/app/view/editor/editor-view.scss:247-340` + `editor-tab-strip.tsx`:
+[`frontend/app/view/editor/editor-view.scss:247-340`](../../frontend/app/view/editor/editor-view.scss) + `editor-tab-strip.tsx`:
 
 ```scss
 .editor-tab-strip {
@@ -311,8 +311,8 @@ If sub-pixel-driven gap shimmer appears at certain zoom levels, the fix is `widt
 
 | File | Change |
 |---|---|
-| `frontend/app/tab/tabbar.scss` | Introduce `--ws-tab-*` tokens on `.tab-bar`; replace `flex-shrink: 0` on `.tab-bar-scroll .tab` with the new `flex` contract; replace `flex-shrink: 0` on `.tab-drop-wrapper` with `flex: 0 1 auto; min-width: 0`. |
-| `frontend/app/tab/tab.scss` | Swap the literal `max-width: 200px` on `.tab` for `max-width: var(--ws-tab-max, 200px)`. |
+| [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) | Introduce `--ws-tab-*` tokens on `.tab-bar`; replace `flex-shrink: 0` on `.tab-bar-scroll .tab` with the new `flex` contract; replace `flex-shrink: 0` on `.tab-drop-wrapper` with `flex: 0 1 auto; min-width: 0`. |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | Swap the literal `max-width: 200px` on `.tab` for `max-width: var(--ws-tab-max, 200px)`. |
 | `specs/SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md` | This spec. *(File currently named `SPEC_WIDGET_BAR_TAB_SIZING_…`; rename on implementation since "widget-bar" was the original misread of the user's intent.)* |
 | `.changesets/<ts>-feat-tabs-…md` | One-line patch changeset. |
 
@@ -384,16 +384,16 @@ Single PR, one commit:
 
 ## 10. References
 
-- `frontend/app/tab/tab.tsx` — workspace tab component
-- `frontend/app/tab/tab.scss` — workspace tab base CSS
-- `frontend/app/tab/tabbar.tsx` — tab strip container
-- `frontend/app/tab/tabbar.scss` — tab strip CSS (the `flex-shrink: 0` site we're replacing)
-- `frontend/app/tab/droppable-tab.tsx` — DnD wrapper (no change)
+- [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) — workspace tab component
+- [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) — workspace tab base CSS
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — tab strip container
+- [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) — tab strip CSS (the `flex-shrink: 0` site we're replacing)
+- [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx) — DnD wrapper (no change)
 - `frontend/app/view/editor/editor-tab-strip.tsx` — reference editor tab strip
-- `frontend/app/view/editor/editor-view.scss:247-340` — reference CSS contract
-- `docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md` — separator architecture + sizing history
-- `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md` — why the old width-animation was removed (avoid repeating that mistake)
-- `docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md` — sub-pixel + `--zoomfactor` interactions
+- [`frontend/app/view/editor/editor-view.scss:247-340`](../../frontend/app/view/editor/editor-view.scss) — reference CSS contract
+- [`docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`](SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md) — separator architecture + sizing history
+- [`docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`](../retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md) — why the old width-animation was removed (avoid repeating that mistake)
+- [`docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md`](../retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md) — sub-pixel + `--zoomfactor` interactions
 - VS Code [`workbench.editor.tabSizing` PR #181729](https://github.com/microsoft/vscode/pull/181729)
 - VS Code [issue #15048 — allow shrink-instead-of-min-width](https://github.com/microsoft/vscode/issues/15048)
 - VS Code [issue #183532 — test `fixed` sizing](https://github.com/microsoft/vscode/issues/183532)

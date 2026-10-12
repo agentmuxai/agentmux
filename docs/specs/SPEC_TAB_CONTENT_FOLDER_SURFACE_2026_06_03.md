@@ -162,7 +162,7 @@ negative-margin boundary-break) is deferred.
   opens into the surface. NOT the §5 negative-margin overlap, and NOT `:has()`.
 - **Perf constraint (mandatory): no `:has()` on tab selectors, no stacked
   semi-transparent layers.** Tab-switch speed rides a keep-alive cache + a reveal
-  gate (`frontend/app/store/tab-reveal.ts`) that lifts after 80ms of no >50ms
+  gate ([`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts)) that lifts after 80ms of no >50ms
   long-tasks (else an 800ms cap). An earlier `:has()`+stacked-fill cut fired
   long-tasks on every streaming recalc/paint and pinned the gate at 800ms
   ("frozen" switches); the shipped version is 1 long-task (68ms) per switch.

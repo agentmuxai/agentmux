@@ -42,10 +42,10 @@ AgentComposerInput
 
 | Role | File |
 |---|---|
-| Command type + context interface | `frontend/app/view/agent/commands/types.ts` |
-| Registry class + buildRegistry() | `frontend/app/view/agent/commands/registry.ts` |
-| Global command registration | `frontend/app/view/agent/commands/global/index.ts` |
-| Block split helpers | `frontend/app/store/global.ts` — `createBlockSplitVertically()` |
+| Command type + context interface | [`frontend/app/view/agent/commands/types.ts`](../../frontend/app/view/agent/commands/types.ts) |
+| Registry class + buildRegistry() | [`frontend/app/view/agent/commands/registry.ts`](../../frontend/app/view/agent/commands/registry.ts) |
+| Global command registration | [`frontend/app/view/agent/commands/global/index.ts`](../../frontend/app/view/agent/commands/global/index.ts) |
+| Block split helpers | [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) — `createBlockSplitVertically()` |
 | Agent CWD storage | `meta["cmd:cwd"]` set in `agent-model.ts:555` during `launchAgent()` |
 | Terminal view meta key | `meta.view = "term"` (standard block meta) |
 
@@ -149,8 +149,8 @@ export function registerGlobalCommands(registry: SlashCommandRegistry): void {
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/commands/global/terminal.ts` | New — 28 lines |
-| `frontend/app/view/agent/commands/global/index.ts` | +1 import, +1 `registry.register()` call |
+| [`frontend/app/view/agent/commands/global/terminal.ts`](../../frontend/app/view/agent/commands/global/terminal.ts) | New — 28 lines |
+| [`frontend/app/view/agent/commands/global/index.ts`](../../frontend/app/view/agent/commands/global/index.ts) | +1 import, +1 `registry.register()` call |
 
 No changes needed to:
 - `commands/types.ts` — `SlashCommandContext.block()` already exposes raw meta

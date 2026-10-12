@@ -4,7 +4,7 @@
 **Status:** active — Phase 1 implemented (priority/background egress lanes + biased select); Phase 2 implemented (egress-side coalesce to latest-only per event×scope); Phases 3–4 proposed — #1782
 **Author:** smike (agent)
 **Area:** `agentmux-srv` WebSocket egress · sysinfo collector · terminal echo path
-**Related history:** PR #926 (`fix(term): remove writeInFlight guard from echo fast path`), `SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md`, `docs/terminal-input-latency-report.md`, `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`
+**Related history:** PR #926 (`fix(term): remove writeInFlight guard from echo fast path`), `SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md`, [`docs/terminal-input-latency-report.md`](../terminal-input-latency-report.md), `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`
 
 ---
 
@@ -268,7 +268,7 @@ This is a *new* layer of the problem; the prior fixes stand:
 |---|---|---|
 | PR #926 — remove `writeInFlight` guard | Frontend echo fast-path stall | Frontend write gating; unrelated to backend egress scheduling |
 | `SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30` | Frontend double-rAF frame beat | Removed a second frame gate; this is server→client queueing |
-| `docs/terminal-input-latency-report.md` | xterm write serialization | Per-write ordering; not cross-event-type priority |
+| [`docs/terminal-input-latency-report.md`](../terminal-input-latency-report.md) | xterm write serialization | Per-write ordering; not cross-event-type priority |
 | `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31` | Hides round-trip via local echo | Predicts the echo; doesn't fix the authoritative echo being delayed by telemetry |
 
 Predictive local echo, where enabled, *masks* this for printable characters — but the
@@ -290,7 +290,7 @@ every byte, predicted or not.
 **Phase 2:** `eventbus.rs` (coalescing background lane); optional `sysinfo.rs` pass-1
 scoping (follow-up).
 
-**Phase 3 (optional):** `frontend/app/statusbar/CpuCoresPopover.tsx`.
+**Phase 3 (optional):** [`frontend/app/statusbar/CpuCoresPopover.tsx`](../../frontend/app/statusbar/CpuCoresPopover.tsx).
 
 **Phase 4 (deferred):** per-connection `last_input_at` shared with `sysinfo.rs`.
 

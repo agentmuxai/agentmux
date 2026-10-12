@@ -49,13 +49,13 @@ The SolidJS warning in the log confirms orphaned reactive scopes:
 
 | File | Line | Issue |
 |------|------|-------|
-| `frontend/layout/lib/layoutNodeModels.ts` | 39-42 | `isFocused: createMemo(...)` created under component owner, dies on unmount |
-| `frontend/layout/lib/layoutNodeModels.ts` | 45-48 | `isMagnified: createMemo(...)` same issue |
-| `frontend/layout/lib/layoutNodeModels.ts` | 23-35 | `innerRect: createMemo(...)` same issue |
-| `frontend/layout/lib/layoutNodeModels.ts` | 38 | `blockNum: createMemo(...)` same issue |
-| `frontend/layout/lib/layoutNodeModels.ts` | 49-52 | `isEphemeral: createMemo(...)` same issue |
-| `frontend/layout/lib/layoutModelHooks.ts` | 13 | `layoutModelMap` caches models across tab switches |
-| `frontend/layout/lib/layoutModelHooks.ts` | 19-24 | Cache hit path returns model with dead memos |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | 39-42 | `isFocused: createMemo(...)` created under component owner, dies on unmount |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | 45-48 | `isMagnified: createMemo(...)` same issue |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | 23-35 | `innerRect: createMemo(...)` same issue |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | 38 | `blockNum: createMemo(...)` same issue |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | 49-52 | `isEphemeral: createMemo(...)` same issue |
+| [`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts) | 13 | `layoutModelMap` caches models across tab switches |
+| [`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts) | 19-24 | Cache hit path returns model with dead memos |
 
 ---
 
@@ -149,9 +149,9 @@ export function deleteLayoutModelForTab(tabId: string) {
 
 | File | Change |
 |------|--------|
-| `frontend/layout/lib/layoutModel.ts` | Add `createRoot` in constructor, `dispose()` method, `runInModelRoot()` helper |
-| `frontend/layout/lib/layoutNodeModels.ts` | Wrap all `createMemo()` in `model.runInModelRoot()` |
-| `frontend/layout/lib/layoutModelHooks.ts` | Call `model.dispose()` in `deleteLayoutModelForTab` |
+| [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) | Add `createRoot` in constructor, `dispose()` method, `runInModelRoot()` helper |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | Wrap all `createMemo()` in `model.runInModelRoot()` |
+| [`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts) | Call `model.dispose()` in `deleteLayoutModelForTab` |
 
 ---
 
@@ -168,5 +168,5 @@ export function deleteLayoutModelForTab(tabId: string) {
 
 ## Related
 
-- **Log pipe spec:** `docs/specs/frontend-log-pipe.md` — the instrumentation that revealed this bug
+- **Log pipe spec:** [`docs/specs/frontend-log-pipe.md`](frontend-log-pipe.md) — the instrumentation that revealed this bug
 - **Previous fix (PR #125):** Fixed `numBlocksInTab` destructuring and `<For>` → `<Key>` for resize handles — same class of SolidJS reactivity bugs, but those were about static capture at mount time, not reactive owner disposal

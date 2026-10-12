@@ -201,4 +201,4 @@ correctly scaled for non-1s intervals.
 ## Affected Files
 
 - `agentmuxsrv-rs/src/backend/sysinfo.rs` — tick loop timing
-- `frontend/app/view/sysinfo/sysinfo.tsx` — gap threshold, x-axis domain, data cutoff
+- [`frontend/app/view/sysinfo/sysinfo.tsx`](../../../frontend/app/view/sysinfo/sysinfo.tsx) — gap threshold, x-axis domain, data cutoff

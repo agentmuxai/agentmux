@@ -38,9 +38,9 @@ After landing `TabModalLayer` for the launch modal, walk every dialog/overlay in
 
 | Modal | File | Trigger | Current scoping | State location | Complexity |
 |---|---|---|---|---|---|
-| **AgentLaunchModal** | `frontend/app/view/agent/components/AgentLaunchModal.tsx:38` | Click agent card in picker | Portal-to-body via Modal v2 | `launchModalAgent` signal in `AgentPicker.tsx:70` | Small |
+| **AgentLaunchModal** | [`frontend/app/view/agent/components/AgentLaunchModal.tsx:38`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) | Click agent card in picker | Portal-to-body via Modal v2 | `launchModalAgent` signal in `AgentPicker.tsx:70` | Small |
 | **ImportPreviewModal** | `frontend/app/view/agent/components/ImportPreviewModal.tsx:15` | Drag/paste forge agents into pane | Portal-to-body via Modal v2 | Local signals in `AgentActionBar` | Small |
-| **AgentPicker delete confirm** | `frontend/app/view/agent/components/AgentPicker.tsx:214-235` | Delete forge agent definition | Portal-to-body via Modal v2 | `deleteCandidate`, `deleteError` in `AgentPicker` | Small |
+| **AgentPicker delete confirm** | [`frontend/app/view/agent/components/AgentPicker.tsx:214-235`](../../frontend/app/view/agent/components/AgentPicker.tsx) | Delete forge agent definition | Portal-to-body via Modal v2 | `deleteCandidate`, `deleteError` in `AgentPicker` | Small |
 | **AgentView close confirm** | `frontend/app/view/agent/agent-view.tsx:~360` | Close pane with running processes | Portal-to-body via Modal v2 | `closeConfirm` signal in `AgentPresentationView` | Small–Medium |
 
 **Why these.** Each is initiated by an action inside one pane and is only relevant to that pane. Today they cover the whole window via Portal-to-body, which means they incorrectly block the tab bar and follow the user across tabs. After migration, each renders inside its tab's `TabModalLayer` and disappears with the tab.
@@ -53,10 +53,10 @@ After landing `TabModalLayer` for the launch modal, walk every dialog/overlay in
 
 | Modal | File | Why global |
 |---|---|---|
-| **CommandPaletteModal** | `frontend/app/modals/command-palette.tsx:28` | App-wide hotkey; must overlay everything. |
-| **AboutModal** | `frontend/app/modals/about.tsx:13` | App-level metadata; not tab-scoped. |
-| **UserInputModal** | `frontend/app/modals/userinputmodal.tsx:14` | Backend RPC initiates; can pertain to any tab; safer to be window-level. |
-| **MessageModal** | `frontend/app/modals/messagemodal.tsx:10` | Generic backend message; window-level scope is correct. |
+| **CommandPaletteModal** | [`frontend/app/modals/command-palette.tsx:28`](../../frontend/app/modals/command-palette.tsx) | App-wide hotkey; must overlay everything. |
+| **AboutModal** | [`frontend/app/modals/about.tsx:13`](../../frontend/app/modals/about.tsx) | App-level metadata; not tab-scoped. |
+| **UserInputModal** | [`frontend/app/modals/userinputmodal.tsx:14`](../../frontend/app/modals/userinputmodal.tsx) | Backend RPC initiates; can pertain to any tab; safer to be window-level. |
+| **MessageModal** | [`frontend/app/modals/messagemodal.tsx:10`](../../frontend/app/modals/messagemodal.tsx) | Generic backend message; window-level scope is correct. |
 | **TokenBreakdownPopover (+ nested reset confirm)** | `frontend/app/statusbar/TokenBreakdownPopover.tsx:51,165` | Anchored to the status bar (window chrome); the nested confirm has window-wide consequence. |
 
 **Action:** No change. These continue to use `Modal v2` + Portal-to-body and the legacy `ModalsRenderer` registry as they do today.
@@ -71,10 +71,10 @@ These are inline overlays already mounted inside their pane's component tree. No
 |---|---|---|
 | **AgentFocusedPanel** | `frontend/app/view/agent/components/AgentFocusedPanel.tsx:26` | Half-pane settings overlay; precedent for the per-pane absolute pattern. `_focused-overlay.scss:8-18` shows the CSS approach we're echoing in `TabModalLayer`. |
 | **AgentCardSettingsPanel** | `frontend/app/view/agent/components/AgentCardSettingsPanel.tsx:40` | Inline expansion under an agent card; not a modal. |
-| **SlashHelpPanel** | `frontend/app/view/agent/components/SlashHelpPanel.tsx:57` | Inline `/help` panel inside agent pane. |
+| **SlashHelpPanel** | [`frontend/app/view/agent/components/SlashHelpPanel.tsx:57`](../../frontend/app/view/agent/components/SlashHelpPanel.tsx) | Inline `/help` panel inside agent pane. |
 | **ActivityLogPanel** | `frontend/app/view/agent/components/ActivityLogPanel.tsx` | Collapsible section above composer. |
-| **SlashCommandPicker** | `frontend/app/view/agent/components/SlashCommandPicker.tsx` | Floating-UI picker tied to slash command flow. |
-| **AgentIdentityPanel** | `frontend/app/view/agent/components/AgentIdentityPanel.tsx:45` | Inline identity tab inside `AgentCardSettingsPanel`. |
+| **SlashCommandPicker** | [`frontend/app/view/agent/components/SlashCommandPicker.tsx`](../../frontend/app/view/agent/components/SlashCommandPicker.tsx) | Floating-UI picker tied to slash command flow. |
+| **AgentIdentityPanel** | [`frontend/app/view/agent/components/AgentIdentityPanel.tsx:45`](../../frontend/app/view/agent/components/AgentIdentityPanel.tsx) | Inline identity tab inside `AgentCardSettingsPanel`. |
 | **DragOverlay** | `frontend/app/drag/DragOverlay.tsx:43` | Cross-window drop indicator; visual feedback only. |
 
 **Action:** No change. Document these as the "inline overlay" tier.

@@ -3,27 +3,27 @@
 **Date:** 2026-09-26
 **Status:** proposed — research and design only, nothing built. §9 lists the
 decisions needed before anyone starts.
-**Scope:** `frontend/app/view/sysinfo/`.
+**Scope:** [`frontend/app/view/sysinfo/`](../../frontend/app/view/sysinfo).
 **Related:**
 - `agent3/sysinfo-tighter-margins` (PR #3937, already shipped in this same
   pass): tighter panel margins, axis labels moved to the origin. Separate
   concern from this spec; mentioned only because both came from the same
   "refine sysinfo" request.
-- `docs/specs/gpu-and-extended-system-metrics.md` (written earlier the same
+- [`docs/specs/gpu-and-extended-system-metrics.md`](gpu-and-extended-system-metrics.md) (written earlier the same
   day, status: proposed): GPU **as a monitored resource** — collecting
   utilization/VRAM/temperature from the machine and charting it like CPU/
   Mem/Net. This spec does not repeat that work; §1 explains the split and
   where the two connect.
-- `docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md`: why
+- [`docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md`](../reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md): why
   small multiples are the base layout and combined/dual-axis charts were
   rejected — this spec's 3D proposal follows the same "opt-in alternate
   view, never a replacement" pattern that report recommended.
-- `docs/analysis/sysinfo-architecture-assessment-2026-05-03.md` and
-  `docs/specs/sysinfo-continuous-monitor-animation-2026-05-03.md`: the
+- [`docs/analysis/sysinfo-architecture-assessment-2026-05-03.md`](../analysis/sysinfo-architecture-assessment-2026-05-03.md) and
+  [`docs/specs/sysinfo-continuous-monitor-animation-2026-05-03.md`](sysinfo-continuous-monitor-animation-2026-05-03.md): the
   prior "canvas/WebGL renderer for the existing 2D charts" assessment
   (rejected as out of proportion) — §4 revisits it with 2026 data and
   reaffirms the same conclusion.
-- `frontend/util/gpuutil.ts`, `frontend/app/statusbar/GpuStatus.tsx`,
+- [`frontend/util/gpuutil.ts`](../../frontend/util/gpuutil.ts), [`frontend/app/statusbar/GpuStatus.tsx`](../../frontend/app/statusbar/GpuStatus.tsx),
   `agentmux-cef/src/app/gpu.rs`: the app's existing GPU-**rendering**-
   capability detection (hardware / software / unavailable). Any new WebGL
   feature must consult this, not add a second detector.
@@ -37,7 +37,7 @@ charts." Read alone, "GPU" could mean either:
 
 **(a) GPU as data to monitor** — utilization%, VRAM, temperature, like CPU/
 Mem/Net. This already has a same-day spec,
-`docs/specs/gpu-and-extended-system-metrics.md` (NVIDIA via `nvml-wrapper`
+[`docs/specs/gpu-and-extended-system-metrics.md`](gpu-and-extended-system-metrics.md) (NVIDIA via `nvml-wrapper`
 first, AMD via Linux sysfs, a `GpuProvider` trait, new `gpu`/`gpu:mem:used`/
 `gpu:temp` WPS keys, new `PlotTypes` entries). It's a good plan — tiered by
 vendor coverage, gracefully degrades to "no GPU metrics" rather than
@@ -169,7 +169,7 @@ browser worth using).
 
 Given §2's honest weighing, the 3D view is proposed as an **opt-in "3D core
 view"** — a new item alongside `"All CPU"` in the Plot Type menu (and,
-once `docs/specs/gpu-and-extended-system-metrics.md` ships, `"All GPUs"`
+once [`docs/specs/gpu-and-extended-system-metrics.md`](gpu-and-extended-system-metrics.md) ships, `"All GPUs"`
 too), not a replacement for the small-multiples default.
 
 **What it shows:** a surface where x = time, y = core index (or GPU index),
@@ -195,7 +195,7 @@ WebGL context slot from xterm).
 
 **Mandatory integration point — GPU-tier gating.** The app already detects
 hardware vs. software vs. unavailable GPU rendering
-(`frontend/util/gpuutil.ts`'s `getGpuInfo()`, surfaced today as the "GFX"
+([`frontend/util/gpuutil.ts`](../../frontend/util/gpuutil.ts)'s `getGpuInfo()`, surfaced today as the "GFX"
 status-bar badge). A software-rendered (SwiftShader/llvmpipe) WebGL surface
 of ~4,000 vertices redrawn at even 0.5Hz risks being sluggish enough to
 actively hurt the experience; an "unavailable" GPU means it can't run at

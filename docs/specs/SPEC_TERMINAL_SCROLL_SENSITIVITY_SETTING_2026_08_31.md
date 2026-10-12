@@ -4,11 +4,11 @@
 **Date:** 2026-08-31
 **Author:** agent3
 **Related:**
-- `frontend/app/view/term/termwrap.ts:137` (`new Terminal({...})` construction)
-- `frontend/app/view/term/termwrap.ts:206-210` (`attachCustomWheelEventHandler` — macOS momentum-scroll debounce + Ctrl+Wheel passthrough)
-- `frontend/app/view/settings/sections/terminal-section.tsx` (Terminal settings UI section)
+- [`frontend/app/view/term/termwrap.ts:137`](../../frontend/app/view/term/termwrap.ts) (`new Terminal({...})` construction)
+- [`frontend/app/view/term/termwrap.ts:206-210`](../../frontend/app/view/term/termwrap.ts) (`attachCustomWheelEventHandler` — macOS momentum-scroll debounce + Ctrl+Wheel passthrough)
+- [`frontend/app/view/settings/sections/terminal-section.tsx`](../../frontend/app/view/settings/sections/terminal-section.tsx) (Terminal settings UI section)
 - `agentmux-srv/src/backend/wconfig/types.rs` (`SettingsType`, Rust-side settings struct)
-- `schema/settings.json`, `frontend/types/gotypes.d.ts`, `settings-template.jsonc` (settings schema/type/template, hand-maintained in parallel per existing convention)
+- [`schema/settings.json`](../../schema/settings.json), `frontend/types/gotypes.d.ts`, `settings-template.jsonc` (settings schema/type/template, hand-maintained in parallel per existing convention)
 
 ---
 
@@ -125,7 +125,7 @@ is hand-maintained and kept in sync manually), add the new key to all of:
 
 - `agentmux-srv/src/backend/wconfig/types.rs` — `pub term_scroll_sensitivity: Option<f64>` with `#[serde(rename = "term:scrollsensitivity", ...)]`.
 - `frontend/types/gotypes.d.ts` — `"term:scrollsensitivity"?: number;` in `SettingsType`.
-- `schema/settings.json` — `"term:scrollsensitivity": { "type": "number", "minimum": 0.1, "maximum": 10, "default": 1, "description": "..." }`.
+- [`schema/settings.json`](../../schema/settings.json) — `"term:scrollsensitivity": { "type": "number", "minimum": 0.1, "maximum": 10, "default": 1, "description": "..." }`.
 - `settings-template.jsonc` — commented-out example line under `-- Terminal --`.
 
 ## 5. Alternatives considered

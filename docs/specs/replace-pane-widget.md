@@ -61,11 +61,11 @@ Each submenu item shows:
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/pane-actions.ts` | Add "Replace With..." submenu to `buildPaneContextMenu()` |
+| [`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts) | Add "Replace With..." submenu to `buildPaneContextMenu()` |
 
 ### API
 
-The `replaceBlock()` function already exists in `frontend/app/store/global.ts:590`:
+The `replaceBlock()` function already exists in [`frontend/app/store/global.ts:590`](../../frontend/app/store/global.ts):
 
 ```typescript
 export async function replaceBlock(
@@ -159,7 +159,7 @@ Same as the "Replace With..." submenu: exclude `devtools` and `settings`, includ
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tabcontent.tsx` | Add `onContextMenu` handler to container div; build widget menu when layout has no leafs |
+| [`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx) | Add `onContextMenu` handler to container div; build widget menu when layout has no leafs |
 
 ## Edge Cases
 

@@ -162,7 +162,7 @@ Styled consistently with the existing AI panel's `AIDragOverlay`.
 
 ### Terminal drop handler
 
-Added to `frontend/app/view/term/term.tsx`:
+Added to [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx):
 
 ```typescript
 const handleDrop = async (e: React.DragEvent) => {
@@ -192,14 +192,14 @@ const handleDrop = async (e: React.DragEvent) => {
 
 1. Add `copy_file_to_dir` Tauri command in `src-tauri/src/commands/`
 2. Register command in `src-tauri/src/lib.rs`
-3. Add drop handlers to terminal pane (`frontend/app/view/term/term.tsx`)
+3. Add drop handlers to terminal pane ([`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx))
 4. Add `DragOverlay` shared component
 5. Wire up Tauri `tauri://drag-drop` event for native file paths
 
 ### Phase 2: Agent pane drop
 
 1. Extract `useFileDrop` hook from `aipanel/aipanel.tsx`
-2. Add drop handlers to agent pane (`frontend/app/view/agent/agent-view.tsx`)
+2. Add drop handlers to agent pane ([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx))
 3. Refactor aipanel to use the shared hook
 
 ### Phase 3: Polish

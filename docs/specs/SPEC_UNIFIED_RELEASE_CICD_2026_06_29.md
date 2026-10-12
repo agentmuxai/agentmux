@@ -117,15 +117,15 @@ on:
 **Job: `verify`** (ubuntu-latest, fast)
 - Checkout at tag
 - Assert `package.json` version == tag suffix == `VERSION_HISTORY.md` top entry == `Cargo.toml` workspace version
-- Fail loudly if any mismatch (release-consistency invariant, see `scripts/release.sh`)
+- Fail loudly if any mismatch (release-consistency invariant, see [`scripts/release.sh`](../../scripts/release.sh))
 
 **Jobs: `build-windows`, `build-linux`, `build-macos`** (parallel, depend on `verify`)
 
 _Windows_ (`windows-latest`):
 - Same steps as `ci-nightly-artifacts.yml` windows job (Ninja, go-task, Inno Setup, rust-cache)
 - `STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh`
-- Package installer: `scripts/package-installer.ps1`
-- Package MSIX: `scripts/package-msix.ps1` (unsigned — Store re-signs)
+- Package installer: [`scripts/package-installer.ps1`](../../scripts/package-installer.ps1)
+- Package MSIX: [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1) (unsigned — Store re-signs)
 - Upload: portable.zip, setup.exe, AgentMux_<ver>_x64.msix
 
 _Linux_ (`ubuntu-22.04`):
@@ -236,8 +236,8 @@ Week 3 (after Partner Center setup)
 
 | File | Repo | Action |
 |---|---|---|
-| `.github/workflows/release.yml` | agentmuxai/agentmux | **Create** |
-| `scripts/extract-changelog.sh` | agentmuxai/agentmux | **Create** |
+| [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | agentmuxai/agentmux | **Create** |
+| [`scripts/extract-changelog.sh`](../../scripts/extract-changelog.sh) | agentmuxai/agentmux | **Create** |
 | `.github/workflows/landing-deploy.yml` | agentmuxai/agentmux-landing | **Create** |
 | private infrastructure stack | private repo | **Edit** (§4.1) |
 

@@ -18,8 +18,8 @@ from the common-prefix computation, silently defeating dedent (or, on the
 numbered Read path, the "every line numbered" check) for any node whose
 content exceeded `MAX_TOOL_OUTPUT_CHARS` — `dedent.ts` now treats the
 marker as ignorable exactly like a blank line.
-**Scope:** `frontend/app/view/agent/components/ToolOverlayLog.tsx`,
-`frontend/app/view/agent/components/DiffViewer.tsx`, one new shared util
+**Scope:** [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx),
+[`frontend/app/view/agent/components/DiffViewer.tsx`](../../frontend/app/view/agent/components/DiffViewer.tsx), one new shared util
 (+ tests)
 **Related:** `SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md`
 (refinement #1 of this series — this is refinement #2)
@@ -31,7 +31,7 @@ tab in the RELATIVE indentation that's left over was rendering at the
 global `tab-size: 4` (`reset.scss`, inherited app-wide, including the
 Editor pane's CodeMirror instance). Fixed as a CSS-only change, not a
 `dedent.ts` change: `tab-size: 2` scoped to `.agent-tool-panel`
-(`frontend/app/view/agent/styles/_document-nodes.scss`) — the shared
+([`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)) — the shared
 ancestor of every Read/Write/Edit/Diff preview path (Shiki and plain-
 fallback alike) — rather than the global `reset.scss` rule, so the Editor
 pane keeps its own 4-wide default unaffected.
@@ -42,7 +42,7 @@ shell or the activity dock), the space narrowing in `dedent.ts` returns early
 on any tab, and tab stops count the line-number gutter, so the first indent
 level of a tab-indented Read is half as wide as the rest (measured). #2958
 also found it stepped the gutter. See
-`docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md` §3.2.
+[`docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md`](../reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md) §3.2.
 
 ---
 
@@ -76,7 +76,7 @@ All final-result rendering happens in the per-tool renderers of
 | Grep/Glob | `renderSearch` → `CompactResult` | independent match lines from arbitrary file positions | **Out of scope** for this pass — each match line is independent, so "common" indent across unrelated lines is semantically weak. Candidate follow-up: per-line leading-whitespace trim with an ellipsis affordance, decided separately. |
 | Streaming chunks (`ChunkList`) | any running tool | incremental chunks | **Out of scope** — dedent needs the full visible text to know the common prefix; applying it per-chunk mid-stream would shift alignment as lines arrive. Final-result rendering replaces the chunk view on completion, which is where dedent applies. |
 
-No dedent/strip-indent utility exists anywhere in `frontend/` today
+No dedent/strip-indent utility exists anywhere in [`frontend/`](../../frontend) today
 (searched).
 
 ### 2.1 The Read line-number prefix — a forcing constraint
@@ -107,7 +107,7 @@ consequences if confirmed:
 
 ### 3.1 New shared utility — `dedent.ts`
 
-`frontend/app/view/agent/components/dedent.ts`, two pure functions, unit
+[`frontend/app/view/agent/components/dedent.ts`](../../frontend/app/view/agent/components/dedent.ts), two pure functions, unit
 tested:
 
 ```ts

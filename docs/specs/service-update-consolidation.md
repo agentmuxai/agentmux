@@ -90,7 +90,7 @@ Several endpoints duplicate the "update + return updated object" pattern:
 | `agentmuxsrv-rs/src/server/service.rs` | 149-177 | `UpdateObjectMeta` — only BLOCK returns updates |
 | `agentmuxsrv-rs/src/server/service.rs` | 182-209 | `UpdateTabName` — bespoke tab update return |
 | `frontend/app/store/wos.ts` | 131-133 | `callBackendService` — correctly processes returned updates |
-| `frontend/app/tab/tab.tsx` | 224 | `ObjectService.UpdateObjectMeta` for tab:color |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | 224 | `ObjectService.UpdateObjectMeta` for tab:color |
 
 ## Immediate Fix (Already Applied)
 

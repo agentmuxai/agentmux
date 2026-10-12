@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-08
 **Status:** Implemented (same day) — #2467
-**Scope:** `frontend/app/view/agent/styles/_document-nodes.scss`,
-`frontend/app/view/agent/styles/_tool-overlay-portal.scss`
+**Scope:** [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss),
+[`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss)
 **Related:**
 - `SPEC_TOOL_PREVIEW_REFINEMENTS_2026_06_26.md` (prior preview-polish pass)
 - `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (established
