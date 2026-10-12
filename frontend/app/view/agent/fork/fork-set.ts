@@ -170,14 +170,20 @@ export interface ForkPill {
 
 /**
  * The fork set's pills for one pane: each fork open in a pane of the same
- * window tab, `inThisWindowTab` telling which blocks those are (the pane's own
- * stack members are deduped by the strip). A fork open in another window tab
- * gets no pill: drawn here it looked like a tab of this pane, its click
- * switched window tabs and its × did nothing
+ * window tab, `blockInThisWindowTab` naming that fork's block there, if any
+ * (the pane's own stack members are deduped by the strip). It is asked per
+ * fork, not per `blockId`: a definition open in two panes has one `blockId`
+ * in the fork set, possibly the one in another window tab (#4747). A fork
+ * open only in another window tab gets no pill: drawn here it looked like a
+ * tab of this pane, its click switched window tabs and its × did nothing
  * (the fork-isolation report in #4744, F1).
  */
-export function forkPills(forks: ReadonlyArray<ForkSetEntry>, inThisWindowTab: (blockId: string) => boolean): ForkPill[] {
-    return forks
-        .filter((f): f is ForkSetEntry & { blockId: string } => !!f.blockId && inThisWindowTab(f.blockId))
-        .map((f) => ({ blockId: f.blockId, label: f.title }));
+export function forkPills(
+    forks: ReadonlyArray<ForkSetEntry>,
+    blockInThisWindowTab: (fork: ForkSetEntry) => string | undefined,
+): ForkPill[] {
+    return forks.flatMap((f) => {
+        const blockId = blockInThisWindowTab(f);
+        return blockId ? [{ blockId, label: f.title }] : [];
+    });
 }

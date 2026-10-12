@@ -3,6 +3,7 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
+import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { MOS } from "@/app/store/global";
 import { revealBlockLocally } from "@/app/util/reveal-block";
 import { setActiveBlockInStack, type NodeModel } from "@/layout/index";
@@ -105,9 +106,13 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
 
     // Forks open in ANOTHER pane of this window tab appear as extra pills
-    // after this pane's own stack members (`forkPills`). `getNodeByBlockId`
+    // after this pane's own stack members (`forkPills`): each fork's block in
+    // this tab, out of every block its definition is open in. `getNodeByBlockId`
     // reads `leafs()`, so the pills follow this tab's layout.
-    const extraTabs = () => forkPills(switchableForks(), (blockId) => !!layoutModel.getNodeByBlockId(blockId));
+    const extraTabs = () =>
+        forkPills(switchableForks(), (f) =>
+            [f.blockId, ...getOpenBlockIdsForDefinition(f.definitionId)].find((b) => !!b && !!layoutModel.getNodeByBlockId(b)),
+        );
 
     // Activating a tab has two cases, both "switch," neither "create": (1)
     // the target block already lives in THIS pane's own block-stack — swap
