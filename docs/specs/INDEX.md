@@ -1125,6 +1125,7 @@ partial list.
 | [`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23`](TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md) | TRACKING — Agent pane bounded live window (phase progress) |
 | [`TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | TRACKING — Typing & terminal input responsiveness |
 | [`TRACKING_WAN_JEKT_VERIFICATION_2026_09_25`](TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md) | TRACKING — WAN jekt verification (same-account, W3-S) |
+| [`app-api-status`](app-api-status.md) | App API — Implementation Status |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions |
 
 ### historical
@@ -1261,7 +1262,6 @@ Fix one when you touch it and know its real state.
 | [`agent-health-codebase-audit`](agent-health-codebase-audit.md) | Agent Health/Liveness Detection — Codebase Audit |
 | [`agent-widget-forge-integration`](agent-widget-forge-integration.md) | Spec: Agent Widget — Forge Integration |
 | [`app-api-pane-open`](app-api-pane-open.md) | App API — `pane.open` Spec |
-| [`app-api-status`](app-api-status.md) | App API — Implementation Status |
 | [`app-update-check`](app-update-check.md) | App Update Check |
 | [`backend-status-tests`](backend-status-tests.md) | Test Spec: Backend Status Atom (`backendStatusAtom`) |
 | [`cef-white-flash-testbed`](cef-white-flash-testbed.md) | CEF White Flash Testbed — Spec |
