@@ -36,13 +36,15 @@ pub fn reclaim_stale_srv_lock(data_dir: &Path) {
     if lock_is_free(&lock_path) {
         return;
     }
-    let Some(pid) = std::fs::read_to_string(&lock_path)
+    // srv records its PID in the lock file; one from a release before that
+    // left it empty, so fall back to asking lsof who has the file open.
+    let recorded = std::fs::read_to_string(&lock_path)
         .ok()
         .and_then(|s| s.trim().parse::<i32>().ok())
-        .filter(|pid| *pid > 1)
-    else {
+        .filter(|pid| *pid > 1);
+    let Some(pid) = recorded.or_else(|| lock_holder_via_lsof(&lock_path)) else {
         crate::log(&format!(
-            "stale-srv: {} is held but names no PID (an srv from before PID recording?); leaving it",
+            "stale-srv: {} is held but its holder can't be identified; leaving it",
             lock_path.display()
         ));
         return;
@@ -136,6 +138,31 @@ fn wait_for_free(lock_path: &Path, within: Duration) -> bool {
     lock_is_free(lock_path)
 }
 
+/// The process that has `lock_path` open, for a lock file without a recorded
+/// PID: an agentmux-srv among `lsof`'s answers if there is one, else the
+/// first. The checks in [`reclaim_stale_srv_lock`] still apply to it.
+fn lock_holder_via_lsof(lock_path: &Path) -> Option<i32> {
+    let out = std::process::Command::new("lsof")
+        .arg("-t")
+        .arg("--")
+        .arg(lock_path)
+        .output()
+        .ok()?;
+    let pids: Vec<i32> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse::<i32>().ok())
+        .filter(|pid| *pid > 1 && *pid != std::process::id() as i32)
+        .collect();
+    pids.iter()
+        .copied()
+        .find(|pid| {
+            ps_field(*pid, "comm=", false)
+                .and_then(|c| Path::new(&c).file_name().map(|n| n.to_string_lossy().starts_with("agentmux-srv")))
+                .unwrap_or(false)
+        })
+        .or_else(|| pids.first().copied())
+}
+
 /// One `ps` field for `pid` (`ww`: untruncated; `with_env`: append the
 /// process' environment, `ps e`), or `None` if it isn't running. Never log
 /// the result: it can hold another process' secrets.
@@ -181,6 +208,7 @@ mod tests {
         assert!(!lock_is_free(&lock));
     }
 }
+
 
 
 

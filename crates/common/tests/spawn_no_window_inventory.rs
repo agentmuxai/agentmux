@@ -155,6 +155,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/launcher/src/stale_srv.rs", "\"/bin/ps\"", 1,
      "not-windows: macOS/Linux/unix-only code path"),
+    ("crates/launcher/src/stale_srv.rs", "\"lsof\"", 1,
+     "not-windows: macOS/Linux/unix-only code path"),
     ("crates/srv/src/backend/process_tracker/cgroup_linux.rs", "\"sleep\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/process_tracker/cgroup_linux.rs", "&argv[0]", 1,
