@@ -108,6 +108,12 @@ So in both occurrences the crash comes right after the pane for the same block i
 
 ---
 
+## F8. After a crash, the restored torn-off window opens over the main window
+
+After the tear-off crash (F1) the app restarted itself and restored its windows. The torn-off window came back empty ("Window 2 - Tab 1", `restoring=1`) at (100,100), 1200x800, in front of the main window at (300,201), covering most of its tab strip. A test that drags in the main window's tab strip then hits the wrong window (this is how a second agent's scripted drags ended up in the wrong window, F1). It was moved aside with the host's `set_window_rect`.
+
+---
+
 ## F4. Left open on purpose (not built; recorded for later)
 
 - **Terminal text during a drag.** A terminal refit is still a ~4.5–7.5 ms GPU wait; #4658 spreads them out but cannot remove them. Removing them means keeping terminal text at its old size until the drag ends. Product decision.
