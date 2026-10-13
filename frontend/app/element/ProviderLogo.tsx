@@ -123,7 +123,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         // SolidJS innerHTML mounts the raw SVG. font-size drives the
         // 1em-based sizing inside lobehub's SVGs. uniquifySvgIds prevents
         // gradient/id collisions when the same icon mounts more than once
-        // on one page — see its own doc comment above.
+        // on one page (see @/util/svg-ids).
         return (
             <span
                 class={cls}
