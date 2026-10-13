@@ -66,6 +66,11 @@ for e in "$BUILD"/* "$BUILD"/.[!.]*; do
   [ "$(basename "$e")" = obj ] || ln -s "$e" "$SCRATCH/$(basename "$e")"
 done
 mkdir "$SCRATCH/obj"
+# A module-enabled build (macOS, Chromium 154) compiles every file against
+# prebuilt Clang modules in obj/build/modules, named relative to the build dir:
+# the scratch obj/ links to them, or no compile can run. Read only: the objects
+# verified here are written elsewhere in obj/, and one under obj/build is refused.
+[ -d "$BUILD/obj/build" ] && ln -s "$BUILD/obj/build" "$SCRATCH/obj/build"
 ok=0; fail=0
 
 # Run the object's compile command, unchanged but for `sub` (a sed expression
@@ -92,6 +97,9 @@ for pair in "${PAIRS[@]}"; do
     echo "ABORT $SRC: the compile command names the build dir itself - refusing to run"; exit 1 ;;
   esac
   { [ -d "$SCRATCH/obj" ] && [ ! -L "$SCRATCH/obj" ]; } || { echo "ABORT: scratch obj/ is not a plain directory"; exit 1; }
+  case "$OBJ" in obj/build/*)
+    echo "ABORT $SRC: $OBJ is under obj/build, which the scratch dir links to the real one - refusing to run"; exit 1 ;;
+  esac
   mkdir -p "$SCRATCH/$(dirname "$OBJ")"
 
   PROBE="s#\.\./\.\./$SRC#$TMP/probe.cc#g"
