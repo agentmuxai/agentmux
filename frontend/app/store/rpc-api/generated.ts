@@ -350,6 +350,7 @@ import type { SessionExportResult } from "@/types/rpc/SessionExportResult";
 import type { SessionRestoreResult } from "@/types/rpc/SessionRestoreResult";
 import type { SessionResumePreflightResult } from "@/types/rpc/SessionResumePreflightResult";
 import type { ShellExecResult } from "@/types/rpc/ShellExecResult";
+import type { ShellList } from "@/types/rpc/ShellList";
 import type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
 import type { ShellStopResult } from "@/types/rpc/ShellStopResult";
 import type { Skill } from "@/types/rpc/Skill";
@@ -2008,6 +2009,10 @@ export const GeneratedApi = {
   // command "blockstats.detail"
   BlockStatsDetailCommand(client: RpcClient, data: BlockStatsDetailReq, opts?: RpcOpts): Promise<BlockStatsDetail> {
     return client.rpcCall("blockstats.detail", data, opts);
+  },
+  // command "shell.list"
+  ShellListCommand(client: RpcClient, opts?: RpcOpts): Promise<ShellList> {
+    return client.rpcCall("shell.list", {}, opts);
   },
   // command "tower.forget"
   TowerForgetCommand(client: RpcClient, data: TowerForgetReq, opts?: RpcOpts): Promise<TowerPeersResult> {

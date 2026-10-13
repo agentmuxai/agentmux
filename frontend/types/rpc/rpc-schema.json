@@ -4406,6 +4406,25 @@
     }
   },
   {
+    "command": "shell.list",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::rpc_types::shells::ShellList",
+    "responseName": "ShellList",
+    "responseTs": {
+      "imports": [
+        "ShellList"
+      ],
+      "name": "ShellList"
+    }
+  },
+  {
     "command": "shellexec",
     "request": "agentmux_srv::backend::rpc_types::block::CommandShellExecData",
     "requestName": "CommandShellExecData",

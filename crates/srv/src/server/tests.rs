@@ -4248,6 +4248,16 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
         block.meta.get(blockcontroller::META_KEY_CONTROLLER).and_then(|v| v.as_str()),
         Some(blockcontroller::BLOCK_CONTROLLER_SHELL)
     );
+    // Pinned to the automatic shell with no arguments: an agent's shell
+    // doesn't follow the user's default-shell setting.
+    assert_eq!(
+        block.meta.get(blockcontroller::META_KEY_TERM_LOCAL_SHELL_PATH).and_then(|v| v.as_str()),
+        Some(crate::backend::shells::automatic().display().to_string().as_str())
+    );
+    assert_eq!(
+        block.meta.get(blockcontroller::META_KEY_TERM_LOCAL_SHELL_OPTS),
+        Some(&serde_json::json!([]))
+    );
     assert_eq!(block.parentoref, format!("block:{agent_block_id}"));
 
     // The pointer is persisted on the AGENT's own block too — this is what
