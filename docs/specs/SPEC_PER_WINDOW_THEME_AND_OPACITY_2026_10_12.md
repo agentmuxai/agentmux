@@ -1,6 +1,6 @@
 # Per-window theme and opacity: one opacity per window, a theme per window, new windows inherit
 
-**Status:** active: implemented in one PR (§7); the owner took the recommended answer to each question in §8.
+**Status:** active: implemented in #4798; the owner took the recommended answer to each question in §8.
 **Date:** 2026-10-12.
 **Requested by:** repo owner: "currently we have 2 opacity numbers, the one set in the hamburger and the one in the status bar version panel. We want to combine them. Currently each window gets its own opacity in the status bar version panel, but the hamburger appears to change all. lets have the hamburger behave like the version status panel, and they should change reactive to each other. meanwhile, we want the theme in the hamburger to be per-window. Currently changing the theme modifies all windows on the channel, but we want it to only change the actual window. if a new window is created, it inherits the theme from the window that created it".
 **Author:** Clamk@narko.
