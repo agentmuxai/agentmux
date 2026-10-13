@@ -615,6 +615,16 @@ async fn test_handler_fork_display_name_registers_and_is_reachable() {
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
 }
 
+/// A name the route name leaves invalid can't register: an `agent@host` is
+/// kept as it is for forwarding, and no message could reach it here (#4744).
+#[test]
+fn test_handler_name_still_invalid_after_its_route_name_does_not_register() {
+    let mut handler = Handler::new();
+    assert!(handler.register_agent("agent2@narko", "block1", None).is_err());
+    assert!(handler.register_agent("   ", "block1", None).is_err());
+    assert!(handler.register_agent(&"a".repeat(65), "block1", None).is_ok(), "capped to a valid id");
+}
+
 #[test]
 fn test_handler_inject_no_sender() {
     let mut handler = Handler::new();

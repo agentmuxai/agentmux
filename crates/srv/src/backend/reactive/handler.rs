@@ -400,7 +400,11 @@ impl Handler {
         no_uid_counter: &'static str,
     ) -> Result<(), String> {
         // A display name that isn't a valid id ("Loap #3") binds by route name.
-        let display = &super::sanitize::route_name(display).ok_or_else(|| format!("invalid agent ID: {display}"))?;
+        // A name the route name leaves invalid (one with '@', kept for
+        // forwarding a target across tiers) can't register (#4744).
+        let display = &super::sanitize::route_name(display)
+            .filter(|d| validate_agent_id(d))
+            .ok_or_else(|| format!("invalid agent ID: {display}"))?;
         let stable = stable.filter(|s| validate_agent_id(s));
         let uid = uid
             .map(str::trim)
