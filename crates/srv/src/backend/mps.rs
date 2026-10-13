@@ -450,6 +450,13 @@ impl Broker {
         }
     }
 
+    /// Whether any route is subscribed to `event_name`, in any scope. For a
+    /// publisher that can skip measuring what nobody reads.
+    pub fn has_subscribers(&self, event_name: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.sub_map.get(event_name).is_some_and(|bs| !bs.is_empty())
+    }
+
     /// Unsubscribe a route from a specific event.
     pub fn unsubscribe(&self, route_id: &str, event_name: &str) {
         let mut inner = self.inner.lock().unwrap();
@@ -973,6 +980,31 @@ mod tests {
         });
 
         assert!(client.received_events().is_empty());
+    }
+
+    /// A publisher that measures something for a subscriber asks this before
+    /// doing the work: any route, any scope, and gone again once the last
+    /// route unsubscribes.
+    #[test]
+    fn test_has_subscribers_follows_any_subscription_of_the_event() {
+        let broker = Broker::new();
+        assert!(!broker.has_subscribers(EVENT_BLOCK_STATS));
+        let sub = |event: &str, scopes: Vec<&str>, allscopes: bool| SubscriptionRequest {
+            event: event.to_string(),
+            scopes: scopes.into_iter().map(String::from).collect(),
+            allscopes,
+        };
+        broker.subscribe("route-1", sub(EVENT_BLOCK_STATS, vec!["block:abc"], false));
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "an exact scope counts");
+        assert!(!broker.has_subscribers(EVENT_SYS_INFO), "another event doesn't");
+        broker.subscribe("route-2", sub(EVENT_BLOCK_STATS, vec![], true));
+        broker.unsubscribe("route-1", EVENT_BLOCK_STATS);
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "route-2 still watches every scope");
+        broker.subscribe("route-3", sub(EVENT_BLOCK_STATS, vec!["block:*"], false));
+        broker.unsubscribe_all("route-2");
+        assert!(broker.has_subscribers(EVENT_BLOCK_STATS), "a wildcard scope counts");
+        broker.unsubscribe_all("route-3");
+        assert!(!broker.has_subscribers(EVENT_BLOCK_STATS));
     }
 
     /// Regression: replay-on-subscribe delivers persisted events that
