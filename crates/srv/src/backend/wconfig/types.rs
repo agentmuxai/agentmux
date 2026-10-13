@@ -189,8 +189,8 @@ pub struct SettingsType {
     #[serde(rename = "widget:icononly", default, skip_serializing_if = "Option::is_none")]
     pub widget_icon_only: Option<bool>,
 
-    /// The widget bar's pinned icons, in order, as short names (`agent` for
-    /// `defwidget@agent`). Absent means the fresh-install default: the entries with
+    /// The widget bar's pinned icons, in order: a built-in's short name (`agent` for
+    /// `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). Absent means the fresh-install default: the entries with
     /// `display:pinned`. Written whole by the bar, its drag reorder and Settings → Widgets.
     #[serde(
         rename = "widget:pinned",

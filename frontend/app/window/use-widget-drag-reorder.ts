@@ -13,7 +13,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { fireAndForget } from "@/util/util";
-import { withVisibleOrder } from "./action-widgets-config";
+import { pinIdOf, withVisibleOrder } from "./action-widgets-config";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
 const DRAG_THRESHOLD = 5;
@@ -92,8 +92,8 @@ export function useWidgetDragReorder(opts: {
         setDragState(DRAG_IDLE);
         if (state.phase !== "dragging") return;
         const current = pinnedWidgets();
-        const shortNames = current.map(({ key }) => key.replace("defwidget@", ""));
-        const dragShort = state.key.replace("defwidget@", "");
+        const shortNames = current.map(({ key }) => pinIdOf(key));
+        const dragShort = pinIdOf(state.key);
         const fromIdx = shortNames.indexOf(dragShort);
         if (fromIdx === -1) return;
         const next = [...shortNames];

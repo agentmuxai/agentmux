@@ -906,7 +906,7 @@ declare global {
         "app:startatlogin"?: boolean;
         "widget:*"?: boolean;
         "widget:icononly"?: boolean;
-        /** Pinned widget-bar icons, in order, as short names (`agent` for `defwidget@agent`). */
+        /** Pinned widget-bar icons, in order: a built-in's short name (`agent` for `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). */
         "widget:pinned"?: string[];
         /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
         "widget:hidden"?: string[];

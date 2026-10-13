@@ -369,6 +369,24 @@ describe("getWidgetBarModel", () => {
         const slack = model.find((e) => e.key === "defwidget@messengers")!.children.find((c) => c.key === "defwidget@slack")!;
         expect([slack.state, slack.pinIndex, slack.pinCount]).toEqual(["pinned", 0, 2]);
         expect([agent.pinIndex, agent.pinCount]).toEqual([1, 2]);
-        expect(model.find((e) => e.key === "ext@acme.board/main")!.canPin).toBe(false);
+    });
+
+    it("pins an installed widget under its full key, and reads old short names as before", () => {
+        const settings = { "widget:pinned": ["agent", "ext@acme.board/main", "ext@gone.widget/main"] };
+        // A pin whose widget isn't installed any more is dropped, not shown.
+        expect(getPinnedKeys(settings, barWmap())).toEqual(["agent", "ext@acme.board/main"]);
+        expect(getPinnedWidgets(settings, barWmap()).map((e) => e.key)).toEqual(["defwidget@agent", "ext@acme.board/main"]);
+        expect(getMoreWidgets(settings, barWmap()).some((e) => e.key === "ext@acme.board/main")).toBe(false);
+        const board = getWidgetBarModel(settings, barWmap()).find((e) => e.key === "ext@acme.board/main")!;
+        expect([board.state, board.pinIndex, board.pinCount]).toEqual(["pinned", 1, 2]);
+        expect(nextWidgetBarConfig("ext@acme.board/main", "more", settings, barWmap())).toEqual({
+            "widget:pinned": ["agent"],
+        });
+        expect(nextWidgetBarConfig("ext@acme.board/main", "hidden", { "widget:pinned": ["agent"] }, barWmap())).toEqual({
+            "widget:hidden": ["ext@acme.board/main"],
+        });
+        expect(nextWidgetBarConfig("ext@acme.board/main", "pinned", { "widget:pinned": ["agent"] }, barWmap())).toEqual({
+            "widget:pinned": ["agent", "ext@acme.board/main"],
+        });
     });
 });
