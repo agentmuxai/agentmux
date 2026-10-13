@@ -3,8 +3,6 @@
 
 //! PTY geometry resolution and platform-specific shell detection.
 
-#[cfg(windows)]
-use agentmux_common::win32::NoWindow;
 use portable_pty::PtySize;
 
 use super::controller::ShellController;
@@ -128,44 +126,6 @@ pub(super) const FLUSHER_EOF_GRACE: std::time::Duration = std::time::Duration::f
 /// P2 on PR #3261).
 pub(super) const FLUSHER_BARRIER_TIMEOUT: std::time::Duration =
     FLUSHER_DRAIN_TIMEOUT.saturating_sub(FLUSHER_EOF_GRACE);
-
-/// Detect the best available interactive shell on Windows.
-///
-/// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
-///   1. Try `pwsh`  (PowerShell 7 — cross-platform)
-///   2. Try `powershell` (Windows PowerShell 5.x)
-///   3. Fall back to `cmd.exe`
-#[cfg(windows)]
-pub(super) fn detect_local_shell_path_windows() -> String {
-    use std::process::Command;
-    // Try pwsh (PowerShell 7)
-    if Command::new("where")
-        .arg("pwsh")
-        .no_window()
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return "pwsh".to_string();
-    }
-    // Try powershell (Windows PowerShell 5.x)
-    if Command::new("where")
-        .arg("powershell")
-        .no_window()
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return "powershell".to_string();
-    }
-    "cmd.exe".to_string()
-}
-
-/// Stub for non-Windows builds (never called due to cfg!(windows) guard).
-#[cfg(not(windows))]
-pub(super) fn detect_local_shell_path_windows() -> String {
-    "cmd.exe".to_string()
-}
 
 /// Resolve the initial PTY geometry from the resync `rt_opts` payload.
 ///

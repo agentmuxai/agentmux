@@ -7,10 +7,18 @@ import { For, Show, type JSX } from "solid-js";
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
 import type { SettingsIndexEntry } from "../settings-model";
 import { NumberControl, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { DefaultShellSetting } from "./default-shell";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const TERMINAL_SETTINGS = {
+    defaultShell: {
+        id: "terminal.default_shell",
+        label: "Default shell",
+        description: "The shell new local terminals open with. Agents' shells and SSH or WSL terminals keep their own.",
+        section: "terminal",
+        keywords: ["shell", "default shell", "pwsh", "powershell", "bash", "zsh", "fish", "git bash", "cmd", "nushell", "term:localshellpath"],
+    },
     fontSize: {
         id: "terminal.font_size",
         label: "Font size",
@@ -135,6 +143,13 @@ export function TerminalSection(): JSX.Element {
 
     return (
         <div class="settings-section-body">
+            <SettingRow
+                id={TERMINAL_SETTINGS.defaultShell.id}
+                label={TERMINAL_SETTINGS.defaultShell.label}
+                description={TERMINAL_SETTINGS.defaultShell.description}
+                stacked
+                control={<DefaultShellSetting />}
+            />
             <SettingRow
                 id={TERMINAL_SETTINGS.fontSize.id}
                 label={TERMINAL_SETTINGS.fontSize.label}

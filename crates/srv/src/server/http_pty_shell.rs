@@ -127,7 +127,7 @@ pub(super) async fn handle_pty_shell_create(
         json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
     );
     // Force cmd.exe directly on Windows rather than the "shell" controller's
-    // default pwsh/powershell auto-detection (`detect_local_shell_path_windows`,
+    // default pwsh/powershell auto-detection (`backend::shells::automatic`,
     // which tries pwsh first). Discovered live, not assumed: PowerShell's
     // PSReadLine issues a cursor-position query (`ESC[6n`, Device Status
     // Report) on interactive startup and blocks forever waiting for a

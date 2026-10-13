@@ -1181,6 +1181,10 @@
             "method": "BlockStatsDetailCommand"
         },
         {
+            "command": "shell.list",
+            "method": "ShellListCommand"
+        },
+        {
             "command": "tower.forget",
             "method": "TowerForgetCommand"
         },

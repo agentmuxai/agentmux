@@ -134,9 +134,7 @@ pub const META_KEY_CMD_INIT_SCRIPT_ZSH: &str = "cmd:initscript.zsh";
 pub const META_KEY_CMD_INIT_SCRIPT_FISH: &str = "cmd:initscript.fish";
 #[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT_PWSH: &str = "cmd:initscript.pwsh";
-#[allow(dead_code)]
 pub const META_KEY_TERM_LOCAL_SHELL_PATH: &str = "term:localshellpath";
-#[allow(dead_code)]
 pub const META_KEY_TERM_LOCAL_SHELL_OPTS: &str = "term:localshellopts";
 
 // ---- Default timeouts ----

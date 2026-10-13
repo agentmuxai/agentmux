@@ -26,7 +26,7 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE,
+    FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE,
     PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
@@ -299,6 +299,35 @@ fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {
 /// backend auto-register path specifically.
 fn is_global_cmd_env_injectable(key: &str) -> bool {
     !matches!(key, "AGENTMUX_AGENT_ID" | "WAVEMUX_AGENT_ID")
+}
+
+/// The extra arguments for an interactive local shell: the block's own
+/// `term:localshellopts` if it has any, else the setting's.
+fn shell_opts(block_meta: &MetaMapType, setting: &[String]) -> Vec<String> {
+    let own: Vec<String> = block_meta
+        .get(super::super::META_KEY_TERM_LOCAL_SHELL_OPTS)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    if own.is_empty() {
+        setting.to_vec()
+    } else {
+        own
+    }
+}
+
+#[cfg(test)]
+mod shell_opts_tests {
+    use super::*;
+
+    #[test]
+    fn the_blocks_own_options_win_over_the_setting() {
+        let mut meta = MetaMapType::new();
+        let setting = vec!["-NoLogo".to_string()];
+        assert_eq!(shell_opts(&meta, &setting), setting);
+        meta.insert(super::super::super::META_KEY_TERM_LOCAL_SHELL_OPTS.into(), serde_json::json!(["-l"]));
+        assert_eq!(shell_opts(&meta, &setting), vec!["-l".to_string()]);
+    }
 }
 
 /// The `cmd:env` part of an interactive shell's environment, computed from
@@ -762,13 +791,24 @@ impl Controller for ShellController {
                 Err(e) => return self.refuse_start(e),
             }
         } else {
-            // "shell" controller: interactive shell with AgentMux integration
-            // On Windows: prefer pwsh (PowerShell 7), fall back to powershell.exe (5.x), then cmd.exe
-            let shell_path = if cfg!(windows) {
-                detect_local_shell_path_windows()
-            } else {
-                std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-            };
+            // "shell" controller: interactive shell with AgentMux integration.
+            // The block's term:localshellpath, else the setting, else the
+            // automatic choice; a configured shell that isn't there falls back
+            // to the automatic one (backend::shells).
+            let settings = self.live_settings();
+            let spawn_shell = crate::backend::shells::resolve_for_spawn(
+                &obj::meta_get_string(&block_meta, super::super::META_KEY_TERM_LOCAL_SHELL_PATH, ""),
+                &settings.term_local_shell_path,
+            );
+            if let Some(missing) = &spawn_shell.missing {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    missing = %missing,
+                    using = %spawn_shell.path.display(),
+                    "configured shell not found; using the automatic one"
+                );
+            }
+            let shell_path = spawn_shell.path.display().to_string();
 
             let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
 
@@ -797,6 +837,11 @@ impl Controller for ShellController {
                 for (k, v) in &startup.env_vars {
                     c.env(k, v);
                 }
+            }
+            // term:localshellopts (the block's, else the setting's), after the
+            // integration args.
+            for arg in shell_opts(&block_meta, &settings.term_local_shell_opts) {
+                c.arg(arg);
             }
 
             // Inject terminal capability env vars into the PTY environment.
