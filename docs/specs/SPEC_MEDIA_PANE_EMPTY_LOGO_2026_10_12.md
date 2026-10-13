@@ -14,11 +14,11 @@ empty background.
 
 ## 2. What the Editor does (the reference)
 
-`EmptyEditor` in `frontend/app/view/editor/editor-view.tsx` renders
+`EmptyEditor` in [`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx) renders
 `<div class="editor-empty-logo" innerHTML={brainLogoSvg} aria-hidden="true" />`
 (the SVG from `frontend/app/asset/logo-brain.svg?raw`) as the first child of
 `.editor-empty`, then the shortcuts and buttons. The styles in
-`frontend/app/view/editor/editor-view.scss` (`.editor-empty-logo`):
+[`frontend/app/view/editor/editor-view.scss`](../../frontend/app/view/editor/editor-view.scss) (`.editor-empty-logo`):
 
 - `position: absolute`, centred with `top/left: 50%` and `translate(-50%, -50%)`
 - `width: min(70%, 560px)`, the SVG at `width: 100%; height: auto`
@@ -31,8 +31,8 @@ There are two empty states:
 
 | Case | Where | Shows |
 |---|---|---|
-| A tab with no file (the usual one: a Media pane always keeps a tab) | `MediaView`, `frontend/app/view/media/media-view.tsx`, the `kind() === "none" && !displayPath()` branch | "Click to load media" (or "No media loaded" where the host can't pick files) and the supported-types explainer, on a full-pane click target that opens the file picker |
-| A pane with no tab at all (rare) | `MediaPane` fallback, `frontend/app/view/media/media-pane.tsx` (`.media-pane-empty`) | "No files open" and "Click to pick one, or drop a file here." |
+| A tab with no file (the usual one: a Media pane always keeps a tab) | `MediaView`, [`frontend/app/view/media/media-view.tsx`](../../frontend/app/view/media/media-view.tsx), the `kind() === "none" && !displayPath()` branch | "Click to load media" (or "No media loaded" where the host can't pick files) and the supported-types explainer, on a full-pane click target that opens the file picker |
+| A pane with no tab at all (rare) | `MediaPane` fallback, [`frontend/app/view/media/media-pane.tsx`](../../frontend/app/view/media/media-pane.tsx) (`.media-pane-empty`) | "No files open" and "Click to pick one, or drop a file here." |
 
 Neither has the logo.
 
@@ -87,14 +87,14 @@ The same as the Editor in both themes: the SVG's own colours at 10% opacity,
 
 ## 5. Out of scope
 
-- The empty-tab logo in `frontend/app/tab/tabcontent.tsx` (a small logo above
+- The empty-tab logo in [`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx) (a small logo above
   user@host and the version). It is a different design and stays.
 - Empty states of other panes. Each can use `EmptyPaneLogo` later.
 - The empty-state wording.
 
 ## 6. Tests
 
-- **`frontend/app/view/media/media-pane.test.tsx`:** a new pane's empty tab
+- **[`frontend/app/view/media/media-pane.test.tsx`](../../frontend/app/view/media/media-pane.test.tsx):** a new pane's empty tab
   renders `.empty-pane-logo`, `aria-hidden`; it is gone once a file is shown;
   it is absent on the error state; clicking the logo's area still calls the
   picker.
@@ -108,7 +108,7 @@ The same as the Editor in both themes: the SVG's own colours at 10% opacity,
 | File | Change |
 |---|---|
 | `frontend/app/element/EmptyPaneLogo.tsx`, `EmptyPaneLogo.scss` | New (§4.1) |
-| `frontend/app/view/editor/editor-view.tsx`, `editor-view.scss` | Use it; drop `.editor-empty-logo` (§4.2) |
-| `frontend/app/view/media/media-view.tsx` | Logo in the empty-tab state (§4.3) |
-| `frontend/app/view/media/media-pane.tsx` (and its style) | Logo in the no-tab state (§4.3) |
-| `frontend/app/view/media/media-pane.test.tsx` | Tests (§6) |
+| [`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx), `editor-view.scss` | Use it; drop `.editor-empty-logo` (§4.2) |
+| [`frontend/app/view/media/media-view.tsx`](../../frontend/app/view/media/media-view.tsx) | Logo in the empty-tab state (§4.3) |
+| [`frontend/app/view/media/media-pane.tsx`](../../frontend/app/view/media/media-pane.tsx) (and its style) | Logo in the no-tab state (§4.3) |
+| [`frontend/app/view/media/media-pane.test.tsx`](../../frontend/app/view/media/media-pane.test.tsx) | Tests (§6) |
