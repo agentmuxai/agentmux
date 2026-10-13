@@ -24,6 +24,7 @@ import { revealTabInStrip } from "./tab-strip-scroll";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
 import { tabWrapperRefs } from "./tabbar-dnd";
+import { GripDots } from "@/app/element/GripDots";
 import "./tabbar.scss";
 
 interface TabBarProps {
@@ -386,6 +387,12 @@ function TabBar(props: TabBarProps): JSX.Element {
                         </>
                     )}
                 </For>
+                {/* The last tab ends with the same separator every other tab
+                    boundary has, so it does not run straight into the drag
+                    square (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13). */}
+                <Show when={tabIds().length > 0}>
+                    <div class="tab-separator" aria-hidden="true" />
+                </Show>
                 {/* Fill lives INSIDE the scroll container so the genuine empty
                     space to the right of the last tab is draggable. isInDragRegion
                     walks UP the DOM from the clicked element: the fill's own
@@ -393,7 +400,11 @@ function TabBar(props: TabBarProps): JSX.Element {
                     "false", so a click here starts a window drag. Moving it outside
                     the scroll (as a sibling) left a dead zone — the empty interior
                     of the scroll container looked draggable but wasn't. */}
-                <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true" />
+                <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true">
+                    {/* A dim grip marks the drag square; it takes no events, so a
+                        press on it is a press on the fill. */}
+                    <GripDots class="tab-bar-fill-grip" />
+                </div>
             </div>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal

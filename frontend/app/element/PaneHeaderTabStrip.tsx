@@ -83,6 +83,9 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             // handle, blockframe.tsx's `data-role="block-header"`), the one
             // strip usage where reserving drag space after the "+" matters.
             reserveDragHandle
+            // The header's whole-pane drag is vetoed for a magnified or
+            // ephemeral pane (TileLayout.core.tsx canDrag); the grip says so.
+            dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()}
             onReorder={props.onReorder}
             onReceiveForeignTab={props.onReceiveForeignTab}
             // Derived from `nodeModel` (this strip's own Pane) rather than

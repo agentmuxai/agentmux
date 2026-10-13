@@ -1,6 +1,6 @@
 # Drag space in the window and pane headers: does it need a grip?
 
-**Status:** proposed
+**Status:** active — v1 in PR #4800: the dim grip in the window drag square (§5.1), the pane grip button (§5.2), the separator after the last tab (§5.5). Next: the Move menu (§5.3).
 **Date:** 2026-10-13
 **Author:** AgentA (Area54)
 **Trigger:** Owner request: "there is a small piece of dragable space, both on the window header and on the pane header. It is always reserved so users have a space to right click or drag. there is actually a best practice grid like icon that simulatates a sort of grip. is that the best practice solution to indicate? research best practices online, write a spect to file."
@@ -10,7 +10,7 @@
 
 **It depends on which header.**
 
-- **Window header: no grip.** Every platform guideline and every major app marks the window's drag space with *empty* space, never a glyph. A grip there would be unique among desktop apps, and would look like a button in a region that should feel like the title bar. What matters is that the space is guaranteed, and today it isn't quite: it scrolls away when the tabs overflow (§3.1).
+- **Window header: the research says no grip.** Every platform guideline and every major app marks the window's drag space with *empty* space, never a glyph. **The owner chose a dim grip anyway (2026-10-13)**: "its as simple as putting the dim standin" in the slot that is already there. §5.1 is that design: quiet enough not to read as a button, with the default cursor kept.
 - **Pane header: yes, a subtle grip, and make it a button.** Moving panes is an app feature. The design systems that cover in-app drag handles (Atlassian, Cloudscape, NN/g) agree on four rules: a 2×3 vertical-dot grip, low-key until the header is hovered, a ≥ 24 px target, and the grip doubling as a menu with the same moves without dragging. That last one is how WCAG 2.5.7 is met, and AgentMux doesn't meet it today: docking and tear-off are drag-only (§3.2).
 - **Not ⠿.** The superseded 2026-06 spec used U+283F. It is non-standard and font-dependent; the vertical 2×3 grip is the convention (§4.5).
 
@@ -107,22 +107,18 @@ A known failure mode: a panel-header drag that moves the whole window instead of
 
 ## 5. Design
 
-### 5.1 Window header: stay blank, but always reserved
+### 5.1 Window header: a dim grip in the existing drag square (owner's choice)
 
-- **No glyph, default arrow cursor.** As every title bar on the platform does, and as the owner chose on 2026-10-04.
-- **New: a drag square that doesn't scroll away.** Add a fixed, non-scrolling drag square, `width: var(--tab-bar-drag-gutter)` (32 px), as a sibling *after* `.tab-bar-scroll`, before the widget bar, with `data-drag-region="true"`.
-  - **Keep `.tab-bar-fill` where it is**, inside the strip. The `tabbar.tsx` comment records why: when the fill was moved outside, the scroll container's empty interior (marked `"false"`) looked draggable but wasn't. The new square is *added*, not moved.
-  - This is `SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md`'s §2.2 alternative. That spec chose the scrolling gutter because the owner allowed it to "be hidden when scrolled to the left". This reopens that choice for §3.1's reason, so it is **owner decision D1**.
-- **Size:** keep 32 px. Microsoft's samples use 48–188 px, but AgentMux's widget bar is right beside it, and 32 px is already a widget's width. Revisit only if users miss it.
-- **Right-click:** keep `TitleBarContextMenu`. Optionally add the window items Windows users expect there (Minimize, Maximize/Restore, Close); **D3**.
-- **Accessibility:** none needed for dragging (keyboard users move windows with the OS: Alt+Space on Windows). Add `aria-hidden="true"`, so screen readers skip an empty decorative box.
+- **Where:** inside `.tab-bar-fill`, centred in its first `--tab-bar-drag-gutter` (32 px), right after the last tab's separator (§5.5). The square stays where it is: the existing slot the owner pointed to, inside the scrolling strip, as `SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md` built it.
+- **Glyph:** the 4×3 dot grip (§5.6), 12 px, `--secondary-text-color` at opacity 0.35; 0.7 while the square is hovered.
+- **Takes no events** (`pointer-events: none`): a press on the grip is a press on the fill, so dragging, double-click and right-click work exactly as before. `aria-hidden`.
+- **Default arrow cursor**, as on every native title bar; no tooltip.
+- Unchanged: the 32 px minimum, `TitleBarContextMenu` on right-click, double-click to maximize.
 
 ### 5.2 Pane header: a grip button in the reserved space
 
-- **Where:** a 24×24 px button at the end of the pane's tab strip, after "+", in the space `.pane-tab-strip-drag-handle` reserves. Change that space from "45 px only when overflowing, else 0" to:
-  - always at least the button's 24 px;
-  - the 45 px gutter while overflowing stays, with the button at its start.
-- **Glyph:** Font Awesome Free `grip-vertical`, 12–14 px.
+- **Where:** a 24×24 px button at the end of the pane's tab strip, after "+", in the space `.pane-tab-strip-drag-handle` reserves. That space was "45 px only when overflowing, else 0"; it is now exactly the button's 24 px, overflowing or not. The owner, after trying v1: "we dont need all that extra space to the right of the grip", so the 45 px overflow gutter and the strip's overflow measurement are gone.
+- **Glyph:** the 4×3 dot grip (§5.6), 12 px.
 - **Visibility:** moving panes is secondary to working in them, so follow Atlassian's secondary-action rule.
   - At rest: `opacity` about 0.35 of `--secondary-text-color`.
   - On header hover, `:focus-within`, or while a pane drag is in progress anywhere: 1.
@@ -132,9 +128,10 @@ A known failure mode: a panel-header drag that moves the whole window instead of
 - **Click, Enter or Space** opens the pane's header menu (the same `handleHeaderContextMenu`), anchored to the button.
 - **Tooltip:** "Drag to move this pane. Click for pane actions."
 - **Accessibility:**
-  - `<button aria-label="Move pane / pane actions" aria-haspopup="menu">`;
+  - `role="button"`, `tabIndex=0`, `aria-label="Move pane / pane actions"`, `aria-haspopup="menu"`. A `div` rather than a `<button>`, so a press on it can still start the header's drag in every engine;
   - reachable with Tab;
   - focus returns to it when the menu closes.
+- **v1 opens the menu** by sending the header a `contextmenu` event at the grip's position, so the grip and a right-click share one handler and one menu.
 
 ### 5.3 The non-drag way to move a pane (WCAG 2.5.7)
 
@@ -148,31 +145,37 @@ Each item uses the layout operations the drag already uses, so a menu move and a
 
 ### 5.4 What not to do
 
-- No grip in the window header, and no `grab` cursor there.
+- No `grab` cursor and no tooltip in the window header; its grip stays dim and takes no events.
 - No ⠿, no lines, no single row of three dots.
 - No hover-only grip without the menu: a hidden handle plus a drag-only action fails 2.5.7.
 - No pane-drag zone touching the window-drag square without a gap: the two must stay distinct (§4.4).
 
-## 6. Owner decisions
+### 5.5 A separator after the last tab
 
-| | Question | Proposed |
+Owner, 2026-10-13: "there is a missing seperator at the end of the last window tab". Every tab boundary had a `.tab-separator` except the last tab's right edge, so the last tab ran straight into the drag square. `tabbar.tsx` now renders one more `.tab-separator` after the last tab (when there is one), with the same rule as the others.
+
+### 5.6 The glyph: 4×3 dots (owner, 2026-10-13)
+
+After trying the 2×3 `grip-vertical` in `task dev`, the owner asked for "3x3", then "a 4x3 but joining 2": two 2×3 grips side by side. Font Awesome Free has neither (`grip` is 3×2, `grip-vertical` 2×3), so `frontend/app/element/GripDots.tsx` draws it: an inline SVG of twelve dots, four columns by three rows on a 4-unit pitch, `currentColor`, 1em tall. Both grips use it. A wide block of dots reads as "grab here" without a single column's row-reorder connotation, and stays clear of the kebab and hamburger shapes (§4.5).
+
+## 6. Decisions
+
+| | Question | Decided |
 |---|---|---|
-| D1 | Pin a 32 px window drag square outside the scrolling tab strip, so it is always there? | Yes |
-| D2 | Pane grip: always visible but dim, or only on hover? | Always, dim; full on hover/focus |
-| D3 | Add Minimize / Maximize / Close to the title bar's right-click menu? | Optional; not needed for this spec |
-| D4 | First Move items in the pane menu | Move Left/Right/Up/Down and Move to New Window |
+| D1 | A pinned window drag square outside the scrolling strip? | No: the owner points to the existing slot; the grip goes there (§5.1) |
+| D2 | Pane grip: always visible but dim, or only on hover? | Always, dim; full on header hover or focus |
+| D3 | Window items in the title bar's right-click menu? | Not now |
+| D4 | First Move items in the pane menu | Move Left/Right/Up/Down and Move to New Window (§5.3, next) |
 
 ## 7. Phases
 
-1. **P1, pane grip button (§5.2):** visual, cursor, tooltip, click-to-menu, accessibility. Small and self-contained.
-2. **P2, Move menu items (§5.3):** the WCAG 2.5.7 fix; needs the layout's swap and tear-off operations exposed to the menu.
-3. **P3, pinned window drag square (§5.1)**, if D1 is yes.
+1. **v1 (PR #4800):** the window grip (§5.1), the pane grip button (§5.2), the last tab's separator (§5.5).
+2. **Next, the Move menu items (§5.3):** the WCAG 2.5.7 fix; needs the layout's swap and tear-off operations exposed to the menu.
 
 ### Tests
 
-- **P1:** the grip renders in every pane header, `aria-label` and `aria-haspopup` set; click and Enter open the header menu; a drag starting on it moves the pane (TileLayout drag test).
-- **P2:** each Move item produces the same layout as the equivalent drag.
-- **P3:** with tabs overflowing and the strip scrolled to the start, the drag square is still in view and a `mousedown` on it reaches `start_window_drag`.
+- **v1** (`PaneTabStrip.test.tsx`): the grip renders in the spacer with its role, `aria-label` and `aria-haspopup`; a click opens the header menu; Enter and Space do, other keys don't. By eye in `task dev`: both grips, the separator, and a drag that starts on the pane grip moves the pane.
+- **Move menu:** each Move item produces the same layout as the equivalent drag.
 
 ## 8. Sources
 

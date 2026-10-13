@@ -443,8 +443,8 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                         // (see docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md)
                         // — checked explicitly here rather than trusted
                         // implicitly. `.pane-tab-strip-drag-handle` (the
-                        // reserved whole-pane-drag space once the strip
-                        // overflows, PaneTabStrip.tsx) is deliberately NOT
+                        // pane's grip slot after the "+", PaneTabStrip.tsx)
+                        // is deliberately NOT
                         // in this selector — it stays part of this region.
                         const atPoint = document.elementFromPoint(input.clientX, input.clientY);
                         if (atPoint?.closest(PANE_DRAG_EXCLUDED)) return false;
