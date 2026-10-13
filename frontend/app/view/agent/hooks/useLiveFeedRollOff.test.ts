@@ -4,7 +4,8 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentNode } from "../types";
-import { useLiveFeedRollOff } from "./useLiveFeedRollOff";
+import { LIVE_FEED_MAX_FINISHED_BYTES } from "../live-feed";
+import { BUDGET_PASS_MS, HIDDEN_HOLD_RELEASE_MS, IN_FLIGHT_TEXT_BUDGET, useLiveFeedRollOff } from "./useLiveFeedRollOff";
 
 const userMsg = (id: string) => ({ type: "user_message", id, message: id }) as unknown as DocumentNode;
 
@@ -14,13 +15,15 @@ function mount(
         rollOff?: { prefixTurns: number; gapsBefore: string[] };
         nodes?: DocumentNode[];
         historyOffset?: number;
+        hidden?: () => boolean;
+        held?: string[];
     } = {}
 ) {
     const dispatched: Array<{ type: string }> = [];
     const [doc] = createSignal<DocumentNode[]>(opts.nodes ?? [userMsg("u1"), userMsg("u2"), userMsg("keep")]);
     const [docState, setDocState] = createSignal({
         collapsedNodes: new Set<string>(),
-        heldOpenNodes: new Set<string>(),
+        heldOpenNodes: new Set<string>(opts.held ?? []),
         pinnedNodes: new Set<string>(),
     });
     const paneModel = {
@@ -47,12 +50,12 @@ function mount(
             outputFormat: () => opts.outputFormat ?? "claude-stream-json",
             block: () => undefined,
             agentAtoms: () => ({ documentStateAtom: [docState, setDocState] }) as never,
-            hidden: () => false,
+            hidden: opts.hidden ?? (() => false),
             history: { historyOffset: () => opts.historyOffset ?? 0 },
         });
         return { feed, dispose };
     });
-    return { ...root, dispatched };
+    return { ...root, dispatched, docState };
 }
 
 describe("useLiveFeedRollOff", () => {
@@ -137,5 +140,54 @@ describe("useLiveFeedRollOff", () => {
             expect(m.feed.earlierHistoryAvailable()).toBe(false);
             m.dispose();
         });
+    });
+});
+
+// SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.3, §2.6.
+describe("useLiveFeedRollOff — holds in hidden panes, and passes while over budget", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("releases held-open rows once the pane has been hidden for HIDDEN_HOLD_RELEASE_MS, then runs a pass", () => {
+        const [hidden, setHidden] = createSignal(false);
+        const m = mount({ hidden, held: ["t1"] });
+        setHidden(true);
+        vi.advanceTimersByTime(HIDDEN_HOLD_RELEASE_MS - 1);
+        expect(m.docState().heldOpenNodes.has("t1")).toBe(true);
+        const before = m.dispatched.length;
+        vi.advanceTimersByTime(1 + 2_000);
+        expect(m.docState().heldOpenNodes.size).toBe(0);
+        expect(m.dispatched.slice(before).some((c) => c.type === "UnloadToolResults")).toBe(true);
+        m.dispose();
+    });
+
+    it("keeps holds when the pane is shown again before the grace ends", () => {
+        const [hidden, setHidden] = createSignal(false);
+        const m = mount({ hidden, held: ["t1"] });
+        setHidden(true);
+        vi.advanceTimersByTime(HIDDEN_HOLD_RELEASE_MS / 2);
+        setHidden(false);
+        vi.advanceTimersByTime(HIDDEN_HOLD_RELEASE_MS * 2);
+        expect(m.docState().heldOpenNodes.has("t1")).toBe(true);
+        m.dispose();
+    });
+
+    it("runs a pass every BUDGET_PASS_MS while the pane holds more text than its budget", () => {
+        const huge = "x".repeat(LIVE_FEED_MAX_FINISHED_BYTES + IN_FLIGHT_TEXT_BUDGET + 1_000);
+        const nodes = [userMsg("u1"), { type: "markdown", id: "m1", content: huge } as unknown as DocumentNode];
+        const m = mount({ nodes });
+        vi.advanceTimersByTime(2_000);
+        const first = m.dispatched.filter((c) => c.type === "UnloadToolResults").length;
+        vi.advanceTimersByTime(BUDGET_PASS_MS * 3 + 2_000);
+        const later = m.dispatched.filter((c) => c.type === "UnloadToolResults").length;
+        expect(later - first).toBeGreaterThanOrEqual(3);
+        m.dispose();
+    });
+
+    it("runs no periodic pass under budget", () => {
+        const m = mount();
+        vi.advanceTimersByTime(BUDGET_PASS_MS * 3);
+        expect(m.dispatched.filter((c) => c.type === "UnloadToolResults")).toHaveLength(0);
+        m.dispose();
     });
 });

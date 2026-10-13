@@ -1,6 +1,6 @@
 # SPEC: The agent pane unloads collapsed tool results from memory
 
-**Status:** proposed — nothing here is built.
+**Status:** implemented — U1 in #4125, U2 in #4126. Extended by `SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md` (any turn, a 2 KB floor, jekt turns, holds released in hidden panes).
 **Date:** 2026-10-01
 **Verified against:** `agentmux` `main` @ `fd95207ea`, plus #4121 (the live
 feed bounded by size). Paths are relative to [`frontend/app/view/agent/`](../../frontend/app/view/agent)

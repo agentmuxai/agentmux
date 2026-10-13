@@ -14,15 +14,18 @@
 import { estimateTokenCount } from "@/util/format-count";
 import { toolActivities } from "./activity/tool-adapter";
 import { RETENTION_MS } from "./activity/types";
+import { fileRangeOf } from "./tool-meta/file-range";
 import { isContentFirstTool, toolPill } from "./tool-meta/tool-descriptors";
 import type { DocumentNode, ToolNode, ToolResult } from "./types";
 
 /**
- * Results smaller than this stay: they cost little, and small reads of a
- * result (background-launch detection, `isAcceptedBackgroundLaunch`) keep
- * working unchanged.
+ * Results smaller than this stay: the stub is under 200 bytes, so below a
+ * couple of KB unloading saves little, and small reads of a result
+ * (background-launch detection, `isAcceptedBackgroundLaunch`) keep working
+ * unchanged. Was 8 KB; many Read and Grep results sit at 2–8 KB
+ * (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.4).
  */
-export const UNLOAD_MIN_BYTES = 8 * 1024;
+export const UNLOAD_MIN_BYTES = 2 * 1024;
 
 /** Slack past the dock's own retention, for a row still fading out. */
 const DOCK_GRACE_MS = 5_000;
@@ -41,8 +44,10 @@ export function resultBytes(result: ToolResult | undefined): number {
 
 /**
  * Ids of the tool nodes whose results may unload now: finished, collapsed
- * (not in `keepIds`: pinned, held open, or otherwise kept), before the turn
- * in flight, with a known transcript line, at least UNLOAD_MIN_BYTES, not
+ * (not in `keepIds`: pinned, held open, or otherwise kept), in any turn —
+ * the turn in flight too, since a long one otherwise holds every result it
+ * produced (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.1) — with
+ * a known transcript line, at least UNLOAD_MIN_BYTES, not
  * a content-first tool (whose body shows while collapsed), and not still
  * showing in the Activity Dock, whose row reads its output from the result
  * (Codex P2 on #4126). A later pass unloads it once the dock lets it go.
@@ -56,16 +61,8 @@ export function planUnload(
     opts: { keepIds: ReadonlySet<string>; now?: number }
 ): string[] {
     const docked = dockedToolIds(nodes, opts.now ?? Date.now());
-    let lastUser = -1;
-    for (let i = nodes.length - 1; i >= 0; i--) {
-        if (nodes[i].type === "user_message") {
-            lastUser = i;
-            break;
-        }
-    }
     const ids: string[] = [];
-    for (let i = 0; i < lastUser; i++) {
-        const n = nodes[i];
+    for (const n of nodes) {
         if (n.type !== "tool") continue;
         if (!FINISHED.has(n.status)) continue;
         if (n.result == null || n.resultUnloaded || !n.resultSource?.stream.startsWith("g:")) continue;
@@ -106,14 +103,20 @@ export function planLogFree(
     return ids;
 }
 
-/** The node with its result replaced by a stub: the pill and size stay. */
+/** The node with its result replaced by a stub: the pill, file range and size stay. */
 export function unloadResult(node: ToolNode): ToolNode {
     const bytes = resultBytes(node.result);
     const pill = toolPill(node);
+    const range = fileRangeOf(node);
     const text = JSON.stringify(node.result ?? "");
     return {
         ...node,
         result: undefined,
-        resultUnloaded: { pill: pill ? { label: pill.label, variant: pill.variant } : null, bytes, tokens: estimateTokenCount(text) },
+        resultUnloaded: {
+            pill: pill ? { label: pill.label, variant: pill.variant } : null,
+            bytes,
+            tokens: estimateTokenCount(text),
+            ...(range ? { range } : {}),
+        },
     };
 }

@@ -236,6 +236,7 @@ partial list.
 | [`SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18`](SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) | SPEC: Keep-alive for agent tabs in the pane tab strip |
 | [`SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10`](SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md) | SPEC: Agent pane tab strip floats over the conversation, doesn't reserve a row |
 | [`SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11`](SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md) | Agent pane: a tool call's hover peek only on its line, and "Open in editor" on Markdown file previews |
+| [`SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01`](SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md) | SPEC: The agent pane unloads collapsed tool results from memory |
 | [`SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24`](SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md) | Spec: Agent Pane Zone Reorder + Enriched "Worked" Footer |
 | [`SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17`](SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) | SPEC: Filter/search box atop the AgentPicker |
 | [`SPEC_AGENT_PICKER_TWO_TIER_2026_05_24`](SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md) | SPEC: Two-tier agent picker — "My Agents" + "Templates" |
@@ -558,6 +559,7 @@ partial list.
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
 | [`SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) | SPEC: Agent pane tab-switch perf |
 | [`SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26`](SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26.md) | Spec: One descriptor per tool (agent pane) |
+| [`SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13`](SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md) | Spec: an agent pane holds a bounded amount of tool output text |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04`](SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md) | Agent Recurring-Task / Polling Primitives — Design Hardening |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
@@ -698,7 +700,6 @@ partial list.
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
 | [`SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12`](SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md) | Spec: Agent pane session-replay framework |
-| [`SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01`](SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md) | SPEC: The agent pane unloads collapsed tool results from memory |
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
 | [`SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) | SPEC: Agent pane shell drawer — replace the Session/History bar with a process & shell info panel |

@@ -130,3 +130,26 @@ describe("command-source / dispatch log", () => {
         expect(describeSource({ kind: "agent", agentId: "agent-1" })).toBe("agent:agent-1");
     });
 });
+
+// SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.7.
+describe("command-source / the log keeps no payloads", () => {
+    beforeEach(() => {
+        __resetDispatchLog();
+    });
+
+    it("keeps a command's scalar fields and counts its arrays, but not its nodes or long text", () => {
+        const bigNode = { id: "n1", result: "x".repeat(50_000) };
+        recordDispatch({
+            slice: "agent-document",
+            key: "block-a",
+            command: { type: "StreamFlush", nodeId: "n1", count: 3, final: true, newNodes: [bigNode, bigNode], text: "y".repeat(5_000) },
+            events: [{ type: "nodes-appended", nodes: [bigNode] }],
+            source: "system",
+            at: 1,
+        });
+        const [rec] = getRecentDispatches();
+        expect(rec.command).toEqual({ type: "StreamFlush", nodeId: "n1", count: 3, final: true, newNodesCount: 2 });
+        expect(rec.events).toEqual([{ type: "nodes-appended", nodesCount: 1 }]);
+        expect(JSON.stringify(rec).length).toBeLessThan(500);
+    });
+});

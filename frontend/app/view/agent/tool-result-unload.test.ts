@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { fileRangeOf } from "./tool-meta/file-range";
 import { planLogFree, planUnload, resultBytes, UNLOAD_MIN_BYTES, unloadResult } from "./tool-result-unload";
 import type { DocumentNode, ToolNode } from "./types";
 
@@ -24,10 +25,25 @@ const user = (id: string): DocumentNode => ({ type: "user_message", id, message:
 const none = new Set<string>();
 
 describe("planUnload", () => {
-    it("unloads a collapsed, finished, large result with a source, before the turn in flight", () => {
+    // SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2.1: the turn in
+    // flight is no longer exempt — a finished, collapsed result there unloads
+    // like one in an older turn; its row stays.
+    it("unloads a collapsed, finished, large result with a source, in any turn", () => {
         const nodes: DocumentNode[] = [user("u0"), tool("t1"), user("u1"), tool("t2")];
-        // t2 is in the turn in flight (after the last user message): kept.
-        expect(planUnload(nodes, { keepIds: none })).toEqual(["t1"]);
+        expect(planUnload(nodes, { keepIds: none })).toEqual(["t1", "t2"]);
+    });
+
+    it("keeps a result the turn in flight is still producing, or one held open", () => {
+        const nodes: DocumentNode[] = [user("u0"), tool("t1", { status: "running" }), tool("t2")];
+        expect(planUnload(nodes, { keepIds: new Set(["t2"]) })).toEqual([]);
+    });
+
+    it("unloads results of 2 KB and more, not smaller ones", () => {
+        expect(UNLOAD_MIN_BYTES).toBe(2 * 1024);
+        const atFloor = { stdout: "x".repeat(UNLOAD_MIN_BYTES), stderr: "", exitCode: 0 };
+        const under = { stdout: "x".repeat(UNLOAD_MIN_BYTES - 200), stderr: "", exitCode: 0 };
+        const nodes: DocumentNode[] = [user("u0"), tool("a", { result: atFloor }), tool("b", { result: under })];
+        expect(planUnload(nodes, { keepIds: none })).toEqual(["a"]);
     });
 
     it("keeps each excluded kind", () => {
@@ -60,8 +76,8 @@ describe("planUnload", () => {
         expect(planUnload(nodes, { keepIds: none, now: now + 60_000 })).toEqual(["t1"]);
     });
 
-    it("does nothing without a user message (the whole document is the turn in flight)", () => {
-        expect(planUnload([tool("t1")], { keepIds: none })).toEqual([]);
+    it("unloads in a document with no user message too (one long turn)", () => {
+        expect(planUnload([tool("t1")], { keepIds: none })).toEqual(["t1"]);
     });
 });
 
@@ -95,5 +111,29 @@ describe("unloadResult", () => {
         expect(out.resultUnloaded?.bytes).toBe(resultBytes(big));
         expect(out.resultUnloaded?.tokens).toBeGreaterThan(0);
         expect(out.resultUnloaded).toHaveProperty("pill");
+    });
+});
+
+// SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §2: unloading inside the
+// turn in flight must not change a row's header, so the stub keeps the range.
+describe("unloadResult keeps the header's file range", () => {
+    it("a Read keeps its range and total once its result is gone", () => {
+        const read = tool("r1", {
+            tool: "Read",
+            toolName: "Read",
+            params: { file_path: "/a.ts", offset: 120, limit: 60 },
+            result: { type: "text", file: { filePath: "/a.ts", numLines: 60, startLine: 120, totalLines: 456 }, content: "x".repeat(3000) },
+        });
+        const before = fileRangeOf(read);
+        expect(before).not.toBeNull();
+        const out = unloadResult(read);
+        expect(out.result).toBeUndefined();
+        expect(fileRangeOf(out)).toEqual(before);
+    });
+
+    it("a tool without a range keeps none", () => {
+        const out = unloadResult(tool("b1"));
+        expect(out.resultUnloaded?.range).toBeUndefined();
+        expect(fileRangeOf(out)).toBeNull();
     });
 });

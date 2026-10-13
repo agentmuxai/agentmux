@@ -23,20 +23,29 @@ export type ReadLine = (offset: number) => Promise<{ lines?: string[] | null; st
  * missing, or the line no longer holds this tool's result.
  */
 export async function readToolResult(node: ToolNode, outputFormat: string, readLine: ReadLine): Promise<ToolResult | null> {
+    // Each way it can fail says why: a row that shows "no longer available"
+    // was silent before (SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md §3).
+    const miss = (why: string): null => {
+        console.warn(`[tool-result] ${node.id}: can't read the result back (${why})`);
+        return null;
+    };
     const src = node.resultSource;
-    if (!src) return null;
+    if (!src) return miss("no transcript line recorded");
     let resp: Awaited<ReturnType<ReadLine>>;
     try {
         resp = await readLine(src.line);
-    } catch {
-        return null;
+    } catch (e) {
+        return miss(`read failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (resp.stream !== src.stream || resp.gen !== src.gen) return null;
+    if (resp.stream !== src.stream || resp.gen !== src.gen) {
+        return miss(`transcript moved on: ${src.stream}@${src.gen} → ${resp.stream}@${resp.gen}`);
+    }
     const line = resp.lines?.[0];
-    if (!line) return null;
+    if (!line) return miss(`line ${src.line} missing`);
     const { nodes } = parseHistoryLines([line], outputFormat);
     const found = nodes.find((n) => n.type === "tool" && n.id === node.id) as ToolNode | undefined;
-    return found?.result ?? null;
+    if (!found?.result) return miss(`line ${src.line} has no result for this tool`);
+    return found.result;
 }
 
 /** Loads a node's unloaded result into the pane; resolves false when it can't. */
