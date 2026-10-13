@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `GET /agentmux/viewer/terminals/:block_id/feed`: one terminal's output,
-//! live and read-only, for a paired device (agentmux-mobile's
-//! `docs/reports/REPORT_PANE_LIST_TERMINALS_AND_FROZEN_FEED_2026_10_12.md`
+//! live and read-only, for a paired device
+//! (`agentmux-mobile/docs/reports/REPORT_PANE_LIST_TERMINALS_AND_FROZEN_FEED_2026_10_12.md`
 //! §2.4, §2.5 phase B). Served beside the other viewer routes, on the viewer
 //! listener only, for the viewer token only.
 //!
