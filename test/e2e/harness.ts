@@ -40,7 +40,7 @@ export async function listCdpTargets(port: number): Promise<CdpTarget[]> {
     return (await res.json()) as CdpTarget[];
 }
 
-export function wsConnect(url: string): Promise<WebSocket> {
+function wsConnect(url: string): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
         const ws = new WebSocket(url);
         ws.addEventListener("open", () => resolve(ws));
@@ -49,7 +49,7 @@ export function wsConnect(url: string): Promise<WebSocket> {
 }
 
 let msgId = 1;
-export function wsSend(ws: WebSocket, method: string, params?: unknown): Promise<any> {
+function wsSend(ws: WebSocket, method: string, params?: unknown): Promise<any> {
     return new Promise((resolve, reject) => {
         const id = msgId++;
         const handler = (event: MessageEvent) => {
@@ -104,7 +104,7 @@ export async function evalInMainWindow(port: number, expression: string): Promis
  *  how close-path failures in these suites get diagnosed.
  *  `AGENTMUX_TEST_HARNESS` is added: an instance under test doesn't publish
  *  its cloud presence (crates/srv/src/muxbus/wan_presence/policy.rs). */
-export function scrubbedEnv(): NodeJS.ProcessEnv {
+function scrubbedEnv(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) {
         if (!k.startsWith("AGENTMUX_") || k === "AGENTMUX_DEBUG_CLOSE") env[k] = v;

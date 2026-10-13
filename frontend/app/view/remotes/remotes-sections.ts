@@ -12,9 +12,9 @@ export const META_REMOTES_EXPAND = "remotes:expand";
 
 export type RemoteSection = "pinned" | "ssh" | "recent" | "wsl" | "hidden";
 
-export const SECTION_ORDER: RemoteSection[] = ["pinned", "ssh", "recent", "wsl", "hidden"];
+const SECTION_ORDER: RemoteSection[] = ["pinned", "ssh", "recent", "wsl", "hidden"];
 
-export const SECTION_LABELS: Record<RemoteSection, string> = {
+const SECTION_LABELS: Record<RemoteSection, string> = {
     pinned: "Pinned",
     ssh: "SSH hosts",
     recent: "Recent",
@@ -84,7 +84,7 @@ function sortIn(section: RemoteSection, records: RemoteRecord[]): RemoteRecord[]
     return out;
 }
 
-export function matchesFilter(r: RemoteRecord, filter: string): boolean {
+function matchesFilter(r: RemoteRecord, filter: string): boolean {
     return matchesEveryWord(filter, r.name, displayName(r));
 }
 

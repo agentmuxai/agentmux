@@ -59,7 +59,7 @@ const isEmpty = (d: MediaDoc | undefined): boolean => !!d && !d.path && !d.file;
 
 let blanks = 0;
 
-export function mediaIcon(path: string): string {
+function mediaIcon(path: string): string {
     const ext = extOf(path);
     if (IMAGE_EXTENSIONS.includes(ext)) return "image";
     if (VIDEO_EXTENSIONS.includes(ext)) return "film";
@@ -69,7 +69,7 @@ export function mediaIcon(path: string): string {
 
 /** A tab with no file yet is "New Tab", as in a browser: a place to load a
  *  file, not a document to save. It has no icon; a file's tab has its kind's. */
-export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
+const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     keyOf: (d) => d.path || `blank:${d.blank ?? 0}`,
     titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "New Tab")),
     iconOf: (d) => (isEmpty(d) ? undefined : mediaIcon(d.path || d.file?.name || "")),

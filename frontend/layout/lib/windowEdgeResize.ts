@@ -224,7 +224,7 @@ function recurseAxis(
  * participant is missing a rect (e.g. mid-mount) — the session is simply
  * not started and the resize stays proportional.
  */
-export function buildEdgeResizeSnapshot(model: LayoutModel): EdgeResizeSnapshotNode | null {
+function buildEdgeResizeSnapshot(model: LayoutModel): EdgeResizeSnapshotNode | null {
     const addlProps = model.getter(model.additionalProps);
     const boundingRect = model.getBoundingRect();
 

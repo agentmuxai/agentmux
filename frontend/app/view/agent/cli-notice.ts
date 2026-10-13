@@ -24,9 +24,9 @@
 import { PROVIDERS } from "./providers/catalog";
 import type { CliNoticeNode } from "./types";
 
-export const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
-export const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
-export const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
+const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
+const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
+const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
 
 const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
 
@@ -132,7 +132,7 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
 }
 
 /** "Claude Code" for `claude`; the id itself for a provider the catalog doesn't know. */
-export function cliDisplayName(provider: string): string {
+function cliDisplayName(provider: string): string {
     return PROVIDERS[provider]?.displayName ?? provider;
 }
 

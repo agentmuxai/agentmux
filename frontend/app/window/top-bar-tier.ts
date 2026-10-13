@@ -15,7 +15,7 @@
  */
 
 /** Sub-pixel rounding allowance at a fractional header zoom. */
-export const TIER_TOLERANCE_PX = 1;
+const TIER_TOLERANCE_PX = 1;
 
 export interface TopBarMeasure {
     /** Width the tab bar and the widget bar share: the tab bar's width plus the live widget bar's. */

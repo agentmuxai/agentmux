@@ -193,7 +193,7 @@ const WHEN_FLAGS = new Set(["textInputFocus", "terminalFocus", "docTabsHost"]);
 /** Throws on any term that isn't a known flag or a viewType comparison.
  *  Checks every term: evalWhen stops at the first false one, so a bad flag
  *  later in the clause would otherwise slip through and throw on a key press. */
-export function validateWhen(when: string | undefined): void {
+function validateWhen(when: string | undefined): void {
     if (!when) return;
     for (const raw of when.split("&&")) {
         const t = raw.trim();
@@ -203,7 +203,7 @@ export function validateWhen(when: string | undefined): void {
 }
 
 /** `when` is `flag`, `!flag`, `viewType == x` or `viewType != x`, joined with `&&`. */
-export function evalWhen(when: string | undefined, ctx: KeyContext): boolean {
+function evalWhen(when: string | undefined, ctx: KeyContext): boolean {
     if (!when) return true;
     return when.split("&&").every((raw) => {
         const t = raw.trim();

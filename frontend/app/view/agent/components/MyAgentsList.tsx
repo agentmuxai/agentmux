@@ -138,7 +138,7 @@ export const noMatchText = (query: string): string => `No agents match "${query}
  *
  * SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.3.
  */
-export const noPreviewText = (row: Pick<RecentSessionRow, "snapshot_check_failed" | "has_snapshot">): string => {
+const noPreviewText = (row: Pick<RecentSessionRow, "snapshot_check_failed" | "has_snapshot">): string => {
     if (row.snapshot_check_failed) return "Couldn't read history";
     if (row.has_snapshot) return "No prompt in recent history";
     return "No conversations yet";

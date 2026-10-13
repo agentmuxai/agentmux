@@ -44,7 +44,7 @@ function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): J
     );
 }
 
-export const CONNECTORS_SPEC: SectionPaneSpec<ConnectorsSection> = {
+const CONNECTORS_SPEC: SectionPaneSpec<ConnectorsSection> = {
     view: CONNECTORS_VIEW,
     sectionKey: CONNECTORS_SECTION_KEY,
     defaultSection: "accounts",

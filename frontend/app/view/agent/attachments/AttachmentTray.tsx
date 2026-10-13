@@ -24,7 +24,7 @@ import { limitLevel, trayLayout } from "./tray-layout";
 
 const UNDO_MS = 6000;
 
-export function toTileModel(item: DraftAttachment, number: number): TileModel {
+function toTileModel(item: DraftAttachment, number: number): TileModel {
     const byteStage = item.stage !== "processing" && item.bytes > 0;
     return {
         key: item.key,

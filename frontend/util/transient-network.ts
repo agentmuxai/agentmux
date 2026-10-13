@@ -13,7 +13,7 @@ export function isTransientNetworkError(err: unknown): boolean {
 }
 
 /** ~1.1 s in total: 10055 refusals seen on #3868's machine came ~1 s apart. */
-export const TRANSIENT_RETRY_DELAYS_MS: readonly number[] = [100, 300, 700];
+const TRANSIENT_RETRY_DELAYS_MS: readonly number[] = [100, 300, 700];
 
 /**
  * Run `fn`, retrying after each delay while it fails with a transient network

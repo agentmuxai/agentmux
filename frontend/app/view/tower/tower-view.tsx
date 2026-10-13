@@ -47,16 +47,16 @@ import {
 import "./tower-view.scss";
 
 /** The process list shows this many rows; the filter narrows the rest. */
-export const HOST_ROW_LIMIT = 400;
+const HOST_ROW_LIMIT = 400;
 
 /** The picker's choice that opens the pairing form rather than a machine. */
-export const PAIR_OPTION = "__pair__";
+const PAIR_OPTION = "__pair__";
 
 /** The machine picker: this computer, the AgentMux computers it is paired
  *  with, then every SSH host and WSL distribution AgentMux knows (the Remotes
  *  pane's list), and a way to pair another. The helper runs on Linux and
  *  macOS only, so other SSH hosts are listed but can't be picked. */
-export function machineOptions(current: string, remotes: RemoteRecord[], peers: TowerPeerInfo[] = []): SelectOption[] {
+function machineOptions(current: string, remotes: RemoteRecord[], peers: TowerPeerInfo[] = []): SelectOption[] {
     const options: SelectOption[] = [{ value: "", label: "This computer" }];
     for (const p of peers) options.push({ value: p.connection, label: `${p.hostname || p.address} (AgentMux)` });
     for (const r of remotes) {

@@ -119,7 +119,7 @@ export function Tabs<T extends string>(props: TabsProps<T>): JSX.Element {
 export type TabbedPaneLayout = "top" | "top-icons";
 
 /** The width each tab needs before a TabbedPane shows the labels. */
-export const TAB_LABEL_MIN_WIDTH = 112;
+const TAB_LABEL_MIN_WIDTH = 112;
 
 /** Which layout a TabbedPane of this width and number of tabs uses. */
 export function tabbedPaneLayout(width: number, tabCount: number, labelsFrom?: number): TabbedPaneLayout {

@@ -44,7 +44,7 @@ export interface Disclosure {
 
 export type DisclosureInputs = Pick<DocumentState, "collapsedNodes" | "pinnedNodes" | "heldOpenNodes">;
 
-export function rowFlags(id: string, state: DisclosureInputs): RowFlags {
+function rowFlags(id: string, state: DisclosureInputs): RowFlags {
     return {
         pinned: state.pinnedNodes.has(id),
         collapsed: state.collapsedNodes.has(id),

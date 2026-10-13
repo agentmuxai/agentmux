@@ -41,7 +41,7 @@ import { trackWidgetPane } from "./widget-panes";
 
 /** The contract version this host implements for trusted widgets. A widget
  *  built for another is rejected rather than half-working. */
-export const PANE_TAB_API_VERSION = 1;
+const PANE_TAB_API_VERSION = 1;
 
 const SHARED_MODULES = ["solid-js", "solid-js/web", "solid-js/store"] as const;
 
@@ -59,7 +59,7 @@ export interface PackageLoaderDeps {
 
 /** `m`, with each instance it creates noted as a pane of `pkg` (where its
  *  commands are delivered) until it is disposed. */
-export function trackedManifest(pkg: WidgetPackageInfo, m: PaneTabManifest): PaneTabManifest {
+function trackedManifest(pkg: WidgetPackageInfo, m: PaneTabManifest): PaneTabManifest {
     return {
         ...m,
         create: (ctx) => {

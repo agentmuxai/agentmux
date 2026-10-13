@@ -47,7 +47,7 @@ export function liveRefit(proposed: GridSize, current: GridSize, bufferLines: nu
  * four of them missed every other frame
  * (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §12).
  */
-export const LIVE_REFITS_PER_FRAME = 2;
+const LIVE_REFITS_PER_FRAME = 2;
 
 /**
  * Refits may use this share of the time that passes. What a refit costs
@@ -58,9 +58,9 @@ export const LIVE_REFITS_PER_FRAME = 2;
  * and a refit starts only while the credit is positive: cheap refits still
  * run `LIVE_REFITS_PER_FRAME` a frame, costly ones about one every other frame.
  */
-export const LIVE_REFIT_TIME_SHARE = 0.25;
+const LIVE_REFIT_TIME_SHARE = 0.25;
 /** The most credit that builds up while nothing refits: about one frame's share at 60 Hz. */
-export const LIVE_REFIT_MAX_CREDIT_MS = 4;
+const LIVE_REFIT_MAX_CREDIT_MS = 4;
 
 export interface RefitScheduler {
     /** Run `job` this frame if the frame has room, otherwise on a later frame. One job per key. */
