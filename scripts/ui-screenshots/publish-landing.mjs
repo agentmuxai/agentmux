@@ -11,7 +11,7 @@
 //       { "file": "ui-agent.webp", "shot": "agent-conversation", "width": 960, "quality": 82 },
 //       { "file": "ui-tower.webp", "shot": "widget-tower", "size": "small" },
 //       { "file": "ui-swarm-follows.mp4", "clip": "swarm-follows-agent", "width": 1280,
-//         "poster": "ui-swarm-follows-poster.webp" } ] }
+//         "poster": "ui-swarm-follows-poster.webp", "posterAt": 6 } ] }
 //
 // Each entry is encoded from the run's PNG (a shot) or MP4 (a clip) with
 // ffmpeg. Only files the manifest lists are written; a shot not marked
@@ -45,6 +45,7 @@ export function readManifest(manifest) {
         if (e?.clip && extname(e.file ?? "") !== ".mp4") errors.push(`${at}: a clip is published as .mp4`);
         if (e?.poster && !e?.clip) errors.push(`${at}: only a clip has a poster`);
         if (e?.poster && extname(e.poster) !== ".webp") errors.push(`${at}: a poster is .webp`);
+        if (e?.posterAt != null && (!e?.poster || typeof e.posterAt !== "number" || !(e.posterAt >= 0))) errors.push(`${at}: posterAt is a number of seconds, for a clip with a poster`);
     });
     if (errors.length) throw new Error(`manifest.json:\n  ${errors.join("\n  ")}`);
     return entries;
@@ -79,14 +80,15 @@ export function landingPlan(entries, images) {
 export function encodeCommands(entry, source, dir) {
     const scale = entry.width ? [`scale=${entry.width}:-2:flags=lanczos`] : [];
     const quiet = ["-hide_banner", "-loglevel", "error", "-y"];
-    const webp = (vf, out) => [...quiet, "-i", source, ...(vf.length ? ["-vf", vf.join(",")] : []), "-frames:v", "1", "-c:v", "libwebp", "-quality", String(entry.quality ?? 82), "-compression_level", "6", out];
+    const webp = (vf, out, at) => [...quiet, ...(at ? ["-ss", String(at)] : []), "-i", source, ...(vf.length ? ["-vf", vf.join(",")] : []), "-frames:v", "1", "-c:v", "libwebp", "-quality", String(entry.quality ?? 82), "-compression_level", "6", out];
     if (entry.shot) return [{ file: entry.file, args: webp(scale, join(dir, entry.file)) }];
     // H.264 in yuv420p needs even dimensions; muted (there's no audio track), and
     // faststart so it plays before it has fully downloaded.
     const vf = [...scale, "scale=trunc(iw/2)*2:trunc(ih/2)*2", "format=yuv420p"].join(",");
     const cmds = [{ file: entry.file, args: [...quiet, "-i", source, "-an", "-vf", vf, "-c:v", "libx264", "-crf", String(entry.crf ?? 26), "-preset", "slow", "-movflags", "+faststart", join(dir, entry.file)] }];
-    // The poster is the clip's first frame, so the page doesn't jump when it starts playing.
-    if (entry.poster) cmds.push({ file: entry.poster, args: webp(scale, join(dir, entry.poster)) });
+    // The poster is the frame at `posterAt` seconds (the first frame by default): what a
+    // visitor sees before the clip plays, or instead of it when autoplay is off.
+    if (entry.poster) cmds.push({ file: entry.poster, args: webp(scale, join(dir, entry.poster), entry.posterAt) });
     return cmds;
 }
 

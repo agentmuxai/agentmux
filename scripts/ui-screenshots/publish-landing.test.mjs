@@ -101,6 +101,19 @@ describe("encodeCommands", () => {
         expect(mp4).toContain("-c:v libx264");
         expect(mp4).toContain("-movflags +faststart");
         expect(cmds[1].args.join(" ")).toContain("-frames:v 1 -c:v libwebp");
+        expect(cmds[1].args).not.toContain("-ss");
+    });
+
+    it("a poster at posterAt seconds seeks there before reading the clip", () => {
+        const [, poster] = encodeCommands({ file: "c.mp4", clip: "c", poster: "c-poster.webp", posterAt: 6.5 }, "/run/c.mp4", "/tmp");
+        const args = poster.args.join(" ");
+        expect(args).toContain("-ss 6.5 -i /run/c.mp4");
+    });
+
+    it("refuses a posterAt that isn't a number of seconds, or without a poster", () => {
+        expect(() => readManifest({ images: [{ file: "c.mp4", clip: "c", poster: "p.webp", posterAt: "6" }] })).toThrow(/posterAt is a number/);
+        expect(() => readManifest({ images: [{ file: "c.mp4", clip: "c", posterAt: 6 }] })).toThrow(/posterAt is a number/);
+        expect(() => readManifest({ images: [{ file: "c.mp4", clip: "c", poster: "p.webp", posterAt: -1 }] })).toThrow(/posterAt is a number/);
     });
 });
 
