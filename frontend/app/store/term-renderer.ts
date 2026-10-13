@@ -16,6 +16,11 @@ export interface TermRendererState {
     kind: TermRendererKind;
     /** Why, for the DOM renderer or a lost context. */
     why?: string;
+    /**
+     * Who set it: a block's terminal can be mounted again before the old
+     * mount is disposed, and the old one must not clear the new one's entry.
+     */
+    owner?: object;
 }
 
 const [renderers, setRenderers] = createSignal<ReadonlyMap<string, TermRendererState>>(new Map());
@@ -28,9 +33,11 @@ export function setTermRendererOf(blockId: string, state: TermRendererState): vo
     setRenderers((prev) => new Map(prev).set(blockId, state));
 }
 
-export function forgetTermRenderer(blockId: string): void {
+/** Drop a block's entry when its terminal closes, if `owner` still set it. */
+export function forgetTermRenderer(blockId: string, owner?: object): void {
     setRenderers((prev) => {
-        if (!prev.has(blockId)) return prev;
+        const current = prev.get(blockId);
+        if (!current || (owner && current.owner !== owner)) return prev;
         const next = new Map(prev);
         next.delete(blockId);
         return next;

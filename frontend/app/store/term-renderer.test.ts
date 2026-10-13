@@ -15,6 +15,17 @@ describe("term renderer, per terminal", () => {
         expect(termRendererOf("b")?.kind).toBe("dom");
     });
 
+    it("a closing terminal clears only the entry it set, not a newer mount's", () => {
+        const oldMount = {};
+        const newMount = {};
+        setTermRendererOf("c", { kind: "webgl", owner: oldMount });
+        setTermRendererOf("c", { kind: "dom", owner: newMount });
+        forgetTermRenderer("c", oldMount);
+        expect(termRendererOf("c")?.kind).toBe("dom");
+        forgetTermRenderer("c", newMount);
+        expect(termRendererOf("c")).toBeUndefined();
+    });
+
     it("describes each renderer for the hover panel", () => {
         expect(describeTermRenderer({ kind: "webgl" }).value).toBe("WebGL (GPU)");
         expect(describeTermRenderer({ kind: "dom" }).value).toBe("DOM (software)");

@@ -31,7 +31,7 @@ import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { paintRows, resizeAndPaint } from "./term-paint";
-import { setTermRendererOf } from "@/app/store/term-renderer";
+import { forgetTermRenderer, setTermRendererOf } from "@/app/store/term-renderer";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 const dlog = debug("wave:termwrap");
@@ -536,6 +536,7 @@ export class TermWrap {
             this.wedgeTimer = null;
         }
         this.disposed = true;
+        forgetTermRenderer(this.blockId, this);
         // Cancel pending PSReadLine-thaw callbacks so they don't fire
         // on a disposed Terminal. dispose() doesn't null `this.terminal`
         // (xterm.Terminal stays in memory until its own dispose finishes
@@ -869,11 +870,11 @@ export class TermWrap {
     private hideCanvasWhileContextLost(canvas: HTMLCanvasElement) {
         const onLost = () => {
             canvas.style.visibility = "hidden";
-            setTermRendererOf(this.blockId, { kind: "lost", why: "its WebGL context was lost; waiting 3 s for it back, then DOM" });
+            setTermRendererOf(this.blockId, { kind: "lost", why: "its WebGL context was lost; waiting 3 s for it back, then DOM", owner: this });
         };
         const onRestored = () => {
             canvas.style.visibility = "";
-            setTermRendererOf(this.blockId, { kind: "webgl" });
+            setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
         };
         canvas.addEventListener("webglcontextlost", onLost);
         canvas.addEventListener("webglcontextrestored", onRestored);
@@ -905,13 +906,14 @@ export class TermWrap {
                         setTermRendererOf(this.blockId, {
                             kind: "dom",
                             why: "its WebGL context was lost and not restored (too many terminals, or a GPU reset)",
+                            owner: this,
                         });
                         // DOM renderer is active by default when no addon is loaded
                     })
                 );
                 this.terminal.loadAddon(webglAddon);
                 setTermRendererAtom("webgl");
-                setTermRendererOf(this.blockId, { kind: "webgl" });
+                setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
                 if (!loggedWebGL) {
                     console.log("loaded webgl renderer!");
                     loggedWebGL = true;
@@ -919,7 +921,7 @@ export class TermWrap {
             } catch (e) {
                 console.warn("WebGL renderer unavailable, using DOM renderer:", e);
                 setTermRendererAtom("dom");
-                setTermRendererOf(this.blockId, { kind: "dom", why: "WebGL couldn't start for this terminal" });
+                setTermRendererOf(this.blockId, { kind: "dom", why: "WebGL couldn't start for this terminal", owner: this });
                 if (!loggedWebGL) {
                     console.log("loaded DOM renderer (webgl fallback)!");
                     loggedWebGL = true;
@@ -931,6 +933,7 @@ export class TermWrap {
             setTermRendererOf(this.blockId, {
                 kind: "dom",
                 why: useWebGl ? "WebGL isn't available on this machine" : "WebGL is turned off (term:disablewebgl)",
+                owner: this,
             });
         }
     }
