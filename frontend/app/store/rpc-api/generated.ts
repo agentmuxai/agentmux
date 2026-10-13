@@ -22,14 +22,22 @@ import type { AgentSessionReadResult } from "@/types/rpc/AgentSessionReadResult"
 import type { AgentSessionWriteStateResult } from "@/types/rpc/AgentSessionWriteStateResult";
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
+import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
+import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
+import type { AttachmentsInfoResult } from "@/types/rpc/AttachmentsInfoResult";
+import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResult";
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
+import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
+import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
 import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
 import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
 import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
 import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
+import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
 import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { CommandActivitySummaryData } from "@/types/rpc/CommandActivitySummaryData";
 import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
@@ -44,6 +52,9 @@ import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
+import type { CommandAttachmentsCopyToWorkdirData } from "@/types/rpc/CommandAttachmentsCopyToWorkdirData";
+import type { CommandAttachmentsInfoData } from "@/types/rpc/CommandAttachmentsInfoData";
+import type { CommandAttachmentsIngestData } from "@/types/rpc/CommandAttachmentsIngestData";
 import type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
 import type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
 import type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
@@ -51,10 +62,17 @@ import type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfile
 import type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfileReadStateData";
 import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
+import type { CommandBrowserProfileCreateData } from "@/types/rpc/CommandBrowserProfileCreateData";
+import type { CommandBrowserProfileDeleteData } from "@/types/rpc/CommandBrowserProfileDeleteData";
+import type { CommandBrowserProfileUpdateData } from "@/types/rpc/CommandBrowserProfileUpdateData";
+import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
 import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
 import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
 import type { CommandDeleteBundleData } from "@/types/rpc/CommandDeleteBundleData";
 import type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
+import type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
+import type { CommandFleetGroupDeleteData } from "@/types/rpc/CommandFleetGroupDeleteData";
+import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupListData";
 import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
 import type { CommandGetAgentContentData } from "@/types/rpc/CommandGetAgentContentData";
 import type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
@@ -65,6 +83,10 @@ import type { CommandGlobalMemoryHistoryData } from "@/types/rpc/CommandGlobalMe
 import type { CommandGlobalMemoryRevertData } from "@/types/rpc/CommandGlobalMemoryRevertData";
 import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
 import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
+import type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
+import type { CommandLayoutOpenData } from "@/types/rpc/CommandLayoutOpenData";
+import type { CommandLayoutPreviewData } from "@/types/rpc/CommandLayoutPreviewData";
+import type { CommandLayoutSaveData } from "@/types/rpc/CommandLayoutSaveData";
 import type { CommandLinkAgentIdentityData } from "@/types/rpc/CommandLinkAgentIdentityData";
 import type { CommandListAgentIdentitiesData } from "@/types/rpc/CommandListAgentIdentitiesData";
 import type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
@@ -82,6 +104,7 @@ import type { CommandRemoteSshLocateData } from "@/types/rpc/CommandRemoteSshLoc
 import type { CommandRemoteTestData } from "@/types/rpc/CommandRemoteTestData";
 import type { CommandRenameAgentDefinitionTitleData } from "@/types/rpc/CommandRenameAgentDefinitionTitleData";
 import type { CommandReorderGlobalBundlesData } from "@/types/rpc/CommandReorderGlobalBundlesData";
+import type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
 import type { CommandSessionArchiveData } from "@/types/rpc/CommandSessionArchiveData";
 import type { CommandSessionExportData } from "@/types/rpc/CommandSessionExportData";
 import type { CommandSessionRestoreData } from "@/types/rpc/CommandSessionRestoreData";
@@ -93,6 +116,8 @@ import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
 import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
 import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
+import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgentHiddenData";
+import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
 import type { CreateEditorDirReq } from "@/types/rpc/CreateEditorDirReq";
 import type { CreateEditorDirResult } from "@/types/rpc/CreateEditorDirResult";
@@ -106,6 +131,10 @@ import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
 import type { EnsureAccountDirReq } from "@/types/rpc/EnsureAccountDirReq";
 import type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
+import type { EnsureProviderAuthDirReq } from "@/types/rpc/EnsureProviderAuthDirReq";
+import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuthDirResult";
+import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
+import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
@@ -142,6 +171,10 @@ import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
 import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
+import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
+import type { LayoutSaveResult } from "@/types/rpc/LayoutSaveResult";
 import type { ListDronesReq } from "@/types/rpc/ListDronesReq";
 import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
 import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
@@ -149,11 +182,28 @@ import type { LspSendReq } from "@/types/rpc/LspSendReq";
 import type { LspStartReq } from "@/types/rpc/LspStartReq";
 import type { LspStartResult } from "@/types/rpc/LspStartResult";
 import type { LspStopReq } from "@/types/rpc/LspStopReq";
+import type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
+import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
+import type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
+import type { McpBindResult } from "@/types/rpc/McpBindResult";
+import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
+import type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
+import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
 import type { MoveScratchFileReq } from "@/types/rpc/MoveScratchFileReq";
 import type { MoveScratchFileResult } from "@/types/rpc/MoveScratchFileResult";
+import type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
+import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 import type { NextPromptSuggestionResult } from "@/types/rpc/NextPromptSuggestionResult";
+import type { NotifyAckParams } from "@/types/rpc/NotifyAckParams";
+import type { NotifyAckResult } from "@/types/rpc/NotifyAckResult";
+import type { NotifyAttentionResult } from "@/types/rpc/NotifyAttentionResult";
+import type { NotifyEmitParams } from "@/types/rpc/NotifyEmitParams";
+import type { NotifyFocusParams } from "@/types/rpc/NotifyFocusParams";
+import type { NotifyOk } from "@/types/rpc/NotifyOk";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
+import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
 import type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
@@ -161,6 +211,7 @@ import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult"
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
 import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
 import type { SessionArchiveResult } from "@/types/rpc/SessionArchiveResult";
@@ -179,7 +230,12 @@ import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
 import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
 import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
 import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
+import type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
+import type { ViewerDevicesResult } from "@/types/rpc/ViewerDevicesResult";
+import type { ViewerPairStartResult } from "@/types/rpc/ViewerPairStartResult";
+import type { ViewerRevokeResult } from "@/types/rpc/ViewerRevokeResult";
 import type { WatchEditorFileReq } from "@/types/rpc/WatchEditorFileReq";
 import type { WatchMediaDirReq } from "@/types/rpc/WatchMediaDirReq";
 import { RpcClient } from "../rpc-client";
@@ -289,6 +345,30 @@ export const GeneratedApi = {
   ): Promise<AskSideQuestionResult> {
     return client.rpcCall("asksidequestion", data, opts);
   },
+  // command "attachments.copy-to-workdir"
+  AttachmentsCopyToWorkdirCommand(
+    client: RpcClient,
+    data: CommandAttachmentsCopyToWorkdirData,
+    opts?: RpcOpts
+  ): Promise<AttachmentsCopyToWorkdirResult> {
+    return client.rpcCall("attachments.copy-to-workdir", data, opts);
+  },
+  // command "attachments.info"
+  AttachmentsInfoCommand(
+    client: RpcClient,
+    data: CommandAttachmentsInfoData,
+    opts?: RpcOpts
+  ): Promise<AttachmentsInfoResult> {
+    return client.rpcCall("attachments.info", data, opts);
+  },
+  // command "attachments.ingest"
+  AttachmentsIngestCommand(
+    client: RpcClient,
+    data: CommandAttachmentsIngestData,
+    opts?: RpcOpts
+  ): Promise<AttachmentsIngestResult> {
+    return client.rpcCall("attachments.ingest", data, opts);
+  },
   // command "auth.cancel"
   AuthCancelCommand(client: RpcClient, data: CancelProviderAuthReq, opts?: RpcOpts): Promise<AckResp> {
     return client.rpcCall("auth.cancel", data, opts);
@@ -341,6 +421,22 @@ export const GeneratedApi = {
   ): Promise<BlockfileWriteStateResult> {
     return client.rpcCall("blockfile:write_state", data, opts);
   },
+  // command "block.reveal"
+  BlockRevealCommand(client: RpcClient, data: BlockRevealParams, opts?: RpcOpts): Promise<BlockRevealResult> {
+    return client.rpcCall("block.reveal", data, opts);
+  },
+  // command "checkcliauth"
+  CheckCliAuthCommand(client: RpcClient, data: CommandCheckCliAuthData, opts?: RpcOpts): Promise<CheckCliAuthResult> {
+    return client.rpcCall("checkcliauth", data, opts);
+  },
+  // command "browser_profiles.create"
+  CreateBrowserProfileCommand(
+    client: RpcClient,
+    data: CommandBrowserProfileCreateData,
+    opts?: RpcOpts
+  ): Promise<BrowserProfilesResult> {
+    return client.rpcCall("browser_profiles.create", data, opts);
+  },
   // command "createeditordir"
   CreateEditorDirCommand(client: RpcClient, data: CreateEditorDirReq, opts?: RpcOpts): Promise<CreateEditorDirResult> {
     return client.rpcCall("createeditordir", data, opts);
@@ -364,6 +460,14 @@ export const GeneratedApi = {
   // command "deleteagentskill"
   DeleteAgentSkillCommand(client: RpcClient, data: CommandDeleteAgentSkillData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("deleteagentskill", data, opts);
+  },
+  // command "browser_profiles.delete"
+  DeleteBrowserProfileCommand(
+    client: RpcClient,
+    data: CommandBrowserProfileDeleteData,
+    opts?: RpcOpts
+  ): Promise<BrowserProfilesResult> {
+    return client.rpcCall("browser_profiles.delete", data, opts);
   },
   // command "deletememory"
   DeleteBundleCommand(client: RpcClient, data: CommandDeleteBundleData, opts?: RpcOpts): Promise<DeleteBundleResult> {
@@ -392,6 +496,46 @@ export const GeneratedApi = {
   // command "identity.ensureaccountdir"
   EnsureAccountDirCommand(client: RpcClient, data: EnsureAccountDirReq, opts?: RpcOpts): Promise<EnsureAccountDirResp> {
     return client.rpcCall("identity.ensureaccountdir", data, opts);
+  },
+  // command "provider.ensureauthdir"
+  EnsureProviderAuthDirCommand(
+    client: RpcClient,
+    data: EnsureProviderAuthDirReq,
+    opts?: RpcOpts
+  ): Promise<EnsureProviderAuthDirResult> {
+    return client.rpcCall("provider.ensureauthdir", data, opts);
+  },
+  // command "eventreadhistory"
+  EventReadHistoryCommand(
+    client: RpcClient,
+    data: CommandEventReadHistoryData,
+    opts?: RpcOpts
+  ): Promise<Array<MuxEvent>> {
+    return client.rpcCall("eventreadhistory", data, opts);
+  },
+  // command "eventsub"
+  EventSubCommand(client: RpcClient, data: SubscriptionRequest, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("eventsub", data, opts);
+  },
+  // command "eventunsuball"
+  EventUnsubAllCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("eventunsuball", null, opts);
+  },
+  // command "fleet.group.delete"
+  FleetGroupDeleteCommand(
+    client: RpcClient,
+    data: CommandFleetGroupDeleteData,
+    opts?: RpcOpts
+  ): Promise<FleetGroupDeleteResult> {
+    return client.rpcCall("fleet.group.delete", data, opts);
+  },
+  // command "fleet.group.list"
+  FleetGroupListCommand(
+    client: RpcClient,
+    data: CommandFleetGroupListData,
+    opts?: RpcOpts
+  ): Promise<FleetGroupListResult> {
+    return client.rpcCall("fleet.group.list", data, opts);
   },
   // command "fs.create"
   FsCreateCommand(client: RpcClient, data: FsCreateReq, opts?: RpcOpts): Promise<FsCreateResult> {
@@ -561,6 +705,10 @@ export const GeneratedApi = {
   InstallStartCommand(client: RpcClient, data: InstallStartReq, opts?: RpcOpts): Promise<InstallStartResult> {
     return client.rpcCall("install.start", data, opts);
   },
+  // command "installtool"
+  InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {
+    return client.rpcCall("installtool", data, opts);
+  },
   // command "linkagentidentity"
   LinkAgentIdentityCommand(client: RpcClient, data: CommandLinkAgentIdentityData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("linkagentidentity", data, opts);
@@ -617,9 +765,57 @@ export const GeneratedApi = {
   LspStopCommand(client: RpcClient, data: LspStopReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("lspstop", data, opts);
   },
+  // command "mcp.bind"
+  McpBindCommand(client: RpcClient, data: McpAgentBindingData, opts?: RpcOpts): Promise<McpBindResult> {
+    return client.rpcCall("mcp.bind", data, opts);
+  },
+  // command "mcp.catalog.bind"
+  McpCatalogBindCommand(client: RpcClient, data: McpAgentBindingData, opts?: RpcOpts): Promise<McpBindResult> {
+    return client.rpcCall("mcp.catalog.bind", data, opts);
+  },
+  // command "mcp.catalog.delete"
+  McpCatalogDeleteCommand(client: RpcClient, data: McpCatalogItemData, opts?: RpcOpts): Promise<McpDeleteResult> {
+    return client.rpcCall("mcp.catalog.delete", data, opts);
+  },
+  // command "mcp.catalog.list_for_agent"
+  McpCatalogListForAgentCommand(
+    client: RpcClient,
+    data: McpAgentScopeData,
+    opts?: RpcOpts
+  ): Promise<Array<McpServerListItem>> {
+    return client.rpcCall("mcp.catalog.list_for_agent", data, opts);
+  },
+  // command "mcp.catalog.unbind"
+  McpCatalogUnbindCommand(client: RpcClient, data: McpAgentBindingData, opts?: RpcOpts): Promise<McpUnbindResult> {
+    return client.rpcCall("mcp.catalog.unbind", data, opts);
+  },
+  // command "mcp.delete"
+  McpDeleteCommand(client: RpcClient, data: McpAgentItemData, opts?: RpcOpts): Promise<McpDeleteResult> {
+    return client.rpcCall("mcp.delete", data, opts);
+  },
+  // command "mcp.get"
+  McpGetCommand(client: RpcClient, data: McpAgentItemData, opts?: RpcOpts): Promise<McpServer | null> {
+    return client.rpcCall("mcp.get", data, opts);
+  },
+  // command "mcp.list"
+  McpListCommand(client: RpcClient, data: McpAgentScopeData, opts?: RpcOpts): Promise<Array<McpServerListItem>> {
+    return client.rpcCall("mcp.list", data, opts);
+  },
+  // command "mcp.unbind"
+  McpUnbindCommand(client: RpcClient, data: McpAgentBindingData, opts?: RpcOpts): Promise<McpUnbindResult> {
+    return client.rpcCall("mcp.unbind", data, opts);
+  },
   // command "movescratchfile"
   MoveScratchFileCommand(client: RpcClient, data: MoveScratchFileReq, opts?: RpcOpts): Promise<MoveScratchFileResult> {
     return client.rpcCall("movescratchfile", data, opts);
+  },
+  // command "muxbus.login"
+  MuxBusLoginCommand(client: RpcClient, data: MuxBusLoginReq, opts?: RpcOpts): Promise<MuxBusLoginResp> {
+    return client.rpcCall("muxbus.login", data, { timeout: 360000, ...opts });
+  },
+  // command "waveinfo"
+  MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<AppInfoResult> {
+    return client.rpcCall("waveinfo", null, opts);
   },
   // command "session:next_prompt_suggestion"
   NextPromptSuggestionCommand(
@@ -629,9 +825,49 @@ export const GeneratedApi = {
   ): Promise<NextPromptSuggestionResult> {
     return client.rpcCall("session:next_prompt_suggestion", data, opts);
   },
+  // command "notify.ack"
+  NotifyAckCommand(client: RpcClient, data: NotifyAckParams, opts?: RpcOpts): Promise<NotifyAckResult> {
+    return client.rpcCall("notify.ack", data, opts);
+  },
+  // command "notify.attention"
+  NotifyAttentionCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyAttentionResult> {
+    return client.rpcCall("notify.attention", {}, opts);
+  },
+  // command "notify.emit"
+  NotifyEmitCommand(client: RpcClient, data: NotifyEmitParams, opts?: RpcOpts): Promise<NotifyOk> {
+    return client.rpcCall("notify.emit", data, opts);
+  },
+  // command "notify.focus"
+  NotifyFocusCommand(client: RpcClient, data: NotifyFocusParams, opts?: RpcOpts): Promise<NotifyOk> {
+    return client.rpcCall("notify.focus", data, opts);
+  },
+  // command "notify.test"
+  NotifyTestCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyOk> {
+    return client.rpcCall("notify.test", {}, opts);
+  },
   // command "openinshell"
   OpenInShellCommand(client: RpcClient, data: OpenInShellReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("openinshell", data, opts);
+  },
+  // command "layout.open"
+  OpenLayoutCommand(client: RpcClient, data: CommandLayoutOpenData, opts?: RpcOpts): Promise<LayoutOpenResult> {
+    return client.rpcCall("layout.open", data, opts);
+  },
+  // command "layout.preview"
+  PreviewLayoutCommand(
+    client: RpcClient,
+    data: CommandLayoutPreviewData,
+    opts?: RpcOpts
+  ): Promise<LayoutPreviewResult> {
+    return client.rpcCall("layout.preview", data, opts);
+  },
+  // command "providers.models"
+  ProvidersModelsCommand(
+    client: RpcClient,
+    data: ProvidersModelsParams,
+    opts?: RpcOpts
+  ): Promise<ProvidersModelsResult> {
+    return client.rpcCall("providers.models", data, opts);
   },
   // command "readeditorfile"
   ReadEditorFileCommand(
@@ -701,9 +937,17 @@ export const GeneratedApi = {
   ResolvePrereqsCommand(client: RpcClient, data: ResolvePrereqsReq, opts?: RpcOpts): Promise<ResolvePrereqsResult> {
     return client.rpcCall("resolve.prereqs", data, opts);
   },
+  // command "runclilogin"
+  RunCliLoginCommand(client: RpcClient, data: CommandRunCliLoginData, opts?: RpcOpts): Promise<RunCliLoginResult> {
+    return client.rpcCall("runclilogin", data, opts);
+  },
   // command "rundrone"
   RunDroneCommand(client: RpcClient, data: RunDroneReq, opts?: RpcOpts): Promise<RunDroneResp> {
     return client.rpcCall("rundrone", data, opts);
+  },
+  // command "layout.save"
+  SaveLayoutCommand(client: RpcClient, data: CommandLayoutSaveData, opts?: RpcOpts): Promise<LayoutSaveResult> {
+    return client.rpcCall("layout.save", data, opts);
   },
   // command "session:archive"
   SessionArchiveCommand(
@@ -853,9 +1097,37 @@ export const GeneratedApi = {
   UpdateAgentSkillCommand(client: RpcClient, data: CommandUpdateAgentSkillData, opts?: RpcOpts): Promise<AgentSkill> {
     return client.rpcCall("updateagentskill", data, opts);
   },
+  // command "browser_profiles.update"
+  UpdateBrowserProfileCommand(
+    client: RpcClient,
+    data: CommandBrowserProfileUpdateData,
+    opts?: RpcOpts
+  ): Promise<BrowserProfilesResult> {
+    return client.rpcCall("browser_profiles.update", data, opts);
+  },
   // command "upsertdrone"
   UpsertDroneCommand(client: RpcClient, data: DroneDefinition, opts?: RpcOpts): Promise<DroneDefinition> {
     return client.rpcCall("upsertdrone", data, opts);
+  },
+  // command "viewer.agent-hidden"
+  ViewerAgentHiddenCommand(
+    client: RpcClient,
+    data: CommandViewerAgentHiddenData,
+    opts?: RpcOpts
+  ): Promise<ViewerAgentHiddenResult> {
+    return client.rpcCall("viewer.agent-hidden", data, opts);
+  },
+  // command "viewer.devices"
+  ViewerDevicesCommand(client: RpcClient, opts?: RpcOpts): Promise<ViewerDevicesResult> {
+    return client.rpcCall("viewer.devices", {}, opts);
+  },
+  // command "viewer.pair-start"
+  ViewerPairStartCommand(client: RpcClient, opts?: RpcOpts): Promise<ViewerPairStartResult> {
+    return client.rpcCall("viewer.pair-start", {}, opts);
+  },
+  // command "viewer.revoke"
+  ViewerRevokeCommand(client: RpcClient, data: CommandViewerRevokeData, opts?: RpcOpts): Promise<ViewerRevokeResult> {
+    return client.rpcCall("viewer.revoke", data, opts);
   },
   // command "watcheditorfile"
   WatchEditorFileCommand(client: RpcClient, data: WatchEditorFileReq, opts?: RpcOpts): Promise<void> {

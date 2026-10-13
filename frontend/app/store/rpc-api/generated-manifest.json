@@ -62,6 +62,18 @@
             "method": "AskSideQuestionCommand"
         },
         {
+            "command": "attachments.copy-to-workdir",
+            "method": "AttachmentsCopyToWorkdirCommand"
+        },
+        {
+            "command": "attachments.info",
+            "method": "AttachmentsInfoCommand"
+        },
+        {
+            "command": "attachments.ingest",
+            "method": "AttachmentsIngestCommand"
+        },
+        {
             "command": "auth.cancel",
             "method": "AuthCancelCommand"
         },
@@ -94,6 +106,18 @@
             "method": "BlockfileWriteStateCommand"
         },
         {
+            "command": "block.reveal",
+            "method": "BlockRevealCommand"
+        },
+        {
+            "command": "checkcliauth",
+            "method": "CheckCliAuthCommand"
+        },
+        {
+            "command": "browser_profiles.create",
+            "method": "CreateBrowserProfileCommand"
+        },
+        {
             "command": "createeditordir",
             "method": "CreateEditorDirCommand"
         },
@@ -108,6 +132,10 @@
         {
             "command": "deleteagentskill",
             "method": "DeleteAgentSkillCommand"
+        },
+        {
+            "command": "browser_profiles.delete",
+            "method": "DeleteBrowserProfileCommand"
         },
         {
             "command": "deletememory",
@@ -132,6 +160,31 @@
         {
             "command": "identity.ensureaccountdir",
             "method": "EnsureAccountDirCommand"
+        },
+        {
+            "command": "provider.ensureauthdir",
+            "method": "EnsureProviderAuthDirCommand"
+        },
+        {
+            "command": "eventreadhistory",
+            "method": "EventReadHistoryCommand"
+        },
+        {
+            "command": "eventsub",
+            "method": "EventSubCommand"
+        },
+        {
+            "command": "eventunsuball",
+            "method": "EventUnsubAllCommand",
+            "send": "null"
+        },
+        {
+            "command": "fleet.group.delete",
+            "method": "FleetGroupDeleteCommand"
+        },
+        {
+            "command": "fleet.group.list",
+            "method": "FleetGroupListCommand"
         },
         {
             "command": "fs.create",
@@ -259,6 +312,10 @@
             "method": "InstallStartCommand"
         },
         {
+            "command": "installtool",
+            "method": "InstallToolCommand"
+        },
+        {
             "command": "linkagentidentity",
             "method": "LinkAgentIdentityCommand"
         },
@@ -299,16 +356,94 @@
             "method": "LspStopCommand"
         },
         {
+            "command": "mcp.bind",
+            "method": "McpBindCommand"
+        },
+        {
+            "command": "mcp.catalog.bind",
+            "method": "McpCatalogBindCommand"
+        },
+        {
+            "command": "mcp.catalog.delete",
+            "method": "McpCatalogDeleteCommand"
+        },
+        {
+            "command": "mcp.catalog.list_for_agent",
+            "method": "McpCatalogListForAgentCommand"
+        },
+        {
+            "command": "mcp.catalog.unbind",
+            "method": "McpCatalogUnbindCommand"
+        },
+        {
+            "command": "mcp.delete",
+            "method": "McpDeleteCommand"
+        },
+        {
+            "command": "mcp.get",
+            "method": "McpGetCommand"
+        },
+        {
+            "command": "mcp.list",
+            "method": "McpListCommand"
+        },
+        {
+            "command": "mcp.unbind",
+            "method": "McpUnbindCommand"
+        },
+        {
             "command": "movescratchfile",
             "method": "MoveScratchFileCommand"
+        },
+        {
+            "command": "muxbus.login",
+            "method": "MuxBusLoginCommand",
+            "opts": "{ timeout: 360000, ...opts }"
+        },
+        {
+            "command": "waveinfo",
+            "method": "MuxInfoCommand",
+            "send": "null"
         },
         {
             "command": "session:next_prompt_suggestion",
             "method": "NextPromptSuggestionCommand"
         },
         {
+            "command": "notify.ack",
+            "method": "NotifyAckCommand"
+        },
+        {
+            "command": "notify.attention",
+            "method": "NotifyAttentionCommand"
+        },
+        {
+            "command": "notify.emit",
+            "method": "NotifyEmitCommand"
+        },
+        {
+            "command": "notify.focus",
+            "method": "NotifyFocusCommand"
+        },
+        {
+            "command": "notify.test",
+            "method": "NotifyTestCommand"
+        },
+        {
             "command": "openinshell",
             "method": "OpenInShellCommand"
+        },
+        {
+            "command": "layout.open",
+            "method": "OpenLayoutCommand"
+        },
+        {
+            "command": "layout.preview",
+            "method": "PreviewLayoutCommand"
+        },
+        {
+            "command": "providers.models",
+            "method": "ProvidersModelsCommand"
         },
         {
             "command": "readeditorfile",
@@ -359,8 +494,16 @@
             "method": "ResolvePrereqsCommand"
         },
         {
+            "command": "runclilogin",
+            "method": "RunCliLoginCommand"
+        },
+        {
             "command": "rundrone",
             "method": "RunDroneCommand"
+        },
+        {
+            "command": "layout.save",
+            "method": "SaveLayoutCommand"
         },
         {
             "command": "session:archive",
@@ -467,8 +610,28 @@
             "method": "UpdateAgentSkillCommand"
         },
         {
+            "command": "browser_profiles.update",
+            "method": "UpdateBrowserProfileCommand"
+        },
+        {
             "command": "upsertdrone",
             "method": "UpsertDroneCommand"
+        },
+        {
+            "command": "viewer.agent-hidden",
+            "method": "ViewerAgentHiddenCommand"
+        },
+        {
+            "command": "viewer.devices",
+            "method": "ViewerDevicesCommand"
+        },
+        {
+            "command": "viewer.pair-start",
+            "method": "ViewerPairStartCommand"
+        },
+        {
+            "command": "viewer.revoke",
+            "method": "ViewerRevokeCommand"
         },
         {
             "command": "watcheditorfile",

@@ -6,46 +6,16 @@
 // `block.reveal` lives there too: it resolves its target the way a toast click
 // does (SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3).
 
-import { RpcClient } from "../rpc-client";
-import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
-import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
-import type { NotifyAckParams } from "@/types/rpc/NotifyAckParams";
-import type { NotifyAckResult } from "@/types/rpc/NotifyAckResult";
-import type { NotifyAttentionResult } from "@/types/rpc/NotifyAttentionResult";
-import type { NotifyEmitParams } from "@/types/rpc/NotifyEmitParams";
-import type { NotifyFocusParams } from "@/types/rpc/NotifyFocusParams";
-import type { NotifyOk } from "@/types/rpc/NotifyOk";
 import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivationParams";
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
+import { RpcClient } from "../rpc-client";
 
 export const NotifyApi = {
-    /** The calls to action srv holds open now (the waiting-for-you registry). */
-    NotifyAttentionCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyAttentionResult> {
-        return client.rpcCall("notify.attention", {}, opts);
-    },
-
-    NotifyEmitCommand(client: RpcClient, data: NotifyEmitParams, opts?: RpcOpts): Promise<NotifyOk> {
-        return client.rpcCall("notify.emit", data, opts);
-    },
-    NotifyFocusCommand(client: RpcClient, data: NotifyFocusParams, opts?: RpcOpts): Promise<NotifyOk> {
-        return client.rpcCall("notify.focus", data, opts);
-    },
-    NotifyAckCommand(client: RpcClient, data: NotifyAckParams, opts?: RpcOpts): Promise<NotifyAckResult> {
-        return client.rpcCall("notify.ack", data, opts);
-    },
-    NotifyTestCommand(client: RpcClient, opts?: RpcOpts): Promise<NotifyOk> {
-        return client.rpcCall("notify.test", {}, opts);
-    },
     NotifyTakeActivationCommand(
         client: RpcClient,
         data?: NotifyTakeActivationParams,
         opts?: RpcOpts
     ): Promise<NotifyTakeActivationResult> {
         return client.rpcCall("notify.takeactivation", data ?? {}, opts);
-    },
-    /** Reveal a block that lives in ANOTHER window: srv tells that window to
-     *  reveal it (`block:reveal`) and returns it so the caller can raise it. */
-    BlockRevealCommand(client: RpcClient, data: BlockRevealParams, opts?: RpcOpts): Promise<BlockRevealResult> {
-        return client.rpcCall("block.reveal", data, opts);
     },
 };
