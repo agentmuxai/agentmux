@@ -1169,12 +1169,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // setting exists specifically for the terminal pane's CPU%/mem overlay.
     // Never in a drag-preview frame (`statsBadgeShown`).
     const showStatsBadge = createMemo(() => {
-        const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting") as string | null | undefined;
-        return statsBadgeShown({
-            preview: !!props.preview,
-            settingKey: setting,
-            settingValue: setting == null ? undefined : getSettingsKeyAtom(setting as any)(),
-        });
+        const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
+        const settingOn = setting == null || getSettingsKeyAtom(setting as any)() !== false;
+        return statsBadgeShown(!!props.preview, settingOn);
     });
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.

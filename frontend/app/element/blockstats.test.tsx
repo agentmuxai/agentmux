@@ -190,16 +190,9 @@ describe("a remote pane's badge", () => {
 
 describe("where the badge is shown", () => {
     it("never in a drag-preview frame, which would be a second badge polling a remote machine again", () => {
-        expect(statsBadgeShown({ preview: true, settingKey: "term:showstatsbadge", settingValue: true })).toBe(false);
-        expect(statsBadgeShown({ preview: true, settingKey: null, settingValue: undefined })).toBe(false);
-    });
-
-    it("otherwise as the pane type's setting says, and always for a type without one", () => {
-        expect(statsBadgeShown({ preview: false, settingKey: "term:showstatsbadge", settingValue: undefined })).toBe(
-            true
-        );
-        expect(statsBadgeShown({ preview: false, settingKey: "term:showstatsbadge", settingValue: false })).toBe(false);
-        expect(statsBadgeShown({ preview: false, settingKey: null, settingValue: undefined })).toBe(true);
+        expect(statsBadgeShown(true, true)).toBe(false);
+        expect(statsBadgeShown(false, true)).toBe(true);
+        expect(statsBadgeShown(false, false)).toBe(false);
     });
 });
 
