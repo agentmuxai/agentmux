@@ -19,7 +19,8 @@ import {
 } from "@/app/view/browser/browser-profiles";
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
 import type { SettingsIndexEntry } from "../settings-model";
-import { SectionHeader } from "../settings-controls";
+import { settingsAtom } from "@/app/store/global";
+import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
 export const BROWSER_SETTINGS = {
     profiles: {
@@ -29,6 +30,14 @@ export const BROWSER_SETTINGS = {
             "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; on Windows it can also use an Incognito tab.",
         section: "browser",
         keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work", "agent", "agents"],
+    },
+    searchSuggestions: {
+        id: "browser.search_suggestions",
+        label: "Search suggestions while typing",
+        description:
+            "The address bar also asks your search engine for suggestions as you type, which sends it what you type before you press Enter. Off: suggestions come only from this computer (your history and the addresses you typed).",
+        section: "browser",
+        keywords: ["autocomplete", "suggestions", "address bar", "omnibox", "google", "search", "privacy", "browser:searchsuggestions"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -117,6 +126,7 @@ export function BrowserSection(): JSX.Element {
     const [newName, setNewName] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
     onMount(() => void loadBrowserProfiles());
+    const s = () => settingsAtom() ?? ({} as any);
 
     const add = async () => {
         const name = newName().trim();
@@ -132,6 +142,17 @@ export function BrowserSection(): JSX.Element {
 
     return (
         <div class="settings-section-body">
+            <SettingRow
+                id={BROWSER_SETTINGS.searchSuggestions.id}
+                label={BROWSER_SETTINGS.searchSuggestions.label}
+                description={BROWSER_SETTINGS.searchSuggestions.description}
+                control={
+                    <ToggleControl
+                        checked={!!(s()["browser:searchsuggestions"] as boolean)}
+                        onChange={(v) => set("browser:searchsuggestions", v)}
+                    />
+                }
+            />
             <SectionHeader label={BROWSER_SETTINGS.profiles.label} />
             <div id={`setting-${BROWSER_SETTINGS.profiles.id}`} class="setting-row">
                 <div class="setting-devices-description">{BROWSER_SETTINGS.profiles.description}</div>

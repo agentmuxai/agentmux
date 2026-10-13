@@ -47,6 +47,7 @@ use crate::browser_pane::CreateBrowserPaneTask;
 use crate::reducer::RegisterResult;
 use crate::state::AppState;
 
+mod autocomplete;
 pub(crate) mod bounds;
 mod clip;
 mod close;

@@ -963,6 +963,7 @@ declare global {
         "term:scrollsensitivity"?: number;
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
+        "browser:searchsuggestions"?: boolean;
         /** User shortcut overrides (frontend/app/keybindings/registry.ts `setUserKeybindings`). */
         "keybindings"?: { key?: string; command: string; when?: string; platform?: "mac" | "other" }[];
         "term:predictiveecho"?: boolean;

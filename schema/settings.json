@@ -66,6 +66,10 @@
         "term:shiftenternewline": {
           "type": "boolean"
         },
+        "browser:searchsuggestions": {
+          "type": "boolean",
+          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit. Off: suggestions come only from this computer (history, typed addresses)."
+        },
         "keybindings": {
           "type": "array",
           "description": "Your own keyboard shortcuts, applied over the defaults. Each entry: {\"key\": \"ctrl+shift+e\", \"command\": \"split:right\"}. A command starting with - unbinds it: {\"command\": \"-tab:new\"} removes every key, or add \"key\" to remove one. Optional \"when\" (e.g. \"!terminalFocus\") and \"platform\" (\"mac\" or \"other\"). Command ids are listed in the keyboard shortcuts help.",

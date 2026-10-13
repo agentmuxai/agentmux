@@ -522,6 +522,16 @@ async fn route_command(
             state.browser_panes.navigate(block_id, url, state)?;
             Ok(serde_json::json!(true))
         }
+        "browser_pane_autocomplete" => {
+            // Chrome's address bar suggestions for the pane's profile
+            // (browser_panes/autocomplete.rs). `supported: false` on a libcef
+            // without the API: the address bar keeps its plain behavior.
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            // The `browser:searchsuggestions` setting; off unless said.
+            let search_suggestions = args.get("search_suggestions").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(state.browser_panes.autocomplete(state, block_id, text, search_suggestions).await)
+        }
         "browser_pane_resize" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
