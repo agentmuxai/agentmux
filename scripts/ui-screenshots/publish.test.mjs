@@ -119,4 +119,13 @@ describe("refresh", () => {
         expect(parseArgs([]).suites).toEqual(SUITE_ORDER);
         expect(() => parseArgs(["--suites", "nope"])).toThrow(/unknown suite/);
     });
+
+    it("with --landing, runs the landing suite last and records the clips as MP4 too", () => {
+        const args = parseArgs(["--port", "9333", "--landing", "/clones/landing", "--suites", "landing,agent", "--out", "/out"]);
+        expect(args.suites).toEqual(["agent", "landing"]);
+        const record = commands(args).find(([label]) => label === "recordings")[2];
+        expect(record).toEqual(expect.arrayContaining(["--formats", "gif,mp4"]));
+        // Without it, the clips stay GIF only (what the docs use).
+        expect(commands(parseArgs(["--port", "9333", "--out", "/out"])).find(([l]) => l === "recordings")[2]).not.toContain("--formats");
+    });
 });

@@ -22,30 +22,34 @@ retaken when the UI changes. The design and the reasons behind it are in
    node scripts/ui-screenshots/demo-env.mjs --home <that folder> --demo D:/demo/acme-web
    ```
 
-3. **Retake everything and copy it into an agentmux-docs clone:**
+3. **Retake everything and publish it into agentmux-docs and agentmux-landing clones:**
 
    ```bash
    AGENTMUX_HOME_OVERRIDE=<that folder> node scripts/ui-screenshots/refresh.mjs \
-       --port 9333 --docs <agentmux-docs clone> --ffmpeg <ffmpeg> \
+       --port 9333 --docs <agentmux-docs clone> --landing <agentmux-landing clone> --ffmpeg <ffmpeg> \
        --redact "<that folder>=C:\Users\demo\.agentmux" --redact "<its parent folder's name>=demo" \
        --redact "<the build's channel>=stable"
    ```
 
-   This runs every suite (widgets, chrome, agent, memory) and every
+   This runs every suite (widgets, chrome, agent, memory, landing) and every
    recording, then replaces each image the docs already use. Nothing is
-   added to the docs: images they don't use yet are listed.
+   added to the docs: images they don't use yet are listed. For the landing
+   site it encodes each file its `public/screenshots/manifest.json` lists
+   (WebP for a shot, MP4 plus a WebP poster for a clip), and writes nothing
+   else. Either option can be left out.
 
 4. **Review before you commit.** Open every changed image (`git diff --stat`
-   in the docs clone, then look at each one) for correctness and for anything
+   in each clone, then look at each one) for correctness and for anything
    from your machine. Then commit with a changeset and open a PR.
 
 ## Pieces
 
 | Script | What it does |
 |---|---|
-| `capture.mjs --suite <name>` | Takes one suite's screenshots: `widgets`, `chrome`, `agent`, `memory` (and `manual`, the first run). `landing` holds shots for agentmux.ai; `refresh.mjs` doesn't run it yet, because nothing publishes to the landing site yet. |
+| `capture.mjs --suite <name>` | Takes one suite's screenshots: `widgets`, `chrome`, `agent`, `memory` (and `manual`, the first run). `landing` holds shots only agentmux.ai uses. |
 | `record.mjs` | Records the clips in `recordings.mjs` as GIF (and `--formats webp,mp4`). Needs ffmpeg. |
 | `publish.mjs --docs <clone> --from <run>...` | Copies a run's images over the docs' files of the same name. `--dry-run` shows what would change. |
+| `publish.mjs --landing <clone> --from <run>...` | Encodes the files the landing site's manifest lists (`publish-landing.mjs`). Each entry names its source: `{ "file": "ui-agent.webp", "shot": "agent-conversation", "width": 960 }`, with `size` for a shot taken at several sizes, or `{ "file": "x.mp4", "clip": "<id>", "poster": "x-poster.webp" }`. |
 | `refresh.mjs` | All of the above, in order. |
 | `demo-env.mjs` | The made-up `acme-web` project the widgets open. |
 | `install-fake-claude.mjs` | The scripted stand-in for Claude Code the agent suite uses (no account, model or network). |
@@ -60,4 +64,5 @@ Retake one shot or clip with `--only <id>` on `capture.mjs` or `record.mjs`.
 - **A clip** goes in `recordings.mjs`: `prep` (not recorded) returns the crop,
   and `run` is recorded. Move the drawn cursor with `cursor.clickSelector()`.
 - **Name the docs image after the id** (`<id>.png`, `<id>-<size>.png` or
-  `<id>.gif`), so `publish.mjs` can find it next time.
+  `<id>.gif`), so `publish.mjs` can find it next time. **On the landing site**,
+  add an entry to its `public/screenshots/manifest.json` instead.
