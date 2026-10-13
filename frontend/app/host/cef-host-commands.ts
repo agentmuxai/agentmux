@@ -55,6 +55,8 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     navigate: async (blockId, url) => {
         await invokeCommand("browser_pane_navigate", { block_id: blockId, url });
     },
+    autocomplete: (blockId, text) =>
+        invokeCommand<BrowserAutocompleteResult>("browser_pane_autocomplete", { block_id: blockId, text }),
     goBack: async (blockId) => {
         await invokeCommand("browser_pane_go_back", { block_id: blockId });
     },

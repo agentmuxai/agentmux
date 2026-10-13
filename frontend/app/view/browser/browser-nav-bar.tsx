@@ -14,6 +14,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 import { DEFAULT_BROWSER_URL, type BrowserViewModel } from "./browser-model";
 import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
+import { createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
+import { AddressSuggestions } from "./address-suggestions";
 
 /**
  * A saved bookmark's favicon, falling back to the app's existing "no
@@ -71,6 +73,36 @@ export function BrowserNavBar(props: {
 
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
     let addressInputRef: HTMLInputElement | undefined;
+
+    // Chrome's address bar suggestions (address-autocomplete.ts). `typed` is
+    // what the user typed, without an inline completion shown after it.
+    const autocomplete = createAddressAutocomplete(
+        (text) => getApi().browserPanes.autocomplete?.(model.blockId, text) ?? Promise.resolve(undefined)
+    );
+    const [typed, setTyped] = createSignal("");
+    let deleting = false;
+    const suggestionsOpen = () => autocomplete.matches().length > 0 && autocomplete.matchesFor() === typed();
+    const showInInput = (value: string) => {
+        setAddressBar(value);
+        if (addressInputRef) addressInputRef.value = value;
+    };
+
+    // Inline completion: when the engine's default match completes what was
+    // typed ("git" -> "github.com"), show the rest selected after the caret,
+    // as Chrome does. Not while deleting, and only if the caret is still at
+    // the end of exactly what was typed.
+    createEffect(() => {
+        const inline = inlineCompletion(
+            typed(),
+            { matches: autocomplete.matches(), matchesFor: autocomplete.matchesFor() },
+            deleting
+        );
+        const el = addressInputRef;
+        if (!inline || !el || document.activeElement !== el) return;
+        if (el.value !== typed() || el.selectionEnd !== typed().length) return;
+        showInInput(typed() + inline);
+        el.setSelectionRange(typed().length, el.value.length);
+    });
     // Reactively mirror the model's URL into the address-bar input whenever
     // CEF reports a navigation via the `browser-pane-nav-state` event (in-
     // pane link clicks, redirects, back/forward, popup-intercept). Without
@@ -113,6 +145,17 @@ export function BrowserNavBar(props: {
         diag(`input-submit value=${JSON.stringify(url)}`);
         if (!url) return;
 
+        // The suggestion Enter picks: the highlighted one, else the engine's
+        // default match for what was typed (which also knows `localhost:3000`
+        // is a URL). Without one, the plain URL-or-search rule below.
+        const chosen = autocomplete.chosen(typed());
+        autocomplete.close();
+        if (chosen?.url) {
+            diag(`input-submit chosen=${chosen.type} url=${JSON.stringify(chosen.url)}`);
+            navigateTo(chosen.url);
+            return;
+        }
+
         let normalized = url;
         if (!normalized.match(/^https?:\/\//i) && !normalized.startsWith("about:")) {
             if (normalized.includes(".") && !normalized.includes(" ")) {
@@ -129,7 +172,27 @@ export function BrowserNavBar(props: {
         if (e.key === "Enter") {
             e.preventDefault();
             handleNavigate();
+            return;
         }
+        if (!suggestionsOpen()) return;
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            autocomplete.move(e.key === "ArrowDown" ? 1 : -1);
+            // Show the highlighted suggestion's text; back to what was typed
+            // when the highlight leaves the list.
+            const sel = autocomplete.selected();
+            const m = sel >= 0 ? autocomplete.matches()[sel] : undefined;
+            showInInput(m ? m.fill_into_edit || m.contents : typed());
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            autocomplete.close();
+            showInInput(typed());
+        }
+    };
+
+    const chooseSuggestion = (m: BrowserAutocompleteMatch) => {
+        autocomplete.close();
+        if (m.url) navigateTo(m.url);
     };
 
     // Ctrl+L (Cmd+L on macOS) is dead by default in a browser pane — CEF
@@ -467,12 +530,22 @@ export function BrowserNavBar(props: {
                     </button>
                 </FlyoutMenu>
                 <BrowserProfileButton model={model} home={home} />
+                <div class="browser-address-wrap">
                 <input
                     ref={addressInputRef}
                     class="browser-address-bar"
                     type="text"
                     value={addressBar()}
-                    onInput={(e) => setAddressBar(e.currentTarget.value)}
+                    role="combobox"
+                    aria-autocomplete="both"
+                    aria-expanded={suggestionsOpen()}
+                    onInput={(e) => {
+                        const value = e.currentTarget.value;
+                        deleting = (e as InputEvent).inputType?.startsWith("delete") ?? false;
+                        setAddressBar(value);
+                        setTyped(value);
+                        autocomplete.update(value);
+                    }}
                     onKeyDown={handleAddressKeyDown}
                     onContextMenu={showTextInputContextMenu}
                     onMouseDown={() => {
@@ -503,6 +576,7 @@ export function BrowserNavBar(props: {
                         const related = e.relatedTarget as Element | null;
                         diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
                         e.currentTarget.select();
+                        setTyped(e.currentTarget.value);
                         // Always fire main_window_focus with window_label —
                         // the IPC misrouting was the root cause of the bounce
                         // (see the `main_window_focus` arm in ipc.rs). With
@@ -512,6 +586,7 @@ export function BrowserNavBar(props: {
                         getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                     }}
                     onBlur={(e) => {
+                        autocomplete.close();
                         const next = e.relatedTarget as Element | null;
                         // Microtask-deferred so we can see what landed focus AFTER the blur.
                         queueMicrotask(() => {
@@ -520,6 +595,15 @@ export function BrowserNavBar(props: {
                     }}
                     placeholder="Enter URL or search..."
                 />
+                <Show when={suggestionsOpen()}>
+                    <AddressSuggestions
+                        matches={autocomplete.matches()}
+                        selected={autocomplete.selected()}
+                        onHover={(i) => autocomplete.select(i)}
+                        onChoose={chooseSuggestion}
+                    />
+                </Show>
+                </div>
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate} title="Go">
                     <i class="fa fa-solid fa-arrow-right" aria-hidden="true" />
                 </button>

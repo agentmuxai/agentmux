@@ -169,6 +169,24 @@ declare global {
      * page. Only meaningful when `HostCaps.nativeBrowserPane` is true.
      * Events (`browser-pane-*`, `pane-media-*`) arrive through `AppApi.listen`.
      */
+    /** One address bar suggestion (crates/cef browser_panes/autocomplete.rs). */
+    type BrowserAutocompleteMatch = {
+        contents: string;
+        description: string;
+        /** Where choosing it goes: a page, or a search results URL. */
+        url: string;
+        fill_into_edit: string;
+        /** Appended after the typed text when this is the default match. */
+        inline_autocompletion: string;
+        /** Chrome's match type, e.g. `history-url`, `search-suggest`. */
+        type: string;
+        provider: string;
+        relevance: number;
+        allowed_to_be_default: boolean;
+    };
+
+    type BrowserAutocompleteResult = { supported: boolean; matches: BrowserAutocompleteMatch[] };
+
     type BrowserPaneHostApi = {
         /** `opts.allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
          *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6).
@@ -186,6 +204,10 @@ declare global {
         setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
         close(blockId: string, windowLabel: string): Promise<void>;
         navigate(blockId: string, url: string): Promise<void>;
+        /** Chrome's address bar suggestions for `text` in the pane's profile
+         *  (browser_panes/autocomplete.rs). Absent on hosts without native panes;
+         *  `supported: false` on a libcef without the API. */
+        autocomplete?(blockId: string, text: string): Promise<BrowserAutocompleteResult>;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
         showPopup(popupId: string): Promise<void>;
         /** Close a popup window a pane's page opened. */
