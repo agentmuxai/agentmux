@@ -24,67 +24,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // The picker's "Remote" section: the user's ssh config hosts and any other
     // SSH connection used this session. The typeahead adds `local` and the
     // WSL distros itself.
-    engine.register_handler(
-        COMMAND_CONN_LIST,
-        Box::new(|_data, _ctx| {
-            Box::pin(async move {
-                let hosts = tokio::task::spawn_blocking(crate::backend::remote::ssh_config::hosts)
-                    .await
-                    .unwrap_or_default();
-                Ok(Some(serde_json::json!(remote_names(
-                    &hosts,
-                    &status::all()
-                ))))
-            })
-        }),
-    );
-    engine.register_handler(
-        COMMAND_CONN_LIST_AWS,
-        Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!([]))) })),
-    );
+    //
+    // The requests are `serde_json::Value`: these handlers read what they need
+    // loosely (a missing field is ""), and `Value` takes anything, so typing them
+    // only records the response (docs/reports/REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md
+    // §5.4c). The frontend stubs keep their precise request types
+    // (generated-manifest.json `dataType`).
+    engine.register_typed(COMMAND_CONN_LIST, |_data: serde_json::Value, _ctx| async move {
+        let hosts = tokio::task::spawn_blocking(crate::backend::remote::ssh_config::hosts)
+            .await
+            .unwrap_or_default();
+        Ok(remote_names(&hosts, &status::all()))
+    });
+    engine.register_typed(COMMAND_CONN_LIST_AWS, |_data: serde_json::Value, _ctx| async move {
+        Ok(Vec::<String>::new())
+    });
     // Installed WSL distributions (empty off Windows, or with no WSL).
-    engine.register_handler(
-        COMMAND_WSL_LIST,
-        Box::new(|_data, _ctx| {
-            Box::pin(async move {
-                let distros = crate::backend::remote::wsl::list().await;
-                Ok(Some(serde_json::json!(distros)))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_WSL_LIST, |_data: serde_json::Value, _ctx| async move {
+        Ok(crate::backend::remote::wsl::list().await)
+    });
 
     let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_CONN_ENSURE,
-        Box::new(move |data, _ctx| {
-            let broker = broker.clone();
-            Box::pin(async move {
-                // `{ connname, logblockid? }`
-                ensure(&broker, &str_field(&data, "connname")).await.map(|_| None)
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_CONN_ENSURE, move |data: serde_json::Value, _ctx| {
+        let broker = broker.clone();
+        // `{ connname, logblockid? }`
+        async move { ensure(&broker, &str_field(&data, "connname")).await }
+    });
 
     let app = state.clone();
-    engine.register_handler(
-        COMMAND_CONN_CONNECT,
-        Box::new(move |data, _ctx| {
-            let app = app.clone();
-            Box::pin(async move {
-                // `{ host, keywords?, logblockid? }`
-                connect(&app, &str_field(&data, "host"), &str_field(&data, "logblockid"))
-                    .await
-                    .map(|_| None)
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_CONN_CONNECT, move |data: serde_json::Value, _ctx| {
+        let app = app.clone();
+        // `{ host, keywords?, logblockid? }`
+        async move { connect(&app, &str_field(&data, "host"), &str_field(&data, "logblockid")).await }
+    });
 
     let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_CONN_DISCONNECT,
-        Box::new(move |data, _ctx| {
-            let broker = broker.clone();
-            Box::pin(async move {
+    engine.register_typed(COMMAND_CONN_DISCONNECT, move |data: serde_json::Value, _ctx| {
+        let broker = broker.clone();
+        async move {
                 // The connection name, as a bare string.
                 let name = data.as_str().unwrap_or_default().to_string();
                 match ConnTarget::parse(&name) {
@@ -96,10 +73,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     _ => {}
                 }
-                Ok(None)
-            })
-        }),
-    );
+                Ok(())
+        }
+    });
 
     // A host's durable sessions, for the Remotes pane's "Sessions…"
     // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
@@ -108,11 +84,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // auth key can send this RPC, an agent included, but none can answer
     // that window.
     let (store, auth_key) = (state.mstore.clone(), state.auth_key.clone());
-    engine.register_handler(
-        COMMAND_CONN_SESSIONS,
-        Box::new(move |data, _ctx| {
-            let (store, auth_key) = (store.clone(), auth_key.clone());
-            Box::pin(async move {
+    engine.register_typed(COMMAND_CONN_SESSIONS, move |data: serde_json::Value, _ctx| {
+        let (store, auth_key) = (store.clone(), auth_key.clone());
+        async move {
                 let (conn, block) = (str_field(&data, "connname"), str_field(&data, "blockid"));
                 let ask = (!block.is_empty()).then_some(sessions::AskIn {
                     block_id: &block,
@@ -121,16 +95,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let list = sessions::list(&store, &conn, ask).await?;
                 // The Remotes pane shows the count without opening ssh itself.
                 remotes::note_sessions(&conn, list.len());
-                Ok(Some(serde_json::json!(list)))
-            })
-        }),
-    );
+                Ok(list)
+        }
+    });
     let app = state.clone();
-    engine.register_handler(
-        COMMAND_CONN_SESSION_END,
-        Box::new(move |data, _ctx| {
-            let app = app.clone();
-            Box::pin(async move {
+    engine.register_typed(COMMAND_CONN_SESSION_END, move |data: serde_json::Value, _ctx| {
+        let app = app.clone();
+        async move {
                 let (conn, id, block) = (
                     str_field(&data, "connname"),
                     str_field(&data, "sessionid"),
@@ -148,10 +119,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     auth_key: &app.auth_key,
                 };
                 let ended = sessions::end(&conn, &id, Some(ask)).await?;
-                Ok(Some(serde_json::json!(ended)))
-            })
-        }),
-    );
+                Ok(ended)
+        }
+    });
 
     // The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
     // a remote's settings, and forgetting a recent one.

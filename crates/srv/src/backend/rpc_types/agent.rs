@@ -208,7 +208,8 @@ pub struct AgentOutputResult {
 }
 
 /// Request for `agent.process-list` — processes tracked under a given block.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentProcessListCommand {
     pub block_id: String,
 }
@@ -216,16 +217,20 @@ pub struct AgentProcessListCommand {
 /// One tracked process row. Mirrors `backend::process_tracker::TrackedProcess`
 /// — defined here so the RPC layer can expose it without leaking the
 /// internal module shape.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentProcessInfo {
     pub pid: u32,
     pub command: String,
+    #[ts(type = "number")]
     pub rss_bytes: u64,
+    #[ts(type = "number")]
     pub started_at_ms: u64,
 }
 
 /// Response from `agent.process-list`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentProcessListResult {
     pub block_id: String,
@@ -238,7 +243,8 @@ pub struct AgentProcessListResult {
 /// Response from `agent.tracked-blocks` — the list of block IDs for
 /// which a tracker exists. Swarm pane uses this to render per-agent
 /// groups.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentTrackedBlocksResult {
     pub block_ids: Vec<String>,
@@ -247,7 +253,8 @@ pub struct AgentTrackedBlocksResult {
 /// One agent pane open anywhere in this instance — any tab, any window,
 /// floating windows included. See `agent.open-panes` and
 /// SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md §4.0.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentOpenPane {
     pub block_id: String,
@@ -260,7 +267,8 @@ pub struct AgentOpenPane {
     pub window_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentOpenPanesResult {
     pub panes: Vec<AgentOpenPane>,
@@ -268,7 +276,8 @@ pub struct AgentOpenPanesResult {
 
 /// Request for `agent.kill-process` — terminate a single PID if it's
 /// in a given block's tracker tree.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentKillProcessCommand {
     pub block_id: String,
     pub pid: u32,
@@ -276,7 +285,8 @@ pub struct AgentKillProcessCommand {
 
 /// Request for `agent.kill-tree` — nuke every process tracked under a
 /// given block.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentKillTreeCommand {
     pub block_id: String,
 }
@@ -286,7 +296,8 @@ pub struct AgentKillTreeCommand {
 /// the OS has fully torn down every descendant by the time the RPC
 /// returns. The swarm activity panel's next refresh will reflect
 /// actual state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct AgentKillResult {
     pub ok: bool,
