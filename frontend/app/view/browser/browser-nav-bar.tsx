@@ -81,6 +81,10 @@ export function BrowserNavBar(props: {
     );
     const [typed, setTyped] = createSignal("");
     let deleting = false;
+    // An IME composition (CJK and others) is in progress: its text isn't
+    // committed yet, so nothing is asked and nothing is written into the input
+    // until it ends (writing a completion mid-composition would break it).
+    let composing = false;
     const suggestionsOpen = () => autocomplete.matches().length > 0 && autocomplete.matchesFor() === typed();
     const showInInput = (value: string) => {
         setAddressBar(value);
@@ -98,7 +102,7 @@ export function BrowserNavBar(props: {
             deleting
         );
         const el = addressInputRef;
-        if (!inline || !el || document.activeElement !== el) return;
+        if (!inline || !el || composing || document.activeElement !== el) return;
         if (el.value !== typed() || el.selectionEnd !== typed().length) return;
         showInInput(typed() + inline);
         el.setSelectionRange(typed().length, el.value.length);
@@ -541,7 +545,20 @@ export function BrowserNavBar(props: {
                         aria-expanded={suggestionsOpen()}
                         onInput={(e) => {
                             const value = e.currentTarget.value;
+                            setAddressBar(value);
+                            if (composing || (e as InputEvent).isComposing) return;
                             deleting = (e as InputEvent).inputType?.startsWith("delete") ?? false;
+                            setTyped(value);
+                            autocomplete.update(value);
+                        }}
+                        onCompositionStart={() => {
+                            composing = true;
+                        }}
+                        onCompositionEnd={(e) => {
+                            // The committed text: ask for it now.
+                            composing = false;
+                            const value = e.currentTarget.value;
+                            deleting = false;
                             setAddressBar(value);
                             setTyped(value);
                             autocomplete.update(value);
@@ -603,7 +620,15 @@ export function BrowserNavBar(props: {
                         />
                     </Show>
                 </div>
-                <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate} title="Go">
+                <button
+                    class="browser-nav-btn browser-go-btn"
+                    // Keep focus in the address bar: a blur would close the
+                    // suggestions, and with them the highlighted choice, before
+                    // this click submits it.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleNavigate}
+                    title="Go"
+                >
                     <i class="fa fa-solid fa-arrow-right" aria-hidden="true" />
                 </button>
             </div>
