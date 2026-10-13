@@ -242,7 +242,7 @@ async fn revert_restores_live_content_and_appends_a_new_version() {
     );
 
     let read = memory_read_impl(&state, "agent-app-4", "MEMORY.md").unwrap();
-    assert_eq!(read.get("content").and_then(|v| v.as_str()), Some("good"));
+    assert_eq!(read.content, "good");
 
     let history_after = memory_history_impl(&state, "agent-app-4", "MEMORY.md").unwrap();
     let versions_after = history_after.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -424,15 +424,12 @@ async fn an_attributed_memory_owner_is_the_callers_row_not_the_slug() {
     assert_eq!(version_count(&state, "uid-mo-y2"), 1);
 
     let read = |owner: SelfOwner<'_>| {
-        memory_read_impl(&state, owner, "MEMORY.md").unwrap()["content"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        memory_read_impl(&state, owner, "MEMORY.md").unwrap().content
     };
     assert_eq!(read(as_y2), "y2's");
     assert_eq!(read("agenty".into()), "y's", "Unattributed: by slug");
     let listed = memory_list_impl(&state, as_y2).unwrap();
-    assert_eq!(listed["files"].as_array().unwrap().len(), 1);
+    assert_eq!(listed.files.len(), 1);
 
     let y_version = state
         .id_store

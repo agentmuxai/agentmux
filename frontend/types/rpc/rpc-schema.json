@@ -76,6 +76,25 @@
     }
   },
   {
+    "command": "agent.define",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentDefineData",
+    "requestName": "CommandAgentDefineData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentDefineData"
+      ],
+      "name": "CommandAgentDefineData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentDefineResult",
+    "responseName": "AgentDefineResult",
+    "responseTs": {
+      "imports": [
+        "AgentDefineResult"
+      ],
+      "name": "AgentDefineResult"
+    }
+  },
+  {
     "command": "agent.kill-process",
     "request": "agentmux_srv::backend::rpc_types::agent::AgentKillProcessCommand",
     "requestName": "AgentKillProcessCommand",
@@ -2610,6 +2629,44 @@
     }
   },
   {
+    "command": "identity.account.upsert",
+    "request": "agentmux_srv::server::app_api::identity::IdentityAccountUpsertReq",
+    "requestName": "IdentityAccountUpsertReq",
+    "requestTs": {
+      "imports": [
+        "IdentityAccountUpsertReq"
+      ],
+      "name": "IdentityAccountUpsertReq"
+    },
+    "response": "agentmux_srv::server::app_api::identity::IdentityAccountUpsertResult",
+    "responseName": "IdentityAccountUpsertResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountUpsertResult"
+      ],
+      "name": "IdentityAccountUpsertResult"
+    }
+  },
+  {
+    "command": "identity.account.validate",
+    "request": "agentmux_srv::server::app_api::identity::IdentityAccountValidateReq",
+    "requestName": "IdentityAccountValidateReq",
+    "requestTs": {
+      "imports": [
+        "IdentityAccountValidateReq"
+      ],
+      "name": "IdentityAccountValidateReq"
+    },
+    "response": "agentmux_srv::server::app_api::identity::IdentityAccountValidateResult",
+    "responseName": "IdentityAccountValidateResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountValidateResult"
+      ],
+      "name": "IdentityAccountValidateResult"
+    }
+  },
+  {
     "command": "identity.ensureaccountdir",
     "request": "agentmux_srv::server::identity_handlers::EnsureAccountDirReq",
     "requestName": "EnsureAccountDirReq",
@@ -2626,6 +2683,44 @@
         "EnsureAccountDirResp"
       ],
       "name": "EnsureAccountDirResp"
+    }
+  },
+  {
+    "command": "identity.self.accounts",
+    "request": "agentmux_srv::server::app_api::identity::IdentitySelfAccountsReq",
+    "requestName": "IdentitySelfAccountsReq",
+    "requestTs": {
+      "imports": [
+        "IdentitySelfAccountsReq"
+      ],
+      "name": "IdentitySelfAccountsReq"
+    },
+    "response": "agentmux_srv::server::app_api::identity::IdentitySelfAccountsResult",
+    "responseName": "IdentitySelfAccountsResult",
+    "responseTs": {
+      "imports": [
+        "IdentitySelfAccountsResult"
+      ],
+      "name": "IdentitySelfAccountsResult"
+    }
+  },
+  {
+    "command": "identity.self.unlink",
+    "request": "agentmux_srv::server::app_api::identity::IdentitySelfUnlinkReq",
+    "requestName": "IdentitySelfUnlinkReq",
+    "requestTs": {
+      "imports": [
+        "IdentitySelfUnlinkReq"
+      ],
+      "name": "IdentitySelfUnlinkReq"
+    },
+    "response": "agentmux_srv::server::app_api::identity::IdentitySelfUnlinkResult",
+    "responseName": "IdentitySelfUnlinkResult",
+    "responseTs": {
+      "imports": [
+        "IdentitySelfUnlinkResult"
+      ],
+      "name": "IdentitySelfUnlinkResult"
     }
   },
   {
@@ -3437,6 +3532,61 @@
         "McpServer"
       ],
       "name": "McpServer"
+    }
+  },
+  {
+    "command": "memory.list",
+    "request": "agentmux_srv::server::app_api::memory::MemoryListReq",
+    "requestName": "MemoryListReq",
+    "requestTs": {
+      "imports": [
+        "MemoryListReq"
+      ],
+      "name": "MemoryListReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryListResult",
+    "responseName": "NativeMemoryListResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryListResult"
+      ],
+      "name": "NativeMemoryListResult"
+    }
+  },
+  {
+    "command": "memory.read",
+    "request": "agentmux_srv::server::app_api::memory::MemoryReadReq",
+    "requestName": "MemoryReadReq",
+    "requestTs": {
+      "imports": [
+        "MemoryReadReq"
+      ],
+      "name": "MemoryReadReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryReadFileResult",
+    "responseName": "NativeMemoryReadFileResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryReadFileResult"
+      ],
+      "name": "NativeMemoryReadFileResult"
+    }
+  },
+  {
+    "command": "memory.write",
+    "request": "agentmux_srv::server::app_api::memory::MemoryWriteReq",
+    "requestName": "MemoryWriteReq",
+    "requestTs": {
+      "imports": [
+        "MemoryWriteReq"
+      ],
+      "name": "MemoryWriteReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {

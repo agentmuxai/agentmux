@@ -1,5 +1,29 @@
 use super::*;
 
+/// `memory.list`: the agent whose memory files to list.
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MemoryListReq {
+    pub agent_id: String,
+}
+
+/// `memory.read`: one of the agent's memory files.
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MemoryReadReq {
+    pub agent_id: String,
+    pub filename: String,
+}
+
+/// `memory.write`: one of the agent's memory files, and its new content.
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MemoryWriteReq {
+    pub agent_id: String,
+    pub filename: String,
+    pub content: String,
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_memory_list(engine, state);
     register_memory_read(engine, state);
@@ -8,63 +32,41 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_memory_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_MEMORY_LIST,
-        Box::new(move |data, ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req { agent_id: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("memory.list: {e}"))?;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                Ok(Some(memory_list_impl(&state, &req.agent_id)?))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_MEMORY_LIST, move |req: MemoryListReq, ctx| {
+        let state = state.clone();
+        async move {
+            check_s1(&state.mstore, &ctx, &req.agent_id)?;
+            memory_list_impl(&state, &req.agent_id)
+        }
+    });
 }
 
 fn register_memory_read(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_MEMORY_READ,
-        Box::new(move |data, ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req { agent_id: String, filename: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("memory.read: {e}"))?;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                Ok(Some(memory_read_impl(&state, &req.agent_id, &req.filename)?))
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_MEMORY_READ, move |req: MemoryReadReq, ctx| {
+        let state = state.clone();
+        async move {
+            check_s1(&state.mstore, &ctx, &req.agent_id)?;
+            memory_read_impl(&state, &req.agent_id, &req.filename)
+        }
+    });
 }
 
 fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
-        COMMAND_MEMORY_WRITE,
-        Box::new(move |data, ctx| {
-            let state = state.clone();
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Req { agent_id: String, filename: String, content: String }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("memory.write: {e}"))?;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, None)?;
-                Ok(None)
-            })
-        }),
-    );
+    engine.register_typed(COMMAND_MEMORY_WRITE, move |req: MemoryWriteReq, ctx| {
+        let state = state.clone();
+        async move {
+            check_s1(&state.mstore, &ctx, &req.agent_id)?;
+            memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, None)
+        }
+    });
 }
 
 pub(crate) fn memory_list_impl<'o>(
     state: &AppState,
     owner: impl Into<SelfOwner<'o>>,
-) -> Result<serde_json::Value, String> {
+) -> Result<NativeMemoryListResult, String> {
     let owner = owner.into();
     let memory_dir = owner.dir(&state.mstore).map_err(|e| format!("memory.list: {e}"))?;
 
@@ -72,7 +74,7 @@ pub(crate) fn memory_list_impl<'o>(
     let entries = match std::fs::read_dir(&memory_dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(json!({ "files": [] }));
+            return Ok(NativeMemoryListResult { files: Vec::new(), unverified: false });
         }
         Err(e) => return Err(format!("memory.list: read_dir: {e}")),
     };
@@ -110,14 +112,14 @@ pub(crate) fn memory_list_impl<'o>(
         });
     }
     files.sort_by(|a, b| b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename)));
-    serde_json::to_value(NativeMemoryListResult { files, unverified: false }).map_err(|e| e.to_string())
+    Ok(NativeMemoryListResult { files, unverified: false })
 }
 
 pub(crate) fn memory_read_impl<'o>(
     state: &AppState,
     owner: impl Into<SelfOwner<'o>>,
     filename: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<NativeMemoryReadFileResult, String> {
     let owner = owner.into();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.read: {e}"))?;
@@ -134,7 +136,7 @@ pub(crate) fn memory_read_impl<'o>(
         .and_then(|f| { use std::io::Read; f.take(MAX).read_to_end(&mut buf) })
         .map_err(|e| format!("memory.read: {filename}: {e}"))?;
     let content = String::from_utf8_lossy(&buf).into_owned();
-    serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())
+    Ok(NativeMemoryReadFileResult { content })
 }
 
 /// Caller-supplied provenance for a `memory.write` call — mirrors
