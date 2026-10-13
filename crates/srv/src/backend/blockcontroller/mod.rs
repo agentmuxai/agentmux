@@ -1169,16 +1169,7 @@ pub fn publish_controller_status(
     broker: &super::mps::Broker,
     status: &BlockControllerRuntimeStatus,
 ) {
-    use super::mps::{MuxEvent, EVENT_CONTROLLER_STATUS};
-
-    let event = MuxEvent {
-        event: EVENT_CONTROLLER_STATUS.to_string(),
-        scopes: vec![format!("block:{}", status.blockid)],
-        sender: String::new(),
-        persist: 1,
-        data: serde_json::to_value(status).ok(),
-    };
-    broker.publish(event);
+    broker.publish_event::<super::mps_events::ControllerStatus>(status, vec![format!("block:{}", status.blockid)], 1);
 }
 
 /// The status an agent-CLI controller reports: a local agent pane with no PID,

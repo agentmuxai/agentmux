@@ -23,7 +23,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import * as MOS from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 
 import { useTrackedProcesses } from "../hooks/useTrackedProcesses";
@@ -96,27 +96,13 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
         // `controllerstatus` is published with `persist: 1`, so subscribing
         // replays the shell's current status immediately — this panel is
         // correct on a drawer reopen without waiting for the next change.
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: MOS.makeORef("block", id),
-            handler: (event) => {
-                const data = event?.data as
-                    | {
-                          shellprocstatus?: unknown;
-                          shellprocexitcode?: unknown;
-                          shellprocpid?: unknown;
-                          shellprocname?: unknown;
-                          spawn_ts_ms?: unknown;
-                      }
-                    | undefined;
-                if (!data) return;
+        const unsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
                 if (typeof data.shellprocstatus === "string") setStatus(data.shellprocstatus);
                 setExitCode(typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0);
                 if (typeof data.shellprocpid === "number") setPid(data.shellprocpid);
                 if (typeof data.shellprocname === "string" && data.shellprocname) setName(data.shellprocname);
                 if (typeof data.spawn_ts_ms === "number") setSpawnTs(data.spawn_ts_ms);
-            },
-        });
+            }, MOS.makeORef("block", id));
         onCleanup(() => unsub());
     });
 

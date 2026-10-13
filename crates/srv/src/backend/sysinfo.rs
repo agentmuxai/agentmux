@@ -16,7 +16,7 @@ use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigState;
-use crate::backend::mps::{Broker, MuxEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
+use crate::backend::mps::{Broker, MuxEvent, EVENT_BLOCK_STATS};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
@@ -1194,15 +1194,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
 
         let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
 
-        let event = MuxEvent {
-            event: EVENT_SYS_INFO.to_string(),
-            scopes: vec![conn_name.clone()],
-            sender: String::new(),
-            persist: PERSIST_COUNT,
-            data: serde_json::to_value(&ts_data).ok(),
-        };
-
-        broker.publish(event);
+        broker.publish_event::<crate::backend::mps_events::SysInfo>(&ts_data, vec![conn_name.clone()], PERSIST_COUNT);
 
         // Per-pane process tree metrics: aggregate CPU/mem across each block's
         // shell process and all its descendants.

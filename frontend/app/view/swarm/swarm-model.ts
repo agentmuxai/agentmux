@@ -11,7 +11,7 @@ import {
     type FleetTargetInfo,
 } from "./swarm-fleet-targets";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
@@ -2056,19 +2056,14 @@ export class SwarmViewModel {
                 .catch(() => {/* keep idle default */});
 
             const scope = MOS.makeORef("block", blockId);
-            const unsub = muxEventSubscribe({
-                eventType: WpsEvent.ControllerStatus,
-                scope,
-                handler: (ev) => {
-                    const data = (ev as any)?.data;
-                    const next = derivedRunningStatus(data?.is_agent_pane, data?.turn_active, data?.shellprocstatus);
+            const unsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                    const next = derivedRunningStatus(data.is_agent_pane, data.turn_active, data.shellprocstatus);
                     this.setAgentStatuses((prev) => {
                         const m = new Map(prev);
                         m.set(blockId, next);
                         return m;
                     });
-                },
-            });
+                }, scope);
             if (unsub) this.blockUnsubs.push(unsub);
         }
     }

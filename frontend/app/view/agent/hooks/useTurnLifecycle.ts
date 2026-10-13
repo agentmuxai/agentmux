@@ -21,7 +21,7 @@
  */
 
 import { createEffect, onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { recordTurn } from "@/store/token-usage";
@@ -179,11 +179,8 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // `ControllerStatus: done` only fires on crash or session teardown.
     // Auto-retry: `ControllerStatus: running` cancels any pending timer.
     let procExitGraceTimer: number | null = null;
-    const procExitUnsub = muxEventSubscribe({
-        eventType: WpsEvent.ControllerStatus,
-        scope: MOS.makeORef("block", opts.blockId),
-        handler: (event) => {
-            const status = (event as any)?.data?.shellprocstatus;
+    const procExitUnsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+            const status = data.shellprocstatus;
             if (status === "running") {
                 if (procExitGraceTimer != null) {
                     clearTimeout(procExitGraceTimer);
@@ -210,8 +207,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
                     opts.model.dispatchPane({ type: "StreamSubscribe", at });
                 }
             }, 1500);
-        },
-    });
+        }, MOS.makeORef("block", opts.blockId));
     onCleanup(() => {
         procExitUnsub();
         if (procExitGraceTimer != null) {

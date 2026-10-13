@@ -23,12 +23,18 @@ import type { TrackedProcessInfo, TrackingConfidence } from "../hooks/useTracked
 // Captured `controllerstatus` handler, so a test can publish a payload.
 let statusHandler: ((event: { data: unknown }) => void) | undefined;
 
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (sub: { eventType: string; handler: (e: { data: unknown }) => void }) => {
-        if (sub.eventType === "controllerstatus") statusHandler = sub.handler;
-        return () => {};
-    },
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: (sub: { eventType: string; handler: (e: { data: unknown }) => void }) => {
+            if (sub.eventType === "controllerstatus") statusHandler = sub.handler;
+            return () => {};
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 const [agentList, setAgentList] = createSignal<TrackedProcessInfo[]>([]);
 const [shellList, setShellList] = createSignal<TrackedProcessInfo[]>([]);

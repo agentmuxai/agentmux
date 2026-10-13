@@ -18,12 +18,18 @@ const hub = vi.hoisted(() => ({
     handlers: [] as Array<{ eventType: string; handler: (e: unknown) => void }>,
 }));
 
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (sub: { eventType: string; handler: (e: unknown) => void }) => {
-        hub.handlers.push(sub);
-        return () => {};
-    },
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: (sub: { eventType: string; handler: (e: unknown) => void }) => {
+            hub.handlers.push(sub);
+            return () => {};
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 vi.mock("@/app/store/services", () => ({
     ObjectService: {
         UpdateObjectMeta: (_oref: string, meta: Record<string, unknown>) => {

@@ -81,23 +81,29 @@ const {
 // mount, which made the replay path — where ReAgent found a P0 — structurally
 // invisible to all 12 tests. `queuePersistedStatus` puts an event in that
 // replay slot instead.
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
-        const key = `${opts.eventType}|${opts.scope}`;
-        mpsHandlers.set(key, [...(mpsHandlers.get(key) ?? []), opts.handler]);
-        const persisted = mpsPersisted.get(key);
-        if (persisted !== undefined) {
-            // Synchronously, inside subscribe — exactly how the broker does it.
-            opts.handler({ data: persisted });
-        }
-        return () => {
-            mpsHandlers.set(
-                key,
-                (mpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
-            );
-        };
-    },
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
+            const key = `${opts.eventType}|${opts.scope}`;
+            mpsHandlers.set(key, [...(mpsHandlers.get(key) ?? []), opts.handler]);
+            const persisted = mpsPersisted.get(key);
+            if (persisted !== undefined) {
+                // Synchronously, inside subscribe — exactly how the broker does it.
+                opts.handler({ data: persisted });
+            }
+            return () => {
+                mpsHandlers.set(
+                    key,
+                    (mpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
+                );
+            };
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {

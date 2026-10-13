@@ -7,7 +7,7 @@ import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { noteResolved, registerPaneCommandRunner, type RunResult } from "@/app/keybindings/app-api";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { isChordActive, resolveKeyEvent } from "@/app/store/keymodel-dispatch";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sendWSCommand } from "@/app/store/ws";
@@ -304,14 +304,9 @@ class TermViewModel {
         initialShellProcStatus.then((rts) => {
             this.updateShellProcStatus(rts);
         });
-        this.shellProcStatusUnsubFn = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: MOS.makeORef("block", blockId),
-            handler: (event) => {
-                let bcRTS: BlockControllerRuntimeStatus = event.data;
-                this.updateShellProcStatus(bcRTS);
-            },
-        });
+        this.shellProcStatusUnsubFn = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                this.updateShellProcStatus(data);
+            }, MOS.makeORef("block", blockId));
 
         // Last, once every field exists: registering notifies readers of
         // this block (the pane chrome's runtime badge, multi-input), which

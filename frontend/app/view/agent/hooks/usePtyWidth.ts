@@ -34,7 +34,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { onCleanup, onMount, type Accessor } from "solid-js";
@@ -201,15 +201,11 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
         // channel is ready (shell.rs). Clear readiness on "done" so a resize
         // made while the agent is idle is coalesced and re-applied when the
         // next turn starts, rather than failing against a dead PTY.
-        const unsubStatus = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: MOS.makeORef("block", opts.blockId),
-            handler: (event) => {
-                const status = (event as any)?.data?.shellprocstatus;
+        const unsubStatus = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                const status = data.shellprocstatus;
                 if (status === "running") markReady();
                 else if (status === "done") controllerReady = false;
-            },
-        });
+            }, MOS.makeORef("block", opts.blockId));
 
         // Re-mount path: the controller may already be running, in which case
         // the event above won't re-fire — probe once so a pending resize flushes.

@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import clsx from "clsx";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
@@ -51,16 +51,12 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
-        const unsubFn = muxEventSubscribe({
-            eventType: WpsEvent.SysInfo,
-            scope: cn,
-            handler: (event) => {
+        const unsubFn = onMuxEvent(WpsEvent.SysInfo, (_data, event) => {
                 if (model.loadingAtom()) return;
                 const dataItem = convertMuxEventToDataItem(event);
                 if (dataItem == null) return;
                 model.appendData(dataItem);
-            },
-        });
+            }, cn);
         console.log("subscribe to sysinfo", cn);
         onCleanup(() => unsubFn());
     });
