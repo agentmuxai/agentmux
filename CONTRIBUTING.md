@@ -55,6 +55,17 @@ We use [Storybook](https://storybook.js.org/docs) to document and test UI compon
 task storybook
 ```
 
+### Calling srv from the frontend
+
+Every RPC stub (`RpcApi.SomeCommand(...)`) is generated, and nothing calls srv's commands any other way.
+
+To call a new command:
+1. Register its handler with `register_typed`, with request and response types that derive `ts_rs::TS`.
+2. Add a line for it to `frontend/app/store/rpc-api/generated-manifest.json`.
+3. Run `node scripts/gen-rpc-stubs.mjs`.
+
+CI fails if a stub is hand-written, `RpcApi` is anything but `GeneratedApi`, or code calls `client.rpcCall("<command>", …)` directly (`gen-rpc-stubs.mjs --check`).
+
 ### Create a Pull Request
 
 Guidelines:

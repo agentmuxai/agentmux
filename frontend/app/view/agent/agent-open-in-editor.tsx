@@ -14,6 +14,7 @@
  */
 
 import { IconButton } from "@/app/element/ui";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { createContext, Show, useContext, type Accessor, type JSX } from "solid-js";
@@ -55,8 +56,8 @@ export function resolveAgentPath(path: string, baseDir: string): string {
  * doesn't reuse a pane when one is given.
  */
 async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {
-    const opened = (await TabRpcClient.rpcCall(
-        "pane.open",
+    const opened = (await RpcApi.PaneOpenCommand(
+        TabRpcClient,
         {
             view: "editor",
             file: resolveAgentPath(path, files.baseDir),

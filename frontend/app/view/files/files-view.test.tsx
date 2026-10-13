@@ -67,6 +67,8 @@ const h = vi.hoisted(() => {
         GetAgentContentCommand: vi.fn(async (_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "def-korp" ? { agent_id: req.agent_id, content_type: "ui:color", content: "#22c55e", updated_at: 0 } : null
         ),
+        // As the generated stub does: forwards to the client, which the tests assert on.
+        PaneOpenCommand: vi.fn((client: { rpcCall: (...a: unknown[]) => unknown }, data: unknown, opts: unknown) => client.rpcCall("pane.open", data, opts)),
     };
     const rpcCall = vi.fn(async () => ({}));
     return { state, rpc, rpcCall };

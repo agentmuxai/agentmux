@@ -754,6 +754,8 @@ declare global {
         /** Absolute path to a file or directory the Media pane is pointed
          *  at. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
         "media:path"?: string;
+        // Settings pane: the section it opens at (settings.tsx).
+        "settings:section"?: string;
         // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
         "files:path"?: string;
         "files:select"?: string[];
@@ -797,6 +799,9 @@ declare global {
         "agent:resume_strategy"?: "none" | "flag" | "codex-exec";
         "agent:session_id_field"?: string;
         "agent:sessionid"?: string;
+        /** A read-only history tab: the agent it shows, and the block it was opened from (open-history-tab.ts). */
+        "agent:historyTabFor"?: string;
+        "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: AgentFailure;
         "agent:runtime"?: {

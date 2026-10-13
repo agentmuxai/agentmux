@@ -1212,15 +1212,14 @@ export class EditorViewModel {
     /** Open the folder in a terminal pane (split right of the current pane). */
     async openInTerminal(folderPath: string): Promise<void> {
         try {
-            // pane.open is a raw RPC — no typed wrapper exists yet in RpcApi.
-            await TabRpcClient.rpcCall("pane.open", {
+            await RpcApi.PaneOpenCommand(TabRpcClient, {
                 view: "term",
                 cwd: folderPath,
                 split_direction: "right",
                 split_reference_block_id: this.blockId,
             }, {});
         } catch {
-            // pane.open might not be registered yet — fail silently.
+            // Opening beside is best-effort: fail silently.
         }
     }
 
@@ -1230,14 +1229,14 @@ export class EditorViewModel {
      *  docs/specs/SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md. */
     async openToTheSide(filePath: string): Promise<void> {
         try {
-            await TabRpcClient.rpcCall("pane.open", {
+            await RpcApi.PaneOpenCommand(TabRpcClient, {
                 view: "editor",
                 file: filePath,
                 split_direction: "right",
                 split_reference_block_id: this.blockId,
             }, {});
         } catch {
-            // pane.open might not be registered yet — fail silently, same as openInTerminal.
+            // Best-effort, same as openInTerminal.
         }
     }
 
