@@ -153,15 +153,7 @@ pub fn handle_append_block_file(
         echo: None,
     };
 
-    let event = mps::MuxEvent {
-        event: mps::EVENT_BLOCK_FILE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: serde_json::to_value(&event_data).ok(),
-    };
-
-    broker.publish(event);
+    broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
 
     // Write-through to FileStore for persistent history (Phase 1.3).
     // Create the file lazily on first append; if the file already exists
@@ -465,13 +457,5 @@ pub fn handle_truncate_block_file(broker: &mps::Broker, block_id: &str, filename
         echo: None,
     };
 
-    let event = mps::MuxEvent {
-        event: mps::EVENT_BLOCK_FILE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: serde_json::to_value(&event_data).ok(),
-    };
-
-    broker.publish(event);
+    broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
 }
