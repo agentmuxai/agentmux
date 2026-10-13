@@ -140,6 +140,60 @@ fn merge_json_object(base: &mut serde_json::Value, overlay: &serde_json::Value) 
     }
 }
 
+/// What `deleteidentityaccount` answers.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteIdentityAccountResult {
+    deleted: bool,
+    /// Agents whose link to the account was removed (Armory delete-time disclosure).
+    affected_agents: Vec<String>,
+    /// What removing the saved login did; null when there was no account row.
+    #[ts(type = "{ outcome: \"removed\" | \"absent\" | \"skipped\" | \"failed\" | \"none\"; path?: string; detail?: string; historyKept?: boolean; historyPath?: string } | null")]
+    cleanup: serde_json::Value,
+}
+
+/// What `account.key.verify` answers: `{ valid: false, error }` when validation
+/// failed, otherwise every field but `error` (the same keys the handler sent).
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct AccountKeyVerifyResult {
+    valid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    account_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "string")]
+    masked_tail: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Record<string, unknown>")]
+    metadata: Option<serde_json::Value>,
+}
+
+/// What `account.oauth.start` answers: `{ sessionId, status }`, or `{ error }`.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct AccountOAuthStartResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    session_id: Option<String>,
+    /// `oauth_status_wire`'s shape, which the frontend models as OAuthFlowStatus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "import(\"@/app/store/rpc-api/types\").OAuthFlowStatus")]
+    status: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    error: Option<String>,
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Identity account CRUD ----
     // id_store: routes to shared/store.db when available so accounts survive
@@ -206,13 +260,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_UPSERT_IDENTITY_ACCOUNT,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let identity_store = identity_store.clone();
-            let broker = broker.clone();
-            Box::pin(async move {
+    // `Value` request: callers send a partial account (generated-manifest.json
+    // keeps `Partial<IdentityAccount>`), which this parses into IdentityAccount.
+    engine.register_typed(COMMAND_UPSERT_IDENTITY_ACCOUNT, move |data: serde_json::Value, _ctx| {
+        let mstore = mstore.clone();
+        let identity_store = identity_store.clone();
+        let broker = broker.clone();
+        async move {
                 // Accept the full IdentityAccount payload. Missing `id` → mint
                 // a fresh UUID; `created_at` and `updated_at` are server-set
                 // so callers don't have to know the current time.
@@ -239,10 +293,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&account).unwrap_or_default()))
-            })
-        }),
-    );
+                Ok(account)
+        }
+    });
 
     // Armory: validate (optional) + securely store an API key.
     // The plaintext goes to the OS keychain; the DB row keeps only the
@@ -251,13 +304,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_ACCOUNT_KEY_VERIFY,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let identity_store = identity_store.clone();
-            let broker = broker.clone();
-            Box::pin(async move {
+    // `Value` request, parsed into VerifyKeyReq below; the stub keeps its type.
+    engine.register_typed(COMMAND_ACCOUNT_KEY_VERIFY, move |data: serde_json::Value, _ctx| {
+        let mstore = mstore.clone();
+        let identity_store = identity_store.clone();
+        let broker = broker.clone();
+        async move {
                 // NB: `req.api_key` is a secret — never log `req`.
                 let req: VerifyKeyReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.key.verify: {e}"))?;
@@ -279,10 +331,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if !outcome.valid {
                         // Nothing stored — surface a structured error so the UI
                         // stays in the entry state.
-                        return Ok(Some(serde_json::json!({
-                            "valid": false,
-                            "error": outcome.error.unwrap_or_else(|| "validation failed".to_string()),
-                        })));
+                        return Ok(AccountKeyVerifyResult {
+                            valid: false,
+                            error: Some(outcome.error.unwrap_or_else(|| "validation failed".to_string())),
+                            account_id: None,
+                            masked_tail: None,
+                            status: None,
+                            metadata: None,
+                        });
                     }
                     ("valid".to_string(), outcome.metadata, outcome.masked_tail, true)
                 } else {
@@ -385,28 +441,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::json!({
-                    "valid": valid,
-                    "accountId": account_id,
-                    "maskedTail": account.context.get("masked_tail").cloned().unwrap_or_default(),
-                    "status": account.status,
-                    "metadata": account.context,
-                })))
-            })
-        }),
-    );
+                Ok(AccountKeyVerifyResult {
+                    valid,
+                    error: None,
+                    account_id: Some(account_id),
+                    masked_tail: Some(account.context.get("masked_tail").cloned().unwrap_or_default()),
+                    status: Some(account.status),
+                    metadata: Some(account.context),
+                })
+        }
+    });
 
     // ── Armory service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
     let oauth_mstore = state.id_store.clone();
     let oauth_identity_store = state.identity_store.clone();
-    engine.register_handler(
-        COMMAND_ACCOUNT_OAUTH_START,
-        Box::new(move |data, _ctx| {
-            let mstore = oauth_mstore.clone();
-            let identity_store = oauth_identity_store.clone();
-            Box::pin(async move {
+    // `Value` request, parsed into OAuthStartReq below; the stub keeps its type.
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_START, move |data: serde_json::Value, _ctx| {
+        let mstore = oauth_mstore.clone();
+        let identity_store = oauth_identity_store.clone();
+        async move {
                 let req: OAuthStartReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.oauth.start: {e}"))?;
                 let byo = req.client_id.map(|cid| {
@@ -416,31 +471,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 });
                 match crate::identity::oauth_client::start(&req.provider, req.name, byo, mstore, identity_store) {
-                    Ok((session_id, status)) => Ok(Some(serde_json::json!({
-                        "sessionId": session_id,
-                        "status": oauth_status_wire(&status),
-                    }))),
+                    Ok((session_id, status)) => Ok(AccountOAuthStartResult {
+                        session_id: Some(session_id),
+                        status: Some(oauth_status_wire(&status)),
+                        error: None,
+                    }),
                     // "not configured" / unknown provider surface as a clean
                     // error field, not an RPC failure, so the UI can show it.
-                    Err(e) => Ok(Some(serde_json::json!({ "error": e }))),
+                    Err(e) => Ok(AccountOAuthStartResult { session_id: None, status: None, error: Some(e) }),
                 }
-            })
-        }),
-    );
+        }
+    });
 
-    engine.register_handler(
-        COMMAND_ACCOUNT_OAUTH_POLL,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let req: OAuthSessionReq = serde_json::from_value(data)
-                    .map_err(|e| format!("account.oauth.poll: {e}"))?;
+    // The response stays `Value`: oauth_status_wire builds it, and the frontend
+    // models it as OAuthFlowStatus (generated-manifest.json `returns`).
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_POLL, move |req: OAuthSessionReq, _ctx| {
+        async move {
                 match crate::identity::oauth_client::manager().poll(&req.session_id) {
-                    Some(s) => Ok(Some(oauth_status_wire(&s))),
+                    Some(s) => Ok(oauth_status_wire(&s)),
                     None => Err(format!("account.oauth.poll: unknown session {}", req.session_id)),
                 }
-            })
-        }),
-    );
+        }
+    });
 
     engine.register_typed(
         COMMAND_ACCOUNT_OAUTH_CANCEL,
@@ -455,15 +507,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_DELETE_IDENTITY_ACCOUNT,
-        Box::new(move |data, _ctx| {
-            let mstore = mstore.clone();
-            let identity_store = identity_store.clone();
-            let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandDeleteIdentityAccountData = serde_json::from_value(data)
-                    .map_err(|e| format!("deleteidentityaccount: {e}"))?;
+    engine.register_typed(COMMAND_DELETE_IDENTITY_ACCOUNT, move |cmd: CommandDeleteIdentityAccountData, _ctx| {
+        let mstore = mstore.clone();
+        let identity_store = identity_store.clone();
+        let broker = broker.clone();
+        async move {
                 // Drop the credential material behind the row BEFORE the row
                 // itself: keychain entry for `SecretRef::Keychain`, on-disk
                 // OAuth token dir for `SecretRef::OAuthConfigDir` (layer 1 of
@@ -598,16 +646,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                     }
                 }
-                Ok(Some(json!({
-                    "deleted": deleted,
-                    // Layer 4 — Armory delete-time disclosure (spec §4).
-                    "affectedAgents": affected_agents,
+                Ok(DeleteIdentityAccountResult {
+                    deleted,
+                    // Layer 4: Armory delete-time disclosure (spec §4).
+                    affected_agents,
                     // Null when there was no account row to clean up after.
-                    "cleanup": cleanup_report,
-                })))
-            })
-        }),
-    );
+                    cleanup: cleanup_report,
+                })
+        }
+    });
 
     // ---- Agent ↔ Identity junction ----
 
