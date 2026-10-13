@@ -59,6 +59,7 @@ Default roster (the operator can change it):
   - Linux: `xdotool` on X11; on Wayland, synthetic input may not start a real drag, so hand those to the operator.
 
   CDP input doesn't go through the OS drag loop or the native key hooks, so it can't test those. Hold a press about 90 ms before releasing.
+- **After clicking a browser pane's address bar, wait about 50 ms before typing.** While the page has focus, its native window holds the OS keyboard focus, and the click only asks the host to take it back: on Windows that `SetFocus` ran 11–38 ms after the click (agentmux#4828). A key sent sooner goes to the page, so the first one or two characters of `agentmux.ai` came out as `entmux.ai`, and on a page with a text field they landed in that field. With 50 ms or more, 0 of 15 runs lost a key, and a bar that already had focus lost none. People can't type that fast after a click, so it affects only scripted input. macOS saw the same, inconclusively; Linux has not been measured.
 - **A clean window.** The window under test is shown, in front and not overlapped. Dev builds restore windows from earlier sessions, and those catch clicks, so close them first. On Windows the dev main window can start hidden.
 - **Do no harm on the tester's machine.** Change files only inside a temp tree the run created, never send or delete anything outside the app under test, and close windows the run opened.
 - **Unbuffered probes.** Use `cat -u` or `stdbuf -o0`; buffered output reads as "no input".
