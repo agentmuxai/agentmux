@@ -346,6 +346,17 @@ export interface PaneTabStripProps<T> {
     docDrag?: DocTabDrag;
 }
 
+
+/** Opens the pane header's own context menu (the header's `contextmenu`
+ *  handler), anchored at `el`: the grip's click and keyboard route to the same
+ *  actions a right-click gives. */
+function openPaneMenuFrom(el: HTMLElement): void {
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left, clientY: r.bottom, button: 2 }),
+    );
+}
+
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     let stripRef: HTMLDivElement | undefined;
     let lastMeasuredWidth: number | undefined;
@@ -634,7 +645,27 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                     <div
                         class="pane-tab-strip-drag-handle"
                         classList={{ "pane-tab-strip-drag-handle--active": overflowing() }}
-                    />
+                    >
+                        {/* The pane's grip: drag it (the header's own drag covers
+                            it) to move the pane; click it, or Enter/Space, for the
+                            pane menu (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13 §5.2). */}
+                        <div
+                            class="pane-tab-strip-grip"
+                            role="button"
+                            tabIndex={0}
+                            aria-label="Move pane / pane actions"
+                            aria-haspopup="menu"
+                            title="Drag to move this pane. Click for pane actions."
+                            onClick={(e) => openPaneMenuFrom(e.currentTarget)}
+                            onKeyDown={(e) => {
+                                if (e.key !== "Enter" && e.key !== " ") return;
+                                e.preventDefault();
+                                openPaneMenuFrom(e.currentTarget);
+                            }}
+                        >
+                            <i class="fa fa-solid fa-grip-vertical" aria-hidden="true" />
+                        </div>
+                    </div>
                 </Show>
             </div>
         </div>

@@ -185,6 +185,24 @@
         // extends the hairline that .tab:not(.active) draws across the fill
         // area so the full-width line is unbroken except under the active tab.
         border-bottom: var(--snap-chrome) solid var(--border-color);
+        display: flex;
+        align-items: center;
+    }
+
+    // The drag square's dim grip, centred in its first --tab-bar-drag-gutter,
+    // right after the last tab (SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13).
+    .tab-bar-fill-grip {
+        flex: 0 0 var(--tab-bar-drag-gutter);
+        text-align: center;
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        opacity: 0.35;
+        pointer-events: none;
+        transition: opacity 120ms ease;
+    }
+
+    .tab-bar-fill:hover .tab-bar-fill-grip {
+        opacity: 0.7;
     }
 
 }

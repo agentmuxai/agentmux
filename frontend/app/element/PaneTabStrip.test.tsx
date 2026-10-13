@@ -593,7 +593,7 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         expect(container.querySelector(".pane-tab-strip-drag-handle")).toBeNull();
     });
 
-    it("renders the spacer at zero width when the strip is not overflowing", () => {
+    it("keeps the spacer at its resting size (just the grip) when the strip is not overflowing", () => {
         scrollWidth = 100;
         clientWidth = 100;
         const { container } = render(() => (
@@ -650,6 +650,50 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         roCb?.();
         const inner = container.querySelector(".pane-tab-strip-inner");
         expect(inner?.lastElementChild?.classList.contains("pane-tab-strip-drag-handle")).toBe(true);
+    });
+
+    // SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md §5.2: the grip in the spacer.
+    const renderWithGrip = (onMenu: (e: MouseEvent) => void) =>
+        render(() => (
+            <div onContextMenu={(e) => onMenu(e)}>
+                <PaneTabStrip
+                    tabs={TABS}
+                    activeId="a"
+                    getId={(t: T) => t.id}
+                    getLabel={(t: T) => t.label}
+                    onActivate={vi.fn()}
+                    onAdd={vi.fn()}
+                    reserveDragHandle
+                />
+            </div>
+        ));
+
+    it("puts a grip in the spacer: a named button that offers a menu", () => {
+        const { container } = renderWithGrip(vi.fn());
+        const grip = container.querySelector(".pane-tab-strip-drag-handle .pane-tab-strip-grip");
+        expect(grip).not.toBeNull();
+        expect(grip!.getAttribute("role")).toBe("button");
+        expect(grip!.getAttribute("tabindex")).toBe("0");
+        expect(grip!.getAttribute("aria-label")).toBe("Move pane / pane actions");
+        expect(grip!.getAttribute("aria-haspopup")).toBe("menu");
+        expect(grip!.querySelector(".fa-grip-vertical")).not.toBeNull();
+    });
+
+    it("clicking the grip opens the pane menu (the header's own contextmenu)", () => {
+        const onMenu = vi.fn();
+        const { container } = renderWithGrip(onMenu);
+        fireEvent.click(container.querySelector(".pane-tab-strip-grip")!);
+        expect(onMenu).toHaveBeenCalledTimes(1);
+    });
+
+    it("Enter and Space on the grip open the pane menu too", () => {
+        const onMenu = vi.fn();
+        const { container } = renderWithGrip(onMenu);
+        const grip = container.querySelector(".pane-tab-strip-grip")!;
+        fireEvent.keyDown(grip, { key: "Enter" });
+        fireEvent.keyDown(grip, { key: " " });
+        fireEvent.keyDown(grip, { key: "a" });
+        expect(onMenu).toHaveBeenCalledTimes(2);
     });
 });
 
