@@ -304,7 +304,7 @@ which CI runs on every PR against synthetic fixtures. Shell embedded in
 markdown is untested by construction; that is the whole lesson, and it cost four
 rounds of review to learn.
 
-Expect **23 `OK`** against a complete `agentmuxai/<ms>`.
+Expect **26 `OK`** against a complete `agentmuxai/<ms>`.
 
 On a *feature* branch, `MISS agentmux_process_requirement` is normal rather than
 a defect -- it lives on `agentmux/<ms>-process-requirement`. That is the R4
@@ -384,7 +384,7 @@ checklist would read that as a regression — a guaranteed false positive on eve
 upgrade, which is how a check gets ignored.
 
 Across milestones the equivalent question is *content*, not ancestry, and §5 is
-what answers it: the carry-set gate compares the same 23 things regardless of
+what answers it: the carry-set gate compares the same 26 things regardless of
 lineage. That is precisely how the 7977 gap in §1.2 was found, where this
 ancestry test could not have said anything.
 
