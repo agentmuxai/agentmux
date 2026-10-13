@@ -1,7 +1,7 @@
 # RCA: opening many terminals blanks some and reloads the app three times
 
 **Date:** 2026-10-13
-**Status:** root cause confirmed from logs and the live page. Option 1 of §5, which stops the reload loop, is implemented in the PR that adds this document; option 2 is open.
+**Status:** retro. Root cause confirmed from logs and the live page. Option 1 of §5, which stops the reload loop, is implemented in the PR that adds this document; option 2 is open.
 **Author:** Camper
 **Trigger:** Repo owner, 2026-10-13, in an isolated `task dev` build (`CamperTerm`, branch `camper/term-resize-no-blank-frame` on `main` @ `5d9af9260`): *"your instance reset a bunch of times after I opened a bunch of terminals. some of the terminals were white, it eventually recovered after about 3-4 reloads, which it did automatically without me doing anything."*
 
