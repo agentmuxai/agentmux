@@ -158,6 +158,17 @@ async function raiseWindowById(windowId: string): Promise<void> {
     if (instance?.label) await getApi().focusWindow(instance.label);
 }
 
+/** The object at `oref`, cached or fetched; `null` when srv has no such row
+ *  (`Client.windowids` can hold stale ids), so one bad id doesn't end a scan. */
+async function loadObject<T extends MuxObj>(otype: string, oid: string): Promise<T | null> {
+    const oref = MOS.makeORef(otype, oid);
+    try {
+        return MOS.getObjectValue<T>(oref) ?? (await MOS.reloadMuxObject<T>(oref)) ?? null;
+    } catch {
+        return null;
+    }
+}
+
 /** Fallback when srv can't name an open window for the block: activate its
  *  tab in the workspace that holds it and raise that workspace's window.
  *  Selects the window tab, not the pane or its tab. */
@@ -169,16 +180,13 @@ async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
     const ws = workspace();
     const client = await ClientService.GetClientData();
     for (const windowId of client?.windowids ?? []) {
-        const winOref = MOS.makeORef("window", windowId);
-        const win = MOS.getObjectValue<MuxWindow>(winOref) ?? (await MOS.reloadMuxObject<MuxWindow>(winOref));
+        const win = await loadObject<MuxWindow>("window", windowId);
         if (!win?.workspaceid || win.workspaceid === ws?.oid) continue;
-        const wsOref = MOS.makeORef("workspace", win.workspaceid);
-        const wsData = MOS.getObjectValue<Workspace>(wsOref) ?? (await MOS.reloadMuxObject<Workspace>(wsOref));
+        const wsData = await loadObject<Workspace>("workspace", win.workspaceid);
         if (!wsData) continue;
         const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
         for (const tabId of allTabIds) {
-            const oref = MOS.makeORef("tab", tabId);
-            const tab = MOS.getObjectValue<Tab>(oref) ?? (await MOS.reloadMuxObject<Tab>(oref));
+            const tab = await loadObject<Tab>("tab", tabId);
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
             await raiseWindowById(windowId);

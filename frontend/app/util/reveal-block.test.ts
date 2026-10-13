@@ -31,10 +31,14 @@ vi.mock("@/app/store/global", () => ({
         makeORef: (_t: string, id: string) => id,
         getObjectValue: (id: string) => tabs[id],
         // Tabs, workspaces and windows share one id space here (makeORef returns the id).
-        reloadMuxObject: async (id: string) =>
-            tabs[id] ??
+        reloadMuxObject: async (id: string) => {
+            if (id === "win-stale") throw new Error("not found: window win-stale");
+            return (
+                tabs[id] ??
             otherWorkspaces.find((w) => w.workspacedata.oid === id)?.workspacedata ??
-            otherWorkspaces.filter((w) => w.windowid === id).map((w) => ({ workspaceid: w.workspacedata.oid }))[0],
+                otherWorkspaces.filter((w) => w.windowid === id).map((w) => ({ workspaceid: w.workspacedata.oid }))[0]
+            );
+        },
     },
     setActiveTab: async (tabId: string) => calls.push(`setActiveTab:${tabId}`),
     getApi: () => ({
@@ -61,7 +65,10 @@ vi.mock("@/app/store/services", () => ({
         SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`),
     },
     // The window list; each window's workspace and its tabs come from MOS (reloadMuxObject above).
-    ClientService: { GetClientData: async () => ({ windowids: ["win-this", ...otherWorkspaces.map((w) => w.windowid)] }) },
+    // A stale id first: session restore can leave one in Client.windowids.
+    ClientService: {
+        GetClientData: async () => ({ windowids: ["win-stale", "win-this", ...otherWorkspaces.map((w) => w.windowid)] }),
+    },
 }));
 
 import { revealBlock, revealBlockLocally, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
