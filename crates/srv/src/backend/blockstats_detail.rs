@@ -69,6 +69,7 @@ pub fn detail(snap: &[ProcInfo], root_pid: u32, max: usize) -> Option<BlockStats
         mem_private: sum(|p| p.mem_private),
         mem_commit: sum(|p| p.mem_commit),
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
+        connection: None,
     })
 }
 

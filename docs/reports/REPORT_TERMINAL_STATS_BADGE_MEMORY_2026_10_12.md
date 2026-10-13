@@ -121,7 +121,8 @@ One procstats snapshot takes about 20 ms here (626 processes, release build), to
 3. `blockstats.detail { block_id }` (`server/app_api/blockstats.rs`): one snapshot, off the async workers. The window's only: a connection registered as an agent is refused, as for Tower.
 4. `blockstats.tsx`: the badge is wrapped in the UI `Tooltip`, placed below it. The tooltip's content is mounted only while it is open; it asks for the detail then, and again every 2 s. If the request fails, it still shows CPU, memory and peak.
 5. `blockstats.scss`: the badge takes the pointer (`pointer-events: none` removed), with `opacity: 0.9` on hover.
-6. Tests: the tree walk, sums, names, cap and peaks (Rust), the RPC end to end and its refusal of agents, and the tooltip's figures, platform text and fallback (vitest).
+6. The tooltip shows at once, without a fade. On an SSH or WSL pane it names the machine (the host `ssh -G` resolves to and its IP address, or the distribution and its address) and says the figures are this computer's `ssh` or `wsl.exe`. Measuring the remote shell itself is `SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md`.
+7. Tests: the tree walk, sums, names, cap and peaks (Rust), the RPC end to end and its refusal of agents, and the tooltip's figures, platform text and fallback (vitest).
 
 **The trade-off:** today the badge lets clicks and text selection through to the terminal under it. With a tooltip, its small area (about 70 × 16 px at the top-right) takes the pointer instead. A long line's last characters under it can't be clicked or selected without scrolling or resizing. Options:
 - **(a)** Accept that. The badge is small and semi-transparent. This is my recommendation.

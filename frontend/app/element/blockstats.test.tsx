@@ -15,7 +15,7 @@ vi.mock("@/app/hook/useBlockStats", () => ({
 }));
 
 import type { BlockStatsDetail } from "@/app/store/rpc-api/blockstats";
-import { BlockStatsBadge, describeProcesses, formatBytes, formatSince } from "./blockstats";
+import { BlockStatsBadge, describeConnection, describeProcesses, formatBytes, formatSince } from "./blockstats";
 
 function detail(over: Partial<BlockStatsDetail> = {}): BlockStatsDetail {
     return {
@@ -74,7 +74,52 @@ describe("the badge's tooltip", () => {
     });
 });
 
+describe("a remote pane's tooltip", () => {
+    it("leads with the machine and says the figures are this computer's ssh", async () => {
+        detailCmd.mockResolvedValue(
+            detail({
+                names: [{ name: "ssh", count: 1 }],
+                connection: { name: "build", kind: "ssh", host: "build.example.net", address: "203.0.113.5" },
+            }),
+        );
+        const { container } = render(() => <BlockStatsBadge blockId="b1" />);
+        fireEvent.mouseEnter(container.querySelector(".block-stats-badge")!);
+        await waitFor(() =>
+            expect(screen.getByText("Connected to build (build.example.net, 203.0.113.5)")).toBeTruthy(),
+        );
+        expect(screen.getByText(/Measured on this computer: ssh \(1 process\)/)).toBeTruthy();
+        expect(screen.queryByText(/This pane's processes/)).toBeNull();
+        expect(screen.queryByText(/The shell and everything started in it/)).toBeNull();
+    });
+
+    it("shows a local pane without a connection line", async () => {
+        detailCmd.mockResolvedValue(detail());
+        const { container } = render(() => <BlockStatsBadge blockId="b1" />);
+        fireEvent.mouseEnter(container.querySelector(".block-stats-badge")!);
+        await waitFor(() => expect(screen.getByText("Private")).toBeTruthy());
+        expect(screen.queryByText(/Connected to/)).toBeNull();
+    });
+});
+
 describe("formatting", () => {
+    it("names a connection by what it says beyond its own name", () => {
+        expect(describeConnection({ name: "build", kind: "ssh", host: "build.example.net", address: "203.0.113.5" })).toBe(
+            "Connected to build (build.example.net, 203.0.113.5)",
+        );
+        // The host is the name already: only the address is new.
+        expect(describeConnection({ name: "me@box.lan:2222", kind: "ssh", host: "box.lan", address: "192.0.2.9" })).toBe(
+            "Connected to me@box.lan:2222 (192.0.2.9)",
+        );
+        expect(describeConnection({ name: "192.0.2.4", kind: "ssh", host: "192.0.2.4", address: "192.0.2.4" })).toBe(
+            "Connected to 192.0.2.4",
+        );
+        expect(describeConnection({ name: "wsl://Ubuntu", kind: "wsl", host: "Ubuntu", address: "198.51.100.5" })).toBe(
+            "Connected to WSL Ubuntu (198.51.100.5)",
+        );
+        expect(describeConnection({ name: "far", kind: "ssh" })).toBe("Connected to far");
+    });
+
+
     it("names at most three executables and counts the rest", () => {
         const names = [
             { name: "pwsh", count: 1 },

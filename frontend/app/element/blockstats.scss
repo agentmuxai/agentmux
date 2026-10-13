@@ -59,6 +59,14 @@
         margin-bottom: var(--space-1);
     }
 
+    .bst-connection {
+        margin-bottom: var(--space-1);
+    }
+
+    .bst-connection-name {
+        font-variant-numeric: tabular-nums;
+    }
+
     .bst-grid {
         display: grid;
         grid-template-columns: auto auto 1fr;

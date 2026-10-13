@@ -41,6 +41,8 @@ import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResul
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
+import type { BlockStatsDetail } from "@/types/rpc/BlockStatsDetail";
+import type { BlockStatsDetailReq } from "@/types/rpc/BlockStatsDetailReq";
 import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
 import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
 import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
@@ -1990,6 +1992,10 @@ export const GeneratedApi = {
   // command "tooldecision"
   ToolDecisionCommand(client: RpcClient, data: CommandToolDecisionData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("tooldecision", data, opts);
+  },
+  // command "blockstats.detail"
+  BlockStatsDetailCommand(client: RpcClient, data: BlockStatsDetailReq, opts?: RpcOpts): Promise<BlockStatsDetail> {
+    return client.rpcCall("blockstats.detail", data, opts);
   },
   // command "tower.forget"
   TowerForgetCommand(client: RpcClient, data: TowerForgetReq, opts?: RpcOpts): Promise<TowerPeersResult> {

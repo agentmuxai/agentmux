@@ -5,7 +5,7 @@
 import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useBlockStats, type BlockStats } from "@/app/hook/useBlockStats";
 import { RpcApi } from "@/app/store/rpc-api";
-import type { BlockStatsDetail } from "@/app/store/rpc-api/blockstats";
+import type { BlockStatsConnection, BlockStatsDetail } from "@/app/store/rpc-api/blockstats";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Tooltip } from "./tooltip";
 import "./blockstats.scss";
@@ -41,6 +41,20 @@ export function formatSince(ms: number, now = new Date()): string {
     const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     if (at.toDateString() === now.toDateString()) return time;
     return `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+
+/**
+ * A remote pane's machine: "Connected to build (build.example.net, 203.0.113.5)",
+ * "Connected to WSL Ubuntu (198.51.100.5)".
+ */
+export function describeConnection(c: BlockStatsConnection): string {
+    const name = c.kind === "wsl" ? `WSL ${c.host ?? c.name.replace(/^wsl:\/\//, "")}` : c.name;
+    // The host only when it says more than the name does (an alias's HostName).
+    const destHost = c.name.replace(/^.*@/, "").replace(/:\d+$/, "");
+    const host = c.kind === "ssh" && c.host && c.host !== destHost && c.host !== c.address ? c.host : undefined;
+    const address = c.address !== destHost ? c.address : undefined;
+    const where = [host, address].filter(Boolean).join(", ");
+    return where ? `Connected to ${name} (${where})` : `Connected to ${name}`;
 }
 
 /** What "Private" means on the machine that measured it. */
@@ -89,21 +103,33 @@ function BlockStatsTooltip(props: { blockId: string; stats: BlockStats }) {
 
     const windows = () => detail()?.memory_metric === "private working set";
 
+    const since = (d: BlockStatsDetail) => (d.started_at_ms != null ? `, running since ${formatSince(d.started_at_ms)}` : "");
+
     return (
         <div class="block-stats-tooltip">
-            <div class="bst-title">
-                <Show
-                    when={detail()}
-                    fallback={`This pane's processes (${props.stats.pids === 1 ? "1 process" : `${props.stats.pids} processes`})`}
-                >
-                    {(d) => (
-                        <>
-                            This pane's processes: {describeProcesses(d())}
-                            <Show when={d().started_at_ms}>{(at) => <>, running since {formatSince(at())}</>}</Show>
-                        </>
-                    )}
-                </Show>
-            </div>
+            <Show
+                when={detail()?.connection}
+                fallback={
+                    <div class="bst-title">
+                        <Show
+                            when={detail()}
+                            fallback={`This pane's processes (${props.stats.pids === 1 ? "1 process" : `${props.stats.pids} processes`})`}
+                        >
+                            {(d) => `This pane's processes: ${describeProcesses(d())}${since(d())}`}
+                        </Show>
+                    </div>
+                }
+            >
+                {(c) => (
+                    <div class="bst-connection">
+                        <div class="bst-title">{describeConnection(c())}</div>
+                        <div class="bst-meaning">
+                            Measured on this computer: {describeProcesses(detail()!)}
+                            {since(detail()!)}, which carries the connection. Not the shell on the other machine.
+                        </div>
+                    </div>
+                )}
+            </Show>
             <div class="bst-grid">
                 <Row label="CPU" value={`${props.stats.cpu.toFixed(1)}%`} meaning="of one core; above 100% is more than one core" />
                 <Row
@@ -123,7 +149,10 @@ function BlockStatsTooltip(props: { blockId: string; stats: BlockStats }) {
                 </Show>
                 <Row label="Peak" value={formatBytes(props.stats.peak)} meaning="the highest Memory has been" />
             </div>
-            <div class="bst-footer">The shell and everything started in it. Updated every second; hide with term:showstatsbadge.</div>
+            <div class="bst-footer">
+                {detail()?.connection ? "" : "The shell and everything started in it. "}Updated every second; hide with
+                term:showstatsbadge.
+            </div>
         </div>
     );
 }
@@ -144,6 +173,7 @@ export function BlockStatsBadge(props: { blockId: string; noHeader?: boolean }) 
             {(s) => (
                 <Tooltip
                     placement="bottom"
+                    immediate
                     divClassName={`block-stats-badge ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
                     content={<BlockStatsTooltip blockId={props.blockId} stats={s()} />}
                 >

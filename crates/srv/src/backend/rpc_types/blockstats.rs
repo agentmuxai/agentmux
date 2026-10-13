@@ -21,6 +21,27 @@ pub struct BlockStatsName {
     pub count: u32,
 }
 
+/// The machine a remote pane (SSH, WSL) is connected to. The badge's figures
+/// are still this computer's: the `ssh` or `wsl.exe` that carries the
+/// connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockStatsConnection {
+    /// The pane's `connection`, as written: `user@host`, an ssh alias, or
+    /// `wsl://<distro>`.
+    pub name: String,
+    /// `ssh` or `wsl`.
+    pub kind: String,
+    /// SSH: the host name `ssh` connects to. WSL: the distribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host: Option<String>,
+    /// Its IP address, when it could be found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub address: Option<String>,
+}
+
 /// `blockstats.detail`: what the badge's tooltip shows beyond the badge's own
 /// CPU and memory, for the same processes (the pane's shell and everything
 /// it started). Read on demand, while the tooltip is open: one process
@@ -45,4 +66,8 @@ pub struct BlockStatsDetail {
     pub mem_commit: Option<u64>,
     /// What `mem_private` measures on this OS ("private working set", …).
     pub memory_metric: String,
+    /// Present for a remote pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<BlockStatsConnection>,
 }
