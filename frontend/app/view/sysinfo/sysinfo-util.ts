@@ -174,3 +174,43 @@ export function xTickFitsBeforeRightEdge(
     const x = marginLeft + ((d - minX) / (maxX - minX)) * (width - marginLeft - marginRight);
     return width - x >= X_TICK_HALF_LABEL_PX;
 }
+
+/** Candidate spacings for x ticks, in seconds: whole seconds, minutes and hours. */
+const TIME_TICK_STEPS_S = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400];
+
+/**
+ * The tick spacing (ms) for a window `spanMs` wide: the smallest candidate that
+ * leaves at most `maxTicks` ticks, so a 2-minute window gets 15 s or 30 s ticks
+ * and a 15-minute one gets minute ticks.
+ */
+export function chooseTimeTickStepMs(spanMs: number, maxTicks: number): number {
+    const max = Math.max(2, Math.floor(maxTicks));
+    for (const s of TIME_TICK_STEPS_S) {
+        if (spanMs / (s * 1000) <= max) return s * 1000;
+    }
+    return TIME_TICK_STEPS_S[TIME_TICK_STEPS_S.length - 1] * 1000;
+}
+
+/**
+ * Tick times (ms) inside [minX, maxX] on round local-clock boundaries of
+ * `stepMs` (:00, :15, :30, ...), so labels read "8:52:30" rather than whatever
+ * millisecond the window happens to start on. `tzOffsetMs` is the local zone's
+ * offset from UTC (east positive), so hour-sized steps land on local hours.
+ */
+export function buildTimeTicks(minX: number, maxX: number, stepMs: number, tzOffsetMs = 0): number[] {
+    if (!(maxX > minX) || !(stepMs > 0)) return [];
+    const ticks: number[] = [];
+    for (let t = Math.ceil((minX + tzOffsetMs) / stepMs) * stepMs - tzOffsetMs; t <= maxX; t += stepMs) {
+        ticks.push(t);
+    }
+    return ticks;
+}
+
+/** A tick's label: seconds when ticks are closer than a minute apart, else hours and minutes. */
+export function formatTimeTick(ts: number, stepMs: number): string {
+    const d = new Date(ts);
+    const hour12 = d.getHours() % 12 || 12;
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    if (stepMs < 60000) return `${hour12}:${mm}:${String(d.getSeconds()).padStart(2, "0")}`;
+    return `${hour12}:${mm} ${d.getHours() < 12 ? "AM" : "PM"}`;
+}

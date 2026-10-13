@@ -14,9 +14,12 @@ import "./sysinfo-plot.scss";
 import type { DataItem } from "./sysinfo-types";
 import {
     buildPlotAxisLabelOptions,
+    buildTimeTicks,
+    chooseTimeTickStepMs,
     computeAutoMaxY,
     computeLeftMarginForTicks,
     computePlotMargins,
+    formatTimeTick,
     resolveDomainBound,
     xTickFitsBeforeRightEdge,
 } from "./sysinfo-util";
@@ -51,6 +54,9 @@ function widestYTickLabel(plot: Element): number {
     }
     return widest;
 }
+
+/** Least width per x tick label, so a narrow pane gets fewer, wider-spaced ticks. */
+const TIME_TICK_MIN_SPACING_PX = 80;
 
 /** Class on every chart's SVG; sysinfo-plot.scss carries Plot's rules for it. */
 const PLOT_CLASS = "sysinfo-plot";
@@ -148,11 +154,16 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             })
         );
 
+        // y1/y2, not y: with `y` alone Plot stacks the area, and its stack turns a
+        // missing value (NaN) into the baseline, so every gap was drawn as a drop to
+        // 0 and a diagonal climb back. An explicit baseline leaves NaN undefined, so
+        // the area breaks where the line does.
         marks.push(
             Plot.areaY(plotData, {
                 fill: `url(#${gradientId})`,
                 x: "ts",
-                y: yval,
+                y1: 0,
+                y2: yval,
             })
         );
 
@@ -167,9 +178,11 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         }
 
         const labelY = yvalMeta?.label ?? "?";
+        // Gap markers carry NaN, which the hover marks would show as "NaN%".
+        const hoverData = plotData.filter((d) => !d.blank);
         marks.push(
             Plot.ruleX(
-                plotData,
+                hoverData,
                 Plot.pointerX({
                     x: "ts",
                     py: yval,
@@ -181,7 +194,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         );
         marks.push(
             Plot.ruleY(
-                plotData,
+                hoverData,
                 Plot.pointerX({
                     px: "ts",
                     y: yval,
@@ -193,7 +206,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         );
         marks.push(
             Plot.tip(
-                plotData,
+                hoverData,
                 Plot.pointerX({
                     x: "ts",
                     y: yval,
@@ -208,7 +221,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         );
         marks.push(
             Plot.dot(
-                plotData,
+                hoverData,
                 Plot.pointerX({ x: "ts", y: yval, fill: color, r: 3, stroke: "var(--main-text-color)", strokeWidth: 1 })
             )
         );
@@ -245,6 +258,10 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         const margins = computePlotMargins(sparkline, title);
         const axisLabels = buildPlotAxisLabelOptions();
 
+        const tickStepMs = chooseTimeTickStepMs(maxX - minX, (pw - margins.marginLeft) / TIME_TICK_MIN_SPACING_PX);
+        const tzOffsetMs = -new Date(maxX).getTimezoneOffset() * 60000;
+        const xTicks = buildTimeTicks(minX, maxX, tickStepMs, tzOffsetMs);
+
         const buildPlot = (marginLeft: number) => {
             const plot = Plot.plot({
                 className: PLOT_CLASS,
@@ -254,9 +271,10 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
                 x: {
                     grid: true,
                     ...axisLabels.x,
+                    ticks: xTicks,
                     tickFormat: (d: number) =>
                         xTickFitsBeforeRightEdge(d, minX, maxX, pw, marginLeft, margins.marginRight)
-                            ? dayjs.unix(d / 1000).format("h:mm A")
+                            ? formatTimeTick(d, tickStepMs)
                             : "",
                     domain: [minX, maxX],
                 },

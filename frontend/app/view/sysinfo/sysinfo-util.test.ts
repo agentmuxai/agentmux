@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import {
     buildPlotAxisLabelOptions,
+    buildTimeTicks,
+    chooseTimeTickStepMs,
+    formatTimeTick,
     computeAutoMaxY,
     computeLeftMarginForTicks,
     computePlotMargins,
@@ -152,5 +155,44 @@ describe("computeAutoMaxY", () => {
 
     it("honors a custom padding fraction", () => {
         expect(computeAutoMaxY([item(10)], "x", 1, undefined, 0.5)).toBeCloseTo(15);
+    });
+});
+
+describe("x axis time ticks", () => {
+    it("chooseTimeTickStepMs picks the smallest step that fits the tick budget", () => {
+        expect(chooseTimeTickStepMs(2 * 60_000, 6)).toBe(30_000);
+        expect(chooseTimeTickStepMs(60_000, 6)).toBe(10_000);
+        expect(chooseTimeTickStepMs(15 * 60_000, 6)).toBe(300_000);
+        expect(chooseTimeTickStepMs(60 * 60_000, 5)).toBe(900_000);
+        // Fewer than two ticks never asked for; a huge span tops out at a day.
+        expect(chooseTimeTickStepMs(10_000, 0)).toBe(5_000);
+        expect(chooseTimeTickStepMs(365 * 86_400_000, 4)).toBe(86_400_000);
+    });
+
+    it("buildTimeTicks lands on round local boundaries inside the window", () => {
+        const minX = Date.UTC(2026, 9, 13, 8, 52, 7);
+        const maxX = Date.UTC(2026, 9, 13, 8, 54, 7);
+        const ticks = buildTimeTicks(minX, maxX, 30_000, 0);
+        expect(ticks.map((t) => new Date(t).getUTCSeconds())).toEqual([30, 0, 30, 0]);
+        expect(ticks[0]).toBeGreaterThanOrEqual(minX);
+        expect(ticks[ticks.length - 1]).toBeLessThanOrEqual(maxX);
+        // A zone half an hour east puts hour ticks on its own hours.
+        const east = 30 * 60_000;
+        const hourly = buildTimeTicks(Date.UTC(2026, 0, 1, 0, 10), Date.UTC(2026, 0, 1, 4, 0), 3_600_000, east);
+        expect(hourly.map((t) => new Date(t + east).getUTCMinutes())).toEqual([0, 0, 0, 0]);
+    });
+
+    it("buildTimeTicks is empty for an empty or backwards window", () => {
+        expect(buildTimeTicks(5, 5, 1000)).toEqual([]);
+        expect(buildTimeTicks(9, 5, 1000)).toEqual([]);
+        expect(buildTimeTicks(0, 5000, 0)).toEqual([]);
+    });
+
+    it("formatTimeTick shows seconds under a minute's spacing, so neighbours differ", () => {
+        const t = new Date(2026, 9, 13, 8, 52, 30).getTime();
+        expect(formatTimeTick(t, 30_000)).toBe("8:52:30");
+        expect(formatTimeTick(t + 30_000, 30_000)).toBe("8:53:00");
+        expect(formatTimeTick(new Date(2026, 9, 13, 20, 5, 0).getTime(), 60_000)).toBe("8:05 PM");
+        expect(formatTimeTick(new Date(2026, 9, 13, 0, 5, 0).getTime(), 60_000)).toBe("12:05 AM");
     });
 });

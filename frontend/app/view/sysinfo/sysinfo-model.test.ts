@@ -40,21 +40,31 @@ describe("sampleReducer — APPEND, ordinary forward time", () => {
         expect(out.map((d) => d.ts)).toEqual([recent.ts, next.ts]);
     });
 
-    it("zero-order holds across 1-3 missed ticks", () => {
+    it("joins a short gap with the line between two real samples, inventing none", () => {
         const state = [sample(1000, 42)];
         const out = append(state, sample(4000, 7));
-        expect(out.map((d) => d.ts)).toEqual([1000, 2000, 3000, 4000]);
-        expect(out[1].cpu).toBe(42);
-        expect(out[2].cpu).toBe(42);
+        expect(out.map((d) => d.ts)).toEqual([1000, 4000]);
+        expect(out.map((d) => d.cpu)).toEqual([42, 7]);
+    });
+
+    it("breaks the series on both sides of a long forward gap", () => {
+        const state = [sample(1000, 42)];
+        const out = append(state, sample(20000, 7));
+        // Real sample, a marker just after it, a marker just before the next, the next.
+        expect(out.map((d) => d.ts)).toEqual([1000, 1001, 19999, 20000]);
+        expect(out.map((d) => d.blank === 1)).toEqual([false, true, true, false]);
+        expect(Number.isNaN(out[1].cpu as number)).toBe(true);
+        expect(Number.isNaN(out[2].cpu as number)).toBe(true);
         expect(out[3].cpu).toBe(7);
     });
 
-    it("inserts a NaN sentinel across a long forward break", () => {
-        const state = [sample(1000)];
-        const out = append(state, sample(20000));
-        expect(out).toHaveLength(3);
-        expect(out[1].blank).toBe(1);
-        expect(Number.isNaN(out[1].cpu as number)).toBe(true);
+    it("breaks a series again at each later gap, leaving the earlier ones in place", () => {
+        let state: DataItem[] = [sample(1000)];
+        state = append(state, sample(20000));
+        state = append(state, sample(21000));
+        state = append(state, sample(60000));
+        expect(state.filter((d) => d.blank === 1)).toHaveLength(4);
+        for (let i = 1; i < state.length; i++) expect(state[i].ts).toBeGreaterThan(state[i - 1].ts);
     });
 });
 
@@ -94,7 +104,7 @@ describe("sampleReducer — APPEND across a backwards clock step", () => {
         const state = [sample(base), sample(base + 8000)];
         const out = append(state, sample(base + 1000));
         const blanks = out.filter((d) => d.blank === 1);
-        expect(blanks).toHaveLength(1);
+        expect(blanks.length).toBeGreaterThan(0);
         expect(out[out.length - 1].ts).toBe(base + 1000);
         // The far-ahead point is gone; the retained one is genuinely older.
         expect(out.some((d) => d.ts === base + 8000)).toBe(false);

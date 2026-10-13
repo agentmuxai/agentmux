@@ -169,20 +169,14 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
             return [...trimmed, item];
         }
 
-        if (last) {
-            const gap = item.ts - last.ts;
-            if (gap > intervalMs * 1.5 && gap <= intervalMs * 3.5) {
-                // 1–3 missed ticks: zero-order hold — extend the last value
-                const steps = Math.round(gap / intervalMs) - 1;
-                const held: DataItem[] = [];
-                for (let i = 1; i <= steps; i++) {
-                    held.push({ ...last, ts: last.ts + i * intervalMs });
-                }
-                return [...trimmed, ...held, item];
-            } else if (gap > intervalMs * 3.5) {
-                // True break (connection hiccup / long pause): NaN sentinel
-                return [...trimmed, makeBlankItem(last, last.ts + 1), item];
-            }
+        if (last && item.ts - last.ts > getGapThresholdMs(intervalSecs)) {
+            // No samples for longer than a few ticks: end the line at the last real
+            // sample and start it again at this one, as RESET does for history. Both
+            // edges get a marker, so the line and the area break at both ends (a
+            // marker on the left alone left the area to ramp up from 0 to this
+            // sample). A shorter gap is joined by the line between two real
+            // readings; no value is repeated to fill it in.
+            return [...trimmed, makeBlankItem(last, last.ts + 1), makeBlankItem(item, item.ts - 1), item];
         }
 
         return [...trimmed, item];
