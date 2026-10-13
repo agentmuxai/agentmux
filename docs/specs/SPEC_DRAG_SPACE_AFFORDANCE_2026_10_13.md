@@ -110,7 +110,7 @@ A known failure mode: a panel-header drag that moves the whole window instead of
 ### 5.1 Window header: a dim grip in the existing drag square (owner's choice)
 
 - **Where:** inside `.tab-bar-fill`, centred in its first `--tab-bar-drag-gutter` (32 px), right after the last tab's separator (§5.5). The square stays where it is: the existing slot the owner pointed to, inside the scrolling strip, as `SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md` built it.
-- **Glyph:** `grip-vertical`, 12 px, `--secondary-text-color` at opacity 0.35; 0.7 while the square is hovered.
+- **Glyph:** the 4×3 dot grip (§5.6), 12 px, `--secondary-text-color` at opacity 0.35; 0.7 while the square is hovered.
 - **Takes no events** (`pointer-events: none`): a press on the grip is a press on the fill, so dragging, double-click and right-click work exactly as before. `aria-hidden`.
 - **Default arrow cursor**, as on every native title bar; no tooltip.
 - Unchanged: the 32 px minimum, `TitleBarContextMenu` on right-click, double-click to maximize.
@@ -120,7 +120,7 @@ A known failure mode: a panel-header drag that moves the whole window instead of
 - **Where:** a 24×24 px button at the end of the pane's tab strip, after "+", in the space `.pane-tab-strip-drag-handle` reserves. Change that space from "45 px only when overflowing, else 0" to:
   - always at least the button's 24 px;
   - the 45 px gutter while overflowing stays, with the button at its start.
-- **Glyph:** Font Awesome Free `grip-vertical`, 12–14 px.
+- **Glyph:** the 4×3 dot grip (§5.6), 12 px.
 - **Visibility:** moving panes is secondary to working in them, so follow Atlassian's secondary-action rule.
   - At rest: `opacity` about 0.35 of `--secondary-text-color`.
   - On header hover, `:focus-within`, or while a pane drag is in progress anywhere: 1.
@@ -155,6 +155,10 @@ Each item uses the layout operations the drag already uses, so a menu move and a
 ### 5.5 A separator after the last tab
 
 Owner, 2026-10-13: "there is a missing seperator at the end of the last window tab". Every tab boundary had a `.tab-separator` except the last tab's right edge, so the last tab ran straight into the drag square. `tabbar.tsx` now renders one more `.tab-separator` after the last tab (when there is one), with the same rule as the others.
+
+### 5.6 The glyph: 4×3 dots (owner, 2026-10-13)
+
+After trying the 2×3 `grip-vertical` in `task dev`, the owner asked for "3x3", then "a 4x3 but joining 2": two 2×3 grips side by side. Font Awesome Free has neither (`grip` is 3×2, `grip-vertical` 2×3), so `frontend/app/element/GripDots.tsx` draws it: an inline SVG of twelve dots, four columns by three rows on a 4-unit pitch, `currentColor`, 1em tall. Both grips use it. A wide block of dots reads as "grab here" without a single column's row-reorder connotation, and stays clear of the kebab and hamburger shapes (§4.5).
 
 ## 6. Decisions
 

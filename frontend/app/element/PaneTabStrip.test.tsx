@@ -676,7 +676,7 @@ describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_0
         expect(grip!.getAttribute("tabindex")).toBe("0");
         expect(grip!.getAttribute("aria-label")).toBe("Move pane / pane actions");
         expect(grip!.getAttribute("aria-haspopup")).toBe("menu");
-        expect(grip!.querySelector(".fa-grip-vertical")).not.toBeNull();
+        expect(grip!.querySelectorAll("svg circle").length).toBe(12); // a 4×3 grip
     });
 
     it("clicking the grip opens the pane menu (the header's own contextmenu)", () => {

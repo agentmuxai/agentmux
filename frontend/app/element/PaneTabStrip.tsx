@@ -44,6 +44,7 @@ import "./PaneTabStrip.scss";
 // window-tab tags, so no existing target mistakes a pill for either.
 // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1.
 import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData } from "@/app/drag/drag-types";
+import { GripDots } from "./GripDots";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
@@ -663,7 +664,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                                 openPaneMenuFrom(e.currentTarget);
                             }}
                         >
-                            <i class="fa fa-solid fa-grip-vertical" aria-hidden="true" />
+                            <GripDots />
                         </div>
                     </div>
                 </Show>

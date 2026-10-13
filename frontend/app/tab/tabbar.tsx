@@ -24,6 +24,7 @@ import { revealTabInStrip } from "./tab-strip-scroll";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
 import { tabWrapperRefs } from "./tabbar-dnd";
+import { GripDots } from "@/app/element/GripDots";
 import "./tabbar.scss";
 
 interface TabBarProps {
@@ -402,7 +403,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                 <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true">
                     {/* A dim grip marks the drag square; it takes no events, so a
                         press on it is a press on the fill. */}
-                    <i class="fa fa-solid fa-grip-vertical tab-bar-fill-grip" aria-hidden="true" />
+                    <GripDots class="tab-bar-fill-grip" />
                 </div>
             </div>
             <Show when={pendingCloseTabId() !== null}>
