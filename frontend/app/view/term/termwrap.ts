@@ -830,6 +830,19 @@ export class TermWrap {
 
     /** The WebGL context was lost and this terminal now draws with the DOM renderer. */
     private webglFellBack = false;
+    /** The WebGL addon was loaded; open() creates its renderer, or fails to. */
+    private webglRequested = false;
+
+    /**
+     * Record WebGL only once open() has created its canvas: the addon is loaded
+     * before open(), and a WebGL2 renderer that fails to start there leaves the
+     * terminal on the DOM renderer.
+     */
+    private recordRendererAfterOpen(canvas: HTMLCanvasElement | null | undefined) {
+        if (!this.webglRequested) return;
+        if (canvas) setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
+        else setTermRendererOf(this.blockId, { kind: "dom", why: "WebGL couldn't start for this terminal", owner: this });
+    }
 
     /** The WebGL canvas, and its size when it was last painted here. */
     private glCanvas: HTMLCanvasElement | null = null;
@@ -849,6 +862,7 @@ export class TermWrap {
      */
     private repaintOnCanvasResize() {
         const canvas = this.terminal.element?.querySelector<HTMLCanvasElement>("canvas:not(.xterm-link-layer)");
+        this.recordRendererAfterOpen(canvas);
         if (!canvas || typeof ResizeObserver === "undefined") return;
         this.glCanvas = canvas;
         this.paintedSize = { width: canvas.width, height: canvas.height };
@@ -921,7 +935,9 @@ export class TermWrap {
                 );
                 this.terminal.loadAddon(webglAddon);
                 setTermRendererAtom("webgl");
-                setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
+                // xterm creates the WebGL renderer in open(); recordRendererAfterOpen
+                // says whether it did.
+                this.webglRequested = true;
                 if (!loggedWebGL) {
                     console.log("loaded webgl renderer!");
                     loggedWebGL = true;
