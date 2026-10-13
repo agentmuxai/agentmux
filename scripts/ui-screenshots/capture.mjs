@@ -11,7 +11,7 @@
 //
 // Usage:
 //   node scripts/ui-screenshots/capture.mjs [--port N] [--out DIR] [--only id1,id2]
-//       [--suite manual|widgets|chrome|agent|memory] [--sizes small,medium,large|all]
+//       [--suite manual|widgets|chrome|agent|memory|landing] [--sizes small,medium,large|all]
 //       [--redact from=to]... [--no-redact]
 //
 // --suite picks the manifest: `manual` (shots.mjs, the default), `widgets`
@@ -49,7 +49,7 @@ import { CdpSession, NO_DIALOGS, findMainTarget, resolveClip } from "./lib/sessi
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Suite name → manifest module (relative to this directory). */
-const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs" };
+const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs", landing: "./landing-shots.mjs" };
 
 function parseArgs(argv) {
     const args = {
