@@ -32,6 +32,10 @@ import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
+import type { LanDiscoverability } from "@/types/rpc/LanDiscoverability";
+import type { LanDiscoveryError } from "@/types/rpc/LanDiscoveryError";
+import type { LanFirewall } from "@/types/rpc/LanFirewall";
+import type { LanInstanceList } from "@/types/rpc/LanInstanceList";
 import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
@@ -120,6 +124,10 @@ export type MuxEventPayloads = {
   "identityaccounts:changed": null;
   install_chunk: InstallChunkEvent;
   install_progress: InstallProgressEvent;
+  laninstances: LanInstanceList;
+  "laninstances:error": LanDiscoveryError;
+  "laninstances:firewall": LanFirewall;
+  "laninstances:health": LanDiscoverability;
   "lsp:message": LspMessageEvent;
   "mcp:changed": null;
   "mcp:observed": BlockRefEvent;
@@ -212,6 +220,10 @@ export const TYPED_MUX_EVENTS = [
   "identityaccounts:changed",
   "install_chunk",
   "install_progress",
+  "laninstances",
+  "laninstances:error",
+  "laninstances:firewall",
+  "laninstances:health",
   "lsp:message",
   "mcp:changed",
   "mcp:observed",

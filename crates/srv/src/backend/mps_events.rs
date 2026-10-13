@@ -177,6 +177,14 @@ events! {
     NotificationActivate: crate::backend::notify::router::EVENT_NOTIFICATION_ACTIVATE => crate::backend::notify::router::NotificationActivateEvent,
     /// Ask one window to open a pane as its own floating OS window (`app_api::pane`).
     OpenFloatingPane: "openfloatingpane" => OpenFloatingPaneEvent,
+    /// The LAN peers this instance sees (`lan_discovery`).
+    LanInstances: "laninstances" => crate::backend::lan_discovery::LanInstanceList,
+    /// LAN discovery couldn't start, or a daemon rebuild failed.
+    LanInstancesError: "laninstances:error" => crate::backend::lan_discovery::LanDiscoveryError,
+    /// Whether this instance is discoverable on every LAN interface (the mDNS watchdog).
+    LanInstancesHealth: "laninstances:health" => crate::backend::lan_discovery::LanDiscoverability,
+    /// The OS firewall's verdict on LAN peers reaching this machine (`lan_firewall`).
+    LanInstancesFirewall: "laninstances:firewall" => crate::backend::lan_firewall::LanFirewall,
     /// Several object updates from one atomic transition, applied in one flush (`EventBus::broadcast_mux_obj_updates`).
     MuxObjBatchedUpdates: super::eventbus::WS_EVENT_MUX_OBJ_BATCHED_UPDATES => crate::backend::obj::MuxObjBatch,
     /// A line of an agent CLI's install progress, for its pane (`mps::publish_install_progress`).
@@ -497,6 +505,18 @@ mod tests {
         );
         let frame = ProtocolFrame(serde_json::json!({ "method": "turn/started" }));
         assert_eq!(serde_json::to_value(&frame).unwrap(), serde_json::json!({ "method": "turn/started" }));
+    }
+
+    #[test]
+    fn lan_payloads_serialize_as_the_json_they_replace() {
+        use crate::backend::eventbus::EventBus;
+        use crate::backend::lan_discovery::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
+        let empty = EventBus::typed_ws_event::<LanInstances>(&LanInstanceList(Vec::new()), String::new());
+        assert_eq!((empty.eventtype.as_str(), empty.data), ("laninstances", Some(serde_json::json!([]))));
+        let error = LanDiscoveryError { error: "bind failed".into() };
+        assert_eq!(serde_json::to_value(&error).unwrap(), serde_json::json!({ "error": "bind failed" }));
+        let health = LanDiscoverability { state: "degraded".into(), missing: vec!["192.0.2.7".into()], rebuilds: 1 };
+        assert_eq!(serde_json::to_value(&health).unwrap(), serde_json::json!({ "state": "degraded", "missing": ["192.0.2.7"], "rebuilds": 1 }));
     }
 
     #[test]

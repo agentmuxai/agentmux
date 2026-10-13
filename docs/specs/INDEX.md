@@ -490,6 +490,7 @@ partial list.
 | [`SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08`](SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md) | SPEC: Tower, agent first: an Agents rail and a Processes list grouped by agent |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
+| [`SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13`](SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md) | Typed events on every path |
 | [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
@@ -656,7 +657,6 @@ partial list.
 | [`SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07`](SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md) | Top bar: widget labels drop before tabs shrink |
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
-| [`SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13`](SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md) | Typed events on every path |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
