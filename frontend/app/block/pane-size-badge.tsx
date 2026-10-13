@@ -26,6 +26,10 @@ import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 interface PaneSizeBadgeProps {
     /** Accessor for the pane's outer frame. Measured via ResizeObserver. */
     target: () => HTMLElement | undefined;
+    /** Anchor top-left instead of bottom-left: for a pane whose content is a
+     *  native surface (a browser page), which paints above the DOM and would
+     *  hide a bottom-left badge. The top edge (header / nav bar) is DOM. */
+    atTop?: boolean;
 }
 
 export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
@@ -67,7 +71,7 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     });
 
     return (
-        <div class="pane-size-badge" aria-hidden="true">
+        <div class="pane-size-badge" classList={{ "pane-size-badge--top": props.atTop === true }} aria-hidden="true">
             {size().w}×{size().h}
         </div>
     );

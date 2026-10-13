@@ -1434,10 +1434,15 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 badge on every pane. The Show keeps the component (and
                 its ResizeObserver) mounted only during the drag, so
                 idle panes do no observer work. Codex P2 rounds 1 + 2
-                on PR #1057.
+                on PR #1057. A native-surface view (the browser) gets it
+                at its top edge, which is DOM; its page would cover the
+                bottom-left corner.
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
             <Show when={!props.preview && nodeModel.isSplitterDragging()}>
-                <PaneSizeBadge target={frameEl} />
+                <PaneSizeBadge
+                    target={frameEl}
+                    atTop={paneTabCapability(blockData()?.meta?.view, "nativeSurface") === true}
+                />
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
                 including hardware-accelerated WebGL surfaces */}

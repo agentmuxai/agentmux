@@ -1,7 +1,7 @@
 # SPEC: Pane resize dimension overlay (WxH badge)
 
 **Date:** 2026-05-26
-**Status:** Draft — ready to implement
+**Status:** implemented — #1057 (the badge); top-left placement on native-surface (browser) panes in the PR that adds §2.3's exception.
 **Author:** AgentA
 **Tracking discussion:** TBD
 
@@ -86,6 +86,15 @@ Bottom-left was picked over bottom-right or center because:
 - Agent panes' "Send / Stop" buttons live bottom-right (per
   `SPEC_AGENT_PANE_BOTTOM_BUTTONS_2026_04_22.md`). Bottom-left is the
   only consistently-empty corner.
+
+**Exception (2026-10-13): panes whose content is a native surface.** A
+browser pane's page is a native window drawn above the DOM, so a
+bottom-left badge sits underneath it and never shows. For a view with the
+`nativeSurface` capability (the browser), the badge anchors top-left
+instead (`pane-size-badge--top`), over the pane header or nav bar, which
+are DOM. Registering the badge as a pane overlay was rejected: its rect
+changes on every frame of a drag, so every browser pane would be re-clipped
+every frame. See `docs/reports/REPORT_PANE_SIZE_BADGE_HIDDEN_ON_BROWSER_PANES_RCA_2026_10_12.md`.
 
 ### 2.4 Style
 
