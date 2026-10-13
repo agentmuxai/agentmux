@@ -245,3 +245,20 @@ Each PR ships with screenshots and a changeset. Phase 1 settles the look, and 2 
 3. **MCP: keep "Also in use" as its own group, or fold observed status into the catalog cards only?** Proposed: both. Catalog cards show their observed status, and "Also in use" lists only what isn't in the catalog, so nothing is shown twice.
 4. **Remotes: an Add gallery?** Proposed none, since remotes are discovered and adding is one destination. One alternative is chips for "SSH host" and "WSL distribution" if WSL ever needs adding by hand.
 5. **Card width.** 200px minimum fits two cards in a half-width pane at default zoom. Check it in the live pass and adjust.
+
+## 9. As built (where it differs from the above)
+
+- **`CardGrid` keys its cards by `keyOf`**, not by item object. A refreshed list brings new objects, and keying on them rebuilt every card and the open details, losing a half-typed form. A changed item now re-renders only its own card, and the open details stay until another card opens (tested in `card.test.tsx`).
+- **`Card` takes a `tooltip`** (the native `title`; `title` is the visible title).
+- **Font sizes are tokens** (`--text-xs`, `--text-2xs`); no raw px.
+- **MCP:**
+  - **Preset icons:** the presets had no logo, so `MCP_PRELOAD_CATALOG` entries gained an `icon` (`music` for Ableton Live, `diagram-project` for TouchDesigner).
+  - **Delete confirmation:** no call lists a server's bound agents, only a count, so the confirm asks each agent through `McpCatalogListForAgentCommand`. It falls back to "Bound to N agents".
+  - **Details:** they also list the agents that report the server.
+  - **New server:** its form opens as a "New server" card first in "Your servers".
+  - **Escape** in an open form closes it and discards the draft.
+  - **Removed files:** `mcp-in-use.scss` and `mcp-status-pill.scss` moved into `mcp-cards.scss`.
+- **Remotes:**
+  - **Colour picker:** `ColorSwatchPalette` has no radio roles or accessible names, so the colour radios stay a radiogroup of `Button`s (`role="radio"`, `aria-checked`, the colour's name).
+  - **Status hook:** the status dot is `Card`'s own, so the old `.remotes-dot` hook became `.ui-card-status.ui-status-dot--{tone}` in the tests.
+  - **Keying:** sections are keyed by id and the grids by remote name.
