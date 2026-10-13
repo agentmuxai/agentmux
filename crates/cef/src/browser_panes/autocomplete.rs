@@ -190,7 +190,11 @@ fn set_search_suggestions(context: &RequestContext, on: bool) -> bool {
         return false;
     };
     value.set_bool(on as std::os::raw::c_int);
-    let mut error = CefString::default();
+    // Not `CefString::default()`: that holds no string struct, so the binding
+    // passes a null `error`, and libcef's wrapper then refuses the call
+    // (returns 0) before it reaches the pref. An owned empty string gives it
+    // somewhere to write.
+    let mut error = CefString::from("");
     if ImplPreferenceManager::set_preference(context, Some(&name), Some(&mut value), Some(&mut error)) == 0 {
         tracing::warn!(on, error = %error, "[autocomplete] couldn't set {SEARCH_SUGGEST_PREF}");
         return false;
