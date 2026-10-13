@@ -32,5 +32,3 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
         },
     };
 }
-
-export { SysinfoViewModel };

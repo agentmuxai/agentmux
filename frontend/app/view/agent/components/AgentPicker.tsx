@@ -101,7 +101,7 @@ function storeSort(sort: AgentSortOption): void {
  * fork or hide app-wide, including other agents calling `agent.define` —
  * remounted every card in every open picker.
  */
-export function reuseUnchangedById(prev: AgentDefinition[], next: AgentDefinition[]): AgentDefinition[] {
+function reuseUnchangedById(prev: AgentDefinition[], next: AgentDefinition[]): AgentDefinition[] {
     const prevById = new Map(prev.map((a) => [a.id, a]));
     let changed = prev.length !== next.length;
     const merged = next.map((a, i) => {
@@ -203,7 +203,7 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
  * from a fresh srv read — before the first one lands, or after a failed one,
  * the cached map can't tell "open elsewhere" from "closed" (Codex P1, #4127).
  */
-export function useInstanceOpenDefinitions(): [
+function useInstanceOpenDefinitions(): [
     () => Map<string, string>,
     () => void,
     () => Map<string, OpenAgentLocation>,

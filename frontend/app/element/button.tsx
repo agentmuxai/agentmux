@@ -26,7 +26,7 @@ const LEGACY_WORDS = new Set(["solid", "outlined", "outline", "ghost", "green", 
  * accent block, so it maps to `accent` — except a modal's dismiss button,
  * which was the same block as its main action and is the neutral one.
  */
-export function legacyTone(className: string | undefined, isDismiss: boolean): UiTone {
+function legacyTone(className: string | undefined, isDismiss: boolean): UiTone {
     const words = new Set((className ?? "").split(/\s+/));
     if (words.has("red")) return "danger";
     if (words.has("ghost")) return "quiet";

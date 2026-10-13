@@ -36,24 +36,24 @@ import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from ".
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
 export const META_PATH = "files:path";
-export const META_SELECT = "files:select";
-export const META_SORT = "files:sort";
-export const META_SORTDIR = "files:sortdir";
-export const META_HIDDEN = "files:hidden";
-export const META_SIDEBAR = "files:sidebar";
-export const META_PREVIEW = "files:preview";
-export const META_VIEW = "files:view";
+const META_SELECT = "files:select";
+const META_SORT = "files:sort";
+const META_SORTDIR = "files:sortdir";
+const META_HIDDEN = "files:hidden";
+const META_SIDEBAR = "files:sidebar";
+const META_PREVIEW = "files:preview";
+const META_VIEW = "files:view";
 /** The SSH connection the pane is browsing (the key terminals use too);
  *  absent for this computer. Remote terminals spec §6.3. */
-export const META_CONN = "connection";
+const META_CONN = "connection";
 
 /** Entries per `fs.list` page (srv caps at 5000). */
 const PAGE = 1000;
 /** No first page by now: say we're waiting (on macOS, likely for a prompt). */
-export const SLOW_LISTING_MS = 400;
+const SLOW_LISTING_MS = 400;
 /** Ask git this long after a listing settles (a burst of changes re-lists
  *  many times; each `git status` is a process). */
-export const GIT_DELAY_MS = 300;
+const GIT_DELAY_MS = 300;
 
 export type Phase =
     /** Listing the folder; nothing to show yet. */

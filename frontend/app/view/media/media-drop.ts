@@ -26,7 +26,7 @@ const MEDIA_MIME_TYPES = new Set([
     "audio/vnd.wave",
 ]);
 
-export const isMediaName = (name: string) => ALL_MEDIA_EXTENSIONS.includes(extOf(name));
+const isMediaName = (name: string) => ALL_MEDIA_EXTENSIONS.includes(extOf(name));
 
 /**
  * Whether a file drag can open in a media pane: exactly one file of a type it

@@ -76,7 +76,7 @@ const BROADCAST_HEADER_RE = /^\[BROADCAST:([^\]\n]+)\]\r?\n([\s\S]*)$/;
  * counts (`FROM=user VIA=swarm`); anything else falls through to plain text, so a
  * malformed or lookalike header is shown as written rather than dressed up.
  */
-export function parseBroadcastHeader(
+function parseBroadcastHeader(
     message: string,
 ): { body: string; recipients?: number; msgId?: string } | null {
     const match = BROADCAST_HEADER_RE.exec(message.trim());

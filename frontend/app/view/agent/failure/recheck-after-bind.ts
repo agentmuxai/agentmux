@@ -45,7 +45,7 @@ export interface RetryRecheckAfterBindDeps {
     onHealthy: () => void;
 }
 
-export const DEFAULT_RECHECK_AFTER_BIND_DELAYS_MS = [300, 700, 1500];
+const DEFAULT_RECHECK_AFTER_BIND_DELAYS_MS = [300, 700, 1500];
 
 /**
  * Try `recheck` up to `delaysMs.length + 1` times, sleeping `delaysMs[i]`

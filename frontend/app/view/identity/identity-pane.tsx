@@ -9,7 +9,7 @@ import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { IdentityPaneView } from "./identity-pane-view";
 
 /** The pane's title: its `frame:title`, else "Identity". */
-export function identityTitle(meta: MetaType | undefined): string {
+function identityTitle(meta: MetaType | undefined): string {
     return (meta?.["frame:title"] as string | undefined) ?? "Identity";
 }
 

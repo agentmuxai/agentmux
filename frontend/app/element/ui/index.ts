@@ -21,10 +21,9 @@ export {
     type TextInputProps,
 } from "./inputs";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl";
-export { densityClass, UiIcon, type UiDensity, type UiTone } from "./shared";
+export { densityClass, type UiDensity, type UiTone } from "./shared";
 export {
     TabbedPane,
-    tabbedPaneLayout,
     tabId,
     tabPanelId,
     Tabs,

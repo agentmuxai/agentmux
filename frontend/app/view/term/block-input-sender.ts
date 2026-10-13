@@ -23,7 +23,7 @@ import { sleep, stringToBase64 } from "@/util/util";
  *  single-write failures. Input above this is split and sent with a small
  *  inter-chunk delay to avoid flooding the backend channel. */
 export const PASTE_CHUNK_BYTES = 4096;
-export const PASTE_CHUNK_DELAY_MS = 5;
+const PASTE_CHUNK_DELAY_MS = 5;
 /** Chunked sends of at least this many KB show a "Pasting…" progress toast. */
 const PASTE_TOAST_MIN_KB = 8;
 

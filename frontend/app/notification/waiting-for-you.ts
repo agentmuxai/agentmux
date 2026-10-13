@@ -31,7 +31,6 @@ import { windowId } from "@/app/store/window-identity";
 
 import { APP_KEY_PREFIX } from "./waiting-keys";
 
-export { APP_KEY_PREFIX };
 
 const waiting = new Map<string, Map<string, string | undefined>>();
 /** `blockId\0source` → disposes the watch that ends that wait on its own. */

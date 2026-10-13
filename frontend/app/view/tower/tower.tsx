@@ -32,5 +32,3 @@ export const towerPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { TowerViewModel };

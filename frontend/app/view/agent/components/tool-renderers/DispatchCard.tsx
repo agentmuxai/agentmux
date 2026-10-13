@@ -73,7 +73,7 @@ function DispatchCardView(props: { dispatch: AgentDispatch }): JSX.Element {
     );
 }
 
-export function DispatchCard(props: { node: ToolNode; ctx?: ToolRenderContext }): JSX.Element {
+function DispatchCard(props: { node: ToolNode; ctx?: ToolRenderContext }): JSX.Element {
     return (
         <Show when={props.ctx?.dispatchMatch} fallback={renderFallback(props.node)}>
             {(d) => <DispatchCardView dispatch={d()} />}

@@ -379,7 +379,7 @@ export interface OverlayNodeProps {
  * An overlay representing the true flexbox layout of the LayoutTreeState.
  * Holds the drop targets for moving around nodes.
  */
-export const OverlayNode = (props: OverlayNodeProps) => {
+const OverlayNode = (props: OverlayNodeProps) => {
     const nodeModel = useNodeModel(props.layoutModel, props.node);
     const additionalProps = () => nodeModel.additionalProps();
     let overlayRef: HTMLDivElement | undefined;

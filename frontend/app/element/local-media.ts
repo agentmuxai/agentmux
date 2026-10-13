@@ -26,9 +26,6 @@ export const VIDEO_EXTENSIONS = ["webm", "mp4", "mov"];
 // see the "Post-implementation corrections" note in SPEC_MEDIA_PANE_2026_07_26.md).
 export const AUDIO_EXTENSIONS = ["wav"];
 
-/** Images an agent message may show inline: the same set as the Media pane. */
-export const INLINE_IMAGE_EXTENSIONS = IMAGE_EXTENSIONS;
-
 /** Client-side caps for inline media (§4.2, §5); srv's own limit is 500 MB. */
 export const INLINE_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
 export const INLINE_AV_MAX_BYTES = 200 * 1024 * 1024;
@@ -57,7 +54,7 @@ export function basenameOf(path: string): string {
 /** What an inline reference to `path` renders as, by extension. */
 export function inlineMediaKind(path: string): "image" | "video" | "audio" | null {
     const ext = extOf(path);
-    if (INLINE_IMAGE_EXTENSIONS.includes(ext)) return "image";
+    if (IMAGE_EXTENSIONS.includes(ext)) return "image";
     if (VIDEO_EXTENSIONS.includes(ext)) return "video";
     if (AUDIO_EXTENSIONS.includes(ext)) return "audio";
     return null;
@@ -120,7 +117,7 @@ export function describeMediaError(el: HTMLMediaElement | undefined): string {
     return err.message ? `${codeName}: ${err.message}` : codeName;
 }
 
-export function streamUrl(path: string): string {
+function streamUrl(path: string): string {
     return getWebServerEndpoint() + "/agentmux/stream-local-file?path=" + encodeURIComponent(path);
 }
 
@@ -132,7 +129,7 @@ export class MediaTooLargeError extends Error {
 }
 
 /** srv answered with an error status (404 for a missing file). */
-export class MediaFetchError extends Error {
+class MediaFetchError extends Error {
     constructor(readonly status: number, statusText: string) {
         super(`${status} ${statusText}`);
     }

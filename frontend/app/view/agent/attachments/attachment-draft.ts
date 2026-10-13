@@ -39,8 +39,8 @@ import type { AttachmentRejected } from "@/types/rpc/AttachmentRejected";
 import { attachmentNoun, fileKind } from "./file-kind";
 
 /** Fallback limits until the backend reports its own (settings-driven) ones. */
-export const DEFAULT_MAX_FILES = 128;
-export const DEFAULT_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const DEFAULT_MAX_FILES = 128;
+const DEFAULT_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 
 export type DraftAttachmentStatus = "processing" | "ready" | "error";
 
@@ -83,7 +83,7 @@ export function pastedFileName(file: File, now = new Date()): string {
 }
 
 /** POST one file to the upload route; resolves with its stored info. */
-export async function uploadFile(file: File, name: string): Promise<AttachmentInfo> {
+async function uploadFile(file: File, name: string): Promise<AttachmentInfo> {
     const res = await fetch(`${getWebServerEndpoint()}/api/v1/attachments/upload?name=${encodeURIComponent(name)}`, {
         method: "POST",
         headers: authHeaders(),

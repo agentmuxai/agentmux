@@ -18,7 +18,7 @@ import { byName, type ToolRendererEntry } from "./registry";
 
 /** The referenced tool names, or null unless the result is a non-empty array
  *  made only of tool_reference blocks. */
-export function toolReferenceNames(result: unknown): string[] | null {
+function toolReferenceNames(result: unknown): string[] | null {
     if (!Array.isArray(result) || result.length === 0) return null;
     const names: string[] = [];
     for (const b of result) {

@@ -43,5 +43,3 @@ export const browserPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { BrowserViewModel };

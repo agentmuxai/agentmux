@@ -48,7 +48,7 @@ export interface ResolvedNote {
  * a user gets (`tab:close`, `files:trash`, replacing a pane), and a pane can
  * add its own guard (`registerPaneCommandRunner`'s `refuse`).
  */
-export const API_REFUSED: ReadonlyMap<string, string> = new Map([
+const API_REFUSED: ReadonlyMap<string, string> = new Map([
     ["files:deletePermanently", "it can't be undone"],
     ["pane:close", "a key press closes the focused pane at once: RunCommand pane:close with a target closes it with the user's 15-second undo"],
 ]);
@@ -58,7 +58,7 @@ export const API_REFUSED: ReadonlyMap<string, string> = new Map([
 const API_REFUSED_MAC: ReadonlyMap<string, string> = new Map();
 
 /** Why MuxAPI refuses `command` on `platform`, or undefined if it doesn't. */
-export function refusalFor(command: string, platform: KeyPlatform): string | undefined {
+function refusalFor(command: string, platform: KeyPlatform): string | undefined {
     return API_REFUSED.get(command) ?? (platform === "mac" ? API_REFUSED_MAC.get(command) : undefined);
 }
 
