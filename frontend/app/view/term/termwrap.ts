@@ -30,6 +30,7 @@ import { markStart, markEnd } from "@/perf";
 import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
+import { paintRows, resizeAndPaint } from "./term-paint";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 const dlog = debug("wave:termwrap");
@@ -257,6 +258,7 @@ export class TermWrap {
     async init() {
         // Mount terminal to DOM
         this.terminal.open(this.connectElem);
+        this.repaintOnCanvasResize();
 
         // Enable cursor blink only while this pane is focused.  The textarea is
         // available after open(); focus/blur fire naturally as the user switches panes.
@@ -818,12 +820,40 @@ export class TermWrap {
         return { cols: dims.cols, rows: dims.rows };
     }
 
-    /** Resize the grid to `dims` if it differs. */
+    /** Resize the grid to `dims` if it differs, and paint it in the same frame (term-paint.ts). */
     private applyFit(dims: { cols: number; rows: number }) {
-        if (this.terminal.rows !== dims.rows || this.terminal.cols !== dims.cols) {
-            (this.terminal as any)._core?._renderService?.clear?.();
-            this.terminal.resize(dims.cols, dims.rows);
-        }
+        if (resizeAndPaint(this.terminal, dims)) this.notePainted();
+    }
+
+    /** The WebGL canvas, and its size when it was last painted here. */
+    private glCanvas: HTMLCanvasElement | null = null;
+    private paintedSize = { width: 0, height: 0 };
+
+    private notePainted() {
+        if (this.glCanvas) this.paintedSize = { width: this.glCanvas.width, height: this.glCanvas.height };
+    }
+
+    /**
+     * xterm's WebGL renderer also resizes its canvas from its own
+     * ResizeObserver, when the canvas's device-pixel size comes out different
+     * from what it set (fractional cell sizes at a 125% display scale), and
+     * that too empties the canvas and leaves the repaint to the next frame.
+     * This observer, registered after xterm's, runs right after it in the same
+     * frame and paints the rows before the frame is shown.
+     */
+    private repaintOnCanvasResize() {
+        const canvas = this.terminal.element?.querySelector<HTMLCanvasElement>("canvas:not(.xterm-link-layer)");
+        if (!canvas || typeof ResizeObserver === "undefined") return;
+        this.glCanvas = canvas;
+        this.paintedSize = { width: canvas.width, height: canvas.height };
+        const observer = new ResizeObserver(() => {
+            if (this.disposed) return;
+            if (canvas.width === this.paintedSize.width && canvas.height === this.paintedSize.height) return;
+            paintRows(this.terminal);
+            this.notePainted();
+        });
+        observer.observe(canvas, { box: "device-pixel-content-box" });
+        this.toDispose.push({ dispose: () => observer.disconnect() });
     }
 
     private loadRendererAddon(useWebGl: boolean) {
