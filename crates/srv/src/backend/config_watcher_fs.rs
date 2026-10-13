@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::eventbus::EventBus;
@@ -359,7 +358,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let mut new_keys = serde_json::Map::new();
-        new_keys.insert("app:defaultnewblock".to_string(), json!("fs-watch-test-marker"));
+        new_keys.insert("app:defaultnewblock".to_string(), serde_json::json!("fs-watch-test-marker"));
         let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &new_keys);
         std::fs::write(&settings_path, &merged).unwrap();
 
