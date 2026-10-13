@@ -222,44 +222,11 @@ declare global {
         cacheRead: number;
     };
 
-    type AgentTurn = {
-        role: "user" | "assistant" | "tool_result";
-        content: unknown;
-        timestampMs: number;
-    };
-
-    type AgentEvent =
-        | { type: "assistant_text"; delta: string }
-        | { type: "tool_use"; toolUseId: string; tool: string; input: unknown }
-        | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
-        | { type: "cost"; costUsd: number; tokens: TokenCounts }
-        | { type: "done"; response: string; transcript: AgentTurn[] }
-        | { type: "error"; message: string }
-        /**
-         * Context compaction completed. Sourced from the CLI's own
-         * `system`/`compact_boundary` stream-json frame — real counts, not
-         * inferred. Mirror of `crates/srv/src/agents/types.rs`'s
-         * `AgentEvent::CompactionBoundary` (`CompactionTrigger` is
-         * `#[serde(rename_all = "snake_case")]`). See
-         * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md
-         * (Codex P2, PR #2378 round 4: this mirror was missing the variant
-         * entirely, leaving typed consumers of this wire union unable to
-         * represent an event the backend actually emits).
-         */
-        | {
-              type: "compaction_boundary";
-              trigger: "auto" | "manual";
-              preTokens: number;
-              postTokens: number;
-              cumulativeDroppedTokens: number;
-              durationMs: number;
-          };
-
     type AgentRunResult = {
         response: string;
         tokens: TokenCounts;
         costUsd: number;
-        transcript: AgentTurn[];
+        transcript: import("@/types/rpc/AgentTurn").AgentTurn[];
     };
 
 

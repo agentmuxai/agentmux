@@ -121,7 +121,7 @@ export const WpsEvent = {
     // — `event` is the SAME tagged `AgentEvent` union every normal turn
     // streams (`type: "assistant_text"` with `delta`, `"done"` with the
     // final `response`, `"error"` with `message`, etc. — see
-    // `frontend/types/srv-types.d.ts`'s `AgentEvent`). The outer `done: true`
+    // `frontend/types/rpc/AgentEvent.ts`). The outer `done: true`
     // (not `event.type === "done"`) is the authoritative completion signal
     // `components/BtwOverlay.tsx` waits on — it also fires on a terminal
     // `error` event, which `event.type` alone would not indicate as "done".

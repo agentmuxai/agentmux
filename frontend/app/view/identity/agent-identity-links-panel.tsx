@@ -30,7 +30,7 @@ import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { loadAccounts, subscribeAccountChanges, PROVIDER_LABELS, type Account } from "./identity-model";
 import { statusBadge } from "./identity-manager";
 import { joinAgentIdentityRows } from "./agent-identities-model";
@@ -103,10 +103,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     createEffect(() => {
         const id = props.agentId;
         if (!id) return;
-        const unsub = muxEventSubscribe({
-            eventType: `agentidentities:changed:${id}`,
-            handler: () => void refreshLinks(),
-        });
+        const unsub = onMuxEvent(`agentidentities:changed:${id}`, () => void refreshLinks());
         onCleanup(unsub);
     });
 

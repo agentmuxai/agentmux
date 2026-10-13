@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795; step 6 (install, shell, attachments, connections) in review; step 7 not started. Verified 2026-10-13.
+**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796; step 7 (per-id events) in review; step 8 not started. Verified 2026-10-13.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
@@ -31,7 +31,8 @@ Same shape as the RPC registry: srv records the type, a schema file is exported,
    - **Unmigrated names** keep `any`, so nothing breaks partway through.
    - **Name constants:** `mps-events.ts`'s constants are checked against the schema's names.
 4. **Signals with no payload.** An event that only says "something changed" is declared with payload `()`. It goes out with no `data` field, as before, and `onMuxEvent` calls its handler with `null` (`NO_PAYLOAD_MUX_EVENTS` in the generated file).
-5. **Ratchets.** A gate counts `json!` payloads in `publish` calls and casts of `event.data` in subscribers. Both may only go down, like `check-untyped-rpc-handlers.mjs`.
+5. **Names per id.** An event sent under a name per id (`agent:memory:changed:<agent id>`) is a `PerIdEvent`, declared by its prefix in `per_id_events!` and published with `publish_event_for::<E>(id, …)`. The generated map keys it by a template literal (`` [event: `agent:memory:changed:${string}`]: null ``), so `onMuxEvent(`agent:memory:changed:${id}`, …)` is typed too.
+6. **Ratchets.** A gate counts `json!` payloads in `publish` calls and casts of `event.data` in subscribers. Both may only go down, like `check-untyped-rpc-handlers.mjs`.
 
 ## Order
 
@@ -43,9 +44,10 @@ One PR per domain, about 10 events each. The busiest subscribers go first:
 4. **Files and blocks:** `blockfile`, `blockstats`, `block:activity`, `files*`, `editor*`, `media*`, `waveobj:update`.
 5. **Signals:** the fixed-name `*changed` events with no payload (agents, memories, skills, MCP, accounts, cron, drones, remotes, the work queue). The widget events move to step 7.
 6. **Shell, install, attachments and connections:** `shell_chunk`, `shell_node_create`, `install_chunk`, `attachment:*`, `connchange`.
-7. **The rest**, including the widget events and the per-id names (`agent:memory:changed:{id}` and the like), and the gate at zero.
+7. **Names per id:** `agent:memory:changed:`, `agentidentities:changed:`, `agentinstances:changed:`, `agentcredentials:revoked:`, `dronerun:`, `agent_event:`.
+8. **The rest**, including the widget events, and the gate at zero.
 
-**Effort:** about 7 PRs, comparable to the stub work. Every step can be shipped on its own: an unmigrated event works exactly as today.
+**Effort:** about 8 PRs, comparable to the stub work. Every step can be shipped on its own: an unmigrated event works exactly as today.
 
 ## Not in scope
 

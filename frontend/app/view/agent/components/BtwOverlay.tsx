@@ -44,6 +44,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
+import type { AgentEvent } from "@/types/rpc/AgentEvent";
 
 export interface BtwOverlayProps {
     /** Block this overlay belongs to — scopes the MPS subscription. */

@@ -9,6 +9,10 @@
 //! frontend's `onMuxEvent(WpsEvent.X, (data) => …)` gets `data` as the Rust type. Publish one with
 //! [`Broker::publish_event`](super::mps::Broker::publish_event). An event not listed here is still
 //! published as a plain `MuxEvent` with untyped data.
+//!
+//! An event sent under a name per id (`agent:memory:changed:<agent id>`) is a [`PerIdEvent`],
+//! declared in the `per_id_events!` list by the name before the id, and published with
+//! [`Broker::publish_event_for`](super::mps::Broker::publish_event_for).
 
 use serde::Serialize;
 
@@ -20,6 +24,31 @@ pub trait Event {
     /// The wire name (`MuxEvent::event`).
     const NAME: &'static str;
     type Payload: Serialize + ts_rs::TS + 'static;
+}
+
+/// A broker event sent under a name per id: its prefix, then the id.
+pub trait PerIdEvent {
+    /// The wire name before the id (`agent:memory:changed:`).
+    const PREFIX: &'static str;
+    type Payload: Serialize + ts_rs::TS + 'static;
+}
+
+macro_rules! per_id_events {
+    ($($(#[$doc:meta])* $marker:ident: $prefix:expr => $payload:ty,)*) => {
+        $(
+            $(#[$doc])*
+            pub struct $marker;
+            impl PerIdEvent for $marker {
+                const PREFIX: &'static str = $prefix;
+                type Payload = $payload;
+            }
+        )*
+        /// Every per-id event: its prefix and its payload as TypeScript.
+        #[cfg(test)]
+        pub fn per_id_schema() -> Vec<(&'static str, TsType)> {
+            vec![$(($prefix, ts_type::<$payload>())),*]
+        }
+    };
 }
 
 macro_rules! events {
@@ -133,6 +162,21 @@ events! {
     WorkQueueChanged: "workqueue:changed" => (),
 }
 
+per_id_events! {
+    /// An agent's native memory files changed (`agent:memory:changed:<agent id>`).
+    AgentMemoryChanged: "agent:memory:changed:" => (),
+    /// An agent's identity links changed (`agentidentities:changed:<agent id>`).
+    AgentIdentitiesChanged: "agentidentities:changed:" => (),
+    /// A definition's instances changed (`agentinstances:changed:<definition id>`).
+    AgentInstancesChanged: "agentinstances:changed:" => (),
+    /// An agent's provider login was unlinked (`agentcredentials:revoked:<agent id>`).
+    AgentCredentialsRevoked: "agentcredentials:revoked:" => CredentialsRevokedEvent,
+    /// One step of a drone run (`dronerun:<run id>`).
+    DroneRun: "dronerun:" => crate::drone::executor::engine::RunEvent,
+    /// An agent pane's output, translated (`agent_event:<block id>`).
+    AgentEventStream: "agent_event:" => crate::agents::types::AgentEvent,
+}
+
 /// An event's `data`: its payload as JSON, or none for an event that carries none (`()`, a
 /// pure "something changed" signal), so such an event goes out with no `data` field at all.
 pub fn payload_data<P: Serialize>(payload: &P) -> Option<serde_json::Value> {
@@ -144,6 +188,21 @@ pub fn payload_data<P: Serialize>(payload: &P) -> Option<serde_json::Value> {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct PathChangedEvent {
     pub path: String,
+}
+
+/// `agentcredentials:revoked:<agent id>`: the agent still holds the provider's tokens until it restarts.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsRevokedEvent {
+    /// Always `true`.
+    #[ts(type = "true")]
+    pub credentials_revoked: bool,
+    pub provider: String,
+    /// The account unlinked, when one account was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account_id: Option<String>,
 }
 
 /// `files:changed`: the folder that changed, as the Files pane shows it.
@@ -165,14 +224,22 @@ pub struct ResumeRetryEvent {
     pub started_at: Option<String>,
 }
 
-/// `schema()` as the JSON the event-schema export writes: one row per event, sorted by name.
+/// `schema()` and `per_id_schema()` as the JSON the event-schema export writes: one row per event,
+/// sorted by name. A per-id event's row names its prefix, with `perId: true`.
 #[cfg(test)]
 pub fn schema_json() -> serde_json::Value {
-    let mut rows = schema();
+    let mut rows: Vec<(&str, TsType, bool)> = schema().into_iter().map(|(n, t)| (n, t, false)).collect();
+    rows.extend(per_id_schema().into_iter().map(|(n, t)| (n, t, true)));
     rows.sort_by(|a, b| a.0.cmp(b.0));
     serde_json::Value::Array(
         rows.into_iter()
-            .map(|(name, ts)| serde_json::json!({ "event": name, "payloadTs": { "name": ts.name, "imports": ts.imports } }))
+            .map(|(name, ts, per_id)| {
+                let mut row = serde_json::json!({ "event": name, "payloadTs": { "name": ts.name, "imports": ts.imports } });
+                if per_id {
+                    row["perId"] = true.into();
+                }
+                row
+            })
             .collect(),
     )
 }
@@ -183,7 +250,7 @@ mod tests {
 
     #[test]
     fn each_event_is_listed_once() {
-        let names: Vec<&str> = schema().into_iter().map(|(n, _)| n).collect();
+        let names: Vec<&str> = schema().into_iter().chain(per_id_schema()).map(|(n, _)| n).collect();
         let mut sorted = names.clone();
         sorted.sort();
         sorted.dedup();

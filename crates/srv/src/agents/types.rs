@@ -66,7 +66,8 @@ pub struct AgentTask {
 /// Provider-specific extension goes through a `Custom` variant
 /// reserved here but intentionally not shipped Phase 1.5 — leave
 /// the enum open for it. See spec §8 risks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
     /// Streaming text chunk from the assistant. Agent pane appends
@@ -80,11 +81,13 @@ pub enum AgentEvent {
     ToolUse {
         tool_use_id: String,
         tool: String,
+        #[ts(type = "unknown")]
         input: serde_json::Value,
     },
     /// Tool execution result.
     ToolResult {
         tool_use_id: String,
+        #[ts(type = "unknown")]
         output: serde_json::Value,
         #[serde(default)]
         is_error: bool,
@@ -114,9 +117,13 @@ pub enum AgentEvent {
     /// shape this is translated from.
     CompactionBoundary {
         trigger: CompactionTrigger,
+        #[ts(type = "number")]
         pre_tokens: u64,
+        #[ts(type = "number")]
         post_tokens: u64,
+        #[ts(type = "number")]
         cumulative_dropped_tokens: u64,
+        #[ts(type = "number")]
         duration_ms: u64,
     },
 }
@@ -124,7 +131,8 @@ pub enum AgentEvent {
 /// How compaction was triggered. `Auto` = context filled up and
 /// Claude Code compacted automatically; `Manual` = the user (or the
 /// agent itself) ran `/compact`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionTrigger {
     Auto,
@@ -155,12 +163,15 @@ pub struct TokenCounts {
     pub cache_read: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTurn {
-    /// `"user"` | `"assistant"` | `"tool_result"`.
+    #[ts(type = r#""user" | "assistant" | "tool_result""#)]
     pub role: String,
+    #[ts(type = "unknown")]
     pub content: serde_json::Value,
+    #[ts(type = "number")]
     pub timestamp_ms: i64,
 }
 

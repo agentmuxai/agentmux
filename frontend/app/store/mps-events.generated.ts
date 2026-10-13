@@ -6,6 +6,7 @@
 // `cargo test -p agentmux-srv export_bindings` and `node scripts/gen-mux-events.mjs`.
 
 import type { AgentContextUsageEvent } from "@/types/rpc/AgentContextUsageEvent";
+import type { AgentEvent } from "@/types/rpc/AgentEvent";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
@@ -15,6 +16,7 @@ import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEven
 import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
@@ -24,6 +26,7 @@ import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
+import type { RunEvent } from "@/types/rpc/RunEvent";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
@@ -39,7 +42,8 @@ import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
-/** Each typed broker event's payload, by its wire name. Subscribe with `onMuxEvent`. */
+/** Each typed broker event's payload, by its wire name. An event sent under a name per id
+ *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
@@ -90,9 +94,15 @@ export type MuxEventPayloads = {
   userattention: UserAttentionEvent;
   "waveobj:update": MuxObjUpdate;
   "workqueue:changed": null;
+  [event: `agent:memory:changed:${string}`]: null;
+  [event: `agent_event:${string}`]: AgentEvent;
+  [event: `agentcredentials:revoked:${string}`]: CredentialsRevokedEvent;
+  [event: `agentidentities:changed:${string}`]: null;
+  [event: `agentinstances:changed:${string}`]: null;
+  [event: `dronerun:${string}`]: RunEvent;
 };
 
-/** The typed events' wire names. */
+/** The typed events' wire names, apart from the per-id ones. */
 export const TYPED_MUX_EVENTS = [
   "agent-message-accepted",
   "agent-resume-retry",
@@ -145,8 +155,12 @@ export const TYPED_MUX_EVENTS = [
   "workqueue:changed",
 ] as const;
 
-/** The typed events that carry no payload: srv sends them with no `data`. */
-export const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
+/** Whether a typed event carries no payload: srv sends it with no `data`. */
+export function isNoPayloadMuxEvent(eventType: string): boolean {
+  return NO_PAYLOAD_MUX_EVENTS.has(eventType) || NO_PAYLOAD_PER_ID_PREFIXES.some((p) => eventType.startsWith(p));
+}
+
+const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
   "agentcontent:changed",
   "agenthistory:changed",
   "agents:changed",
@@ -162,3 +176,9 @@ export const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
   "skills:changed",
   "workqueue:changed",
 ]);
+
+const NO_PAYLOAD_PER_ID_PREFIXES: readonly string[] = [
+  "agent:memory:changed:",
+  "agentidentities:changed:",
+  "agentinstances:changed:",
+];

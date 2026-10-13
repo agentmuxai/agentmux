@@ -509,6 +509,17 @@ impl Broker {
         });
     }
 
+    /// Publishes a per-id event (`mps_events::PerIdEvent`) under its prefix plus `id`.
+    pub fn publish_event_for<E: super::mps_events::PerIdEvent>(&self, id: &str, payload: &E::Payload, scopes: Vec<String>, persist: usize) {
+        self.publish(MuxEvent {
+            event: format!("{}{id}", E::PREFIX),
+            scopes,
+            sender: String::new(),
+            persist,
+            data: super::mps_events::payload_data(payload),
+        });
+    }
+
     /// Publish an event to all matching subscribers.
     pub fn publish(&self, event: MuxEvent) {
         for o in self.observers.read().unwrap_or_else(|e| e.into_inner()).iter() {
@@ -744,6 +755,24 @@ mod tests {
         assert_eq!(signal["event"], "agents:changed");
         assert!(signal.get("data").is_none(), "{signal}");
         assert_eq!(seen[1].data, Some(serde_json::json!({ "dir": "/tmp" })));
+    }
+
+    #[test]
+    fn a_per_id_event_goes_out_under_its_prefix_and_the_id() {
+        use crate::backend::mps_events::{AgentCredentialsRevoked, AgentMemoryChanged, CredentialsRevokedEvent};
+        let b = Broker::new();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<MuxEvent>::new()));
+        let s2 = seen.clone();
+        b.add_observer(std::sync::Arc::new(move |e: &MuxEvent| s2.lock().unwrap().push(e.clone())));
+        let revoked = CredentialsRevokedEvent { credentials_revoked: true, provider: "claude".into(), account_id: None };
+        b.publish_event_for::<AgentCredentialsRevoked>("agent-1", &revoked, vec![], 0);
+        b.publish_event_for::<AgentMemoryChanged>("agent-2", &(), vec![], 0);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].event, "agentcredentials:revoked:agent-1");
+        // As the json! it replaces: no accountId when no one account was unlinked.
+        assert_eq!(seen[0].data, Some(serde_json::json!({ "credentialsRevoked": true, "provider": "claude" })));
+        assert_eq!(seen[1].event, "agent:memory:changed:agent-2");
+        assert_eq!(seen[1].data, None);
     }
 
     use super::*;

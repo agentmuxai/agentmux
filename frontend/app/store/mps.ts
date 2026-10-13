@@ -7,7 +7,7 @@ import { Subject } from "rxjs";
 import { sendRawRpcMessage } from "./ws";
 import type { SubscriptionRequest } from "@/app/store/rpc-api";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
-import { NO_PAYLOAD_MUX_EVENTS, type MuxEventPayloads } from "./mps-events.generated";
+import { isNoPayloadMuxEvent, type MuxEventPayloads } from "./mps-events.generated";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 type MuxEventSubject = {
@@ -210,7 +210,7 @@ function handleMuxEvent(event: MuxEvent) {
 /** Subscribes to an event srv publishes with a typed payload (mps-events.generated.ts):
  *  `data` is that payload, as its Rust type. A typed event must be subscribed this way, not
  *  with muxEventSubscribe (scripts/gen-mux-events.mjs --check). An event with no data is skipped,
- *  unless it carries none by design (NO_PAYLOAD_MUX_EVENTS: its handler gets `null`). */
+ *  unless it carries none by design (isNoPayloadMuxEvent: its handler gets `null`). */
 function onMuxEvent<K extends keyof MuxEventPayloads>(
     eventType: K,
     handler: (data: MuxEventPayloads[K], event: MuxEvent) => void,
@@ -221,7 +221,7 @@ function onMuxEvent<K extends keyof MuxEventPayloads>(
         scope,
         handler: (event) => {
             if (event.data != null) handler(event.data as MuxEventPayloads[K], event);
-            else if (NO_PAYLOAD_MUX_EVENTS.has(eventType)) handler(null as MuxEventPayloads[K], event);
+            else if (isNoPayloadMuxEvent(eventType)) handler(null as MuxEventPayloads[K], event);
         },
     });
 }

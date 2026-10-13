@@ -607,24 +607,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             "identity.delete: running agent(s) affected"
                         );
                         for agent_id in &affected_agents {
-                            broker.publish(crate::backend::mps::MuxEvent {
-                                event: format!("agentidentities:changed:{agent_id}"),
-                                scopes: vec![],
-                                sender: String::new(),
-                                persist: 0,
-                                data: None,
-                            });
-                            broker.publish(crate::backend::mps::MuxEvent {
-                                event: format!("agentcredentials:revoked:{agent_id}"),
-                                scopes: vec![],
-                                sender: String::new(),
-                                persist: 0,
-                                data: Some(json!({
-                                    "credentialsRevoked": true,
-                                    "provider": provider,
-                                    "accountId": cmd.id,
-                                })),
-                            });
+                            broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&agent_id, &(), vec![], 0);
+                            let revoked = crate::backend::mps_events::CredentialsRevokedEvent {
+                                credentials_revoked: true,
+                                provider: provider.to_string(),
+                                account_id: Some(cmd.id.clone()),
+                            };
+                            broker.publish_event_for::<crate::backend::mps_events::AgentCredentialsRevoked>(&agent_id, &revoked, vec![], 0);
                         }
                     }
                 }
@@ -651,13 +640,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 mstore
                     .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
                     .map_err(|e| format!("linkagentidentity: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: format!("agentidentities:changed:{}", cmd.agent_id),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
                 // See app_api/identity.rs's identical call for why this is
                 // needed: watch_agent's one-shot config-dir resolution can
                 // race ahead of this exact binding.
@@ -690,13 +673,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: agent-identity link removed (unlinkagentidentity)"
                 );
                 if removed {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: format!("agentidentities:changed:{}", cmd.agent_id),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
                     // Spec §3 names unlink alongside delete: a live process
                     // for this agent still holds the unlinked account's
                     // tokens until restarted — same disclosure chip. Skipped
@@ -704,16 +681,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // unbind — see CommandUnlinkAgentIdentityData's doc
                     // comment; reagent P2 on PR #2414).
                     if !cmd.silent {
-                        broker.publish(crate::backend::mps::MuxEvent {
-                            event: format!("agentcredentials:revoked:{}", cmd.agent_id),
-                            scopes: vec![],
-                            sender: String::new(),
-                            persist: 0,
-                            data: Some(json!({
-                                "credentialsRevoked": true,
-                                "provider": cmd.provider,
-                            })),
-                        });
+                        let revoked = crate::backend::mps_events::CredentialsRevokedEvent {
+                            credentials_revoked: true,
+                            provider: cmd.provider.clone(),
+                            account_id: None,
+                        };
+                        broker.publish_event_for::<crate::backend::mps_events::AgentCredentialsRevoked>(&cmd.agent_id, &revoked, vec![], 0);
                     }
                 }
                 Ok(UnlinkAgentIdentityResult { unlinked: removed })
