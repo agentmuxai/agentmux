@@ -6,7 +6,7 @@
 // isn't subscribed the untyped way.
 
 import { describe, expect, it } from "vitest";
-import { eventShapedHandlers, renderEvents, untypedSubscriptions, wpsNames } from "./gen-mux-events.mjs";
+import { eventShapedHandlers, renderEvents, untypedHistoryReads, untypedSubscriptions, wpsNames } from "./gen-mux-events.mjs";
 
 const rows = [
     { event: "controllerstatus", payloadTs: { name: "BlockControllerRuntimeStatus", imports: ["BlockControllerRuntimeStatus"] } },
@@ -118,5 +118,35 @@ describe("eventShapedHandlers", () => {
             ["frontend/h.ts", "onMuxEvent(WpsEvent.SysInfo, refresh);\nmuxEventSubscribe({ eventType: \"x\", handler: (e: any) => e.data });"],
         ];
         expect(eventShapedHandlers(sources)).toEqual([]);
+    });
+});
+
+describe("untypedHistoryReads", () => {
+    const wps = wpsNames('export const WpsEvent = {\n    SysInfo: "sysinfo",\n    SingletonClaim: "singleton:claim",\n} as const;');
+    const typed = new Set(["sysinfo"]);
+
+    it("refuses EventReadHistoryCommand of a typed event, however it is named", () => {
+        const sources = [
+            ["frontend/a.ts", "RpcApi.EventReadHistoryCommand(TabRpcClient, { event: WpsEvent.SysInfo, scope, maxitems: 1 });"],
+            ["frontend/b.ts", 'RpcApi.EventReadHistoryCommand(client, { event: "sysinfo", scope, maxitems: 1 });'],
+            ["frontend/c.ts", "const EVENT_SYS = WpsEvent.SysInfo;\nvoid RpcApi.EventReadHistoryCommand(client, {\n    event: EVENT_SYS,\n    scope,\n});"],
+            ["frontend/d.ts", "RpcApi.EventReadHistoryCommand(client, { event: `dronerun:${id}`, scope: \"\" });"],
+        ];
+        expect(untypedHistoryReads(sources, typed, wps, new Set(["dronerun:"])).map((e) => e.split(":").slice(0, 2).join(":"))).toEqual([
+            "frontend/a.ts:1",
+            "frontend/b.ts:1",
+            "frontend/c.ts:2",
+            "frontend/d.ts:1",
+        ]);
+    });
+
+    it("leaves untyped events, and the typed helper itself, alone", () => {
+        const sources = [
+            ["frontend/e.ts", "RpcApi.EventReadHistoryCommand(client, { event: WpsEvent.SingletonClaim, scope, maxitems: 1 });"],
+            ["frontend/app/store/mps-history.ts", "RpcApi.EventReadHistoryCommand(TabRpcClient, { event, scope, maxitems });"],
+            ["frontend/f.ts", "readMuxEventHistory(WpsEvent.SysInfo, scope, 5);"],
+        ];
+        expect(untypedHistoryReads(sources, typed, wps)).toEqual([]);
+        expect(untypedSubscriptions([sources[2]], typed, wps)).toEqual([]);
     });
 });

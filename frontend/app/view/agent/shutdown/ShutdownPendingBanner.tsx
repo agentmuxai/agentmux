@@ -25,6 +25,7 @@ import {
     secondsLeft,
     type PendingShutdown,
 } from "./shutdown-pending";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 
 interface ShutdownPendingBannerProps {
     blockId: string;
@@ -64,11 +65,11 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     });
 
     // A pane opened mid-countdown still shows it: both events are persisted.
-    const history = (event: string) =>
-        RpcApi.EventReadHistoryCommand(TabRpcClient, { event, scope, maxitems: 1 })
-            .then((events) => events?.[events.length - 1]?.data ?? null)
-            .catch(() => null);
-    void Promise.all([history(EVENT_SHUTDOWN_PENDING), history(EVENT_SHUTDOWN_PENDING_CLEARED)]).then(
+    const last = <T,>(items: T[]): T | null => items[items.length - 1] ?? null;
+    void Promise.all([
+        readMuxEventHistory(EVENT_SHUTDOWN_PENDING, scope, 1).then(last).catch(() => null),
+        readMuxEventHistory(EVENT_SHUTDOWN_PENDING_CLEARED, scope, 1).then(last).catch(() => null),
+    ]).then(
         ([p, cleared]) => {
             if (sawLive) return;
             const replayed = replayPending(p, cleared, Date.now());

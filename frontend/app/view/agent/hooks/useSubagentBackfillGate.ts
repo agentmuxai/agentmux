@@ -81,10 +81,9 @@
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { refreshSubagentsNow } from "../activity/subagent-source";
 import { refreshDispatchesNow } from "../activity/dispatch-source";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 
 /**
  * Resolve a raw `subagent:backfill_status` MPS payload into `"started"` /
@@ -244,15 +243,11 @@ export function useSubagentBackfillGate(
         // live subscribe above (already registered) will catch the real
         // pair once it does, and the safety-net timer covers the case
         // where it somehow never does.
-        void RpcApi.EventReadHistoryCommand(TabRpcClient, {
-            event: WpsEvent.SubagentBackfillStatus,
-            scope: `block:${blockId}`,
-            maxitems: 2,
-        })
+        void readMuxEventHistory(WpsEvent.SubagentBackfillStatus, `block:${blockId}`, 2)
             .then((history) => {
                 if (receivedLiveEvent) return;
-                const latest = history?.[history.length - 1];
-                if (latest) applyStatus(latest.data);
+                const latest = history[history.length - 1];
+                if (latest) applyStatus(latest);
             })
             .catch((e) => {
                 console.log("[useSubagentBackfillGate] failed to load initial backfill status", e);
