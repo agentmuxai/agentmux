@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796, step 7 (per-id events) in #4797, step 8 (the remaining fixed-name events) in #4799; step 9 (relays, direct frames, the gate at zero) in review. Verified 2026-10-13.
+**Status:** implemented — every broker event srv builds is typed, and the `MAX_EVENTS` ratchet is at 0. Step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796, step 7 (per-id events) in #4797, step 8 (the remaining fixed-name events) in #4799, step 9 (relays, direct frames, the gate at zero) in #4803. Verified 2026-10-13.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
