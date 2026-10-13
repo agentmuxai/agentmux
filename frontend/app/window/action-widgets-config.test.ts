@@ -263,9 +263,9 @@ function barWmap(): Record<string, WidgetConfigType> {
 }
 
 describe("widget:hidden", () => {
-    it("reads full keys, maps old names, and never hides Settings", () => {
-        const hidden = getHiddenKeys({ "widget:hidden": ["defwidget@remotes", "ext@acme.board/main", "defwidget@settings", 7] });
-        expect(hidden).toEqual(new Set(["defwidget@connectors", "ext@acme.board/main"]));
+    it("reads full keys and never hides Settings", () => {
+        const hidden = getHiddenKeys({ "widget:hidden": ["defwidget@drone", "ext@acme.board/main", "defwidget@settings", 7] });
+        expect(hidden).toEqual(new Set(["defwidget@drone", "ext@acme.board/main"]));
     });
 
     it("takes a hidden entry off the bar, out of More and out of the + picker", () => {
@@ -340,11 +340,6 @@ describe("nextWidgetBarConfig", () => {
         expect(nextWidgetBarConfig("defwidget@settings", "hidden", {}, barWmap())).toEqual({});
     });
 
-    it("un-hides an entry stored under its old name", () => {
-        const wmap = { ...barWmap(), "defwidget@connectors": widget({ label: "Connectors" }) };
-        const settings = { "widget:hidden": ["defwidget@remotes"] };
-        expect(nextWidgetBarConfig("defwidget@connectors", "more", settings, wmap)).toEqual({ "widget:hidden": null });
-    });
 });
 
 describe("getWidgetBarModel", () => {

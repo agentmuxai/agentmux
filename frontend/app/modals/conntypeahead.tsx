@@ -299,7 +299,7 @@ const ChangeConnectionBlockModal = ({
         const localSuggestions: SuggestionConnectionScope | null = localItems.length
             ? { headerText: "Local", items: localItems }
             : null;
-        // Pinned, SSH hosts, Recent and WSL, as in the Remotes pane (§4.7).
+        // Pinned, SSH hosts, Recent and WSL, as in Connectors > Remotes (§4.7).
         const remoteScopes = remoteSuggestionScopes(remotes(), connSelected(), conn, (name) =>
             computeConnColorNum(connStatusMap.get(name))
         );

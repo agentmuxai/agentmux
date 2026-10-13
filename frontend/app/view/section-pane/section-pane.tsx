@@ -32,9 +32,6 @@ export interface SectionPaneSpec<Id extends string> {
     view: string;
     /** Block meta key holding the selected section id. */
     sectionKey: string;
-    /** Keys that held it before the pane was renamed, read when `sectionKey`
-     *  holds nothing and cleared on the next selection. */
-    legacySectionKeys?: readonly string[];
     /** Section shown when the meta holds none, or an unknown id. */
     defaultSection: Id;
     /** The section tabs' accessible name. */
@@ -66,7 +63,7 @@ export class SectionPaneModel<Id extends string> {
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<Id>(() => {
             const m = meta() as Record<string, unknown> | undefined;
-            const s = [spec.sectionKey, ...(spec.legacySectionKeys ?? [])].map((k) => m?.[k]).find((v) => v != null);
+            const s = m?.[spec.sectionKey];
             return spec.sections.some((sec) => sec.id === s) ? (s as Id) : spec.defaultSection;
         });
         this.viewName = createMemo<string>(
@@ -75,8 +72,7 @@ export class SectionPaneModel<Id extends string> {
     }
 
     selectSection(id: Id): void {
-        const cleared = Object.fromEntries((this.spec.legacySectionKeys ?? []).map((k) => [k, null]));
-        this.setMeta({ ...cleared, [this.spec.sectionKey]: id });
+        this.setMeta({ [this.spec.sectionKey]: id });
     }
 }
 

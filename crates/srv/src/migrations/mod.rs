@@ -81,6 +81,7 @@ mod m0033_narrow_skill_global_uniqueness_index;
 mod m0034_identity_history_backfill;
 mod m0035_agent_owns_its_provider;
 mod m0036_drop_bundle_mcp;
+mod m0037_retire_old_pane_names;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;
@@ -253,4 +254,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0034_identity_history_backfill::M0034IdentityHistoryBackfill,
     &m0035_agent_owns_its_provider::M0035AgentOwnsItsProvider,
     &m0036_drop_bundle_mcp::M0036DropBundleMcp,
+    &m0037_retire_old_pane_names::M0037RetireOldPaneNames,
 ];
