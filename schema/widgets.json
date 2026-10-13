@@ -36,8 +36,14 @@
         "display:order": {
           "type": "number"
         },
+        "display:grouponly": {
+          "type": "boolean",
+          "description": "Shown only inside its parent group's flyout, not on the bar, in More or in the pane pickers. Not the user's Hidden (widget:hidden)."
+        },
         "display:hidden": {
-          "type": "boolean"
+          "type": "boolean",
+          "deprecated": true,
+          "description": "The old name of display:grouponly, still read."
         },
         "display:pinned": {
           "type": "boolean",

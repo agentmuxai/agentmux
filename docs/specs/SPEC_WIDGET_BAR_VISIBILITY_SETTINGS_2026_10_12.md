@@ -260,7 +260,7 @@ Separate follow-ups:
    (`widget_packages.rs:594`).
 8. ~~**Out-of-date schemas:**~~ Resolved 2026-10-13: `schema/widgets.json` has `display:pinned` and `module`; `schema/settings.json` already had `widget:pinned`. The original finding: `schema/widgets.json` lacks `display:pinned` and `module` and sets
    `additionalProperties: false`, so it rejects valid files. `schema/settings.json` lacks `widget:pinned`.
-9. **`display:hidden` naming:** it means "only inside its group", and the Launcher also uses it. Rename to
+9. ~~**`display:hidden` naming:**~~ Resolved 2026-10-13: widgets now use `display:grouponly`; `display:hidden` is still read (a serde alias) and is written back under the new name. Connections keep their own `display:hidden`, which is a different thing. The original finding: it means "only inside its group", and the Launcher also uses it. Rename to
    `display:grouponly` (reading the old name), so it can't be confused with the user's Hidden.
 10. ~~**Comment drift:**~~ Resolved 2026-10-13 (the `user_widgets.rs` comment is corrected; the settings-key block was already a pointer). The original finding: `user_widgets.rs:116` says the user file can "hide" a package entry, but it can only replace
     it. The settings-key doc block is duplicated in `action-widgets.tsx:11-13` and `action-widgets-config.ts:8-10`.

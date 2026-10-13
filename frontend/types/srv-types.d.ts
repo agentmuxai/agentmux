@@ -1352,7 +1352,8 @@ declare global {
     // wconfig.WidgetConfigType
     type WidgetConfigType = {
         "display:order"?: number;
-        "display:hidden"?: boolean;
+        /** Shown only inside its parent group's flyout, not on the bar, in More or in the pane pickers. Not the user's Hidden (`widget:hidden`). Older files call this `display:hidden`. */
+        "display:grouponly"?: boolean;
         "display:pinned"?: boolean;
         icon?: string;
         color?: string;

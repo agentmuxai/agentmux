@@ -40,8 +40,8 @@ function messengersWmap(): Record<string, WidgetConfigType> {
             children: ["discord", "slack"],
             blockdef: { files: {}, meta: {} },
         }),
-        "defwidget@discord": widget({ "display:order": 10, "display:hidden": true, label: "Discord" }),
-        "defwidget@slack": widget({ "display:order": 11, "display:hidden": true, label: "Slack" }),
+        "defwidget@discord": widget({ "display:order": 10, "display:grouponly": true, label: "Discord" }),
+        "defwidget@slack": widget({ "display:order": 11, "display:grouponly": true, label: "Slack" }),
         "defwidget@help": widget({ "display:order": 9, label: "Help" }),
     };
 }
