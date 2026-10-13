@@ -933,6 +933,7 @@ pub async fn run_agent_turn_joining(
         .get("AGENTMUX_AGENT_UID")
         .map(|u| u.trim().to_string())
         .filter(|u| !u.is_empty());
+    let turn_agent_id = env_vars.get("AGENTMUX_AGENT_ID").cloned(); // the stable binding, as spawn parks it
 
     let session_id_field =
         crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
@@ -1273,10 +1274,8 @@ pub async fn run_agent_turn_joining(
         // binding — matching the namespace used by `handle_reactive_register`
         // in server/reactive.rs (`req.agent_id`) and the delivery path's
         // lowercased `name_to_blocks` map — with this turn's UID as the key.
-        // PR bodies embed $AGENTMUX_AGENT_ID (same value) so the cloud injection
-        // key and the poll key are always consistent.
-        // Both calls are idempotent: add_agent skips the WS send if already
-        // subscribed; register_agent replaces any stale mapping from a prior session.
+        // PR bodies embed $AGENTMUX_AGENT_ID, the stable binding (a fork's
+        // `loap-3` under `Loap-3`), so both are subscribed (idempotently).
         // As its route name for every use below ("Loap #3" → "Loap-3"), or the
         // controller's own id disagrees with what a jekt resolves to (#2695).
         let display = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
@@ -1292,7 +1291,7 @@ pub async fn run_agent_turn_joining(
                     &block_id,
                     None,
                     0,
-                    None,
+                    turn_agent_id.as_deref(),
                     turn_uid.as_deref(),
                     "registration.no_uid.register_tail",
                 );
@@ -1315,7 +1314,8 @@ pub async fn run_agent_turn_joining(
                     ctrl.set_agent_id(Some(agent_name.clone()));
                 }
                 if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                    sub.add_agent(&agent_name);
+                    let names = crate::backend::reactive::handler::get_global_handler().names_for_block(&block_id);
+                    names.iter().for_each(|n| sub.add_agent(n));
                 }
                 // Also mirror into the per-channel + host-global
                 // shared file registries — this AgentInput/

@@ -352,3 +352,19 @@ impl Store {
         Ok(rows.into_iter().filter(|(_, slug)| slug.trim().to_lowercase() == folded).map(|(id, _)| id).collect())
     }
 }
+
+impl Store {
+    /// The definitions a message's target names: the one whose slug it is,
+    /// else every one whose display name routes to it (`agent_route_name`: a
+    /// fork "Loap #3" is `Loap-3`, and a root `Claude` may hold the slug
+    /// `claude-2`) (#4744). Folded like the key tables.
+    pub fn agent_defs_for_target(&self, target: &str) -> Result<Vec<AgentDefinition>, StoreError> {
+        let fold = |s: &str| s.trim().to_lowercase();
+        let target = fold(target);
+        let defs = self.agent_def_list()?;
+        if let Some(def) = defs.iter().find(|d| fold(&d.slug) == target) {
+            return Ok(vec![def.clone()]);
+        }
+        Ok(defs.into_iter().filter(|d| fold(&agentmux_common::slug::agent_route_name(&d.name)) == target).collect())
+    }
+}

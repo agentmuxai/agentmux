@@ -862,8 +862,7 @@ impl Handler {
 
     /// Every name `block_id` is bound under (display first, then stable).
     /// Production teardown gets the same list back from [`unregister_block`];
-    /// this read-only form is for tests and diagnostics.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// this read-only form is what registration subscribes for cloud delivery.
     pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
         let Some(names) = self.block_names.get(block_id) else {
             return Vec::new();
@@ -2061,7 +2060,6 @@ impl ReactiveHandler {
     }
 
     /// Every name `block_id` is bound under — see [`Handler::names_for_block`].
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
         self.inner.lock().unwrap().names_for_block(block_id)
     }

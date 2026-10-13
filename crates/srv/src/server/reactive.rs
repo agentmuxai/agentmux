@@ -735,17 +735,16 @@ pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<cra
     let _ = transcript_req; // request_id/max_lines belong to the (not-yet-built) auto-responder, not tier resolution.
     req.is_transcript_request = true;
 
-    // Match on the RESPONDING agent's (target_agent's) own slug — the
-    // stable, AGENTMUX_AGENT_ID-derived identifier, NOT the renameable
-    // display `name` (same cross-namespace hazard already documented at
-    // this file's Supervisor-nudge opt-in check just above, which this
-    // mirrors exactly).
-    let visibility = mstore
-        .agent_def_list()
-        .ok()
-        .and_then(|defs| defs.into_iter().find(|d| d.slug.eq_ignore_ascii_case(&req.target_agent)))
-        .map(|d| d.conversation_visibility)
-        .unwrap_or_else(crate::backend::storage::agents::default_conversation_visibility);
+    // The RESPONDING agent's (target_agent's) own definition: by its slug,
+    // the stable AGENTMUX_AGENT_ID-derived identifier, else by its display
+    // name's route name (a fork targeted as `Loap-3`, #4744). A target naming
+    // several agents fails closed, as `ask`.
+    let defs = mstore.agent_defs_for_target(&req.target_agent).unwrap_or_default();
+    let (slug, visibility) = match defs.as_slice() {
+        [def] => (def.slug.clone(), def.conversation_visibility.clone()),
+        [] => (req.target_agent.clone(), crate::backend::storage::agents::default_conversation_visibility()),
+        _ => (req.target_agent.clone(), "ask".to_string()),
+    };
 
     let tier = req.delivery_tier.as_deref().unwrap_or("host");
     req.transcript_request_escalate_forced = match visibility.as_str() {
@@ -753,7 +752,7 @@ pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<cra
         "trusted_peers" => {
             let requester = req.source_agent.as_deref().unwrap_or("");
             let granted = mstore
-                .conversation_trust_grant_check(&req.target_agent, requester, tier)
+                .conversation_trust_grant_check(&slug, requester, tier)
                 .unwrap_or(false);
             !granted
         }
@@ -825,8 +824,8 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
-    resolve_transcript_request_tier_fields(&state.mstore, &mut req);
     req.route_unsigned_target();
+    resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -1855,9 +1854,9 @@ pub(super) async fn handle_reactive_register(
                 }
             }
 
-            // Notify cloud subscriber so it can subscribe for cloud-push delivery
+            // Subscribe the display and stable names; cloud senders address the stable one.
             if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                sub.add_agent(&req.agent_id);
+                state.reactive_handler.names_for_block(&req.block_id).iter().for_each(|n| sub.add_agent(n));
             }
 
             // Notify the Swarm view so it calls AgentTrackedBlocksCommand and
