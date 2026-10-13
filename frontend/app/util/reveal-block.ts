@@ -20,7 +20,7 @@ import { giveBlockFocus } from "@/app/store/focusManager";
 import { getApi, MOS, setActiveTab, workspace } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WorkspaceService } from "@/app/store/services";
+import { ClientService, WorkspaceService } from "@/app/store/services";
 import { setActiveBlockInStack } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
@@ -164,10 +164,15 @@ async function raiseWindowById(windowId: string): Promise<void> {
 async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
     // We need Tab.blockids to find which tab holds the block: layout models for
     // other windows' tabs aren't available in this renderer.
+    // Walk the open windows, not WorkspaceService.ListWorkspaces: that skips
+    // unnamed workspaces, which is what an ordinary or torn-off window holds.
     const ws = workspace();
-    for (const entry of await WorkspaceService.ListWorkspaces()) {
-        if (entry.workspaceid === ws?.oid) continue;
-        const wsOref = MOS.makeORef("workspace", entry.workspaceid);
+    const client = await ClientService.GetClientData();
+    for (const windowId of client?.windowids ?? []) {
+        const winOref = MOS.makeORef("window", windowId);
+        const win = MOS.getObjectValue<MuxWindow>(winOref) ?? (await MOS.reloadMuxObject<MuxWindow>(winOref));
+        if (!win?.workspaceid || win.workspaceid === ws?.oid) continue;
+        const wsOref = MOS.makeORef("workspace", win.workspaceid);
         const wsData = MOS.getObjectValue<Workspace>(wsOref) ?? (await MOS.reloadMuxObject<Workspace>(wsOref));
         if (!wsData) continue;
         const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
@@ -176,7 +181,7 @@ async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
             const tab = MOS.getObjectValue<Tab>(oref) ?? (await MOS.reloadMuxObject<Tab>(oref));
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
-            if (entry.windowid) await raiseWindowById(entry.windowid);
+            await raiseWindowById(windowId);
             return;
         }
     }
