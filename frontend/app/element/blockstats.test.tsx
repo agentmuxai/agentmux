@@ -10,6 +10,9 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const MB = 1024 * 1024;
+// Which pane-tab state the remote badge sees (pane-tab-visibility.ts).
+let paneVisibility = "active";
+vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => () => paneVisibility }));
 vi.mock("@/app/hook/useBlockStats", () => ({
     useBlockStats: () => () => ({ cpu: 0.3, mem: 90 * MB, peak: 184 * MB, pids: 1 }),
 }));
@@ -110,29 +113,25 @@ describe("a local pane's tooltip", () => {
 });
 
 describe("a remote pane's badge", () => {
-    // jsdom lays nothing out, so no element has an offsetParent: say the
-    // pane is on screen unless a test hides it.
-    let onScreen = true;
     beforeEach(() => {
-        onScreen = true;
-        Object.defineProperty(HTMLElement.prototype, "offsetParent", {
-            configurable: true,
-            get() {
-                return onScreen ? document.body : null;
-            },
-        });
-    });
-    afterEach(() => {
-        delete (HTMLElement.prototype as { offsetParent?: unknown }).offsetParent;
+        paneVisibility = "active";
     });
 
-    it("asks nothing while its pane isn't on screen, the first time included", async () => {
-        onScreen = false;
+    it("asks nothing while its pane's window tab isn't displayed, the first time included", async () => {
+        paneVisibility = "windowHidden";
         detailCmd.mockResolvedValue(remote({ figures: REMOTE_FIGURES, host: HOST }));
         const { container } = render(() => <BlockStatsBadge blockId="r1" connection="build" />);
         await new Promise((r) => setTimeout(r, 50));
         expect(detailCmd).not.toHaveBeenCalled();
         expect(container.querySelector(".block-stats-badge")).toBeNull();
+    });
+
+    it("asks nothing from a dormant kept-alive pane", async () => {
+        paneVisibility = "dormant";
+        detailCmd.mockResolvedValue(remote({ figures: REMOTE_FIGURES, host: HOST }));
+        render(() => <BlockStatsBadge blockId="r1" connection="build" />);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(detailCmd).not.toHaveBeenCalled();
     });
 
     it("asks its machine without being hovered, and shows the remote shell's figures", async () => {

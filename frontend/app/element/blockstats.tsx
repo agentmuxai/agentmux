@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useBlockStats, type BlockStats } from "@/app/hook/useBlockStats";
 import { RpcApi } from "@/app/store/rpc-api";
 import type {
@@ -11,7 +12,18 @@ import type {
     BlockStatsRemote,
 } from "@/app/store/rpc-api/blockstats";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import {
+    Match,
+    Show,
+    Switch,
+    createEffect,
+    createMemo,
+    createSignal,
+    on,
+    onCleanup,
+    onMount,
+    type Accessor,
+} from "solid-js";
 import "./blockstats.scss";
 import { Tooltip } from "./tooltip";
 
@@ -260,15 +272,17 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
 }
 
 /**
- * A remote pane's figures, asked of its machine every 2 seconds while `el`
- * is on screen (not in a hidden tab or a minimized window), the first time
- * included.
+ * A remote pane's figures, asked of its machine every 2 seconds while the
+ * pane can be seen, the first time included: its window tab is the displayed
+ * one, it isn't a dormant kept-alive pane (both hide with `visibility`, so
+ * layout can't tell: `usePaneTabVisibility`), and the window isn't hidden.
  */
-function useRemoteStats(blockId: string, el: Accessor<HTMLElement | undefined>): Accessor<BlockStatsDetail | null> {
+function useRemoteStats(blockId: string): Accessor<BlockStatsDetail | null> {
     const [detail, setDetail] = createSignal<BlockStatsDetail | null>(null);
+    const paneVisibility = usePaneTabVisibility(blockId);
     let closed = false;
     let busy = false;
-    const visible = () => document.visibilityState !== "hidden" && (el()?.offsetParent ?? null) !== null;
+    const visible = () => paneVisibility() === "active" && document.visibilityState !== "hidden";
     const load = () => {
         if (busy || !visible()) return;
         busy = true;
@@ -280,17 +294,17 @@ function useRemoteStats(blockId: string, el: Accessor<HTMLElement | undefined>):
             .finally(() => (busy = false));
     };
     onMount(() => {
-        load();
         const timer = setInterval(load, DETAIL_INTERVAL_MS);
         onCleanup(() => clearInterval(timer));
     });
+    // Ask at once on mount and whenever the pane comes into view.
+    createEffect(on(paneVisibility, (v) => v === "active" && load()));
     onCleanup(() => (closed = true));
     return detail;
 }
 
 function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
-    const [anchor, setAnchor] = createSignal<HTMLElement>();
-    const detail = useRemoteStats(props.blockId, anchor);
+    const detail = useRemoteStats(props.blockId);
     const shown = createMemo(() => {
         const r = detail()?.remote;
         return r ? remoteBadge(r) : null;
@@ -302,9 +316,6 @@ function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
     };
     return (
         <>
-            {/* Always here, so whether the pane is on screen is known before
-                there is anything to show. */}
-            <span ref={setAnchor} class="block-stats-anchor" />
             <Show when={detail()}>
                 {(d) => (
                     <Tooltip

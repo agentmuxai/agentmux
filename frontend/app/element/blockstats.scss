@@ -55,15 +55,6 @@
     }
 }
 
-// A remote badge's always-present anchor: how it knows whether its pane is
-// on screen before it has anything to show. Takes no room.
-.block-stats-anchor {
-    position: absolute;
-    width: 0;
-    height: 0;
-    pointer-events: none;
-}
-
 .block-stats-tooltip {
     max-width: 440px;
     white-space: normal;
