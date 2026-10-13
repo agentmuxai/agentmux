@@ -30,15 +30,29 @@ pub fn agentmux_home() -> Option<std::path::PathBuf> {
     HOME_DIR.get().cloned().flatten().map(std::path::PathBuf::from)
 }
 
+/// The `srvinfo` event: srv's version, and the machine it runs on.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct SrvInfo {
+    pub version: String,
+    /// srv's OS, as `process.platform` names it (`darwin`, `win32`, `linux`).
+    pub platform: String,
+    pub user_name: String,
+    pub host_name: String,
+    /// The account-wide AgentMux root on srv's machine (`~/.agentmux`, or its override).
+    pub home_dir: Option<String>,
+}
+
 /// The `data` of the `srvinfo` event.
-pub fn srv_info(version: &str, host_name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "version": version,
-        "platform": agentmux_common::platform_name::platform_name(),
-        "userName": whoami::username(),
-        "hostName": host_name,
-        "homeDir": HOME_DIR.get().cloned().flatten(),
-    })
+pub fn srv_info(version: &str, host_name: &str) -> SrvInfo {
+    SrvInfo {
+        version: version.to_string(),
+        platform: agentmux_common::platform_name::platform_name().to_string(),
+        user_name: whoami::username(),
+        host_name: host_name.to_string(),
+        home_dir: HOME_DIR.get().cloned().flatten(),
+    }
 }
 
 #[cfg(test)]
@@ -47,7 +61,7 @@ mod tests {
 
     #[test]
     fn srv_info_names_the_machine_and_the_version() {
-        let info = srv_info("1.2.3", "box");
+        let info = serde_json::to_value(srv_info("1.2.3", "box")).unwrap();
         assert_eq!(info["version"], "1.2.3");
         assert_eq!(info["hostName"], "box");
         assert_eq!(

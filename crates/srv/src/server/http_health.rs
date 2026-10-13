@@ -211,6 +211,8 @@ pub(super) async fn handle_wps_publish(
             return (StatusCode::OK, Json(json!({"ok": true})));
         }
     }
+    // untyped-relay: publishes an event a process outside srv built (agentmux-bashwrap, wsh), as
+    // it was sent.
     let event = crate::backend::mps::MuxEvent {
         event: req.event,
         scopes: req.scopes,

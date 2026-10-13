@@ -16,7 +16,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::Serialize;
 
-use crate::backend::mps::MuxEvent;
 use crate::server::AppState;
 
 pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
@@ -81,7 +80,8 @@ impl Action {
 }
 
 /// A request as the caller and the frontend see it (§12.2).
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct PendingView {
     pub request_id: String,
     pub block_id: String,
@@ -92,16 +92,29 @@ pub struct PendingView {
     /// The tool: `QuitSelf`, `ClosePane`, `FleetBulkStop`.
     pub via: String,
     pub reason: String,
+    #[ts(type = "number")]
     pub deadline_ms: i64,
     /// `pending` → `kept_by_user`, or `proceeding` → `shut_down` / `failed` /
     /// `superseded` (the user closed it themselves meanwhile).
+    #[ts(type = r#""pending" | "kept_by_user" | "proceeding" | "shut_down" | "failed" | "superseded""#)]
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub error: Option<String>,
     /// This caller joined a request already open for the block rather than
     /// opening one. Never stored; set on the view `request` returns.
     #[serde(skip)]
+    #[ts(skip)]
     pub joined: bool,
+}
+
+/// `agent:shutdown-pending-cleared`: the request ended, and how.
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct PendingClearedEvent {
+    pub block_id: String,
+    pub request_id: String,
+    pub outcome: String,
 }
 
 struct Entry {
@@ -211,14 +224,9 @@ fn set_status(request_id: &str, status: &'static str, error: Option<String>) -> 
     Some(e.view.clone())
 }
 
-fn publish(state: &AppState, event: &str, block_id: &str, persist: usize, data: serde_json::Value) {
-    state.broker.publish(MuxEvent {
-        event: event.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist,
-        data: Some(data),
-    });
+/// `agent:shutdown-pending` for `view`, to the pane at `block_id`.
+fn publish_pending(state: &AppState, block_id: &str, view: &PendingView) {
+    state.broker.publish_event::<crate::backend::mps_events::AgentShutdownPending>(view, vec![format!("block:{block_id}")], 1);
 }
 
 fn notify_router(state: &AppState) -> Option<Arc<crate::backend::notify::router::Router>> {
@@ -286,9 +294,9 @@ fn request_within(
             if pending && (stronger || grew) {
                 // Same request and deadline; the banner names the new asker,
                 // and shows on every tab it now covers.
-                let data = serde_json::to_value(PendingView { joined: false, ..joined.clone() }).unwrap_or_default();
+                let view = PendingView { joined: false, ..joined.clone() };
                 for b in &covers {
-                    publish(state, EVENT_SHUTDOWN_PENDING, b, 1, data.clone());
+                    publish_pending(state, b, &view);
                 }
             }
             return joined;
@@ -324,9 +332,8 @@ fn request_within(
     };
     // The banner on every tab it covers (persisted, so a window opened during
     // the countdown shows it too) and the OS notification.
-    let data = serde_json::to_value(&view).unwrap_or_default();
     for b in &new_covers {
-        publish(state, EVENT_SHUTDOWN_PENDING, b, 1, data.clone());
+        publish_pending(state, b, &view);
     }
     if let Some(router) = notify_router(state) {
         let why = if view.reason.is_empty() { String::new() } else { format!(": {}", view.reason) };
@@ -398,9 +405,9 @@ pub fn audit_note(v: &PendingView, by: &str, via: &str) -> String {
 }
 
 fn cleared(state: &AppState, v: &PendingView, outcome: &str) {
-    let data = serde_json::json!({ "block_id": v.block_id, "request_id": v.request_id, "outcome": outcome });
+    let data = PendingClearedEvent { block_id: v.block_id.clone(), request_id: v.request_id.clone(), outcome: outcome.to_string() };
     for b in covers_of(&v.request_id) {
-        publish(state, EVENT_SHUTDOWN_PENDING_CLEARED, &b, 1, data.clone());
+        state.broker.publish_event::<crate::backend::mps_events::AgentShutdownPendingCleared>(&data, vec![format!("block:{b}")], 1);
     }
     if let Some(router) = notify_router(state) {
         router.resolve_nonblocking(&v.block_id, crate::backend::notify::policy::Family::Shutdown);

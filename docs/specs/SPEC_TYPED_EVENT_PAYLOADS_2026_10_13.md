@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796, step 7 (per-id events) in #4797; step 8 (the remaining fixed-name events) in review; step 9 not started. Verified 2026-10-13.
+**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796, step 7 (per-id events) in #4797, step 8 (the remaining fixed-name events) in #4799; step 9 (relays, direct frames, the gate at zero) in review. Verified 2026-10-13.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
@@ -32,7 +32,8 @@ Same shape as the RPC registry: srv records the type, a schema file is exported,
    - **Name constants:** `mps-events.ts`'s constants are checked against the schema's names.
 4. **Signals with no payload.** An event that only says "something changed" is declared with payload `()`. It goes out with no `data` field, as before, and `onMuxEvent` calls its handler with `null` (`NO_PAYLOAD_MUX_EVENTS` in the generated file).
 5. **Names per id.** An event sent under a name per id (`agent:memory:changed:<agent id>`) is a `PerIdEvent`, declared by its prefix in `per_id_events!` and published with `publish_event_for::<E>(id, …)`. The generated map keys it by a template literal (`` [event: `agent:memory:changed:${string}`]: null ``), so `onMuxEvent(`agent:memory:changed:${id}`, …)` is typed too.
-6. **Ratchets.** A gate counts `json!` payloads in `publish` calls and casts of `event.data` in subscribers. Both may only go down, like `check-untyped-rpc-handlers.mjs`.
+6. **Direct frames and relays.** A frame srv writes to one WebSocket itself (`srvinfo`, `config` on connect) is built by `EventBus::typed_frame::<E>`. A relay, which forwards an event someone else built as it came (the HTTP publish route, the WebSocket lane forwarder), has no payload type of its own: it is marked `// untyped-relay: <why>` and counted against its own exact cap, `MAX_RELAYS`.
+7. **Ratchets.** A gate counts `json!` payloads in `publish` calls and casts of `event.data` in subscribers. Both may only go down, like `check-untyped-rpc-handlers.mjs`.
 
 ## Order
 

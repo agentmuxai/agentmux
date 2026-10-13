@@ -21,7 +21,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
@@ -87,26 +87,14 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
         const upsert = (p: TrackedProcessInfo) =>
             setList((cur) => (cur.some((x) => x.pid === p.pid) ? cur : [...cur, p]));
 
-        const unsubAdded = muxEventSubscribe({
-            eventType: WpsEvent.AgentProcessAdded,
-            scope: MOS.makeORef("block", id),
-            handler: (event) => {
-                const p = (event.data as { process?: TrackedProcessInfo } | undefined)?.process;
-                if (!p) return;
-                if (seeded) upsert(p);
-                else pending.push(p);
-            },
-        });
-        const unsubExited = muxEventSubscribe({
-            eventType: WpsEvent.AgentProcessExited,
-            scope: MOS.makeORef("block", id),
-            handler: (event) => {
-                const pid = (event.data as { pid?: number } | undefined)?.pid;
-                if (pid == null) return;
-                if (seeded) setList((cur) => cur.filter((p) => p.pid !== pid));
-                else exitedBeforeSeed.add(pid);
-            },
-        });
+        const unsubAdded = onMuxEvent(WpsEvent.AgentProcessAdded, ({ process: p }) => {
+            if (seeded) upsert(p);
+            else pending.push(p);
+        }, MOS.makeORef("block", id));
+        const unsubExited = onMuxEvent(WpsEvent.AgentProcessExited, ({ pid }) => {
+            if (seeded) setList((cur) => cur.filter((p) => p.pid !== pid));
+            else exitedBeforeSeed.add(pid);
+        }, MOS.makeORef("block", id));
 
         const seed = (processes: TrackedProcessInfo[]) => {
             const merged = [...processes];

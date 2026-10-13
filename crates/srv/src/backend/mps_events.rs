@@ -159,6 +159,26 @@ events! {
     AgentReactiveUnregistered: "agent:reactive-unregistered" => BlockRefEvent,
     /// One protocol frame from an app-server agent (`app_server_controller`).
     AppServerOutput: "output" => ProtocolFrame,
+    /// srv's version and machine, sent once on every WebSocket connect.
+    SrvInfo: "srvinfo" => crate::srv_info::SrvInfo,
+    /// The full config, redacted for the renderer: on connect, and when it changes.
+    Config: super::mps::EVENT_CONFIG => ConfigEvent,
+    /// What one ambient model call spent (`ambient::spend`).
+    AmbientSpent: crate::ambient::spend::EVENT_AMBIENT_SPENT => crate::ambient::spend::AmbientSpentEvent,
+    /// A process joined an agent pane's tree, or left it (`process_tracker::registry`).
+    AgentProcessAdded: "agent:process-added" => ProcessAddedEvent,
+    AgentProcessExited: "agent:process-exited" => ProcessExitedEvent,
+    /// A shutdown waiting for the user to keep the agent, and its end (`sagas::pending_shutdown`).
+    AgentShutdownPending: crate::sagas::pending_shutdown::EVENT_SHUTDOWN_PENDING => crate::sagas::pending_shutdown::PendingView,
+    AgentShutdownPendingCleared: crate::sagas::pending_shutdown::EVENT_SHUTDOWN_PENDING_CLEARED => crate::sagas::pending_shutdown::PendingClearedEvent,
+    /// An OS notification to show, retract or act on (`notify::router`).
+    Notification: crate::backend::notify::router::EVENT_NOTIFICATION => crate::backend::notify::policy::Notification,
+    NotificationRetract: crate::backend::notify::router::EVENT_NOTIFICATION_RETRACT => crate::backend::notify::router::NotificationRetractEvent,
+    NotificationActivate: crate::backend::notify::router::EVENT_NOTIFICATION_ACTIVATE => crate::backend::notify::router::NotificationActivateEvent,
+    /// Ask one window to open a pane as its own floating OS window (`app_api::pane`).
+    OpenFloatingPane: "openfloatingpane" => OpenFloatingPaneEvent,
+    /// Tell a window's renderer to reveal a block (`notify::router`).
+    BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
 
     // Signals with no payload: something changed, and a subscriber refetches what it shows.
     /// The agents list changed.
@@ -300,6 +320,38 @@ pub struct DockClearEvent {
     pub node_id: String,
 }
 
+/// `config`: the full config, redacted for the renderer.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ConfigEvent {
+    #[ts(type = "FullConfigType")]
+    pub fullconfig: serde_json::Value,
+}
+
+/// `openfloatingpane`: the pane to float, now alone in its own workspace.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct OpenFloatingPaneEvent {
+    pub block_id: String,
+    pub workspace_id: String,
+}
+
+/// `agent:process-added`: a process joined an agent pane's tree.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ProcessAddedEvent {
+    pub block_id: String,
+    pub process: crate::backend::process_tracker::TrackedProcess,
+}
+
+/// `agent:process-exited`: a process left an agent pane's tree.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ProcessExitedEvent {
+    pub block_id: String,
+    pub pid: u32,
+}
+
 /// `output`: one app-server protocol frame, as the agent sent it.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -400,6 +452,27 @@ mod tests {
         );
         let frame = ProtocolFrame(serde_json::json!({ "method": "turn/started" }));
         assert_eq!(serde_json::to_value(&frame).unwrap(), serde_json::json!({ "method": "turn/started" }));
+    }
+
+    #[test]
+    fn a_typed_frame_is_the_eventrecv_frame_srv_wrote_by_hand() {
+        let frame = crate::backend::eventbus::EventBus::typed_frame::<Config>(&ConfigEvent { fullconfig: serde_json::json!({ "settings": {} }) });
+        assert_eq!(
+            frame,
+            serde_json::json!({ "eventtype": "rpc", "data": { "command": "eventrecv", "data": { "event": "config", "data": { "fullconfig": { "settings": {} } } } } })
+        );
+        let activate = crate::backend::notify::router::NotificationActivateEvent {
+            id: "n1".into(),
+            block_id: "b1".into(),
+            tab_id: "t1".into(),
+            window_id: "w1".into(),
+            workspace_id: None,
+            at_ms: 7,
+        };
+        assert_eq!(
+            serde_json::to_value(&activate).unwrap(),
+            serde_json::json!({ "id": "n1", "block_id": "b1", "tab_id": "t1", "window_id": "w1", "workspace_id": null, "at_ms": 7 })
+        );
     }
 
     #[test]

@@ -14,10 +14,8 @@
 
 use std::sync::{Arc, OnceLock};
 
-use serde_json::json;
-
 use crate::agents::TokenCounts;
-use crate::backend::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
+use crate::backend::eventbus::EventBus;
 
 /// The event a purpose's spend is published as.
 pub const EVENT_AMBIENT_SPENT: &str = "ambient:spent";
@@ -30,18 +28,16 @@ pub fn publish_on(bus: Arc<EventBus>) {
     let _ = BUS.set(bus);
 }
 
+/// `ambient:spent`: what one ambient model call spent, and on what.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AmbientSpentEvent {
+    pub purpose: String,
+    pub tokens: TokenCounts,
+}
+
 /// Publish what one call for `purpose` spent.
 pub fn report(purpose: &str, tokens: &TokenCounts) {
     let Some(bus) = BUS.get() else { return };
-    bus.broadcast_event(&WSEventType {
-        eventtype: WS_EVENT_RPC.to_string(),
-        oref: String::new(),
-        data: Some(json!({
-            "command": "eventrecv",
-            "data": {
-                "event": EVENT_AMBIENT_SPENT,
-                "data": { "purpose": purpose, "tokens": tokens },
-            }
-        })),
-    });
+    bus.broadcast_typed::<crate::backend::mps_events::AmbientSpent>(&AmbientSpentEvent { purpose: purpose.to_string(), tokens: tokens.clone() });
 }

@@ -71,14 +71,8 @@ struct WSIncoming {
 /// The `srvinfo` event sent once on every WebSocket connect, right after
 /// `config`: srv's version, which the UI compares with its own, and the
 /// machine srv runs on (`crate::srv_info`).
-fn srv_info_event(info: serde_json::Value) -> serde_json::Value {
-    json!({
-        "eventtype": "rpc",
-        "data": {
-            "command": "eventrecv",
-            "data": { "event": "srvinfo", "data": info }
-        }
-    })
+fn srv_info_event(info: crate::srv_info::SrvInfo) -> serde_json::Value {
+    crate::backend::eventbus::EventBus::typed_frame::<crate::backend::mps_events::SrvInfo>(&info)
 }
 
 pub(super) async fn handle_ws(
@@ -118,16 +112,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
         let config = state.config_watcher.get_full_config();
         if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
             crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
-            let config_event = json!({
-                "eventtype": "rpc",
-                "data": {
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "config",
-                        "data": { "fullconfig": config_val }
-                    }
-                }
-            });
+            let config_event = crate::backend::eventbus::EventBus::typed_frame::<crate::backend::mps_events::Config>(&crate::backend::mps_events::ConfigEvent { fullconfig: config_val });
             if let Ok(msg) = serde_json::to_string(&config_event) {
                 let _ = socket.send(Message::Text(msg.into())).await;
             }
@@ -348,6 +333,8 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
         serde_json::to_string(&event).unwrap_or_default()
     } else {
         // Raw event bus event — wrap as RPC eventrecv
+        // Re-wraps a background-lane event srv already built (typed where it was
+        // published) into the frame the renderer reads.
         let mux_event = json!({
             "event": event["eventtype"],
             "scopes": [event["oref"]],
@@ -356,6 +343,7 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
         let wrapped = json!({
             "eventtype": "rpc",
             "data": {
+                // untyped-relay: forwards an event built elsewhere, as it was built.
                 "command": "eventrecv",
                 "data": mux_event,
             },
@@ -2274,7 +2262,7 @@ mod tests {
 
     #[test]
     fn srv_info_event_carries_the_info_on_the_eventrecv_path() {
-        let ev = super::srv_info_event(serde_json::json!({ "version": "1.2.3" }));
+        let ev = super::srv_info_event(crate::srv_info::srv_info("1.2.3", "box"));
         assert_eq!(ev["eventtype"], "rpc");
         assert_eq!(ev["data"]["command"], "eventrecv");
         assert_eq!(ev["data"]["data"]["event"], "srvinfo");

@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-use super::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
+use super::eventbus::EventBus;
 use super::fs_watch::{FsWatchEvent, FsWatchEventKind, FsWatchPool};
 use super::wconfig::{self, ConfigState, SettingsType};
 
@@ -319,18 +319,7 @@ pub fn broadcast_full_config(config_watcher: &Arc<ConfigState>, event_bus: &Arc<
     let client_count = event_bus.connection_count();
     if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
         crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "config",
-                    "data": { "fullconfig": config_val }
-                }
-            })),
-        };
-        event_bus.broadcast_event(&event);
+        event_bus.broadcast_typed::<crate::backend::mps_events::Config>(&crate::backend::mps_events::ConfigEvent { fullconfig: config_val });
         tracing::info!(clients = client_count, "config event broadcast complete");
     }
 }

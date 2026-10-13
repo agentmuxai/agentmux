@@ -10,16 +10,7 @@
 // updated under the other, and the status bar offers a reload.
 
 import { createSignal } from "solid-js";
-
-export interface SrvInfo {
-    version: string;
-    /** srv's OS, as `process.platform` names it ("darwin", "win32", "linux"). */
-    platform: string;
-    userName: string;
-    hostName: string;
-    /** The account-wide AgentMux root on srv's machine (`~/.agentmux`, or its override). */
-    homeDir: string | null;
-}
+import type { SrvInfo } from "@/types/rpc/SrvInfo";
 
 const [srvInfo, setSrvInfo] = createSignal<SrvInfo | null>(null);
 const [srvSilent, setSrvSilent] = createSignal(false);

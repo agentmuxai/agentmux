@@ -14,14 +14,21 @@ let subscribed: { eventType: string; handler: (e: { data: unknown }) => void }[]
 
 vi.mock("@/app/util/reveal-block", () => ({ revealBlockLocally: (b: string, o?: { tabId?: string }) => reveal(b, o) }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w1" }));
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (s: { eventType: string; handler: (e: { data: unknown }) => void }) => {
-        subscribed.push(s);
-        return () => {
-            subscribed = subscribed.filter((x) => x !== s);
-        };
-    },
-}));
+vi.mock("@/app/store/mps", async () => {
+    const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const mock = {
+        muxEventSubscribe: (s: { eventType: string; handler: (e: { data: unknown }) => void }) => {
+            subscribed.push(s);
+            return () => {
+                subscribed = subscribed.filter((x) => x !== s);
+            };
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 import { EVENT_BLOCK_REVEAL, handleBlockReveal, installBlockRevealEvents, shouldRevealHere } from "./reveal-block-events";
 
