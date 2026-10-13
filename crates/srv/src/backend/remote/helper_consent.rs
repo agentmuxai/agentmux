@@ -368,15 +368,17 @@ fn open_questions() -> std::sync::MutexGuard<'static, HashMap<String, watch::Rec
 /// `need`: `None` to ask. Read with the open questions locked, so a question
 /// closing meanwhile can't be missed (its answer is noted before it closes).
 fn held(connection: &str, key: &str, need: Need) -> Option<Result<(), String>> {
+    // A failed try first: an Install answered before it doesn't make the
+    // upload work this time.
+    if need == (Need::Terminal { by_default: true }) && not_installed_hosts().contains(key) {
+        return Some(Err("it didn't install on this host earlier".to_string()));
+    }
     if approved().contains(key) {
         return Some(Ok(()));
     }
     match need {
         Need::Terminal { .. } if declined().contains(key) => {
             Some(Err(format!("you chose not to install AgentMux's helper on {connection}")))
-        }
-        Need::Terminal { by_default: true } if not_installed_hosts().contains(key) => {
-            Some(Err("it didn't install on this host earlier".to_string()))
         }
         _ => None,
     }
@@ -423,6 +425,11 @@ async fn ask_once(deps: &Deps, connection: &str, block_id: &str, need: Need) -> 
         }
     };
     record(deps, connection, None, answer);
+    // Unanswered, for a terminal durable only by default: a failed try,
+    // noted before the question closes so a terminal arriving now sees it.
+    if !answer.answered && need == (Need::Terminal { by_default: true }) {
+        note_not_installed(connection);
+    }
     let _ = tx.send(Some(answer));
     verdict(connection, answer)
 }
@@ -562,6 +569,37 @@ mod tests {
         let chosen = Need::Terminal { by_default: false };
         let _ = allow_install_with(deps, "me@need-failed-host", Some("blk-need-4"), chosen).await;
         assert_eq!(ASKED.load(Ordering::SeqCst), 2, "a terminal set to durable asks");
+    }
+
+    /// Install was answered but the upload failed: a terminal durable only by
+    /// default doesn't try again (Files may). And a question closed
+    /// unanswered is noted as a failed try before it closes, so no terminal
+    /// slips in between and asks again.
+    #[tokio::test]
+    async fn a_failed_or_unanswered_try_holds_for_default_terminals() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        static DEPS_NO_ANSWER: OnceLock<Deps> = OnceLock::new();
+        let deps = DEPS_NO_ANSWER.get_or_init(|| Deps {
+            ask: Box::new(|_, _| {
+                ASKED.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(Answer::default()) })
+            }),
+            settings: Box::new(|_| (String::new(), String::new())),
+            remember: Box::new(|_, _| Ok(())),
+        });
+        let terminal = Need::Terminal { by_default: true };
+        note_answer("me@approved-failed-host", Answer { answered: true, approve: true, remember: false });
+        note_not_installed("me@approved-failed-host");
+        let retry = allow_install_with(deps, "me@approved-failed-host", Some("blk-af-1"), terminal).await;
+        assert!(retry.is_err(), "a failed install outweighs the Install answer");
+        let files = allow_install_with(deps, "me@approved-failed-host", Some("blk-af-2"), Need::Files).await;
+        assert_eq!(files, Ok(()), "Files tries again on the Install answer");
+        assert_eq!(ASKED.load(Ordering::SeqCst), 0);
+
+        let unanswered = allow_install_with(deps, "me@unanswered-host", Some("blk-af-3"), terminal).await;
+        assert!(unanswered.is_err());
+        assert!(not_installed("me@unanswered-host"), "noted before the question closed");
     }
 
     /// The pane asking is closed mid-question: a pane waiting on its answer
