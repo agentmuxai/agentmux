@@ -19,7 +19,8 @@
 // data, where `Broker::publish_event::<E>` sends the payload of an event declared
 // in backend/mps_events.rs, which the frontend gets as its Rust type
 // (SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md). MAX_EVENTS counts the hand-built
-// ones, outside tests and mps.rs itself.
+// ones, and hand-built `eventrecv` frames sent around the broker (`EventBus::broadcast_typed`
+// is their typed form), outside tests, mps.rs and eventbus.rs.
 //
 //   node scripts/check-untyped-rpc-handlers.mjs          check
 //   node scripts/check-untyped-rpc-handlers.mjs --list   print each one
@@ -29,7 +30,7 @@ import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX = 25;
-const MAX_EVENTS = 136;
+const MAX_EVENTS = 140;
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(ROOT, "crates/srv/src");
@@ -138,7 +139,11 @@ for (const file of rustFiles(SRC)) {
     lines.forEach((line, i) => {
         if (line.trim().startsWith("//")) return;
         if (/\.register_handler\(/.test(line)) found.push(`${rel}:${i + 1}`);
-        if (/\bMuxEvent\s*\{/.test(line) && !/\bstruct\s+MuxEvent\b/.test(line) && !rel.endsWith("backend/mps.rs")) events.push(`${rel}:${i + 1}`);
+        // A hand-built MuxEvent, or a hand-built `eventrecv` frame sent around the broker
+        // (`EventBus::broadcast_event`). mps.rs and eventbus.rs hold the typed helpers.
+        const helper = rel.endsWith("backend/mps.rs") || rel.endsWith("backend/eventbus.rs");
+        const built = (/\bMuxEvent\s*\{/.test(line) && !/\bstruct\s+MuxEvent\b/.test(line)) || /"command":\s*"eventrecv"/.test(line);
+        if (built && !helper) events.push(`${rel}:${i + 1}`);
     });
 }
 
@@ -146,18 +151,18 @@ if (process.argv.includes("--list")) {
     for (const f of found) console.log(f);
     console.log(`${found.length} untyped handler(s)`);
     for (const f of events) console.log(f);
-    console.log(`${events.length} hand-built MuxEvent(s)`);
+    console.log(`${events.length} hand-built event(s)`);
     process.exit(0);
 }
 
 if (events.length > MAX_EVENTS) {
-    console.error(`check-untyped-rpc-handlers: ${events.length} hand-built MuxEvents, allowed ${MAX_EVENTS}.`);
-    console.error("Declare the event in crates/srv/src/backend/mps_events.rs and publish it with Broker::publish_event.");
+    console.error(`check-untyped-rpc-handlers: ${events.length} hand-built events, allowed ${MAX_EVENTS}.`);
+    console.error("Declare the event in crates/srv/src/backend/mps_events.rs and publish it with Broker::publish_event (or EventBus::broadcast_typed).");
     console.error("Run with --list to see them all.");
     process.exit(1);
 }
 if (events.length < MAX_EVENTS) {
-    console.error(`check-untyped-rpc-handlers: ${events.length} hand-built MuxEvents, below MAX_EVENTS = ${MAX_EVENTS} (thank you).`);
+    console.error(`check-untyped-rpc-handlers: ${events.length} hand-built events, below MAX_EVENTS = ${MAX_EVENTS} (thank you).`);
     console.error("Lower MAX_EVENTS in scripts/check-untyped-rpc-handlers.mjs to the new count, so the room can't be taken back.");
     process.exit(1);
 }

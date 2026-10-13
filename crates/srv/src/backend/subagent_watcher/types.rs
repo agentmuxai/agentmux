@@ -101,20 +101,27 @@ pub enum SubAgentStatus {
     Abandoned,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SubagentEvent {
     pub agent_id: String,
     pub event_type: SubagentEventType,
+    #[ts(type = "number")]
     pub timestamp: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SubagentEventType {
     Text { content: String },
     /// `input` is the call's input, bounded by `parse::bounded_tool_input`;
     /// the Swarm feed formats it with the agent pane's `toolDetail`.
-    ToolUse { name: String, input: serde_json::Value },
+    ToolUse {
+        name: String,
+        #[ts(type = "unknown")]
+        input: serde_json::Value,
+    },
     ToolResult { is_error: bool, preview: String },
     Progress { output: String },
     /// A JSONL `"result"`-typed line — the subagent's final output.
@@ -164,7 +171,8 @@ pub struct AgentDispatch {
     pub dispatch_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "lowercase")]
 pub enum DispatchKind {
     Solo,
@@ -178,7 +186,8 @@ pub enum DispatchKind {
 // directly (not derived from the counts-based `refresh_dispatch_status`,
 // which only ever produces Running/Completed) whenever every member is
 // Completed|Abandoned and at least one is Abandoned.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "lowercase")]
 pub enum DispatchStatus {
     Running,

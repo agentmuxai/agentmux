@@ -79,7 +79,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -227,14 +227,10 @@ export function useSubagentBackfillGate(
             }
         };
 
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.SubagentBackfillStatus,
-            scope: `block:${blockId}`,
-            handler: (event: any) => {
+        const unsub = onMuxEvent(WpsEvent.SubagentBackfillStatus, (data) => {
                 receivedLiveEvent = true;
-                applyStatus(event?.data);
-            },
-        });
+                applyStatus(data);
+            }, `block:${blockId}`);
 
         // Explicit current-history read on mount — same rationale as
         // useResumeRetryStream.ts's identical read: subscribe-time replay

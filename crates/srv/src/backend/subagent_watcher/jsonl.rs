@@ -11,12 +11,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde_json::json;
-
 use super::parse::*;
 use super::types::*;
 use super::SubagentWatcher;
-use crate::backend::eventbus::{WSEventType, WS_EVENT_RPC};
 
 impl SubagentWatcher {
     /// Process a changed/new JSONL subagent file. Reads new lines, updates state,
@@ -383,26 +380,15 @@ impl SubagentWatcher {
                         .or_insert_with(|| PendingDispatchActivity::new(parent_agent, parent_block_id, &session_id));
                     entry.members.push((agent_id.clone(), new_events.clone()));
                 }
-                let activity_event = WSEventType {
-                    eventtype: WS_EVENT_RPC.to_string(),
-                    oref: String::new(),
-                    data: Some(json!({
-                        "command": "eventrecv",
-                        "data": {
-                            "event": "subagent:activity",
-                            "data": {
-                                "agentId": agent_id,
-                                "parentAgent": parent_agent,
-                                "parentBlockId": parent_block_id,
-                                "newEvents": new_events.len(),
-                                "totalEvents": info_snapshot.event_count,
-                                "events": new_events,
-                                "dispatchId": info_snapshot.dispatch_id,
-                            }
-                        }
-                    })),
-                };
-                self.event_bus.broadcast_event(&activity_event);
+                self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentActivity>(&super::events::SubagentActivityEvent {
+                    agent_id: agent_id.to_string(),
+                    parent_agent: parent_agent.to_string(),
+                    parent_block_id: parent_block_id.to_string(),
+                    new_events: new_events.len(),
+                    total_events: info_snapshot.event_count,
+                    events: new_events.clone(),
+                    dispatch_id: info_snapshot.dispatch_id.to_string(),
+                });
             }
         }
 
@@ -471,27 +457,14 @@ impl SubagentWatcher {
 
             if !pending.members.is_empty() {
                 let new_events: usize = pending.members.iter().map(|(_, evs)| evs.len()).sum();
-                let event = WSEventType {
-                    eventtype: WS_EVENT_RPC.to_string(),
-                    oref: String::new(),
-                    data: Some(json!({
-                        "command": "eventrecv",
-                        "data": {
-                            "event": "dispatch:activity",
-                            "data": {
-                                "dispatchId": dispatch_id,
-                                "parentAgent": pending.parent_agent,
-                                "parentBlockId": pending.parent_block_id,
-                                "sessionId": pending.session_id,
-                                "newEvents": new_events,
-                                "members": pending.members.iter().map(|(agent_id, events)| {
-                                    json!({ "agentId": agent_id, "events": events })
-                                }).collect::<Vec<_>>(),
-                            }
-                        }
-                    })),
-                };
-                self.event_bus.broadcast_event(&event);
+                self.event_bus.broadcast_typed::<crate::backend::mps_events::DispatchActivity>(&super::events::DispatchActivityEvent {
+                    dispatch_id: dispatch_id.to_string(),
+                    parent_agent: pending.parent_agent.to_string(),
+                    parent_block_id: pending.parent_block_id.to_string(),
+                    session_id: pending.session_id.to_string(),
+                    new_events: new_events,
+                    members: pending.members.iter().map(|(agent_id, events)| super::events::DispatchMemberEvents { agent_id: agent_id.clone(), events: events.clone() }).collect(),
+                });
             }
 
             for done in &pending.completed {
@@ -520,26 +493,15 @@ impl SubagentWatcher {
         session_id: &str,
         dispatch_id: &str,
     ) {
-        let spawned_event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:spawned",
-                    "data": {
-                        "agentId": spawn.agent_id,
-                        "slug": spawn.slug,
-                        "parentAgent": parent_agent,
-                        "parentBlockId": parent_block_id,
-                        "sessionId": session_id,
-                        "model": spawn.model,
-                        "dispatchId": dispatch_id,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&spawned_event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentSpawned>(&super::events::SubagentSpawnedEvent {
+            agent_id: spawn.agent_id.to_string(),
+            slug: spawn.slug.to_string(),
+            parent_agent: parent_agent.to_string(),
+            parent_block_id: parent_block_id.to_string(),
+            session_id: session_id.to_string(),
+            model: spawn.model.clone(),
+            dispatch_id: dispatch_id.to_string(),
+        });
         tracing::info!(
             agent_id = %spawn.agent_id,
             slug = %spawn.slug,
@@ -561,24 +523,13 @@ impl SubagentWatcher {
         session_id: &str,
         dispatch_id: &str,
     ) {
-        let completed_event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:completed",
-                    "data": {
-                        "agentId": done.agent_id,
-                        "parentAgent": parent_agent,
-                        "parentBlockId": parent_block_id,
-                        "totalEvents": done.total_events,
-                        "dispatchId": dispatch_id,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&completed_event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentCompleted>(&super::events::SubagentCompletedEvent {
+            agent_id: done.agent_id.to_string(),
+            parent_agent: Some(parent_agent.to_string()),
+            parent_block_id: parent_block_id.to_string(),
+            total_events: done.total_events,
+            dispatch_id: dispatch_id.to_string(),
+        });
         tracing::info!(
             agent_id = %done.agent_id,
             total_events = done.total_events,
@@ -807,21 +758,10 @@ impl SubagentWatcher {
     /// `subagent:named`: the subagent's display name is set (from the parent's
     /// description, or by Haiku). The dock and the Swarm patch their row from it.
     pub(super) fn broadcast_subagent_named(&self, agent_id: &str, display_name: &str) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:named",
-                    "data": {
-                        "agentId": agent_id,
-                        "displayName": display_name,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentNamed>(&super::events::SubagentNamedEvent {
+            agent_id: agent_id.to_string(),
+            display_name: display_name.to_string(),
+        });
     }
 
     /// A known subagent's fields changed without a new spawn — today, only its
@@ -829,45 +769,23 @@ impl SubagentWatcher {
     /// it so the subagent's background tasks move under its row. Deliberately
     /// NOT a re-sent `subagent:spawned`: the dock's sources add rows on that.
     pub(super) fn broadcast_subagent_updated(&self, agent_id: &str, parent_block_id: &str) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:updated",
-                    "data": {
-                        "agentId": agent_id,
-                        "parentBlockId": parent_block_id,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentUpdated>(&super::events::SubagentUpdatedEvent {
+            agent_id: agent_id.to_string(),
+            parent_block_id: parent_block_id.to_string(),
+        });
     }
 
     pub(super) fn broadcast_dispatch_updated(&self, info: &AgentDispatch) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "dispatch:updated",
-                    "data": {
-                        "dispatchId": info.dispatch_id,
-                        "kind": info.kind,
-                        "parentAgent": info.parent_agent,
-                        "parentBlockId": info.parent_block_id,
-                        "sessionId": info.session_id,
-                        "memberCount": info.member_count,
-                        "membersDone": info.members_done,
-                        "status": info.status,
-                        "dispatchName": info.dispatch_name,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::DispatchUpdated>(&super::events::DispatchUpdatedEvent {
+            dispatch_id: info.dispatch_id.to_string(),
+            kind: info.kind.clone(),
+            parent_agent: info.parent_agent.to_string(),
+            parent_block_id: info.parent_block_id.to_string(),
+            session_id: info.session_id.to_string(),
+            member_count: info.member_count,
+            members_done: info.members_done,
+            status: info.status.clone(),
+            dispatch_name: info.dispatch_name.clone(),
+        });
     }
 }

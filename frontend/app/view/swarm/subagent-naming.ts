@@ -13,11 +13,10 @@
  */
 
 import { callBackendService } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import type { ActiveSubagent } from "./swarm-model";
 
 import { WpsEvent } from "@/app/store/mps-events";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
 /** Requests in flight, so the dock and the Swarm pane don't ask twice at once. */
 const inFlight = new Set<string>();
 
@@ -35,13 +34,9 @@ export function requestSubagentName(agentId: string): void {
 
 /** Call `handler` with each subagent name as it arrives. Returns the unsubscribe. */
 export function onSubagentNamed(handler: (agentId: string, displayName: string) => void): () => void {
-    return muxEventSubscribe({
-        eventType: WpsEvent.SubagentNamed,
-        handler: (event: MuxEvent) => {
-            const data = event?.data as { agentId?: string; displayName?: string } | undefined;
-            if (data?.agentId && data.displayName) handler(data.agentId, data.displayName);
-        },
-    });
+    return onMuxEvent(WpsEvent.SubagentNamed, (data) => {
+            if (data.agentId && data.displayName) handler(data.agentId, data.displayName);
+        });
 }
 
 /** `list` with subagent `agentId` renamed; the other entries keep their identity. */

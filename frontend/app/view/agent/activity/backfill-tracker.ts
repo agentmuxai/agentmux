@@ -28,7 +28,7 @@
  * below settles that one block on a timer, releasing its held rows.
  */
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 
 import { WpsEvent } from "@/app/store/mps-events";
 const backfillingBlocks = new Map<string, ReturnType<typeof setTimeout>>();
@@ -134,7 +134,4 @@ export function createBackfillAwareTrigger(scheduleDebouncedRefresh: () => void,
 // and this tracker both listen to the same backend event independently and
 // safely: `mps.ts`'s `dispatchToSubjects` fans one incoming message out to
 // every registered listener, filtering by each listener's own `scope`).
-muxEventSubscribe({
-    eventType: WpsEvent.SubagentBackfillStatus,
-    handler: (event: { scopes?: string[]; data?: unknown }) => handleBackfillStatusEvent(event?.scopes, event?.data),
-});
+onMuxEvent(WpsEvent.SubagentBackfillStatus, (data, event) => handleBackfillStatusEvent(event.scopes, data));

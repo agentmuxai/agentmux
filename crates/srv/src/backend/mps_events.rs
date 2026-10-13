@@ -61,6 +61,19 @@ events! {
     AgentShutdown: crate::sagas::close_pane::EVENT_AGENT_SHUTDOWN => crate::sagas::close_pane::ShutdownLineEvent,
     /// A call to action srv holds open started, or ended (`backend::user_attention`).
     UserAttention: super::mps::EVENT_USER_ATTENTION => crate::backend::user_attention::UserAttentionEvent,
+    /// New events from one subagent (`subagent_watcher`).
+    SubagentActivity: "subagent:activity" => crate::backend::subagent_watcher::events::SubagentActivityEvent,
+    /// A workflow dispatch's coalesced new events.
+    DispatchActivity: "dispatch:activity" => crate::backend::subagent_watcher::events::DispatchActivityEvent,
+    SubagentSpawned: "subagent:spawned" => crate::backend::subagent_watcher::events::SubagentSpawnedEvent,
+    SubagentCompleted: "subagent:completed" => crate::backend::subagent_watcher::events::SubagentCompletedEvent,
+    SubagentNamed: "subagent:named" => crate::backend::subagent_watcher::events::SubagentNamedEvent,
+    SubagentUpdated: "subagent:updated" => crate::backend::subagent_watcher::events::SubagentUpdatedEvent,
+    DispatchUpdated: "dispatch:updated" => crate::backend::subagent_watcher::events::DispatchUpdatedEvent,
+    SubagentAbandoned: "subagent:abandoned" => crate::backend::subagent_watcher::events::SubagentAbandonedEvent,
+    SubagentBlockPruned: "subagent:block_pruned" => crate::backend::subagent_watcher::events::SubagentBlockPrunedEvent,
+    /// A resumed pane's subagent backfill started or finished.
+    SubagentBackfillStatus: super::mps::EVENT_SUBAGENT_BACKFILL_STATUS => crate::backend::subagent_watcher::events::SubagentBackfillStatusEvent,
 }
 
 /// The `agent-resume-retry` event's payload (`mps_events::AgentResumeRetry`).

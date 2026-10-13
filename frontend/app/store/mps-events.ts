@@ -166,6 +166,8 @@ export const WpsEvent = {
     SubagentCompleted: "subagent:completed",
     SubagentNamed: "subagent:named",
     SubagentSpawned: "subagent:spawned",
+    // New events from one subagent. Typed in srv; nothing subscribes yet (Swarm uses dispatch:activity).
+    SubagentActivity: "subagent:activity",
     SubagentUpdated: "subagent:updated",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",

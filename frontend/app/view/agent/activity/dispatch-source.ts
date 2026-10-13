@@ -18,7 +18,7 @@
  */
 
 import { callBackendService } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { createSignal, type Accessor } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { createBackfillAwareTrigger, holdBackfillingRows } from "./backfill-tracker";
@@ -105,11 +105,11 @@ const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh()
 // refresh itself stays immediate (undebounced) — see that module's
 // identical comment for why.
 void refresh();
-muxEventSubscribe({ eventType: WpsEvent.SubagentSpawned, handler: () => trigger() });
-muxEventSubscribe({ eventType: WpsEvent.SubagentCompleted, handler: () => trigger() });
-muxEventSubscribe({ eventType: WpsEvent.SubagentNamed, handler: () => trigger() });
-muxEventSubscribe({ eventType: WpsEvent.SubagentAbandoned, handler: () => trigger() });
-muxEventSubscribe({ eventType: WpsEvent.DispatchUpdated, handler: () => trigger() });
+onMuxEvent(WpsEvent.SubagentSpawned, () => trigger());
+onMuxEvent(WpsEvent.SubagentCompleted, () => trigger());
+onMuxEvent(WpsEvent.SubagentNamed, () => trigger());
+onMuxEvent(WpsEvent.SubagentAbandoned, () => trigger());
+onMuxEvent(WpsEvent.DispatchUpdated, () => trigger());
 
 /** Every tracked dispatch (Solo or Workflow) currently known, across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */

@@ -22,12 +22,18 @@ const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
-        hub.handlers.set(sub.eventType, sub.handler);
-        return () => hub.handlers.delete(sub.eventType);
-    }),
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+            hub.handlers.set(sub.eventType, sub.handler);
+            return () => hub.handlers.delete(sub.eventType);
+        }),
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 const unnamedSubagent = {
     agent_id: "agent-1",
@@ -107,7 +113,8 @@ describe("SwarmViewModel backfill-naming backlog trigger", () => {
         vi.useFakeTimers();
         const spawnedHandler = hub.handlers.get("subagent:spawned");
         expect(spawnedHandler).toBeDefined();
-        spawnedHandler!({});
+        // A real subagent:spawned carries its payload; onMuxEvent skips an event with none.
+        spawnedHandler!({ data: { agentId: "agent-2" } });
 
         vi.advanceTimersByTime(200); // past the 150ms debounce, comfortable margin
 

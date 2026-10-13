@@ -72,6 +72,96 @@
     }
   },
   {
+    "event": "dispatch:activity",
+    "payloadTs": {
+      "imports": [
+        "DispatchActivityEvent"
+      ],
+      "name": "DispatchActivityEvent"
+    }
+  },
+  {
+    "event": "dispatch:updated",
+    "payloadTs": {
+      "imports": [
+        "DispatchUpdatedEvent"
+      ],
+      "name": "DispatchUpdatedEvent"
+    }
+  },
+  {
+    "event": "subagent:abandoned",
+    "payloadTs": {
+      "imports": [
+        "SubagentAbandonedEvent"
+      ],
+      "name": "SubagentAbandonedEvent"
+    }
+  },
+  {
+    "event": "subagent:activity",
+    "payloadTs": {
+      "imports": [
+        "SubagentActivityEvent"
+      ],
+      "name": "SubagentActivityEvent"
+    }
+  },
+  {
+    "event": "subagent:backfill_status",
+    "payloadTs": {
+      "imports": [
+        "SubagentBackfillStatusEvent"
+      ],
+      "name": "SubagentBackfillStatusEvent"
+    }
+  },
+  {
+    "event": "subagent:block_pruned",
+    "payloadTs": {
+      "imports": [
+        "SubagentBlockPrunedEvent"
+      ],
+      "name": "SubagentBlockPrunedEvent"
+    }
+  },
+  {
+    "event": "subagent:completed",
+    "payloadTs": {
+      "imports": [
+        "SubagentCompletedEvent"
+      ],
+      "name": "SubagentCompletedEvent"
+    }
+  },
+  {
+    "event": "subagent:named",
+    "payloadTs": {
+      "imports": [
+        "SubagentNamedEvent"
+      ],
+      "name": "SubagentNamedEvent"
+    }
+  },
+  {
+    "event": "subagent:spawned",
+    "payloadTs": {
+      "imports": [
+        "SubagentSpawnedEvent"
+      ],
+      "name": "SubagentSpawnedEvent"
+    }
+  },
+  {
+    "event": "subagent:updated",
+    "payloadTs": {
+      "imports": [
+        "SubagentUpdatedEvent"
+      ],
+      "name": "SubagentUpdatedEvent"
+    }
+  },
+  {
     "event": "sysinfo",
     "payloadTs": {
       "imports": [

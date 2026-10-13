@@ -10,14 +10,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
-
 use super::completion;
 use super::parse::file_mtime;
 use super::types::*;
 use super::SubagentWatcher;
-use crate::backend::eventbus::{WSEventType, WS_EVENT_RPC};
-use crate::backend::mps;
 
 /// How many times `reconcile_stale_subagents` retries when the parent
 /// block's controller isn't registered yet, before giving up and leaving
@@ -37,13 +33,11 @@ const RECONCILE_RETRY_INTERVAL_MS: u64 = 3_000;
 /// section 5.
 fn publish_backfill_status(watcher: &SubagentWatcher, parent_block_id: &str, status: &str) {
     let Some(broker) = watcher.broker.lock().unwrap().clone() else { return };
-    broker.publish(mps::MuxEvent {
-        event: mps::EVENT_SUBAGENT_BACKFILL_STATUS.to_string(),
-        scopes: vec![format!("block:{}", parent_block_id)],
-        sender: String::new(),
-        persist: 2,
-        data: Some(json!({ "status": status })),
-    });
+    broker.publish_event::<crate::backend::mps_events::SubagentBackfillStatus>(
+        &super::events::SubagentBackfillStatusEvent { status: status.to_string() },
+        vec![format!("block:{}", parent_block_id)],
+        2,
+    );
 }
 
 impl SubagentWatcher {
@@ -549,21 +543,10 @@ impl SubagentWatcher {
     /// immediately" (an already-open pane still picks up the correction on
     /// its next unrelated reload in the meantime).
     fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:abandoned",
-                    "data": {
-                        "parentBlockId": parent_block_id,
-                        "agentIds": agent_ids,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentAbandoned>(&super::events::SubagentAbandonedEvent {
+            parent_block_id: parent_block_id.to_string(),
+            agent_ids: agent_ids.to_vec(),
+        });
     }
 
     /// The `Completed` counterpart to `broadcast_subagents_abandoned` above,
@@ -589,23 +572,13 @@ impl SubagentWatcher {
         dispatch_id: &str,
         total_events: usize,
     ) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:completed",
-                    "data": {
-                        "agentId": agent_id,
-                        "parentBlockId": parent_block_id,
-                        "totalEvents": total_events,
-                        "dispatchId": dispatch_id,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentCompleted>(&super::events::SubagentCompletedEvent {
+            agent_id: agent_id.to_string(),
+            parent_agent: None,
+            parent_block_id: parent_block_id.to_string(),
+            total_events: total_events,
+            dispatch_id: dispatch_id.to_string(),
+        });
     }
 
     /// Process agent-*.jsonl directly in `dir`, plus workflow runs under
