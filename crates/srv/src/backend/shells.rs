@@ -348,9 +348,8 @@ fn version_of(c: &Candidate) -> Option<String> {
         .stderr(std::process::Stdio::null());
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        use agentmux_common::win32::NoWindow;
+        cmd.no_window();
     }
     let mut child = cmd.spawn().ok()?;
     let deadline = Instant::now() + VERSION_TIMEOUT;
