@@ -13,8 +13,9 @@
 //! bar. Same runtime-size guard as `begin_window_drag` (`ui_tasks/drag.rs`).
 //!
 //! Remote search suggestions (the default engine's suggest service, which
-//! sees each edit before it is submitted) only when the user turned on the
-//! `browser:searchsuggestions` setting. Chrome's own profile pref
+//! sees each edit before it is submitted) only while the
+//! `browser:searchsuggestions` setting is on (the default, as in Chrome; the
+//! user can turn it off). Chrome's own profile pref
 //! `search.suggest_enabled` switches them, set before each query; with it off
 //! only local matches come back. If the pref can't be turned off, no query
 //! runs at all.
