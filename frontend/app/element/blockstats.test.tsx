@@ -28,6 +28,7 @@ import {
     isRemoteConnection,
     partial,
     remoteBadge,
+    statsBadgeShown,
 } from "./blockstats";
 
 function figures(over: Partial<BlockStatsFigures> = {}): BlockStatsFigures {
@@ -184,6 +185,14 @@ describe("a remote pane's badge", () => {
         await waitFor(() => expect(container.querySelector(".block-stats-badge")?.textContent).toBe("–"));
         hover(container);
         await waitFor(() => expect(screen.getByText("Not measured: AgentMux's helper isn't on build.")).toBeTruthy());
+    });
+});
+
+describe("where the badge is shown", () => {
+    it("never in a drag-preview frame, which would be a second badge polling a remote machine again", () => {
+        expect(statsBadgeShown(true, true)).toBe(false);
+        expect(statsBadgeShown(false, true)).toBe(true);
+        expect(statsBadgeShown(false, false)).toBe(false);
     });
 });
 

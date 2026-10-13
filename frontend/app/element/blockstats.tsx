@@ -80,6 +80,17 @@ export function describeConnection(c: BlockStatsConnection): string {
     return where ? `Connected to ${name} (${where})` : `Connected to ${name}`;
 }
 
+/**
+ * Whether a pane frame shows the badge: as its pane type's setting says
+ * (`settingOn`; `term:showstatsbadge` for a terminal), and never in a
+ * drag-preview frame. Every pane renders one off screen, laid out and visible
+ * to the visibility hooks, so its badge would be a second one, and a remote
+ * pane's would ask the machine a second time on every poll.
+ */
+export function statsBadgeShown(preview: boolean, settingOn: boolean): boolean {
+    return !preview && settingOn;
+}
+
 /** Whether a pane's `connection` is another machine (SSH, WSL). */
 export function isRemoteConnection(connection: string | undefined): boolean {
     const c = (connection ?? "").trim();

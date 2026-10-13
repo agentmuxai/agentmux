@@ -23,7 +23,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { computeMenuPosition } from "@/app/util/menu-position";
 import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
-import { BlockStatsBadge } from "@/element/blockstats";
+import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { MenuButton } from "@/element/menubutton";
@@ -1167,9 +1167,11 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
     // types keep the badge unconditionally, matching prior behavior — this
     // setting exists specifically for the terminal pane's CPU%/mem overlay.
+    // Never in a drag-preview frame (`statsBadgeShown`).
     const showStatsBadge = createMemo(() => {
         const setting = paneTabCapability(blockData()?.meta?.view, "statsBadgeSetting");
-        return setting == null || getSettingsKeyAtom(setting as any)() !== false;
+        const settingOn = setting == null || getSettingsKeyAtom(setting as any)() !== false;
+        return statsBadgeShown(!!props.preview, settingOn);
     });
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.
