@@ -16,6 +16,7 @@ import { DEFAULT_BROWSER_URL, type BrowserViewModel } from "./browser-model";
 import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
 import { createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
 import { AddressSuggestions } from "./address-suggestions";
+import { createFirstClickSelectAll } from "./address-select-all";
 
 /**
  * A saved bookmark's favicon, falling back to the app's existing "no
@@ -73,6 +74,8 @@ export function BrowserNavBar(props: {
 
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
     let addressInputRef: HTMLInputElement | undefined;
+    // The click that focuses the bar selects the whole address, as in Chrome.
+    const firstClickSelectAll = createFirstClickSelectAll();
 
     // Chrome's address bar suggestions (address-autocomplete.ts). `typed` is
     // what the user typed, without an inline completion shown after it. The
@@ -585,7 +588,8 @@ export function BrowserNavBar(props: {
                         }}
                         onKeyDown={handleAddressKeyDown}
                         onContextMenu={showTextInputContextMenu}
-                        onMouseDown={() => {
+                        onMouseDown={(e) => {
+                            firstClickSelectAll.onMouseDown(e.currentTarget);
                             // Fire main_window_focus on mousedown — BEFORE focus
                             // moves — so OS keyboard focus reclaims from the pane
                             // HWND at the start of the click. Without this, the
@@ -602,6 +606,7 @@ export function BrowserNavBar(props: {
                             diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
                             getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                         }}
+                        onMouseUp={(e) => firstClickSelectAll.onMouseUp(e.currentTarget)}
                         onFocus={(e) => {
                             // relatedTarget = the element that LOST focus to us
                             // (or null if focus came from outside the document,
@@ -612,7 +617,7 @@ export function BrowserNavBar(props: {
                             // itself.
                             const related = e.relatedTarget as Element | null;
                             diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
-                            e.currentTarget.select();
+                            firstClickSelectAll.onFocus(e.currentTarget);
                             setTyped(e.currentTarget.value);
                             // Always fire main_window_focus with window_label —
                             // the IPC misrouting was the root cause of the bounce
