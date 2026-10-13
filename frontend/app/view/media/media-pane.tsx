@@ -21,6 +21,7 @@ import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
 import { createEffect, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { MediaView } from "./media-view";
+import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { keyLabel } from "@/app/keybindings";
 
 /** The file the pane shows (the tab in front's): the pane's title, layout
@@ -266,8 +267,9 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
                     keyed
                     fallback={
                         <div class="media-pane-empty" onClick={() => void pickInto()}>
-                            <div>No files open</div>
-                            <div class="media-pane-empty-hint">
+                            <EmptyPaneLogo />
+                            <div class="media-empty-text">No files open</div>
+                            <div class="media-empty-text media-pane-empty-hint">
                                 {hostHas("nativeDialogs") ? "Click to pick one, or drop a file here." : "Drop a file here."}
                             </div>
                         </div>
