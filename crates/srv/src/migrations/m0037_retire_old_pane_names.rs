@@ -110,7 +110,7 @@ fn migrate_meta(meta: &mut Map<String, Value>) -> bool {
     };
     match view.as_str() {
         "armory" | "trust" => {
-            // Frozen copy of armoryTarget/armoryMigrationPatch (panes.ts).
+            // Frozen copy of the removed armoryTarget/armoryMigrationPatch.
             let section = meta.get("armory:section").and_then(Value::as_str).map(str::to_string);
             let sub = meta.get("armory:memory:subsection").and_then(Value::as_str).map(str::to_string);
             let (target_view, key, target_section) = match section.as_deref() {
@@ -224,7 +224,7 @@ fn old_view_block_count(store: &Store) -> Result<usize, String> {
 
 // ── settings.json ─────────────────────────────────────────────────
 
-/// Frozen copy of RENAMED_PINS (action-widgets-config.ts): a pin's short name, as it reads now.
+/// Frozen copy of the removed RENAMED_PINS: a pin's short name, as it reads now.
 fn current_names(short: &str) -> Vec<&str> {
     match short {
         "armory" => vec![CONNECTORS, MEMORY],

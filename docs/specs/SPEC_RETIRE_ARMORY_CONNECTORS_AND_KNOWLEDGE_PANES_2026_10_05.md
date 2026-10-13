@@ -57,7 +57,7 @@ tabs (none of them is a document) and they aren't pane tabs (they share one bloc
 
 ## 1. The Armory today
 
-One pane tab (`view: "armory"`, alias `"trust"`, [`frontend/app/view/armory/`](../../frontend/app/view/armory)), with a left
+One pane tab (`view: "armory"`, alias `"trust"`, `frontend/app/view/armory/`, removed in #4823), with a left
 rail of five sections. Each section is an existing manager component, always mounted and
 shown or hidden by a CSS class (`armory-view.tsx`):
 
