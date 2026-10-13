@@ -1,4 +1,4 @@
-# `muxsh` — a terminal CLI over the Agent App API
+# `muxsh` — a terminal CLI over MuxAPI
 
 **Status:** living — reference doc kept current alongside the tool, same as `MUXLOG.md`/`MUXSPECT.md`.
 
@@ -8,7 +8,7 @@ Wave Terminal's `wsh` CLI — not a revival of it (AgentMux retired the
 inherited `wsh` entirely in 2026-04 after finding zero real usage; see
 [`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](specs/archive/SPEC_RETIRE_WSH_2026_04_12.md)), but a purpose-built
 collection scoped per [`docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md`](specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) —
-every subcommand maps to a real, `$AGENTMUX_AUTH_KEY`-gated App API route,
+every subcommand maps to a real, `$AGENTMUX_AUTH_KEY`-gated MuxAPI route,
 not an agent-identity-signed one (a distinction that ruled out a couple of
 `wsh` commands that looked buildable on paper — see "What's not here" below).
 

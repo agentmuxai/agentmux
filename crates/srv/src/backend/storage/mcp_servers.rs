@@ -212,7 +212,7 @@ impl Store {
     /// List every GLOBAL MCP server — the Armory catalog view. Unlike
     /// `mcp_server_list`, this takes no `agent_id` and never includes an
     /// agent's private servers; it backs the window-scoped `mcp.catalog.*`
-    /// App API (no `check_s1`, so there is no agent context to scope by).
+    /// MuxAPI (no `check_s1`, so there is no agent context to scope by).
     /// Each row carries `bound_count` — how many agents currently hold a
     /// `db_agent_mcp_ref` to it — per SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md
     /// §8 ("used by N agents"), tracked as gap #2 of #1960.

@@ -615,6 +615,16 @@ async fn test_handler_fork_display_name_registers_and_is_reachable() {
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
 }
 
+/// A name the route name leaves invalid can't register: an `agent@host` is
+/// kept as it is for forwarding, and no message could reach it here (#4744).
+#[test]
+fn test_handler_name_still_invalid_after_its_route_name_does_not_register() {
+    let mut handler = Handler::new();
+    assert!(handler.register_agent("agent2@narko", "block1", None).is_err());
+    assert!(handler.register_agent("   ", "block1", None).is_err());
+    assert!(handler.register_agent(&"a".repeat(65), "block1", None).is_ok(), "capped to a valid id");
+}
+
 #[test]
 fn test_handler_inject_no_sender() {
     let mut handler = Handler::new();
@@ -4383,4 +4393,22 @@ fn test_system_note_falls_back_to_keystrokes_for_a_terminal_agent() {
     handler.deliver_system_note("agent1", "[AgentMux] hi").unwrap();
     let typed = typed.lock().unwrap();
     assert_eq!(typed[1], b"[AgentMux] hi\r".to_vec());
+}
+
+/// An unsigned display-name target routes by its route name on every tier,
+/// including the forwarding ones; a signed one keeps the target its
+/// signature binds; an `@` address isn't turned into a local name.
+#[test]
+fn test_route_unsigned_target() {
+    let mut unsigned = InjectionRequest { target_agent: "Loap #3".to_string(), ..Default::default() };
+    unsigned.route_unsigned_target();
+    assert_eq!(unsigned.target_agent, "Loap-3");
+    let mut signed =
+        InjectionRequest { target_agent: "Loap #3".to_string(), jekt_sig: Some("sig".to_string()), ..Default::default() };
+    assert!(signed.is_signed());
+    signed.route_unsigned_target();
+    assert_eq!(signed.target_agent, "Loap #3");
+    let mut address = InjectionRequest { target_agent: "agent2@narko".to_string(), ..Default::default() };
+    address.route_unsigned_target();
+    assert_eq!(address.target_agent, "agent2@narko");
 }

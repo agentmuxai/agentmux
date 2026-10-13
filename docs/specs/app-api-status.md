@@ -1,4 +1,4 @@
-# App API — Implementation Status
+# MuxAPI — Implementation Status
 
 **Status:** living — the current state is the first section; everything after "History" is the 2026-04-11 snapshot, kept as written.
 **Updated:** 2026-10-12 (first written 2026-04-11)
@@ -170,4 +170,4 @@ Other slash commands (`/cost`, `/compact`, etc.) pass through to the CLI which h
 3. **CLI auto-install** — integrate npm install into `agent.open`
 4. **Tier 2 commands** — `pane.open`, `pane.close`, `pane.list`, `pane.focus`
 5. **HTTP REST gateway** — `/api/v1/agent/*` endpoints for external tools
-6. **MCP integration** — expose App API as MCP tools in the agentmux MCP server
+6. **MCP integration** — expose MuxAPI as MCP tools in the agentmux MCP server

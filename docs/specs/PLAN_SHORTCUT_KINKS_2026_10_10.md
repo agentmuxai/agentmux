@@ -8,7 +8,7 @@
 ## 1. Why
 
 The first cross-platform run of [`scripts/verify-shortcuts.mjs`](../../scripts/verify-shortcuts.mjs) found bugs, which #4603 fixed. It also turned up kinks that aren't single bugs:
-- App API behaviour that surprises an agent;
+- MuxAPI behaviour that surprises an agent;
 - a macOS gap users share;
 - a crash whose cause isn't confirmed;
 - dev-environment friction that cost each of us time.
@@ -19,12 +19,12 @@ This plan turns them into work packages, one owner each, sized for one PR apiece
 
 | # | Kink | Kind |
 |---|---|---|
-| K1 | A pane with tabs has two block ids (the layout node's and each tab's). `target` can name a hidden tab: RunCommand runs there, PressKeys is refused | App API |
-| K2 | RunCommand/PressKeys reach only panes in the window's active tab; switching tabs means guessing `tab:goto:N` | App API |
-| K3 | Three table commands act beyond their pane: `files:openInNewTab` (a PDF opens in its OS app unasked; programs ask first), `term:paste` (a line break in the clipboard runs in the shell), `files:mention` (writes into an agent's message box) | App API safety |
+| K1 | A pane with tabs has two block ids (the layout node's and each tab's). `target` can name a hidden tab: RunCommand runs there, PressKeys is refused | MuxAPI |
+| K2 | RunCommand/PressKeys reach only panes in the window's active tab; switching tabs means guessing `tab:goto:N` | MuxAPI |
+| K3 | Three table commands act beyond their pane: `files:openInNewTab` (a PDF opens in its OS app unasked; programs ask first), `term:paste` (a line break in the clipboard runs in the shell), `files:mention` (writes into an agent's message box) | MuxAPI safety |
 | K4 | `files:trash` can't be undone on macOS (restore isn't implemented), for users too. #4603 refuses it to agents there | macOS gap |
 | K5 | The Files pane's stale `<Show>` crash: fixed in #4603 by reading a memo instead of the `<Show>` accessor. Confirmed gone on Linux (Maricon's rerun, 3 of 3 rounds); macOS rerun pending. It never reproduced in jsdom or on Windows | Root cause inferred |
-| K6 | Dialogs handle Escape themselves, so `app:escape` rarely resolves; PressKeys can't report it | App API reporting |
+| K6 | Dialogs handle Escape themselves, so `app:escape` rarely resolves; PressKeys can't report it | MuxAPI reporting |
 | K7 | Ctrl+F in a focused terminal goes to the shell on Windows/Linux, by design; the Help pane doesn't say so | Help accuracy |
 | K8 | Ctrl+Tab in an editor with one document falls through to the global `tab:next` | Behaviour (by design) |
 | K9 | `window:new` windows persist and are restored on the next launch, with every pane a run created | Test hygiene |
@@ -34,7 +34,7 @@ This plan turns them into work packages, one owner each, sized for one PR apiece
 | K13 | Dev pages reloaded mid-run, twice right after terminals were created; Vite already ignores `dist/`, `target/`, `*.md`, `*.json`, so the trigger is unknown | Dev env |
 | K14 | `npm install` in `task dev` rewrites `package-lock.json` with another npm's flags; it slipped into #4603 | Dev env |
 | K15 | The verification script changed files outside its scratch folder on the first runs (folders created and trashed a few levels up) | Process |
-| K16 | `editor:saveAs` notes the key as resolved before finding that Save As doesn't apply (non-scratch tab), so PressKeys reports a false pass | App API reporting |
+| K16 | `editor:saveAs` notes the key as resolved before finding that Save As doesn't apply (non-scratch tab), so PressKeys reports a false pass | MuxAPI reporting |
 | K17 | One `--editor` pane can't cover every editor row: a Markdown file opens in preview, where save, Save As and find don't apply, but `editor:togglePreview` needs Markdown | Script setup |
 
 Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket exit assertion on Windows, `gh pr merge --delete-branch` switching the checkout, cargo and a dev build sharing the target lock) aren't AgentMux bugs. They go into each agent's own notes, not this plan.
@@ -69,7 +69,7 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
   - focus the dev instance first;
   - restore the window and workspace afterwards.
 
-### AgentA@Area54 (Windows, App API)
+### AgentA@Area54 (Windows, MuxAPI)
 
 - **A1. `target` names a pane, whichever tab it shows** (K1).
   - `focus(target)` resolves a pane tab's id to its layout node and makes that tab the visible one.
@@ -103,7 +103,7 @@ Each PR:
 - links this plan;
 - reruns `verify-shortcuts.mjs` on its own platform and posts the matrix.
 
-Changes to the App API or the shortcut table also get a run on the other two platforms before merge, as in the shortcuts plan §6. When a package lands, its owner ticks it here in a small docs commit (§6).
+Changes to MuxAPI or the shortcut table also get a run on the other two platforms before merge, as in the shortcuts plan §6. When a package lands, its owner ticks it here in a small docs commit (§6).
 
 ## 5. Decisions for the owner
 

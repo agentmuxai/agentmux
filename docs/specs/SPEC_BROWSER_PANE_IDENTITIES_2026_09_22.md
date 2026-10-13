@@ -145,7 +145,7 @@ need either a CEF-fork patch or a structural workaround (§4.4).
 - G4. The identity is visible on the pane tab and pane header, not just
   inside the nav bar (the messaging widgets hide the nav bar via
   `browser:show_controls=false`).
-- G5. Agents can request it through the App API (`pane.open`) and
+- G5. Agents can request it through MuxAPI (`pane.open`) and
   widgets can declare it in `widgets.json`.
 - G6. OAuth popups opened from a private pane stay in that pane's
   identity. This is the whole point; a login flow that pops a window
@@ -296,7 +296,7 @@ logged at `warn`, and coerced to `shared`; the frontend hides the menu
 item on those platforms (§5.3), so users never see a control that
 silently does nothing.
 
-## 5. srv, App API, frontend
+## 5. srv, MuxAPI, frontend
 
 ### 5.1 srv
 
@@ -310,7 +310,7 @@ silently does nothing.
 - No new tables. No migration. Session restore already round-trips
   block meta.
 
-### 5.2 App API / MCP
+### 5.2 MuxAPI / MCP
 
 `pane.open` with `view: "browser", url, identity: "private"`. Surfaced
 through the existing MCP pane-open tool schema
@@ -439,7 +439,7 @@ archived data-dir-unification spec planned for cookies
   Phase 1. Phase 3 profile dirs need the same handling as `cef-cache`
   (the legacy-dir sweep in `commands/mod.rs:109-134` shows the pattern
   for cleaning up orphans).
-- `pane.open identity=private` over the App API is not a privilege
+- `pane.open identity=private` over MuxAPI is not a privilege
   escalation: it grants an agent *less* shared state, not more. No new
   authorization tier needed.
 
@@ -471,7 +471,7 @@ archived data-dir-unification spec planned for cookies
   notice shown once.
 - Pane tab, pane header tooltip and nav bar badge all show the private
   state; nothing changes visually for shared panes.
-- `pane.open view=browser identity=private` from the App API creates a
+- `pane.open view=browser identity=private` from MuxAPI creates a
   private pane; `identity=profile:x` is rejected with a clear error.
 - On Linux/macOS the option is hidden and the arg is coerced with a
   warn log; no CHECK crash is reachable.

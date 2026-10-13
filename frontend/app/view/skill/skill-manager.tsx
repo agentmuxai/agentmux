@@ -4,7 +4,7 @@
 /**
  * SkillManager — the Armory's "Skills" tab body. Context-free
  * list/create/edit/delete over the global Skill catalog (skill.catalog.*
- * App API via SkillCatalogModel). Every row here is global — per-agent
+ * MuxAPI via SkillCatalogModel). Every row here is global — per-agent
  * private skills live in the Agent-setup modal (AgentSkillsModal), not
  * here.
  */

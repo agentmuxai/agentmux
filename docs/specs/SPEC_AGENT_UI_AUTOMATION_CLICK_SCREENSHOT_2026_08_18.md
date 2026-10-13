@@ -1,4 +1,4 @@
-# SPEC: Agent UI Automation (Click + Screenshot) as a First-Class Agent App API Capability
+# SPEC: Agent UI Automation (Click + Screenshot) as a First-Class MuxAPI Capability
 
 Status: Phase 1 implemented (branch `agenty-0629j/feat-agent-ui-automation`)
 Date: 2026-08-18
@@ -101,7 +101,7 @@ back to automated tests + `tsc`/`cargo build` and ask the human to do the
 actual click-through. The repo owner reframed this as a gap in a *core*
 feature, not a one-off: agents should be first-class operators inside
 AgentMux, able to drive its UI (click, read rendered state, screenshot) the
-way any other App API capability (Shell, OpenMedia, FocusWindow, …) lets
+way any other MuxAPI capability (Shell, OpenMedia, FocusWindow, …) lets
 them operate the rest of the app.
 
 ## 1. The load-bearing fact: this is mostly already built

@@ -228,7 +228,7 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
         handleDocTabKey(e, tabs);
     };
 
-    // The App API's RunCommand runs the same tab actions as the keys.
+    // MuxAPI's RunCommand runs the same tab actions as the keys.
     onCleanup(
         registerPaneCommandRunner(ctx.blockId, (command) => {
             const action = docTabAction(command);

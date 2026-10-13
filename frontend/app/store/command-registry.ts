@@ -488,7 +488,7 @@ window.addEventListener("agentmux-event", ((e: CustomEvent) => {
     }
 }) as EventListener);
 
-// Listen for `open_agent` dispatched by the Rust IPC handler (App API).
+// Listen for `open_agent` dispatched by the Rust IPC handler (MuxAPI).
 // Creates a new agent pane with agentId pre-set so the AgentView auto-launches.
 // Reads the persisted ui:zoom before block creation so term:zoom is seeded
 // in the initial meta — this is the only open path for the normal user flow.

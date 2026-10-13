@@ -81,7 +81,7 @@ async fn write_then_history_records_a_version_with_default_provenance() {
     assert_eq!(versions[0].get("source").and_then(|v| v.as_str()), Some("agent_inferred"));
 }
 
-// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: this is the App API surface
+// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: this is MuxAPI surface
 // the `MemoryWrite` MCP tool actually calls — proves the publish keys by
 // the resolved canonical UUID (`version_agent_id`), not the raw `agent_id`
 // slug parameter this function otherwise takes throughout. In this

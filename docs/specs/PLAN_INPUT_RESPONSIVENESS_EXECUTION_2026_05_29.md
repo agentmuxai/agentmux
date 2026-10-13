@@ -93,10 +93,10 @@ Three candidates:
 **Q2: How to drive synthetic keystrokes without firing the agent?**
 
 Two options:
-- (a) Use the App API (`pane.open agent` + send synthetic keys via CDP `Input.dispatchKeyEvent`).
+- (a) Use MuxAPI (`pane.open agent` + send synthetic keys via CDP `Input.dispatchKeyEvent`).
 - (b) Bench the textarea in isolation, mounted in a fixture page outside the agent pane.
 
-**Decision: (a).** Same approach as the terminal bench — it drives a real pane via App API. Isolating the textarea would miss interaction with the surrounding pane (virtualized document above, status strip below). Need a "dry-run" mode: type characters into the textarea, never actually submit (never trigger an agent invocation, never spend tokens). Spec §6.1 already establishes the textarea is uncontrolled, so typing without submitting is the natural pattern.
+**Decision: (a).** Same approach as the terminal bench — it drives a real pane via MuxAPI. Isolating the textarea would miss interaction with the surrounding pane (virtualized document above, status strip below). Need a "dry-run" mode: type characters into the textarea, never actually submit (never trigger an agent invocation, never spend tokens). Spec §6.1 already establishes the textarea is uncontrolled, so typing without submitting is the natural pattern.
 
 **Q3: What latency target does the bench enforce?**
 
@@ -105,7 +105,7 @@ Per spec §2: P50 ≤ 16 ms, P95 ≤ 50 ms (the "internal snappy" budget for age
 ### Approach
 
 1. Copy [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs) skeleton.
-2. Open an agent pane via App API (`pane.open` with widget `agent`).
+2. Open an agent pane via MuxAPI (`pane.open` with widget `agent`).
 3. Focus the textarea (CDP `Element.focus` on the `.agent-input` selector).
 4. Drive N synthetic keystrokes (e.g. 200) via CDP `Input.dispatchKeyEvent`, each spaced ≥ 50 ms apart (avoid burst collapse).
 5. For each keystroke: timestamp at dispatch → wait for the matching `agent-keystroke` mark + next RAF callback → compute latency.

@@ -1,4 +1,4 @@
-# SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename)
+# SPEC: Test-Harness Access to MuxAPI (+ /wave → /agentmux rename)
 
 **Status:** draft
 Date: 2026-04-18
@@ -66,7 +66,7 @@ External processes can't obtain the key because:
 - The CEF host binding isn't reachable over any documented channel from
   outside the CEF process.
 
-Result: test harnesses have no way to call the app API. They currently
+Result: test harnesses have no way to call MuxAPI. They currently
 simulate user input via UIAutomation + mouse clicks, which is slow,
 flaky, layout-sensitive, and can't reach operations that don't have UI
 bindings (bulk data manipulation, fixture setup, etc).

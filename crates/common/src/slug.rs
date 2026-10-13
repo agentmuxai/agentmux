@@ -81,9 +81,11 @@ pub fn fork_slug(root_slug: &str, root_name: &str, branch_label: &str) -> String
 /// it is, natural casing included (`Agent2`, which PR titles and git authors
 /// carry); anything else gets `definition_slug`'s rule without lowercasing, so
 /// a fork's automatic name `Loap #3` routes as `Loap-3` instead of being
-/// refused (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F3).
+/// refused (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F3). A name with an
+/// `@` is an address (`agent2@narko`), not a name: it is left as it is, so it
+/// fails as an id instead of resolving to a local agent called `agent2-narko`.
 pub fn agent_route_name(name: &str) -> String {
-    if is_agent_id(name) {
+    if is_agent_id(name) || name.contains('@') {
         name.to_string()
     } else {
         dashed(name)
@@ -175,6 +177,7 @@ mod tests {
                 "My_Agent-2",
             ),
             ("Loap #3", "loap-3", "loap--3", "loap__3", "loap--3", "Loap-3"),
+            ("agent2@narko", "agent2-narko", "agent2-narko", "agent2_narko", "agent2-narko", "agent2@narko"),
         ];
         for (input, def, path, stem, js, route) in table {
             assert_eq!(definition_slug(input), *def, "definition_slug({input:?})");
@@ -182,7 +185,9 @@ mod tests {
             assert_eq!(file_stem(input), *stem, "file_stem({input:?})");
             assert_eq!(js_ascii_slug(input), *js, "js_ascii_slug({input:?})");
             assert_eq!(agent_route_name(input), *route, "agent_route_name({input:?})");
-            assert!(is_agent_id(&agent_route_name(input)), "agent_route_name({input:?}) is a valid id");
+            if !input.contains('@') {
+                assert!(is_agent_id(&agent_route_name(input)), "agent_route_name({input:?}) is a valid id");
+            }
         }
     }
 

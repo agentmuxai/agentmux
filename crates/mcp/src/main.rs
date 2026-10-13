@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! agentmux-mcp — MCP stdio server that exposes AgentMux's App API tools
+//! agentmux-mcp — MCP stdio server that exposes AgentMux's MuxAPI tools
 //! (`Shell`, `SendMessage`, memory, panes, …) to Claude.
 //!
 //! Claude Code launches this binary as an MCP server (via `.mcp.json`'s

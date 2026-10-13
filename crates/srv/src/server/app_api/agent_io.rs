@@ -524,7 +524,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                         // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
                         // does — see its comment (input.rs). Without this a
-                        // container agent opened via the App API path gets no
+                        // container agent opened via MuxAPI path gets no
                         // sidecar URL at all, same as the RPC path before this fix.
                         if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
                             env_vars.insert(

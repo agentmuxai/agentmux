@@ -71,7 +71,7 @@ Visible in CEF DevTools Performance tab (Timings row) and the dev-mode
 Perf HUD (`Ctrl+Shift+P`). Cost: ~50 ns each. See
 `SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md` §A1.
 
-### 2.3 Agent App API (programmatic access)
+### 2.3 MuxAPI (programmatic access)
 
 The backend WebSocket (`ws://<ws_endpoint>/ws`) exposes three operations
 used by the benchmark:
@@ -160,7 +160,7 @@ Full format documented in `SPEC_TEST_API_ACCESS.md` §5.
 | ~~`scripts/bench-cdp.mjs`~~ | *(removed — scripts cleanup 2026-06-18)* |
 | [`scripts/benchmarks/`](../../scripts/benchmarks) | Startup time + memory + bundle size |
 | [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1) | PowerShell helper to read `authkey.dev` |
-| [`tools/tests/pane-focus-stress.ps1`](../../tools/tests/pane-focus-stress.ps1) | App API harness via service endpoint |
+| [`tools/tests/pane-focus-stress.ps1`](../../tools/tests/pane-focus-stress.ps1) | MuxAPI harness via service endpoint |
 
 ---
 

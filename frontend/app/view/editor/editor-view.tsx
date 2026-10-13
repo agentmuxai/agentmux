@@ -122,7 +122,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // The pane's tabs on the shared strip and keys (PLAN_EDITOR_ON_SHARED_DOC_TABS).
     const docTabs = editorDocTabs(model);
 
-    // The editor's own commands, run by its keys and by the App API's
+    // The editor's own commands, run by its keys and by MuxAPI's
     // RunCommand alike. False when the command doesn't apply right now.
     const runEditorCommand = (command: string): boolean => {
         const tabAction = docTabAction(command);

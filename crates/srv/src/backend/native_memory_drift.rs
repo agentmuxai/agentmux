@@ -615,7 +615,7 @@ mod tests {
     }
 
     // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: an out-of-band write
-    // (bypassing both the WS RPC and App API surfaces entirely) must still
+    // (bypassing both the WS RPC and MuxAPI surfaces entirely) must still
     // make the Armory grid reactive — that's this whole module's reason to
     // exist, so its own publish path needs the same regression guard the
     // RPC handlers' publish calls get.

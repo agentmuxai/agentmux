@@ -72,7 +72,7 @@ A new `ContainerError::ImagePull { image, kind, detail }` replaces the pass-thro
 | `Network` | `no such host`, `timeout`, `connection refused`, `TLS handshake` | Could not reach the registry. Check the connection and any proxy configured in Docker, then try again, or run on this computer. |
 | `Other` | anything else | Could not download the image, with the daemon's text. |
 
-`ContainerError::user_message()` renders these, and a daemon that is not answering gets its own sentence ("Docker is not responding; start Docker Desktop"). Both call sites that start a container turn (`input.rs` and `agent_io.rs`) go through one helper that also writes the frame to the pane. The App API path previously wrote none.
+`ContainerError::user_message()` renders these, and a daemon that is not answering gets its own sentence ("Docker is not responding; start Docker Desktop"). Both call sites that start a container turn (`input.rs` and `agent_io.rs`) go through one helper that also writes the frame to the pane. MuxAPI path previously wrote none.
 
 The message begins "Couldn't start the container ..." and `muxspect_handlers::classify_last_error_source` learns that prefix, so the diagnostic still reports `container_spawn`.
 

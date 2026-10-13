@@ -25,9 +25,9 @@
 1771 crates/srv/src/backend/fs_ops/host_jobs.rs
 2216 crates/srv/src/backend/history/index.rs
 1901 crates/srv/src/backend/history/mod.rs
-3300 crates/srv/src/backend/lan_discovery.rs
+3294 crates/srv/src/backend/lan_discovery.rs
 1889 crates/srv/src/backend/providers.rs
-2450 crates/srv/src/backend/reactive/handler.rs
+2448 crates/srv/src/backend/reactive/handler.rs
 3127 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3385 crates/srv/src/identity/resolver/inject.rs

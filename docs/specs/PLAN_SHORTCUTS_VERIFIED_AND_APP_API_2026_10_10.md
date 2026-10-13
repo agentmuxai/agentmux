@@ -1,7 +1,7 @@
 # Plan — every shortcut in the Help pane works on every platform, and agents can drive them
 
 **Date:** 2026-10-10
-**Status:** active — owner decisions recorded (§8); phase 2 (App API) in #4593, fixes from the first cross-platform run in #4603.
+**Status:** active — owner decisions recorded (§8); phase 2 (MuxAPI) in #4593, fixes from the first cross-platform run in #4603.
 **Author:** AgentA@Area54 (Windows), with Masty@starpower and Maricon@charlie for the other platforms
 **Builds on:**
 - [../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md](../reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md) (the audit, by reading code; phases 3–6 shipped in #4323–#4328)
@@ -10,7 +10,7 @@
 ## 1. Goals
 
 1. **The Help pane is accurate on Windows, macOS and Linux.** Every key it lists does what its label says, on each platform, verified by pressing the key, not by reading code.
-2. **Agents can drive every shortcut through the App API,** and the same API is how we verify the shortcuts: an agent can run a shortcut's command, press its keys, and check what happened.
+2. **Agents can drive every shortcut through MuxAPI,** and the same API is how we verify the shortcuts: an agent can run a shortcut's command, press its keys, and check what happened.
 
 ## 2. What is true today
 
@@ -24,7 +24,7 @@ The Help pane's shortcut list is generated from the table (`keybindings/help.ts`
 | Help shows something the table doesn't drive | The Help pane's own zoom keys are hardcoded (`helpview.tsx`) and ignore remaps; "Shift + drag" is hand-written; a meta key on Linux is labelled "Win" |
 | A command that only works from its key | `term:copy`/`paste`/`clear` are no-ops in the global map (the terminal runs them itself; RunCommand reaches them through the terminal's own runner since phase 2); the command palette's registry diverges from the key handlers (`tab:close` skips the confirm dialog, `split:*` ignores `app:defaultnewblock`, most table ids aren't registered) |
 
-**App API coverage:** about six table commands have an equivalent tool (`NewTab`, `SetActiveTab`, `SetName` for tab rename, `ClosePane`, partial splits through the open-pane tools). There is no tool that runs a shortcut's command or presses a key with modifiers: `BrowserDispatchKey` sends only Enter, Tab, Escape, Backspace, Space and the arrows, unmodified, into the agent's own pane. `FocusWindow` reorders the window list but appears not to raise the window (code trace only).
+**MuxAPI coverage:** about six table commands have an equivalent tool (`NewTab`, `SetActiveTab`, `SetName` for tab rename, `ClosePane`, partial splits through the open-pane tools). There is no tool that runs a shortcut's command or presses a key with modifiers: `BrowserDispatchKey` sends only Enter, Tab, Escape, Backspace, Space and the arrows, unmodified, into the agent's own pane. `FocusWindow` reorders the window list but appears not to raise the window (code trace only).
 
 ## 3. Three layers of verification
 
@@ -32,8 +32,8 @@ A shortcut works only if all three hold, and each needs a different tool:
 
 | Layer | Question | How it is checked |
 |---|---|---|
-| **L1 Command** | Does the command do what the label says? | App API `RunCommand` (new, §4), then observe the result |
-| **L2 Page key** | Does the key, once in the page, resolve to that command in that context? | App API `PressKeys` (new, §4): real key events with modifiers, injected through the DevTools protocol into the window |
+| **L1 Command** | Does the command do what the label says? | MuxAPI `RunCommand` (new, §4), then observe the result |
+| **L2 Page key** | Does the key, once in the page, resolve to that command in that context? | MuxAPI `PressKeys` (new, §4): real key events with modifiers, injected through the DevTools protocol into the window |
 | **L3 OS key** | Does the key reach AgentMux at all on this platform? | OS-level key synthesis on each host: `SendInput` (Windows); `osascript`/System Events (macOS); on Linux, `xdotool` on an X11 session only and `ydotool` on Wayland (kernel uinput, so the compositor's grabs apply; one-time root setup for uinput access). XWayland plus `xdotool` doesn't count: AgentMux is a native Wayland client there, and XTEST events skip the compositor's grabs. A short manual pass confirms the suspected list in §2 |
 
 L1 and L2 run unattended from a script against a dev instance (§5). L3 is the per-platform part the partners own.
@@ -45,9 +45,9 @@ L1 and L2 run unattended from a script against a dev instance (§5). L3 is the p
 - Synthetic keys do trigger system shortcuts: a synthesized Ctrl+Arrow really switches Spaces. L3 needs the owner's go-ahead and an idle machine, and on macOS the Accessibility permission for the sending process, which only the owner can grant.
 - The automated pass never sends ⌘Q, ⌘W, or any key that closes a tab, pane or window, or deletes files; those are checked by hand.
 
-## 4. App API additions
+## 4. MuxAPI additions
 
-Three tools on the agent App API ([`crates/mcp`](../../crates/mcp)), served by srv and carried out by the frontend, following the path `UIClick` already uses (srv `ui_handlers.rs` → CEF host → page):
+Three tools on the agent MuxAPI ([`crates/mcp`](../../crates/mcp)), served by srv and carried out by the frontend, following the path `UIClick` already uses (srv `ui_handlers.rs` → CEF host → page):
 
 - **`ListShortcuts`** returns the effective table for this platform: command id, label, category, keys as the Help pane shows them, context rule, and whether the row is pane-local. Agents read what the user sees.
 - **`RunCommand(command, target?)`** runs a table command by id in the agent's window: global commands through the dispatcher's own `runKeyCommand` (not the separate command-palette registry), pane commands (`doctab:*`, `editor:*`, `files:*`, `term:*`) through the target pane's handler. `target` picks the pane (default: the focused pane) or tab. It returns whether the command ran and a short reason when it didn't ("no terminal focused", "fewer than two terminals").
@@ -99,7 +99,7 @@ For each PR that changes behaviour:
 ## 7. Phases and PRs
 
 1. **This plan.**
-2. **App API:** `ListShortcuts`, `RunCommand`, `PressKeys`, with srv routes, the host and frontend handlers, and tests. Palette routed through `runKeyCommand`.
+2. **MuxAPI:** `ListShortcuts`, `RunCommand`, `PressKeys`, with srv routes, the host and frontend handlers, and tests. Palette routed through `runKeyCommand`.
 3. **Verification script** and a first full run on all three platforms. The results go into §9 of this plan.
 4. **Fixes, from the results:**
    - rebind keys the OS takes, per platform;
@@ -114,7 +114,7 @@ For each PR that changes behaviour:
 
 **Decided 2026-10-10** (the owner: "proceed with best recommendations"):
 1. `RunCommand` and `PressKeys` act only in the window that holds the agent's own pane.
-2. Destructive commands keep the confirmation a user sees, and closing a pane the agent doesn't own keeps `ClosePane`'s 15-second undo. `files:deletePermanently` is not available through the App API at all (it can't be undone); `files:trash` is (it can).
+2. Destructive commands keep the confirmation a user sees, and closing a pane the agent doesn't own keeps `ClosePane`'s 15-second undo. `files:deletePermanently` is not available through MuxAPI at all (it can't be undone); `files:trash` is (it can).
 3. When the OS takes a key, AgentMux changes its default on that platform. First case: `pane:swap:*` on Linux, with a replacement that avoids GNOME's grabs (§9).
 4. The L3 setup (the Accessibility permission on starpower, `ydotool` with uinput access on charlie) is the owner's to do when a partner asks; L1 and L2 don't wait for it.
 

@@ -6,7 +6,7 @@
 // AgentMux inherited and fully retired 2026-04-12,
 // docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md — zero real usage of the
 // imported 20-subcommand surface). Not that CLI revived: a purpose-built
-// collection over the Agent App API, scoped per
+// collection over MuxAPI, scoped per
 // docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md — every subcommand
 // below maps to a real, verified-unsigned (`$AGENTMUX_AUTH_KEY`-gated, not
 // agent-identity-signed) REST route; a few `wsh` commands that looked
@@ -34,7 +34,7 @@ import { pathToFileURL } from "node:url";
 
 import { agentmuxFetch, readAgentmuxEnv } from "./lib/muxclient.mjs";
 
-const HELP = `muxsh — a terminal CLI over the Agent App API (no GUI required)
+const HELP = `muxsh — a terminal CLI over MuxAPI (no GUI required)
 
 usage:
   muxsh open <file>              open a file in an editor pane

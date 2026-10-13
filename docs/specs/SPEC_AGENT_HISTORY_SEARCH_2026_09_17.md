@@ -30,7 +30,7 @@ resolvable).
 ## 1. Problem
 
 An agent cannot search its own past. There is no verb for it anywhere in the
-App API.
+MuxAPI.
 
 What exists, and why each one doesn't answer the question:
 
@@ -100,7 +100,7 @@ what arguments" is answerable **structurally**, not by regexing prose. That is
 precisely failure #1.
 
 **Nothing new needs to be parsed, discovered, or indexed. This spec adds a
-search verb and an App API tool.**
+search verb and a MuxAPI tool.**
 
 ---
 
@@ -155,7 +155,7 @@ early and returns nothing reproduces exactly failure #1 — an agent concluding
 distinguishable from an exhausted budget, so the response always states which
 it was.
 
-### 3.3 App API tool
+### 3.3 MuxAPI tool
 
 ```
 SearchHistory {

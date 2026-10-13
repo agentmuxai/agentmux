@@ -14,7 +14,7 @@ follow below so the warning is never pushed below the fold. -->
 >   may not carry over cleanly across versions, so avoid storing anything
 >   you can't easily recreate.
 > - **Interfaces are still moving** — config files, accounts,
->   bundles, and the App API can change shape without a migration
+>   bundles, and MuxAPI can change shape without a migration
 >   path during alpha.
 > - **Platform coverage varies** — Windows gets the most testing right now;
 >   macOS and Linux builds are a bit further behind.
@@ -53,7 +53,7 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 
 - **Multi-provider agent panes** — Claude Code, Codex, Gemini, GitHub Copilot, Qwen, Kimi, OpenClaw, Pi, Mux Code and Antigravity as first-class providers, alongside terminal, editor, browser, file and media panes ([all widgets](#widgets)). Structured views of tool calls, reasoning, and diffs — not a terminal wrapper.
 - **Universal pane tabs** — every pane is a generic container that can hold any mix of widgets as tabs, not just more of its own type. A pane's own tab strip *is* its header (one row, not a header-plus-strip stack), and its "+" opens a picker of every widget type — agent, terminal, browser, editor, sysinfo, swarm, drone, and the rest — so you build up an agent-plus-terminal-plus-browser workspace inside a single pane instead of endlessly splitting. Inspired by [cmux](https://github.com/manaflow-ai/cmux)'s `Workspace → Pane → Surface → Panel` model. See [Panes and tabs](#panes-and-tabs) below.
-- **Agents drive the workspace** — Via the App API, a running agent can open panes, rename tabs, navigate the layout, and message peer agents — over a typed local WebSocket. Agents are operators, not passengers.
+- **Agents drive the workspace** — Through MuxAPI, a running agent can open panes, rename tabs, navigate the layout, and message peer agents, using the tools of its built-in MCP server. Agents are operators, not passengers.
 - **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
 - **Swarm** — A live view of every agent and its subagents, background tasks and todos, including agents on other machines you're connected to. Follow one agent, or broadcast a message to several at once.
 - **Accounts** — Sign-ins and keys for providers and services (Claude, Codex, GitHub, AWS, API keys and more), kept in Connectors → Accounts and bound to each agent, at most one per provider. They survive renames; switching an agent's account restarts that agent.
@@ -62,7 +62,7 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **AgentMux owns the session state** — Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity are invoked once per turn. Claude Code runs as a persistent stream, and Copilot, OpenClaw and Pi as long-lived [ACP](https://agentclientprotocol.com/) processes. Either way AgentMux holds the durable session state, so a conversation survives a restart of its CLI. Measured memory use is in [#4714](https://github.com/agentmuxai/agentmux/issues/4714): an idle AgentMux with one terminal commits about 740 MB on Windows, against about 1,010 MB for an idle VS Code.
 - **Reducer stack** — The launcher, host and sidecar each keep their state in a reducer with a structured event log, so "what mutated this state?" has one place to look.
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
-- **App API** — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and about 250 lower-level commands (panes, files, memory, skills, bundles, fleet, and more). Agents reach it through the built-in `agentmux` MCP server; external tools can call it directly. See [App API](#app-api).
+- **MuxAPI** (formerly the App API) — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and about 250 lower-level commands (panes, files, memory, skills, bundles, fleet, and more). Agents reach it through the built-in `agentmux` MCP server; external tools can call it directly. See [MuxAPI](#muxapi).
 - **Build your own widgets** — A widget is a folder with a `widget.json` and web files. It runs sandboxed, and installing it asks you to approve each permission it wants; an agent can build one and install it the same way. Manage them in Settings → Widgets. See [Build a widget](https://docs.agentmux.ai/build-a-widget/) and [`sdk/widget-sdk/`](sdk/widget-sdk).
 - **Across machines** — Find other AgentMux instances on your network (opt-in), message agents across machines over MuxBus, run terminals on SSH and WSL hosts (Connectors → Remotes), and watch a live agent feed from a paired phone. See [LAN discovery](https://docs.agentmux.ai/lan-discovery/) and [Warden](https://docs.agentmux.ai/warden/).
 - **Work queue and schedules** — Agents can enqueue, claim and finish shared tasks, and run prompts on a schedule with cron, which catches up on runs missed while the app was closed.
@@ -247,7 +247,7 @@ Everything else — `self-declared`, `network-claimed`, or a **failed** `unverif
 
 This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full tier and escalation rules live in the `SPEC_JEKT_*` specs in [`docs/specs/`](docs/specs), starting with [`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`](docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) and [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`](docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md); agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
 
-## App API
+## MuxAPI
 
 AgentMux exposes a local WebSocket RPC surface so external tools and agents can drive the host — open agent panes, send messages, read output, and more. It binds to loopback and is auth-gated per instance; turning on LAN access adds a listener per network interface, gated by its own key. Agents use it through the `agentmux` MCP server.
 
@@ -283,7 +283,7 @@ Four more crates support them:
 | Crate | Role |
 |---|---|
 | [`agentmux-common`](crates/common) | Shared utilities (path resolution, runtime mode, jekt signing) used by all of the above |
-| [`agentmux-mcp`](crates/mcp) | The `agentmux` MCP server each agent runs: its tools for panes, shells, memory, messages, the work queue and more, over the App API |
+| [`agentmux-mcp`](crates/mcp) | The `agentmux` MCP server each agent runs: its tools for panes, shells, memory, messages, the work queue and more, over MuxAPI |
 | [`agentmux-bashwrap`](crates/bashwrap) | Streams an agent's bash commands, and runs the hooks provider CLIs call |
 | [`agentmux-remote`](crates/remote) | AgentMux's helper on an SSH host: durable terminal sessions there |
 | [`agentmux-procstats`](crates/procstats) | Per-process CPU and memory, read without elevation, for the Tower pane |

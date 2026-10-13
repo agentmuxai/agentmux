@@ -177,7 +177,7 @@ If vitest is still above 3 min after step 7, add a two-way `--shard` matrix in t
 - **Step 5:** the long sleeps the plan named were all in `#[ignore]` tests. Only one slow test that runs waits purely on tokio time; it now uses a paused clock (10 s → 0.3 s). The other slow tests wait on real processes.
 - **Step 6** (split the Rust job across runners): not needed. Under nextest the test run is 92 s, and the remaining job time is compiling, which another runner would repeat.
 - **Step 11** (`useMuxEvent`): of 39 subscribe/cleanup sites, only 7 follow the plain pattern a hook would replace; the rest resubscribe on id changes or live at module level. Deferred.
-- **Step 12:** shipped as a ratchet (60 untyped handlers, may only fall). Most are App API commands whose caller is the Rust MCP server, so generated TS buys them nothing.
+- **Step 12:** shipped as a ratchet (60 untyped handlers, may only fall). Most are MuxAPI commands whose caller is the Rust MCP server, so generated TS buys them nothing.
 - **Step 13:** Codex turns now carry their figures (#4549), but the pane shows them only once the App Server transcript renders there (its translator gap). ACP's prompt response has no usage to read. The `ControllerStatusCore` consolidation is not needed for either and is deferred.
 - **Step 17:**
   - Done: the largest frontend test (#4552) and `storage/agents.rs` (#4553).

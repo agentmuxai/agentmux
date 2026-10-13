@@ -73,7 +73,7 @@ Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an O
 | 2 | `agentmux-srv/src/server/mod.rs` | 3,327 | 3,327 | **81** | Rust | `AppState`, the HTTP router (133 `.route(` calls), ~50 inline HTTP handlers, auth middleware |
 | 3 | `agentmux-mcp/src/main.rs` | 4,809 | 3,916 | 47 | Rust | MCP stdio server: `tools/list` and `call_tool` dispatch + HTTP call for all 75 tools (schemas live in `tool_schemas.rs`) |
 | 4 | `agentmux-srv/src/bootstrap.rs` | 2,440 | 2,402 | 61 | Rust | srv startup: logging, stores + migrations, background subsystems, listeners, delivery hooks |
-| 5 | `agentmux-srv/src/server/app_api/mod.rs` | 4,985 | 2,259 | 54 | Rust | App API: `open_pane`, `agent_define_core`, memory / global-memory / bundle / identity `*_impl` bodies |
+| 5 | `agentmux-srv/src/server/app_api/mod.rs` | 4,985 | 2,259 | 54 | Rust | MuxAPI: `open_pane`, `agent_define_core`, memory / global-memory / bundle / identity `*_impl` bodies |
 | 6 | `agentmux-srv/src/backend/storage/agents.rs` | 3,829 | 3,158 | 38 | Rust | `AgentDefinition` / `AgentInstance` storage, slugs, name keys, purge |
 | 7 | `agentmux-srv/src/server/reactive.rs` | 3,839 | 2,565 | 38 | Rust | Jekt delivery: four signature verifiers, tiers, `deliver`, reactive HTTP handlers |
 | 8 | `agentmux-srv/src/backend/storage/migrations.rs` | 3,022 | 2,381 | 40 | Rust | SQL schema DDL for five databases (`run_object_schema` alone is 558–1396) |
@@ -90,7 +90,7 @@ Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an O
 | 19 | [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | 1,400 | 1,400 | 28 | TSX | Block frame / header |
 | 20 | [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) | 2,085 | 2,085 | 17 | TS | Swarm view model |
 | 21 | `agentmux-srv/src/muxbus/cloud_subscriber.rs` | 2,012 | 1,511 | 23 | Rust | Cloud push subscription |
-| 22 | `agentmux-srv/src/server/app_api/session.rs` | 2,302 | 1,699 | 20 | Rust | Session App API (resume preflight etc.) |
+| 22 | `agentmux-srv/src/server/app_api/session.rs` | 2,302 | 1,699 | 20 | Rust | Session MuxAPI (resume preflight etc.) |
 | 23 | `agentmux-srv/src/backend/blockcontroller/persistent/mod.rs` | 1,674 | 1,674 | 19 | Rust | Persistent controller core |
 | 24 | [`frontend/app-init.ts`](../../frontend/app-init.ts) | 1,295 | 1,295 | 24 | TS | Frontend bootstrap |
 | 25 | `agentmux-srv/src/backend/blockcontroller/mod.rs` | 1,545 | 1,039 | 29 | Rust | Block controller registry |

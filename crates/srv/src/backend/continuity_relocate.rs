@@ -24,7 +24,8 @@ use crate::backend::session_backfill::session_file_path;
 
 const MARKER_SUFFIX: &str = ".agentmux-relocated";
 const TMP_INFIX: &str = ".agentmux-tmp-";
-/// How much of a session's end is read to check its last record parses.
+/// How much of a session's end is read first to find its last record; more
+/// is read when the record is larger.
 const TAIL_CHECK_BYTES: u64 = 256 * 1024;
 
 /// The session file `sid` for `cwd` under `config_dir`, or under the
@@ -58,25 +59,56 @@ fn global_twin(config_dir: &str) -> Option<PathBuf> {
 /// Whether `path` is a session the CLI can resume: a non-empty file whose
 /// last record parses (spec H5 — a file cut mid-write is not resumed).
 pub(crate) fn is_resumable_file(path: &Path) -> bool {
+    last_record(path, false).is_ok_and(|(_, record)| parses(&record))
+}
+
+/// Whether session `sid` for `cwd` under `config_dir` can be copied in by
+/// [`relocate`]: it exists ([`source_file`]) and holds a complete record. Its
+/// last record may still be being written, by a parent a fork starts from
+/// mid-turn: [`relocate`] cuts the copy back to its last complete one.
+pub(crate) fn can_relocate(config_dir: &str, cwd: &str, sid: &str) -> bool {
+    source_file(config_dir, cwd, sid)
+        .and_then(|p| last_record(&p, true).ok())
+        .is_some_and(|(_, record)| parses(&record))
+}
+
+/// `path`'s last record and the offset where it ends. With `complete_only`
+/// that is the last newline-ended record, so a record still being written
+/// is passed over; a file with no newline at all is one record either way,
+/// left to the parse to judge. Reads the file's end, widening the window
+/// until it holds the whole record, however large (a big tool result).
+fn last_record(path: &Path, complete_only: bool) -> std::io::Result<(u64, Vec<u8>)> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(path) else { return false };
-    let Ok(len) = f.metadata().map(|m| m.len()) else { return false };
-    if len == 0 {
-        return false;
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    let mut window = TAIL_CHECK_BYTES;
+    loop {
+        let start = len.saturating_sub(window);
+        f.seek(SeekFrom::Start(start))?;
+        let mut tail = Vec::new();
+        f.read_to_end(&mut tail)?;
+        let newline_before = |at: usize| tail[..at].iter().rposition(|b| *b == b'\n');
+        let end = match (complete_only, newline_before(tail.len())) {
+            (false, _) => Some(tail.len()),
+            (true, Some(at)) => Some(at + 1),
+            (true, None) => (start == 0).then_some(tail.len()),
+        };
+        if let Some(end) = end {
+            let body = tail[..end].iter().rposition(|b| !b.is_ascii_whitespace()).map_or(0, |at| at + 1);
+            match newline_before(body) {
+                Some(at) => return Ok((start + end as u64, tail[at + 1..body].to_vec())),
+                None if start == 0 => return Ok((end as u64, tail[..body].to_vec())),
+                None => {}
+            }
+        }
+        window = window.saturating_mul(4);
     }
-    let start = len.saturating_sub(TAIL_CHECK_BYTES);
-    if f.seek(SeekFrom::Start(start)).is_err() {
-        return false;
-    }
-    let mut tail = Vec::new();
-    if f.read_to_end(&mut tail).is_err() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(&tail);
-    text.lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .is_some_and(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
+}
+
+/// Whether `record` is one JSON value (an empty one isn't: an empty file
+/// isn't resumable).
+fn parses(record: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(record).is_ok()
 }
 
 /// A copy [`relocate`] placed, with the marker that makes it this
@@ -105,13 +137,21 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
     // write straight into the winner's copy (codex P1 on #3924).
     let token = uuid::Uuid::new_v4().simple().to_string();
     let tmp = dir.join(format!("{sid}.jsonl{TMP_INFIX}{owner_uid}.{token}"));
-    let bytes = match std::fs::copy(src, &tmp) {
+    let bytes = match std::fs::copy(src, &tmp).and_then(|_| trim_to_complete_records(&tmp)) {
         Ok(b) => b,
         Err(e) => {
             let _ = std::fs::remove_file(&tmp);
             return Err(format!("copy {}: {e}", src.display()));
         }
     };
+    // The source may be live: a fork may start while its parent writes a
+    // turn. What was copied is cut back to its last complete record above, a
+    // stable snapshot the fork branches from; it is placed only if the CLI
+    // can resume it.
+    if !is_resumable_file(&tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("{} has no complete record to fork from", src.display()));
+    }
     let marker = marker_for(&dest, &token);
     let record = serde_json::json!({ "owner_uid": owner_uid, "source": src.to_string_lossy(), "bytes": bytes });
     let placed = std::fs::write(&marker, record.to_string())
@@ -123,6 +163,19 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
         return Err(e);
     }
     Ok(Relocated { copy: dest, marker })
+}
+
+/// Cut `path` back to its last complete (newline-ended) record: a copy of a
+/// session file another process is appending to may end mid-record. Returns
+/// the kept length. A tail with no newline at all is left as it is; the
+/// resumability check that follows judges it.
+fn trim_to_complete_records(path: &Path) -> std::io::Result<u64> {
+    let (keep, _) = last_record(path, true)?;
+    let f = std::fs::OpenOptions::new().write(true).open(path)?;
+    if keep < f.metadata()?.len() {
+        f.set_len(keep)?;
+    }
+    Ok(keep)
 }
 
 /// Give the finished copy its real name, only if nothing has it: two spawns
@@ -247,6 +300,60 @@ mod tests {
         assert!(!is_resumable_file(&cut), "a file cut mid-record");
         assert!(!is_resumable_file(&empty));
         assert!(!is_resumable_file(&d.path().join("missing.jsonl")));
+    }
+
+    /// A last record larger than the first read of the file's end (a big
+    /// tool result) is still found whole (#4748).
+    #[test]
+    fn a_record_larger_than_the_tail_window_is_read_whole() {
+        let (from, to) = (cfg(), cfg());
+        let big = format!("{{\"result\":\"{}\"}}
+", "x".repeat(TAIL_CHECK_BYTES as usize * 2));
+        let src = write_session(from.path(), "big", &format!("{{\"turn\":1}}
+{big}{{\"tur"));
+        assert!(!is_resumable_file(&src));
+        assert!(can_relocate(&s(from.path()), CWD, "big"));
+        let r = relocate(&src, &s(to.path()), CWD, "big", "uid-1").unwrap();
+        assert_eq!(std::fs::read_to_string(&r.copy).unwrap(), format!("{{\"turn\":1}}
+{big}"));
+        assert!(is_resumable_file(&r.copy));
+    }
+
+    /// A parent mid-turn can still be forked from: the gate asks whether a
+    /// copy would hold a complete record, not whether the live file ends on
+    /// one (#4748).
+    #[test]
+    fn a_source_mid_record_can_be_relocated_but_not_resumed_in_place() {
+        let d = cfg();
+        let live = write_session(d.path(), "live", "{\"turn\":1}
+{\"tur");
+        let partial = write_session(d.path(), "partial", "{\"tur");
+        assert!(!is_resumable_file(&live));
+        assert!(can_relocate(&s(d.path()), CWD, "live"));
+        assert!(!can_relocate(&s(d.path()), CWD, "partial"), "no complete record");
+        assert!(!can_relocate(&s(d.path()), CWD, "missing"));
+    }
+
+    /// A source still being written may end mid-record: the copy stops at the
+    /// last complete one, and a source with none is refused (#4748).
+    #[test]
+    fn a_copy_of_a_live_session_ends_on_its_last_complete_record() {
+        let (from, to) = (cfg(), cfg());
+        let src = write_session(from.path(), "live", "{\"turn\":1}
+{\"turn\":2}
+{\"tur");
+        let r = relocate(&src, &s(to.path()), CWD, "live", "uid-1").unwrap();
+        assert_eq!(std::fs::read_to_string(&r.copy).unwrap(), "{\"turn\":1}
+{\"turn\":2}
+");
+        assert!(std::fs::read_to_string(&src).unwrap().ends_with("{\"tur"), "the source is untouched");
+
+        let (from, to) = (cfg(), cfg());
+        let src = write_session(from.path(), "partial", "{\"tur");
+        assert!(relocate(&src, &s(to.path()), CWD, "partial", "uid-1").is_err());
+        let dest = session_file_path(&s(to.path()), CWD, "partial").unwrap();
+        assert!(!dest.exists(), "nothing placed");
+        assert_eq!(std::fs::read_dir(dest.parent().unwrap()).map(|d| d.count()).unwrap_or(0), 0, "no temp copy left");
     }
 
     #[test]

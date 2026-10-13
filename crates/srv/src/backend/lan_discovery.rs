@@ -738,15 +738,9 @@ impl LanDiscovery {
             {
                 let mut instances = self.instances.write();
                 for (key, peer) in outcomes {
-                    if let Some(peer) = peer {
-                        if let Some(entry) = instances.get_mut(&key) {
-                            entry.last_polled_ok = agentmux_common::time::now_secs_u64();
-                            if entry.agents != peer.names || entry.agent_status != peer.status {
-                                entry.agents = peer.names;
-                                entry.agent_status = peer.status;
-                                changed = true;
-                            }
-                        }
+                    if let Some(entry) = instances.get_mut(&key) {
+                        let now = agentmux_common::time::now_secs_u64();
+                        changed |= agent_names::apply_agent_names_poll(entry, peer, now);
                     }
                 }
             }

@@ -98,12 +98,12 @@ A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`
 - `bundle.import.preview` returns `widgets`: each widget's name, version, author, kind, permissions, hash, signature (§2.3), the version installed here if any, and why it can't be imported, if it can't.
 - The preview modal gains a **Widgets** section: each widget's name and version, its signature line and its permissions in the words of spec §6.4, with a checkbox, on by default. It says plainly: "Each widget asks for your approval before it runs." A widget already installed and approved at the same files and key is shown as such and not offered (one installed but still waiting is offered, and asks again); one that would replace an installed version says so.
 - `bundle.import.commit` takes `include_widgets: [id]`. After the bundle is written, srv reads the archive again, holds it to the digest the user previewed, copies each chosen widget into `~/.agentmux/widgets/<id>/` (replacing an installed version), and opens the normal approval prompt for each, as "The bundle "<name>" wants to install <widget>". **A bundle never approves a widget**: they arrive `needs_approval` (or `changed`), exactly as if installed from a folder, and declining one leaves the rest of the bundle imported. The commit answers each widget's outcome: `waiting`, `unchanged` or `failed` with why.
-- An agent importing a bundle through the App API gets the same: the widgets wait for the user's approval, which an agent can't give. (`bundle.import_for_agent` doesn't carry widgets yet.)
+- An agent importing a bundle through MuxAPI gets the same: the widgets wait for the user's approval, which an agent can't give. (`bundle.import_for_agent` doesn't carry widgets yet.)
 
 ### 3.4 Export
 
 - `bundle.export` takes `widgets: [id]` (with `format: "zip"`): installed, approved, sandboxed widgets to include. Export writes their **approved** files, each hashed again against the approval (never a newer, unapproved copy on disk), with `widget.sig` when it still names the approved signer, and lists them in `components.widgets`.
-- AgentMux's UI has no bundle export button today; agents export through the App API. A widget picker belongs with that button when it comes.
+- AgentMux's UI has no bundle export button today; agents export through MuxAPI. A widget picker belongs with that button when it comes.
 
 ### 3.5 What the agent is told
 

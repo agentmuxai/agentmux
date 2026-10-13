@@ -90,7 +90,7 @@ it).
 >   may not carry over cleanly across versions, so avoid storing anything
 >   you can't easily recreate.
 > - **Interfaces are still moving** — config files, identity bundles,
->   memory bundles, and the App API can change shape without a migration
+>   memory bundles, and MuxAPI can change shape without a migration
 >   path during alpha.
 > - **Platform coverage varies** — Windows gets the most testing right now;
 >   macOS and Linux builds are a bit further behind.

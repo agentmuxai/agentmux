@@ -3,6 +3,7 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
+import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { MOS } from "@/app/store/global";
 import { revealBlockLocally } from "@/app/util/reveal-block";
 import { setActiveBlockInStack, type NodeModel } from "@/layout/index";
@@ -11,6 +12,7 @@ import { createMemo } from "solid-js";
 import { agentModels } from "./agent-models";
 import { closeAgentTab } from "./close-agent-tab";
 import { useOpenDefinitionMap } from "./components/AgentPicker";
+import { forkPills } from "./fork/fork-set";
 import { useForkSet } from "./fork/useForkSet";
 
 /**
@@ -84,9 +86,9 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     const agentId = () => activeBlockData()?.meta?.["agentId"];
 
     // Fork tabs: conversations sharing this one's `parent_id` lineage that
-    // are open in ANOTHER top-level pane, shown as extra pills (PaneChrome
-    // dedupes them against this pane's own stack) so cross-pane
-    // fork-switching keeps working.
+    // are open in ANOTHER top-level pane of this pane's own window tab, shown
+    // as extra pills (PaneChrome dedupes them against this pane's own stack)
+    // so cross-pane fork-switching keeps working.
     const [openDefinitions] = useOpenDefinitionMap();
     // ReAgent P2: reads the active tab's OWN agentDefinitions
     // (agent-model.ts) instead of calling useAgentDefinitions() again here
@@ -103,18 +105,20 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // with no open blockId anywhere can't be jumped to, so it isn't offered.
     const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
 
-    // Forks open in ANOTHER pane appear as extra pills after this pane's own
-    // stack members, labeled with their branch/definition title.
+    // Forks open in ANOTHER pane of this window tab appear as extra pills
+    // after this pane's own stack members (`forkPills`): each fork's block in
+    // this tab, out of every block its definition is open in. `getNodeByBlockId`
+    // reads `leafs()`, so the pills follow this tab's layout.
     const extraTabs = () =>
-        switchableForks()
-            .filter((f) => !!f.blockId)
-            .map((f) => ({ blockId: f.blockId!, label: f.title }));
+        forkPills(switchableForks(), (f) =>
+            [f.blockId, ...getOpenBlockIdsForDefinition(f.definitionId)].find((b) => !!b && !!layoutModel.getNodeByBlockId(b)),
+        );
 
     // Activating a tab has two cases, both "switch," neither "create": (1)
     // the target block already lives in THIS pane's own block-stack — swap
     // the active member in place; (2) a fork open as its own separate
-    // top-level pane — reveal it via revealBlockLocally, same as the
-    // picker's "Switch to existing" flow already does.
+    // top-level pane of this window tab — reveal it via revealBlockLocally,
+    // same as the picker's "Switch to existing" flow already does.
     const handleTabSwitch = (targetBlockId: string) => {
         if (targetBlockId === activeBlockId()) return;
         const node = getOwnNode();

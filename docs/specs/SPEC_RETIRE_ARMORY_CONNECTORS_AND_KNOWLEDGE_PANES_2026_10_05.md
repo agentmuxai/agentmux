@@ -87,7 +87,7 @@ Personal) is `armory:memory:subsection` (`armory-model.ts`).
 | Bundle summary pane "Edit/Manage in Identity & Memory" | [`frontend/app/view/bundle-summary.tsx`](../../frontend/app/view/bundle-summary.tsx) |
 | Layout files (type `"armory"`, `config.section`) | [`crates/srv/src/backend/layout_file.rs`](../../crates/srv/src/backend/layout_file.rs) |
 
-No MCP or App API tool opens the Armory.
+No MCP or MuxAPI tool opens the Armory.
 
 ### 1.2 Three problems with it as it is
 
