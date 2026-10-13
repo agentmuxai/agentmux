@@ -141,23 +141,98 @@ export function eventShapedHandlers(sources) {
     return errors;
 }
 
+/** Event-name constants declared in any source (`const EVENT_AGENT_SHUTDOWN = "agent:shutdown"`,
+ *  or `= WpsEvent.X`), by name. */
+function eventConsts(sources, wps) {
+    const byFile = new Map();
+    const everywhere = new Map();
+    for (const [path, text] of sources) {
+        const own = new Map();
+        for (const m of text.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*(?::\s*string\s*)?=\s*(?:"([^"]+)"|WpsEvent\.(\w+))/g)) {
+            const name = m[2] ?? wps.get(m[3]);
+            if (!name) continue;
+            own.set(m[1], name);
+            if (!everywhere.has(m[1])) everywhere.set(m[1], new Set());
+            everywhere.get(m[1]).add(name);
+        }
+        byFile.set(path, own);
+    }
+    // The constant declared in the same file wins; one imported from another is used only when
+    // every file declaring it means the same event. Otherwise it's unresolved.
+    return {
+        get(path, ident) {
+            const own = byFile.get(path)?.get(ident);
+            if (own) return own;
+            const all = everywhere.get(ident);
+            return all?.size === 1 ? [...all][0] : undefined;
+        },
+    };
+}
+
+/** `EventReadHistoryCommand` reads of a typed event outside `mps-history.ts`'s
+ *  `readMuxEventHistory`, which returns the stored payloads typed. The event is named in the
+ *  call's `event:` field as `WpsEvent.<Key>`, a literal, a constant, or a per-id template. */
+export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set()) {
+    const errors = [];
+    const consts = eventConsts(sources, wps);
+    const nameOf = (path, e) => {
+        if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "WpsEvent") return wps.get(e.name.text);
+        if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+        if (ts.isIdentifier(e)) return consts.get(path, e.text);
+        if (ts.isTemplateExpression(e) && perIdPrefixes.has(e.head.text)) return `${e.head.text}<id>`;
+        return undefined;
+    };
+    for (const [path, text] of sources) {
+        if (path.endsWith("app/store/mps-history.ts") || !text.includes("EventReadHistoryCommand")) continue;
+        const sf = sourceFile(path, text);
+        const lineOf = (n) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+        const visit = (node) => {
+            const named = (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "EventReadHistoryCommand";
+            if (named) {
+                // Only a direct call (`X.EventReadHistoryCommand(…)` or `X["EventReadHistoryCommand"](…)`)
+                // can be checked; an alias, a destructured reference or the name as a string would
+                // hide the call, so any other reference is refused.
+                const access = node.parent;
+                const call = access?.parent;
+                const member =
+                    (ts.isPropertyAccessExpression(access) && access.name === node) ||
+                    (ts.isElementAccessExpression(access) && access.argumentExpression === node);
+                const direct = member && ts.isCallExpression(call) && call.expression === access;
+                // The stub's own declaration (`EventReadHistoryCommand(client, …) {`) names it too.
+                const declared = ts.isIdentifier(node) && (ts.isMethodDeclaration(access) || ts.isMethodSignature(access) || ts.isPropertySignature(access)) && access.name === node;
+                if (!declared && !direct) {
+                    errors.push(`${path}:${lineOf(node)}: EventReadHistoryCommand referenced other than by calling it; call it directly, or read a typed event's history with readMuxEventHistory (app/store/mps-history.ts)`);
+                } else if (direct) {
+                    // Allowed only when the event is named inline and isn't typed. A request built
+                    // elsewhere, or an event this can't resolve, is refused: it may be a typed one.
+                    const request = call.arguments.find((a) => ts.isObjectLiteralExpression(a));
+                    const prop = request?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "event");
+                    const name = prop && nameOf(path, prop.initializer);
+                    const perId = name && [...perIdPrefixes].some((p) => name.startsWith(p));
+                    if (!name) {
+                        errors.push(`${path}:${lineOf(call)}: EventReadHistoryCommand without an event named inline (\`event: WpsEvent.X\`, a literal or a constant); a typed event's history is read with readMuxEventHistory (app/store/mps-history.ts)`);
+                    } else if (typed.has(name) || perId) {
+                        errors.push(`${path}:${lineOf(call)}: "${name}" has a typed payload; read its history with readMuxEventHistory (app/store/mps-history.ts), not EventReadHistoryCommand`);
+                    }
+                }
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(sf);
+    }
+    return errors;
+}
+
 /** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
  *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal, or a
  *  per-id event as a template literal starting with one of `perIdPrefixes`. */
 export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Set()) {
     const errors = [];
-    // A subscription can also name its event through a string constant of its own
-    // (`const EVENT_AGENT_SHUTDOWN = "agent:shutdown"`), declared in any source.
-    const consts = new Map();
-    for (const [, text] of sources) {
-        for (const m of text.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*(?::\s*string\s*)?=\s*(?:"([^"]+)"|WpsEvent\.(\w+))/g)) {
-            const name = m[2] ?? wps.get(m[3]);
-            if (name) consts.set(m[1], name);
-        }
-    }
+    // A subscription can also name its event through a string constant of its own.
+    const consts = eventConsts(sources, wps);
     for (const [path, text] of sources) {
         for (const m of text.matchAll(/eventType:\s*(?:WpsEvent\.(\w+)|"([^"]+)"|([A-Z][A-Z0-9_]*)\b)/g)) {
-            const name = m[1] ? wps.get(m[1]) : m[2] ?? consts.get(m[3]);
+            const name = m[1] ? wps.get(m[1]) : m[2] ?? consts.get(path, m[3]);
             if (!name || !typed.has(name)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: "${name}" has a typed payload; subscribe with onMuxEvent(WpsEvent.${m[1] ?? "…"}, (data) => …), not muxEventSubscribe`);
@@ -169,11 +244,12 @@ export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Se
         }
         // Any other use of a typed event's WpsEvent name, such as a list mapped into
         // `muxEventSubscribe({ eventType, … })`, hides how it is subscribed. Allowed: onMuxEvent's
-        // first argument, `eventType:` (checked above), an RPC's `event:` field, and a named constant.
+        // first argument, readMuxEventHistory's, `eventType:` (checked above), an RPC's `event:` field
+        // (EventReadHistoryCommand's is checked by untypedHistoryReads), and a named constant.
         for (const m of text.matchAll(/WpsEvent\.(\w+)\b/g)) {
             const name = wps.get(m[1]);
             if (!name || !typed.has(name)) continue;
-            if (/(?:onMuxEvent\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
+            if (/(?:onMuxEvent\(|readMuxEventHistory\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
             // A comment naming the event subscribes nothing.
             if (inComment(path, text, m.index)) continue;
             const line = text.slice(0, m.index).split("\n").length;
@@ -208,6 +284,7 @@ async function main() {
     const sources = frontendSources();
     errors.push(...untypedSubscriptions(sources, new Set(fixed.map((r) => r.event)), wps, perIdPrefixes));
     errors.push(...eventShapedHandlers(sources));
+    errors.push(...untypedHistoryReads(sources, new Set(fixed.map((r) => r.event)), wps, perIdPrefixes));
     if (errors.length) {
         console.error(`gen-mux-events: ${errors.length} problem(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`);
         process.exit(1);

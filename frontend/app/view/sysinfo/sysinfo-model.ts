@@ -10,13 +10,12 @@ import type { SignalAtom } from "@/util/util";
 import { createSignalAtom } from "@/util/util";
 
 import { getConnStatusAtom } from "@/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
 import { WpsEvent } from "@/app/store/mps-events";
-import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
-import { convertMuxEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
+import { convertTimeSeriesToDataItem, getGapThresholdMs } from "./sysinfo-util";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { readMuxEventHistory } from "@/app/store/mps-history";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer
@@ -323,13 +322,8 @@ class SysinfoViewModel {
         try {
             const numPoints = this.numPoints();
             const connName = this.connection();
-            const initialData = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
-                event: WpsEvent.SysInfo,
-                scope: connName,
-                maxitems: numPoints,
-            });
-            if (initialData == null) return;
-            const initialDataItems: DataItem[] = initialData.map(convertMuxEventToDataItem);
+            const initialData = await readMuxEventHistory(WpsEvent.SysInfo, connName, numPoints);
+            const initialDataItems: DataItem[] = initialData.map(convertTimeSeriesToDataItem);
             this.resetData(initialDataItems);
         } catch (e) {
             console.log("Error loading initial data for sysinfo", e);
