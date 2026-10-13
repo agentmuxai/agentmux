@@ -535,7 +535,9 @@ so an object also embeds its `.dwo` name, derived from `-o`: an A compiled to
 `/tmp/A.o` never equalled the shipped object, and `B.o` and `C.o` always
 differed by name, so the no-op check could never fire. Each compile runs its
 command unchanged from a temporary sibling of the build directory (same depth,
-`gen/` and the rest symlinked, its own `obj/`).
+`gen/` and the rest symlinked, its own `obj/`). On a module-enabled build (macOS,
+Chromium 154) that `obj/` also links `obj/build`, where the prebuilt Clang modules
+every compile reads live; without it no compile could run there (CEF 154 r3).
 
 Expect **two** `OK` lines on macOS, one on Linux. `views_caption_rightclick_passthrough` is not listed
 because it adds a symbol and §7.2 already covers it.

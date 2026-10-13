@@ -219,5 +219,31 @@ if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'patch is a no-op'; then
   ok "patches: a no-op patch is reported, not silently verified"
 else bad "patches no-op detection" "rc=$rc"; fi
 
+# A module-enabled build (macOS, Chromium 154): every compile reads prebuilt
+# Clang modules from obj/build/modules, relative to the build dir. The scratch
+# dir's own obj/ had none, so every compile failed with "module file ... not
+# found" and nothing could be verified (CEF 154 r3 on macOS, cef#12).
+MT="$TMP/mbuild"; mkdir -p "$MT/out/build/obj/build/modules/system" "$MT/bin"
+( cd "$MT" && git init -q . )
+sed 's/^    -MF) shift 2 ;;$/    -MF) shift 2 ;;\n    -fmodule-file=*) [ -f "${1#-fmodule-file=}" ] || { echo "fatal error: module file '"'"'${1#-fmodule-file=}'"'"' not found" >\&2; exit 1; }; shift ;;/' "$PT/bin/fakecc" > "$MT/bin/fakecc"
+cat > "$MT/bin/ninja" <<CC
+#!/usr/bin/env bash
+echo "fakecc -MMD -MF obj/x.o.d -fmodule-file=obj/build/modules/system/module.pcm -c ../../src.cc -o obj/x.o"
+CC
+chmod +x "$MT/bin/fakecc" "$MT/bin/ninja"
+echo "prebuilt module" > "$MT/out/build/obj/build/modules/system/module.pcm"
+echo "pristine body" > "$MT/src.cc"
+git -C "$MT" add -A && git -C "$MT" -c user.email=t@t -c user.name=t commit -qm pristine
+echo "patched body" > "$MT/src.cc"
+( cd "$MT/out/build" && PATH="$MT/bin:$PATH" fakecc -MF obj/x.o.d -fmodule-file=obj/build/modules/system/module.pcm -c ../../src.cc -o obj/x.o )
+PCM_BEFORE=$(shasum < "$MT/out/build/obj/build/modules/system/module.pcm")
+out=$(PATH="$MT/bin:$PATH" "$PSCRIPT" --build-dir "$MT/out/build" --pair "src.cc:obj/x.o" 2>&1); rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '^OK   src.cc'; then
+  ok "patches: a module-enabled build compiles in the scratch dir (prebuilt modules reachable)"
+else bad "patches with prebuilt modules" "rc=$rc out=$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"; fi
+if [ "$PCM_BEFORE" = "$(shasum < "$MT/out/build/obj/build/modules/system/module.pcm")" ]; then
+  ok "patches: the real prebuilt modules are untouched"
+else bad "patches: a prebuilt module was modified"; fi
+
 printf '\ncef-verify.test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
