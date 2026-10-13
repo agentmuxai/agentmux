@@ -14,7 +14,7 @@ import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { muxbusDelivery, muxbusIndicator } from "@/store/muxbus-delivery";
 
 /** How often the indicator re-reads the clock, for the reconnecting delay. */
-export const INDICATOR_CLOCK_MS = 15_000;
+const INDICATOR_CLOCK_MS = 15_000;
 
 export function MuxBusIndicator(): JSX.Element {
     const muxbus = useMuxBusStatus();

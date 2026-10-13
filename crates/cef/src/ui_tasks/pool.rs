@@ -11,15 +11,15 @@ use crate::state::AppState;
 #[cfg(not(target_os = "windows"))]
 use super::get_window_on_ui;
 
-/// Windows-only: drive the CEF Views `Window` set_bounds() + show() for a
-/// promoted pool window — the same path the macOS/Linux promote uses
-/// (`PromotePoolWindowTask`). The Windows promote positions the raw HWND via
-/// Win32 and never touched the Views `Window`, so the browser's view-hierarchy /
-/// compositor visibility never flipped from hidden -> the promoted window painted
-/// BLANK despite a valid DOM. This is the macOS-vs-Windows asymmetry. Bounds are
-/// DIP (CEF Views space); the Win32 caller converts physical -> DIP via
-/// `app::dpi_scale_at`. Must run on the UI thread.
-/// See docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md.
+// Windows-only: drive the CEF Views `Window` set_bounds() + show() for a
+// promoted pool window — the same path the macOS/Linux promote uses
+// (`PromotePoolWindowTask`). The Windows promote positions the raw HWND via
+// Win32 and never touched the Views `Window`, so the browser's view-hierarchy /
+// compositor visibility never flipped from hidden -> the promoted window painted
+// BLANK despite a valid DOM. This is the macOS-vs-Windows asymmetry. Bounds are
+// DIP (CEF Views space); the Win32 caller converts physical -> DIP via
+// `app::dpi_scale_at`. Must run on the UI thread.
+// See docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md.
 // Windows-only: run the macOS-parity CEF Views show() on the UI thread. The
 // Windows promote runs on the IPC thread, but CEF Views calls are UI-thread-only,
 // so the set_bounds()+show() must be posted here (mirroring the macOS
@@ -391,9 +391,9 @@ pub fn post_promote_pane_pool_window(
 //
 // Spec: docs/specs/SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
 
-/// Resize the mother window to `new_w_dip` on macOS/Linux via CEF Views
-/// `set_bounds`. Width is in CSS/DIP pixels (same coordinate space as the
-/// floater args); height is read from the current bounds and preserved.
+// Resize the mother window to `new_w_dip` on macOS/Linux via CEF Views
+// `set_bounds`. Width is in CSS/DIP pixels (same coordinate space as the
+// floater args); height is read from the current bounds and preserved.
 #[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct ResizeMotherWindowTask {
@@ -434,12 +434,12 @@ pub fn post_resize_mother_window(state: &Arc<AppState>, label: &str, new_w_dip: 
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-/// Resize the mother window to `new_w_dip` on Windows via Win32 `SetWindowPos`.
-/// `new_w_dip` is in CSS/DIP pixels; this function converts to physical pixels
-/// using the source window's monitor DPI before calling `SetWindowPos`.
-/// `hwnd` is resolved directly from `source_window_label` in
-/// `open_floating_pane_window` (not the cascade-hook fallback `parent_main_hwnd`)
-/// so the resize always targets the actual source window.
+// Resize the mother window to `new_w_dip` on Windows via Win32 `SetWindowPos`.
+// `new_w_dip` is in CSS/DIP pixels; this function converts to physical pixels
+// using the source window's monitor DPI before calling `SetWindowPos`.
+// `hwnd` is resolved directly from `source_window_label` in
+// `open_floating_pane_window` (not the cascade-hook fallback `parent_main_hwnd`)
+// so the resize always targets the actual source window.
 #[cfg(target_os = "windows")]
 wrap_task! {
     pub struct ResizeMotherWindowWin32Task {

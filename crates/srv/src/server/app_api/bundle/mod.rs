@@ -162,13 +162,11 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // (`ValidationReport`, ts-rs-generated) and that is where the drift risk
 // actually was; the request stays a `Value` on purpose.
 fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
-    let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
-        Box::pin(async move {
-            let report = bundle_validate_impl(data)?;
-            Ok(Some(serde_json::to_value(&report).map_err(|e| e.to_string())?))
-        })
+    // `Value` request: bundle_validate_impl normalizes the loose bundle input
+    // itself, as bundle.upsert does.
+    engine.register_typed(COMMAND_BUNDLE_VALIDATE, |data: serde_json::Value, _ctx| async move {
+        bundle_validate_impl(data)
     });
-    engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {

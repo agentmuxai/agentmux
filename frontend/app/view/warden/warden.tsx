@@ -25,5 +25,3 @@ export const wardenPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { WardenViewModel };

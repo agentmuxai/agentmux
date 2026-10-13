@@ -76,9 +76,9 @@ export interface FrameResult {
 }
 
 /** Below this, a move is sub-pixel settling, not a visible jump. */
-export const MOVE_TOLERANCE_PX = 0.5;
+const MOVE_TOLERANCE_PX = 0.5;
 /** Below this, space under the last row is rounding, not a gap. */
-export const GAP_TOLERANCE_PX = 1;
+const GAP_TOLERANCE_PX = 1;
 
 const visible = (r: RowBox, clientHeight: number): boolean => r.bottom > 0 && r.top < clientHeight;
 
@@ -179,7 +179,7 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
 // ── DOM binding ─────────────────────────────────────────────────────────────
 
 /** How long after the user's last input a frame is still theirs. */
-export const USER_INPUT_EXEMPT_MS = 300;
+const USER_INPUT_EXEMPT_MS = 300;
 const STORAGE_KEY = "agentmux:one-way-recorder";
 const RING_SIZE = 50;
 const LOG_BURST = 20;
@@ -488,7 +488,7 @@ export function noteOneWay(pane: string, label: string): void {
     recorders.get(pane)?.note(label);
 }
 
-export const oneWayRecorder = {
+const oneWayRecorder = {
     enable(): void {
         enabled = true;
         writeEnabled(true);

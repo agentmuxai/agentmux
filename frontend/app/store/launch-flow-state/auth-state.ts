@@ -19,22 +19,19 @@
  * single clearly-named case with idempotency rules, and the unit
  * tests pin every combo.
  *
- * Backend wire types are mirrored in `frontend/types/srv-types.d.ts`
- * (`AuthSessionStatus` etc.). This module imports those globals so
- * `Selected` / `Polled` carry the same shapes the RPC handlers
- * return.
+ * Backend wire types are generated from srv into `frontend/types/rpc/`
+ * (`AuthSessionStatus`, `PollSessionResult`), so `Selected` / `Polled`
+ * carry the same shapes the RPC handlers return.
  */
 
 /** Mirrors the wire `AuthSessionStatus` from
  *  `crates/srv/src/identity/auth_session.rs` (camelCase via
  *  `rename_all_fields`).
  *
- *  Intentionally duplicates the global `AuthSessionStatus` type in
- *  `frontend/types/srv-types.d.ts` (added in PR #850). The duplication
- *  is so that the reducer's command surface is self-contained —
- *  `auth-state.ts` declares its own types without depending on the
- *  ambient global `declare`, which makes the file importable and
- *  pure-testable. The two shapes must stay in lockstep.
+ *  Intentionally separate from the generated `AuthSessionStatus`
+ *  (`frontend/types/rpc/AuthSessionStatus.ts`): it adds the planned
+ *  `authenticated` variant below, which srv doesn't send yet. The other
+ *  variants must stay in lockstep with the generated type.
  *
  *  Two terminal-ish variants:
  *  - `authenticated`: CLI auth confirmed but no bundle row exists yet.

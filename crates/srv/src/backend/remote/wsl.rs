@@ -126,6 +126,7 @@ pub fn wslenv_with<'a>(existing: &str, caller_keys: impl IntoIterator<Item = &'a
 /// Parse `wsl.exe --list --quiet`. It writes UTF-16LE (with or without a BOM),
 /// one distribution per line; with none installed it prints a sentence and
 /// exits non-zero, which the caller treats as "none".
+#[cfg(any(windows, test))]
 pub fn parse_list(stdout: &[u8]) -> Vec<String> {
     // UTF-16LE when it starts with its BOM, or when every second byte is zero
     // (ASCII names in UTF-16LE); otherwise UTF-8.

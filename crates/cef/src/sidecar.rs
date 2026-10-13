@@ -454,7 +454,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     let normal_timeout = std::time::Duration::from_secs(30);
     let migration_timeout = std::time::Duration::from_secs(1800);
     let mut deadline = tokio::time::Instant::now() + normal_timeout;
-    let mut sleep = tokio::time::sleep_until(deadline);
+    let sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
     let migration_failed = |reason: String| format!("agentmux-srv database migration failed: {}", reason);

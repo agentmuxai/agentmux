@@ -46,12 +46,15 @@ pub fn strip_verbatim(s: &str) -> String {
 }
 
 /// `FILE_ATTRIBUTE_HIDDEN`.
+#[cfg(any(windows, test))]
 const ATTR_HIDDEN: u32 = 0x2;
 /// `FILE_ATTRIBUTE_SYSTEM`.
+#[cfg(any(windows, test))]
 const ATTR_SYSTEM: u32 = 0x4;
 
 /// Whether Windows file attributes mark an entry hidden. Explorer hides both
 /// hidden and system entries by default, so both count (spec §9).
+#[cfg(any(windows, test))]
 pub fn attributes_mark_hidden(attributes: u32) -> bool {
     attributes & (ATTR_HIDDEN | ATTR_SYSTEM) != 0
 }

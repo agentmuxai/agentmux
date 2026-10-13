@@ -13,7 +13,7 @@ import type { HistoryPoint } from "./tower-model";
 import { formatAgo, formatMem } from "./tower-util";
 
 /** The window the charts show, ending at the latest sample. */
-export const WINDOW_MS = 10 * 60 * 1000;
+const WINDOW_MS = 10 * 60 * 1000;
 const W = 600;
 const H = 48;
 

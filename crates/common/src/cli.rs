@@ -23,7 +23,7 @@ enum ResolvedShim {
 /// extract the real entry point and invoke it directly (either `node <script>`
 /// for JS shims or the target `.exe` directly for native-binary shims).
 pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
-    let mut cmd = build_cli_cmd(cli_path);
+    let cmd = build_cli_cmd(cli_path);
     // CREATE_NO_WINDOW: the host + launcher are GUI-subsystem and srv is
     // launched windowless, so a console-subsystem child (node, claude.exe,
     // cmd.exe) spawned without this flag forces Windows to allocate a fresh
@@ -34,9 +34,11 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     // covered; idempotent for the agent-CLI callers (persistent/subprocess/
     // acp) that already set it manually.
     #[cfg(windows)]
-    {
+    let cmd = {
+        let mut cmd = cmd;
         cmd.no_window();
-    }
+        cmd
+    };
     cmd
 }
 

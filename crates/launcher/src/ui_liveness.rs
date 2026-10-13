@@ -111,6 +111,7 @@ impl UiLiveness {
     /// the host exits: a probe the old host never answered must not age into
     /// a miss charged to its replacement (the hang dump in
     /// `host_hang_dump` would otherwise dump a healthy, just-respawned host).
+    #[cfg(any(target_os = "windows", test))]
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -148,6 +149,7 @@ pub fn consecutive_misses() -> u32 {
 }
 
 /// See [`UiLiveness::reset`]. Process-global instance.
+#[cfg(target_os = "windows")]
 pub fn reset() {
     cell().lock().unwrap().reset()
 }

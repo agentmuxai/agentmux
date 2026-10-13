@@ -24,7 +24,7 @@ import { contextCompactedNodeId, type CompactBoundaryData } from "./compact-boun
 import type { ContextDeliveryNode } from "./types";
 
 /** How Claude Code opens the summary. One of two signals; see `isSummaryFrame`. */
-export const COMPACTION_SUMMARY_PREFIX = "This session is being continued from a previous conversation";
+const COMPACTION_SUMMARY_PREFIX = "This session is being continued from a previous conversation";
 
 const EXCERPT_MAX = 160;
 

@@ -197,6 +197,7 @@ pub(crate) fn mark_held_for_test(agent_id: &str) {
 }
 
 /// Note a 409 `not_holder` the relay returned on a pending pull or an ack.
+#[cfg(test)]
 pub(crate) fn note_not_holder(agent_id: &str, body: &serde_json::Value) -> String {
     let desc = body.get("held_by").map(describe_holder).unwrap_or_default();
     record(agent_id, &Outcome::HeldElsewhere(desc.clone()));

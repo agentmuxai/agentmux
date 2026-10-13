@@ -20,6 +20,8 @@ import type { McpPreloadEntry } from "./mcp-preload-catalog";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { McpServer } from "@/types/rpc/McpServer";
+import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
 export interface McpDraft {
     id?: string;
     name: string;

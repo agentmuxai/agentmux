@@ -14,6 +14,7 @@ use std::time::Duration;
 /// the gate treats an un-sampled process as having ample commit.
 ///
 /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.A.
+#[cfg(target_os = "windows")]
 static COMMIT_FREE_MB: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Latest observed system commit **total** (limit) in MB, alongside

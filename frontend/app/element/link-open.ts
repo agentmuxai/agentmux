@@ -13,7 +13,7 @@ function isWebUrl(url: string): boolean {
 
 /** Open `url` in a new browser pane. A link that isn't a web page (mailto:,
  *  vscode:) goes to its system handler instead. */
-export function openLinkInPane(url: string): void {
+function openLinkInPane(url: string): void {
     if (!isWebUrl(url)) {
         void openLink(url);
         return;

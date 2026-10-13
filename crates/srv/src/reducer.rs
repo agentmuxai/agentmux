@@ -44,16 +44,15 @@ mod workspace;
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
 
-/// Per-dispatch context. Currently just an RFC3339 timestamp.
+/// Per-dispatch context: the pid the dispatching connection registered.
 #[derive(Debug, Clone)]
 pub struct Ctx {
-    pub now_rfc3339: String,
     pub registered_pid: Option<u32>,
 }
 
 pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
     match cmd {
-        Command::Register { kind, pid, version } => lifecycle::handle_register(state, ctx, kind, pid, version),
+        Command::Register { kind, pid, version } => lifecycle::handle_register(state, kind, pid, version),
         Command::Goodbye => lifecycle::handle_goodbye(state, ctx),
         Command::Ping { nonce } => {
             let v = state.bump_version();

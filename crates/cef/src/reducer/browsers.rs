@@ -75,6 +75,7 @@ pub(super) fn handle_register_browser(
 /// is already registered. Emits no event — the frontend learns the new label
 /// via the `pool:pane-promote` payload, not a host event.
 /// See `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
+#[cfg(target_os = "windows")]
 pub(super) fn handle_relabel_browser(
     state: &mut HostState,
     old_label: String,

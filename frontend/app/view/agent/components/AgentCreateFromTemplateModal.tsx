@@ -80,7 +80,7 @@ interface AgentCreateFromTemplateModalPanelProps {
  * named "X" already exists`); say it in words instead, with the name as typed.
  * Every other error passes through unchanged.
  */
-export function friendlySubmitError(message: string, typedName: string): string {
+function friendlySubmitError(message: string, typedName: string): string {
     if (/an agent named .* already exists/.test(message)) {
         return `You already have an agent named ${typedName}. Choose another name.`;
     }

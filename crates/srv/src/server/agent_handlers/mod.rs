@@ -13,6 +13,7 @@ mod bundle;
 mod bash_prefix;
 pub(crate) mod container_turn;
 pub(crate) mod input;
+mod identity_env;
 mod side_question;
 
 use std::sync::Arc;
@@ -1252,16 +1253,12 @@ mod recent_sessions_tests {
             "getagentcontent must not hand-serialize its response — that records              Value and leaves it outside the drift net; got {recorded:?}",
         );
 
-        // Commands still on register_handler are absent rather than recorded
-        // wrong — that absence is what makes migrating one at a time safe.
-        //
-        // `listagents` stays here deliberately: it tolerates a null/malformed
-        // body for older clients, which `register_typed` cannot express (see
-        // the comment on its registration in core.rs).
-        assert!(
-            rows.iter().all(|r| r["command"] != crate::backend::rpc_types::COMMAND_LIST_AGENTS),
-            "listagents keeps its loose-input handler and must not appear in the schema",
-        );
+        // `listagents` tolerates a null/malformed body for older clients, so its
+        // request stays `Value` (see its registration in core.rs). Its response is
+        // still recorded, which is where the drift risk lived.
+        let list = find(crate::backend::rpc_types::COMMAND_LIST_AGENTS);
+        assert_eq!(list["requestName"], "Value");
+        assert_eq!(list["responseTs"]["name"], "Array<AgentDefinition>");
     }
 
     /// A migrated handler answers exactly as it did before, including the

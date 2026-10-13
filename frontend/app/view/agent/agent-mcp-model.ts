@@ -30,6 +30,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { McpServerListItem } from "@/types/rpc/McpServerListItem";
 export class AgentMcpModel {
     readonly agentId: string;
 

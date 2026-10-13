@@ -22,5 +22,3 @@ export const swarmPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { SwarmViewModel };

@@ -26,7 +26,7 @@ import {
 import { byName, type ToolRendererEntry } from "./registry";
 import { faviconSrc as faviconFor, hostname, openUrl, prettyUrl } from "./url";
 
-export function WebFetchResult(props: { node: ToolNode }): JSX.Element {
+function WebFetchResult(props: { node: ToolNode }): JSX.Element {
     const data = extractFetchResult(props.node.result);
     return (
         <Show

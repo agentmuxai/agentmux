@@ -17,14 +17,17 @@ use super::managed::{ManagedResource, Owner};
 use super::store::Store;
 
 /// A standalone MCP Server primitive (v1 composable model).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServer {
     pub id: String,
     pub name: String,
     pub transport: String,
     pub config: String,
     pub is_global: bool,
+    #[ts(type = "number")]
     pub created_at: i64,
+    #[ts(type = "number")]
     pub updated_at: i64,
 }
 
@@ -107,7 +110,8 @@ impl ManagedResource for McpServer {
 /// alone can't tell the UI whether *this* agent has bound it — without
 /// `bound_to_agent`, bind/unbind in the per-agent modal has no way to render
 /// as a stateful toggle (see docs/specs, "bound to me" gap tracked in #1960).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServerListItem {
     #[serde(flatten)]
     pub server: McpServer,
@@ -117,10 +121,12 @@ pub struct McpServerListItem {
 /// `mcp_server_list_global`'s response shape: the server plus how many
 /// agents currently hold a `db_agent_mcp_ref` to it — the Armory catalog's
 /// "used by N agents" count (gap #2 of #1960).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServerCatalogItem {
     #[serde(flatten)]
     pub server: McpServer,
+    #[ts(type = "number")]
     pub bound_count: i64,
     /// Reaches every agent, not only the bound ones (`McpServerReach`).
     pub all_agents: bool,
@@ -132,7 +138,8 @@ pub struct McpServerCatalogItem {
 /// `db_mcp_server_reach`. The default, no row, is "only the agents it is
 /// bound to, and no container agent".
 /// `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct McpServerReach {
     pub all_agents: bool,
     pub in_containers: bool,

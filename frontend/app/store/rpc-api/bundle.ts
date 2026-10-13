@@ -6,8 +6,6 @@
 // gate, same as the rest of `bundle.*`. See
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
-import { RpcClient } from "../rpc-client";
-
 // The bundle CRUD shapes below are GENERATED from their Rust definitions by
 // ts-rs. See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.4 step 2.
 // `BundleImportApi` at the bottom is NOT migrated yet — those three commands
@@ -15,16 +13,11 @@ import { RpcClient } from "../rpc-client";
 export type { Bundle } from "@/types/rpc/Bundle";
 // Global Memory version history (globalmemory:history/diff/revert) — see
 // docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
-export type { GlobalMemoryVersionMeta } from "@/types/rpc/GlobalMemoryVersionMeta";
-export type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
-export type { GlobalMemoryImportSource } from "@/types/rpc/GlobalMemoryImportSource";
 export type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
-import type { GlobalMemoryImportSources as GlobalMemoryImportSourcesT } from "@/types/rpc/GlobalMemoryImportSources";
-import type { GlobalMemoryImportReport as GlobalMemoryImportReportT } from "@/types/rpc/GlobalMemoryImportReport";
+export type { GlobalMemoryImportSource } from "@/types/rpc/GlobalMemoryImportSource";
+export type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
 export type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
-import type { GlobalMemorySection as GlobalMemorySectionT } from "@/types/rpc/GlobalMemorySection";
-import type { CommandGlobalMemorySectionsData } from "@/types/rpc/CommandGlobalMemorySectionsData";
-import type { CommandGlobalMemoryImportData } from "@/types/rpc/CommandGlobalMemoryImportData";
+export type { GlobalMemoryVersionMeta } from "@/types/rpc/GlobalMemoryVersionMeta";
 
 // The validation report shapes are GENERATED too. The validate HANDLER stays
 // on `register_handler` on purpose (it normalizes its payload before
@@ -37,41 +30,22 @@ export type { ValidationReport as BundleValidationReport } from "@/types/rpc/Val
 // previously had NO Rust type at all -- both handlers built their responses as
 // ad-hoc `json!` literals -- so the declarations here were hand-maintained
 // against nothing.
-export type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPreviewResponse";
 export type { BundleImportCommitResponse } from "@/types/rpc/BundleImportCommitResponse";
 export type { BundleImportContextFilePreview } from "@/types/rpc/BundleImportContextFilePreview";
-export type { BundleImportSkillPreview } from "@/types/rpc/BundleImportSkillPreview";
-export type { BundleImportMcpServerPreview } from "@/types/rpc/BundleImportMcpServerPreview";
-export type { BundleImportMcpServerDisplay } from "@/types/rpc/BundleImportMcpServerDisplay";
-export type { BundleImportRequirementPreview } from "@/types/rpc/BundleImportRequirementPreview";
-export type { BundleImportProjectInstructionPreview } from "@/types/rpc/BundleImportProjectInstructionPreview";
-export type { BundleImportUnresolvedRequirement } from "@/types/rpc/BundleImportUnresolvedRequirement";
 export type { BundleImportFileEntry } from "@/types/rpc/BundleImportFileEntry";
+export type { BundleImportMcpServerDisplay } from "@/types/rpc/BundleImportMcpServerDisplay";
+export type { BundleImportMcpServerPreview } from "@/types/rpc/BundleImportMcpServerPreview";
+export type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPreviewResponse";
+export type { BundleImportProjectInstructionPreview } from "@/types/rpc/BundleImportProjectInstructionPreview";
+export type { BundleImportRequirementPreview } from "@/types/rpc/BundleImportRequirementPreview";
+export type { BundleImportSkillPreview } from "@/types/rpc/BundleImportSkillPreview";
 export type { BundleImportSkillSelection } from "@/types/rpc/BundleImportSkillSelection";
-export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/ValidationIssue";
+export type { BundleImportUnresolvedRequirement } from "@/types/rpc/BundleImportUnresolvedRequirement";
 export type { IssueSeverity as BundleValidationSeverity } from "@/types/rpc/IssueSeverity";
+export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/ValidationIssue";
 
 import type { Bundle as BundleT } from "@/types/rpc/Bundle";
-import type { CommandListBundlesData } from "@/types/rpc/CommandListBundlesData";
-import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
-import type { CommandDeleteBundleData } from "@/types/rpc/CommandDeleteBundleData";
-import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
-import type { CommandReorderGlobalBundlesData } from "@/types/rpc/CommandReorderGlobalBundlesData";
-import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
-import type { CommandGlobalMemoryHistoryData } from "@/types/rpc/CommandGlobalMemoryHistoryData";
-import type { CommandGlobalMemoryDiffData } from "@/types/rpc/CommandGlobalMemoryDiffData";
-import type { CommandGlobalMemoryRevertData } from "@/types/rpc/CommandGlobalMemoryRevertData";
-import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
-import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult";
-import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
-import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
-import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
-import type { ValidationReport } from "@/types/rpc/ValidationReport";
-import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
-import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
-import type { BundleImportPreviewResponse as BundleImportPreviewResponseT } from "@/types/rpc/BundleImportPreviewResponse";
-import type { BundleImportCommitResponse as BundleImportCommitResponseT } from "@/types/rpc/BundleImportCommitResponse";
 
 // The accurate request shape for the three upsert/validate commands, DERIVED
 // from the generated `Bundle` rather than hand-listed, so a new Rust field
@@ -112,183 +86,3 @@ export type BundleUpsertRequest = BundleUpsertInput & Pick<CommandUpsertBundleDa
 // command does normalize, but that is a different command and not the one this
 // stub calls.)
 export type BundleValidateInput = Pick<BundleT, "name"> & Partial<Omit<BundleT, "name">>;
-
-// Bundle CRUD (db_bundles rows; Rust: Store::bundle_*). The wire command
-// names below (`listmemories`, `getmemory`, ...) are the legacy aliases the
-// backend still registers alongside `bundle.*` — the strings must not change
-// until Phase 3 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md retires them.
-export const BundleApi = {
-    ListBundlesCommand(
-        client: RpcClient,
-        data: CommandListBundlesData = {},
-        opts?: RpcOpts,
-    ): Promise<BundleT[]> {
-        return client.rpcCall("listmemories", data, opts);
-    },
-
-    GetBundleCommand(
-        client: RpcClient,
-        data: CommandGetBundleData,
-        opts?: RpcOpts,
-    ): Promise<BundleT> {
-        return client.rpcCall("getmemory", data, opts);
-    },
-
-    UpsertBundleCommand(
-        client: RpcClient,
-        data: BundleUpsertRequest,
-        opts?: RpcOpts,
-    ): Promise<BundleT> {
-        return client.rpcCall("upsertmemory", data, opts);
-    },
-
-    DeleteBundleCommand(
-        client: RpcClient,
-        data: CommandDeleteBundleData,
-        opts?: RpcOpts,
-    ): Promise<DeleteBundleResult> {
-        return client.rpcCall("deletememory", data, opts);
-    },
-
-    // `ids` is the full ordered list of global bundle ids.
-    ReorderGlobalBundlesCommand(
-        client: RpcClient,
-        data: CommandReorderGlobalBundlesData,
-        opts?: RpcOpts,
-    ): Promise<ReorderGlobalBundlesResult> {
-        return client.rpcCall("reorderglobalbrain", data, opts);
-    },
-
-    // System-tier Global Memory — see
-    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. The ONLY
-    // commands that can write is_system=true; deliberately separate from
-    // UpsertBundleCommand/DeleteBundleCommand.
-    UpsertSystemBundleCommand(
-        client: RpcClient,
-        data: BundleUpsertRequest,
-        opts?: RpcOpts,
-    ): Promise<BundleT> {
-        return client.rpcCall("upsertsystemmemory", data, opts);
-    },
-
-    DeleteSystemBundleCommand(
-        client: RpcClient,
-        data: CommandDeleteBundleData,
-        opts?: RpcOpts,
-    ): Promise<DeleteBundleResult> {
-        return client.rpcCall("deletesystemmemory", data, opts);
-    },
-
-    // Read-only. Returns the CLAUDE.md at AgentMux's shared Claude
-    // provider config dir (~/.agentmux/shared/providers/claude/CLAUDE.md
-    // via DataPaths::provider_auth_dir — the CLAUDE_CONFIG_DIR a
-    // non-identity-bound spawned Claude agent actually gets). NOTE: this
-    // is Claude Code's own home-relocation path, NOT the file AgentMux's
-    // Global Memory actually composes into (that's
-    // <agent working_directory>/CLAUDE.md, a per-agent path this doesn't
-    // cover) — this is a "Claude Code provider config" reference display
-    // only. See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
-    // §5, §7. No parameters, no write counterpart.
-    GetClaudeGlobalConfigCommand(
-        client: RpcClient,
-        data: CommandGetClaudeGlobalConfigData = {},
-        opts?: RpcOpts,
-    ): Promise<ClaudeGlobalConfig> {
-        return client.rpcCall("getclaudeglobalconfig", data, opts);
-    },
-
-    // Global Memory version history for the Armory UI — the WebSocket
-    // counterparts of the GlobalMemory{History,Diff,Revert} MCP tools
-    // (#3448), system-tier entries included. Revert records a NEW version
-    // (source "revert"); `version` is null only for a no-op system revert.
-    /**
-     * The other scopes an isolated channel can bring Global Memory from, and
-     * what each has that this channel lacks — SPEC_MEMORY_FOLLOWS_THE_AGENT
-     * §2.1.6. Empty unless this channel is isolated.
-     */
-    GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSourcesT> {
-        return client.rpcCall("globalmemory:import_sources", {}, opts);
-    },
-
-    /**
-     * The Global Memory block agents' startup files carry, as its sections
-     * (Operator Config first) — what memory reinjection re-delivers. See
-     * docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1.
-     */
-    GlobalMemorySectionsCommand(
-        client: RpcClient,
-        data: CommandGlobalMemorySectionsData = {},
-        opts?: RpcOpts
-    ): Promise<GlobalMemorySectionT[]> {
-        return client.rpcCall("globalmemory:sections", data, opts);
-    },
-
-    /** Import what source `index` of list `list_id` has that this channel lacks. */
-    GlobalMemoryImportCommand(
-        client: RpcClient,
-        data: CommandGlobalMemoryImportData,
-        opts?: RpcOpts,
-    ): Promise<GlobalMemoryImportReportT> {
-        return client.rpcCall("globalmemory:import", data, opts);
-    },
-
-    GlobalMemoryHistoryCommand(
-        client: RpcClient,
-        data: CommandGlobalMemoryHistoryData,
-        opts?: RpcOpts,
-    ): Promise<GlobalMemoryHistoryResult> {
-        return client.rpcCall("globalmemory:history", data, opts);
-    },
-
-    GlobalMemoryDiffCommand(
-        client: RpcClient,
-        data: CommandGlobalMemoryDiffData,
-        opts?: RpcOpts,
-    ): Promise<GlobalMemoryDiffResult> {
-        return client.rpcCall("globalmemory:diff", data, opts);
-    },
-
-    GlobalMemoryRevertCommand(
-        client: RpcClient,
-        data: CommandGlobalMemoryRevertData,
-        opts?: RpcOpts,
-    ): Promise<GlobalMemoryRevertResult> {
-        return client.rpcCall("globalmemory:revert", data, opts);
-    },
-};
-
-
-export const BundleImportApi = {
-    // `data` takes all three input modes the server actually supports
-    // (`file_path`, `zip_base64`, `files`), which the previous hand-written
-    // `{ file_path: string }` did not -- two of them were unreachable through
-    // this client even though `resolve_import_input` has always accepted them.
-    BundleImportPreviewCommand(
-        client: RpcClient,
-        data: CommandBundleImportPreviewData,
-        opts?: RpcOpts,
-    ): Promise<BundleImportPreviewResponseT> {
-        return client.rpcCall("bundle.import.preview", data, opts);
-    },
-
-    BundleImportCommitCommand(
-        client: RpcClient,
-        data: CommandBundleImportCommitData,
-        opts?: RpcOpts,
-    ): Promise<BundleImportCommitResponseT> {
-        return client.rpcCall("bundle.import.commit", data, opts);
-    },
-
-    // Structural-only check (crates/srv/src/backend/bundle_validate.rs) —
-    // read-only, no Store write. Takes `BundleValidateInput`, which is
-    // `BundleUpsertInput` minus the `id` requirement, so it can validate an
-    // unsaved draft (including a brand-new bundle with no id yet), not just
-    // what's already persisted.
-    ValidateBundleCommand(
-        client: RpcClient,
-        data: BundleValidateInput,
-        opts?: RpcOpts,
-    ): Promise<ValidationReport> {
-        return client.rpcCall("bundle.validate", data, opts);
-    },
-};

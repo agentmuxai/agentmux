@@ -30,7 +30,7 @@
 
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
-import { Key } from "@solid-primitives/keyed";
+import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { DocumentNode, DocumentState } from "../types";
@@ -82,10 +82,10 @@ interface ScrollGeometry {
  * for a wheel/keyboard gesture's scroll events to land (they are rAF-
  * coalesced), short enough that an unrelated later scroll never inherits it.
  */
-export const USER_INPUT_WINDOW_MS = 250;
+const USER_INPUT_WINDOW_MS = 250;
 
 /** One-way path: how close to the true bottom a reader must scroll to follow again (spec 09-24 §5.5). */
-export const ONE_WAY_REATTACH_PX = 24;
+const ONE_WAY_REATTACH_PX = 24;
 
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;

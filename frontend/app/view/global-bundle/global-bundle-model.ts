@@ -62,7 +62,7 @@ export interface GlobalMemoryDraft {
 
 /** The server's `bundle_versions::content_hash` — what `base_sha256` means
  *  for a Global Memory save. */
-export function globalMemoryContentHash(v: GlobalMemoryDraft): Promise<string> {
+function globalMemoryContentHash(v: GlobalMemoryDraft): Promise<string> {
     return sha256Hex(`${v.name}\0${v.instructions}`);
 }
 

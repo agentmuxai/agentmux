@@ -1067,6 +1067,7 @@ impl SessionIndex {
     /// look the same to a caller. The same goes for every other way a
     /// candidate goes unread (a `max_sessions` cut, a file that won't parse):
     /// each is counted, and any of them makes the answer not `complete`.
+    #[cfg(test)]
     pub fn search_sessions(
         &self,
         candidates: &[SessionMeta],
@@ -1084,6 +1085,7 @@ impl SessionIndex {
     }
 
     /// Check if the index has been populated.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.sessions.lock().unwrap().is_empty()
     }
@@ -1395,7 +1397,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
     /// Hammers the two conflicting lock orders against each other on the same
     /// `Arc<SessionIndex>` a real deployment shares between requests.
     ///

@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -52,15 +51,11 @@ pub struct FsWatchEvent {
 /// unsubscribe the same handle twice.
 #[derive(Debug, Clone)]
 pub struct Subscription {
-    id: u64,
-    /// What the caller actually asked to watch (a file or a directory).
-    pub path: PathBuf,
     /// What's actually registered with the OS watcher — the parent
     /// directory for a file subscription (see module doc: this is the
-    /// baked-in atomic-rename-safety rule), or `path` itself for a
+    /// baked-in atomic-rename-safety rule), or the directory itself for a
     /// directory subscription.
     watch_target: PathBuf,
-    mode: RecursiveMode,
 }
 
 struct WatchEntry {
@@ -106,7 +101,6 @@ pub struct FsWatchPool {
     inner: Mutex<Inner>,
     health: HealthState,
     backend: WatchBackend,
-    next_id: AtomicU64,
     tx: broadcast::Sender<FsWatchEvent>,
 }
 
@@ -128,7 +122,6 @@ impl FsWatchPool {
             inner: Mutex::new(Inner { watcher, targets: HashMap::new(), share_poller: None, raw_tx }),
             health: HealthState::default(),
             backend,
-            next_id: AtomicU64::new(1),
             tx: broadcast_tx,
         });
 
@@ -181,7 +174,7 @@ impl FsWatchPool {
     pub fn subscribe_file(self: &Arc<Self>, path: &Path) -> Subscription {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let target = canonical.parent().map(Path::to_path_buf).unwrap_or(canonical.clone());
-        self.subscribe_target(canonical, target, RecursiveMode::NonRecursive)
+        self.subscribe_target(target, RecursiveMode::NonRecursive)
     }
 
     /// Watch the directory at `path` directly (non-recursive — matching
@@ -189,18 +182,17 @@ impl FsWatchPool {
     /// filtering is the caller's concern, not the pool's).
     pub fn subscribe_dir(self: &Arc<Self>, path: &Path) -> Subscription {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        self.subscribe_target(canonical.clone(), canonical, RecursiveMode::NonRecursive)
+        self.subscribe_target(canonical, RecursiveMode::NonRecursive)
     }
 
     /// Watch `path` and everything under it (widget packages: an edit deep in
     /// a package folder reloads it).
     pub fn subscribe_dir_recursive(self: &Arc<Self>, path: &Path) -> Subscription {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        self.subscribe_target(canonical.clone(), canonical, RecursiveMode::Recursive)
+        self.subscribe_target(canonical, RecursiveMode::Recursive)
     }
 
-    fn subscribe_target(self: &Arc<Self>, requested_path: PathBuf, target: PathBuf, mode: RecursiveMode) -> Subscription {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+    fn subscribe_target(self: &Arc<Self>, target: PathBuf, mode: RecursiveMode) -> Subscription {
         let is_new = {
             let mut inner = self.inner.lock().unwrap();
             let entry = inner.targets.entry(target.clone()).or_insert_with(|| WatchEntry { refcount: 0, mode });
@@ -212,7 +204,7 @@ impl FsWatchPool {
             self.start_watch(target.clone(), mode);
         }
 
-        Subscription { id, path: requested_path, watch_target: target, mode }
+        Subscription { watch_target: target }
     }
 
     /// Stop watching on behalf of `sub`. Idempotent-safe: unsubscribing the
@@ -255,6 +247,7 @@ impl FsWatchPool {
         self.tx.subscribe()
     }
 
+    #[allow(dead_code)] // Diagnostics surface, SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §4 point 4.
     pub fn health(&self) -> FsWatchHealth {
         let active_watches = self.inner.lock().unwrap().targets.len();
         FsWatchHealth {

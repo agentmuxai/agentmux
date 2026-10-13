@@ -51,7 +51,12 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/mos", () => ({ makeORef: (kind: string, id: string) => `${kind}:${id}` }));
+vi.mock("@/app/store/mos", () => ({
+    makeORef: (kind: string, id: string) => `${kind}:${id}`,
+    // The pane's env as the launch left it: the login must keep it
+    // (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F2).
+    getObjectValue: () => ({ meta: { "cmd:env": { AGENTMUX_AGENT_ID: "loap" } } }),
+}));
 
 import { runProviderLogin } from "./run-provider-login";
 
@@ -237,7 +242,7 @@ describe("runProviderLogin", () => {
         });
         expect(hub.setMeta).toHaveBeenCalledWith({}, {
             oref: "block:block-1",
-            meta: { "cmd:env": { CLAUDE_CONFIG_DIR: MINTED.dir } },
+            meta: { "cmd:env": { AGENTMUX_AGENT_ID: "loap", CLAUDE_CONFIG_DIR: MINTED.dir } },
         });
     });
 

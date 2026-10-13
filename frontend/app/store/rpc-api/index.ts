@@ -1,9 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Hand-maintained RPC bindings. Keep in sync with the agentmux-srv RPC
-// handlers (backend/rpc_types/, server/websocket.rs). The original Go
-// generator (cmd/generate/main-generatets.go) was removed with the Go backend.
+// RPC bindings. `generated.ts` (`GeneratedApi`) is generated from srv's typed
+// commands by scripts/gen-rpc-stubs.mjs; the domain files hold the stubs not
+// moved there yet, still hand-maintained against the agentmux-srv RPC
+// handlers (backend/rpc_types/, server/websocket.rs). To move one, add it to
+// generated-manifest.json, delete its method here, and run the generator.
 //
 // This module was split from a single ~1,454-line rpc-api file into domain
 // files. `RpcApi` is composed here from the per-domain partials; its public
@@ -11,31 +13,9 @@
 // are identical to the original single-object export. None of the methods use
 // `this`, so composing them into one plain object is behaviour-preserving.
 
-import { AgentApi } from "./agent";
-import { AttachmentsApi } from "./attachments";
-import { BlockApi } from "./block";
-import { BookmarksApi } from "./bookmarks";
-import { BrowserProfilesApi } from "./browser-profiles";
-import { BrowserStartPageApi } from "./browser-start-page";
-import { BundleApi, BundleImportApi } from "./bundle";
-import { FileApi } from "./file";
-import { FleetApi } from "./fleet";
-import { FsApi } from "./fs";
+import { GeneratedApi } from "./generated";
 import { IdentityApi } from "./identity";
-import { LayoutApi } from "./layout";
-import { McpApi } from "./mcp";
-import { MiscApi } from "./misc";
-import { NativeMemoryApi } from "./native-memory";
-import { NotifyApi } from "./notify";
-import { PresenceApi } from "./presence";
-import { ReactiveApi } from "./reactive";
-import { RemotesApi } from "./remotes";
-import { SessionApi } from "./session";
-import { SkillApi } from "./skill";
-import { TowerApi } from "./tower";
-import { ViewerApi } from "./viewer";
-import { VoiceApi } from "./voice";
-import { WidgetsApi } from "./widgets";
+
 import { WorkspaceApi } from "./workspace";
 
 export type {
@@ -287,7 +267,6 @@ export type {
     InstallFailure,
     InstallToolResult,
     NoArgsReq,
-    ResolveCliInput,
     ResolveCliResult,
     RunCliLoginResult,
     SubscriptionRequest,
@@ -305,31 +284,7 @@ export type {
 
 // WshServerCommandToDeclMap
 export const RpcApi = {
-    ...MiscApi,
-    ...BlockApi,
-    ...FileApi,
-    ...FsApi,
     ...WorkspaceApi,
-    ...AgentApi,
     ...IdentityApi,
-    ...BundleApi,
-    ...NativeMemoryApi,
-    ...SessionApi,
-    ...McpApi,
-    ...SkillApi,
-    ...BundleImportApi,
-    ...FleetApi,
-    ...RemotesApi,
-    ...WidgetsApi,
-    ...ReactiveApi,
-    ...BookmarksApi,
-    ...BrowserProfilesApi,
-    ...LayoutApi,
-    ...BrowserStartPageApi,
-    ...VoiceApi,
-    ...NotifyApi,
-    ...AttachmentsApi,
-    ...ViewerApi,
-    ...PresenceApi,
-    ...TowerApi,
+    ...GeneratedApi,
 };

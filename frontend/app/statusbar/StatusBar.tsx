@@ -86,7 +86,7 @@ let builtinsRegistered = false;
 
 /** AgentMux's own items, in the status bar registry. Widgets add theirs
  *  there too (`widget-contributions.tsx`). */
-export function registerBuiltinStatusBarItems(): void {
+function registerBuiltinStatusBarItems(): void {
     if (builtinsRegistered) return;
     builtinsRegistered = true;
     const builtins: [string, "left" | "right", () => JSX.Element][] = [

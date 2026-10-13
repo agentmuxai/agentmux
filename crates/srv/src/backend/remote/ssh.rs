@@ -192,6 +192,7 @@ const NAME_HASH_HEX: usize = 8;
 
 /// The longest socket name ssh binds in a control dir: the name's hash, `-`,
 /// the 40-hex `%C`, and while binding `.` plus 16 random characters.
+#[cfg(any(unix, test))]
 const SOCKET_NAME_MAX: usize = NAME_HASH_HEX + 1 + 40 + 17;
 
 /// `ControlPath=` for `dest`'s shared connection in `dir`: `<name hash>-%C`.
@@ -392,6 +393,7 @@ fn private_dir(dir: &Path) -> Option<()> {
 /// Whether ssh can bind a socket in `dir`: the longest path it binds is
 /// `dir/<name hash>-<40-hex %C>.<16 random>` ([`SOCKET_NAME_MAX`]), and it has
 /// to fit in `sun_path` with its NUL.
+#[cfg(any(unix, test))]
 fn socket_fits(dir: &Path) -> bool {
     let sun_path = if cfg!(target_os = "linux") { 108 } else { 104 };
     dir.as_os_str().len() + 1 + SOCKET_NAME_MAX < sun_path
@@ -561,6 +563,7 @@ mod tests {
     /// name, `-`, the 40-hex `%C`, and while binding `.` plus 16 random
     /// characters. It must stay under the OS's `sun_path` (104 bytes on macOS,
     /// 108 on Linux, NUL included).
+    #[cfg(unix)]
     fn bind_path_len(dir: &Path) -> usize {
         dir.as_os_str().len() + 1 + 8 + 1 + 40 + 17
     }

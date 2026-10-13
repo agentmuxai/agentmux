@@ -32,6 +32,7 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } fr
 import { registerFileDropTarget } from "@/app/drag/file-drop";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { ALL_MEDIA_EXTENSIONS, createMediaDropHook } from "./media-drop";
+import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { Button } from "@/app/element/ui";
 import "./media-view.scss";
 import {
@@ -488,9 +489,10 @@ export function MediaView(props: {
                     />
                 </Show>
                 <Show when={!errorMsg() && kind() === "none" && !displayPath()}>
-                    <div style={emptyStateStyle} onClick={() => void pickFile()}>
-                        <div style={{ "font-size": "1.05em" }}>{canPick ? "Click to load media" : "No media loaded"}</div>
-                        <div style={explainerStyle}>
+                    <div class="media-view-empty" style={emptyStateStyle} onClick={() => void pickFile()}>
+                        <EmptyPaneLogo />
+                        <div class="media-empty-text" style={{ "font-size": "1.05em" }}>{canPick ? "Click to load media" : "No media loaded"}</div>
+                        <div class="media-empty-text" style={explainerStyle}>
                             {supportedTypesText} If you pick a file from a folder your agent is
                             actively generating into, this pane updates automatically as new
                             matching files appear there — no need to reopen it.

@@ -24,6 +24,7 @@ use super::super::zone_naming::is_valid_definition_id;
 /// marker file (if present from an earlier portable run) isn't
 /// resurrected. Operators may delete the file; the migration ignores
 /// it either way.
+#[cfg(test)]
 pub const TEMPLATE_PROMOTE_MARKER_V1: &str = "migration_template_promote_v1.flag";
 
 /// Stats from `migrate_promote_template_sessions_v1`. Logged at INFO.

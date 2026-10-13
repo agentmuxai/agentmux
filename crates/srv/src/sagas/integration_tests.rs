@@ -432,8 +432,6 @@ fn state_with_shared_saga_log(
 /// inverses).
 #[tokio::test]
 async fn crash_recovery_tear_off_tab_partial_apply_compensates_on_restart() {
-    use agentmux_common::ipc::{Command, Event};
-
     // Phase 1: original AppState. Run the forward saga, then "crash"
     // by tampering with the saga log so the lifecycle row is `running`
     // (mimicking a process kill between the last step's finish_step

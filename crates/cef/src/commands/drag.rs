@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+#[cfg(target_os = "windows")]
 use cef::{ImplBrowser, ImplBrowserHost};
 
 use crate::events;
@@ -615,16 +616,19 @@ pub fn tear_off_sc_move_handshake(
     // Optional in case a future call site doesn't need merge detection;
     // if any are missing/empty, we skip the hook install and the
     // dragged window simply ends as a standalone after mouseup.
+    #[cfg(target_os = "windows")]
     let tab_id = args
         .get("tabId")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    #[cfg(target_os = "windows")]
     let source_ws_id = args
         .get("sourceWsId")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    #[cfg(target_os = "windows")]
     let dest_ws_id = args
         .get("destWsId")
         .and_then(|v| v.as_str())
@@ -634,6 +638,7 @@ pub fn tear_off_sc_move_handshake(
     // source strip). Defaults to 0 if missing — cancel-back will
     // reinsert at start, which is best-effort if the caller didn't
     // provide the real index.
+    #[cfg(target_os = "windows")]
     let original_tab_index = args
         .get("originalTabIndex")
         .and_then(|v| v.as_u64())
@@ -642,6 +647,7 @@ pub fn tear_off_sc_move_handshake(
     // Threaded into HookContext so the cancel-back payload can tell
     // the backend to restore into pinnedtabids vs tabids. Defaults
     // to false (regular tab). (gemini PR #567 round-6 MEDIUM)
+    #[cfg(target_os = "windows")]
     let was_pinned = args
         .get("wasPinned")
         .and_then(|v| v.as_bool())

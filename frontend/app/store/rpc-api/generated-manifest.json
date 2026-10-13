@@ -1,0 +1,1392 @@
+{
+    "$comment": "Commands whose frontend stubs are generated (scripts/gen-rpc-stubs.mjs -> generated.ts). Each entry: command, method (the RpcApi method name callers use), and optionally send (a no-argument command: \"{}\" (default) or \"null\"; an optional request: \"data\" (default) or \"data ?? {}\") and opts (an expression replacing opts, e.g. a longer timeout). Moving a command here: add its entry, delete its hand-written method, run the generator.",
+    "stubs": [
+        {
+            "command": "account.key.verify",
+            "method": "AccountKeyVerifyCommand",
+            "dataType": "{ provider: string; name: string; displayName?: string; kind?: string; apiKey: string; validate: boolean; accountId?: string; context?: Record<string, unknown> }"
+        },
+        {
+            "command": "account.oauth.cancel",
+            "method": "AccountOAuthCancelCommand"
+        },
+        {
+            "command": "account.oauth.poll",
+            "method": "AccountOAuthPollCommand",
+            "returns": "import(\"@/app/store/rpc-api/types\").OAuthFlowStatus"
+        },
+        {
+            "command": "account.oauth.start",
+            "method": "AccountOAuthStartCommand",
+            "dataType": "{ provider: string; name: string; clientId?: string; clientSecret?: string }"
+        },
+        {
+            "command": "session:activity_summary",
+            "method": "AgentActivitySummaryCommand"
+        },
+        {
+            "command": "agentanswer",
+            "method": "AgentAnswerCommand",
+            "dataType": "CommandAgentAnswerData"
+        },
+        {
+            "command": "agentcancel",
+            "method": "AgentCancelCommand"
+        },
+        {
+            "command": "agentdefcreatefromtemplate",
+            "method": "AgentDefCreateFromTemplateCommand"
+        },
+        {
+            "command": "agentdefhide",
+            "method": "AgentDefHideCommand"
+        },
+        {
+            "command": "agentdeflisthiddentemplates",
+            "method": "AgentDefListHiddenTemplatesCommand",
+            "send": "{}"
+        },
+        {
+            "command": "agentdefunhide",
+            "method": "AgentDefUnhideCommand"
+        },
+        {
+            "command": "agentinput",
+            "method": "AgentInputCommand"
+        },
+        {
+            "command": "agent.kill-process",
+            "method": "AgentKillProcessCommand"
+        },
+        {
+            "command": "agent.kill-tree",
+            "method": "AgentKillTreeCommand"
+        },
+        {
+            "command": "agentlastruntime",
+            "method": "AgentLastRuntimeCommand"
+        },
+        {
+            "command": "agent.open-panes",
+            "method": "AgentOpenPanesCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
+            "command": "agent.process-list",
+            "method": "AgentProcessListCommand"
+        },
+        {
+            "command": "agent:session:append_output",
+            "method": "AgentSessionAppendOutputCommand"
+        },
+        {
+            "command": "agent:session:archive",
+            "method": "AgentSessionArchiveCommand"
+        },
+        {
+            "command": "agent:session:list_archives",
+            "method": "AgentSessionListArchivesCommand"
+        },
+        {
+            "command": "agent:session:read",
+            "method": "AgentSessionReadCommand"
+        },
+        {
+            "command": "agent:session:write_state",
+            "method": "AgentSessionWriteStateCommand"
+        },
+        {
+            "command": "agentshutdownkeep",
+            "method": "AgentShutdownKeepCommand"
+        },
+        {
+            "command": "agentstop",
+            "method": "AgentStopCommand"
+        },
+        {
+            "command": "agent.tracked-blocks",
+            "method": "AgentTrackedBlocksCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
+            "command": "ambientnarrate",
+            "method": "AmbientNarrateCommand"
+        },
+        {
+            "command": "ambient.outcomes",
+            "method": "AmbientOutcomesCommand",
+            "dataType": "Record<string, never>",
+            "returns": "import(\"@/app/store/ambient-outcomes\").AmbientOutcomes"
+        },
+        {
+            "command": "appendagenthistory",
+            "method": "AppendAgentHistoryCommand"
+        },
+        {
+            "command": "asksidequestion",
+            "method": "AskSideQuestionCommand"
+        },
+        {
+            "command": "attachments.cancel",
+            "method": "AttachmentsCancelCommand"
+        },
+        {
+            "command": "attachments.copy-to-workdir",
+            "method": "AttachmentsCopyToWorkdirCommand"
+        },
+        {
+            "command": "attachments.info",
+            "method": "AttachmentsInfoCommand"
+        },
+        {
+            "command": "attachments.ingest",
+            "method": "AttachmentsIngestCommand"
+        },
+        {
+            "command": "auth.cancel",
+            "method": "AuthCancelCommand"
+        },
+        {
+            "command": "auth.poll",
+            "method": "AuthPollCommand"
+        },
+        {
+            "command": "auth.start",
+            "method": "AuthStartCommand",
+            "optionalFields": [
+                "directAccount",
+                "existingAccountId",
+                "authEnv",
+                "requiresTty"
+            ]
+        },
+        {
+            "command": "auth.submitcallback",
+            "method": "AuthSubmitCallbackCommand"
+        },
+        {
+            "command": "backgroundtaskcompletion",
+            "method": "BackgroundTaskCompletionCommand"
+        },
+        {
+            "command": "backgroundtaskpid",
+            "method": "BackgroundTaskPidCommand"
+        },
+        {
+            "command": "blockfile:line_count",
+            "method": "BlockfileLineCountCommand"
+        },
+        {
+            "command": "blockfile:read_range",
+            "method": "BlockfileReadRangeCommand"
+        },
+        {
+            "command": "blockfile:read_state",
+            "method": "BlockfileReadStateCommand"
+        },
+        {
+            "command": "blockfile:write_state",
+            "method": "BlockfileWriteStateCommand"
+        },
+        {
+            "command": "block.reveal",
+            "method": "BlockRevealCommand"
+        },
+        {
+            "command": "bundle.import.commit",
+            "method": "BundleImportCommitCommand"
+        },
+        {
+            "command": "bundle.import.preview",
+            "method": "BundleImportPreviewCommand"
+        },
+        {
+            "command": "checkcliauth",
+            "method": "CheckCliAuthCommand"
+        },
+        {
+            "command": "voice.checkPath",
+            "method": "CheckPathCommand"
+        },
+        {
+            "command": "memorydelivery:claim_fallback",
+            "method": "ClaimFallbackCommand"
+        },
+        {
+            "command": "memorydelivery:compose",
+            "method": "ComposeCommand"
+        },
+        {
+            "command": "connconnect",
+            "method": "ConnConnectCommand",
+            "dataType": "ConnRequest"
+        },
+        {
+            "command": "conndisconnect",
+            "method": "ConnDisconnectCommand",
+            "dataType": "string"
+        },
+        {
+            "command": "connensure",
+            "method": "ConnEnsureCommand",
+            "dataType": "ConnExtData"
+        },
+        {
+            "command": "connlistaws",
+            "method": "ConnListAWSCommand",
+            "send": "null"
+        },
+        {
+            "command": "connlist",
+            "method": "ConnListCommand",
+            "send": "null"
+        },
+        {
+            "command": "connsessionend",
+            "method": "ConnSessionEndCommand",
+            "dataType": "{ connname: string; sessionid: string; blockid?: string }"
+        },
+        {
+            "command": "connsessions",
+            "method": "ConnSessionsCommand",
+            "dataType": "{ connname: string; blockid?: string }"
+        },
+        {
+            "command": "containerimagecheck",
+            "method": "ContainerImageCheckCommand"
+        },
+        {
+            "command": "containerruntimeavailable",
+            "method": "ContainerRuntimeAvailableCommand",
+            "send": "{}"
+        },
+        {
+            "command": "controllerinput",
+            "method": "ControllerInputCommand",
+            "optionalFields": [
+                "inputdata64",
+                "signame"
+            ]
+        },
+        {
+            "command": "controllerresync",
+            "method": "ControllerResyncCommand",
+            "dataType": "CommandControllerResyncData"
+        },
+        {
+            "command": "createagent",
+            "method": "CreateAgentDefinitionCommand",
+            "optionalFields": [
+                "icon",
+                "description",
+                "working_directory",
+                "shell",
+                "provider_flags",
+                "auto_start",
+                "restart_on_crash",
+                "idle_timeout_minutes",
+                "agent_type",
+                "environment",
+                "agent_bus_id"
+            ]
+        },
+        {
+            "command": "createagentinstance",
+            "method": "CreateAgentInstanceCommand",
+            "optionalFields": [
+                "block_id",
+                "parent_instance_id",
+                "identity_id",
+                "memory_id",
+                "instance_name",
+                "working_directory"
+            ]
+        },
+        {
+            "command": "createagentskill",
+            "method": "CreateAgentSkillCommand",
+            "optionalFields": [
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
+        },
+        {
+            "command": "browser_profiles.create",
+            "method": "CreateBrowserProfileCommand"
+        },
+        {
+            "command": "createeditordir",
+            "method": "CreateEditorDirCommand"
+        },
+        {
+            "command": "createeditorfile",
+            "method": "CreateEditorFileCommand"
+        },
+        {
+            "command": "createscratchfile",
+            "method": "CreateScratchFileCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "createsubblock",
+            "method": "CreateSubBlockCommand",
+            "dataType": "CommandCreateSubBlockData"
+        },
+        {
+            "command": "deleteagent",
+            "method": "DeleteAgentDefinitionCommand"
+        },
+        {
+            "command": "deleteagentinstance",
+            "method": "DeleteAgentInstanceCommand"
+        },
+        {
+            "command": "deleteagentskill",
+            "method": "DeleteAgentSkillCommand"
+        },
+        {
+            "command": "browser_profiles.delete",
+            "method": "DeleteBrowserProfileCommand"
+        },
+        {
+            "command": "deletememory",
+            "method": "DeleteBundleCommand"
+        },
+        {
+            "command": "deletedrone",
+            "method": "DeleteDroneCommand"
+        },
+        {
+            "command": "deleteeditorfile",
+            "method": "DeleteEditorFileCommand"
+        },
+        {
+            "command": "deleteidentityaccount",
+            "method": "DeleteIdentityAccountCommand"
+        },
+        {
+            "command": "deletesubblock",
+            "method": "DeleteSubBlockCommand"
+        },
+        {
+            "command": "deletesystemmemory",
+            "method": "DeleteSystemBundleCommand"
+        },
+        {
+            "command": "docknodestatus",
+            "method": "DockNodeStatusCommand"
+        },
+        {
+            "command": "identity.ensureaccountdir",
+            "method": "EnsureAccountDirCommand"
+        },
+        {
+            "command": "provider.ensureauthdir",
+            "method": "EnsureProviderAuthDirCommand"
+        },
+        {
+            "command": "eventreadhistory",
+            "method": "EventReadHistoryCommand"
+        },
+        {
+            "command": "eventsub",
+            "method": "EventSubCommand"
+        },
+        {
+            "command": "eventunsuball",
+            "method": "EventUnsubAllCommand",
+            "send": "null"
+        },
+        {
+            "command": "eventunsub",
+            "method": "EventUnsubCommand",
+            "dataType": "string"
+        },
+        {
+            "command": "exportagents",
+            "method": "ExportAgentDefinitionsCommand",
+            "send": "{}"
+        },
+        {
+            "command": "fleet.broadcast",
+            "method": "FleetBroadcastCommand"
+        },
+        {
+            "command": "fleet.bulk-stop",
+            "method": "FleetBulkStopCommand"
+        },
+        {
+            "command": "fleet.group.create",
+            "method": "FleetGroupCreateCommand"
+        },
+        {
+            "command": "fleet.group.delete",
+            "method": "FleetGroupDeleteCommand"
+        },
+        {
+            "command": "fleet.group.list",
+            "method": "FleetGroupListCommand"
+        },
+        {
+            "command": "fleet.group.update",
+            "method": "FleetGroupUpdateCommand"
+        },
+        {
+            "command": "forkagentdefinition",
+            "method": "ForkAgentDefinitionCommand"
+        },
+        {
+            "command": "forkagentdefinitionsuggest",
+            "method": "ForkAgentDefinitionSuggestCommand"
+        },
+        {
+            "command": "fs.create",
+            "method": "FsCreateCommand"
+        },
+        {
+            "command": "fs.delete",
+            "method": "FsDeleteCommand"
+        },
+        {
+            "command": "fs.git_status",
+            "method": "FsGitStatusCommand"
+        },
+        {
+            "command": "fs.list",
+            "method": "FsListCommand"
+        },
+        {
+            "command": "fs.op.cancel",
+            "method": "FsOpCancelCommand"
+        },
+        {
+            "command": "fs.open",
+            "method": "FsOpenCommand"
+        },
+        {
+            "command": "fs.op.resolve",
+            "method": "FsOpResolveCommand"
+        },
+        {
+            "command": "fs.op.start",
+            "method": "FsOpStartCommand"
+        },
+        {
+            "command": "fs.places",
+            "method": "FsPlacesCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "fs.rename",
+            "method": "FsRenameCommand"
+        },
+        {
+            "command": "fs.restore",
+            "method": "FsRestoreCommand"
+        },
+        {
+            "command": "fs.reveal",
+            "method": "FsRevealCommand"
+        },
+        {
+            "command": "fs.trash",
+            "method": "FsTrashCommand"
+        },
+        {
+            "command": "fs.unwatch",
+            "method": "FsUnwatchCommand"
+        },
+        {
+            "command": "fs.watch",
+            "method": "FsWatchCommand"
+        },
+        {
+            "command": "getagentbundles",
+            "method": "GetAgentBundlesCommand"
+        },
+        {
+            "command": "getagentcontent",
+            "method": "GetAgentContentCommand"
+        },
+        {
+            "command": "getagentinstance",
+            "method": "GetAgentInstanceCommand"
+        },
+        {
+            "command": "getallagentcontent",
+            "method": "GetAllAgentContentCommand"
+        },
+        {
+            "command": "getmemory",
+            "method": "GetBundleCommand"
+        },
+        {
+            "command": "getclaudeglobalconfig",
+            "method": "GetClaudeGlobalConfigCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "getdrone",
+            "method": "GetDroneCommand"
+        },
+        {
+            "command": "geteditorhome",
+            "method": "GetEditorHomeCommand"
+        },
+        {
+            "command": "geteditorroots",
+            "method": "GetEditorRootsCommand"
+        },
+        {
+            "command": "getfullconfig",
+            "method": "GetFullConfigCommand",
+            "send": "null",
+            "returns": "FullConfigType"
+        },
+        {
+            "command": "getidentityaccount",
+            "method": "GetIdentityAccountCommand"
+        },
+        {
+            "command": "getmeta",
+            "method": "GetMetaCommand",
+            "dataType": "CommandGetMetaData",
+            "returns": "MetaType"
+        },
+        {
+            "command": "reactive.registrations",
+            "method": "GetReactiveRegistrationsCommand"
+        },
+        {
+            "command": "gettoolstatus",
+            "method": "GetToolStatusCommand",
+            "send": "{}"
+        },
+        {
+            "command": "globalmemory:diff",
+            "method": "GlobalMemoryDiffCommand"
+        },
+        {
+            "command": "globalmemory:history",
+            "method": "GlobalMemoryHistoryCommand"
+        },
+        {
+            "command": "globalmemory:import",
+            "method": "GlobalMemoryImportCommand"
+        },
+        {
+            "command": "globalmemory:import_sources",
+            "method": "GlobalMemoryImportSourcesCommand",
+            "send": "{}"
+        },
+        {
+            "command": "globalmemory:revert",
+            "method": "GlobalMemoryRevertCommand"
+        },
+        {
+            "command": "globalmemory:sections",
+            "method": "GlobalMemorySectionsCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "hidenamedagent",
+            "method": "HideNamedAgentCommand"
+        },
+        {
+            "command": "importagents",
+            "method": "ImportAgentDefinitionsCommand"
+        },
+        {
+            "command": "importagentfromclaw",
+            "method": "ImportAgentFromClawCommand"
+        },
+        {
+            "command": "install.cancel",
+            "method": "InstallCancelCommand"
+        },
+        {
+            "command": "install.check",
+            "method": "InstallCheckCommand"
+        },
+        {
+            "command": "install.start",
+            "method": "InstallStartCommand"
+        },
+        {
+            "command": "installtool",
+            "method": "InstallToolCommand"
+        },
+        {
+            "command": "linkagentidentity",
+            "method": "LinkAgentIdentityCommand"
+        },
+        {
+            "command": "listagents",
+            "method": "ListAgentDefinitionsCommand",
+            "send": "data ?? {}",
+            "dataType": "{ is_seeded?: 0 | 1; include_hidden?: boolean }"
+        },
+        {
+            "command": "listagenthistory",
+            "method": "ListAgentHistoryCommand"
+        },
+        {
+            "command": "listagentidentities",
+            "method": "ListAgentIdentitiesCommand"
+        },
+        {
+            "command": "listagentinstances",
+            "method": "ListAgentInstancesCommand"
+        },
+        {
+            "command": "listagentskills",
+            "method": "ListAgentSkillsCommand"
+        },
+        {
+            "command": "listallagentidentities",
+            "method": "ListAllAgentIdentitiesCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "listbackgroundtasks",
+            "method": "ListBackgroundTasksCommand"
+        },
+        {
+            "command": "bookmarks.list",
+            "method": "ListBookmarksCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "browser_profiles.list",
+            "method": "ListBrowserProfilesCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "listmemories",
+            "method": "ListBundlesCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "listdroneruns",
+            "method": "ListDroneRunsCommand"
+        },
+        {
+            "command": "listdrones",
+            "method": "ListDronesCommand"
+        },
+        {
+            "command": "listeditordir",
+            "method": "ListEditorDirCommand"
+        },
+        {
+            "command": "listidentityaccounts",
+            "method": "ListIdentityAccountsCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "listnamedagents",
+            "method": "ListNamedAgentsCommand",
+            "dataType": "{ limit?: number; definition_id?: string }"
+        },
+        {
+            "command": "listrecentsessions",
+            "method": "ListRecentSessionsCommand",
+            "dataType": "{ limit?: number; identity_id?: string }"
+        },
+        {
+            "command": "lspsend",
+            "method": "LspSendCommand"
+        },
+        {
+            "command": "lspstart",
+            "method": "LspStartCommand"
+        },
+        {
+            "command": "lspstop",
+            "method": "LspStopCommand"
+        },
+        {
+            "command": "mcp.bind",
+            "method": "McpBindCommand"
+        },
+        {
+            "command": "mcp.catalog.bind",
+            "method": "McpCatalogBindCommand"
+        },
+        {
+            "command": "mcp.catalog.delete",
+            "method": "McpCatalogDeleteCommand"
+        },
+        {
+            "command": "mcp.catalog.list",
+            "method": "McpCatalogListCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "mcp.catalog.list_for_agent",
+            "method": "McpCatalogListForAgentCommand"
+        },
+        {
+            "command": "mcp.catalog.probe",
+            "method": "McpCatalogProbeCommand"
+        },
+        {
+            "command": "mcp.catalog.set_reach",
+            "method": "McpCatalogSetReachCommand"
+        },
+        {
+            "command": "mcp.catalog.unbind",
+            "method": "McpCatalogUnbindCommand"
+        },
+        {
+            "command": "mcp.catalog.upsert",
+            "method": "McpCatalogUpsertCommand",
+            "optionalFields": [
+                "id",
+                "transport",
+                "config"
+            ]
+        },
+        {
+            "command": "mcp.delete",
+            "method": "McpDeleteCommand"
+        },
+        {
+            "command": "mcp.get",
+            "method": "McpGetCommand"
+        },
+        {
+            "command": "mcp.list",
+            "method": "McpListCommand"
+        },
+        {
+            "command": "mcp.observed.list",
+            "method": "McpObservedListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "mcp.probe",
+            "method": "McpProbeCommand"
+        },
+        {
+            "command": "mcp.unbind",
+            "method": "McpUnbindCommand"
+        },
+        {
+            "command": "mcp.upsert",
+            "method": "McpUpsertCommand",
+            "optionalFields": [
+                "id",
+                "transport",
+                "config"
+            ]
+        },
+        {
+            "command": "movescratchfile",
+            "method": "MoveScratchFileCommand"
+        },
+        {
+            "command": "muxbus.cloudconfig",
+            "method": "MuxBusCloudConfigCommand",
+            "send": "{}"
+        },
+        {
+            "command": "muxbus.disconnect",
+            "method": "MuxBusDisconnectCommand",
+            "send": "{}"
+        },
+        {
+            "command": "muxbus.login.cancel",
+            "method": "MuxBusLoginCancelCommand",
+            "send": "{}"
+        },
+        {
+            "command": "muxbus.login",
+            "method": "MuxBusLoginCommand",
+            "opts": "{ timeout: 360000, ...opts }"
+        },
+        {
+            "command": "muxbus.status",
+            "method": "MuxBusStatusCommand",
+            "send": "{}"
+        },
+        {
+            "command": "waveinfo",
+            "method": "MuxInfoCommand",
+            "send": "null"
+        },
+        {
+            "command": "agent:memory:adoption_list",
+            "method": "NativeMemoryAdoptionListCommand"
+        },
+        {
+            "command": "agent:memory:claims",
+            "method": "NativeMemoryClaimsCommand"
+        },
+        {
+            "command": "agent:memory:diff",
+            "method": "NativeMemoryDiffCommand"
+        },
+        {
+            "command": "agent:memory:history",
+            "method": "NativeMemoryHistoryCommand"
+        },
+        {
+            "command": "agent:memory:list",
+            "method": "NativeMemoryListCommand"
+        },
+        {
+            "command": "agent:memory:read_file",
+            "method": "NativeMemoryReadFileCommand"
+        },
+        {
+            "command": "agent:memory:revert",
+            "method": "NativeMemoryRevertCommand"
+        },
+        {
+            "command": "agent:memory:write_file",
+            "method": "NativeMemoryWriteFileCommand"
+        },
+        {
+            "command": "session:next_prompt_suggestion",
+            "method": "NextPromptSuggestionCommand"
+        },
+        {
+            "command": "notify.ack",
+            "method": "NotifyAckCommand"
+        },
+        {
+            "command": "notify.attention",
+            "method": "NotifyAttentionCommand"
+        },
+        {
+            "command": "notify.emit",
+            "method": "NotifyEmitCommand"
+        },
+        {
+            "command": "notify.focus",
+            "method": "NotifyFocusCommand"
+        },
+        {
+            "command": "notify.takeactivation",
+            "method": "NotifyTakeActivationCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "notify.test",
+            "method": "NotifyTestCommand"
+        },
+        {
+            "command": "openinshell",
+            "method": "OpenInShellCommand"
+        },
+        {
+            "command": "layout.open",
+            "method": "OpenLayoutCommand"
+        },
+        {
+            "command": "presence.publish-now",
+            "method": "PresencePublishNowCommand"
+        },
+        {
+            "command": "presence.status",
+            "method": "PresenceStatusCommand"
+        },
+        {
+            "command": "layout.preview",
+            "method": "PreviewLayoutCommand"
+        },
+        {
+            "command": "providers.models",
+            "method": "ProvidersModelsCommand"
+        },
+        {
+            "command": "readeditorfile",
+            "method": "ReadEditorFileCommand"
+        },
+        {
+            "command": "remoteadd",
+            "method": "RemoteAddCommand"
+        },
+        {
+            "command": "remoteagentrevoke",
+            "method": "RemoteAgentRevokeCommand"
+        },
+        {
+            "command": "remoteforget",
+            "method": "RemoteForgetCommand"
+        },
+        {
+            "command": "remotehelperremove",
+            "method": "RemoteHelperRemoveCommand"
+        },
+        {
+            "command": "remotesetconfig",
+            "method": "RemoteSetConfigCommand"
+        },
+        {
+            "command": "remoteslist",
+            "method": "RemotesListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "remotesshlocate",
+            "method": "RemoteSshLocateCommand"
+        },
+        {
+            "command": "remotetest",
+            "method": "RemoteTestCommand"
+        },
+        {
+            "command": "renameagentdefinitiontitle",
+            "method": "RenameAgentDefinitionTitleCommand"
+        },
+        {
+            "command": "renameeditorfile",
+            "method": "RenameEditorFileCommand"
+        },
+        {
+            "command": "reorderglobalbrain",
+            "method": "ReorderGlobalBundlesCommand"
+        },
+        {
+            "command": "reseedagents",
+            "method": "ReseedAgentDefinitionsCommand",
+            "send": "{}"
+        },
+        {
+            "command": "resolvecli",
+            "method": "ResolveCliCommand",
+            "optionalFields": [
+                "block_id"
+            ]
+        },
+        {
+            "command": "resolve.prereqs",
+            "method": "ResolvePrereqsCommand"
+        },
+        {
+            "command": "routeannounce",
+            "method": "RouteAnnounceCommand",
+            "send": "null"
+        },
+        {
+            "command": "routeunannounce",
+            "method": "RouteUnannounceCommand",
+            "send": "null"
+        },
+        {
+            "command": "runclilogin",
+            "method": "RunCliLoginCommand"
+        },
+        {
+            "command": "rundrone",
+            "method": "RunDroneCommand"
+        },
+        {
+            "command": "layout.save",
+            "method": "SaveLayoutCommand"
+        },
+        {
+            "command": "searchagenthistory",
+            "method": "SearchAgentHistoryCommand"
+        },
+        {
+            "command": "session:archive",
+            "method": "SessionArchiveCommand"
+        },
+        {
+            "command": "session:export",
+            "method": "SessionExportCommand"
+        },
+        {
+            "command": "session:restore",
+            "method": "SessionRestoreCommand"
+        },
+        {
+            "command": "session:resume_preflight",
+            "method": "SessionResumePreflightCommand"
+        },
+        {
+            "command": "setagentbundles",
+            "method": "SetAgentBundlesCommand"
+        },
+        {
+            "command": "setagentcontent",
+            "method": "SetAgentContentCommand"
+        },
+        {
+            "command": "bookmarks.set",
+            "method": "SetBookmarksCommand"
+        },
+        {
+            "command": "browser_start_page.set",
+            "method": "SetBrowserStartPageCommand"
+        },
+        {
+            "command": "setconfig",
+            "method": "SetConfigCommand",
+            "dataType": "SettingsType"
+        },
+        {
+            "command": "setmeta",
+            "method": "SetMetaCommand",
+            "dataType": "CommandSetMetaData"
+        },
+        {
+            "command": "shellexec",
+            "method": "ShellExecCommand"
+        },
+        {
+            "command": "shellstatus",
+            "method": "ShellStatusCommand"
+        },
+        {
+            "command": "shellstop",
+            "method": "ShellStopCommand"
+        },
+        {
+            "command": "skill.bind",
+            "method": "SkillBindCommand"
+        },
+        {
+            "command": "skill.catalog.bind",
+            "method": "SkillCatalogBindCommand"
+        },
+        {
+            "command": "skill.catalog.bind_to_bundle",
+            "method": "SkillCatalogBindToBundleCommand"
+        },
+        {
+            "command": "skill.catalog.delete",
+            "method": "SkillCatalogDeleteCommand"
+        },
+        {
+            "command": "skill.catalog.list",
+            "method": "SkillCatalogListCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "skill.catalog.list_for_agent",
+            "method": "SkillCatalogListForAgentCommand"
+        },
+        {
+            "command": "skill.catalog.list_for_bundle",
+            "method": "SkillCatalogListForBundleCommand"
+        },
+        {
+            "command": "skill.catalog.unbind",
+            "method": "SkillCatalogUnbindCommand"
+        },
+        {
+            "command": "skill.catalog.unbind_from_bundle",
+            "method": "SkillCatalogUnbindFromBundleCommand"
+        },
+        {
+            "command": "skill.catalog.upsert",
+            "method": "SkillCatalogUpsertCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
+        },
+        {
+            "command": "skill.catalog.upsert_for_bundle",
+            "method": "SkillCatalogUpsertForBundleCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
+        },
+        {
+            "command": "skill.delete",
+            "method": "SkillDeleteCommand"
+        },
+        {
+            "command": "skill.get",
+            "method": "SkillGetCommand"
+        },
+        {
+            "command": "skill.list",
+            "method": "SkillListCommand"
+        },
+        {
+            "command": "skill.unbind",
+            "method": "SkillUnbindCommand"
+        },
+        {
+            "command": "skill.upsert",
+            "method": "SkillUpsertCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
+        },
+        {
+            "command": "subprocessspawn",
+            "method": "SubprocessSpawnCommand"
+        },
+        {
+            "command": "swarm.other-instances",
+            "method": "SwarmOtherInstancesCommand",
+            "dataType": "Record<string, never>",
+            "returns": "import(\"@/app/view/swarm/swarm-remote\").SwarmOtherInstances"
+        },
+        {
+            "command": "toolchain.env",
+            "method": "ToolchainEnvCommand",
+            "send": "{}"
+        },
+        {
+            "command": "toolchain.install_system_tool",
+            "method": "ToolchainInstallSystemToolCommand"
+        },
+        {
+            "command": "toolchain.prune",
+            "method": "ToolchainPruneCommand"
+        },
+        {
+            "command": "toolchain.resolve_install_command",
+            "method": "ToolchainResolveInstallCommandCommand"
+        },
+        {
+            "command": "toolchain.versions",
+            "method": "ToolchainVersionsCommand"
+        },
+        {
+            "command": "tooldecision",
+            "method": "ToolDecisionCommand"
+        },
+        {
+            "command": "tower.forget",
+            "method": "TowerForgetCommand"
+        },
+        {
+            "command": "tower.pair",
+            "method": "TowerPairCommand"
+        },
+        {
+            "command": "tower.peers",
+            "method": "TowerPeersCommand"
+        },
+        {
+            "command": "tower.sample",
+            "method": "TowerSampleCommand"
+        },
+        {
+            "command": "unlinkagentidentity",
+            "method": "UnlinkAgentIdentityCommand",
+            "optionalFields": [
+                "silent"
+            ]
+        },
+        {
+            "command": "unwatcheditorfile",
+            "method": "UnwatchEditorFileCommand"
+        },
+        {
+            "command": "unwatchmediadir",
+            "method": "UnwatchMediaDirCommand"
+        },
+        {
+            "command": "updateagent",
+            "method": "UpdateAgentDefinitionCommand",
+            "optionalFields": [
+                "description",
+                "working_directory",
+                "shell",
+                "provider_flags",
+                "auto_start",
+                "restart_on_crash",
+                "idle_timeout_minutes",
+                "agent_type",
+                "environment",
+                "agent_bus_id",
+                "accounts",
+                "container_image",
+                "container_volumes",
+                "auto_continue_enabled",
+                "model_vendor_base_url"
+            ]
+        },
+        {
+            "command": "updateagentinstance",
+            "method": "UpdateAgentInstanceCommand"
+        },
+        {
+            "command": "updateagentskill",
+            "method": "UpdateAgentSkillCommand"
+        },
+        {
+            "command": "browser_profiles.update",
+            "method": "UpdateBrowserProfileCommand"
+        },
+        {
+            "command": "upsertmemory",
+            "method": "UpsertBundleCommand",
+            "optionalFields": [
+                "description",
+                "is_blank",
+                "is_global",
+                "provider",
+                "model",
+                "instructions",
+                "instructions_by_provider",
+                "context_files",
+                "mcp_servers",
+                "skills",
+                "sort_order",
+                "is_system",
+                "created_at",
+                "updated_at"
+            ]
+        },
+        {
+            "command": "upsertdrone",
+            "method": "UpsertDroneCommand"
+        },
+        {
+            "command": "upsertidentityaccount",
+            "method": "UpsertIdentityAccountCommand",
+            "dataType": "Partial<IdentityAccount>"
+        },
+        {
+            "command": "upsertsystemmemory",
+            "method": "UpsertSystemBundleCommand",
+            "optionalFields": [
+                "description",
+                "is_blank",
+                "is_global",
+                "provider",
+                "model",
+                "instructions",
+                "instructions_by_provider",
+                "context_files",
+                "mcp_servers",
+                "skills",
+                "sort_order",
+                "is_system",
+                "created_at",
+                "updated_at"
+            ]
+        },
+        {
+            "command": "bundle.validate",
+            "method": "ValidateBundleCommand",
+            "dataType": "import(\"@/app/store/rpc-api/bundle\").BundleValidateInput"
+        },
+        {
+            "command": "viewer.agent-hidden",
+            "method": "ViewerAgentHiddenCommand"
+        },
+        {
+            "command": "viewer.devices",
+            "method": "ViewerDevicesCommand"
+        },
+        {
+            "command": "viewer.pair-start",
+            "method": "ViewerPairStartCommand"
+        },
+        {
+            "command": "viewer.revoke",
+            "method": "ViewerRevokeCommand"
+        },
+        {
+            "command": "watcheditorfile",
+            "method": "WatchEditorFileCommand"
+        },
+        {
+            "command": "watchmediadir",
+            "method": "WatchMediaDirCommand"
+        },
+        {
+            "command": "widget.api",
+            "method": "WidgetApiCommand",
+            "dataType": "{ port: number; path: string; method?: string; headers?: Record<string, string>; body?: string }"
+        },
+        {
+            "command": "widget.health",
+            "method": "WidgetHealthCommand",
+            "dataType": "{ port: number; health_check_path: string; health_check_body_contains?: string }"
+        },
+        {
+            "command": "widgets.call",
+            "method": "WidgetsCallCommand"
+        },
+        {
+            "command": "widgets.catalog",
+            "method": "WidgetsCatalogCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.catalog.install",
+            "method": "WidgetsCatalogInstallCommand"
+        },
+        {
+            "command": "widgets.endsession",
+            "method": "WidgetsEndSessionCommand"
+        },
+        {
+            "command": "widgets.install",
+            "method": "WidgetsInstallCommand",
+            "optionalFields": [
+                "replace"
+            ]
+        },
+        {
+            "command": "widgets.list",
+            "method": "WidgetsListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.readfile",
+            "method": "WidgetsReadFileCommand"
+        },
+        {
+            "command": "widgets.requests",
+            "method": "WidgetsRequestsCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.rescan",
+            "method": "WidgetsRescanCommand",
+            "send": "{}"
+        },
+        {
+            "command": "widgets.session",
+            "method": "WidgetsSessionCommand"
+        },
+        {
+            "command": "widgets.setenabled",
+            "method": "WidgetsSetEnabledCommand"
+        },
+        {
+            "command": "widgets.uninstall",
+            "method": "WidgetsUninstallCommand"
+        },
+        {
+            "command": "writeagentconfig",
+            "method": "WriteAgentConfigCommand"
+        },
+        {
+            "command": "writeeditorfile",
+            "method": "WriteEditorFileCommand"
+        },
+        {
+            "command": "wsllist",
+            "method": "WslListCommand",
+            "send": "null"
+        }
+    ]
+}

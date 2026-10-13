@@ -103,7 +103,7 @@ export const FLASH_INTER_STRIKE_FLOOR = 0.15;
 /** After the last strike's hold, the fade to zero. */
 export const FLASH_TAIL_MS = 280;
 /** Keyframe sampling step: ≥120 Hz, finer than any display this runs on. */
-export const FLASH_SAMPLE_STEP_MS = 8;
+const FLASH_SAMPLE_STEP_MS = 8;
 /**
  * The display pipeline's own delay (compositor plus scan-out, about a frame)
  * between an animation value changing and it being on screen. The flash

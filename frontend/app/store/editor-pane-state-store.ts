@@ -119,7 +119,7 @@ function projectTab(t: DocTab<EditorBuffer>): EditorTab {
 }
 
 /** The state for a document-tab model. */
-export function fromDocTabs(doc: DocTabsState<EditorBuffer>): EditorPaneState {
+function fromDocTabs(doc: DocTabsState<EditorBuffer>): EditorPaneState {
     return {
         doc,
         tabs: doc.tabs.map(projectTab),
@@ -331,7 +331,7 @@ function baseName(path: string): string {
 }
 
 /** A tab's title in the strip: a scratch buffer's name, else the file's. */
-export function editorTabTitle(b: Pick<EditorBuffer, "filePath" | "displayName">): string {
+function editorTabTitle(b: Pick<EditorBuffer, "filePath" | "displayName">): string {
     return b.displayName || baseName(b.filePath);
 }
 

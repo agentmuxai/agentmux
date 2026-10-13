@@ -672,6 +672,7 @@ impl PolicyState {
     }
 
     /// Number of live (pending or shown) notifications — for tests/diagnostics.
+    #[cfg(test)]
     pub fn live_len(&self) -> usize {
         self.live.len()
     }

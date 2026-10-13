@@ -43,7 +43,7 @@ retaken when the UI changes. The design and the reasons behind it are in
 
 | Script | What it does |
 |---|---|
-| `capture.mjs --suite <name>` | Takes one suite's screenshots: `widgets`, `chrome`, `agent`, `memory` (and `manual`, the first run). |
+| `capture.mjs --suite <name>` | Takes one suite's screenshots: `widgets`, `chrome`, `agent`, `memory` (and `manual`, the first run). `landing` holds shots for agentmux.ai; `refresh.mjs` doesn't run it yet, because nothing publishes to the landing site yet. |
 | `record.mjs` | Records the clips in `recordings.mjs` as GIF (and `--formats webp,mp4`). Needs ffmpeg. |
 | `publish.mjs --docs <clone> --from <run>...` | Copies a run's images over the docs' files of the same name. `--dry-run` shows what would change. |
 | `refresh.mjs` | All of the above, in order. |

@@ -926,7 +926,7 @@ const FINISHED_TOOL_STATUSES = new Set<ToolNode["status"]>(["success", "failed",
  * long call with a dock row, which shows the log in stream order.
  * SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.1 (U1).
  */
-export function freesLog(tool: ToolNode): boolean {
+function freesLog(tool: ToolNode): boolean {
     return (
         FINISHED_TOOL_STATUSES.has(tool.status) &&
         tool.result != null &&

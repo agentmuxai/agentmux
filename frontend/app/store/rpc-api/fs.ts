@@ -10,8 +10,6 @@
 // (`MpsEvents.FilesChanged`), scoped to `block:<block_id>`, with
 // `{ dir }` set to the folder's path exactly as `fs.list` returns it.
 
-import { RpcClient } from "../rpc-client";
-
 export type { FsCreateKind } from "@/types/rpc/FsCreateKind";
 export type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 export type { FsCreateResult } from "@/types/rpc/FsCreateResult";
@@ -19,10 +17,10 @@ export type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 export type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
 export type { FsEntry } from "@/types/rpc/FsEntry";
 export type { FsError } from "@/types/rpc/FsError";
+export type { FsErrorKind } from "@/types/rpc/FsErrorKind";
 export type { FsGitEntry } from "@/types/rpc/FsGitEntry";
 export type { FsGitState } from "@/types/rpc/FsGitState";
 export type { FsGitStatus } from "@/types/rpc/FsGitStatus";
-export type { FsErrorKind } from "@/types/rpc/FsErrorKind";
 export type { FsListReq } from "@/types/rpc/FsListReq";
 export type { FsListResult } from "@/types/rpc/FsListResult";
 export type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
@@ -48,106 +46,3 @@ export type { FsTrashReq } from "@/types/rpc/FsTrashReq";
 export type { FsUnwatchReq } from "@/types/rpc/FsUnwatchReq";
 export type { FsWatchReq } from "@/types/rpc/FsWatchReq";
 export type { FsWatchResult } from "@/types/rpc/FsWatchResult";
-
-import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
-import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
-import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
-import type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
-import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
-import type { FsListReq } from "@/types/rpc/FsListReq";
-import type { FsListResult } from "@/types/rpc/FsListResult";
-import type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
-import type { FsOpResolveReq } from "@/types/rpc/FsOpResolveReq";
-import type { FsOpResults } from "@/types/rpc/FsOpResults";
-import type { FsOpStartReq } from "@/types/rpc/FsOpStartReq";
-import type { FsOpStartResult } from "@/types/rpc/FsOpStartResult";
-import type { FsPathReq } from "@/types/rpc/FsPathReq";
-import type { FsPlacesReq } from "@/types/rpc/FsPlacesReq";
-import type { FsPlacesResult } from "@/types/rpc/FsPlacesResult";
-import type { FsRenameReq } from "@/types/rpc/FsRenameReq";
-import type { FsRenameResult } from "@/types/rpc/FsRenameResult";
-import type { FsRestoreReq } from "@/types/rpc/FsRestoreReq";
-import type { FsTrashReq } from "@/types/rpc/FsTrashReq";
-import type { FsUnwatchReq } from "@/types/rpc/FsUnwatchReq";
-import type { FsWatchReq } from "@/types/rpc/FsWatchReq";
-import type { FsWatchResult } from "@/types/rpc/FsWatchResult";
-
-export const FsApi = {
-    // One page of a folder. Omit `cursor` for the first page; pass the
-    // previous page's `cursor` for the next. No `cursor` in the answer means
-    // done. A folder that can't be opened answers with `error`, not a throw.
-    FsListCommand(client: RpcClient, data: FsListReq, opts?: RpcOpts): Promise<FsListResult> {
-        return client.rpcCall("fs.list", data, opts);
-    },
-
-    // Home, known folders (named, never read) and drives.
-    FsPlacesCommand(client: RpcClient, data?: FsPlacesReq, opts?: RpcOpts): Promise<FsPlacesResult> {
-        return client.rpcCall("fs.places", data ?? {}, opts);
-    },
-
-    FsWatchCommand(client: RpcClient, data: FsWatchReq, opts?: RpcOpts): Promise<FsWatchResult> {
-        return client.rpcCall("fs.watch", data, opts);
-    },
-
-    FsUnwatchCommand(client: RpcClient, data: FsUnwatchReq, opts?: RpcOpts): Promise<FsEmptyResult> {
-        return client.rpcCall("fs.unwatch", data, opts);
-    },
-
-    // Mutations reject with a sentence fit for a toast.
-    FsRenameCommand(client: RpcClient, data: FsRenameReq, opts?: RpcOpts): Promise<FsRenameResult> {
-        return client.rpcCall("fs.rename", data, opts);
-    },
-
-    FsCreateCommand(client: RpcClient, data: FsCreateReq, opts?: RpcOpts): Promise<FsCreateResult> {
-        return client.rpcCall("fs.create", data, opts);
-    },
-
-    // The batch operations answer one result per path, in order.
-    FsTrashCommand(client: RpcClient, data: FsTrashReq, opts?: RpcOpts): Promise<FsOpResults> {
-        return client.rpcCall("fs.trash", data, opts);
-    },
-
-    // Undo of FsTrashCommand: the paths are the ORIGINAL locations.
-    FsRestoreCommand(client: RpcClient, data: FsRestoreReq, opts?: RpcOpts): Promise<FsOpResults> {
-        return client.rpcCall("fs.restore", data, opts);
-    },
-
-    // PERMANENT. Confirm with the user first.
-    FsDeleteCommand(client: RpcClient, data: FsDeleteReq, opts?: RpcOpts): Promise<FsOpResults> {
-        return client.rpcCall("fs.delete", data, opts);
-    },
-
-    FsOpenCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsEmptyResult> {
-        return client.rpcCall("fs.open", data, opts);
-    },
-
-    FsRevealCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsEmptyResult> {
-        return client.rpcCall("fs.reveal", data, opts);
-    },
-
-    // Copy or move as a background job. Resolves with `op_id` once the
-    // request is validated (rejects with a sentence otherwise); progress,
-    // conflicts and the outcome arrive as `files:op` events
-    // (`MpsEvents.FilesOp`, data `FsOpEvent`) scoped to `block:<block_id>`.
-    // An event can arrive before this resolves.
-    FsOpStartCommand(client: RpcClient, data: FsOpStartReq, opts?: RpcOpts): Promise<FsOpStartResult> {
-        return client.rpcCall("fs.op.start", data, opts);
-    },
-
-    // Answer the conflict an op is waiting on (state `conflict`). Rejects if
-    // the op is finished or isn't waiting.
-    FsOpResolveCommand(client: RpcClient, data: FsOpResolveReq, opts?: RpcOpts): Promise<FsEmptyResult> {
-        return client.rpcCall("fs.op.resolve", data, opts);
-    },
-
-    // Stop an op between files or chunks; a partial file is removed. A
-    // final `canceled` event follows. Unknown or finished ops are ignored.
-    FsOpCancelCommand(client: RpcClient, data: FsOpCancelReq, opts?: RpcOpts): Promise<FsEmptyResult> {
-        return client.rpcCall("fs.op.cancel", data, opts);
-    },
-    // What git says about a listed folder's entries, and the branch. Never
-    // fails: outside a repository `in_repo` is false.
-    FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {
-        return client.rpcCall("fs.git_status", data, opts);
-    },
-};

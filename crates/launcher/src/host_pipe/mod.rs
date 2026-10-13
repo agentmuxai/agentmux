@@ -615,6 +615,7 @@ impl HostPipe {
     /// CEF-init/first-paint time (where it would be misleading). reagent
     /// P2, PR #2967 — was a separate `has_registered_host` method with an
     /// identical body; merged to avoid keeping two copies in sync.
+    #[cfg(any(target_os = "windows", test))]
     pub async fn is_connected(&self) -> bool {
         self.inner.lock().await.writer.is_some()
     }

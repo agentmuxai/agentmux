@@ -152,8 +152,8 @@ const PAGE_SIZE = 200;
 export const OLDER_PAGE_LINES = 2_000;
 
 /** Schema versions. v1 = nodes[] embedded; v2 = overlay only + NDJSON replay. */
-export const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
-export const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
+const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
+const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
 /** Version written by writeSnapshotNow. */
 export const SNAPSHOT_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION_V2;
 

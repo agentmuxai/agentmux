@@ -18,7 +18,7 @@ import { search, openSearchPanel } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
 import { editorTheme } from "./editor-theme";
 import { Markdown } from "@/app/element/markdown";
-import brainLogoSvg from "@/app/asset/logo-brain.svg?raw";
+import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
@@ -729,8 +729,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // input; the file tree is the way to open files).
     const EmptyEditor = () => (
         <div class="editor-empty">
-            {/* eslint-disable-next-line solid/no-innerhtml */}
-            <div class="editor-empty-logo" innerHTML={brainLogoSvg} aria-hidden="true" />
+            <EmptyPaneLogo />
             <div class="editor-empty-shortcuts">
                 {emptyShortcuts.map((s) => (
                     <div class="editor-empty-shortcut">

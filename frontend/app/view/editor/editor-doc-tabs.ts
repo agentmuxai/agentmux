@@ -29,7 +29,7 @@ import type { EditorMode, EditorViewModel } from "./editor-model";
 
 /** Tab `tabId` of Editor `blockId` dragged to just before or after another.
  *  False when nothing moved (dropped where it already was). */
-export function moveEditorTabTo(blockId: string, tabId: string, targetId: string, position: "before" | "after"): boolean {
+function moveEditorTabTo(blockId: string, tabId: string, targetId: string, position: "before" | "after"): boolean {
     const before = snapshot(blockId)?.doc;
     dispatch(blockId, { type: "MoveTabTo", tabId, targetId, position, source: "user" });
     return snapshot(blockId)?.doc !== before;

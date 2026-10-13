@@ -4,12 +4,9 @@
 // Block lifecycle, controller I/O, blockfile access. Split from the original
 // hand-maintained rpc-api file. Keep in sync with agentmux-srv RPC handlers.
 
-import { RpcClient } from "../rpc-client";
-
 export type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 export type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
 
-import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 import type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
 
 /**
@@ -22,152 +19,28 @@ import type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
  * generated type calls them required; deriving restores what callers actually
  * do. Only `blockid` is genuinely always present.
  */
-export type BlockInputInput = Pick<CommandBlockInputData, "blockid"> &
-    Partial<Omit<CommandBlockInputData, "blockid">>;
+export type BlockInputInput = Pick<CommandBlockInputData, "blockid"> & Partial<Omit<CommandBlockInputData, "blockid">>;
 
 // The blockfile:* shapes are GENERATED from their Rust definitions by ts-rs.
 // The rest of this file is still hand-written: four commands
 // (controllerinput, controllerresync, agentanswer, createsubblock) have shapes
 // ts-rs cannot express -- see the carve-out notes in rpc_types/block.rs.
-export type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
-export type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
-export type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfileReadRangeData";
-export type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
-export type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfileReadStateData";
-export type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
-export type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
-export type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
-export type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData";
-export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
-export type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
-export type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
-export type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
-export type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
-export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
-export type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
-export type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 export type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 export type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
-
-import type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
-import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
-import type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfileReadRangeData";
-import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
-import type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfileReadStateData";
-import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
-import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
-import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
-import type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData";
-import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
-import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
-import type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
-import type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
-import type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
-import type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
-import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
-import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
-import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
-import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
-
-export const BlockApi = {
-    ControllerInputCommand(client: RpcClient, data: BlockInputInput, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("controllerinput", data, opts);
-    },
-
-    // Reply to a per-tool-call permission gate. Today the backend
-    // validates the payload and logs the decision (audit trail) —
-    // actual delivery to the agent CLI is deferred to PR-3b/PR-4
-    // per SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
-    ToolDecisionCommand(client: RpcClient, data: CommandToolDecisionData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("tooldecision", data, opts);
-    },
-
-    // Fire-and-forget request to narrate an autonomous AgentMux action into
-    // the pane's conversation. The response is not the narration — that
-    // arrives later as an `ambient-narration` broadcast, or never.
-    AmbientNarrateCommand(client: RpcClient, data: CommandAmbientNarrateData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("ambientnarrate", data, opts);
-    },
-
-    // Fire-and-forget push whenever a ToolNode's status changes. Backs
-    // `muxspect dock`'s diagnostic snapshot. Spec:
-    // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
-    DockNodeStatusCommand(client: RpcClient, data: CommandDockNodeStatusData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("docknodestatus", data, opts);
-    },
-
-    // Fire-and-forget push of a declared-background task's real terminal
-    // outcome (parsed from its <task-notification> message), into the
-    // durable Background Task Registry. Deliberately separate from
-    // DockNodeStatusCommand above — see CommandBackgroundTaskCompletionData's
-    // doc comment in srv-types.d.ts for why. Spec:
-    // docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
-    BackgroundTaskCompletionCommand(client: RpcClient, data: CommandBackgroundTaskCompletionData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("backgroundtaskcompletion", data, opts);
-    },
-
-    // Fire-and-forget push of a declared-background task's real OS pid,
-    // relayed from bashwrap's own MPS "pid" chunk. Spec:
-    // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
-    BackgroundTaskPidCommand(client: RpcClient, data: CommandBackgroundTaskPidData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("backgroundtaskpid", data, opts);
-    },
-
-    // Request/response — this block's current db_background_tasks rows.
-    // Spec: docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
-    ListBackgroundTasksCommand(client: RpcClient, data: CommandListBackgroundTasksData, opts?: RpcOpts): Promise<BackgroundTaskView[]> {
-        return client.rpcCall("listbackgroundtasks", data, opts);
-    },
-
-    // Deliver an AskUserQuestion answer to the running agent CLI as a
-    // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
-    AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("agentanswer", data, opts);
-    },
-
-    // Deliver a real protocol-level decline of a pending AskUserQuestion
-    // (Cancel button / Escape) — a control_response with behavior: "deny".
-    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-    AgentCancelCommand(client: RpcClient, data: CommandAgentCancelData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("agentcancel", data, opts);
-    },
-
-    // The pending-shutdown banner's "Keep running".
-    // Spec: docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3.
-    AgentShutdownKeepCommand(
-        client: RpcClient,
-        data: CommandAgentShutdownKeepData,
-        opts?: RpcOpts,
-    ): Promise<AgentShutdownKeepResult> {
-        return client.rpcCall("agentshutdownkeep", data, opts);
-    },
-
-    ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("controllerresync", data, opts);
-    },
-
-    CreateSubBlockCommand(client: RpcClient, data: CommandCreateSubBlockData, opts?: RpcOpts): Promise<ORef> {
-        return client.rpcCall("createsubblock", data, opts);
-    },
-
-    DeleteSubBlockCommand(client: RpcClient, data: CommandDeleteBlockData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("deletesubblock", data, opts);
-    },
-
-    BlockfileLineCountCommand(client: RpcClient, data: CommandBlockfileLineCountData, opts?: RpcOpts): Promise<BlockfileLineCountResult> {
-        return client.rpcCall("blockfile:line_count", data, opts);
-    },
-
-    BlockfileReadRangeCommand(client: RpcClient, data: CommandBlockfileReadRangeData, opts?: RpcOpts): Promise<BlockfileReadRangeResult> {
-        return client.rpcCall("blockfile:read_range", data, opts);
-    },
-
-    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md
-    BlockfileReadStateCommand(client: RpcClient, data: CommandBlockfileReadStateData, opts?: RpcOpts): Promise<BlockfileReadStateResult> {
-        return client.rpcCall("blockfile:read_state", data, opts);
-    },
-
-    BlockfileWriteStateCommand(client: RpcClient, data: CommandBlockfileWriteStateData, opts?: RpcOpts): Promise<BlockfileWriteStateResult> {
-        return client.rpcCall("blockfile:write_state", data, opts);
-    },
-};
+export type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
+export type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
+export type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
+export type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
+export type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
+export type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
+export type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+export type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
+export type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
+export type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
+export type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfileReadRangeData";
+export type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfileReadStateData";
+export type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
+export type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData";
+export type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
+export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
+export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";

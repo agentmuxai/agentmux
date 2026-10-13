@@ -21,7 +21,7 @@ import {
 import { SectionPaneModel, SectionPaneView, type SectionPaneSpec } from "@/app/view/section-pane/section-pane";
 import { SkillManager } from "@/app/view/skill/skill-manager";
 
-export const MEMORY_SPEC: SectionPaneSpec<MemorySection> = {
+const MEMORY_SPEC: SectionPaneSpec<MemorySection> = {
     view: MEMORY_VIEW,
     sectionKey: MEMORY_SECTION_KEY,
     legacySectionKeys: [LEGACY_KNOWLEDGE_SECTION_KEY],

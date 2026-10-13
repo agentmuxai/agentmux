@@ -66,17 +66,22 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                     // The head of the agent's chain, for the spawn's resume
                     // gate. The UID comes from the pane's agent row, as the
                     // spawn env's does (`persisted_agent_identity`).
-                    input.chain_head = mstore
+                    let uid = mstore
                         .instance_get_active_for_block(&block_id)
                         .ok()
                         .flatten()
                         .map(|instance| instance.id)
-                        .filter(|uid| !uid.trim().is_empty())
-                        .and_then(|uid| {
-                            let gfs = crate::backend::agent_session::global_transcript_store()?;
-                            crate::backend::continuity_segments::chain_head(gfs, uid.trim())
-                                .map(crate::backend::continuity_segments::with_legacy_identity)
-                        });
+                        .filter(|uid| !uid.trim().is_empty());
+                    let gfs = crate::backend::agent_session::global_transcript_store();
+                    if let (Some(uid), Some(gfs)) = (uid.as_deref().map(str::trim), gfs) {
+                        input.chain_head = crate::backend::continuity_segments::chain_head(gfs, uid)
+                            .map(crate::backend::continuity_segments::with_legacy_identity);
+                        // As the spawn's gate does: a fork with no chain of its
+                        // own starts from the agent it was forked from.
+                        if input.chain_head.is_none() {
+                            input.fork_source = crate::backend::continuity_segments::fork_source_head(&mstore, gfs, uid);
+                        }
+                    }
                     input.identity_key =
                         crate::identity::account_email::identity_key_from_oauth_dir("claude", &input.config_dir);
                     crate::backend::resume_preflight::preflight(&input)
@@ -174,6 +179,7 @@ fn preflight_input_from_meta(
         history_session_id: String::new(),
         chain_head: None,
         identity_key: None,
+        fork_source: None,
     }
 }
 

@@ -53,10 +53,6 @@ impl BackgroundTaskStatus {
             _ => BackgroundTaskStatus::Running,
         }
     }
-
-    pub fn is_terminal(self) -> bool {
-        !matches!(self, BackgroundTaskStatus::Running)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,14 +330,6 @@ mod tests {
     #[test]
     fn unrecognized_status_string_defaults_to_running() {
         assert_eq!(BackgroundTaskStatus::from_str("garbage"), BackgroundTaskStatus::Running);
-    }
-
-    #[test]
-    fn is_terminal_is_true_for_everything_but_running() {
-        assert!(!BackgroundTaskStatus::Running.is_terminal());
-        assert!(BackgroundTaskStatus::Done.is_terminal());
-        assert!(BackgroundTaskStatus::Error.is_terminal());
-        assert!(BackgroundTaskStatus::Stopped.is_terminal());
     }
 
     /// Survives a fresh `Store::open` against the same file — proves the

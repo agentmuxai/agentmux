@@ -83,6 +83,7 @@ pub enum MdnsHealth {
 }
 
 impl MdnsHealth {
+    #[cfg(test)]
     pub fn is_undiscoverable(&self) -> bool {
         matches!(self, MdnsHealth::Undiscoverable { .. })
     }

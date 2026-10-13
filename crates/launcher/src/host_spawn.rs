@@ -254,7 +254,6 @@ pub(crate) fn spawn_host_unix(
     // this is gated to Linux; macOS uses NSTask's auto-reap behavior.
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::process::CommandExt as _;
         // Safety: prctl is async-signal-safe. No allocation, no syscalls
         // beyond prctl itself. Errors from prctl are non-fatal — the host
         // still spawns; we just lose the auto-reap guarantee.

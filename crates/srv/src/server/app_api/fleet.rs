@@ -44,7 +44,6 @@
 
 use agentmux_common::AUTH_KEY_HEADER;
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::backend::blockcontroller::health::TurnOrigin;
 use crate::backend::reactive::broadcast_turn_message;

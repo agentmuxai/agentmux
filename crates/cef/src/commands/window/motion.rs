@@ -229,7 +229,6 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
         // SetCapture + GetMessage + SetWindowPos loop (`ui_tasks::Win32BeginMoveTask`),
         // NOT WM_NCLBUTTONDOWN — Chromium's frame swallows that NC message, so
         // the OS modal move loop never engages for a CEF window.
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
         let hwnd = unsafe {
             let h = resolve_window_hwnd(state, label);
             if h.is_null() {
@@ -243,11 +242,9 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
         } else {
             tracing::warn!("[start_window_drag] no HWND resolved for label={}", label);
         }
-        return Ok(serde_json::Value::Null);
     }
     #[cfg(not(target_os = "windows"))]
     crate::ui_tasks::post_start_drag(state, label);
-    let _ = (state, args, label);
     Ok(serde_json::Value::Null)
 }
 
@@ -334,8 +331,7 @@ pub fn resolve_window_at_cursor(
                 // CreateFloatingWindowTask::execute and the caller). Fall back
                 // to the label-aware HWND lookup used by start_window_drag so
                 // the floater is always excluded from its own hit-test.
-                // resolve_window_hwnd is unsafe — closure body needs its own block.
-                let h = unsafe { resolve_window_hwnd(state, exclude_label) };
+                let h = resolve_window_hwnd(state, exclude_label);
                 if h.is_null() { None } else { Some(h as isize) }
             })
         };

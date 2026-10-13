@@ -32,7 +32,7 @@ import "./browser-profiles.scss";
 
 /** Open a new browser tab in the same pane as `blockId`, browsing as
  *  `identity` (absent: Personal), at `url`. */
-export async function openTabAs(blockId: string, url: string, identity: string | undefined): Promise<void> {
+async function openTabAs(blockId: string, url: string, identity: string | undefined): Promise<void> {
     const meta: Record<string, unknown> = { view: "browser", url };
     if (identity) meta[IDENTITY_META_KEY] = identity;
     try {

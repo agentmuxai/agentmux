@@ -167,7 +167,7 @@ const REMAKE_ARR_THRESHOLD: usize = 10 * 1024;
 
 // ---- Types ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct MuxEvent {
     pub event: String,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -175,6 +175,7 @@ pub struct MuxEvent {
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub sender: String,
     #[serde(skip_serializing_if = "is_zero", default)]
+    #[ts(type = "number")]
     pub persist: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,

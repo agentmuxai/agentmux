@@ -48,7 +48,12 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
         if count == 0 {
             return Ok(candidate);
         }
-        candidate = format!("{base}-{n}");
+        // Trimmed so the suffixed slug stays a valid agent id (at most 64
+        // chars); an over-long one fails every registration.
+        let suffix = format!("-{n}");
+        let room = agentmux_common::slug::AGENT_ID_MAX_LEN.saturating_sub(suffix.len());
+        let stem: String = base.chars().take(room).collect();
+        candidate = format!("{}{suffix}", stem.trim_end_matches('-'));
         n += 1;
     }
 }
@@ -327,6 +332,25 @@ pub(crate) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(Stri
 }
 
 impl Store {
+    /// The names deleted agents were known by, lowercased as they were
+    /// tombstoned before each delete. A fork's automatic number counts them,
+    /// so a deleted fork's number is never handed out again, even the
+    /// highest one (`suggest_fork_name`).
+    pub fn retired_agent_names(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT name FROM db_agent_key_tombstones")?;
+        let names = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(names)
+    }
+
+    /// The names agent `id` had before its renames. A lineage root's former
+    /// names keep its deleted forks' numbers counted after it is renamed
+    /// (`suggest_fork_name`).
+    pub fn agent_former_names(&self, id: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        former_names(&conn, id)
+    }
+
     /// The slugs of every row whose slug equals `name` trimmed and folded
     /// (identity M4d-3's drift count; slug uniqueness is case-sensitive, so
     /// "Aria" and "aria" are two rows).
@@ -350,5 +374,21 @@ impl Store {
         let mut stmt = conn.prepare("SELECT id, slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows.into_iter().filter(|(_, slug)| slug.trim().to_lowercase() == folded).map(|(id, _)| id).collect())
+    }
+}
+
+impl Store {
+    /// The definitions a message's target names: the one whose slug it is,
+    /// else every one whose display name routes to it (`agent_route_name`: a
+    /// fork "Loap #3" is `Loap-3`, and a root `Claude` may hold the slug
+    /// `claude-2`) (#4744). Folded like the key tables.
+    pub fn agent_defs_for_target(&self, target: &str) -> Result<Vec<AgentDefinition>, StoreError> {
+        let fold = |s: &str| s.trim().to_lowercase();
+        let target = fold(target);
+        let defs = self.agent_def_list()?;
+        if let Some(def) = defs.iter().find(|d| fold(&d.slug) == target) {
+            return Ok(vec![def.clone()]);
+        }
+        Ok(defs.into_iter().filter(|d| fold(&agentmux_common::slug::agent_route_name(&d.name)) == target).collect())
     }
 }

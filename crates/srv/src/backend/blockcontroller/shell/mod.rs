@@ -52,7 +52,7 @@ pub(crate) use indexing::{extend_output_idx, output_index, output_now, read_via_
 // A full rebuild from byte 0: the readers extend instead (`extend_output_idx`
 // falls back to one itself), so only tests call it directly.
 #[cfg(test)]
-pub(crate) use indexing::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
+pub(crate) use indexing::rebuild_output_idx;
 
 #[cfg(test)]
 mod tests;

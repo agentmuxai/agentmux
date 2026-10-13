@@ -94,7 +94,7 @@ impl AgentMuxHandler {
         let selection_text = CefString::from(&p.selection_text()).to_string();
         let is_editable = p.is_editable() != 0;
 
-        let mut b_owned = b.clone();
+        let b_owned = b.clone();
         let can_go_back = b_owned.can_go_back() != 0;
         let can_go_forward = b_owned.can_go_forward() != 0;
 

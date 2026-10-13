@@ -349,6 +349,7 @@ fn capture_login_shell_path(shell: &str, path: Option<&str>) -> Option<String> {
 }
 
 /// Extract the PATH wrapped between the sentinels, ignoring surrounding noise.
+#[cfg(any(unix, test))]
 fn parse_sentinel(buf: &str) -> Option<String> {
     const START: &str = "__AMUX_PATH__";
     const END: &str = "__AMUX_END__";
@@ -443,6 +444,7 @@ fn nvm_current_bin(home: &str) -> Option<String> {
 
 /// Parse a leading "vMAJOR.MINOR.PATCH" into a comparable tuple. Missing or
 /// non-numeric parts sort as 0.
+#[cfg(any(unix, test))]
 fn parse_semverish(v: &str) -> (u64, u64, u64) {
     let core = v.strip_prefix('v').unwrap_or(v);
     let mut it = core.split('.');
@@ -453,6 +455,7 @@ fn parse_semverish(v: &str) -> (u64, u64, u64) {
 /// Pure merge: priority order is login-shell entries, then well-known dirs,
 /// then the inherited PATH — de-duplicated, first occurrence wins. Inherited
 /// entries are always preserved (appended), so the result is a superset.
+#[cfg(any(unix, test))]
 fn build_enriched(inherited: &str, login_shell: Option<&str>, wellknown: &[String]) -> EnrichedPath {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut out: Vec<&str> = Vec::new();
@@ -497,6 +500,7 @@ fn build_enriched(inherited: &str, login_shell: Option<&str>, wellknown: &[Strin
 }
 
 /// De-dup + drop empties, preserving order — for comparing "did we change it".
+#[cfg(any(unix, test))]
 fn normalize(path: &str) -> String {
     let mut seen = HashSet::new();
     path.split(':')

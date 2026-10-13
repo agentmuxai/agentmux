@@ -108,7 +108,7 @@ export interface TranscriptCursorStats {
  */
 export const GAP_FILL_MAX_LINES = 5_000;
 /** Lines per read while filling a gap. */
-export const GAP_FILL_CHUNK_LINES = 1_000;
+const GAP_FILL_CHUNK_LINES = 1_000;
 
 type Item = { kind: "event"; ev: TranscriptFileEvent } | { kind: "count"; count: number; stream: string; gen: string };
 

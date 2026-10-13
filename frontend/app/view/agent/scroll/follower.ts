@@ -20,7 +20,7 @@
 /** Time constant of the approach: ~140 ms to cover 90 % of a step. */
 export const FOLLOW_TAU_MS = 60;
 /** Under reduced motion the approach is quicker, not gone: ~60 ms to cover 90 % of a step. */
-export const FOLLOW_TAU_REDUCED_MS = 25;
+const FOLLOW_TAU_REDUCED_MS = 25;
 /** A step larger than this share of the viewport is shown at once (a paste, a load). */
 export const SNAP_FRACTION = 0.75;
 /** Within this of the target the follower is at rest. 1 px, not less: at a fractional

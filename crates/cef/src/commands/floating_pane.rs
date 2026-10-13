@@ -28,7 +28,9 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::state::{AppState, WindowKind};
+use crate::state::AppState;
+#[cfg(target_os = "windows")]
+use crate::state::WindowKind;
 
 #[derive(Debug, Deserialize)]
 pub struct OpenFloatingPaneArgs {

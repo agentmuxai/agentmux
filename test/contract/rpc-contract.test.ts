@@ -201,8 +201,6 @@ function deriveContract(root: string): Contract {
 
 /** FE makes live calls to these, but the backend registers no handler. */
 const KNOWN_LIVE_UNREGISTERED = [
-    "activity",
-    "recordtevent",
     "resolveids",
     "setrtinfo",
     "workspacelist",
@@ -210,10 +208,6 @@ const KNOWN_LIVE_UNREGISTERED = [
 
 /** rpc-api/ declares these methods, but no backend handler exists. */
 const KNOWN_DECLARED_UNREGISTERED = [
-    "activity",
-    "fileappend",
-    "filejoin",
-    "recordtevent",
     "resolveids",
     "setrtinfo",
     "workspacelist",

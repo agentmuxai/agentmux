@@ -42,7 +42,7 @@ import {
 } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
-import { crumbsOf, isWithin, joinPath, nameProblem, samePath, stemLength } from "./files-path";
+import { crumbsOf, isWithin, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, folderAt, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
@@ -52,10 +52,10 @@ import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } f
 import { isEditableTarget } from "@/util/focusutil";
 import { Button, IconButton } from "@/app/element/ui";
 
-export const ROW_HEIGHT = 24;
+const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
-export const TILE_W = 112;
-export const TILE_H = 132;
+const TILE_W = 112;
+const TILE_H = 132;
 const OVERSCAN = 8;
 
 const COLUMNS: { key: SortKey; label: string; class: string }[] = [
@@ -79,7 +79,7 @@ export function formatModified(ms: number | undefined, now: number = Date.now())
     return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-export function kindOf(e: FsEntry): string {
+function kindOf(e: FsEntry): string {
     if (e.is_dir) return e.is_symlink ? "Folder link" : "Folder";
     const ext = extensionOf(e.name);
     const base = ext ? `${ext.toUpperCase()} file` : "File";
@@ -1204,7 +1204,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
 /** The letter beside a name and what it means (spec §12, git decorations).
  *  A folder shows the most pressing state of what's inside it. */
-export const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title: string }> = {
+const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title: string }> = {
     untracked: { letter: "U", title: "Untracked: new, not yet added to git" },
     added: { letter: "A", title: "Added to git, not yet committed" },
     renamed: { letter: "R", title: "Renamed" },
@@ -1214,7 +1214,7 @@ export const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string;
 };
 
 /** "main ↑1 ↓2 · 3 changes" for the status line. */
-export function gitSummary(g: FsGitStatus): string {
+function gitSummary(g: FsGitStatus): string {
     const parts: string[] = [];
     let head = g.branch ?? "detached";
     if (g.ahead) head += ` ↑${g.ahead}`;
@@ -1496,9 +1496,6 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
         </span>
     );
 }
-
-/** The full path of an entry in the folder shown (for tests and callers). */
-export const entryPath = (dir: string, name: string): string => joinPath(dir, name);
 
 /** A copy or move found something already at the destination (§7.2). */
 function ConflictDialog(props: {

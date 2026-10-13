@@ -22,7 +22,7 @@
 import { FALLBACK_CONTEXT_WINDOW, memorySizeBand } from "./memory-reinjection";
 import type { ContextDeliveryNode, ContextItem, DocumentNode } from "./types";
 
-export const MEMORY_INJECTED_SUBTYPE = "agentmux_memory_injected";
+const MEMORY_INJECTED_SUBTYPE = "agentmux_memory_injected";
 
 type RawFrame = Record<string, unknown>;
 

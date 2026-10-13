@@ -12,7 +12,11 @@ use cef::*;
 
 use crate::state::AppState;
 
-use super::{AppStateCloseOps, BrowserPaneCloseOps, BrowserPaneManager};
+#[cfg(target_os = "windows")]
+use super::AppStateCloseOps;
+#[cfg(any(target_os = "windows", test))]
+use super::BrowserPaneCloseOps;
+use super::BrowserPaneManager;
 
 impl BrowserPaneManager {
     /// Close a pane by destroying its app-owned wrapper HWND (not CEF's own
@@ -141,6 +145,7 @@ impl BrowserPaneManager {
     /// transition (Live→Closing) and the entry removal (CompleteBrowserPaneClose)
     /// happen in `close()` via reducer dispatch — `close_with` is purely
     /// the FFI side-effects that follow.
+    #[cfg(any(target_os = "windows", test))]
     fn close_with(label: &str, ops: &dyn BrowserPaneCloseOps) {
         if let Some(hwnd) = ops.take_browser_hwnd(label) {
             ops.destroy_hwnd(hwnd);
@@ -260,11 +265,11 @@ impl BrowserPaneManager {
 // and retro-browser-pane-renderer-leak-2026-07-07 for the leak that calling
 // it from the IPC thread silently caused.
 
-/// Windows pane-wrapper destroy, marshalled to the CEF UI thread (the
-/// wrapper's owning thread — Win32 DestroyWindow is owner-thread-only).
-/// Posted by `AppStateCloseOps::destroy_hwnd`; the actual
-/// hide → reparent-to-top-level → DestroyWindow sequence lives in
-/// `browser_pane::wrapper::destroy_wrapper_hwnd`.
+// Windows pane-wrapper destroy, marshalled to the CEF UI thread (the
+// wrapper's owning thread — Win32 DestroyWindow is owner-thread-only).
+// Posted by `AppStateCloseOps::destroy_hwnd`; the actual
+// hide → reparent-to-top-level → DestroyWindow sequence lives in
+// `browser_pane::wrapper::destroy_wrapper_hwnd`.
 #[cfg(target_os = "windows")]
 wrap_task! {
     pub struct DestroyPaneWrapperTask {
