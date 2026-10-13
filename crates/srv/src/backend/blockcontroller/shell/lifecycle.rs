@@ -786,15 +786,12 @@ impl Controller for ShellController {
 
 
             // Apply shell-specific startup args (--rcfile, -File, etc.)
-            if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home) {
-                for arg in &startup.extra_args {
-                    c.arg(arg);
-                }
-                for (k, v) in &startup.env_vars {
-                    c.env(k, v);
-                }
+            let startup = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home);
+            let integration = startup.as_ref().map(|s| s.extra_args.as_slice()).unwrap_or_default();
+            c.args(crate::backend::shells::with_user_opts(integration, &shell_opts));
+            for (k, v) in startup.iter().flat_map(|s| &s.env_vars) {
+                c.env(k, v);
             }
-            c.args(&shell_opts); // term:localshellopts, after the integration args
 
             // Inject terminal capability env vars into the PTY environment.
             // ConPTY on Windows fully supports VT/ANSI sequences, so set TERM

@@ -334,6 +334,21 @@ fn shell_opts(block_meta: &MetaMapType, setting: &[String]) -> Vec<String> {
     }
 }
 
+/// The shell's arguments: the integration ones and the user's
+/// `term:localshellopts`. PowerShell's integration ends `-File <script>`, and
+/// anything after `-File` goes to the script, so the user's options go before
+/// it; elsewhere they follow (bash wants its long options, `--rcfile`, first).
+pub fn with_user_opts(integration: &[String], opts: &[String]) -> Vec<String> {
+    let at = integration
+        .iter()
+        .position(|a| a.eq_ignore_ascii_case("-File"))
+        .unwrap_or(integration.len());
+    let mut out = integration[..at].to_vec();
+    out.extend_from_slice(opts);
+    out.extend_from_slice(&integration[at..]);
+    out
+}
+
 /// Ask a shell its version, briefly.
 fn version_of(c: &Candidate) -> Option<String> {
     let args: &[&str] = match c.kind {
@@ -502,6 +517,22 @@ mod tests {
         // An empty list of its own means none, not the setting's.
         meta.insert(META_KEY_TERM_LOCAL_SHELL_OPTS.into(), serde_json::json!([]));
         assert!(shell_opts(&meta, &setting).is_empty());
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn user_options_go_before_powershells_file_and_after_bashs_rcfile() {
+        let pwsh = strings(&["-ExecutionPolicy", "Bypass", "-NoExit", "-File", "wavepwsh.ps1"]);
+        assert_eq!(
+            with_user_opts(&pwsh, &strings(&["-NoLogo"])),
+            strings(&["-ExecutionPolicy", "Bypass", "-NoExit", "-NoLogo", "-File", "wavepwsh.ps1"])
+        );
+        let bash = strings(&["--rcfile", "bashrc"]);
+        assert_eq!(with_user_opts(&bash, &strings(&["-l"])), strings(&["--rcfile", "bashrc", "-l"]));
+        assert_eq!(with_user_opts(&[], &strings(&["/K"])), strings(&["/K"]));
     }
 
     fn auto() -> PathBuf {
