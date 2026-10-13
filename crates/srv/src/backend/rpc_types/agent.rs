@@ -236,7 +236,7 @@ pub struct AgentProcessListResult {
     pub block_id: String,
     /// Platform confidence level — `"high"`, `"best_effort"`, `"none"`.
     /// Frontend shows a badge when anything less than `high`.
-    pub confidence: String,
+    pub confidence: crate::backend::process_tracker::TrackingConfidence,
     pub processes: Vec<AgentProcessInfo>,
 }
 

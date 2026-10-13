@@ -21,11 +21,7 @@ fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let process_tracker = process_tracker.clone();
         async move {
                 let members = process_tracker.list_block(&cmd.block_id);
-                let confidence = match process_tracker.confidence_of(&cmd.block_id) {
-                    crate::backend::process_tracker::TrackingConfidence::High => "high",
-                    crate::backend::process_tracker::TrackingConfidence::BestEffort => "best_effort",
-                    crate::backend::process_tracker::TrackingConfidence::None => "none",
-                };
+                let confidence = process_tracker.confidence_of(&cmd.block_id);
                 let processes: Vec<AgentProcessInfo> = members
                     .into_iter()
                     .map(|m| AgentProcessInfo {
@@ -37,7 +33,7 @@ fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .collect();
                 Ok(AgentProcessListResult {
                     block_id: cmd.block_id,
-                    confidence: confidence.to_string(),
+                    confidence,
                     processes,
                 })
         }
