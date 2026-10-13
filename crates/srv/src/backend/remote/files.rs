@@ -563,13 +563,34 @@ pub async fn connect_quiet(conn: &str) -> Result<Arc<RemoteFiles>, RemoteError> 
     if let Some(f) = s.as_ref().filter(|f| f.is_open()) {
         return Ok(f.clone());
     }
+    // A host this failed on lately (a helper of another version, a login
+    // that needs a prompt) isn't tried again on every poll.
+    if let Some(why) = quiet_failures().lock().unwrap().get(&name).filter(|(at, _)| at.elapsed() < QUIET_RETRY_AFTER) {
+        return Err(RemoteError::link(why.1.clone()));
+    }
     if !super::helper_hosts::known(conn) {
         return Err(RemoteError::link(format!("AgentMux's helper isn't on {name}")));
     }
     let host = HostSsh::for_connection(conn).map_err(RemoteError::link)?;
-    let files = start(&name, host, None).await.map_err(|(e, _)| e)?;
+    let files = match start(&name, host, None).await {
+        Ok(f) => f,
+        Err((e, _)) => {
+            quiet_failures().lock().unwrap().insert(name, (Instant::now(), e.message.clone()));
+            return Err(e);
+        }
+    };
+    quiet_failures().lock().unwrap().remove(&name);
     *s = Some(files.clone());
     Ok(files)
+}
+
+/// How long [`connect_quiet`] leaves a host it failed on alone.
+const QUIET_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// Hosts [`connect_quiet`] failed on: when, and why (said again meanwhile).
+fn quiet_failures() -> &'static Mutex<HashMap<String, (Instant, String)>> {
+    static FAILURES: OnceLock<Mutex<HashMap<String, (Instant, String)>>> = OnceLock::new();
+    FAILURES.get_or_init(Default::default)
 }
 
 /// The pool's key for `conn`: its canonical name, one per host however it is
@@ -594,6 +615,25 @@ pub(crate) async fn connect_in_process(conn: &str, home: std::path::PathBuf) -> 
     let slot = pool().lock().unwrap().entry(name).or_default().clone();
     *slot.lock().await = Some(f.clone());
     f
+}
+
+#[cfg(test)]
+mod quiet_tests {
+    use super::*;
+
+    /// A host `connect_quiet` failed on lately gets the same answer again,
+    /// without another ssh, until the back-off has passed.
+    #[tokio::test]
+    async fn a_recent_failure_is_answered_without_trying_again() {
+        let name = canonical("me@quiet-backoff-test").unwrap();
+        quiet_failures().lock().unwrap().insert(name.clone(), (Instant::now(), "the helper is another version".into()));
+        let err = connect_quiet("me@quiet-backoff-test").await.err().expect("refused");
+        assert_eq!(err.message, "the helper is another version");
+        let long_ago = Instant::now().checked_sub(QUIET_RETRY_AFTER + Duration::from_secs(1)).unwrap();
+        quiet_failures().lock().unwrap().insert(name, (long_ago, "old".into()));
+        let err = connect_quiet("me@quiet-backoff-test").await.err().expect("still no helper here");
+        assert_ne!(err.message, "old", "after the back-off it is tried again");
+    }
 }
 
 #[cfg(test)]

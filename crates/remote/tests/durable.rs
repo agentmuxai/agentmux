@@ -247,7 +247,14 @@ fn serve_measures_a_sessions_shell_through_the_daemon() {
     assert_eq!((none.found, none.processes), (PaneFound::None, 0));
     assert!(none.host_processes > 1);
 
-    a.send(Frame::End);
+    // The shell exits: the session stays listed a while, but its PID is no
+    // longer the pane's (it may already be another process's).
+    // The background sleep holds the terminal open: end it first.
+    a.send(Frame::Input(b"kill %1; exit\n".to_vec()));
+    a.until(|f, _| matches!(f, Frame::Exited { .. }));
+    let exited = pane_procs(&home, "stats1");
+    assert_eq!(exited.found, PaneFound::None, "{exited:?}");
+    // attach ends with its session's shell; the cleanup ends the session.
     let _ = a.child.wait();
 }
 

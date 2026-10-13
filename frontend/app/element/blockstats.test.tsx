@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const detailCmd = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
@@ -110,6 +110,31 @@ describe("a local pane's tooltip", () => {
 });
 
 describe("a remote pane's badge", () => {
+    // jsdom lays nothing out, so no element has an offsetParent: say the
+    // pane is on screen unless a test hides it.
+    let onScreen = true;
+    beforeEach(() => {
+        onScreen = true;
+        Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+            configurable: true,
+            get() {
+                return onScreen ? document.body : null;
+            },
+        });
+    });
+    afterEach(() => {
+        delete (HTMLElement.prototype as { offsetParent?: unknown }).offsetParent;
+    });
+
+    it("asks nothing while its pane isn't on screen, the first time included", async () => {
+        onScreen = false;
+        detailCmd.mockResolvedValue(remote({ figures: REMOTE_FIGURES, host: HOST }));
+        const { container } = render(() => <BlockStatsBadge blockId="r1" connection="build" />);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(detailCmd).not.toHaveBeenCalled();
+        expect(container.querySelector(".block-stats-badge")).toBeNull();
+    });
+
     it("asks its machine without being hovered, and shows the remote shell's figures", async () => {
         detailCmd.mockResolvedValue(remote({ figures: REMOTE_FIGURES, host: HOST, peak: 120 * MB }));
         const { container } = render(() => <BlockStatsBadge blockId="r1" connection="build" />);
@@ -117,7 +142,9 @@ describe("a remote pane's badge", () => {
         expect(detailCmd).toHaveBeenCalledWith({}, { block_id: "r1" });
 
         hover(container);
-        await waitFor(() => expect(screen.getByText("Connected to build (build.example.net, 203.0.113.5)")).toBeTruthy());
+        await waitFor(() =>
+            expect(screen.getByText("Connected to build (build.example.net, 203.0.113.5)")).toBeTruthy()
+        );
         expect(screen.getByText(/Measured on that machine: bash, node ×2 \(3 processes\)/)).toBeTruthy();
         expect(screen.getByText(/the pane's durable session/)).toBeTruthy();
         for (const [label, v] of [
@@ -154,18 +181,18 @@ describe("a remote pane's badge", () => {
 
 describe("formatting", () => {
     it("names a connection by what it says beyond its own name", () => {
-        expect(describeConnection({ name: "build", kind: "ssh", host: "build.example.net", address: "203.0.113.5" })).toBe(
-            "Connected to build (build.example.net, 203.0.113.5)",
-        );
+        expect(
+            describeConnection({ name: "build", kind: "ssh", host: "build.example.net", address: "203.0.113.5" })
+        ).toBe("Connected to build (build.example.net, 203.0.113.5)");
         // The host is the name already: only the address is new.
-        expect(describeConnection({ name: "me@box.lan:2222", kind: "ssh", host: "box.lan", address: "192.0.2.9" })).toBe(
-            "Connected to me@box.lan:2222 (192.0.2.9)",
-        );
+        expect(
+            describeConnection({ name: "me@box.lan:2222", kind: "ssh", host: "box.lan", address: "192.0.2.9" })
+        ).toBe("Connected to me@box.lan:2222 (192.0.2.9)");
         expect(describeConnection({ name: "192.0.2.4", kind: "ssh", host: "192.0.2.4", address: "192.0.2.4" })).toBe(
-            "Connected to 192.0.2.4",
+            "Connected to 192.0.2.4"
         );
         expect(describeConnection({ name: "wsl://Ubuntu", kind: "wsl", host: "Ubuntu", address: "198.51.100.5" })).toBe(
-            "Connected to WSL Ubuntu (198.51.100.5)",
+            "Connected to WSL Ubuntu (198.51.100.5)"
         );
         expect(describeConnection({ name: "far", kind: "ssh" })).toBe("Connected to far");
     });
@@ -179,8 +206,15 @@ describe("formatting", () => {
     });
 
     it("gives the badge the pane's figures, else the host's, else nothing", () => {
-        expect(remoteBadge({ found: "marker", figures: REMOTE_FIGURES, host: HOST })).toEqual({ cpu: "12.5%", mem: "90M", host: false });
+        expect(remoteBadge({ found: "marker", figures: REMOTE_FIGURES, host: HOST })).toEqual({
+            cpu: "12.5%",
+            mem: "90M",
+            host: false,
+        });
         expect(remoteBadge({ found: "marker", figures: { ...REMOTE_FIGURES, cpu: undefined } })?.cpu).toBe("–%");
+        expect(remoteBadge({ found: "marker", figures: { ...REMOTE_FIGURES, mem_resident: undefined } })?.mem).toBe(
+            "–"
+        );
         expect(remoteBadge({ found: "none", host: HOST })).toEqual({ cpu: "300.0%", mem: "6.0G", host: true });
         expect(remoteBadge({ found: "unavailable", reason: "x" })).toBeNull();
     });

@@ -191,7 +191,10 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
                 out.write_all(if found { b"ok\n" } else { b"none\n" })
             }
             ["PID", id] => {
-                let pid = sessions.lock().unwrap().get(*id).map(|s| s.pid);
+                // An exited session stays listed for a while, but its shell
+                // is gone and its PID may already be another process's.
+                let session = sessions.lock().unwrap().get(*id).cloned();
+                let pid = session.filter(|s| s.inner.lock().unwrap().exited.is_none()).map(|s| s.pid);
                 out.write_all(pid.map_or_else(|| "none\n".to_string(), |p| format!("{p}\n")).as_bytes())
             }
             ["LIST"] => {

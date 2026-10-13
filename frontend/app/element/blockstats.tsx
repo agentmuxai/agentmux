@@ -2,13 +2,18 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { useBlockStats, type BlockStats } from "@/app/hook/useBlockStats";
 import { RpcApi } from "@/app/store/rpc-api";
-import type { BlockStatsConnection, BlockStatsDetail, BlockStatsFigures, BlockStatsRemote } from "@/app/store/rpc-api/blockstats";
+import type {
+    BlockStatsConnection,
+    BlockStatsDetail,
+    BlockStatsFigures,
+    BlockStatsRemote,
+} from "@/app/store/rpc-api/blockstats";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Tooltip } from "./tooltip";
+import { Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import "./blockstats.scss";
+import { Tooltip } from "./tooltip";
 
 /**
  * How often an open tooltip asks for a local pane's processes again, and how
@@ -46,7 +51,8 @@ export function formatSince(ms: number, now = new Date()): string {
     return `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
 }
 
-const since = (f: BlockStatsFigures) => (f.started_at_ms != null ? `, running since ${formatSince(f.started_at_ms)}` : "");
+const since = (f: BlockStatsFigures) =>
+    f.started_at_ms != null ? `, running since ${formatSince(f.started_at_ms)}` : "";
 
 /**
  * A remote pane's machine: "Connected to build (build.example.net, 203.0.113.5)",
@@ -83,7 +89,8 @@ function privateMeaning(metric: string): string {
 /** The badge's two figures for a remote pane, and whether they are the whole host's. */
 export function remoteBadge(r: BlockStatsRemote): { cpu: string; mem: string; host: boolean } | null {
     const cpu = (v: number | undefined) => (v == null ? "–%" : `${v.toFixed(1)}%`);
-    if (r.figures) return { cpu: cpu(r.figures.cpu), mem: formatMem(r.figures.mem_resident ?? 0), host: false };
+    const mem = (v: number | undefined) => (v == null ? "–" : formatMem(v));
+    if (r.figures) return { cpu: cpu(r.figures.cpu), mem: mem(r.figures.mem_resident), host: false };
     if (r.host) return { cpu: cpu(r.host.cpu), mem: formatMem(r.host.mem), host: true };
     return null;
 }
@@ -109,7 +116,7 @@ function LocalTooltip(props: { blockId: string; stats: BlockStats }) {
     const load = () =>
         RpcApi.BlockStatsDetailCommand(TabRpcClient, { block_id: props.blockId }).then(
             (d) => !closed && setDetail(d.local ?? null),
-            () => !closed && setDetail(null),
+            () => !closed && setDetail(null)
         );
     onMount(() => {
         void load();
@@ -133,14 +140,22 @@ function LocalTooltip(props: { blockId: string; stats: BlockStats }) {
                 </Show>
             </div>
             <div class="bst-grid">
-                <Row label="CPU" value={`${props.stats.cpu.toFixed(1)}%`} meaning="of one core; above 100% is more than one core" />
+                <Row
+                    label="CPU"
+                    value={`${props.stats.cpu.toFixed(1)}%`}
+                    meaning="of one core; above 100% is more than one core"
+                />
                 <Row
                     label="Memory"
                     value={formatBytes(props.stats.mem)}
                     meaning={`in RAM now, including pages shared with other processes${windows() ? "; Windows trims it when the shell is idle" : ""}`}
                 />
                 <Show when={detail()?.mem_private != null}>
-                    <Row label="Private" value={formatBytes(detail()!.mem_private!)} meaning={privateMeaning(detail()!.memory_metric)} />
+                    <Row
+                        label="Private"
+                        value={formatBytes(detail()!.mem_private!)}
+                        meaning={privateMeaning(detail()!.memory_metric)}
+                    />
                 </Show>
                 <Show when={detail()?.mem_commit != null}>
                     <Row
@@ -151,7 +166,9 @@ function LocalTooltip(props: { blockId: string; stats: BlockStats }) {
                 </Show>
                 <Row label="Peak" value={formatBytes(props.stats.peak)} meaning="the highest Memory has been" />
             </div>
-            <div class="bst-footer">The shell and everything started in it. Updated every second; hide with term:showstatsbadge.</div>
+            <div class="bst-footer">
+                The shell and everything started in it. Updated every second; hide with term:showstatsbadge.
+            </div>
         </div>
     );
 }
@@ -180,7 +197,9 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                         That machine can't tell this pane's processes from the rest: these are its own totals. A durable
                         pane, or a server that accepts AgentMux's variables (AcceptEnv AGENTMUX_*), shows the pane's.
                     </Match>
-                    <Match when={remote()?.found === "unavailable"}>Not measured: {remote()?.reason ?? "the machine couldn't be asked"}.</Match>
+                    <Match when={remote()?.found === "unavailable"}>
+                        Not measured: {remote()?.reason ?? "the machine couldn't be asked"}.
+                    </Match>
                 </Switch>
             </div>
             <div class="bst-grid">
@@ -200,10 +219,18 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                                 />
                             </Show>
                             <Show when={f().mem_private != null}>
-                                <Row label="Private" value={formatBytes(f().mem_private!)} meaning={privateMeaning(f().memory_metric)} />
+                                <Row
+                                    label="Private"
+                                    value={formatBytes(f().mem_private!)}
+                                    meaning={privateMeaning(f().memory_metric)}
+                                />
                             </Show>
                             <Show when={remote()?.peak != null}>
-                                <Row label="Peak" value={formatBytes(remote()!.peak!)} meaning="the highest Memory has been" />
+                                <Row
+                                    label="Peak"
+                                    value={formatBytes(remote()!.peak!)}
+                                    meaning="the highest Memory has been"
+                                />
                             </Show>
                         </>
                     )}
@@ -225,14 +252,17 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                     )}
                 </Show>
             </div>
-            <div class="bst-footer">Updated every 2 seconds while the pane is visible; hide with term:showstatsbadge.</div>
+            <div class="bst-footer">
+                Updated every 2 seconds while the pane is visible; hide with term:showstatsbadge.
+            </div>
         </div>
     );
 }
 
 /**
  * A remote pane's figures, asked of its machine every 2 seconds while `el`
- * is on screen (not in a hidden tab or a minimized window).
+ * is on screen (not in a hidden tab or a minimized window), the first time
+ * included.
  */
 function useRemoteStats(blockId: string, el: Accessor<HTMLElement | undefined>): Accessor<BlockStatsDetail | null> {
     const [detail, setDetail] = createSignal<BlockStatsDetail | null>(null);
@@ -240,12 +270,12 @@ function useRemoteStats(blockId: string, el: Accessor<HTMLElement | undefined>):
     let busy = false;
     const visible = () => document.visibilityState !== "hidden" && (el()?.offsetParent ?? null) !== null;
     const load = () => {
-        if (busy || (detail() && !visible())) return;
+        if (busy || !visible()) return;
         busy = true;
         RpcApi.BlockStatsDetailCommand(TabRpcClient, { block_id: blockId })
             .then(
                 (d) => !closed && setDetail(d),
-                () => {},
+                () => {}
             )
             .finally(() => (busy = false));
     };
@@ -271,23 +301,28 @@ function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
         return f.cpu > 90 ? "cpu-high" : f.cpu > 50 ? "cpu-medium" : "";
     };
     return (
-        <Show when={detail()}>
-            {(d) => (
-                <Tooltip
-                    placement="bottom"
-                    immediate
-                    divClassName={`block-stats-badge remote ${shown()?.host ? "host" : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
-                    content={<RemoteTooltip detail={d()} />}
-                >
-                    <span ref={setAnchor} class="stats-cpu">
-                        {shown() ? (shown()!.host ? `host ${shown()!.cpu}` : shown()!.cpu) : "–"}
-                    </span>
-                    <Show when={shown()}>
-                        <span class="stats-mem">{shown()!.mem}</span>
-                    </Show>
-                </Tooltip>
-            )}
-        </Show>
+        <>
+            {/* Always here, so whether the pane is on screen is known before
+                there is anything to show. */}
+            <span ref={setAnchor} class="block-stats-anchor" />
+            <Show when={detail()}>
+                {(d) => (
+                    <Tooltip
+                        placement="bottom"
+                        immediate
+                        divClassName={`block-stats-badge remote ${shown()?.host ? "host" : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}
+                        content={<RemoteTooltip detail={d()} />}
+                    >
+                        <span class="stats-cpu">
+                            {shown() ? (shown()!.host ? `host ${shown()!.cpu}` : shown()!.cpu) : "–"}
+                        </span>
+                        <Show when={shown()}>
+                            <span class="stats-mem">{shown()!.mem}</span>
+                        </Show>
+                    </Tooltip>
+                )}
+            </Show>
+        </>
     );
 }
 
@@ -326,7 +361,10 @@ function LocalBadge(props: { blockId: string; noHeader?: boolean }) {
  */
 export function BlockStatsBadge(props: { blockId: string; noHeader?: boolean; connection?: string }) {
     return (
-        <Show when={isRemoteConnection(props.connection)} fallback={<LocalBadge blockId={props.blockId} noHeader={props.noHeader} />}>
+        <Show
+            when={isRemoteConnection(props.connection)}
+            fallback={<LocalBadge blockId={props.blockId} noHeader={props.noHeader} />}
+        >
             <RemoteBadge blockId={props.blockId} noHeader={props.noHeader} />
         </Show>
     );
