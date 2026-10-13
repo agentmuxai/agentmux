@@ -31,6 +31,7 @@ import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { paintRows, resizeAndPaint } from "./term-paint";
+import { setTermRendererOf } from "@/app/store/term-renderer";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
 const dlog = debug("wave:termwrap");
@@ -854,6 +855,34 @@ export class TermWrap {
         });
         observer.observe(canvas, { box: "device-pixel-content-box" });
         this.toDispose.push({ dispose: () => observer.disconnect() });
+        this.hideCanvasWhileContextLost(canvas);
+    }
+
+    /**
+     * While the canvas's WebGL context is lost, show the pane's own background
+     * instead of the dead canvas. The page's limit of 16 contexts evicts the
+     * oldest when terminals open quickly past it, and xterm waits 3 s for a
+     * restore before this terminal falls back to the DOM renderer
+     * (RCA_TERMINAL_WEBGL_CONTEXT_CAP_RELOAD_LOOP_2026_10_13.md); those panes
+     * showed white meanwhile.
+     */
+    private hideCanvasWhileContextLost(canvas: HTMLCanvasElement) {
+        const onLost = () => {
+            canvas.style.visibility = "hidden";
+            setTermRendererOf(this.blockId, { kind: "lost", why: "its WebGL context was lost; waiting 3 s for it back, then DOM" });
+        };
+        const onRestored = () => {
+            canvas.style.visibility = "";
+            setTermRendererOf(this.blockId, { kind: "webgl" });
+        };
+        canvas.addEventListener("webglcontextlost", onLost);
+        canvas.addEventListener("webglcontextrestored", onRestored);
+        this.toDispose.push({
+            dispose: () => {
+                canvas.removeEventListener("webglcontextlost", onLost);
+                canvas.removeEventListener("webglcontextrestored", onRestored);
+            },
+        });
     }
 
     private loadRendererAddon(useWebGl: boolean) {
@@ -873,11 +902,16 @@ export class TermWrap {
                         webglAddon.dispose();
                         console.warn("WebGL context lost, falling back to DOM renderer");
                         setTermRendererAtom("dom"); // GPU context lost → DOM fallback
+                        setTermRendererOf(this.blockId, {
+                            kind: "dom",
+                            why: "its WebGL context was lost and not restored (too many terminals, or a GPU reset)",
+                        });
                         // DOM renderer is active by default when no addon is loaded
                     })
                 );
                 this.terminal.loadAddon(webglAddon);
                 setTermRendererAtom("webgl");
+                setTermRendererOf(this.blockId, { kind: "webgl" });
                 if (!loggedWebGL) {
                     console.log("loaded webgl renderer!");
                     loggedWebGL = true;
@@ -885,6 +919,7 @@ export class TermWrap {
             } catch (e) {
                 console.warn("WebGL renderer unavailable, using DOM renderer:", e);
                 setTermRendererAtom("dom");
+                setTermRendererOf(this.blockId, { kind: "dom", why: "WebGL couldn't start for this terminal" });
                 if (!loggedWebGL) {
                     console.log("loaded DOM renderer (webgl fallback)!");
                     loggedWebGL = true;
@@ -893,6 +928,10 @@ export class TermWrap {
         } else {
             // WebGL unsupported (GPU disabled) or disabled by setting — DOM renderer.
             setTermRendererAtom("dom");
+            setTermRendererOf(this.blockId, {
+                kind: "dom",
+                why: useWebGl ? "WebGL isn't available on this machine" : "WebGL is turned off (term:disablewebgl)",
+            });
         }
     }
 
