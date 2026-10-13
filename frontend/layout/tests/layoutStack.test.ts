@@ -1214,6 +1214,14 @@ describe("addWidgetAsPaneTab", () => {
         expect(rpcCall).not.toHaveBeenCalled();
         expect(deleteBlock).not.toHaveBeenCalled();
     });
+
+    it("refuses a blockdef with no view, before asking srv (which would take the meta as-is)", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        await expect(addWidgetAsPaneTab(model, nodeId, { meta: {} } as BlockDef)).rejects.toThrow(/no view/);
+        await expect(addWidgetAsPaneTab(model, nodeId, { meta: { view: "" } } as BlockDef)).rejects.toThrow(/no view/);
+        expect(rpcCall).not.toHaveBeenCalled();
+    });
 });
 
 describe("openBlockInStack", () => {

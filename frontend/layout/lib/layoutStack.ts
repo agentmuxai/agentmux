@@ -90,9 +90,11 @@ export async function addWidgetAsPaneTab(
      *  `meta.insert("cmd:cwd", …)`. */
     extraMeta?: Record<string, unknown>
 ): Promise<void> {
+    const view = blockDef.meta?.view;
+    // srv takes a supplied meta as-is and never checks `view`, so a blockdef
+    // without one would make a block with no view: refuse it here.
+    if (typeof view !== "string" || !view) throw new Error("addWidgetAsPaneTab: the blockdef has no view");
     const meta = (extraMeta ? { ...blockDef.meta, ...extraMeta } : blockDef.meta) as MetaType | undefined;
-    // A blockdef without a view: srv refuses it, as it did before this was typed.
-    const view = String(blockDef.meta?.view ?? "");
     await openBlockInStack(model, { nodeId }, view, meta);
 }
 

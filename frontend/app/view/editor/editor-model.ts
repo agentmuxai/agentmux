@@ -1212,7 +1212,6 @@ export class EditorViewModel {
     /** Open the folder in a terminal pane (split right of the current pane). */
     async openInTerminal(folderPath: string): Promise<void> {
         try {
-            // pane.open is a raw RPC — no typed wrapper exists yet in RpcApi.
             await RpcApi.PaneOpenCommand(TabRpcClient, {
                 view: "term",
                 cwd: folderPath,
@@ -1220,7 +1219,7 @@ export class EditorViewModel {
                 split_reference_block_id: this.blockId,
             }, {});
         } catch {
-            // pane.open might not be registered yet — fail silently.
+            // Opening beside is best-effort: fail silently.
         }
     }
 
@@ -1237,7 +1236,7 @@ export class EditorViewModel {
                 split_reference_block_id: this.blockId,
             }, {});
         } catch {
-            // pane.open might not be registered yet — fail silently, same as openInTerminal.
+            // Best-effort, same as openInTerminal.
         }
     }
 
