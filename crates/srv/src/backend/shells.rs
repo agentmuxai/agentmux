@@ -23,7 +23,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::backend::blockcontroller::{META_KEY_TERM_LOCAL_SHELL_OPTS, META_KEY_TERM_LOCAL_SHELL_PATH};
+use crate::backend::obj::MetaMapType;
 use crate::backend::rpc_types::{EffectiveShell, ShellInfo, ShellList};
+use crate::backend::wconfig::SettingsType;
 
 /// How long a shell may take to say its version before it is listed without one.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(3);
@@ -309,6 +312,28 @@ fn resolve_with(
     }
 }
 
+/// The shell and extra arguments a block's interactive terminal starts with:
+/// [`resolve_for_spawn`] on the block's and the global `term:localshellpath`,
+/// and the block's `term:localshellopts`, else the setting's (appended after
+/// the shell-integration arguments). Logs a configured shell that wasn't found.
+pub fn for_block(block_id: &str, block_meta: &MetaMapType, settings: &SettingsType) -> (PathBuf, Vec<String>) {
+    let own_path = block_meta.get(META_KEY_TERM_LOCAL_SHELL_PATH).and_then(|v| v.as_str()).unwrap_or("");
+    let shell = resolve_for_spawn(own_path, &settings.term_local_shell_path);
+    if let Some(missing) = &shell.missing {
+        tracing::warn!(block_id, missing = %missing, using = %shell.path.display(), "configured shell not found; using the automatic one");
+    }
+    (shell.path, shell_opts(block_meta, &settings.term_local_shell_opts))
+}
+
+/// The block's own `term:localshellopts` when it has the key, even empty (an
+/// agent's shell pins `[]`), else the setting's.
+fn shell_opts(block_meta: &MetaMapType, setting: &[String]) -> Vec<String> {
+    match block_meta.get(META_KEY_TERM_LOCAL_SHELL_OPTS).and_then(|v| v.as_array()) {
+        Some(own) => own.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
+        None => setting.to_vec(),
+    }
+}
+
 /// Ask a shell its version, briefly.
 fn version_of(c: &Candidate) -> Option<String> {
     let args: &[&str] = match c.kind {
@@ -466,6 +491,18 @@ mod tests {
         assert_eq!(Kind::of(Path::new(r"C:\Windows\System32\cmd.exe")), Kind::Cmd);
         assert_eq!(Kind::GitBash.name(Path::new("x")), "Git Bash");
         assert_eq!(Kind::Other.name(Path::new(r"C:\tools\xonsh.exe")), "xonsh.exe");
+    }
+
+    #[test]
+    fn the_blocks_own_options_win_over_the_setting() {
+        let mut meta = MetaMapType::new();
+        let setting = vec!["-NoLogo".to_string()];
+        assert_eq!(shell_opts(&meta, &setting), setting);
+        meta.insert(META_KEY_TERM_LOCAL_SHELL_OPTS.into(), serde_json::json!(["-l"]));
+        assert_eq!(shell_opts(&meta, &setting), vec!["-l".to_string()]);
+        // An empty list of its own means none, not the setting's.
+        meta.insert(META_KEY_TERM_LOCAL_SHELL_OPTS.into(), serde_json::json!([]));
+        assert!(shell_opts(&meta, &setting).is_empty());
     }
 
     fn auto() -> PathBuf {

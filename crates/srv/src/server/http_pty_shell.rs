@@ -126,6 +126,15 @@ pub(super) async fn handle_pty_shell_create(
         blockcontroller::META_KEY_CONTROLLER.to_string(),
         json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
     );
+    // An agent's shell doesn't follow the user's default-shell setting
+    // (term:localshellpath and term:localshellopts are for their terminals):
+    // pin it to the automatic shell with no extra arguments. Only macOS and
+    // Linux reach that branch; Windows runs cmd.exe below.
+    meta.insert(
+        blockcontroller::META_KEY_TERM_LOCAL_SHELL_PATH.to_string(),
+        json!(crate::backend::shells::automatic().display().to_string()),
+    );
+    meta.insert(blockcontroller::META_KEY_TERM_LOCAL_SHELL_OPTS.to_string(), json!([]));
     // Force cmd.exe directly on Windows rather than the "shell" controller's
     // default pwsh/powershell auto-detection (`backend::shells::automatic`,
     // which tries pwsh first). Discovered live, not assumed: PowerShell's
