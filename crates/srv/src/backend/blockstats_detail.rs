@@ -10,17 +10,25 @@
 //! `agentmux_procstats` snapshot, private and committed. A snapshot costs
 //! tens of milliseconds, so it is taken only while a tooltip is open, never
 //! on the badge's every-second tick.
+//!
+//! A remote pane (SSH, WSL) is measured on the machine it is connected to,
+//! by AgentMux's helper there (`PaneProcs`); [`remote`] turns its answer
+//! into the badge's figures, with a peak kept here.
+//! SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use agentmux_procstats::ProcInfo;
+use agentmux_remote::fsproto::{PaneFound, PaneFrame};
 
-use crate::backend::rpc_types::{BlockStatsDetail, BlockStatsName};
+use crate::backend::rpc_types::{BlockStatsFigures, BlockStatsHost, BlockStatsName, BlockStatsRemote};
 
 /// The tooltip's numbers for the process tree under `root_pid`, at most
 /// `max` processes (the badge's own cap). `None` when the shell isn't in the
 /// snapshot (it exited).
-pub fn detail(snap: &[ProcInfo], root_pid: u32, max: usize) -> Option<BlockStatsDetail> {
+pub fn detail(snap: &[ProcInfo], root_pid: u32, max: usize) -> Option<BlockStatsFigures> {
     let root = snap.iter().position(|p| p.pid == root_pid)?;
     let by_pid: HashMap<u32, usize> = snap.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
     // Parent → children, trusting a parent only if it really is one (a
@@ -62,15 +70,82 @@ pub fn detail(snap: &[ProcInfo], root_pid: u32, max: usize) -> Option<BlockStats
     // the order the walk met them in).
     names[1..].sort_by(|a, b| b.count.cmp(&a.count));
 
-    Some(BlockStatsDetail {
+    Some(BlockStatsFigures {
         processes: tree.len() as u32,
         names,
         started_at_ms: snap[root].started_at_ms,
+        cpu: None,
+        mem_resident: None,
         mem_private: sum(|p| p.mem_private),
         mem_commit: sum(|p| p.mem_commit),
+        unmeasured: None,
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
-        connection: None,
     })
+}
+
+/// A remote pane's helper answer as the badge's figures, with its peak.
+pub fn remote(block_id: &str, f: PaneFrame) -> BlockStatsRemote {
+    let percent = |milli: u64| milli as f64 / 10.0;
+    let host = BlockStatsHost {
+        cpu_count: f.cpu_count,
+        cpu: f.host_cpu_milli.map(percent),
+        mem: f.host_mem,
+        processes: f.host_processes,
+        unmeasured: f.host_unmeasured,
+        memory_metric: f.memory_metric.clone(),
+    };
+    let found = match f.found {
+        PaneFound::Session => "session",
+        PaneFound::Marker => "marker",
+        PaneFound::None => "none",
+    };
+    let figures = (f.found != PaneFound::None).then(|| BlockStatsFigures {
+        processes: f.processes,
+        names: f.names.into_iter().map(|(name, count)| BlockStatsName { name, count }).collect(),
+        started_at_ms: f.started_at_ms,
+        cpu: f.cpu_milli.map(percent),
+        mem_resident: f.mem_resident,
+        mem_private: f.mem,
+        mem_commit: None,
+        unmeasured: Some(f.unmeasured),
+        memory_metric: f.memory_metric,
+    });
+    let peak = figures.as_ref().and_then(|fig| {
+        let mem = fig.mem_resident?;
+        Some(remote_peaks().lock().unwrap().observe(block_id, (0, fig.started_at_ms.unwrap_or(0)), mem))
+    });
+    BlockStatsRemote { found: found.to_string(), figures, host: Some(host), peak, reason: None }
+}
+
+/// A remote pane whose machine couldn't be asked, and why.
+pub fn remote_unavailable(reason: String) -> BlockStatsRemote {
+    BlockStatsRemote { found: "unavailable".to_string(), figures: None, host: None, peak: None, reason: Some(reason) }
+}
+
+/// Remote panes' peaks, by pane and shell (its start: the PID is the other
+/// machine's). A pane not asked about for [`REMOTE_PEAK_IDLE`] is forgotten.
+fn remote_peaks() -> &'static Mutex<RemotePeaks> {
+    static PEAKS: OnceLock<Mutex<RemotePeaks>> = OnceLock::new();
+    PEAKS.get_or_init(Default::default)
+}
+
+const REMOTE_PEAK_IDLE: Duration = Duration::from_secs(600);
+
+#[derive(Default)]
+struct RemotePeaks {
+    peaks: Peaks,
+    seen: HashMap<String, Instant>,
+}
+
+impl RemotePeaks {
+    fn observe(&mut self, block_id: &str, shell: Shell, mem: u64) -> u64 {
+        let now = Instant::now();
+        self.seen.insert(block_id.to_string(), now);
+        self.seen.retain(|_, at| now.duration_since(*at) < REMOTE_PEAK_IDLE);
+        let seen = &self.seen;
+        self.peaks.retain(|id| seen.contains_key(id));
+        self.peaks.observe(block_id, shell, mem)
+    }
 }
 
 /// An executable's name as a person calls it: `pwsh`, not `pwsh.exe`.
@@ -186,6 +261,48 @@ mod tests {
         assert_eq!(display_name("bash"), "bash");
         assert_eq!(display_name(".exe"), ".exe");
         assert_eq!(display_name("exe"), "exe");
+    }
+
+    fn frame(found: PaneFound, started: u64, resident: u64) -> PaneFrame {
+        PaneFrame {
+            found,
+            processes: 3,
+            names: vec![("bash".into(), 1), ("node".into(), 2)],
+            started_at_ms: Some(started),
+            cpu_milli: Some(1_250),
+            mem: Some(40 << 20),
+            mem_resident: Some(resident),
+            unmeasured: 0,
+            memory_metric: "anonymous resident + swap".into(),
+            cpu_count: 8,
+            host_cpu_milli: Some(3_000),
+            host_mem: 6 << 30,
+            host_processes: 400,
+            host_unmeasured: 0,
+        }
+    }
+
+    #[test]
+    fn a_remote_answer_becomes_the_badges_figures_and_peak() {
+        let r = remote("rb-1", frame(PaneFound::Session, 1_000, 90));
+        assert_eq!(r.found, "session");
+        let fig = r.figures.unwrap();
+        assert_eq!((fig.cpu, fig.mem_resident, fig.processes), (Some(125.0), Some(90), 3));
+        assert_eq!(fig.names[0].name, "bash");
+        let host = r.host.unwrap();
+        assert_eq!((host.cpu, host.cpu_count, host.processes), (Some(300.0), 8, 400));
+        assert_eq!(r.peak, Some(90));
+        assert_eq!(remote("rb-1", frame(PaneFound::Session, 1_000, 60)).peak, Some(90), "the peak holds");
+        assert_eq!(remote("rb-1", frame(PaneFound::Marker, 2_000, 50)).peak, Some(50), "a new shell starts over");
+    }
+
+    #[test]
+    fn a_remote_pane_found_by_neither_way_has_only_the_hosts_figures() {
+        let r = remote("rb-2", frame(PaneFound::None, 0, 0));
+        assert_eq!((r.found.as_str(), r.figures, r.peak), ("none", None, None));
+        assert!(r.host.is_some());
+        let u = remote_unavailable("no helper".into());
+        assert_eq!((u.found.as_str(), u.reason.as_deref(), u.host), ("unavailable", Some("no helper"), None));
     }
 
     #[test]

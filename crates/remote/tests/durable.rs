@@ -12,6 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use agentmux_remote::frame::{Decoder, Frame};
+use agentmux_remote::fsproto::{PaneFound, PaneFrame, Reply, Request, Splitter};
 
 const BIN: &str = env!("CARGO_BIN_EXE_agentmux-remote");
 
@@ -185,6 +186,76 @@ fn a_session_survives_a_dropped_link_and_replays_exactly_what_was_missed() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&list.stdout), "", "ended");
+}
+
+/// Ends `.1` and removes the test's home when dropped.
+struct EndOnDrop(std::path::PathBuf, &'static str);
+
+impl Drop for EndOnDrop {
+    fn drop(&mut self) {
+        let _ = Command::new(BIN)
+            .args(["end", "--session", self.1])
+            .env("AGENTMUX_REMOTE_HOME", &self.0)
+            .output();
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// `PaneProcs` for `session`, asked of a fresh `serve --stdio` as srv asks
+/// it for a durable pane's stats badge.
+fn pane_procs(home: &std::path::Path, session: &str) -> PaneFrame {
+    let mut child = Command::new(BIN)
+        .args(["serve", "--stdio"])
+        .env("AGENTMUX_REMOTE_HOME", home)
+        .env("HOME", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("serve runs");
+    let req = Request::PaneProcs { block_id: String::new(), session: session.into() };
+    child.stdin.take().unwrap().write_all(&req.encode(1)).unwrap();
+    let mut out = Vec::new();
+    child.stdout.take().unwrap().read_to_end(&mut out).unwrap();
+    let _ = child.wait();
+    let bodies = Splitter::new().push(&out).unwrap();
+    match Reply::decode(&bodies[0]).unwrap().1 {
+        Reply::PaneProcs(f) => f,
+        other => panic!("expected PaneProcs, got {other:?}"),
+    }
+}
+
+/// A durable pane's stats: `serve` asks the daemon for the session's shell
+/// and sums it and what it started; an unknown session is the host's totals
+/// only.
+#[test]
+fn serve_measures_a_sessions_shell_through_the_daemon() {
+    let home = std::env::temp_dir().join(format!("amr-stats-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = EndOnDrop(home.clone(), "stats1");
+    let mut a = attach(&home, "stats1", 0);
+    a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    a.send(Frame::Input(b"sleep 30 &\n".to_vec()));
+    std::thread::sleep(Duration::from_millis(500));
+
+    let f = pane_procs(&home, "stats1");
+    assert_eq!(f.found, PaneFound::Session, "{f:?}");
+    assert_eq!(f.names.first().map(|n| n.0.as_str()), Some("sh"), "the session's shell first: {f:?}");
+    assert!(f.names.iter().any(|(n, _)| n == "sleep"), "and what it started: {f:?}");
+    assert!(f.processes >= 2 && f.host_processes > f.processes, "{f:?}");
+
+    let none = pane_procs(&home, "no-such-session");
+    assert_eq!((none.found, none.processes), (PaneFound::None, 0));
+    assert!(none.host_processes > 1);
+
+    // The shell exits: the session stays listed a while, but its PID is no
+    // longer the pane's (it may already be another process's).
+    // The background sleep holds the terminal open: end it first.
+    a.send(Frame::Input(b"kill %1; exit\n".to_vec()));
+    a.until(|f, _| matches!(f, Frame::Exited { .. }));
+    let exited = pane_procs(&home, "stats1");
+    assert_eq!(exited.found, PaneFound::None, "{exited:?}");
+    // attach ends with its session's shell; the cleanup ends the session.
+    let _ = a.child.wait();
 }
 
 /// Several attaches at once, with no daemon running: one daemon, one session.

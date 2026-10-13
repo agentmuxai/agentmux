@@ -60,7 +60,15 @@ fn run(args: &[String]) -> i32 {
         }
         Some("serve") if args.get(1).map(String::as_str) == Some("--stdio") => {
             let (mut stdin, mut stdout) = (std::io::stdin().lock(), std::io::stdout().lock());
-            match serve::run(&serve::home_dir(), &mut stdin, &mut stdout) {
+            // A durable pane's stats ask the daemon for its session's shell.
+            #[cfg(unix)]
+            let server = serve::Server::with_sessions(
+                serve::home_dir(),
+                Box::new(|session| attach::session_pid(&base_dir(), session)),
+            );
+            #[cfg(not(unix))]
+            let server = serve::Server::new(serve::home_dir());
+            match serve::run_with(server, &mut stdin, &mut stdout) {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("agentmux-remote serve: {e}");

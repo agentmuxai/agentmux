@@ -1414,7 +1414,18 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 </Show>
                 {props.preview ? previewElem : props.children}
                 <Show when={showStatsBadge()}>
-                    <BlockStatsBadge blockId={nodeModel.blockId} noHeader={noHeader()} />
+                    <BlockStatsBadge
+                        blockId={nodeModel.blockId}
+                        noHeader={noHeader()}
+                        connection={
+                            // Only a terminal's badge measures a remote shell;
+                            // other panes on a connection (Files, preview) have
+                            // none and keep the local badge's behavior.
+                            blockData()?.meta?.view === "term"
+                                ? (blockData()?.meta?.connection as string | undefined)
+                                : undefined
+                        }
+                    />
                 </Show>
             </div>
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>

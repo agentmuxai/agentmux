@@ -37,6 +37,12 @@
         color: var(--error-color);
     }
 
+    // A remote pane whose own processes can't be told apart: the whole
+    // host's figures, set apart so they don't read as the pane's.
+    &.remote.host {
+        font-style: italic;
+    }
+
     // When this pane's header is hoisted out of BlockFrame_Default (into the
     // shared pane-leaf-chrome above it — see BlockFrame's
     // `noHeader`), `.block-frame-default-inner` no longer
@@ -59,7 +65,8 @@
         margin-bottom: var(--space-1);
     }
 
-    .bst-connection {
+    .bst-connection,
+    .bst-how {
         margin-bottom: var(--space-1);
     }
 

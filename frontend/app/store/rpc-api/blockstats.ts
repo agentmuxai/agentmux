@@ -7,4 +7,7 @@
 
 export type { BlockStatsConnection } from "@/types/rpc/BlockStatsConnection";
 export type { BlockStatsDetail } from "@/types/rpc/BlockStatsDetail";
+export type { BlockStatsFigures } from "@/types/rpc/BlockStatsFigures";
+export type { BlockStatsHost } from "@/types/rpc/BlockStatsHost";
 export type { BlockStatsName } from "@/types/rpc/BlockStatsName";
+export type { BlockStatsRemote } from "@/types/rpc/BlockStatsRemote";

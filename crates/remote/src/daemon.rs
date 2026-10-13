@@ -14,6 +14,10 @@
 //!   the session over and the old connection is closed.
 //! - `AMR <protocol> END <session>`: end it. Answered `ok` or `none`.
 //! - `AMR <protocol> LIST`: one line per session, `id end exited`.
+//! - `AMR <protocol> PID <session>`: its shell's process id, for its pane's
+//!   stats badge (`serve`'s `PaneProcs`). Answered `<pid>` or `none`. A
+//!   daemon older than this answers it as a bad request: the pane then reads
+//!   as not measured.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -185,6 +189,13 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
             ["END", id] => {
                 let found = end_session(sessions, id, None);
                 out.write_all(if found { b"ok\n" } else { b"none\n" })
+            }
+            ["PID", id] => {
+                // An exited session stays listed for a while, but its shell
+                // is gone and its PID may already be another process's.
+                let session = sessions.lock().unwrap().get(*id).cloned();
+                let pid = session.filter(|s| s.inner.lock().unwrap().exited.is_none()).map(|s| s.pid);
+                out.write_all(pid.map_or_else(|| "none\n".to_string(), |p| format!("{p}\n")).as_bytes())
             }
             ["LIST"] => {
                 // The sessions first, then each one's state: never the map's
