@@ -717,6 +717,7 @@ partial list.
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
 | [`SPEC_DOCS_CLEANUP_AUDIT_2026_08_22`](SPEC_DOCS_CLEANUP_AUDIT_2026_08_22.md) | SPEC — Docs cleanup audit: what's stale, duplicated, or mis-shelved |
 | [`SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27`](SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md) | SPEC: Drag and drop: audit, one facility, one drop indicator |
+| [`SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13`](SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md) | Drag space in the window and pane headers: does it need a grip? |
 | [`SPEC_EARLY_ALPHA_WARNING_2026_06_05`](SPEC_EARLY_ALPHA_WARNING_2026_06_05.md) | SPEC: Early Alpha Warning — README & Microsoft Store Partner Center |
 | [`SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21`](SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21.md) | SPEC — Editor Markdown Live Preview Panel |
 | [`SPEC_ERROR_COPY_EVERYWHERE_2026_09_24`](SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md) | SPEC: every error surface can be copied, errors and traces in one click |
