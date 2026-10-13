@@ -645,16 +645,51 @@ pub fn payload(
     status: FirewallStatus,
     per_adapter: &[(Adapter, AdapterState)],
     local_rules_ignored: bool,
-) -> serde_json::Value {
-    serde_json::json!({
-        "status": status.wire(),
-        "localRulesIgnored": local_rules_ignored,
-        "adapters": per_adapter.iter().map(|(a, s)| serde_json::json!({
-            "name": a.name,
-            "category": category_wire(a.category),
-            "state": state_wire(*s),
-        })).collect::<Vec<_>>(),
-    })
+) -> LanFirewall {
+    LanFirewall {
+        status: status.wire().to_string(),
+        local_rules_ignored,
+        adapters: per_adapter
+            .iter()
+            .map(|(a, s)| LanFirewallAdapter {
+                name: a.name.clone(),
+                category: category_wire(a.category).to_string(),
+                state: state_wire(*s).to_string(),
+            })
+            .collect(),
+    }
+}
+
+/// `laninstances:firewall`: what the OS firewall would do to LAN peers reaching this machine.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LanFirewall {
+    #[ts(type = r#""ok" | "needs-setup" | "blocked" | "public-network" | "managed" | "unknown" | "off""#)]
+    pub status: String,
+    /// Per adapter: its network category and whether a rule covers it.
+    pub adapters: Vec<LanFirewallAdapter>,
+    /// Group policy makes locally created rules ineffective.
+    #[serde(rename = "localRulesIgnored")]
+    #[ts(rename = "localRulesIgnored")]
+    pub local_rules_ignored: bool,
+}
+
+impl LanFirewall {
+    /// No verdict to show: LAN went off, or the firewall couldn't be read.
+    fn bare(status: &str) -> Self {
+        LanFirewall { status: status.to_string(), adapters: Vec::new(), local_rules_ignored: false }
+    }
+}
+
+/// One adapter in a `LanFirewall` verdict.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LanFirewallAdapter {
+    pub name: String,
+    #[ts(type = r#""public" | "private" | "domain" | "unknown""#)]
+    pub category: String,
+    #[ts(type = r#""covered" | "needs-setup" | "blocked" | "public-not-trusted" | "unknown""#)]
+    pub state: String,
 }
 
 /// How often the firewall is read while LAN discovery is wanted. A read is cheap
@@ -687,15 +722,7 @@ pub fn spawn_watcher(
             if !lan.is_wanted() {
                 // LAN went off: clear whatever the indicator was showing.
                 if last.as_deref().is_some_and(|s| s != "off") {
-                    event_bus.broadcast_event(&super::eventbus::WSEventType {
-                        eventtype: "laninstances:firewall".to_string(),
-                        oref: String::new(),
-                        data: Some(serde_json::json!({
-                            "status": "off",
-                            "adapters": [],
-                            "localRulesIgnored": false
-                        })),
-                    });
+                    event_bus.broadcast_event(&super::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&LanFirewall::bare("off"), String::new()));
                     last = Some("off".to_string());
                 }
                 continue;
@@ -716,15 +743,7 @@ pub fn spawn_watcher(
                     // no longer knows (ReAgent P2 on #4151).
                     if last.as_deref() != Some("unknown") {
                         tracing::warn!("could not read the OS firewall, so no verdict: {e}");
-                        event_bus.broadcast_event(&super::eventbus::WSEventType {
-                            eventtype: "laninstances:firewall".to_string(),
-                            oref: String::new(),
-                            data: Some(serde_json::json!({
-                                "status": "unknown",
-                                "adapters": [],
-                                "localRulesIgnored": false
-                            })),
-                        });
+                        event_bus.broadcast_event(&super::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&LanFirewall::bare("unknown"), String::new()));
                         last = Some("unknown".to_string());
                     }
                     continue;
@@ -745,11 +764,8 @@ pub fn spawn_watcher(
                 );
             }
             if should_publish(report.status, changed) {
-                event_bus.broadcast_event(&super::eventbus::WSEventType {
-                    eventtype: "laninstances:firewall".to_string(),
-                    oref: String::new(),
-                    data: Some(payload(report.status, &report.per_adapter, snapshot.local_rules_ignored)),
-                });
+                let verdict = payload(report.status, &report.per_adapter, snapshot.local_rules_ignored);
+                event_bus.broadcast_event(&super::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&verdict, String::new()));
             }
             last = Some(wire);
         }
@@ -1065,7 +1081,7 @@ mod tests {
     #[test]
     fn the_event_payload_is_the_frontend_contract() {
         let a = adapter("Ethernet", Some(Category::Private));
-        let v = payload(FirewallStatus::NeedsSetup, &[(a, AdapterState::NeedsSetup)], false);
+        let v = serde_json::to_value(payload(FirewallStatus::NeedsSetup, &[(a, AdapterState::NeedsSetup)], false)).unwrap();
         assert_eq!(v["status"], "needs-setup");
         assert_eq!(v["localRulesIgnored"], false);
         assert_eq!(v["adapters"][0]["name"], "Ethernet");

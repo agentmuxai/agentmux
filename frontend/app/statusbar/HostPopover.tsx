@@ -24,6 +24,7 @@ import { isLinux, isMacOS } from "@/util/platformutil";
 import { PairDevicePanel } from "./PairDevicePanel";
 
 import { Switch } from "@/app/element/ui";
+import type { LanInstance } from "@/types/rpc/LanInstance";
 
 /** Whether the host's reported name is srv's machine (names compare case-insensitively). */
 export function sameMachine(hostName: string | undefined, srvHostName: string | undefined): boolean {

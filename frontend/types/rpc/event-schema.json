@@ -445,6 +445,42 @@
     }
   },
   {
+    "event": "laninstances",
+    "payloadTs": {
+      "imports": [
+        "LanInstanceList"
+      ],
+      "name": "LanInstanceList"
+    }
+  },
+  {
+    "event": "laninstances:error",
+    "payloadTs": {
+      "imports": [
+        "LanDiscoveryError"
+      ],
+      "name": "LanDiscoveryError"
+    }
+  },
+  {
+    "event": "laninstances:firewall",
+    "payloadTs": {
+      "imports": [
+        "LanFirewall"
+      ],
+      "name": "LanFirewall"
+    }
+  },
+  {
+    "event": "laninstances:health",
+    "payloadTs": {
+      "imports": [
+        "LanDiscoverability"
+      ],
+      "name": "LanDiscoverability"
+    }
+  },
+  {
     "event": "lsp:message",
     "payloadTs": {
       "imports": [
