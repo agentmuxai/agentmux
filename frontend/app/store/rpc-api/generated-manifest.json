@@ -2,6 +2,18 @@
     "$comment": "Commands whose frontend stubs are generated (scripts/gen-rpc-stubs.mjs -> generated.ts). Each entry: command, method (the RpcApi method name callers use), and optionally send (a no-argument command: \"{}\" (default) or \"null\"; an optional request: \"data\" (default) or \"data ?? {}\") and opts (an expression replacing opts, e.g. a longer timeout). Moving a command here: add its entry, delete its hand-written method, run the generator.",
     "stubs": [
         {
+            "command": "account.oauth.cancel",
+            "method": "AccountOAuthCancelCommand"
+        },
+        {
+            "command": "session:activity_summary",
+            "method": "AgentActivitySummaryCommand"
+        },
+        {
+            "command": "agentcancel",
+            "method": "AgentCancelCommand"
+        },
+        {
             "command": "agentinput",
             "method": "AgentInputCommand"
         },
@@ -10,8 +22,36 @@
             "method": "AgentLastRuntimeCommand"
         },
         {
+            "command": "agent:session:append_output",
+            "method": "AgentSessionAppendOutputCommand"
+        },
+        {
+            "command": "agent:session:archive",
+            "method": "AgentSessionArchiveCommand"
+        },
+        {
+            "command": "agent:session:list_archives",
+            "method": "AgentSessionListArchivesCommand"
+        },
+        {
+            "command": "agent:session:read",
+            "method": "AgentSessionReadCommand"
+        },
+        {
+            "command": "agent:session:write_state",
+            "method": "AgentSessionWriteStateCommand"
+        },
+        {
+            "command": "agentshutdownkeep",
+            "method": "AgentShutdownKeepCommand"
+        },
+        {
             "command": "agentstop",
             "method": "AgentStopCommand"
+        },
+        {
+            "command": "ambientnarrate",
+            "method": "AmbientNarrateCommand"
         },
         {
             "command": "appendagenthistory",
@@ -20,6 +60,38 @@
         {
             "command": "asksidequestion",
             "method": "AskSideQuestionCommand"
+        },
+        {
+            "command": "auth.cancel",
+            "method": "AuthCancelCommand"
+        },
+        {
+            "command": "auth.submitcallback",
+            "method": "AuthSubmitCallbackCommand"
+        },
+        {
+            "command": "backgroundtaskcompletion",
+            "method": "BackgroundTaskCompletionCommand"
+        },
+        {
+            "command": "backgroundtaskpid",
+            "method": "BackgroundTaskPidCommand"
+        },
+        {
+            "command": "blockfile:line_count",
+            "method": "BlockfileLineCountCommand"
+        },
+        {
+            "command": "blockfile:read_range",
+            "method": "BlockfileReadRangeCommand"
+        },
+        {
+            "command": "blockfile:read_state",
+            "method": "BlockfileReadStateCommand"
+        },
+        {
+            "command": "blockfile:write_state",
+            "method": "BlockfileWriteStateCommand"
         },
         {
             "command": "createeditordir",
@@ -38,12 +110,28 @@
             "method": "DeleteAgentSkillCommand"
         },
         {
+            "command": "deletememory",
+            "method": "DeleteBundleCommand"
+        },
+        {
             "command": "deletedrone",
             "method": "DeleteDroneCommand"
         },
         {
             "command": "deleteeditorfile",
             "method": "DeleteEditorFileCommand"
+        },
+        {
+            "command": "deletesystemmemory",
+            "method": "DeleteSystemBundleCommand"
+        },
+        {
+            "command": "docknodestatus",
+            "method": "DockNodeStatusCommand"
+        },
+        {
+            "command": "identity.ensureaccountdir",
+            "method": "EnsureAccountDirCommand"
         },
         {
             "command": "fs.create",
@@ -135,6 +223,22 @@
             "method": "GetEditorRootsCommand"
         },
         {
+            "command": "getidentityaccount",
+            "method": "GetIdentityAccountCommand"
+        },
+        {
+            "command": "globalmemory:diff",
+            "method": "GlobalMemoryDiffCommand"
+        },
+        {
+            "command": "globalmemory:history",
+            "method": "GlobalMemoryHistoryCommand"
+        },
+        {
+            "command": "globalmemory:revert",
+            "method": "GlobalMemoryRevertCommand"
+        },
+        {
             "command": "importagents",
             "method": "ImportAgentDefinitionsCommand"
         },
@@ -143,12 +247,36 @@
             "method": "ImportAgentFromClawCommand"
         },
         {
+            "command": "install.cancel",
+            "method": "InstallCancelCommand"
+        },
+        {
+            "command": "install.check",
+            "method": "InstallCheckCommand"
+        },
+        {
+            "command": "install.start",
+            "method": "InstallStartCommand"
+        },
+        {
+            "command": "linkagentidentity",
+            "method": "LinkAgentIdentityCommand"
+        },
+        {
+            "command": "listagentidentities",
+            "method": "ListAgentIdentitiesCommand"
+        },
+        {
             "command": "listagentinstances",
             "method": "ListAgentInstancesCommand"
         },
         {
             "command": "listagentskills",
             "method": "ListAgentSkillsCommand"
+        },
+        {
+            "command": "listbackgroundtasks",
+            "method": "ListBackgroundTasksCommand"
         },
         {
             "command": "listdrones",
@@ -173,6 +301,10 @@
         {
             "command": "movescratchfile",
             "method": "MoveScratchFileCommand"
+        },
+        {
+            "command": "session:next_prompt_suggestion",
+            "method": "NextPromptSuggestionCommand"
         },
         {
             "command": "openinshell",
@@ -219,8 +351,32 @@
             "method": "RenameEditorFileCommand"
         },
         {
+            "command": "reorderglobalbrain",
+            "method": "ReorderGlobalBundlesCommand"
+        },
+        {
+            "command": "resolve.prereqs",
+            "method": "ResolvePrereqsCommand"
+        },
+        {
             "command": "rundrone",
             "method": "RunDroneCommand"
+        },
+        {
+            "command": "session:archive",
+            "method": "SessionArchiveCommand"
+        },
+        {
+            "command": "session:export",
+            "method": "SessionExportCommand"
+        },
+        {
+            "command": "session:restore",
+            "method": "SessionRestoreCommand"
+        },
+        {
+            "command": "session:resume_preflight",
+            "method": "SessionResumePreflightCommand"
         },
         {
             "command": "setagentbundles",
@@ -289,6 +445,10 @@
         {
             "command": "skill.unbind",
             "method": "SkillUnbindCommand"
+        },
+        {
+            "command": "tooldecision",
+            "method": "ToolDecisionCommand"
         },
         {
             "command": "unwatcheditorfile",
