@@ -657,6 +657,7 @@ partial list.
 | [`SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07`](SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md) | Top bar: widget labels drop before tabs shrink |
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
+| [`SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13`](SPEC_TSRS_SERDE_ATTRIBUTE_WARNINGS_2026_10_13.md) | ts-rs drops serde attributes it can't parse |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
