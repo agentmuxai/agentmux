@@ -60,7 +60,9 @@
         }
 
         // Edge fades while the tabs overflow (createScrollEdges, tabbar.tsx).
-        @include mixins.scroll-edge-fade(28px);
+        // Wider than a pane strip's: window tabs shrink to 60px, and 28px fell
+        // mostly on a tab's padding and separator, too faint to read as a cue.
+        @include mixins.scroll-edge-fade(48px);
 
         // Override tab.scss absolute positioning — render tabs in flex flow.
         // Each tab uses its measured natural width as flex-basis (set by
