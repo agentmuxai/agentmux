@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** in progress, 2026-10-13. Step 1 (infrastructure, `controllerstatus`, `sysinfo`) is this spec's first PR. The event declarations live in `crates/srv/src/backend/mps_events.rs`, the generator in `scripts/gen-mux-events.mjs`.
+**Status:** active, 2026-10-13. Step 1 (infrastructure, `controllerstatus`, `sysinfo`) is this spec's first PR. The event declarations live in `crates/srv/src/backend/mps_events.rs`, the generator in `scripts/gen-mux-events.mjs`.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
