@@ -147,6 +147,10 @@ pub struct PaneFrame {
     pub mem: Option<u64>,
     /// Their resident memory, bytes, shared pages included.
     pub mem_resident: Option<u64>,
+    /// Of `processes`, those the host wouldn't measure (another user's, as
+    /// `sudo` starts, on macOS): `cpu_milli`, `mem` and `mem_resident` leave
+    /// them out.
+    pub unmeasured: u32,
     pub memory_metric: String,
     /// The whole host, as [`ProcFrame`]'s totals.
     pub cpu_count: u32,
@@ -645,6 +649,7 @@ impl Reply {
                     .opt_u64(f.cpu_milli)
                     .opt_u64(f.mem)
                     .opt_u64(f.mem_resident)
+                    .u32(f.unmeasured)
                     .str(&f.memory_metric)
                     .u32(f.cpu_count)
                     .opt_u64(f.host_cpu_milli)
@@ -732,6 +737,7 @@ impl Reply {
                     cpu_milli: r.opt_u64()?,
                     mem: r.opt_u64()?,
                     mem_resident: r.opt_u64()?,
+                    unmeasured: r.u32()?,
                     memory_metric: r.str()?,
                     cpu_count: r.u32()?,
                     host_cpu_milli: r.opt_u64()?,
@@ -918,6 +924,7 @@ mod tests {
                 cpu_milli: Some(250),
                 mem: Some(80 << 20),
                 mem_resident: Some(120 << 20),
+                unmeasured: 1,
                 memory_metric: "anonymous resident + swap".into(),
                 cpu_count: 16,
                 host_cpu_milli: None,
@@ -934,6 +941,7 @@ mod tests {
                 cpu_milli: None,
                 mem: None,
                 mem_resident: None,
+                unmeasured: 0,
                 memory_metric: "memory footprint".into(),
                 cpu_count: 8,
                 host_cpu_milli: Some(3_100),

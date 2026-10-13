@@ -192,6 +192,7 @@ pub fn pane_frame(procs: &[ProcInfo], rates: &[Option<f64>], roots: &[usize], fo
         cpu_milli: sum(&|i| rates[i].map(|r| milli(r) as u64)),
         mem: sum(&|i| procs[i].mem_private),
         mem_resident: sum(&|i| procs[i].mem_resident),
+        unmeasured: tree.iter().filter(|&&i| !procs[i].measured()).count() as u32,
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
         cpu_count,
         host_cpu_milli: rates.iter().flatten().fold(None, |acc: Option<u64>, &r| Some(acc.unwrap_or(0) + milli(r) as u64)),
@@ -352,7 +353,16 @@ mod tests {
         assert_eq!(f.cpu_milli, Some(10 + 500 + 250));
         assert_eq!(f.mem, Some(4 + 50 + 30 + 2 + 3));
         assert_eq!(f.mem_resident, Some(2 * (4 + 50 + 30 + 2 + 3)));
+        assert_eq!(f.unmeasured, 0);
         assert_eq!((f.cpu_count, f.host_processes, f.host_mem, f.host_unmeasured), (4, 7, 95, 0));
+        // A child run as another user (sudo) on macOS: counted, not measured.
+        let mut procs = pane_table();
+        procs[3].cpu_ns = None;
+        procs[3].mem_private = None;
+        procs[3].mem_resident = None;
+        let f = pane_frame(&procs, &rates, &[5, 1], PaneFound::Marker, 4);
+        assert_eq!((f.processes, f.unmeasured, f.mem), (5, 1, Some(4 + 50 + 2 + 3)));
+        assert_eq!(f.host_unmeasured, 1);
     }
 
     #[test]

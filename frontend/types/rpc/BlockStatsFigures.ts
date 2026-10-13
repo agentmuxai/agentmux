@@ -32,6 +32,12 @@ mem_private?: number,
  */
 mem_commit?: number, 
 /**
+ * Of `processes`, those the machine wouldn't measure (another user's, as
+ * `sudo` starts, on a macOS host): the figures above leave them out.
+ * Remote only.
+ */
+unmeasured?: number, 
+/**
  * What `mem_private` measures on that machine ("private working set", …).
  */
 memory_metric: string, };

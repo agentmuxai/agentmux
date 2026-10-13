@@ -108,6 +108,13 @@ export function hostCoverage(h: { processes: number; unmeasured: number }): stri
     return `your ${mine} processes only; ${h.unmeasured} others' can't be read`;
 }
 
+/** A note when some of a pane's processes weren't measured: its figures leave them out. */
+export function partial(f: BlockStatsFigures): string {
+    const n = f.unmeasured ?? 0;
+    if (n === 0) return "";
+    return ` ${n === 1 ? "1 of them runs" : `${n} of them run`} as another user and can't be read: the figures below leave ${n === 1 ? "it" : "them"} out.`;
+}
+
 /** The badge's two figures for a remote pane, and whether they are the whole host's. */
 export function remoteBadge(r: BlockStatsRemote): { cpu: string; mem: string; host: boolean } | null {
     const cpu = (v: number | undefined) => (v == null ? "–%" : `${v.toFixed(1)}%`);
@@ -209,11 +216,11 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                 <Switch>
                     <Match when={figures() && remote()?.found === "session"}>
                         Measured on that machine: {describeProcesses(figures()!)}
-                        {since(figures()!)}, the pane's durable session.
+                        {since(figures()!)}, the pane's durable session.{partial(figures()!)}
                     </Match>
                     <Match when={figures()}>
                         Measured on that machine: {describeProcesses(figures()!)}
-                        {since(figures()!)}, found by the pane's id in their environment.
+                        {since(figures()!)}, found by the pane's id in their environment.{partial(figures()!)}
                     </Match>
                     <Match when={remote()?.found === "none"}>
                         That machine can't tell this pane's processes from the rest: these are its own totals. A durable

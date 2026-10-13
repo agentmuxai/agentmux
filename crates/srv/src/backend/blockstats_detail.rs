@@ -78,6 +78,7 @@ pub fn detail(snap: &[ProcInfo], root_pid: u32, max: usize) -> Option<BlockStats
         mem_resident: None,
         mem_private: sum(|p| p.mem_private),
         mem_commit: sum(|p| p.mem_commit),
+        unmeasured: None,
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
     })
 }
@@ -106,6 +107,7 @@ pub fn remote(block_id: &str, f: PaneFrame) -> BlockStatsRemote {
         mem_resident: f.mem_resident,
         mem_private: f.mem,
         mem_commit: None,
+        unmeasured: Some(f.unmeasured),
         memory_metric: f.memory_metric,
     });
     let peak = figures.as_ref().and_then(|fig| {
@@ -270,6 +272,7 @@ mod tests {
             cpu_milli: Some(1_250),
             mem: Some(40 << 20),
             mem_resident: Some(resident),
+            unmeasured: 0,
             memory_metric: "anonymous resident + swap".into(),
             cpu_count: 8,
             host_cpu_milli: Some(3_000),

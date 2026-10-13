@@ -69,6 +69,12 @@ pub struct BlockStatsFigures {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub mem_commit: Option<u64>,
+    /// Of `processes`, those the machine wouldn't measure (another user's, as
+    /// `sudo` starts, on a macOS host): the figures above leave them out.
+    /// Remote only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unmeasured: Option<u32>,
     /// What `mem_private` measures on that machine ("private working set", …).
     pub memory_metric: String,
 }

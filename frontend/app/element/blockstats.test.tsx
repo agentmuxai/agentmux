@@ -26,6 +26,7 @@ import {
     formatSince,
     hostCoverage,
     isRemoteConnection,
+    partial,
     remoteBadge,
 } from "./blockstats";
 
@@ -209,6 +210,14 @@ describe("formatting", () => {
         expect(hostCoverage({ processes: 600, unmeasured: 210 })).toBe(
             "your 390 processes only; 210 others' can't be read"
         );
+    });
+
+    it("says when a pane's figures leave out processes run as another user", () => {
+        expect(partial(REMOTE_FIGURES)).toBe("");
+        expect(partial({ ...REMOTE_FIGURES, unmeasured: 1 })).toBe(
+            " 1 of them runs as another user and can't be read: the figures below leave it out."
+        );
+        expect(partial({ ...REMOTE_FIGURES, unmeasured: 2 })).toContain("2 of them run as another user");
     });
 
     it("tells a remote connection from a local one", () => {
