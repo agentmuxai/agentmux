@@ -25,7 +25,6 @@ export type { ToolchainPruneSkip } from "@/types/rpc/ToolchainPruneSkip";
 export type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
 import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
-import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 
 /**
  * What a `resolvecli` caller may send.
@@ -99,14 +98,6 @@ export const WorkspaceApi = {
         return client.rpcCall("connlistaws", null, opts);
     },
 
-    EventUnsubCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("eventunsub", data, opts);
-    },
-
-    GetFullConfigCommand(client: RpcClient, opts?: RpcOpts): Promise<FullConfigType> {
-        return client.rpcCall("getfullconfig", null, opts);
-    },
-
     GetMetaCommand(client: RpcClient, data: CommandGetMetaData, opts?: RpcOpts): Promise<MetaType> {
         return client.rpcCall("getmeta", data, opts);
     },
@@ -137,9 +128,5 @@ export const WorkspaceApi = {
 
     WslListCommand(client: RpcClient, opts?: RpcOpts): Promise<string[]> {
         return client.rpcCall("wsllist", null, opts);
-    },
-
-    ResolveCliCommand(client: RpcClient, data: ResolveCliInput, opts?: RpcOpts): Promise<ResolveCliResult> {
-        return client.rpcCall("resolvecli", data, opts);
     },
 };

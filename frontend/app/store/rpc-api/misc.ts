@@ -16,9 +16,6 @@ import { RpcClient } from "../rpc-client";
 export type { WidgetApiResult } from "@/types/rpc/WidgetApiResult";
 export type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
 
-import type { WidgetApiResult } from "@/types/rpc/WidgetApiResult";
-import type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
-
 export type { AiRateLimitResult } from "@/types/rpc/AiRateLimitResult";
 export type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 
@@ -55,41 +52,5 @@ export const MiscApi = {
 
     RecordTEventCommand(client: RpcClient, data: TEvent, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("recordtevent", data, opts);
-    },
-
-    // command "widget.health" [call] — HTTP liveness probe for an external widget
-    // server on localhost. Returns { healthy, status_code } — never throws on
-    // connection failure so the UI can show a "not running" pill gracefully.
-    // health_check_body_contains: optional substring the response body must contain;
-    // used to distinguish services that share a default port (e.g. Flowise/Grafana
-    // both default to 3000).
-    WidgetHealthCommand(
-        client: RpcClient,
-        data: { port: number; health_check_path: string; health_check_body_contains?: string },
-        opts?: RpcOpts
-    ): Promise<WidgetHealthResult> {
-        return client.rpcCall("widget.health", data, opts);
-    },
-
-    // command "widget.api" [call] — HTTP proxy to a widget's local server.
-    // Bypasses browser CORS restrictions so agents (and the frontend) can call
-    // ComfyUI /prompt, Grafana /api/query, etc. without a CORS header.
-    // body must be a pre-serialised JSON string when calling JSON APIs.
-    // Never throws. ok:true means the HTTP exchange completed — check status_code
-    // for HTTP-level success/failure (4xx/5xx still return ok:true).
-    // ok:false means transport failure (connection refused, timeout) or invalid
-    // port/path — status_code is null and error is set.
-    WidgetApiCommand(
-        client: RpcClient,
-        data: {
-            port: number;
-            path: string;
-            method?: string;
-            headers?: Record<string, string>;
-            body?: string;
-        },
-        opts?: RpcOpts
-    ): Promise<WidgetApiResult> {
-        return client.rpcCall("widget.api", data, opts);
     },
 };

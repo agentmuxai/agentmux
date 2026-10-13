@@ -11,9 +11,9 @@
  * that needs a real `RpcClient` and is verified by direct reading rather
  * than unit tests — it's thin, typed pass-through, not logic.
  *
- * Global Memory (`BundleApi.GlobalMemorySectionsCommand`) returns each
+ * Global Memory (`RpcApi.GlobalMemorySectionsCommand`) returns each
  * section's full text inline — no second round-trip needed. Personal/
- * native memory (`NativeMemoryApi.NativeMemoryListCommand`) returns
+ * native memory (`RpcApi.NativeMemoryListCommand`) returns
  * metadata only (`NativeMemoryFileMeta` — no content field), so each
  * non-index file needs a follow-up `NativeMemoryReadFileCommand` call.
  * `MEMORY.md` (`is_index: true`) is excluded — it's the index Claude Code
@@ -21,8 +21,7 @@
  * is about the actual memory entries, not their own table of contents.
  */
 
-import { BundleApi } from "@/app/store/rpc-api/bundle";
-import { NativeMemoryApi } from "@/app/store/rpc-api/native-memory";
+import { RpcApi } from "@/app/store/rpc-api";
 import type { RpcClient } from "@/app/store/rpc-client";
 import type { MemoryEntryInput } from "./memory-reinjection";
 
@@ -39,7 +38,7 @@ import type { MemoryEntryInput } from "./memory-reinjection";
 export async function fetchGlobalMemoryEntries(client: RpcClient, blockId?: string): Promise<MemoryEntryInput[]> {
     // The block lets srv leave out Operator Config meant for another agent
     // kind, as that pane's startup file does.
-    const sections = await BundleApi.GlobalMemorySectionsCommand(client, { block_id: blockId });
+    const sections = await RpcApi.GlobalMemorySectionsCommand(client, { block_id: blockId });
     return sections.map((s) => ({
         label: `${s.is_system ? "[AgentMux System]" : "[Workspace]"} ${s.name}`,
         source: "global" as const,
@@ -53,7 +52,7 @@ export async function fetchGlobalMemoryEntries(client: RpcClient, blockId?: stri
  * full body content via a follow-up read per file.
  */
 async function fetchPersonalMemoryEntries(client: RpcClient, agentId: string): Promise<MemoryEntryInput[]> {
-    const { files } = await NativeMemoryApi.NativeMemoryListCommand(client, { agent_id: agentId });
+    const { files } = await RpcApi.NativeMemoryListCommand(client, { agent_id: agentId });
     const contentFiles = files.filter((f) => !f.is_index);
 
     // Sequential, not Promise.all: a memory directory is small (§3.4.1's real
@@ -64,7 +63,7 @@ async function fetchPersonalMemoryEntries(client: RpcClient, agentId: string): P
     // requirement (§3.1).
     const entries: MemoryEntryInput[] = [];
     for (const meta of contentFiles) {
-        const { content } = await NativeMemoryApi.NativeMemoryReadFileCommand(client, {
+        const { content } = await RpcApi.NativeMemoryReadFileCommand(client, {
             agent_id: agentId,
             filename: meta.filename,
         });

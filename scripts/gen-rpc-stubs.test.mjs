@@ -133,3 +133,46 @@ describe("generate", () => {
         expect(errors.join()).toMatch(/OtherCommand: two commands generate it/);
     });
 });
+
+describe("raw-JSON overrides", () => {
+    it("dataType and returns keep a precise type where the Rust side is serde_json::Value", () => {
+        const src = renderStub({ command: "w", method: "WCommand", dataType: "WidgetHealthReq", returns: "FullConfigType" }, row("w", "JsonValue", "JsonValue"));
+        expect(src).toContain("data: WidgetHealthReq, opts?: RpcOpts): Promise<FullConfigType>");
+        expect([...namesUsed({ dataType: "WidgetHealthReq", returns: "FullConfigType" }, row("w", "JsonValue", "JsonValue"))].sort()).toEqual(["FullConfigType", "WidgetHealthReq"]);
+    });
+
+    it("refuses to override a type that isn't raw JSON", () => {
+        expect(() => renderStub({ command: "t", method: "TCommand", returns: "Other" }, row("t", "TReq", "TResp"))).toThrow(/overrides only a serde_json::Value response/);
+        const { errors } = generate({
+            schema: [row("t", "TReq", "TResp")],
+            manifest: { stubs: [{ command: "t", method: "TCommand", dataType: "Other" }] },
+            ambient: new Set(),
+            generatedTypes: new Set(["TReq", "TResp"]),
+            hand: new Map(),
+        });
+        expect(errors.join()).toMatch(/overrides only a serde_json::Value request/);
+    });
+});
+
+describe("optionalFields", () => {
+    const fieldsOf = (t) => (t === "CommandResolveCliData" ? new Set(["provider_id", "cli_command", "block_id"]) : null);
+    const schema = [row("resolvecli", "CommandResolveCliData", "Result")];
+    const base = { schema, ambient: new Set(["Result"]), generatedTypes: new Set(["CommandResolveCliData"]), hand: new Map(), fieldsOf };
+
+    it("makes fields srv defaults optional on the generated request type", () => {
+        const src = renderStub({ command: "resolvecli", method: "ResolveCliCommand", optionalFields: ["block_id"] }, schema[0]);
+        expect(src).toContain('data: Omit<CommandResolveCliData, "block_id"> & Partial<Pick<CommandResolveCliData, "block_id">>');
+        const { errors } = generate({ ...base, manifest: { stubs: [{ command: "resolvecli", method: "ResolveCliCommand", optionalFields: ["block_id"] }] } });
+        expect(errors).toBeUndefined();
+    });
+
+    it("refuses a field the generated type doesn't have", () => {
+        const { errors } = generate({ ...base, manifest: { stubs: [{ command: "resolvecli", method: "ResolveCliCommand", optionalFields: ["nope"] }] } });
+        expect(errors.join()).toMatch(/has no field\(s\) nope/);
+    });
+
+    it("refuses a request type with no generated file", () => {
+        const { errors } = generate({ ...base, schema: [row("x", "Elsewhere", "Result")], generatedTypes: new Set(), ambient: new Set(["Result", "Elsewhere"]), manifest: { stubs: [{ command: "x", method: "XCommand", optionalFields: ["a"] }] } });
+        expect(errors.join()).toMatch(/needs a generated request type/);
+    });
+});

@@ -6,8 +6,6 @@
 // Armory Bundle (see ./bundle.ts). Split from the old `memory` module in Phase 1 of
 // docs/specs/SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md.
 
-import { RpcClient } from "../rpc-client";
-
 // The result shapes below are GENERATED from their Rust definitions by ts-rs
 // and re-exported here, so the previously hand-written copies in
 // frontend/types/srv-types.d.ts (which sat in the global namespace and could
@@ -34,25 +32,4 @@ export type { NativeMemoryReadFileResult } from "@/types/rpc/NativeMemoryReadFil
 export type { NativeMemoryRevertResult } from "@/types/rpc/NativeMemoryRevertResult";
 export type { NativeMemoryVersionMeta } from "@/types/rpc/NativeMemoryVersionMeta";
 
-import type { CommandNativeMemoryListData } from "@/types/rpc/CommandNativeMemoryListData";
-import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeMemoryReadFileData";
-import type { NativeMemoryListResult as NativeMemoryListResultT } from "@/types/rpc/NativeMemoryListResult";
-import type { NativeMemoryReadFileResult as NativeMemoryReadFileResultT } from "@/types/rpc/NativeMemoryReadFileResult";
-
-export const NativeMemoryApi = {
-    NativeMemoryListCommand(
-        client: RpcClient,
-        data: CommandNativeMemoryListData,
-        opts?: RpcOpts
-    ): Promise<NativeMemoryListResultT> {
-        return client.rpcCall("agent:memory:list", data, opts);
-    },
-
-    NativeMemoryReadFileCommand(
-        client: RpcClient,
-        data: CommandNativeMemoryReadFileData,
-        opts?: RpcOpts
-    ): Promise<NativeMemoryReadFileResultT> {
-        return client.rpcCall("agent:memory:read_file", data, opts);
-    },
-};
+export const NativeMemoryApi = {};

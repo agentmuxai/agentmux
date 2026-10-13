@@ -6,8 +6,6 @@
 // gate, same as the rest of `bundle.*`. See
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
-import type { CommandGlobalMemorySectionsData } from "@/types/rpc/CommandGlobalMemorySectionsData";
-import type { GlobalMemorySection as GlobalMemorySectionT } from "@/types/rpc/GlobalMemorySection";
 import { RpcClient } from "../rpc-client";
 
 // The bundle CRUD shapes below are GENERATED from their Rust definitions by
@@ -49,9 +47,6 @@ export type { IssueSeverity as BundleValidationSeverity } from "@/types/rpc/Issu
 export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/ValidationIssue";
 
 import type { Bundle as BundleT } from "@/types/rpc/Bundle";
-import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
-import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
-import type { CommandListBundlesData } from "@/types/rpc/CommandListBundlesData";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 
@@ -100,10 +95,6 @@ export type BundleValidateInput = Pick<BundleT, "name"> & Partial<Omit<BundleT, 
 // backend still registers alongside `bundle.*` — the strings must not change
 // until Phase 3 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md retires them.
 export const BundleApi = {
-    ListBundlesCommand(client: RpcClient, data: CommandListBundlesData = {}, opts?: RpcOpts): Promise<BundleT[]> {
-        return client.rpcCall("listmemories", data, opts);
-    },
-
     UpsertBundleCommand(client: RpcClient, data: BundleUpsertRequest, opts?: RpcOpts): Promise<BundleT> {
         return client.rpcCall("upsertmemory", data, opts);
     },
@@ -114,37 +105,6 @@ export const BundleApi = {
     // UpsertBundleCommand/DeleteBundleCommand.
     UpsertSystemBundleCommand(client: RpcClient, data: BundleUpsertRequest, opts?: RpcOpts): Promise<BundleT> {
         return client.rpcCall("upsertsystemmemory", data, opts);
-    },
-
-    // Read-only. Returns the CLAUDE.md at AgentMux's shared Claude
-    // provider config dir (~/.agentmux/shared/providers/claude/CLAUDE.md
-    // via DataPaths::provider_auth_dir — the CLAUDE_CONFIG_DIR a
-    // non-identity-bound spawned Claude agent actually gets). NOTE: this
-    // is Claude Code's own home-relocation path, NOT the file AgentMux's
-    // Global Memory actually composes into (that's
-    // <agent working_directory>/CLAUDE.md, a per-agent path this doesn't
-    // cover) — this is a "Claude Code provider config" reference display
-    // only. See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
-    // §5, §7. No parameters, no write counterpart.
-    GetClaudeGlobalConfigCommand(
-        client: RpcClient,
-        data: CommandGetClaudeGlobalConfigData = {},
-        opts?: RpcOpts
-    ): Promise<ClaudeGlobalConfig> {
-        return client.rpcCall("getclaudeglobalconfig", data, opts);
-    },
-
-    /**
-     * The Global Memory block agents' startup files carry, as its sections
-     * (Operator Config first) — what memory reinjection re-delivers. See
-     * docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P1.
-     */
-    GlobalMemorySectionsCommand(
-        client: RpcClient,
-        data: CommandGlobalMemorySectionsData = {},
-        opts?: RpcOpts
-    ): Promise<GlobalMemorySectionT[]> {
-        return client.rpcCall("globalmemory:sections", data, opts);
     },
 };
 

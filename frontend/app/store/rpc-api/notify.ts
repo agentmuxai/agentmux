@@ -6,16 +6,4 @@
 // `block.reveal` lives there too: it resolves its target the way a toast click
 // does (SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3).
 
-import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivationParams";
-import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
-import { RpcClient } from "../rpc-client";
-
-export const NotifyApi = {
-    NotifyTakeActivationCommand(
-        client: RpcClient,
-        data?: NotifyTakeActivationParams,
-        opts?: RpcOpts
-    ): Promise<NotifyTakeActivationResult> {
-        return client.rpcCall("notify.takeactivation", data ?? {}, opts);
-    },
-};
+export const NotifyApi = {};

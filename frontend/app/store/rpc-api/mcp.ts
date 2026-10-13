@@ -8,8 +8,6 @@
 // commands are the window-scoped counterpart (no agent_id, global rows
 // only) — that's what the Armory's MCP Servers tab uses.
 
-import { RpcClient } from "../rpc-client";
-
 // Every request and result shape below is GENERATED from its Rust definition by
 // ts-rs. They were function-local anonymous `struct Req` declarations inside
 // each handler closure -- seventeen of them -- so the inline types here were
@@ -35,7 +33,6 @@ export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
 
 import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
 import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
-import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
 
 // `id`, `transport` and `config` are all `#[serde(default)]` on the Rust side,
 // so they are omittable on the wire, but ts-rs generates them as required (it
@@ -48,14 +45,4 @@ export type McpUpsertInput = Pick<CommandMcpUpsertData, "agent_id" | "name"> &
 export type McpCatalogUpsertInput = Pick<CommandMcpCatalogUpsertData, "name"> &
     Partial<Omit<CommandMcpCatalogUpsertData, "name">>;
 
-export const McpApi = {
-    // ── Armory catalog (global servers only, no agent_id) ──────────────────
-
-    McpCatalogListCommand(
-        client: RpcClient,
-        data: McpCatalogListData = {},
-        opts?: RpcOpts
-    ): Promise<McpServerCatalogItem[]> {
-        return client.rpcCall("mcp.catalog.list", data, opts);
-    },
-};
+export const McpApi = {};
