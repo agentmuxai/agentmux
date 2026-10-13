@@ -728,7 +728,12 @@
         },
         {
             "command": "mcp.catalog.upsert",
-            "method": "McpCatalogUpsertCommand"
+            "method": "McpCatalogUpsertCommand",
+            "optionalFields": [
+                "id",
+                "transport",
+                "config"
+            ]
         },
         {
             "command": "mcp.delete",
@@ -757,7 +762,12 @@
         },
         {
             "command": "mcp.upsert",
-            "method": "McpUpsertCommand"
+            "method": "McpUpsertCommand",
+            "optionalFields": [
+                "id",
+                "transport",
+                "config"
+            ]
         },
         {
             "command": "movescratchfile",

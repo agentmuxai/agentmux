@@ -1421,7 +1421,12 @@ export const GeneratedApi = {
     return client.rpcCall("mcp.catalog.unbind", data, opts);
   },
   // command "mcp.catalog.upsert"
-  McpCatalogUpsertCommand(client: RpcClient, data: CommandMcpCatalogUpsertData, opts?: RpcOpts): Promise<McpServer> {
+  McpCatalogUpsertCommand(
+    client: RpcClient,
+    data: Omit<CommandMcpCatalogUpsertData, "id" | "transport" | "config"> &
+      Partial<Pick<CommandMcpCatalogUpsertData, "id" | "transport" | "config">>,
+    opts?: RpcOpts
+  ): Promise<McpServer> {
     return client.rpcCall("mcp.catalog.upsert", data, opts);
   },
   // command "mcp.delete"
@@ -1449,7 +1454,12 @@ export const GeneratedApi = {
     return client.rpcCall("mcp.unbind", data, opts);
   },
   // command "mcp.upsert"
-  McpUpsertCommand(client: RpcClient, data: CommandMcpUpsertData, opts?: RpcOpts): Promise<McpServer> {
+  McpUpsertCommand(
+    client: RpcClient,
+    data: Omit<CommandMcpUpsertData, "id" | "transport" | "config"> &
+      Partial<Pick<CommandMcpUpsertData, "id" | "transport" | "config">>,
+    opts?: RpcOpts
+  ): Promise<McpServer> {
     return client.rpcCall("mcp.upsert", data, opts);
   },
   // command "movescratchfile"

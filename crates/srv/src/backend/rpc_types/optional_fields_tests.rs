@@ -17,6 +17,7 @@ use super::agent::{CommandCreateAgentDefinitionData, CommandCreateAgentSkillData
 use super::identity::CommandUnlinkAgentIdentityData;
 use super::instance::CommandCreateAgentInstanceData;
 use super::block::{CommandBlockInputData, CommandResolveCliData};
+use super::mcp::{CommandMcpCatalogUpsertData, CommandMcpUpsertData};
 use super::skill::{CommandSkillCatalogUpsertData, CommandSkillCatalogUpsertForBundleData, CommandSkillUpsertData};
 use crate::server::widget_handlers::WidgetInstallReq;
 
@@ -26,6 +27,8 @@ const PROVEN: &[&str] = &[
     "createagent",
     "createagentinstance",
     "createagentskill",
+    "mcp.catalog.upsert",
+    "mcp.upsert",
     "resolvecli",
     "skill.catalog.upsert",
     "skill.catalog.upsert_for_bundle",
@@ -94,6 +97,14 @@ fn creates_and_upserts_take_just_their_required_fields() {
     assert!(!u.silent);
     let w: WidgetInstallReq = serde_json::from_value(json!({ "path": "/tmp/w" })).unwrap();
     assert!(!w.replace);
+}
+
+#[test]
+fn mcp_upserts_take_a_new_server_without_id_transport_or_config() {
+    let r: CommandMcpUpsertData = serde_json::from_value(json!({ "agent_id": "a1", "name": "files" })).unwrap();
+    assert_eq!((r.id.as_str(), r.transport.as_str()), ("", "stdio"));
+    let c: CommandMcpCatalogUpsertData = serde_json::from_value(json!({ "name": "files" })).unwrap();
+    assert_eq!(c.transport, "stdio");
 }
 
 #[test]
