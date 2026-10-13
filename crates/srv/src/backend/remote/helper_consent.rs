@@ -228,6 +228,16 @@ fn approved() -> std::sync::MutexGuard<'static, HashSet<String>> {
     hosts(&APPROVED)
 }
 
+/// The helper was removed from `connection`'s host: what was answered for it
+/// since srv started (Install, Not now, a failed try) no longer holds, and
+/// its next need asks again. A stored Always or Never is a setting, and stays.
+pub fn forget_answers(connection: &str) {
+    let key = host_key(connection);
+    approved().remove(&key);
+    declined().remove(&key);
+    not_installed_hosts().remove(&key);
+}
+
 /// Remember an answer until srv restarts: "Not now" for [`plain_instead`],
 /// Install so the host isn't asked again; each undoes the other. A closed
 /// window is no answer.
@@ -481,6 +491,12 @@ mod tests {
         let later = allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-4")).await;
         assert_eq!(later, Ok(()));
         assert_eq!(asked.load(Ordering::SeqCst), 2, "Install holds until srv restarts");
+
+        // Removing the helper (Remotes) undoes it: the next need asks again.
+        forget_answers(" me@shared-question-host ");
+        let after_removal = allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-5")).await;
+        assert_eq!(after_removal, Ok(()));
+        assert_eq!(asked.load(Ordering::SeqCst), 3, "asked again after the helper was removed");
 
     }
 

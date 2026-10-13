@@ -352,6 +352,8 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
     if let Err(e) = helper_hosts::forget_helper(&name) {
         tracing::warn!(connection = %name, error = %e, "could not forget the removed helper");
     }
+    // Its next need asks again (spec §4.9), whatever was answered before.
+    crate::backend::remote::helper_consent::forget_answers(&name);
     remotes::note_sessions(&name, 0);
     remotes::publish_change(&state.broker);
     tracing::info!(connection = %name, sessions = running.len(), "removed the helper");
