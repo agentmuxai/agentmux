@@ -285,11 +285,11 @@ export interface PaneTabStripProps<T> {
      *  file-tab strip, the agent History strip) render inside a Pane's
      *  content, not its header, and leave this off.
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6. */
+    reserveDragHandle?: boolean;
     /** The pane can't be dragged right now (magnified or ephemeral: the
      *  header's `canDrag` vetoes it). The grip then offers only the menu:
      *  no grab cursor, and its label and tooltip drop "move". */
     dragDisabled?: boolean;
-    reserveDragHandle?: boolean;
 
     /** Opt in to same-pane drag-reorder (Phase 3 of
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2): `(blockId, targetId,
