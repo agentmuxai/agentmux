@@ -337,22 +337,27 @@ fn open_questions() -> std::sync::MutexGuard<'static, HashMap<String, watch::Rec
 /// host answers this pane too. A failed question counts as no answer.
 async fn ask_once(deps: &Deps, connection: &str, block_id: &str) -> Answer {
     let key = host_key(connection);
-    let tx = {
-        let mut open = open_questions();
-        match open.get(&key) {
-            Some(rx) => Err(rx.clone()),
-            None => {
-                let (tx, rx) = watch::channel(None);
-                open.insert(key.clone(), rx);
-                Ok(tx)
+    let tx = loop {
+        let open = {
+            let mut open = open_questions();
+            match open.get(&key) {
+                Some(rx) => Err(rx.clone()),
+                None => {
+                    let (tx, rx) = watch::channel(None);
+                    open.insert(key.clone(), rx);
+                    Ok(tx)
+                }
             }
-        }
-    };
-    let tx = match tx {
-        Ok(tx) => tx,
-        // Closed unanswered (the asking pane went away): no answer.
-        Err(mut rx) => {
-            return rx.wait_for(Option::is_some).await.ok().and_then(|a| *a).unwrap_or_default();
+        };
+        match open {
+            Ok(tx) => break tx,
+            Err(mut rx) => match rx.wait_for(Option::is_some).await {
+                Ok(answer) => return answer.unwrap_or_default(),
+                // The asking pane went away without an answer (closed, or
+                // stopped): this pane asks instead. The user said nothing
+                // about it.
+                Err(_) => continue,
+            },
         }
     };
     // However this ends, even dropped with its pane, the question closes.
@@ -456,6 +461,34 @@ mod tests {
         );
         assert_eq!((a, b, c), (Ok(()), Ok(()), Ok(())));
         assert_eq!(asked.load(Ordering::SeqCst), 2, "one question per host");
+    }
+
+    /// The pane asking is closed mid-question: a pane waiting on its answer
+    /// asks instead, rather than taking the closed pane's "no answer".
+    #[tokio::test]
+    async fn a_waiting_pane_asks_when_the_asking_pane_closes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        static DEPS_SECOND_ANSWERS: OnceLock<Deps> = OnceLock::new();
+        let deps = DEPS_SECOND_ANSWERS.get_or_init(|| Deps {
+            ask: Box::new(|_, _| {
+                if ASKED.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Box::pin(std::future::pending())
+                } else {
+                    Box::pin(async { Ok(Answer { answered: true, approve: true, remember: false }) })
+                }
+            }),
+            settings: Box::new(|_| (String::new(), String::new())),
+            remember: Box::new(|_, _| Ok(())),
+        });
+        let asking = tokio::spawn(allow_install_with(deps, "me@handover-host", Some("blk-handover-1")));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let waiting = tokio::spawn(allow_install_with(deps, "me@handover-host", Some("blk-handover-2")));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        asking.abort();
+        let waited = tokio::time::timeout(std::time::Duration::from_secs(5), waiting).await;
+        assert_eq!(waited.expect("the waiting pane gets an answer").unwrap(), Ok(()));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 2, "asked again, by the pane still open");
     }
 
     /// The pane asking is closed mid-question: the question doesn't stay

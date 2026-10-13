@@ -625,8 +625,8 @@ struct Run {
     /// The askpass grant behind `host`'s prompts (revoked on drop).
     _askpass_grant: Option<crate::backend::remote::askpass::Revoke>,
     /// Set when the run ends because the helper isn't to be had (the user
-    /// declined it, or durable was only the default and it didn't install): the pane
-    /// becomes a plain SSH terminal.
+    /// declined it, or durable was only the default and it didn't install):
+    /// the pane becomes a plain SSH terminal.
     plain: Arc<AtomicBool>,
     /// Durable only by default ([`Mode::Default`]): without the helper the
     /// pane becomes a plain terminal rather than stopping.
@@ -768,9 +768,9 @@ impl Run {
                             .await;
                             return over(EXIT_COMMAND_NOT_FOUND);
                         }
-                        // The user doesn't want the helper here, or it was
-                        // durable was only the default and it didn't install: the pane falls
-                        // back to a plain SSH terminal.
+                        // The user doesn't want the helper here, or durable was only the
+                        // default and it didn't install: the pane falls back to a plain SSH
+                        // terminal.
                         let mut line = format!(
                             "AgentMux's helper isn't on {}, so this is a plain SSH terminal: it ends if the connection drops.",
                             self.conn
