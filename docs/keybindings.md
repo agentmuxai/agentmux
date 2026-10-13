@@ -30,6 +30,7 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Move tab left | ⇧⌘PgUp | Ctrl+Alt+Shift+PgUp |
 | Move tab right | ⇧⌘PgDn | Ctrl+Alt+Shift+PgDn |
 | Rename tab | F2 | F2 |
+| New Incognito tab (browser pane) | ⇧⌘N | Ctrl+Shift+N |
 
 ## Panes
 
