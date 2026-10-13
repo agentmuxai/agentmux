@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RpcApi } from "@/app/store/rpc-api";
-import type { BackgroundTaskView, FleetActionResult, FleetStagePlan } from "@/app/store/rpc-api";
+import { RpcApi, type BackgroundTaskView, type FleetActionResult, type FleetStagePlan } from "@/app/store/rpc-api";
 import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     localFleetTargets,
