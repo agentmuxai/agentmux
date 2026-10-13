@@ -521,6 +521,7 @@ partial list.
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_COMPILE_GATE_2026_10_09`](PLAN_MACOS_COMPILE_GATE_2026_10_09.md) | Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
+| [`PLAN_RENDERER_MEMORY_FIXES_2026_10_12`](PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md) | Plan: renderer memory fixes, in ROI order |
 | [`PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10`](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) | Plan — every shortcut in the Help pane works on every platform, and agents can drive them |
 | [`PLAN_SHORTCUT_KINKS_2026_10_10`](PLAN_SHORTCUT_KINKS_2026_10_10.md) | Plan — ironing out the kinks found while verifying the shortcuts |
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
@@ -603,6 +604,7 @@ partial list.
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
+| [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
 | [`SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30`](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown |

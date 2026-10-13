@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-12
 **Scope:** AgentMux's own processes (CEF host, GPU, utility and renderer processes, srv, launcher). Agent CLIs are covered separately in §7.
-**Status:** research and measurement only. No code has changed.
+**Status:** analysis — research and measurement only. No code has changed.
 **Update (same day):** Phase 0 has been done, and the root causes are measured in `REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md`. Where this report guesses at the causes (§4) and orders the work (§6), that report wins: fix tool-body unmounting and the `keyArray` leak first, then renderer recycling and hibernating hidden tabs.
 
 ## 1. Short answer

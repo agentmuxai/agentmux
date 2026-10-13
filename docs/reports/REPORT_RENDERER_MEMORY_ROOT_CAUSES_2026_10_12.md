@@ -1,7 +1,7 @@
 # Report: where AgentMux's renderer memory goes — measured root causes
 
 **Date:** 2026-10-12
-**Status:** measurement and analysis. Nothing has changed in the repo; the patches described here were built only into throwaway lab copies.
+**Status:** analysis — measurement only. Nothing has changed in the repo; the patches described here were built only into throwaway lab copies.
 **Follows:** `REPORT_MEMORY_FOOTPRINT_500MB_BUDGET_2026_10_12.md` (the budget and plan). That report's open questions, Phase 0, are answered here.
 
 ## 1. Summary
