@@ -1,7 +1,7 @@
 # RCA: the W×H resize badge never shows on browser panes
 
 **Date:** 2026-10-12
-**Status:** root cause identified from source; fix recommended (§6), not implemented.
+**Status:** analysis — root cause identified from source; fix recommended (§6), not implemented.
 **Author:** Agent1
 **Trigger:** Repo owner, 2026-10-12: while resizing panes, a `W×H` label appears at the bottom-left of every pane except browser panes. Recent browser-pane performance work (which was itself a regression fix) must not regress.
 **Code:** `main` @ `84e05ef4b` (rechecked after the 2026-10-13 RPC refactor; the badge code is unchanged, only moved).

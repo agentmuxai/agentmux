@@ -1,7 +1,7 @@
 # Spike: Chrome's address bar autocomplete in browser panes, through a CEF patch
 
 **Date:** 2026-10-12
-**Status:** spike done; the patch works. Not productized.
+**Status:** analysis — spike done; the patch works. Not productized.
 **Author:** Agent1
 **Question (repo owner):** can a browser pane's address bar get Chrome's own completion (history, typed URLs, search suggestions), and is a CEF patch really the way?
 **Code:** `agentmuxai/cef` branch `agentmuxai/8037` @ `6fba2047e` (CEF 154.0.8037.58), the CEF version after the one the app ships (152). The spike commit is `1de415fd1` on a local branch `agent1/omnibox-spike-8037` (not pushed).
