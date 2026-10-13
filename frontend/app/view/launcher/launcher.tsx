@@ -56,7 +56,13 @@ export class LauncherViewModel {
         const fullConfig = atoms.fullConfigAtom();
         const wmap = fullConfig?.widgets || {};
         const settings = fullConfig?.settings || {};
-        const parent = this.activeParent();
+        // A group that's been hidden since the user drilled into it (Settings → Widgets, the bar)
+        // drops the Launcher back to the top-level grid, where it no longer shows either.
+        const drilled = this.activeParent();
+        const drilledKey = drilled
+            ? Object.keys(wmap).find((k) => wmap[k] === drilled || (wmap[k]?.label === drilled.label && wmap[k]?.children?.join() === drilled.children?.join()))
+            : undefined;
+        const parent = drilled && !(drilledKey && isWidgetHidden(drilledKey, wmap, settings)) ? drilled : null;
 
         let source: WidgetConfigType[];
         if (parent) {
