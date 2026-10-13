@@ -572,11 +572,19 @@ pub async fn connect_quiet(conn: &str) -> Result<Arc<RemoteFiles>, RemoteError> 
         return Err(RemoteError::link(format!("AgentMux's helper isn't on {name}")));
     }
     let host = HostSsh::for_connection(conn).map_err(RemoteError::link)?;
-    let files = match start(&name, host, None).await {
-        Ok(f) => f,
-        Err((e, _)) => {
+    // Its own deadline, inside: a caller's timeout would drop this before a
+    // failure is recorded, and an unreachable host would be tried every poll.
+    let started = tokio::time::timeout(QUIET_START_TIMEOUT, start(&name, host, None)).await;
+    let files = match started {
+        Ok(Ok(f)) => f,
+        Ok(Err((e, _))) => {
             quiet_failures().lock().unwrap().insert(name, (Instant::now(), e.message.clone()));
             return Err(e);
+        }
+        Err(_) => {
+            let why = format!("{name} didn't answer in time");
+            quiet_failures().lock().unwrap().insert(name, (Instant::now(), why.clone()));
+            return Err(RemoteError::link(why));
         }
     };
     quiet_failures().lock().unwrap().remove(&name);
@@ -586,6 +594,11 @@ pub async fn connect_quiet(conn: &str) -> Result<Arc<RemoteFiles>, RemoteError> 
 
 /// How long [`connect_quiet`] leaves a host it failed on alone.
 const QUIET_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// How long [`connect_quiet`] waits for the helper to start: under the
+/// stats badge's own 5 s, so a host that doesn't answer is recorded as a
+/// failure rather than cut off and tried again on the next poll.
+const QUIET_START_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Hosts [`connect_quiet`] failed on: when, and why (said again meanwhile).
 fn quiet_failures() -> &'static Mutex<HashMap<String, (Instant, String)>> {

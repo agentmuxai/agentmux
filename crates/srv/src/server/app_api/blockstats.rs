@@ -30,7 +30,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let meta = mstore.get::<Block>(&req.block_id).ok().flatten().map(|b| b.meta);
             let meta_str = |key: &str| meta.as_ref().map(|m| obj::meta_get_string(m, key, "")).unwrap_or_default();
             let conn = meta_str("connection");
-            if matches!(ConnTarget::parse(&conn), Ok(ConnTarget::Ssh(_) | ConnTarget::Wsl(_))) {
+            // Only a terminal has a remote shell to measure; any other pane on
+            // a connection (Files, preview) is not asked of the machine.
+            let remote_terminal = meta_str("view") == "term";
+            if remote_terminal && matches!(ConnTarget::parse(&conn), Ok(ConnTarget::Ssh(_) | ConnTarget::Wsl(_))) {
                 // The machine's name and address, and the pane's processes
                 // there, side by side.
                 let session = meta_str(META_KEY_SESSION_ID);

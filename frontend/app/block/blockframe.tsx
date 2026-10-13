@@ -1417,7 +1417,14 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     <BlockStatsBadge
                         blockId={nodeModel.blockId}
                         noHeader={noHeader()}
-                        connection={blockData()?.meta?.connection as string | undefined}
+                        connection={
+                            // Only a terminal's badge measures a remote shell;
+                            // other panes on a connection (Files, preview) have
+                            // none and keep the local badge's behavior.
+                            blockData()?.meta?.view === "term"
+                                ? (blockData()?.meta?.connection as string | undefined)
+                                : undefined
+                        }
                     />
                 </Show>
             </div>
