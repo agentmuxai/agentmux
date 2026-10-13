@@ -21,7 +21,7 @@
 
 use std::sync::Arc;
 
-use crate::backend::notify::policy::{Family, FocusReport, NotifyKind};
+use crate::backend::notify::policy::{Family, FocusReport};
 use crate::backend::notify::router;
 use crate::backend::rpc::engine::WshRpcEngine;
 

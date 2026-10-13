@@ -32,7 +32,7 @@ export interface PaneRectBatcher {
 }
 
 /** Runs `cb` as its own task, after the current one (no 4 ms timer clamp). */
-export function nextTask(cb: () => void): void {
+function nextTask(cb: () => void): void {
     const ch = new MessageChannel();
     ch.port1.onmessage = () => {
         ch.port1.close();

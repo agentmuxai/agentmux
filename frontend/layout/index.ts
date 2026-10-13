@@ -19,7 +19,6 @@ import {
     closeBlockInStack,
     moveBlockInStack,
     openBlockInStack,
-    pushBlockOntoStack,
     setActiveBlockInStack,
 } from "./lib/layoutStack";
 import { installWindowEdgeResizeListener } from "./lib/windowEdgeResize";
@@ -50,7 +49,6 @@ export {
     NavigateDirection,
     newLayoutNode,
     openBlockInStack,
-    pushBlockOntoStack,
     redockDraggedPane,
     setActiveBlockInStack,
     TileLayout,

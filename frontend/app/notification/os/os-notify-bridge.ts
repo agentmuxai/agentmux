@@ -39,8 +39,8 @@ import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import type { NotifyPaneEvent } from "@/types/rpc/NotifyPaneEvent";
 
 import { WpsEvent } from "@/app/store/mps-events";
-export const EVENT_NOTIFICATION_ACTIVATE = WpsEvent.NotificationActivate;
-export const EVENT_NOTIFICATION_STATE = WpsEvent.NotificationState;
+const EVENT_NOTIFICATION_ACTIVATE = WpsEvent.NotificationActivate;
+const EVENT_NOTIFICATION_STATE = WpsEvent.NotificationState;
 
 /** Clicks older than this are ignored (stale replay / slow window). */
 const ACTIVATION_MAX_AGE_MS = 15_000;

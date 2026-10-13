@@ -329,3 +329,42 @@ describe("moving Media tabs between panes", () => {
         a.dispose();
     });
 });
+
+// docs/specs/SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md §4.3–§4.4, §6.
+describe("the faint AgentMux logo in an empty Media pane", () => {
+    it("an empty tab shows the logo behind its text, hidden from screen readers", () => {
+        const v = mount();
+        const logo = v.container.querySelector(".media-view-empty .empty-pane-logo");
+        expect(logo).not.toBeNull();
+        expect(logo!.getAttribute("aria-hidden")).toBe("true");
+        expect(logo!.querySelector("svg")).not.toBeNull();
+        expect([...v.container.querySelectorAll(".media-view-empty .media-empty-text")].map((x) => x.textContent)[0]).toBe(
+            "Click to load media",
+        );
+    });
+
+    it("a file in the tab replaces it", async () => {
+        const v = mount({ "media:path": "C:/pics/a.png" });
+        await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
+        expect(v.container.querySelector(".empty-pane-logo")).toBeNull();
+    });
+
+    it("a file that fails to show gets its error, without the logo", async () => {
+        const v = mount({ "media:path": "C:/pics/a.png" });
+        await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
+        fireEvent.error(v.container.querySelector("img")!);
+        await waitFor(() => expect(v.container.textContent).toContain("Failed to display media"));
+        expect(v.container.querySelector(".empty-pane-logo")).toBeNull();
+    });
+});
+
+describe("two empty panes on screen at once", () => {
+    it("each logo has its own SVG ids, so neither renders blank", () => {
+        const a = mount();
+        const b = mount();
+        const ids = (v: ReturnType<typeof mount>) =>
+            [...v.container.querySelectorAll(".empty-pane-logo [id]")].map((e) => e.id);
+        expect(ids(a).length).toBeGreaterThan(0);
+        expect(ids(a).filter((id) => ids(b).includes(id))).toEqual([]);
+    });
+});

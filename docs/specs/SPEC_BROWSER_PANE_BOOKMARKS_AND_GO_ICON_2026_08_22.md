@@ -4,7 +4,7 @@
 **Type:** Two asks bundled in one doc — (1) a small presentational fix, ready to
 implement; (2) a design exploration for a bigger feature, **not yet approved
 for implementation**.
-**Status:** implemented — #2730 (2026-08-22), the PR this doc was added in. The store is `agentmux-srv/src/backend/bookmarks_store.rs`, exposed through `server/app_api/bookmarks.rs` and [`frontend/app/store/rpc-api/bookmarks.ts`](../../frontend/app/store/rpc-api/bookmarks.ts). The v1 non-goals are still out of scope.
+**Status:** implemented — #2730 (2026-08-22), the PR this doc was added in. The store is `agentmux-srv/src/backend/bookmarks_store.rs`, exposed through `server/app_api/bookmarks.rs` and the generated stubs ([`frontend/app/store/rpc-api/generated.ts`](../../frontend/app/store/rpc-api/generated.ts)). The v1 non-goals are still out of scope.
 **Scope:** [`frontend/app/view/browser/`](../../frontend/app/view/browser) (nav bar, view model), [`frontend/app/store/browser-pane-state/`](../../frontend/app/store/browser-pane-state), potentially `settings.json`/`agentmux-srv` config plumbing for part 2.
 
 ---
@@ -276,7 +276,7 @@ dev` + clicking through the feature) — typecheck/unit-test coverage only.
    `agentmux-srv/src/server/app_api/bookmarks.rs`, constants in
    `rpc_types/commands.rs`, registered in `app_api/mod.rs`.
 3. ~~Frontend: RPC wrapper, bookmarks button + `FlyoutMenu` wiring.~~ Done —
-   [`frontend/app/store/rpc-api/bookmarks.ts`](../../frontend/app/store/rpc-api/bookmarks.ts), spliced into `RpcApi`
+   the generated stubs ([`frontend/app/store/rpc-api/generated.ts`](../../frontend/app/store/rpc-api/generated.ts)), spliced into `RpcApi`
    (`rpc-api/index.ts`); toggle/dedupe logic extracted to the pure, unit-
    tested [`frontend/app/view/browser/browser-bookmarks-logic.ts`](../../frontend/app/view/browser/browser-bookmarks-logic.ts)
    (`toggleBookmark`/`findBookmark`); wired into `browser-nav-bar.tsx`.

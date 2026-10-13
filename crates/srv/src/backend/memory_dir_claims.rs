@@ -444,6 +444,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let real = tmp.path().join("shared-projects");
         std::fs::create_dir_all(&real).unwrap();
+        #[cfg(unix)]
         let link = tmp.path().join("channel-projects");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real, &link).unwrap();

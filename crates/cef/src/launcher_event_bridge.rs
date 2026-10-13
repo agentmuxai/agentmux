@@ -91,6 +91,7 @@ impl DedupCache {
         self.seen.values().any(|&v| v > 0)
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.seen.len()
     }

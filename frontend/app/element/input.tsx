@@ -32,15 +32,6 @@ const InputGroup = (props: InputGroupProps): JSX.Element => {
     );
 };
 
-interface InputLeftElementProps {
-    children?: JSX.Element;
-    className?: string;
-}
-
-const InputLeftElement = (props: InputLeftElementProps): JSX.Element => {
-    return <div class={clsx("input-left-element", props.className)}>{props.children}</div>;
-};
-
 interface InputRightElementProps {
     children?: JSX.Element;
     className?: string;
@@ -126,4 +117,4 @@ const Input = (props: InputProps): JSX.Element => {
     );
 };
 
-export { Input, InputGroup, InputLeftElement, InputRightElement };
+export { Input, InputGroup, InputRightElement };

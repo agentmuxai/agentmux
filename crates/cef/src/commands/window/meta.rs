@@ -33,11 +33,6 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     let factor = factor.clamp(0.5, 3.0);
     *state.zoom_factor.lock() = factor;
 
-    // Convert to CEF zoom level (log base 1.2)
-    // CEF uses: zoom_factor = 1.2 ^ zoom_level
-    // So: zoom_level = log(zoom_factor) / log(1.2)
-    let zoom_level = factor.ln() / 1.2_f64.ln();
-
     // NOTE: host.set_zoom_level() deadlocks from IPC thread, and post_task
     // crashes with current CEF bindings. Zoom is applied via CSS on the frontend.
     // The zoom_factor state is stored for get_zoom_factor queries.

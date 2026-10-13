@@ -4,53 +4,39 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
+import { hostHas } from "@/app/host/host-caps";
+import { UserInputModal } from "@/app/modals/userinputmodal";
 import { WpsEvent } from "@/app/store/mps-events";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { setPlatform } from "@/util/platformutil";
 import { createMemo, createSignal } from "solid-js";
-import { reconnectWS } from "./ws";
+import { getApi } from "./app-api";
 import {
-    backendStatusAtom,
     backendDeathInfoAtom,
+    backendStatusAtom,
     initBackendStatusListeners,
     setBackendStatusAtom,
 } from "./backendStatus";
+import { fullConfigAtom, hasCustomAIPresetsAtom, setFullConfigAtom, settingsAtom } from "./config-signals";
+import { allConnStatus } from "./conn-status";
+import { flashErrors, notificationPopoverMode, notifications, pushNotification } from "./flash-notifications";
 import { openModal } from "./modalmodel";
-import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as MOS from "./mos";
 import { getFileSubject, muxEventSubscribe } from "./mps";
-import { getApi } from "./app-api";
-import { hostHas } from "@/app/host/host-caps";
-import {
-    fullConfigAtom,
-    setFullConfigAtom,
-    settingsAtom,
-    hasCustomAIPresetsAtom,
-} from "./config-signals";
-import {
-    getBlockMetaKeyAtom,
-    getSettingsKeyAtom,
-    getOverrideConfigAtom,
-    getSettingsPrefixAtom,
-    useBlockAtom,
-} from "./block-atom-cache";
-import {
-    setWindowId,
-    clientId,
-    setClientId,
-    staticTabId,
-    setStaticTabId,
-    client,
-    muxWindow,
-    workspace,
-    tabAtom,
-    activeTabId,
-    uiContext,
-} from "./window-identity";
-import { allConnStatus } from "./conn-status";
 import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
-import { flashErrors, notifications, notificationPopoverMode, pushNotification } from "./flash-notifications";
+import {
+    activeTabId,
+    client,
+    clientId,
+    muxWindow,
+    setClientId,
+    setStaticTabId,
+    setWindowId,
+    staticTabId,
+    tabAtom,
+    uiContext,
+    workspace,
+} from "./window-identity";
+import { reconnectWS } from "./ws";
 
 // ---------------------------------------------------------------------------
 // Global signals (replace Jotai atoms)
@@ -92,7 +78,7 @@ export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] =
 // the atom every consumer reads is hard false.
 export const prefersReducedMotionAtom = createMemo(() => false);
 
-export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom };
+export { backendDeathInfoAtom, backendStatusAtom, setBackendStatusAtom };
 
 const [typeAheadModalAtom] = createSignal<Record<string, unknown>>({});
 export const [modalOpen, setModalOpen] = createSignal(false);
@@ -163,8 +149,7 @@ export const [openWindowEntriesAtom, setOpenWindowEntriesAtom] = createSignal<Wi
 // and seeded from `listWindowInstances()` at boot.
 // See docs/specs/SPEC_INSTANCE_PANEL_FLOATING_PANES_SECTION_2026_06_24.md.
 export type FloatingPaneEntry = { label: string; windowId: string | null };
-export const [openFloatingPaneEntriesAtom, setOpenFloatingPaneEntriesAtom] =
-    createSignal<FloatingPaneEntry[]>([]);
+export const [openFloatingPaneEntriesAtom, setOpenFloatingPaneEntriesAtom] = createSignal<FloatingPaneEntry[]>([]);
 
 // ---------------------------------------------------------------------------
 // GlobalAtomsType-compatible export (used in mos.ts callBackendService)
@@ -416,7 +401,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                     }
                 })();
             },
-        },
+        }
     );
 }
 
@@ -424,8 +409,8 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
 // backward-compat (97 files import from this module).
 export {
     getBlockMetaKeyAtom,
-    getSettingsKeyAtom,
     getOverrideConfigAtom,
+    getSettingsKeyAtom,
     getSettingsPrefixAtom,
     useBlockAtom,
 } from "./block-atom-cache";
@@ -433,35 +418,26 @@ export {
 // Window identity — moved to window-identity.ts; re-exported below for
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object and initGlobalSignals.
-export {
-    staticTabId,
-    client,
-    muxWindow,
-    workspace,
-    tabAtom,
-    activeTabId,
-    uiContext,
-};
+export { staticTabId, workspace };
 
 // Block creation / layout actions — moved to block-layout-actions.ts;
 // re-exported below for backward-compat (97 files import from this module).
 export {
+    createBlock,
     createBlockSplitHorizontally,
     createBlockSplitVertically,
-    createBlock,
     replaceBlock,
 } from "./block-layout-actions";
 
 // Block component model registry — moved to block-component-registry.ts;
 // re-exported below for backward-compat (97 files import from this module).
 export {
+    getBlockComponentModel,
+    getFocusedBlockId,
+    openOrFocusPaneByView,
+    refocusNode,
     registerBlockComponentModel,
     unregisterBlockComponentModel,
-    getBlockComponentModel,
-    getAllBlockComponentModels,
-    getFocusedBlockId,
-    refocusNode,
-    openOrFocusPaneByView,
 } from "./block-component-registry";
 
 // AgentMux file fetching — moved to mux-file.ts; re-exported below for
@@ -471,48 +447,31 @@ export { fetchMuxFile } from "./mux-file";
 // Connection status — moved to conn-status.ts; re-exported below for
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object.
-export {
-    allConnStatus,
-    loadConnStatus,
-    subscribeToConnEvents,
-    getConnStatusAtom,
-} from "./conn-status";
+export { getConnStatusAtom, loadConnStatus, subscribeToConnEvents } from "./conn-status";
 
 // Flash errors / notifications — moved to flash-notifications.ts;
 // re-exported below for backward-compat (97 files import from this module).
 // Also imported above (see top of file) for use in the `atoms` object.
 export {
     flashErrors,
-    notifications,
-    setNotifications,
-    notificationPopoverMode,
-    setNotificationPopoverMode,
     pushFlashError,
     pushNotification,
-    removeNotificationById,
     removeFlashError,
+    removeNotificationById,
+    setNotifications,
 } from "./flash-notifications";
 
 // Tab management — moved to tab-actions.ts; re-exported below for
 // backward-compat (97 files import from this module).
 export { createTab, setActiveTab } from "./tab-actions";
 
-// ---------------------------------------------------------------------------
-// Telemetry
-// ---------------------------------------------------------------------------
-
-export function recordTEvent(event: string, props?: TEventProps) {
-    if (props == null) props = {};
-    RpcApi.RecordTEventCommand(TabRpcClient, { event, props }, { noresponse: true });
-}
-
 // Counters (dev tooling) — moved to dev-counters.ts; re-exported below for
 // backward-compat (97 files import from this module).
-export { countersClear, counterInc, countersPrint } from "./dev-counters";
+export { counterInc, countersClear, countersPrint } from "./dev-counters";
 
 // Misc utilities — moved to misc-utils.ts; re-exported below for
 // backward-compat (97 files import from this module).
-export { isDev, getUserName, getHostName, openLink } from "./misc-utils";
+export { getHostName, getUserName, isDev, openLink } from "./misc-utils";
 
 // Re-export MOS and getApi for call-sites that import them from here
-export { MOS, getApi };
+export { getApi, MOS };

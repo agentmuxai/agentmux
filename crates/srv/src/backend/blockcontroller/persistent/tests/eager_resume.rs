@@ -725,7 +725,7 @@ async fn a_killed_process_is_announced_as_gone() {
     let (c, broker) = controller_with_broker("blk-rt-kill", None).await;
     let _kill_on_drop = KillOnDrop(&c);
     wait_until("the announcement that it is running", || last_announced_running(&broker, "blk-rt-kill") == Some(true)).await;
-    c.stop_process(true);
+    c.stop_process(true).unwrap();
     wait_until("the announcement that it is gone", || last_announced_running(&broker, "blk-rt-kill") == Some(false)).await;
 }
 

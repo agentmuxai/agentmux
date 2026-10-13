@@ -42,6 +42,7 @@ impl BootTimings {
     }
 
     /// Run `f`, recording how long it took under `step`.
+    #[cfg(test)]
     pub fn time<T>(&mut self, step: &'static str, f: impl FnOnce() -> T) -> T {
         let t = Instant::now();
         let out = f();
@@ -49,6 +50,7 @@ impl BootTimings {
         out
     }
 
+    #[cfg(test)]
     pub fn steps(&self) -> &[(&'static str, u64)] {
         &self.steps
     }

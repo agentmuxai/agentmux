@@ -8,9 +8,11 @@
 //!
 //! - `POST /agentmux/viewer/pair`: a pairing code for a viewer token. The
 //!   only route without a token.
-//! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents` and
-//!   `GET /agentmux/viewer/agents/:name/feed`: `Authorization: Bearer
-//!   amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
+//! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents`,
+//!   `GET /agentmux/viewer/agents/:name/feed`, `GET /agentmux/viewer/panes`,
+//!   `GET /agentmux/viewer/terminals/:block_id/feed`
+//!   (`server::http_viewer_terminal`) and `GET /agentmux/viewer/procs`:
+//!   `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
 //!   them, and the token opens nothing else: no other router knows it.
 //!
 //! Read-only throughout. An agent hidden from paired devices is left out of
@@ -36,13 +38,19 @@ pub(crate) const FEED_HEARTBEAT: Duration = Duration::from_secs(15);
 /// How often a feed looks at its agent's state. One controller lookup and one
 /// block read, so a second is cheap and keeps the device's chip current.
 pub(crate) const STATUS_POLL: Duration = Duration::from_secs(1);
+/// How often a feed checks that its agent hasn't moved to another block, and
+/// reads lines of the agent's shared transcript that no event of this block
+/// brought (another block, or another srv instance, running the same agent).
+/// The desktop pane polls the shared transcript as often
+/// (`useAgentStream.ts`, `SHARED_ZONE_POLL_MS`).
+pub(crate) const FOLLOW_POLL: Duration = Duration::from_secs(5);
 /// The snapshot: the last 50 turns or 256 KB, whichever is smaller.
 const SNAPSHOT_TAIL_TURNS: u32 = 50;
 const SNAPSHOT_TAIL_BYTES: u64 = 256 * 1024;
 /// The most lines one bounded read returns (`blockfile:read_range`'s cap).
 const READ_LIMIT: u64 = 10_000;
-const RETRY_PREAMBLE: &[u8] = b"retry: 3000\n\n";
-const HEARTBEAT: &[u8] = b": hb\n\n";
+pub(crate) const RETRY_PREAMBLE: &[u8] = b"retry: 3000\n\n";
+pub(crate) const HEARTBEAT: &[u8] = b": hb\n\n";
 
 /// The paired device a request authenticated as.
 #[derive(Debug, Clone)]
@@ -57,6 +65,11 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/agents", get(handle_viewer_agents))
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
         .route("/agentmux/viewer/procs", get(handle_viewer_procs))
+        .route("/agentmux/viewer/panes", get(handle_viewer_panes))
+        .route(
+            "/agentmux/viewer/terminals/:block_id/feed",
+            get(super::http_viewer_terminal::handle_viewer_terminal_feed),
+        )
         .route_layer(middleware::from_fn_with_state(state.clone(), viewer_auth_middleware));
     Router::new()
         .route("/agentmux/viewer/pair", post(handle_viewer_pair))
@@ -301,6 +314,57 @@ async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<Proc
     }
 }
 
+/// `GET /agentmux/viewer/panes`: every pane on this computer, window by window
+/// and tab by tab, with each agent's shell drawer (`backend::viewer::panes`):
+/// names, types, the agent name a feed opens by, and whether a terminal runs.
+/// No content, command line or working directory; agents hidden from paired
+/// devices, and their shells, are left out.
+async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
+    let st = state.clone();
+    let panes = tokio::task::spawn_blocking(move || {
+        use crate::backend::obj::{Block, Tab, Window, Workspace};
+        // A table that can't be read fails the request: an empty or partial
+        // list would read as "nothing open".
+        let windows = st.mstore.get_all::<Window>().map_err(|e| e.to_string())?;
+        let workspaces = st.mstore.get_all::<Workspace>().map_err(|e| e.to_string())?;
+        let tabs = st.mstore.get_all::<Tab>().map_err(|e| e.to_string())?;
+        let blocks = st.mstore.get_all::<Block>().map_err(|e| e.to_string())?;
+        let label = |b: &Block| {
+            crate::server::app_api::tower_pane::block_label(&st.mstore, &b.oid)
+                .map(|l| (l.label, l.agent))
+                .unwrap_or_default()
+        };
+        let agent_name = |id: &str| st.reactive_handler.get_agent_by_block(id).map(|a| a.agent_id.clone());
+        let running = |id: &str| {
+            crate::backend::blockcontroller::get_block_controller_status(id)
+                .map(|s| s.shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
+        };
+        let hidden = |id: &str| agent_hidden(&st, id);
+        let facts = crate::backend::viewer::panes::PaneFacts {
+            label: &label,
+            agent_name: &agent_name,
+            running: &running,
+            hidden: &hidden,
+        };
+        Ok::<_, String>(crate::backend::viewer::panes::list(&windows, &workspaces, &tabs, &blocks, &facts))
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    match panes {
+        Ok(panes) => Json(json!({
+            "now_ms": agentmux_common::time::now_ms_u64(),
+            "terminals_shared": super::http_viewer_terminal::terminals_shared(&state),
+            "panes": panes,
+        }))
+        .into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "viewer: could not list panes");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "could not list panes" }))).into_response()
+        }
+    }
+}
+
 /// `GET /agentmux/viewer/agents/:name/feed`: the agent's transcript as
 /// Server-Sent Events (see [`feed_stream`]). 404 for an agent that isn't
 /// this channel's or is hidden; 503 past the feed caps.
@@ -328,13 +392,20 @@ async fn handle_viewer_feed(
     };
     let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok()).map(str::to_string);
     let provider = provider_of(&state, &agent.block_id);
+    tracing::info!(
+        device = %caller.device_id,
+        agent = %name,
+        block = %agent.block_id,
+        resume = last_event_id.is_some(),
+        "viewer feed: opened"
+    );
     let stream = feed_stream(
         FeedSource::of(&state, &agent.block_id),
         provider,
         last_event_id,
         lease,
         FeedTiming::default(),
-        AgentProbe::of(&state, &agent.block_id),
+        AgentProbe::of(&state, &name),
     );
     (
         [(header::CONTENT_TYPE, "text/event-stream"), (header::CACHE_CONTROL, "no-cache")],
@@ -352,30 +423,43 @@ fn not_found() -> Response {
 pub(crate) struct FeedTiming {
     pub heartbeat: Duration,
     pub status_poll: Duration,
+    pub follow_poll: Duration,
 }
 
 impl Default for FeedTiming {
     fn default() -> Self {
-        Self { heartbeat: FEED_HEARTBEAT, status_poll: STATUS_POLL }
+        Self { heartbeat: FEED_HEARTBEAT, status_poll: STATUS_POLL, follow_poll: FOLLOW_POLL }
     }
 }
 
-/// What a feed asks about its agent while it runs: whether it has been hidden
-/// from paired devices, and its state.
+/// The state of the agent in a block, if it has one.
+type StatusProbe = Box<dyn Fn(&str) -> Option<crate::backend::agent_state::AgentStatus> + Send>;
+
+/// What a feed asks about its agent while it runs: the block it runs in now,
+/// whether it has been hidden from paired devices, its state, and the
+/// provider of a block it moves to.
 pub(crate) struct AgentProbe {
-    pub hidden: Box<dyn Fn() -> bool + Send>,
-    pub status: Box<dyn Fn() -> Option<crate::backend::agent_state::AgentStatus> + Send>,
+    pub block: Box<dyn Fn() -> Option<String> + Send>,
+    pub hidden: Box<dyn Fn(&str) -> bool + Send>,
+    pub status: StatusProbe,
+    pub provider: Box<dyn Fn(&str) -> String + Send>,
 }
 
 impl AgentProbe {
-    /// The agent in `block_id`: hidden per its definition, and its state from
-    /// the tracker the LAN feed uses (`agent_state::agent_status_of_block`).
-    pub(crate) fn of(state: &AppState, block_id: &str) -> Self {
-        let (hidden_state, hidden_block) = (state.clone(), block_id.to_string());
-        let (mstore, status_block) = (state.mstore.clone(), block_id.to_string());
+    /// The agent registered as `name`: its block from the registry (it moves
+    /// on a respawn), hidden per its definition, its state from the tracker
+    /// the LAN feed uses (`agent_state::agent_status_of_block`), and the
+    /// provider per the block's meta.
+    pub(crate) fn of(state: &AppState, name: &str) -> Self {
+        let (registry, name) = (state.reactive_handler, name.to_string());
+        let hidden_state = state.clone();
+        let provider_state = state.clone();
+        let mstore = state.mstore.clone();
         Self {
-            hidden: Box::new(move || agent_hidden(&hidden_state, &hidden_block)),
-            status: Box::new(move || crate::backend::agent_state::agent_status_of_block(&mstore, &status_block)),
+            block: Box::new(move || registry.get_agent(&name).map(|a| a.block_id.clone())),
+            hidden: Box::new(move |block_id| agent_hidden(&hidden_state, block_id)),
+            status: Box::new(move |block_id| crate::backend::agent_state::agent_status_of_block(&mstore, block_id)),
+            provider: Box::new(move |block_id| provider_of(&provider_state, block_id)),
         }
     }
 }
@@ -474,6 +558,64 @@ impl FeedSource {
         let cursor = Cursor { stream: result.stream.unwrap_or(stream), gen: gen.to_string(), next_line: line + result.lines.len() as u64 };
         Some((cursor, result.lines))
     }
+
+    /// Lines of the agent's shared transcript past `cursor` that no event of
+    /// this block brought: another block, or another srv instance, running
+    /// the same agent wrote them, or this block's append didn't say where it
+    /// landed in the shared stream. Moves the cursor past what it returns.
+    /// Lines an event brings later are then skipped by line number
+    /// ([`feed::apply_append`]), so nothing is sent twice.
+    ///
+    /// A cursor on the block's own transcript is left to its events, unless
+    /// the transcript is now read from another stream: the agent's shared
+    /// transcript started after the snapshot (another srv instance may have
+    /// begun it, and its appends reach no event here).
+    async fn catch_up(&self, cursor: &mut Cursor) -> CatchUp {
+        let shared = cursor.stream.starts_with("g:");
+        let Some((stream, gen, total)) = self.position().await else {
+            return CatchUp::Nothing;
+        };
+        if stream != cursor.stream {
+            return CatchUp::Resync("stream");
+        }
+        if !shared {
+            return CatchUp::Nothing;
+        }
+        if gen != cursor.gen {
+            return CatchUp::Resync("gen");
+        }
+        if total <= cursor.next_line {
+            return CatchUp::Nothing;
+        }
+        if total - cursor.next_line > READ_LIMIT {
+            return CatchUp::Resync("behind");
+        }
+        // Replaced since the count: the next poll, or the event that
+        // announces it, resyncs.
+        let Some(result) = self.read(cursor.next_line, &gen, false).await else {
+            return CatchUp::Nothing;
+        };
+        let bytes: usize = result.lines.iter().map(|l| feed::wire_size(l.as_bytes())).sum();
+        if bytes > feed::MAX_BEHIND_BYTES {
+            return CatchUp::Resync("behind");
+        }
+        if result.lines.is_empty() {
+            return CatchUp::Nothing;
+        }
+        let line = cursor.next_line;
+        cursor.next_line += result.lines.len() as u64;
+        CatchUp::Lines { line, lines: result.lines }
+    }
+}
+
+/// What [`FeedSource::catch_up`] found.
+enum CatchUp {
+    Nothing,
+    /// Lines that follow on from the cursor, starting at `line`.
+    Lines { line: u64, lines: Vec<String> },
+    /// The cursor can't continue (another stream or generation, or too far
+    /// behind): reset and send a fresh snapshot.
+    Resync(&'static str),
 }
 
 fn snapshot_event(snapshot: Snapshot, provider: &str) -> Bytes {
@@ -526,6 +668,11 @@ fn status_event(status: Option<crate::backend::agent_state::AgentStatus>) -> Byt
 /// behind or the agent is hidden, and silently when the device is revoked
 /// (its lease's token) or goes away. The lease is held until the stream is
 /// dropped.
+///
+/// The feed follows the agent, not the block it opened on: every
+/// [`FOLLOW_POLL`] it asks the registry where the agent runs now and moves
+/// its subscription there, and reads lines of the agent's shared transcript
+/// that no event brought ([`FeedSource::catch_up`]).
 pub(crate) fn feed_stream(
     source: FeedSource,
     provider: String,
@@ -536,6 +683,8 @@ pub(crate) fn feed_stream(
 ) -> impl Stream<Item = Result<Bytes, Infallible>> + Send + 'static {
     async_stream::stream! {
         let lease = lease;
+        let mut source = source;
+        let mut provider = provider;
         // The state last sent to the device; `None` until one exists.
         let mut shown = None;
         // Subscribed before anything is read, so nothing published between
@@ -559,7 +708,7 @@ pub(crate) fn feed_stream(
                 Some(snapshot) => {
                     let cursor = snapshot.cursor.clone();
                     yield Ok(snapshot_event(snapshot, &provider));
-                    if let Some(status) = feed::status_step(&mut shown, (probe.status)(), true) {
+                    if let Some(status) = feed::status_step(&mut shown, (probe.status)(&source.block_id), true) {
                         yield Ok(status_event(status));
                     }
                     Some(cursor)
@@ -575,6 +724,8 @@ pub(crate) fn feed_stream(
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut status_tick = tokio::time::interval_at(tokio::time::Instant::now() + timing.status_poll, timing.status_poll);
         status_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut follow_tick = tokio::time::interval_at(tokio::time::Instant::now() + timing.follow_poll, timing.follow_poll);
+        follow_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         while let Some(current) = cursor.as_mut() {
             // What to do after this event: keep going, resync from a fresh
             // snapshot after a `reset`, or stop.
@@ -589,19 +740,56 @@ pub(crate) fn feed_stream(
                         break;
                     }
                     Some(HubEvent::Rewritten { fileop }) => resync = Some(fileop),
-                    Some(HubEvent::Append { pos, records }) => match feed::apply_append(current, &pos, &records) {
+                    Some(HubEvent::Append { pos, records, .. }) => match feed::apply_append(current, &pos, &records) {
                         AppendStep::Send { line, lines } => yield Ok(append_event(current, line, lines)),
-                        AppendStep::Skip => {}
+                        AppendStep::Skip => {
+                            if !pos.iter().any(|p| p.stream == current.stream) {
+                                // Not placed in the feed's stream; the follow
+                                // poll brings these lines if they reached it.
+                                tracing::debug!(block = %source.block_id, stream = %current.stream, "viewer feed: an append without a position in the feed's stream");
+                            }
+                        }
                         AppendStep::Resync(reason) => resync = Some(reason.to_string()),
                     },
                 },
                 _ = status_tick.tick() => {
-                    if let Some(status) = feed::status_step(&mut shown, (probe.status)(), false) {
+                    if let Some(status) = feed::status_step(&mut shown, (probe.status)(&source.block_id), false) {
                         yield Ok(status_event(status));
                     }
                 }
+                _ = follow_tick.tick() => {
+                    let moved = (probe.block)().filter(|b| *b != source.block_id);
+                    // Checked before anything is subscribed to or read: the
+                    // block followed to, or the shared transcript read below,
+                    // may belong to an agent hidden from paired devices.
+                    if (probe.hidden)(moved.as_deref().unwrap_or(&source.block_id)) {
+                        yield Ok(reset_event("hidden"));
+                        break;
+                    }
+                    if let Some(block) = moved {
+                        tracing::info!(from = %source.block_id, to = %block, "viewer feed: the agent moved to another block; following it");
+                        // Subscribed before the catch-up read below, as at
+                        // the start, so nothing published in between is missed.
+                        sub = source.hub.subscribe(&block);
+                        // Its snapshots are labelled with its own provider.
+                        provider = (probe.provider)(&block);
+                        source.block_id = block;
+                        if current.stream.starts_with("b:") {
+                            // The old block's own transcript: the new one is
+                            // another stream.
+                            resync = Some("moved".to_string());
+                        }
+                    }
+                    if resync.is_none() {
+                        match source.catch_up(current).await {
+                            CatchUp::Nothing => {}
+                            CatchUp::Lines { line, lines } => yield Ok(append_event(current, line, lines)),
+                            CatchUp::Resync(reason) => resync = Some(reason.to_string()),
+                        }
+                    }
+                }
                 _ = tick.tick() => {
-                    if (probe.hidden)() {
+                    if (probe.hidden)(&source.block_id) {
                         yield Ok(reset_event("hidden"));
                         break;
                     }
@@ -609,12 +797,13 @@ pub(crate) fn feed_stream(
                 }
             }
             if let Some(reason) = resync {
+                tracing::info!(block = %source.block_id, %reason, "viewer feed: reset; sending a fresh snapshot");
                 yield Ok(reset_event(&reason));
                 match source.snapshot().await {
                     Some(snapshot) => {
                         cursor = Some(snapshot.cursor.clone());
                         yield Ok(snapshot_event(snapshot, &provider));
-                        if let Some(status) = feed::status_step(&mut shown, (probe.status)(), true) {
+                        if let Some(status) = feed::status_step(&mut shown, (probe.status)(&source.block_id), true) {
                             yield Ok(status_event(status));
                         }
                     }

@@ -65,6 +65,7 @@ impl PersistentSubprocessController {
     /// the old content-equality check here treated a genuinely
     /// different, identical-text message as "already queued" and
     /// silently dropped it).
+    #[cfg(test)]
     pub(super) fn decide_send_action(&self, json_str: &str, skip_if_seq_queued: Option<u64>) -> SendAction {
         self.decide_send_action_from(json_str, skip_if_seq_queued, None)
     }

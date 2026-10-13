@@ -36,7 +36,7 @@ export interface MemoryEntryInput {
 export type SizeBand = "low" | "mid" | "high" | "critical";
 
 /** Proposed starting default — see spec §3.4.2 for the real-data reasoning behind 0.10, and §3.4.4 for why it's tunable, not empirically settled. */
-export const DEFAULT_MEMORY_SIZE_FRACTION = 0.1;
+const DEFAULT_MEMORY_SIZE_FRACTION = 0.1;
 
 /**
  * Bands Personal memory's estimated token total against a FRACTION OF THE

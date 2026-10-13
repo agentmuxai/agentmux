@@ -21,6 +21,7 @@ import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
 import { createEffect, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { MediaView } from "./media-view";
+import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { keyLabel } from "@/app/keybindings";
 
 /** The file the pane shows (the tab in front's): the pane's title, layout
@@ -58,7 +59,7 @@ const isEmpty = (d: MediaDoc | undefined): boolean => !!d && !d.path && !d.file;
 
 let blanks = 0;
 
-export function mediaIcon(path: string): string {
+function mediaIcon(path: string): string {
     const ext = extOf(path);
     if (IMAGE_EXTENSIONS.includes(ext)) return "image";
     if (VIDEO_EXTENSIONS.includes(ext)) return "film";
@@ -68,7 +69,7 @@ export function mediaIcon(path: string): string {
 
 /** A tab with no file yet is "New Tab", as in a browser: a place to load a
  *  file, not a document to save. It has no icon; a file's tab has its kind's. */
-export const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
+const MEDIA_DOC_TABS: DocTabsSpec<MediaDoc> = {
     keyOf: (d) => d.path || `blank:${d.blank ?? 0}`,
     titleOf: (d) => (d.path ? basenameOf(d.path) : (d.file?.name ?? "New Tab")),
     iconOf: (d) => (isEmpty(d) ? undefined : mediaIcon(d.path || d.file?.name || "")),
@@ -266,8 +267,9 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
                     keyed
                     fallback={
                         <div class="media-pane-empty" onClick={() => void pickInto()}>
-                            <div>No files open</div>
-                            <div class="media-pane-empty-hint">
+                            <EmptyPaneLogo />
+                            <div class="media-empty-text">No files open</div>
+                            <div class="media-empty-text media-pane-empty-hint">
                                 {hostHas("nativeDialogs") ? "Click to pick one, or drop a file here." : "Drop a file here."}
                             </div>
                         </div>

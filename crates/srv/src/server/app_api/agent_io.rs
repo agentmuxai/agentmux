@@ -17,19 +17,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_tracker = state.process_tracker.clone();
-    engine.register_handler(
-        COMMAND_AGENT_PROCESS_LIST,
-        Box::new(move |data, _ctx| {
-            let process_tracker = process_tracker.clone();
-            Box::pin(async move {
-                let cmd: AgentProcessListCommand = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.process-list: {e}"))?;
+    engine.register_typed(COMMAND_AGENT_PROCESS_LIST, move |cmd: AgentProcessListCommand, _ctx| {
+        let process_tracker = process_tracker.clone();
+        async move {
                 let members = process_tracker.list_block(&cmd.block_id);
-                let confidence = match process_tracker.confidence_of(&cmd.block_id) {
-                    crate::backend::process_tracker::TrackingConfidence::High => "high",
-                    crate::backend::process_tracker::TrackingConfidence::BestEffort => "best_effort",
-                    crate::backend::process_tracker::TrackingConfidence::None => "none",
-                };
+                let confidence = process_tracker.confidence_of(&cmd.block_id);
                 let processes: Vec<AgentProcessInfo> = members
                     .into_iter()
                     .map(|m| AgentProcessInfo {
@@ -39,23 +31,21 @@ fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         started_at_ms: m.started_at_ms,
                     })
                     .collect();
-                Ok(Some(serde_json::to_value(&AgentProcessListResult {
+                Ok(AgentProcessListResult {
                     block_id: cmd.block_id,
-                    confidence: confidence.to_string(),
+                    confidence,
                     processes,
-                }).unwrap()))
-            })
-        }),
-    );
+                })
+        }
+    });
 }
 
 fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_broker = state.process_broker.clone();
-    engine.register_handler(
-        COMMAND_AGENT_TRACKED_BLOCKS,
-        Box::new(move |_data, _ctx| {
-            let process_broker = process_broker.clone();
-            Box::pin(async move {
+    // No argument: `Value` takes whatever the caller sends.
+    engine.register_typed(COMMAND_AGENT_TRACKED_BLOCKS, move |_data: serde_json::Value, _ctx| {
+        let process_broker = process_broker.clone();
+        async move {
                 // Was: `process_tracker.list_all_blocks()` unioned with
                 // `reactive::get_global_handler().list_active_blocks()` — two
                 // structurally different, independently-populated registries
@@ -74,12 +64,9 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .into_iter()
                     .map(|status| status.block_id)
                     .collect();
-                Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
-                    block_ids,
-                }).unwrap()))
-            })
-        }),
-    );
+                Ok(AgentTrackedBlocksResult { block_ids })
+        }
+    });
 }
 
 /// `swarm.other-instances`: this machine's other channels (the host-global shared
@@ -92,14 +79,14 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
     let own_url = state.local_web_url.clone();
     let lan_discovery = state.lan_discovery.clone();
     let http = state.http_client.clone();
-    engine.register_handler(
-        COMMAND_SWARM_OTHER_INSTANCES,
-        Box::new(move |_data, _ctx| {
-            let hostname = hostname.clone();
-            let own_url = own_url.clone();
-            let lan_peers = lan_discovery.get_instances();
-            let http = http.clone();
-            Box::pin(async move {
+    // The response stays `Value`: the frontend models the snapshot with its own
+    // types (swarm-remote.ts), which the stub keeps (generated-manifest.json `returns`).
+    engine.register_typed(COMMAND_SWARM_OTHER_INSTANCES, move |_data: serde_json::Value, _ctx| {
+        let hostname = hostname.clone();
+        let own_url = own_url.clone();
+        let lan_peers = lan_discovery.get_instances();
+        let http = http.clone();
+        async move {
                 // A directory read; off the async runtime's worker threads.
                 let entries = tokio::task::spawn_blocking(|| {
                     crate::registry::resolve_shared_reactive_dir()
@@ -123,27 +110,19 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     &own_url,
                     now_ms,
                 );
-                Ok(Some(serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))?))
-            })
-        }),
-    );
+                serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))
+        }
+    });
 }
 
 /// `ambient.outcomes`: how ambient calls have ended since srv started, so "the
 /// swarm has been blank for an hour" is visible without a database copy
 /// (SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.8).
 fn register_ambient_outcomes(engine: &Arc<WshRpcEngine>) {
-    engine.register_handler(
-        COMMAND_AMBIENT_OUTCOMES,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
-                Ok(Some(
-                    serde_json::to_value(crate::ambient::outcome::snapshot())
-                        .map_err(|e| format!("ambient.outcomes: {e}"))?,
-                ))
-            })
-        }),
-    );
+    // `Value` response, as for swarm.other-instances: the frontend keeps its own type.
+    engine.register_typed(COMMAND_AMBIENT_OUTCOMES, |_data: serde_json::Value, _ctx| async move {
+        serde_json::to_value(crate::ambient::outcome::snapshot()).map_err(|e| format!("ambient.outcomes: {e}"))
+    });
 }
 
 /// `agent.open-panes`: every agent pane in this instance, wherever it is.
@@ -155,12 +134,10 @@ fn register_ambient_outcomes(engine: &Arc<WshRpcEngine>) {
 fn register_agent_open_panes(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_broker = state.process_broker.clone();
     let mstore = state.mstore.clone();
-    engine.register_handler(
-        COMMAND_AGENT_OPEN_PANES,
-        Box::new(move |_data, _ctx| {
-            let process_broker = process_broker.clone();
-            let mstore = mstore.clone();
-            Box::pin(async move {
+    engine.register_typed(COMMAND_AGENT_OPEN_PANES, move |_data: serde_json::Value, _ctx| {
+        let process_broker = process_broker.clone();
+        let mstore = mstore.clone();
+        async move {
                 let block_ids: Vec<String> = process_broker
                     .list_agent_panes()
                     .into_iter()
@@ -169,10 +146,9 @@ fn register_agent_open_panes(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let panes = tokio::task::spawn_blocking(move || open_agent_panes(&mstore, &block_ids))
                     .await
                     .map_err(|e| format!("agent.open-panes: {e}"))?;
-                Ok(Some(serde_json::to_value(&AgentOpenPanesResult { panes }).unwrap()))
-            })
-        }),
-    );
+                Ok(AgentOpenPanesResult { panes })
+        }
+    });
 }
 
 /// Where each of `block_ids` is open: its agent, tab, and the windows
@@ -227,40 +203,30 @@ pub(crate) fn open_agent_panes(store: &Store, block_ids: &[String]) -> Vec<Agent
 
 fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_tracker = state.process_tracker.clone();
-    engine.register_handler(
-        COMMAND_AGENT_KILL_PROCESS,
-        Box::new(move |data, _ctx| {
-            let process_tracker = process_tracker.clone();
-            Box::pin(async move {
-                let cmd: AgentKillProcessCommand = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.kill-process: {e}"))?;
+    engine.register_typed(COMMAND_AGENT_KILL_PROCESS, move |cmd: AgentKillProcessCommand, _ctx| {
+        let process_tracker = process_tracker.clone();
+        async move {
                 tracing::info!(
                     block_id = %cmd.block_id,
                     pid = cmd.pid,
                     "agent.kill-process"
                 );
                 let ok = process_tracker.kill_pid(&cmd.block_id, cmd.pid);
-                Ok(Some(serde_json::to_value(&AgentKillResult { ok }).unwrap()))
-            })
-        }),
-    );
+                Ok(AgentKillResult { ok })
+        }
+    });
 }
 
 fn register_agent_kill_tree(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_tracker = state.process_tracker.clone();
-    engine.register_handler(
-        COMMAND_AGENT_KILL_TREE,
-        Box::new(move |data, _ctx| {
-            let process_tracker = process_tracker.clone();
-            Box::pin(async move {
-                let cmd: AgentKillTreeCommand = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.kill-tree: {e}"))?;
+    engine.register_typed(COMMAND_AGENT_KILL_TREE, move |cmd: AgentKillTreeCommand, _ctx| {
+        let process_tracker = process_tracker.clone();
+        async move {
                 tracing::info!(block_id = %cmd.block_id, "agent.kill-tree");
                 let ok = process_tracker.kill_tree(&cmd.block_id);
-                Ok(Some(serde_json::to_value(&AgentKillResult { ok }).unwrap()))
-            })
-        }),
-    );
+                Ok(AgentKillResult { ok })
+        }
+    });
 }
 
 /// The environment an `agent.send` spawn is given: `cmd:env` through

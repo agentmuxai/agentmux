@@ -20,7 +20,7 @@ function getCtx(): CanvasRenderingContext2D | null {
 //   10px left-pad + 10px right-pad + 4px gap + 16px close-btn + 12px slack = 52px
 // Matches .tab-inner { padding: 0 10px } in tab.scss.
 const TAB_PADDING_BUDGET = 52;
-export const TAB_MAX_WIDTH = 260;
+const TAB_MAX_WIDTH = 260;
 // Chrome's own tab strip renders every tab at a fixed 232px (DIPs) — see
 // `TabStyle::GetStandardWidth()` / `kTabWidth` in
 // chrome/browser/ui/tabs/tab_style.cc — and only shrinks tabs below that
@@ -29,7 +29,7 @@ export const TAB_MAX_WIDTH = 260;
 // short-named) tab still reads as a normal-sized tab instead of shrinking
 // to hug its own text; longer labels can still grow past it, up to
 // TAB_MAX_WIDTH.
-export const TAB_STANDARD_WIDTH = 232;
+const TAB_STANDARD_WIDTH = 232;
 
 const DEFAULT_TAB_WIDTH = TAB_STANDARD_WIDTH;
 

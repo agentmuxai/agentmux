@@ -35,13 +35,13 @@ import { setStatusLook, type CommandSource } from "./widget-panes";
 
 import "./sandboxed-widget.scss";
 
-export const PROTOCOL = 1;
+const PROTOCOL = 1;
 const HELLO_TIMEOUT_MS = 10_000;
 const MAX_IN_FLIGHT = 64;
 /** Commands kept for a pane that hasn't connected yet. */
 const MAX_PENDING_COMMANDS = 20;
 
-export const IFRAME_SANDBOX = "allow-scripts allow-forms allow-modals allow-downloads";
+const IFRAME_SANDBOX = "allow-scripts allow-forms allow-modals allow-downloads";
 
 export function makeSandboxedPaneManifest(pkg: WidgetPackageInfo, pane: WidgetPaneInfo): PaneTabManifest {
     return {
@@ -349,7 +349,7 @@ async function saveFile(name: string, type: string, data: Uint8Array): Promise<b
 }
 
 /** The widget's own meta keys (`widget:<id>:<key>`), without the prefix. */
-export function ownMeta(id: string, meta: Record<string, unknown> | null | undefined): Record<string, unknown> {
+function ownMeta(id: string, meta: Record<string, unknown> | null | undefined): Record<string, unknown> {
     const prefix = `widget:${id}:`;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(meta ?? {})) if (k.startsWith(prefix)) out[k.slice(prefix.length)] = v;

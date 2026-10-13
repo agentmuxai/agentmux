@@ -20,7 +20,7 @@ import { createEffect, createMemo } from "solid-js";
 
 import { isFloatingOnTop } from "./floating-ontop-meta";
 
-export { FLOATING_ONTOP_META_KEY, isFloatingOnTop } from "./floating-ontop-meta";
+export { isFloatingOnTop } from "./floating-ontop-meta";
 
 /** Show the tack? Floaters only, on a host that supports it. Phase 1 is
  *  Windows-only (spec §7) — the host command errors elsewhere. */
@@ -30,7 +30,7 @@ export function canTackFloatingPane(floatingLabel: string | null): boolean {
 
 /** Tack / untack a floating pane. Errors are logged, not thrown: a click that
  *  fails leaves the meta — and so the button — unchanged. */
-export function setFloatingOnTop(label: string, blockId: string, on: boolean): void {
+function setFloatingOnTop(label: string, blockId: string, on: boolean): void {
     getApi().windows.setFloatingAlwaysOnTop(label, blockId, on).catch(console.error);
 }
 

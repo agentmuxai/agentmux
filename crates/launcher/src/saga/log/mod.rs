@@ -20,7 +20,7 @@
 //
 // What stays: the LIVE coordinator semantics. The registry keeps the same
 // method surface the coordinator drives (start/terminate saga,
-// start/finish/fail step, snapshot for diagnostics) so `--diag`-style
+// start/finish step, snapshot for diagnostics) so `--diag`-style
 // in-process introspection and the `[saga]` launcher-log narration are
 // unchanged. What's gone: `open(path)` / `open_read_only` (no file),
 // `vacuum_older_than` (replaced by a bounded in-memory retention cap),
@@ -35,6 +35,7 @@ use std::sync::Mutex;
 
 use agentmux_common::ipc::{Command, Event};
 use chrono::Utc;
+#[cfg(test)]
 use serde::{Deserialize, Serialize};
 
 use super::PipeTarget;
@@ -113,6 +114,7 @@ fn pipe_target_str(t: PipeTarget) -> &'static str {
 
 /// A saga in `running`, `compensating`, or `failed` state.
 /// Kept (name included) for the in-process diagnostic surface.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnresolvedLauncherSaga {
     pub saga_id: u64,
@@ -126,6 +128,7 @@ pub struct UnresolvedLauncherSaga {
 
 /// A step attached to a saga. Steps are returned in `step_index`
 /// ascending order.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnresolvedLauncherStep {
     pub step_index: u32,
@@ -136,11 +139,11 @@ pub struct UnresolvedLauncherStep {
     pub output_json: Option<String>,
     pub started_at: String,
     pub ended_at: Option<String>,
-    pub failure_reason: Option<String>,
 }
 
 /// Operator-facing snapshot of a recent saga. Sorted most-recent-first
 /// by `ended_at` falling back to `started_at`.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SagaSummary {
     pub saga_id: u64,
@@ -156,19 +159,24 @@ pub struct SagaSummary {
     pub input_json: String,
 }
 
+// Everything but `step_index` is read only by the `cfg(test)` snapshot
+// readers (SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md §3).
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 struct StepRecord {
     step_index: u32,
     name: String,
-    state: String, // "pending" | "succeeded" | "failed"
+    state: String, // "pending" | "succeeded"
     target: Option<String>,
     cmd_json: Option<String>,
     output_json: Option<String>,
     started_at: String,
     ended_at: Option<String>,
-    failure_reason: Option<String>,
 }
 
+// `name`, `started_at` and `input_json` are read only by the `cfg(test)`
+// snapshot readers (SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md §3).
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 struct SagaRecord {
     name: String,
@@ -188,6 +196,7 @@ impl SagaRecord {
         )
     }
 
+    #[cfg(test)]
     fn recency_key(&self) -> &str {
         self.ended_at.as_deref().unwrap_or(&self.started_at)
     }
@@ -306,7 +315,6 @@ impl LauncherSagaLog {
                 output_json: None,
                 started_at: now_rfc3339(),
                 ended_at: None,
-                failure_reason: None,
             });
         }
         Ok(())
@@ -329,25 +337,10 @@ impl LauncherSagaLog {
         Ok(())
     }
 
-    /// Mark a step `failed` with a reason.
-    pub fn fail_step(
-        &self,
-        saga_id: u64,
-        step_index: u32,
-        reason: &str,
-    ) -> Result<(), LogError> {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(step) = Self::step_mut(&mut inner, saga_id, step_index) {
-            step.state = "failed".to_string();
-            step.failure_reason = Some(reason.to_string());
-            step.ended_at = Some(now_rfc3339());
-        }
-        Ok(())
-    }
-
     /// All sagas in `running`, `compensating`, or `failed` state, each
     /// with its full step list, ordered by saga_id ascending. With no
     /// recovery walker this is now purely a diagnostic read.
+    #[cfg(test)]
     pub fn unresolved_sagas(&self) -> Result<Vec<UnresolvedLauncherSaga>, LogError> {
         let inner = self.inner.lock().unwrap();
         Ok(inner
@@ -363,16 +356,6 @@ impl LauncherSagaLog {
                 steps: s.steps.iter().map(step_out).collect(),
             })
             .collect())
-    }
-
-    /// Step rows for a single saga regardless of saga state, ordered by
-    /// step_index ascending.
-    pub fn get_saga_steps(&self, saga_id: u64) -> Result<Vec<UnresolvedLauncherStep>, LogError> {
-        let inner = self.inner.lock().unwrap();
-        Ok(inner
-            .get(&saga_id)
-            .map(|s| s.steps.iter().map(step_out).collect())
-            .unwrap_or_default())
     }
 
     /// Mark a saga `failed_compensation`. Idempotent; preserves any
@@ -402,6 +385,7 @@ impl LauncherSagaLog {
 
     /// Up to `limit` recent sagas, most-recent-first by
     /// `ended_at ?? started_at`, ties broken by saga_id descending.
+    #[cfg(test)]
     pub fn snapshot_recent(&self, limit: usize) -> Result<Vec<SagaSummary>, LogError> {
         let inner = self.inner.lock().unwrap();
         let mut rows: Vec<(&u64, &SagaRecord)> = inner.iter().collect();
@@ -462,6 +446,7 @@ impl LauncherSagaLog {
     }
 }
 
+#[cfg(test)]
 fn step_out(s: &StepRecord) -> UnresolvedLauncherStep {
     UnresolvedLauncherStep {
         step_index: s.step_index,
@@ -472,7 +457,6 @@ fn step_out(s: &StepRecord) -> UnresolvedLauncherStep {
         output_json: s.output_json.clone(),
         started_at: s.started_at.clone(),
         ended_at: s.ended_at.clone(),
-        failure_reason: s.failure_reason.clone(),
     }
 }
 

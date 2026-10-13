@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-export const TILE_PX = 64;
-export const TILE_GAP_PX = 6;
+const TILE_PX = 64;
+const TILE_GAP_PX = 6;
 
 /**
  * How many tiles fit in one collapsed row of `widthPx`, and how many spill

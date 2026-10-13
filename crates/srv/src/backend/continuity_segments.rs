@@ -184,6 +184,7 @@ pub(crate) fn record_session(fs: &FileStore, agent_uid: &str, segment_id: &str, 
     )
 }
 
+#[cfg(test)]
 pub(crate) fn record_end(
     fs: &FileStore,
     agent_uid: &str,
@@ -290,6 +291,13 @@ pub(crate) enum ResumeGate {
     /// `--fork-session`, so that branch is never appended to by a second
     /// writer (spec §4.4, H4).
     Fork { head: String },
+    /// This agent has no conversation of its own yet, and the agent it was
+    /// forked from is at the candidate (`GateInput::fork_source`): copy that
+    /// session in from `from_config_dir` / `from_cwd` (a fork works in its own
+    /// directory, so the CLI can't find it there) and resume it with
+    /// `--fork-session`, so the fork starts from its parent's conversation and
+    /// never writes to it (the fork-isolation report in #4744, F5).
+    ForkFrom { head: String, from_config_dir: String, from_cwd: String },
 }
 
 /// What the gate weighs about the spawn.
@@ -305,6 +313,9 @@ pub(crate) struct GateInput<'a> {
     /// The spawn's provider config dir and working dir.
     pub config_dir: &'a str,
     pub cwd: &'a str,
+    /// The chain head of the agent this one was forked from, when this one
+    /// has none of its own (`fork_source_head`).
+    pub fork_source: Option<&'a Head>,
 }
 
 /// Where the agent's conversation was last: the newest segment that has a
@@ -331,14 +342,15 @@ pub(crate) struct Head {
 ///
 /// `size_here(sid)`: the size of the session's file under the spawn's
 /// config dir and cwd, `None` when it isn't there. `resumable_at(config_dir,
-/// sid)`: a complete session file for the spawn's cwd exists under that
-/// other config dir (§4.3).
+/// cwd, sid)`: a session file for that working dir exists under that config
+/// dir with a complete record to copy (§4.3; its last record may still be
+/// being written, and the copy is cut back to a complete one).
 pub(crate) fn resume_gate(
     input: &GateInput<'_>,
     size_here: impl Fn(&str) -> Option<u64>,
-    resumable_at: impl Fn(&str, &str) -> bool,
+    resumable_at: impl Fn(&str, &str, &str) -> bool,
 ) -> ResumeGate {
-    let Some(head) = input.head else { return ResumeGate::Allow };
+    let Some(head) = input.head else { return fork_from(input, &resumable_at).unwrap_or(ResumeGate::Allow) };
     if Some(head.session_id.as_str()) == input.poisoned {
         return ResumeGate::Allow;
     }
@@ -354,7 +366,7 @@ pub(crate) fn resume_gate(
         return if is_candidate { ResumeGate::Allow } else { ResumeGate::Redirect { head: head.session_id.clone() } };
     }
     if let Some(from) = relocation_source(head, input) {
-        if resumable_at(from, &head.session_id) {
+        if resumable_at(from, input.cwd, &head.session_id) {
             return ResumeGate::Relocate { head: head.session_id.clone(), from_config_dir: from.to_string() };
         }
     }
@@ -392,6 +404,42 @@ fn relocation_source<'h>(head: &'h Head, input: &GateInput<'_>) -> Option<&'h st
     }
     let slug = crate::backend::claude_layout::project_dir_name;
     (slug(&head.cwd) == slug(input.cwd)).then_some(from)
+}
+
+/// `ResumeGate::ForkFrom` when this agent has no chain and the agent it was
+/// forked from is at the candidate: a Claude session, under the spawn's own
+/// identity (both known, I2), whose file holds a complete record where it
+/// was recorded.
+fn fork_from(input: &GateInput<'_>, resumable_at: &impl Fn(&str, &str, &str) -> bool) -> Option<ResumeGate> {
+    let source = input.fork_source?;
+    if source.session_id != input.candidate || !matches!(source.provider.as_str(), "claude" | "claude-code") {
+        return None;
+    }
+    if source.identity_key.as_deref()? != input.identity? {
+        return None;
+    }
+    let from = source.config_dir.as_deref()?;
+    resumable_at(from, &source.cwd, &source.session_id).then(|| ResumeGate::ForkFrom {
+        head: source.session_id.clone(),
+        from_config_dir: from.to_string(),
+        from_cwd: source.cwd.clone(),
+    })
+}
+
+/// The chain head of the agent `agent_uid` was forked from (its definition
+/// has a `branch_label` and a `parent_id`): what a fork with no conversation
+/// of its own starts from (`ResumeGate::ForkFrom`). Shared by the spawn's
+/// gate and the pane's resume preflight.
+pub(crate) fn fork_source_head(
+    store: &crate::backend::storage::store::Store,
+    fs: &FileStore,
+    agent_uid: &str,
+) -> Option<Head> {
+    let def = store.agent_def_get(agent_uid).ok()??;
+    if def.branch_label.trim().is_empty() || def.parent_id.trim().is_empty() {
+        return None;
+    }
+    chain_head(fs, def.parent_id.trim()).map(with_legacy_identity)
 }
 
 fn same_dir(a: &str, b: &str) -> bool {
@@ -542,8 +590,54 @@ mod tests {
     /// the sessions under the spawn's config dir and `elsewhere` the ones
     /// complete under any other.
     fn gate(candidate: &str, head: Option<&Head>, identity: Option<&str>, poisoned: Option<&str>, here: &[&str], elsewhere: &[&str]) -> ResumeGate {
-        let input = GateInput { candidate, head, identity, poisoned, config_dir: "C:/cfg/new", cwd: "C:/work" };
-        resume_gate(&input, |sid| here.contains(&sid).then_some(10), |_, sid| elsewhere.contains(&sid))
+        let input = GateInput { candidate, head, identity, poisoned, config_dir: "C:/cfg/new", cwd: "C:/work", fork_source: None };
+        resume_gate(&input, |sid| here.contains(&sid).then_some(10), |_, _, sid| elsewhere.contains(&sid))
+    }
+
+    // A fork's first spawn (the fork-isolation report in #4744, F5).
+
+    fn fork_source(sid: &str, identity: Option<&str>) -> Head {
+        Head {
+            session_id: sid.into(),
+            identity_key: identity.map(str::to_string),
+            config_dir: Some("C:/cfg/parent".into()),
+            provider: "claude".into(),
+            cwd: "C:/parent".into(),
+            provider_bytes_end: None,
+        }
+    }
+
+    /// The gate for a fork with no chain, `source` its parent's head, whose
+    /// file is complete at the parent's own config dir and working dir.
+    fn fork_gate(candidate: &str, source: &Head, identity: Option<&str>, complete: bool) -> ResumeGate {
+        let input = GateInput {
+            candidate,
+            head: None,
+            identity,
+            poisoned: None,
+            config_dir: "C:/cfg/new",
+            cwd: "C:/work",
+            fork_source: Some(source),
+        };
+        resume_gate(&input, |_| None, |dir, cwd, sid| complete && dir == "C:/cfg/parent" && cwd == "C:/parent" && sid == candidate)
+    }
+
+    #[test]
+    fn a_fork_without_a_chain_forks_from_its_parents_head() {
+        let source = fork_source("p1", Some("k1"));
+        assert_eq!(
+            fork_gate("p1", &source, Some("k1"), true),
+            ResumeGate::ForkFrom { head: "p1".into(), from_config_dir: "C:/cfg/parent".into(), from_cwd: "C:/parent".into() }
+        );
+    }
+
+    #[test]
+    fn a_fork_forks_only_its_parents_complete_head_under_its_own_identity() {
+        let source = fork_source("p1", Some("k1"));
+        assert_eq!(fork_gate("p0", &source, Some("k1"), true), ResumeGate::Allow, "not the parent's head");
+        assert_eq!(fork_gate("p1", &source, Some("k2"), true), ResumeGate::Allow, "another identity (I2)");
+        assert_eq!(fork_gate("p1", &source, None, true), ResumeGate::Allow, "identity unknown");
+        assert_eq!(fork_gate("p1", &source, Some("k1"), false), ResumeGate::Allow, "no complete file there");
     }
 
     #[test]

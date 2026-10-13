@@ -142,6 +142,7 @@ pub fn find_node_by_id_mut<'a>(tree: &'a mut LayoutNode, id: &str) -> Option<&'a
 /// block to its layout node inside the reducer arm (the reducer owns the
 /// tree; callers like the `delete_block` saga only know the block id).
 /// Blocks appear at most once in a well-formed tree; first match wins.
+#[cfg(test)]
 pub fn find_node_id_by_block(tree: &LayoutNode, block_id: &str) -> Option<String> {
     if tree
         .data
@@ -1349,15 +1350,6 @@ fn split_impl(
     root.children = children_ordered;
     root.data = None;
     Ok(())
-}
-
-// ── Clear tree ─────────────────────────────────────────────────────────────
-
-/// Clear the tree root. Callers set the `Option<LayoutNode>` to `None`.
-/// This function exists only to be referenced in the test helper pattern;
-/// actual clearing in the reducer just sets root = None.
-pub fn clear_tree_node(_root: &mut Option<LayoutNode>) {
-    *_root = None;
 }
 
 // ── Tree normalization (balanceNode) ────────────────────────────────────────

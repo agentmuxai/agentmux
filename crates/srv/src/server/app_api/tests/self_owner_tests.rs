@@ -36,13 +36,13 @@ async fn an_attributed_self_call_is_about_the_callers_row() {
             serde_json::from_value(json!({"id": bundle, "name": bundle})).unwrap();
         state.id_store.bundle_upsert(&b).unwrap();
     }
-    let acct = crate::backend::storage::IdentityAccount {
+    let acct = crate::backend::storage::identities::IdentityAccount {
         id: "acct-so-y".to_string(),
         name: "claude-oauth".to_string(),
         provider: "claude".to_string(),
         kind: "oauth".to_string(),
         display_name: String::new(),
-        secret_ref: crate::backend::storage::SecretRef::OAuthConfigDir {
+        secret_ref: crate::backend::storage::identities::SecretRef::OAuthConfigDir {
             dir: "/tmp/acct-so-y".to_string(),
         },
         context: json!({}),

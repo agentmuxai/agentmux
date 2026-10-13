@@ -534,11 +534,11 @@ pub(crate) fn compute_pane_visible(
     !overlays.iter().any(|or| rects_intersect(*or, pane_rect))
 }
 
-/// Linux/macOS pane-airspace task — fired by `set_pane_overlay_clip` for the
-/// non-Windows code path. For each live OverlayController, hide it when any
-/// overlay rect intersects its current bounds; show it otherwise. See the
-/// doc comment on `set_pane_overlay_clip` (non-Windows variant) for why this
-/// is the equivalent of the Windows SetWindowRgn airspace dance.
+// Linux/macOS pane-airspace task — fired by `set_pane_overlay_clip` for the
+// non-Windows code path. For each live OverlayController, hide it when any
+// overlay rect intersects its current bounds; show it otherwise. See the
+// doc comment on `set_pane_overlay_clip` (non-Windows variant) for why this
+// is the equivalent of the Windows SetWindowRgn airspace dance.
 #[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct SetPaneOverlayClipViewsTask {

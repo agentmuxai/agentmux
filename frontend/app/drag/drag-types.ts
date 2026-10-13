@@ -20,7 +20,6 @@ const tagOf = (data: Tagged) => (data as { type?: unknown } | null | undefined)?
 export const isTileSource = (data: Tagged) => tagOf(data) === tileItemType;
 export const isTabSource = (data: Tagged) => tagOf(data) === tabItemType;
 export const isPaneTabSource = (data: Tagged) => tagOf(data) === paneTabItemType;
-export const isDocTabSource = (data: Tagged) => tagOf(data) === docTabItemType;
 
 /** What a document-tab drag carries (pragmatic-dnd's `source.data`). */
 export interface DocTabDragData {

@@ -312,6 +312,7 @@ pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
 /// across a session boundary the way the frontend's persistent parser
 /// instance could (and once did — see that file's `clearHiddenReinjectionState`
 /// doc comment for the bug that required).
+#[cfg(test)]
 pub(crate) fn extract_digest_text(lines: &[&str]) -> String {
     extract_digest_parts(lines).join("
 ")

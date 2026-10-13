@@ -22,7 +22,7 @@ Operator, 2026-10-07: **a bundle contains instructions, context, skills, Global 
 
 **MCP servers in bundles — live, not leftover:**
 - **UI:** the bundle's detail view renders `BundleMcpSection` ([`frontend/app/view/bundle/bundle-manager.tsx:251`](../../frontend/app/view/bundle/bundle-manager.tsx), `BundleMcpSection.tsx`, `bundle-mcp-model.ts`). It binds catalog servers and creates servers private to the bundle.
-- **RPCs:** `mcp.catalog.list_for_bundle`, `bind_to_bundle`, `unbind_from_bundle` and `upsert_for_bundle` (`server/app_api/mcp.rs`, `rpc_types/mcp.rs`, [`frontend/app/store/rpc-api/mcp.ts`](../../frontend/app/store/rpc-api/mcp.ts), and the generated `McpBundleBindingData`, `McpBundleScopeData`, `CommandMcpCatalogUpsertForBundleData`).
+- **RPCs:** `mcp.catalog.list_for_bundle`, `bind_to_bundle`, `unbind_from_bundle` and `upsert_for_bundle` (`server/app_api/mcp.rs`, `rpc_types/mcp.rs`, [`frontend/app/store/rpc-api/generated.ts`](../../frontend/app/store/rpc-api/generated.ts), and the generated `McpBundleBindingData`, `McpBundleScopeData`, `CommandMcpCatalogUpsertForBundleData`).
 - **Storage:** `db_bundle_mcp_ref` (`storage/mcp_servers.rs`, `managed.rs`), plus the legacy inline `db_bundles.mcp_servers` JSON column. `m0030` backfilled the ref table from that column.
 - **Launch:** `effective_mcp_servers` unions the servers of every bundle in the agent's list (`managed_union_bundle_refs`, extended to the list in #4433). That covers `agent.open` only; the Launch button never did it (the gap called 2c).
 - **ABF:** export writes `components.mcp_entries` (`bundle_export.rs`, `server/app_api/bundle/export.rs`); import binds them (`components.rs`); validation checks them (`bundle_validate.rs`).

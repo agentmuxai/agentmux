@@ -6,7 +6,7 @@ import type { ProviderDefinition, SystemPrereq } from "./types";
 /** Shared git prereq — claude-code calls `git` from session-start
  *  (issue anthropics/claude-code#29898), and openclaw uses git for
  *  project context. Curated install URLs per platform. */
-export const GIT_PREREQ: SystemPrereq = {
+const GIT_PREREQ: SystemPrereq = {
     tool: "git",
     label: "Git",
     installUrls: {
@@ -54,7 +54,7 @@ export const NODE_PREREQ: SystemPrereq = {
  *  while npm is genuinely missing. Probing only `node` would report this
  *  requirement satisfied and still send the user into the same unrecoverable
  *  npm-spawn crash NODE_PREREQ exists to prevent. */
-export const NPM_PREREQ: SystemPrereq = {
+const NPM_PREREQ: SystemPrereq = {
     tool: "npm",
     label: "npm",
     installUrls: {
@@ -572,7 +572,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
 };
 
 // Aliases for provider IDs from older databases or alternate naming
-export const PROVIDER_ALIASES: Record<string, string> = {
+const PROVIDER_ALIASES: Record<string, string> = {
     "claude-code": "claude",
     "claude_code": "claude",
     "codex-cli": "codex",

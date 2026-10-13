@@ -35,6 +35,7 @@
 ///   production launch is `agentmux`, not `agentmux-launcher` —
 ///   codex P1 on PR #882 round 1 caught this would regress every
 ///   portable build.
+#[cfg(target_os = "windows")]
 const ACCEPTED_PARENT_STEMS: &[&str] = &["agentmux-launcher", "agentmux"];
 
 /// Returns `Some(true)` if the host's parent process is the AgentMux

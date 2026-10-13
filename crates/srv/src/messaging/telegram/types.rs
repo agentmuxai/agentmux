@@ -24,6 +24,7 @@ pub struct Update {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Message {
+    #[allow(dead_code)]
     pub message_id: i64,
     pub chat: Chat,
     #[serde(default)]

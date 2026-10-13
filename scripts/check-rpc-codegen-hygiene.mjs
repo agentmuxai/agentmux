@@ -151,6 +151,10 @@ function typedHandlersHandSerializing() {
             if (i < 0) break;
             let next = src.indexOf("engine.register_", i + 10);
             if (next < 0) next = src.length;
+            // Nor past the end of the enclosing top-level fn: a registration never spans one,
+            // and the next fn's untyped handler would otherwise be read as this one's body.
+            const fnEnd = src.indexOf("\n}\n", i);
+            if (fnEnd >= 0 && fnEnd < next) next = fnEnd;
             const block = src.slice(i, next);
             const cmd = (block.match(/\n\s*(COMMAND_\w+|"[\w.:\-]+")/) || [])[1] || "?";
             const re = /^\s*(?:return )?Ok\((?:Some\()?serde_json::(?:to_value|json!)|^\s*Ok\([\w.]+\.map\(\|\w+\| serde_json::to_value/gm;

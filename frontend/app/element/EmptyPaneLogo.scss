@@ -1,0 +1,20 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Large faded brain mark behind an empty pane's text — a background watermark.
+.empty-pane-logo {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(70%, 560px);
+    opacity: 0.1;
+    pointer-events: none;
+    z-index: 0;
+
+    svg {
+        width: 100%;
+        height: auto;
+        display: block;
+    }
+}

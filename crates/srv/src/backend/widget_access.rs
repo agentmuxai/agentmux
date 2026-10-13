@@ -80,7 +80,6 @@ impl AccessError {
 pub struct Session {
     pub widget_id: String,
     pub hash: String,
-    pub block_id: String,
     opened: Instant,
 }
 
@@ -133,7 +132,7 @@ impl Sessions {
     }
 
     /// A token for one pane of an approved package at `hash`.
-    pub fn open(&self, packages: &[WidgetPackageInfo], id: &str, hash: &str, block_id: &str) -> Result<String, AccessError> {
+    pub fn open(&self, packages: &[WidgetPackageInfo], id: &str, hash: &str) -> Result<String, AccessError> {
         let mut st = self.state();
         if runnable(packages, id, hash).is_none() || st.removing.contains(id) {
             return Err(AccessError::unavailable(format!("{id} isn't approved at this version")));
@@ -147,7 +146,7 @@ impl Sessions {
         }
         st.open.insert(
             token.clone(),
-            Session { widget_id: id.to_string(), hash: hash.to_string(), block_id: block_id.to_string(), opened: Instant::now() },
+            Session { widget_id: id.to_string(), hash: hash.to_string(), opened: Instant::now() },
         );
         Ok(token)
     }
@@ -245,12 +244,12 @@ mod tests {
     fn a_session_is_for_one_approved_sandboxed_version_only() {
         let s = Sessions::default();
         let approved = vec![pkg(WidgetState::Approved, WidgetKind::Sandboxed, &["storage"])];
-        assert!(s.open(&approved, "acme.notes", "h0", "b1").is_err(), "another hash");
-        assert!(s.open(&[pkg(WidgetState::NeedsApproval, WidgetKind::Sandboxed, &[])], "acme.notes", "h1", "b1").is_err());
-        assert!(s.open(&[pkg(WidgetState::Approved, WidgetKind::Trusted, &[])], "acme.notes", "h1", "b1").is_err());
-        let token = s.open(&approved, "acme.notes", "h1", "b1").unwrap();
+        assert!(s.open(&approved, "acme.notes", "h0").is_err(), "another hash");
+        assert!(s.open(&[pkg(WidgetState::NeedsApproval, WidgetKind::Sandboxed, &[])], "acme.notes", "h1").is_err());
+        assert!(s.open(&[pkg(WidgetState::Approved, WidgetKind::Trusted, &[])], "acme.notes", "h1").is_err());
+        let token = s.open(&approved, "acme.notes", "h1").unwrap();
         let (session, p) = s.authorize(&approved, &token).unwrap();
-        assert_eq!((session.widget_id.as_str(), session.block_id.as_str()), ("acme.notes", "b1"));
+        assert_eq!(session.widget_id, "acme.notes");
         assert!(require(&p, "storage").is_ok());
         assert_eq!(require(&p, "agents:send").unwrap_err().data, Some(json!({ "permission": "agents:send" })));
         // Changed since: the session no longer works.
@@ -265,13 +264,13 @@ mod tests {
     fn an_uninstall_ends_the_widgets_sessions_until_it_is_done() {
         let s = Sessions::default();
         let approved = vec![pkg(WidgetState::Approved, WidgetKind::Sandboxed, &["storage"])];
-        let token = s.open(&approved, "acme.notes", "h1", "b1").unwrap();
+        let token = s.open(&approved, "acme.notes", "h1").unwrap();
         s.begin_removal("acme.notes");
         assert_eq!(s.authorize(&approved, &token).unwrap_err().code, 1005, "an open pane can't write while it's removed");
-        assert!(s.open(&approved, "acme.notes", "h1", "b2").is_err(), "nor open a new session");
+        assert!(s.open(&approved, "acme.notes", "h1").is_err(), "nor open a new session");
         s.end_removal("acme.notes");
         assert!(s.authorize(&approved, &token).is_err(), "the old session stays ended");
-        assert!(s.open(&approved, "acme.notes", "h1", "b2").is_ok(), "a reinstall's panes can start again");
+        assert!(s.open(&approved, "acme.notes", "h1").is_ok(), "a reinstall's panes can start again");
     }
 
     #[test]

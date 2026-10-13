@@ -9,10 +9,14 @@ use crate::backend::storage::store::AgentDefinition;
 use crate::server::tests::test_state;
 
 fn insert_agent_def(state: &AppState, slug: &str, conversation_visibility: &str) {
+    insert_named_agent_def(state, slug, slug, conversation_visibility);
+}
+
+fn insert_named_agent_def(state: &AppState, slug: &str, name: &str, conversation_visibility: &str) {
     let mut def = AgentDefinition {
         id: uuid::Uuid::new_v4().to_string(),
         slug: slug.to_string(),
-        name: slug.to_string(),
+        name: name.to_string(),
         icon: String::new(),
         provider: "claude".to_string(),
         description: String::new(),
@@ -230,4 +234,33 @@ async fn unknown_target_agent_fails_closed_to_private_defaults() {
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
     assert!(req.is_transcript_request, "rule 1 (forced sensitive) applies regardless of whether the target is known");
     assert!(!req.transcript_request_escalate_forced, "an unknown agent defaults to the safe 'private' behavior for the escalate-forcing question");
+}
+
+/// A fork targeted by its display name's route name (`Loap-3` for "Loap #3")
+/// gets its own policy, whatever its slug, and a grant keyed by that slug
+/// counts (#4744).
+#[tokio::test]
+async fn a_target_named_by_its_route_name_resolves_to_its_own_policy() {
+    let state = test_state();
+    insert_named_agent_def(&state, "loap-loap-2-loap-3", "Loap #3", "ask");
+    let mut req = base_req("Loap-3");
+    resolve_transcript_request_tier_fields(&state.mstore, &mut req);
+    assert!(req.transcript_request_escalate_forced, "ask forces escalation");
+
+    insert_named_agent_def(&state, "claude-2", "Claude", "trusted_peers");
+    state.mstore.conversation_trust_grant_add("claude-2", "requester", "lan").unwrap();
+    let mut req = base_req("Claude");
+    resolve_transcript_request_tier_fields(&state.mstore, &mut req);
+    assert!(!req.transcript_request_escalate_forced, "the grant is the slug's");
+}
+
+/// A target that routes to several agents fails closed (#4744).
+#[tokio::test]
+async fn a_target_naming_several_agents_forces_escalate() {
+    let state = test_state();
+    insert_named_agent_def(&state, "a-1", "Twin #1", "private");
+    insert_named_agent_def(&state, "b-1", "Twin-1", "private");
+    let mut req = base_req("Twin-1");
+    resolve_transcript_request_tier_fields(&state.mstore, &mut req);
+    assert!(req.transcript_request_escalate_forced);
 }

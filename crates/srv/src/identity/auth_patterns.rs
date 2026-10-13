@@ -23,8 +23,6 @@ pub enum AuthPatternMatch {
     /// CLI emitted a "logged in as <email>" line. Used to know we're
     /// done and to populate the bundle's display name.
     LoginSuccess { email: Option<String> },
-    /// CLI emitted an "authentication failed" line.
-    LoginFailure { message: String },
 }
 
 /// Try every pattern for the given provider against a single line of

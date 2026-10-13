@@ -47,14 +47,11 @@ pub(super) fn handle_pane_pool_ready(state: &mut HostState, label: String) -> Di
 }
 
 pub(super) fn handle_pane_pool_destroyed_before_promote(state: &mut HostState, label: String) -> DispatchOutput {
-    let was_unpromoted = state.pane_pool.unpromoted.remove(&label);
-    let queue_len_before = state.pane_pool.queue.len();
+    state.pane_pool.unpromoted.remove(&label);
     state.pane_pool.queue.retain(|l| l != &label);
-    let was_in_queue = state.pane_pool.queue.len() < queue_len_before;
     state.pane_pool.respawn_in_flight = false;
     let queue_len_after = state.pane_pool.queue.len();
     DispatchOutput {
-        pane_pool_destroyed_was_unpromoted: was_unpromoted || was_in_queue,
         pane_pool_size_after: Some(queue_len_after),
         ..Default::default()
     }
@@ -72,6 +69,7 @@ pub(super) fn handle_pane_pool_destroyed_before_promote(state: &mut HostState, l
 /// the pop itself here, under the same `host_state` mutex every other pool
 /// mutation goes through, makes the two commands mutually exclusive: only
 /// one can ever claim a given front label.
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn handle_pop_front_pane_pool_for_eviction(state: &mut HostState) -> DispatchOutput {
     let Some(label) = state.pane_pool.queue.pop_front() else {
         return DispatchOutput::default();

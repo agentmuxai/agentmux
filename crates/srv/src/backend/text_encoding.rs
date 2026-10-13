@@ -212,7 +212,7 @@ mod tests {
     fn windows_1252_ini_decodes() {
         // 0x92 = right single quote, 0xE9 = é in Windows-1252 — invalid UTF-8.
         let bytes = b"name = O\x92Brien caf\xE9\r\n";
-        assert!(std::str::from_utf8(bytes).is_err(), "precondition: not UTF-8");
+        assert!(std::str::from_utf8(std::hint::black_box(bytes)).is_err(), "precondition: not UTF-8");
         let d = decode_file(bytes);
         assert!(d.content.contains("O\u{2019}Brien"), "got {:?}", d.content);
         assert!(d.content.contains("caf\u{e9}"));

@@ -224,7 +224,12 @@ async fn the_viewer_token_opens_the_viewer_routes_and_nothing_else() {
 async fn the_lan_key_and_the_instance_key_open_no_viewer_route() {
     let state = test_state();
     let viewer = viewer_router(&state);
-    for uri in ["/agentmux/viewer/hello", "/agentmux/viewer/agents", "/agentmux/viewer/agents/anyone/feed"] {
+    for uri in [
+        "/agentmux/viewer/hello",
+        "/agentmux/viewer/agents",
+        "/agentmux/viewer/agents/anyone/feed",
+        "/agentmux/viewer/panes",
+    ] {
         for key in ["test-secret-key", "test-lan-key"] {
             assert_eq!(send(&viewer, Method::GET, uri, Some(("X-AuthKey", key.into()))).await, StatusCode::UNAUTHORIZED);
             assert_eq!(send(&viewer, Method::GET, uri, bearer(key)).await, StatusCode::UNAUTHORIZED);
@@ -300,6 +305,53 @@ async fn a_hidden_or_unknown_agent_has_no_feed() {
         StatusCode::NOT_FOUND
     );
     assert_eq!(state.viewer.open_feeds(), 0, "a refused feed holds no place");
+}
+
+// ---- Panes ----
+
+#[tokio::test]
+async fn panes_lists_every_tab_pane_with_agent_names_and_leaves_hidden_agents_out() {
+    use crate::backend::obj::{Tab, Window, Workspace};
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (shown, shown_block, _) = register_defined(&state, "viewer-pane-agent");
+    let (_, hidden_block, hidden_def) = register_defined(&state, "viewer-pane-hidden");
+    state.mstore.agent_hide_from_devices_set(&hidden_def, true).unwrap();
+    let term = uuid::Uuid::new_v4().to_string();
+    let mut term_block = crate::backend::obj::Block { oid: term.clone(), ..Default::default() };
+    term_block.meta.insert("view".into(), serde_json::json!("term"));
+    term_block.meta.insert("frame:title".into(), serde_json::json!("build"));
+    state.mstore.insert(&mut term_block).unwrap();
+    let mut tab = Tab {
+        oid: uuid::Uuid::new_v4().to_string(),
+        name: "Work".into(),
+        blockids: vec![shown_block.clone(), hidden_block.clone(), term.clone()],
+        ..Default::default()
+    };
+    state.mstore.insert(&mut tab).unwrap();
+    let mut ws = Workspace { oid: uuid::Uuid::new_v4().to_string(), tabids: vec![tab.oid.clone()], activetabid: tab.oid.clone(), ..Default::default() };
+    state.mstore.insert(&mut ws).unwrap();
+    let mut window = Window { oid: uuid::Uuid::new_v4().to_string(), workspaceid: ws.oid.clone(), ..Default::default() };
+    state.mstore.insert(&mut window).unwrap();
+
+    let resp = viewer_router(&state)
+        .oneshot(request(Method::GET, "/agentmux/viewer/panes", Some(("Authorization", &format!("Bearer {token}"))), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = json_of(resp).await;
+    assert!(json["now_ms"].as_u64().unwrap() > 0);
+    assert_eq!(json["terminals_shared"], false, "terminals open on the device only once shared");
+    // Tests share one object store, so only this test's window is looked at.
+    let panes: Vec<&serde_json::Value> =
+        json["panes"].as_array().unwrap().iter().filter(|p| p["window_id"] == window.oid.as_str()).collect();
+    let ids: Vec<&str> = panes.iter().map(|p| p["block_id"].as_str().unwrap()).collect();
+    assert_eq!(ids, [shown_block.as_str(), term.as_str()], "the hidden agent is left out");
+    assert_eq!(panes[0]["kind"], "agent");
+    assert_eq!(panes[0]["agent"], shown.as_str(), "the name its feed opens by");
+    assert_eq!((panes[0]["tab"].as_str(), panes[0]["tab_active"].as_bool()), (Some("Work"), Some(true)));
+    assert_eq!((panes[1]["kind"].as_str(), panes[1]["label"].as_str()), (Some("terminal"), Some("build")));
+    assert!(panes[1].get("running").is_none(), "no controller: not known to run");
 }
 
 // ---- The feed ----
@@ -621,11 +673,11 @@ where
 #[tokio::test]
 async fn an_agent_hidden_while_watched_is_reset_and_closed() {
     let state = test_state();
-    let (_, block, def) = register_defined(&state, "viewer-hide-live");
+    let (name, block, def) = register_defined(&state, "viewer-hide-live");
     append(&state, &block, "{\"a\":1}");
     let lease = state.viewer.open_feed("dev").unwrap();
-    let timing = FeedTiming { heartbeat: std::time::Duration::from_millis(50), status_poll: std::time::Duration::from_secs(3600) };
-    let stream = feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &block));
+    let timing = FeedTiming { heartbeat: std::time::Duration::from_millis(50), status_poll: std::time::Duration::from_secs(3600), follow_poll: std::time::Duration::from_secs(3600) };
+    let stream = feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &name));
     let mut stream = Box::pin(stream);
     assert_eq!(next_bytes(&mut stream).await.unwrap(), "retry: 3000\n\n");
     assert!(next_bytes(&mut stream).await.unwrap().starts_with("event: snapshot"));
@@ -698,11 +750,11 @@ async fn a_feed_sends_status_after_the_snapshot() {
 #[tokio::test]
 async fn an_agent_without_a_state_gets_no_status_event() {
     let state = test_state();
-    let (_, block, _) = register_defined(&state, "viewer-status-absent");
+    let (name, block, _) = register_defined(&state, "viewer-status-absent");
     append(&state, &block, "{\"a\":1}");
     let lease = state.viewer.open_feed("dev").unwrap();
-    let timing = FeedTiming { heartbeat: std::time::Duration::from_secs(3600), status_poll: std::time::Duration::from_millis(20) };
-    let mut stream = Box::pin(feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &block)));
+    let timing = FeedTiming { heartbeat: std::time::Duration::from_secs(3600), status_poll: std::time::Duration::from_millis(20), follow_poll: std::time::Duration::from_secs(3600) };
+    let mut stream = Box::pin(feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &name)));
     next_bytes(&mut stream).await.unwrap();
     assert!(next_bytes(&mut stream).await.unwrap().starts_with("event: snapshot"));
     let more = tokio::time::timeout(std::time::Duration::from_millis(300), stream.next()).await;
@@ -714,11 +766,11 @@ async fn a_feed_follows_state_changes_and_says_when_the_state_is_gone() {
     use crate::backend::agent_state::test_support::register_stub;
     use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
     let state = test_state();
-    let (_, block) = register_working(&state, "viewer-status-change");
+    let (name, block) = register_working(&state, "viewer-status-change");
     append(&state, &block, "{\"a\":1}");
     let lease = state.viewer.open_feed("dev").unwrap();
-    let timing = FeedTiming { heartbeat: std::time::Duration::from_secs(3600), status_poll: std::time::Duration::from_millis(20) };
-    let mut stream = Box::pin(feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &block)));
+    let timing = FeedTiming { heartbeat: std::time::Duration::from_secs(3600), status_poll: std::time::Duration::from_millis(20), follow_poll: std::time::Duration::from_secs(3600) };
+    let mut stream = Box::pin(feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &name)));
     next_bytes(&mut stream).await.unwrap();
     assert!(next_bytes(&mut stream).await.unwrap().starts_with("event: snapshot"));
     let first = next_bytes(&mut stream).await.unwrap();
@@ -747,6 +799,215 @@ async fn a_feed_follows_state_changes_and_says_when_the_state_is_gone() {
     assert!(data["now_ms"].as_u64().unwrap() > 0);
     let more = tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
     assert!(more.is_err(), "nothing more while there is no state");
+}
+
+// ---- Following the agent ----
+
+/// Only the follow poll ticks, and often.
+fn follow_timing() -> FeedTiming {
+    FeedTiming {
+        heartbeat: std::time::Duration::from_secs(3600),
+        status_poll: std::time::Duration::from_secs(3600),
+        follow_poll: std::time::Duration::from_millis(20),
+    }
+}
+
+/// The next SSE event of a feed stream: `(name, data)`.
+async fn next_stream_event<S>(stream: &mut S) -> Option<(String, serde_json::Value)>
+where
+    S: futures_util::Stream<Item = Result<axum::body::Bytes, std::convert::Infallible>> + Unpin,
+{
+    let chunk = next_bytes(stream).await?;
+    let name = chunk.lines().find_map(|l| l.strip_prefix("event: "))?.to_string();
+    let data = chunk.lines().find_map(|l| l.strip_prefix("data: ")).map(|d| serde_json::from_str(d).unwrap())?;
+    Some((name, data))
+}
+
+/// A global transcript store, and the shared zone of the agent definition
+/// `def`: `agent:<def>:current`.
+fn with_shared_zone(state: &mut AppState, def: &str) -> (Arc<crate::backend::storage::filestore::FileStore>, String) {
+    let gfs = Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+    state.global_transcript_store = Some(gfs.clone());
+    (gfs, format!("agent:{def}:current"))
+}
+
+fn shared_append(gfs: &crate::backend::storage::filestore::FileStore, zone: &str, body: &[u8]) {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    let _ = gfs.make_file(zone, "output", FileMeta::default(), FileOpts::default());
+    gfs.append_lines(zone, "output", body).unwrap();
+}
+
+#[tokio::test]
+async fn a_feed_follows_its_agent_to_a_new_block() {
+    let state = test_state();
+    let (name, old_block, _) = register_defined(&state, "viewer-moved");
+    append(&state, &old_block, "{\"old\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &old_block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(lines_of(&snap), vec!["{\"old\":1}"]);
+
+    // The agent respawns in another block, with another provider, which
+    // writes its own transcript.
+    let new_block = uuid::Uuid::new_v4().to_string();
+    let mut block = crate::backend::obj::Block { oid: new_block.clone(), ..Default::default() };
+    block.meta.insert("agentProvider".into(), serde_json::json!("codex"));
+    state.mstore.insert(&mut block).unwrap();
+    state.reactive_handler.register_agent(&name, &new_block, None).unwrap();
+    append(&state, &new_block, "{\"new\":1}");
+    let (event, reset) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((event.as_str(), reset["reason"].as_str()), ("reset", Some("moved")));
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(lines_of(&snap), vec!["{\"new\":1}"]);
+    assert_eq!(snap["provider"], "codex", "labelled with the new block's provider");
+
+    // And its appends now reach the device.
+    append(&state, &new_block, "{\"new\":2}");
+    let (event, data) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((event.as_str(), data["line"].as_u64()), ("append", Some(1)));
+    assert_eq!(lines_of(&data), vec!["{\"new\":2}"]);
+}
+
+#[tokio::test]
+async fn a_feed_does_not_follow_its_agent_into_a_hidden_block() {
+    let state = test_state();
+    let (name, old_block, _) = register_defined(&state, "viewer-moved-hidden");
+    append(&state, &old_block, "{\"old\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &old_block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    assert_eq!(next_stream_event(&mut stream).await.unwrap().0, "snapshot");
+
+    // The name is re-registered on a block whose definition is hidden from
+    // paired devices, and that block has a transcript.
+    let def = uuid::Uuid::new_v4().to_string();
+    let mut hidden_def = crate::backend::storage::agents::test_agent_def(&def, &name, "claude", "standalone", 1, "");
+    state.mstore.agent_def_insert(&mut hidden_def).unwrap();
+    state.mstore.agent_hide_from_devices_set(&def, true).unwrap();
+    let new_block = uuid::Uuid::new_v4().to_string();
+    let mut block = crate::backend::obj::Block { oid: new_block.clone(), ..Default::default() };
+    block.meta.insert("agentId".into(), serde_json::json!(def));
+    state.mstore.insert(&mut block).unwrap();
+    append(&state, &new_block, "{\"private\":1}");
+    state.reactive_handler.register_agent(&name, &new_block, None).unwrap();
+
+    let mut rest = String::new();
+    while let Some(chunk) = next_bytes(&mut stream).await {
+        rest.push_str(&chunk);
+    }
+    assert_eq!(rest, "event: reset\ndata: {\"reason\":\"hidden\"}\n\n", "closed, and nothing of the hidden block sent");
+    assert_eq!(state.viewer.open_feeds(), 0);
+}
+
+#[tokio::test]
+async fn lines_another_writer_adds_to_the_shared_transcript_reach_the_feed_once() {
+    let mut state = test_state();
+    let (name, block, def) = register_defined(&state, "viewer-shared");
+    let (gfs, zone) = with_shared_zone(&mut state, &def);
+    shared_append(&gfs, &zone, b"{\"n\":0}\n{\"n\":1}\n");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(snap["next_line"], 2);
+    let gen = snap["gen"].as_str().unwrap().to_string();
+
+    // Another block or srv instance running the same agent appends: no event
+    // reaches this srv's broker, so only the poll can find these lines.
+    shared_append(&gfs, &zone, b"{\"n\":2}\n{\"n\":3}\n");
+    let (event, data) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "append");
+    assert_eq!((data["gen"].as_str(), data["line"].as_u64()), (Some(gen.as_str()), Some(2)));
+    assert_eq!(lines_of(&data), vec!["{\"n\":2}", "{\"n\":3}"]);
+
+    // Sent once: later polls find nothing new.
+    let more = tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+    assert!(more.is_err(), "nothing more until something new");
+    shared_append(&gfs, &zone, b"{\"n\":4}\n");
+    let (_, data) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((data["line"].as_u64(), lines_of(&data)), (Some(4), vec!["{\"n\":4}".to_string()]));
+}
+
+#[tokio::test]
+async fn a_feed_on_the_blocks_own_transcript_moves_to_a_shared_one_that_starts_later() {
+    let mut state = test_state();
+    let (name, block, def) = register_defined(&state, "viewer-shared-after-local");
+    let (gfs, zone) = with_shared_zone(&mut state, &def);
+    append(&state, &block, "{\"local\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(lines_of(&snap), vec!["{\"local\":1}"], "the block's own transcript, no shared one yet");
+
+    // Another srv instance starts the agent's shared transcript.
+    shared_append(&gfs, &zone, b"{\"shared\":1}\n");
+    let (event, reset) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((event.as_str(), reset["reason"].as_str()), ("reset", Some("stream")));
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert_eq!(lines_of(&snap), vec!["{\"shared\":1}"]);
+}
+
+#[tokio::test]
+async fn a_feed_opened_before_any_transcript_picks_up_the_shared_one() {
+    let mut state = test_state();
+    let (name, block, def) = register_defined(&state, "viewer-shared-late");
+    let (gfs, zone) = with_shared_zone(&mut state, &def);
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let mut stream = Box::pin(feed_stream(
+        FeedSource::of(&state, &block),
+        "claude".into(),
+        None,
+        lease,
+        follow_timing(),
+        AgentProbe::of(&state, &name),
+    ));
+    next_bytes(&mut stream).await.unwrap();
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((event.as_str(), snap["gen"].as_str(), snap["next_line"].as_u64()), ("snapshot", Some(""), Some(0)));
+
+    // The transcript starts in the shared zone, written elsewhere.
+    shared_append(&gfs, &zone, b"{\"first\":1}\n");
+    let (event, reset) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!((event.as_str(), reset["reason"].as_str()), ("reset", Some("stream")));
+    let (event, snap) = next_stream_event(&mut stream).await.unwrap();
+    assert_eq!(event, "snapshot");
+    assert!(!snap["gen"].as_str().unwrap().is_empty());
+    assert_eq!(lines_of(&snap), vec!["{\"first\":1}"]);
 }
 
 /// Tower's route for a paired device: the token is needed, sharing is off

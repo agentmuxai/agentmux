@@ -45,6 +45,50 @@ pub struct RpcBinding {
     pub request: &'static str,
     /// Fully qualified response type.
     pub response: &'static str,
+    /// The request as TypeScript, from ts-rs. `None` only for bindings
+    /// recorded by [`RpcSchema::record`] without one (the unit tests here).
+    pub request_ts: Option<TsType>,
+    /// The response as TypeScript.
+    pub response_ts: Option<TsType>,
+}
+
+/// How a Rust type reads in TypeScript, as ts-rs itself renders it.
+///
+/// Taken from ts-rs rather than derived from the Rust path, because the two
+/// differ: `#[ts(rename = "DeleteDroneResp")] struct DeleteResp` exports as
+/// `DeleteDroneResp`, so matching on the Rust name would bind a stub to a type
+/// that does not exist (or, worse, to an unrelated one of that name).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TsType {
+    /// The type expression, e.g. `AgentDefinition`, `Array<Skill>`,
+    /// `CommandFooData | null`, `null` (for `()`).
+    pub name: String,
+    /// Every exported type the expression names, which a generated stub
+    /// imports from `frontend/types/rpc/`. Sorted and de-duplicated.
+    pub imports: Vec<String>,
+}
+
+/// `T` as TypeScript: its ts-rs name, and the exported types that name uses.
+///
+/// A type with its own exported file (`#[ts(export)]`) is imported by name;
+/// its fields are that file's business. A wrapper without one (`Option<X>`,
+/// `Vec<X>`, `HashMap<String, X>`) is looked through, via its generic
+/// parameters: ts-rs reports `X` as a generic of `Option<X>`, not as a
+/// dependency, so `TS::dependencies()` alone would miss it.
+pub fn ts_type<T: ts_rs::TS + 'static + ?Sized>() -> TsType {
+    struct Collect(std::collections::BTreeSet<String>);
+    impl ts_rs::TypeVisitor for Collect {
+        fn visit<U: ts_rs::TS + 'static + ?Sized>(&mut self) {
+            if U::output_path().is_some() {
+                self.0.insert(U::ident());
+            } else {
+                U::visit_generics(self);
+            }
+        }
+    }
+    let mut c = Collect(Default::default());
+    ts_rs::TypeVisitor::visit::<T>(&mut c);
+    TsType { name: T::name(), imports: c.0.into_iter().collect() }
 }
 
 impl RpcBinding {
@@ -53,11 +97,13 @@ impl RpcBinding {
     /// Kept alongside the full path rather than replacing it: the short name
     /// is what a binding is called in TypeScript, but two modules can hold
     /// same-named types, so the full path stays authoritative.
+    #[cfg(test)]
     pub fn request_name(&self) -> &str {
         short_name(self.request)
     }
 
     /// Last path segment of `response`.
+    #[cfg(test)]
     pub fn response_name(&self) -> &str {
         short_name(self.response)
     }
@@ -65,6 +111,7 @@ impl RpcBinding {
 
 /// `a::b::Foo` -> `Foo`; also strips a generic tail so `Vec<a::B>` reads as
 /// `Vec<a::B>` rather than being truncated at a `::` inside the parameter.
+#[cfg(test)]
 fn short_name(path: &str) -> &str {
     match path.find('<') {
         // Generic: leave it whole. Truncating `Vec<crate::x::Y>` at the last
@@ -89,7 +136,8 @@ impl RpcSchema {
         Self::default()
     }
 
-    /// Record (or replace) the binding for `command`.
+    /// Record (or replace) the binding for `command`, without TypeScript.
+    #[cfg(test)]
     pub fn record(&mut self, command: &str, request: &'static str, response: &'static str) {
         self.bindings.insert(
             command.to_string(),
@@ -97,12 +145,34 @@ impl RpcSchema {
                 command: command.to_string(),
                 request,
                 response,
+                request_ts: None,
+                response_ts: None,
+            },
+        );
+    }
+
+    /// Record (or replace) `command`'s binding, with its request and response
+    /// as TypeScript. This is what `register_typed` records.
+    pub fn record_typed<Req, Resp>(&mut self, command: &str)
+    where
+        Req: ts_rs::TS + 'static,
+        Resp: ts_rs::TS + 'static,
+    {
+        self.bindings.insert(
+            command.to_string(),
+            RpcBinding {
+                command: command.to_string(),
+                request: std::any::type_name::<Req>(),
+                response: std::any::type_name::<Resp>(),
+                request_ts: Some(ts_type::<Req>()),
+                response_ts: Some(ts_type::<Resp>()),
             },
         );
     }
 
     /// Bindings in command order. `BTreeMap` makes this stable across runs,
     /// which is what lets a generated artifact be diffed in CI.
+    #[cfg(test)]
     pub fn bindings(&self) -> Vec<&RpcBinding> {
         self.bindings.values().collect()
     }
@@ -117,30 +187,40 @@ impl RpcSchema {
         self.bindings.remove(command);
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
     }
 
+    #[cfg(test)]
     pub fn get(&self, command: &str) -> Option<&RpcBinding> {
         self.bindings.get(command)
     }
 
     /// Stable JSON, sorted by command, for the dump + CI gate.
+    #[cfg(test)]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::Value::Array(
             self.bindings
                 .values()
                 .map(|b| {
+                    let ts = |t: &Option<TsType>| match t {
+                        Some(t) => serde_json::json!({ "name": t.name, "imports": t.imports }),
+                        None => serde_json::Value::Null,
+                    };
                     serde_json::json!({
                         "command": b.command,
                         "request": b.request,
                         "requestName": b.request_name(),
+                        "requestTs": ts(&b.request_ts),
                         "response": b.response,
                         "responseName": b.response_name(),
+                        "responseTs": ts(&b.response_ts),
                     })
                 })
                 .collect(),
@@ -151,6 +231,41 @@ impl RpcSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "../../../frontend/types/rpc/")]
+    #[ts(rename = "Renamed")]
+    #[allow(dead_code)]
+    struct RustName {
+        v: bool,
+    }
+
+    #[test]
+    fn ts_type_uses_the_exported_name_not_the_rust_one() {
+        // The reason the schema asks ts-rs instead of trimming the Rust path:
+        // `DeleteResp` exports as `DeleteDroneResp`, and a stub must name that.
+        let t = ts_type::<RustName>();
+        assert_eq!(t.name, "Renamed");
+        assert_eq!(t.imports, vec!["Renamed".to_string()]);
+    }
+
+    #[test]
+    fn ts_type_looks_through_option_and_vec_to_the_type_to_import() {
+        // ts-rs reports `X` as a generic parameter of `Option<X>`, not as a
+        // dependency, so collecting `dependencies()` alone would import nothing.
+        let opt = ts_type::<Option<RustName>>();
+        assert_eq!(opt.name, "Renamed | null");
+        assert_eq!(opt.imports, vec!["Renamed".to_string()]);
+        let vec = ts_type::<Vec<RustName>>();
+        assert_eq!(vec.name, "Array<Renamed>");
+        assert_eq!(vec.imports, vec!["Renamed".to_string()]);
+    }
+
+    #[test]
+    fn ts_type_of_unit_and_primitives_imports_nothing() {
+        assert_eq!(ts_type::<()>(), TsType { name: "null".into(), imports: vec![] });
+        assert_eq!(ts_type::<String>().imports, Vec::<String>::new());
+    }
 
     #[test]
     fn short_name_takes_the_last_segment() {

@@ -461,6 +461,7 @@ async fn launcher_main(startup_sink: Option<startup_events::StartupEventSink>) {
 
     #[cfg(target_os = "windows")]
     {
+        let _ = startup_sink;
         supervisor::run_windows(exe_dir, &real_exe, &args).await;
     }
 

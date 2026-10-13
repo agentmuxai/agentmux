@@ -268,7 +268,6 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |data, ctx| {
             let state = state.clone();
             Box::pin(async move {
-                let id_store = &state.id_store;
                 let identity_store = &state.identity_store;
                 let broker = &state.broker;
                 #[derive(serde::Deserialize)]

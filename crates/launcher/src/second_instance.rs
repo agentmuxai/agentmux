@@ -226,6 +226,7 @@ fn forward_host_body(
 /// message claimed branch was the ONLY lever, which is what this revision
 /// corrects — verified against `resolve_channel_and_dir`'s actual source,
 /// not just re-asserted.)
+#[cfg(not(target_os = "windows"))]
 fn print_dev_instance_collision(channel: &str, data_dir: &std::path::Path, socket_path: &str) {
     eprintln!(
         "AgentMux dev instance already running for channel \"{channel}\"\n\
@@ -251,7 +252,7 @@ fn print_dev_instance_collision(channel: &str, data_dir: &std::path::Path, socke
 /// answered our connect probe), so a transient/fatal forward failure shouldn't
 /// block — at worst the relaunch is a silent no-op instead of a new window.
 /// SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 pub(crate) fn forward_open_new_window_or_log(data_dir: &std::path::Path, dir_hash: &str) {
     match forward_open_new_window(data_dir, dir_hash) {
         Ok(()) => log("forwarded open_new_window to existing instance"),

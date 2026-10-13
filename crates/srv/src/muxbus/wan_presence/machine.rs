@@ -266,6 +266,7 @@ impl Machine {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn state(&self) -> Option<PresenceState> {
         self.state
     }

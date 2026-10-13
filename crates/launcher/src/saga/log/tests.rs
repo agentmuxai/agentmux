@@ -79,26 +79,7 @@ fn step_for_unknown_saga_is_a_noop() {
     let log = LauncherSagaLog::new();
     log.start_step(999, 0, "step", PipeTarget::Host, &ping(0))
         .unwrap();
-    assert!(log.get_saga_steps(999).unwrap().is_empty());
     assert!(log.snapshot_recent(10).unwrap().is_empty());
-}
-
-#[test]
-fn fail_step_records_reason() {
-    let log = LauncherSagaLog::new();
-    log.start_saga(5, "saga_fail", &serde_json::json!({})).unwrap();
-    log.start_step(5, 0, "step_a", PipeTarget::Host, &ping(0)).unwrap();
-    log.fail_step(5, 0, "host pipe disconnected").unwrap();
-
-    // Inspect via unresolved_sagas — saga is still 'running' since
-    // terminate wasn't called.
-    let unresolved = log.unresolved_sagas().unwrap();
-    assert_eq!(unresolved.len(), 1);
-    let step = &unresolved[0].steps[0];
-    assert_eq!(step.state, "failed");
-    assert_eq!(step.failure_reason.as_deref(), Some("host pipe disconnected"));
-    // Step's target survives the round-trip.
-    assert_eq!(step.target.as_deref(), Some("host"));
 }
 
 #[test]

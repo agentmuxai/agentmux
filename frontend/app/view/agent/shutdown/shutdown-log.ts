@@ -16,7 +16,7 @@ import { MOS } from "@/app/store/global";
 import { muxEventSubscribe } from "@/app/store/mps";
 
 import { WpsEvent } from "@/app/store/mps-events";
-export const EVENT_AGENT_SHUTDOWN = WpsEvent.AgentShutdown;
+const EVENT_AGENT_SHUTDOWN = WpsEvent.AgentShutdown;
 
 /** One `agent:shutdown` line (§12.1). */
 export type ShutdownLine = { seq: number; step: string; text: string; error?: string };
@@ -30,7 +30,7 @@ export type ShutdownLog = {
 };
 
 /** Display cap (§12.1): the rest collapse into "+N more". */
-export const SHUTDOWN_LOG_MAX_LINES = 8;
+const SHUTDOWN_LOG_MAX_LINES = 8;
 
 /** Pure: fold one event into a log — ordered by `seq`, duplicates ignored. */
 export function applyShutdownEvent(log: ShutdownLog, data: unknown): ShutdownLog {

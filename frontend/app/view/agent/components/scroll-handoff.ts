@@ -102,7 +102,7 @@ export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid;
 }
 
 /** Whole notches in a wheel event, or null when it's continuous input. */
-export function wheelNotches(e: WheelEvent): number | null {
+function wheelNotches(e: WheelEvent): number | null {
     // Non-standard, but present in Chromium (our only engine); absent → continuous.
     const raw = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
     if (typeof raw === "number" && raw !== 0 && raw % WHEEL_NOTCH === 0) return Math.abs(raw) / WHEEL_NOTCH;

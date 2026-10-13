@@ -16,7 +16,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/global", () => ({
     atoms: {},
-    recordTEvent: vi.fn(),
     refocusNode: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));

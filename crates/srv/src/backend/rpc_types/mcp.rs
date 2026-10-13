@@ -71,8 +71,9 @@ fn default_config() -> String {
 /// `id`, `transport` and `config` are all defaulted, so they are omittable on
 /// the wire, and ts-rs generates them as **required** (it cannot express an
 /// optional property for a non-`Option` field). The frontend derives the
-/// accurate shape from this type rather than hand-listing the optional fields;
-/// see `McpUpsertInput` in `rpc-api/mcp.ts`.
+/// accurate shape from this type: generated-manifest.json's `optionalFields`
+/// makes them optional in the generated stub (proven by
+/// `rpc_types/optional_fields_tests.rs`).
 ///
 /// The defaults are load-bearing and are why these cannot become
 /// `Option<String>`: an omitted `transport` is `"stdio"` and an omitted

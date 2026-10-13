@@ -19,6 +19,8 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { Skill } from "@/types/rpc/Skill";
+import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 export interface SkillDraft {
     id?: string;
     name: string;

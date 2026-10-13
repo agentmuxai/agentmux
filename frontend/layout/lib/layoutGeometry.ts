@@ -672,7 +672,7 @@ function uncoveredParts(seg: EdgeSegment, covered: EdgeSegment[]): EdgeSegment[]
  * chip's middle stays a click target whatever the tile gap (spec R6); the
  * handle's `halfSizePx` records the clamped extent.
  */
-export function extendResizeHandlesThroughChips(
+function extendResizeHandlesThroughChips(
     additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
     rootNode: LayoutNode | undefined,
     resizeHandleSizePx: number

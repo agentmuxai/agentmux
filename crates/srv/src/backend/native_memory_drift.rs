@@ -39,7 +39,7 @@ use std::time::Duration;
 
 use crate::backend::fs_watch::{FsWatchEventKind, FsWatchPool};
 use crate::backend::storage::store::Store;
-use crate::server::native_memory_handlers::{list_all_memory_targets, memory_dir_for_agent_by_id};
+use crate::server::native_memory_handlers::list_all_memory_targets;
 
 /// Same cadence class as `FsWatchPool::HEALTH_SWEEP_INTERVAL`
 /// (`backend/fs_watch/recovery.rs`) — chosen for the same reason: frequent
@@ -474,6 +474,7 @@ fn refresh_subscriptions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::native_memory_handlers::memory_dir_for_agent_by_id;
 
     fn shared_store() -> Store {
         Store::open_shared(std::path::Path::new(":memory:")).unwrap()

@@ -55,7 +55,7 @@ export function agentColor(taskId: string, label: string, remote: boolean): stri
 }
 
 /** A rail entry's color: its agent's; the fixed entries have none. */
-export function entryColor(entry: RailEntry, remote: boolean): string | undefined {
+function entryColor(entry: RailEntry, remote: boolean): string | undefined {
     return entry.kind === "agent" ? agentColor(entry.id, entry.label, remote) : undefined;
 }
 
@@ -190,7 +190,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
 
 /** The last minute of CPU, scaled to the entry's own peak (at least half a
  *  core, so an idle agent stays flat instead of magnifying noise). */
-export function Sparkline(props: { points: readonly number[]; color?: string }) {
+function Sparkline(props: { points: readonly number[]; color?: string }) {
     const path = () => {
         const pts = props.points;
         if (pts.length < 2) return "";

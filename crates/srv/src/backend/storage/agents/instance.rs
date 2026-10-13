@@ -854,6 +854,7 @@ impl Store {
     /// `session_id`, `status`, `github_context`, `ended_at`). Retained as a
     /// convenience for tests + internal callers; the `updateagentinstance`
     /// handler uses [`Self::instance_update_partial`].
+    #[cfg(test)]
     pub fn instance_update(&self, inst: &AgentInstance) -> Result<bool, StoreError> {
         let upd = InstanceUpdate {
             block_id: Some(inst.block_id.clone()),

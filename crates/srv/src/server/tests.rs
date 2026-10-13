@@ -2366,7 +2366,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
     }
     let (tree, focused, leaforder) =
         crate::backend::wcore::default_three_pane_tree("b-agent", "b-swarm", "b-sysinfo");
-    crate::server::service::seed_layout_via_reducer(
+    crate::server::service::reducer_helpers::seed_layout_via_reducer(
         &state, &tab1, tree, focused, leaforder, String::new(),
     )
     .await
@@ -2433,7 +2433,7 @@ async fn layout_seed_unknown_tab_errors() {
     let state = test_state();
     let (tree, focused, leaforder) =
         crate::backend::wcore::default_three_pane_tree("a", "b", "c");
-    let err = crate::server::service::seed_layout_via_reducer(
+    let err = crate::server::service::reducer_helpers::seed_layout_via_reducer(
         &state, "ghost-tab", tree, focused, leaforder, String::new(),
     )
     .await
@@ -2802,7 +2802,7 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
     .expect("definition fixture");
     state.mstore.agent_def_insert(&mut def).expect("insert definition");
 
-    let inst: crate::backend::storage::AgentInstance = serde_json::from_value(serde_json::json!({
+    let inst: crate::backend::storage::agents::AgentInstance = serde_json::from_value(serde_json::json!({
         "id": "inst-1",
         "definition_id": def.id,
         "status": "running",

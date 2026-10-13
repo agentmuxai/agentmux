@@ -116,6 +116,7 @@ impl PersistentSubprocessController {
     /// stdin (see [`Self::deferred_must_wait_locked`]). Refusing it then used
     /// to drop the message outright (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
     /// §3.2.1). Spec: `SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` §2.1.
+    #[cfg(test)]
     pub fn send_user_message(&self, message: String) -> Result<(), String> {
         self.send_user_message_outcome(message).map(|_| ())
     }
@@ -124,6 +125,7 @@ impl PersistentSubprocessController {
     /// now or is queued until the process can take it (it is starting up,
     /// restarting or stopping) — so an automated sender can tell its caller
     /// the truth (MCP `SendMessage`).
+    #[cfg(test)]
     pub fn send_user_message_outcome(&self, message: String) -> Result<SendOutcome, String> {
         self.send_user_message_outcome_from(message, None)
     }

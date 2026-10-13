@@ -20,7 +20,7 @@ import Fuse, { type IFuseOptions } from "fuse.js";
 // just the start). Kept consistent app-wide so search *feels* the same
 // everywhere; callers override/extend `keys` per domain, which is the part
 // that's genuinely domain-specific.
-export const DEFAULT_FUZZY_OPTIONS: Partial<IFuseOptions<unknown>> = {
+const DEFAULT_FUZZY_OPTIONS: Partial<IFuseOptions<unknown>> = {
     threshold: 0.35,
     ignoreLocation: true,
     // 1, not e.g. 2: every consumer this utility replaces (command palette,

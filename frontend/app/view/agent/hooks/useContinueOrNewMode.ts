@@ -28,6 +28,7 @@ import {
 } from "@/app/store/launch-flow-state";
 import { realAccountIdOrEmpty } from "@/app/view/agent/identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import type { NamedAgentRow } from "@/types/rpc/NamedAgentRow";
 
 export interface UseContinueOrNewModeOpts {
     /** The launch-flow reactive store — pass BY REFERENCE (the whole

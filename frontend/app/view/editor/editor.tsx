@@ -39,5 +39,3 @@ export const editorPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { EditorViewModel };

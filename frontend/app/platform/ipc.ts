@@ -16,7 +16,7 @@ export type HostType = "cef" | "browser";
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function detectHost(): HostType {
+function detectHost(): HostType {
     if (typeof window.__AGENTMUX_IPC_PORT__ !== "undefined") {
         return "cef";
     }

@@ -65,13 +65,13 @@ impl BrowserPaneManager {
     }
 
     pub fn go_back(&self, block_id: &str, state: &Arc<AppState>) {
-        if let Some(mut b) = self.live_browser(state, block_id) { b.go_back(); }
+        if let Some(b) = self.live_browser(state, block_id) { b.go_back(); }
     }
     pub fn go_forward(&self, block_id: &str, state: &Arc<AppState>) {
-        if let Some(mut b) = self.live_browser(state, block_id) { b.go_forward(); }
+        if let Some(b) = self.live_browser(state, block_id) { b.go_forward(); }
     }
     pub fn reload(&self, block_id: &str, state: &Arc<AppState>) {
-        if let Some(mut b) = self.live_browser(state, block_id) { b.reload(); }
+        if let Some(b) = self.live_browser(state, block_id) { b.reload(); }
     }
 
     /// "Print" from the unified browser-pane context menu
@@ -79,7 +79,7 @@ impl BrowserPaneManager {
     /// print UI for the pane's current page, same as `CefBrowserHost::Print`
     /// used anywhere else in Chromium.
     pub fn print(&self, block_id: &str, state: &Arc<AppState>) {
-        if let Some(mut b) = self.live_browser(state, block_id) {
+        if let Some(b) = self.live_browser(state, block_id) {
             if let Some(host) = b.host() { host.print(); }
         }
     }
@@ -89,7 +89,7 @@ impl BrowserPaneManager {
     /// Chromium renders it internally, same as `chrome-devtools:`, so it
     /// carries none of the OS-handoff risk that allowlist exists to block).
     pub fn view_source(&self, block_id: &str, state: &Arc<AppState>) {
-        let Some(mut b) = self.live_browser(state, block_id) else { return };
+        let Some(b) = self.live_browser(state, block_id) else { return };
         let Some(frame) = b.main_frame() else { return };
         let current_url = CefString::from(&ImplFrame::url(&frame)).to_string();
         if current_url.is_empty() {
@@ -115,7 +115,7 @@ impl BrowserPaneManager {
     /// suppressed — see `client::context_menu`. `None` for
     /// window_info/client/settings uses CEF's default popup DevTools window.
     pub fn inspect_element(&self, block_id: &str, state: &Arc<AppState>, x: i32, y: i32) {
-        if let Some(mut b) = self.live_browser(state, block_id) {
+        if let Some(b) = self.live_browser(state, block_id) {
             if let Some(host) = b.host() {
                 host.show_dev_tools(None, None, None, Some(&Point { x, y }));
             }

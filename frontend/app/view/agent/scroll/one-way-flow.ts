@@ -33,10 +33,10 @@ export const RECHECK_MS = 300;
  * held in place with spacer room, which left a gap between the user's message
  * and the composer for the agent to fill slowly.
  */
-export const COMMIT_SETTLE_MS = 600;
+const COMMIT_SETTLE_MS = 600;
 
 /** Below this, a move is sub-pixel noise, not something to compensate. */
-export const MOVE_EPSILON_PX = 0.5;
+const MOVE_EPSILON_PX = 0.5;
 
 /** The largest downward move (px, ≥ 0) of any row present in both maps. */
 export function largestDownwardMove<K>(before: ReadonlyMap<K, number>, after: ReadonlyMap<K, number>): number {

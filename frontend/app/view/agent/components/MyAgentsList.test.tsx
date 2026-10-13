@@ -8,19 +8,14 @@
  * after the rename.
  */
 
+import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentSortOption } from "./AgentPickerFilterBar";
-import {
-    EMPTY_FILTERED,
-    EMPTY_GLOBAL,
-    FETCH_ERROR,
-    noMatchText,
-    MyAgentsList,
-} from "./MyAgentsList";
+import { EMPTY_FILTERED, EMPTY_GLOBAL, FETCH_ERROR, MyAgentsList, noMatchText } from "./MyAgentsList";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
@@ -72,6 +67,10 @@ const makeRow = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow =>
     has_snapshot: true,
     agent_created_at: Date.now() - 7_776_000_000,
     started_at: Date.now() - 3_600_000,
+    model_vendor_base_url: "",
+    session_id: "",
+    snapshot_check_failed: false,
+    agent_type: "",
     ...overrides,
 });
 
@@ -88,12 +87,7 @@ describe("MyAgentsList — empty state", () => {
     it("renders the identity-specific empty copy when filtered", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
         const [identityId] = createSignal<string>("id-work");
-        render(() => (
-            <MyAgentsList
-                identityId={identityId}
-                onReattach={() => {}}
-            />
-        ));
+        render(() => <MyAgentsList identityId={identityId} onReattach={() => {}} />);
         const empty = await screen.findByTestId("agent-my-agents-empty");
         expect(empty).toHaveTextContent(EMPTY_FILTERED);
     });
@@ -101,15 +95,17 @@ describe("MyAgentsList — empty state", () => {
 
 describe("MyAgentsList — populated", () => {
     it("renders one row per agent with preview + node count", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Maks", preview: "fix the live-feed" }),
-            makeRow({
-                instance_id: "b",
-                instance_name: "Other",
-                preview: "earlier conversation",
-                node_count: 1,
-            }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Maks", preview: "fix the live-feed" }),
+                makeRow({
+                    instance_id: "b",
+                    instance_name: "Other",
+                    preview: "earlier conversation",
+                    node_count: 1,
+                }),
+            ])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         // Wait for resource to settle.
         const entries = await screen.findAllByTestId("agent-my-agents-entry");
@@ -125,28 +121,30 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("says a transcript with no recent prompt has none, not that it has no history", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ preview: "", has_snapshot: true, node_count: 0 }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([makeRow({ preview: "", has_snapshot: true, node_count: 0 })])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(screen.getByText("No prompt in recent history")).toBeInTheDocument();
     });
 
     it("says No conversations yet for an agent with no transcript, whatever channel the row came from", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "local", preview: "", has_snapshot: false, node_count: 0 }),
-            makeRow({ instance_id: "other", preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "local", preview: "", has_snapshot: false, node_count: 0 }),
+                makeRow({ instance_id: "other", preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
+            ])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findAllByTestId("agent-my-agents-entry");
         expect(screen.getAllByText("No conversations yet")).toHaveLength(2);
     });
 
     it("says Couldn't read history when the transcript read itself failed", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ preview: "", has_snapshot: false, node_count: 0, snapshot_check_failed: true }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([makeRow({ preview: "", has_snapshot: false, node_count: 0, snapshot_check_failed: true })])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(screen.getByText("Couldn't read history")).toBeInTheDocument();
@@ -154,11 +152,19 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("no longer uses the retired history placeholders", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
-            makeRow({ instance_id: "b", preview: "", has_snapshot: true, node_count: 0 }),
-            makeRow({ instance_id: "c", preview: "", has_snapshot: false, node_count: 0, snapshot_check_failed: true }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
+                makeRow({ instance_id: "b", preview: "", has_snapshot: true, node_count: 0 }),
+                makeRow({
+                    instance_id: "c",
+                    preview: "",
+                    has_snapshot: false,
+                    node_count: 0,
+                    snapshot_check_failed: true,
+                }),
+            ])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findAllByTestId("agent-my-agents-entry");
         for (const gone of [
@@ -178,14 +184,18 @@ describe("MyAgentsList — populated", () => {
         const accountLine = () => document.querySelector(".agent-recent-sessions-account");
 
         it("shows the bound account's name", async () => {
-            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ identity_name: "work@example.com" })]));
+            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+                okResult([makeRow({ identity_name: "work@example.com" })])
+            );
             render(() => <MyAgentsList onReattach={() => {}} />);
             await screen.findByTestId("agent-my-agents-entry");
             expect(accountLine()).toHaveTextContent("work@example.com");
         });
 
         it("shows No auth for an agent the backend says is unbound", async () => {
-            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ identity_name: "No auth" })]));
+            vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+                okResult([makeRow({ identity_name: "No auth" })])
+            );
             render(() => <MyAgentsList onReattach={() => {}} />);
             await screen.findByTestId("agent-my-agents-entry");
             expect(accountLine()).toHaveTextContent("No auth");
@@ -216,16 +226,11 @@ describe("MyAgentsList — populated", () => {
     it("passes identity_id to the RPC when filter is set", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
         const [identityId] = createSignal<string>("id-work");
-        render(() => (
-            <MyAgentsList
-                identityId={identityId}
-                onReattach={() => {}}
-            />
-        ));
+        render(() => <MyAgentsList identityId={identityId} onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-empty");
         expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
             expect.anything(),
-            expect.objectContaining({ identity_id: "id-work" }),
+            expect.objectContaining({ identity_id: "id-work" })
         );
     });
 
@@ -235,7 +240,7 @@ describe("MyAgentsList — populated", () => {
         await screen.findByTestId("agent-my-agents-empty");
         expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
             expect.anything(),
-            expect.objectContaining({ identity_id: "" }),
+            expect.objectContaining({ identity_id: "" })
         );
     });
 
@@ -251,9 +256,7 @@ describe("MyAgentsList — populated", () => {
     // "SANDBOX" here too, not the sm-variant's "Container" wording — one
     // consistent vocabulary between the picker row and the pane it opens.
     it("renders the container runtime badge with the same 'tag' variant + SANDBOX wording as the composer strip", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ agent_type: "container" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ agent_type: "container" })]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         const badge = screen.getByText("SANDBOX");
@@ -262,9 +265,7 @@ describe("MyAgentsList — populated", () => {
     });
 
     it("renders the host runtime badge with the same 'tag' variant + HOST wording as the composer strip", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ agent_type: "host" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ agent_type: "host" })]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         const badge = screen.getByText("HOST");
@@ -275,10 +276,12 @@ describe("MyAgentsList — populated", () => {
 
 describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md)", () => {
     it("narrows rows by case-insensitive substring match on instance_name", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Maks" }),
-            makeRow({ instance_id: "b", instance_name: "Other Agent" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Maks" }),
+                makeRow({ instance_id: "b", instance_name: "Other Agent" }),
+            ])
+        );
         const [nameFilter] = createSignal("mak");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         const entries = await screen.findAllByTestId("agent-my-agents-entry");
@@ -288,11 +291,13 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
     });
 
     it("typing an exact agent name lists the names that contain it, not near-misses (agentx must not list agenty)", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "agentx" }),
-            makeRow({ instance_id: "b", instance_name: "agenty" }),
-            makeRow({ instance_id: "c", instance_name: "agentxx" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "agentx" }),
+                makeRow({ instance_id: "b", instance_name: "agenty" }),
+                makeRow({ instance_id: "c", instance_name: "agentxx" }),
+            ])
+        );
         const [nameFilter] = createSignal("agentx");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         await screen.findAllByTestId("agent-my-agents-entry");
@@ -301,10 +306,12 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
     });
 
     it("still tolerates a typo when no name contains the query", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "agenty" }),
-            makeRow({ instance_id: "b", instance_name: "Maks" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "agenty" }),
+                makeRow({ instance_id: "b", instance_name: "Maks" }),
+            ])
+        );
         const [nameFilter] = createSignal("agentz");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         const entries = await screen.findAllByTestId("agent-my-agents-entry");
@@ -313,9 +320,9 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
     });
 
     it("falls back to definition_name when instance_name doesn't match but definition_name does", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "", definition_name: "Claude Code" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([makeRow({ instance_id: "a", instance_name: "", definition_name: "Claude Code" })])
+        );
         const [nameFilter] = createSignal("claude");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         const entries = await screen.findAllByTestId("agent-my-agents-entry");
@@ -323,10 +330,12 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
     });
 
     it("restores the full list when the filter is cleared", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Maks" }),
-            makeRow({ instance_id: "b", instance_name: "Other Agent" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Maks" }),
+                makeRow({ instance_id: "b", instance_name: "Other Agent" }),
+            ])
+        );
         const [nameFilter, setNameFilter] = createSignal("mak");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         await screen.findAllByTestId("agent-my-agents-entry");
@@ -336,9 +345,9 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
     });
 
     it("renders a distinct no-match empty state when the filter matches nothing, not the generic/identity empty copy", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Maks" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([makeRow({ instance_id: "a", instance_name: "Maks" })])
+        );
         const [nameFilter] = createSignal("zzz-no-such-agent");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         const noMatch = await screen.findByTestId("agent-my-agents-no-match");
@@ -348,10 +357,12 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
     });
 
     it("does not filter when nameFilter is absent (existing callers unaffected)", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Maks" }),
-            makeRow({ instance_id: "b", instance_name: "Other Agent" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Maks" }),
+                makeRow({ instance_id: "b", instance_name: "Other Agent" }),
+            ])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         const entries = await screen.findAllByTestId("agent-my-agents-entry");
         expect(entries).toHaveLength(2);
@@ -364,7 +375,7 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
         await screen.findByTestId("agent-my-agents-empty");
         expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
             expect.anything(),
-            expect.objectContaining({ limit: 20 }),
+            expect.objectContaining({ limit: 20 })
         );
 
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockClear();
@@ -372,8 +383,8 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
         await waitFor(() =>
             expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
                 expect.anything(),
-                expect.objectContaining({ limit: 100 }),
-            ),
+                expect.objectContaining({ limit: 100 })
+            )
         );
 
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockClear();
@@ -381,15 +392,15 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
         await waitFor(() =>
             expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
                 expect.anything(),
-                expect.objectContaining({ limit: 20 }),
-            ),
+                expect.objectContaining({ limit: 20 })
+            )
         );
     });
 
     it("does not refetch on every keystroke once already searching (limit stays bumped, same call count)", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Maks" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([makeRow({ instance_id: "a", instance_name: "Maks" })])
+        );
         const [nameFilter, setNameFilter] = createSignal("m");
         render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
         await screen.findAllByTestId("agent-my-agents-entry");
@@ -412,43 +423,51 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
     };
 
     it('defaults to "recent" (most-recently-launched first) when sortBy is omitted — existing callers get the same client-side sort as the explicit default, not raw backend order', async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 1000 }),
-            makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 2000 }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 1000 }),
+                makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 2000 }),
+            ])
+        );
         render(() => <MyAgentsList onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Alpha", "Zebra"]);
     });
 
     it('sorts by name (A→Z), case-insensitively, when sortBy is "name"', async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "zebra" }),
-            makeRow({ instance_id: "b", instance_name: "Alpha" }),
-            makeRow({ instance_id: "c", instance_name: "middle" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "zebra" }),
+                makeRow({ instance_id: "b", instance_name: "Alpha" }),
+                makeRow({ instance_id: "c", instance_name: "middle" }),
+            ])
+        );
         const [sortBy] = createSignal<AgentSortOption>("name");
         render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Alpha", "middle", "zebra"]);
     });
 
     it('sorts by most-recently-launched first when sortBy is "recent"', async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Oldest", started_at: 1000 }),
-            makeRow({ instance_id: "b", instance_name: "Newest", started_at: 3000 }),
-            makeRow({ instance_id: "c", instance_name: "Middle", started_at: 2000 }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Oldest", started_at: 1000 }),
+                makeRow({ instance_id: "b", instance_name: "Newest", started_at: 3000 }),
+                makeRow({ instance_id: "c", instance_name: "Middle", started_at: 2000 }),
+            ])
+        );
         const [sortBy] = createSignal<AgentSortOption>("recent");
         render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Newest", "Middle", "Oldest"]);
     });
 
     it('sorts Host before Sandbox (Container) before unknown when sortBy is "type", each group alphabetical', async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Zulu Sandbox", agent_type: "container" }),
-            makeRow({ instance_id: "b", instance_name: "Bravo Host", agent_type: "host" }),
-            makeRow({ instance_id: "c", instance_name: "Alpha Host", agent_type: "host" }),
-            makeRow({ instance_id: "d", instance_name: "Unknown Type", agent_type: undefined }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Zulu Sandbox", agent_type: "container" }),
+                makeRow({ instance_id: "b", instance_name: "Bravo Host", agent_type: "host" }),
+                makeRow({ instance_id: "c", instance_name: "Alpha Host", agent_type: "host" }),
+                makeRow({ instance_id: "d", instance_name: "Unknown Type", agent_type: undefined }),
+            ])
+        );
         const [sortBy] = createSignal<AgentSortOption>("type");
         render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Alpha Host", "Bravo Host", "Zulu Sandbox", "Unknown Type"]);
@@ -459,21 +478,25 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
         // (default_agent_type() in backend/storage/agents/mod.rs) — every
         // non-"container" value is treated as the host controller at
         // launch, so a "standalone" agent IS effectively a host agent.
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Sandbox Agent", agent_type: "container" }),
-            makeRow({ instance_id: "b", instance_name: "Legacy Standalone", agent_type: "standalone" }),
-            makeRow({ instance_id: "c", instance_name: "Explicit Host", agent_type: "host" }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Sandbox Agent", agent_type: "container" }),
+                makeRow({ instance_id: "b", instance_name: "Legacy Standalone", agent_type: "standalone" }),
+                makeRow({ instance_id: "c", instance_name: "Explicit Host", agent_type: "host" }),
+            ])
+        );
         const [sortBy] = createSignal<AgentSortOption>("type");
         render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Explicit Host", "Legacy Standalone", "Sandbox Agent"]);
     });
 
     it("re-sorts reactively when sortBy changes after mount", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 2000 }),
-            makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 1000 }),
-        ]));
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 2000 }),
+                makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 1000 }),
+            ])
+        );
         const [sortBy, setSortBy] = createSignal<AgentSortOption>("recent");
         render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Zebra", "Alpha"]);
@@ -588,9 +611,7 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
             .mockImplementationOnce(() => new Promise(() => {}));
 
         const [identityId, setIdentityId] = createSignal<string>("id-1");
-        render(() => (
-            <MyAgentsList identityId={identityId} onReattach={() => {}} />
-        ));
+        render(() => <MyAgentsList identityId={identityId} onReattach={() => {}} />);
 
         await screen.findAllByTestId("agent-my-agents-entry");
         expect(screen.getByTestId("agent-my-agents-count")).toHaveTextContent("1");
@@ -653,15 +674,15 @@ describe("MyAgentsList — fetch error (retro-my-agents-fresh-channel-regression
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
         let rejectStale!: (err: unknown) => void;
-        const stalePromise = new Promise<never>((_, reject) => { rejectStale = reject; });
+        const stalePromise = new Promise<never>((_, reject) => {
+            rejectStale = reject;
+        });
         vi.mocked(RpcApi.ListRecentSessionsCommand)
             .mockImplementationOnce(() => stalePromise)
             .mockResolvedValueOnce(okResult([makeRow({ instance_id: "fresh" })]));
 
         const [identityId, setIdentityId] = createSignal<string>("id-1");
-        render(() => (
-            <MyAgentsList identityId={identityId} onReattach={() => {}} />
-        ));
+        render(() => <MyAgentsList identityId={identityId} onReattach={() => {}} />);
 
         // Supersede the still-pending first fetch before it ever resolves.
         setIdentityId("id-2");

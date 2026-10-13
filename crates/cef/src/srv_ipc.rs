@@ -28,9 +28,12 @@
 // until the host restarts. E.2c.5b/E.5 will tighten this once it
 // matters (saga consumers can't tolerate dropped events).
 
+#[cfg(target_os = "windows")]
 use std::sync::Arc;
 
+#[cfg(target_os = "windows")]
 use agentmux_common::ipc::{ClientKind, Command, Event};
+#[cfg(target_os = "windows")]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[cfg(target_os = "windows")]

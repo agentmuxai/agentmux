@@ -28,9 +28,9 @@ import { extensionOf } from "./files-sort";
 import { Button } from "@/app/element/ui";
 
 /** How much of a text file the preview reads. */
-export const PREVIEW_TEXT_BYTES = 256 * 1024;
+const PREVIEW_TEXT_BYTES = 256 * 1024;
 /** Wait this long after the selection settles before reading anything. */
-export const PREVIEW_DELAY_MS = 150;
+const PREVIEW_DELAY_MS = 150;
 
 export type Preview =
     | { kind: "none" }
@@ -46,14 +46,14 @@ export type Preview =
 const MARKDOWN = new Set(["md", "markdown", "mdx"]);
 
 /** A NUL in the first 8 KB: not text worth showing. */
-export function looksBinary(bytes: Uint8Array): boolean {
+function looksBinary(bytes: Uint8Array): boolean {
     const n = Math.min(bytes.length, 8192);
     for (let i = 0; i < n; i++) if (bytes[i] === 0) return true;
     return false;
 }
 
 /** Reads what the preview shows for `entry` at `path`. */
-export async function loadPreview(entry: FsEntry, path: string, signal: AbortSignal): Promise<Preview> {
+async function loadPreview(entry: FsEntry, path: string, signal: AbortSignal): Promise<Preview> {
     if (entry.is_dir) return { kind: "folder", entry };
     if (entry.error) return { kind: "other", entry, reason: entry.error };
     const ext = extensionOf(entry.name);

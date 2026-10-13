@@ -350,6 +350,7 @@ pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, win
 /// `size: {width, height}` shape (`crates/srv/src/backend/obj.rs`'s
 /// `Point`/`WinSize`) since the two crates don't share these types directly
 /// — the wire format is plain JSON either way.
+#[cfg(target_os = "windows")]
 pub(crate) fn backend_set_window_pos_and_size(web_endpoint: &str, auth_key: &str, window_id: &str, rect: agentmux_common::ipc::Rect) {
     let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_pos_and_size") else {
         return;
@@ -553,6 +554,7 @@ pub(crate) fn backend_get_client_window_ids(web_endpoint: &str, auth_key: &str) 
 /// identity — labels can recur across host restarts); `None` on transport
 /// failure, `Some(vec![])` on a clean no-match. Same wire shape / blocking
 /// thread contract as `backend_get_client_window_ids` above.
+#[cfg(target_os = "windows")]
 pub(crate) fn backend_find_window_by_label(
     web_endpoint: &str,
     auth_key: &str,
@@ -738,6 +740,7 @@ pub(crate) fn register_ipc_with_backend(
 /// session-end wndproc hook) uses this to decide whether it is safe to leave
 /// the once-per-attempt flush latch set, or whether it must re-arm it so a
 /// later trigger in the same shutdown attempt gets another chance.
+#[cfg(target_os = "windows")]
 pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) -> bool {
     use std::io::{Read, Write};
 

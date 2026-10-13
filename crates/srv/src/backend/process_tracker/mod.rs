@@ -214,11 +214,13 @@ pub trait TrackerHandle: Send + Sync {
 }
 
 /// How reliable this platform's tracker is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum TrackingConfidence {
     /// Descendants can't escape the tracker. Windows Job Objects +
     /// Linux cgroups v2.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))] // Only those two trackers build it.
     High,
     /// Descendants can escape via `setsid`, launchd, etc. macOS.
     BestEffort,

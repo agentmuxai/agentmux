@@ -27,5 +27,3 @@ export const settingsPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { SettingsViewModel };

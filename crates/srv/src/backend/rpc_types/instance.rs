@@ -100,7 +100,8 @@ pub struct CommandListNamedAgentsData {
 /// display name + provider), `db_agent_identity_links`/`db_accounts`
 /// (for the identity display name), and `db_bundles` (for bundle
 /// names) so the frontend renders without further lookups.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NamedAgentRow {
     pub instance_id: String,
     pub instance_name: String,
@@ -112,7 +113,9 @@ pub struct NamedAgentRow {
     pub identity_name: String,
     pub memory_id: String,
     pub memory_name: String,
+    #[ts(type = "number")]
     pub started_at: i64,
+    #[ts(type = "number")]
     pub ended_at: i64,
     pub status: String,
     pub block_id_hint: String,
@@ -160,7 +163,8 @@ pub struct CommandListRecentSessionsData {
 /// empty `preview` mean the snapshot wasn't readable (the block may
 /// pre-date the persistence flow or have crashed before its first
 /// 30s snapshot) — the row still surfaces so the user can reattach.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RecentSessionRow {
     pub instance_id: String,
     pub instance_name: String,
@@ -200,9 +204,11 @@ pub struct RecentSessionRow {
     /// exist or doesn't contain a user_message node yet.
     pub preview: String,
     /// Total `nodes.length` from the snapshot. 0 when unavailable.
+    #[ts(type = "number")]
     pub node_count: usize,
     /// Last activity timestamp (filestore modts when the snapshot
     /// exists, otherwise `started_at`). Drives the sort order.
+    #[ts(type = "number")]
     pub last_active_at: i64,
     /// Whether `output.state.json` was found in filestore for this
     /// block. False when the snapshot doesn't exist yet (no preview)
@@ -221,9 +227,11 @@ pub struct RecentSessionRow {
     pub snapshot_check_failed: bool,
     /// When the agent definition was first created (ms since epoch).
     /// Shown as "Created" in the My Agents card.
+    #[ts(type = "number")]
     pub agent_created_at: i64,
     /// When this instance was last launched (ms since epoch).
     /// Shown as "Last Launch" in the My Agents card.
+    #[ts(type = "number")]
     pub started_at: i64,
     /// "host" or "container" — drives the runtime badge in the My Agents list.
     #[serde(default)]
@@ -243,7 +251,8 @@ pub struct RecentSessionRow {
 /// this call (empty = fully healthy); the frontend treats an empty
 /// `rows` alongside a non-empty `degraded` as an error state, not a
 /// trustworthy zero.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ListRecentSessionsResult {
     pub rows: Vec<RecentSessionRow>,
     #[serde(default)]

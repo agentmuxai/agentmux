@@ -21,10 +21,10 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NativeMemoryVersionMeta } from "@/app/store/rpc-api";
 import { MemoryHistoryModel, type MemoryHistorySource } from "@/app/view/memory-editor/memory-history-model";
 
-export { orderVersionsOldestFirst, sourceLabel, sourceWarning } from "@/app/view/memory-editor/memory-history-model";
+export { orderVersionsOldestFirst } from "@/app/view/memory-editor/memory-history-model";
 
 /** The `agent:memory:*` data source for one (agent, file). */
-export function nativeMemoryHistorySource(
+function nativeMemoryHistorySource(
     agentId: string,
     filename: string,
 ): MemoryHistorySource<NativeMemoryVersionMeta> {

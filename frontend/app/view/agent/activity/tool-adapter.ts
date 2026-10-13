@@ -53,9 +53,8 @@ function pureSleepMs(n: ToolNode): number | null {
 }
 
 /** The harness's literal acceptance-message prefix for a genuinely detached
- *  launch (see BashParams.run_in_background's doc comment). Exported so any
- *  other code that needs to recognize the same signal doesn't redefine it. */
-export const BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:";
+ *  launch (see BashParams.run_in_background's doc comment). */
+const BACKGROUND_LAUNCH_ACCEPTED_PREFIX = "Command running in background with ID:";
 
 function isBashToolNode(n: DocumentNode): n is ToolNode {
     return n.type === "tool" && n.tool === "Bash" && n.timestamp != null;

@@ -54,6 +54,7 @@ static REAPED_CUMULATIVE: AtomicU64 = AtomicU64::new(0);
 
 /// `(candidates found this sweep, first_seen entries carried across sweeps,
 /// cumulative blocks reaped since process start)`.
+#[cfg(any(windows, test))]
 pub fn last_sweep_stats() -> (usize, usize, u64) {
     (
         LAST_CANDIDATES.load(Ordering::Relaxed),

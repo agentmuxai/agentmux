@@ -194,17 +194,6 @@ export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     agentmux: "AgentMux",
 };
 
-export const PROVIDER_COLORS: Record<AccountProvider, string> = {
-    github: "#e1effe",
-    openai: "#d1fae5",
-    aws: "#fef3c7",
-    anthropic: "#ede9fe",
-    google: "#e8f0fe",
-    slack: "#f3e8fd",
-    custom: "#f1f5f9",
-    agentmux: "#ede9fe",
-};
-
 export const KIND_LABELS: Record<AccountKind, string> = {
     pat: "Personal Access Token",
     role: "IAM Role",

@@ -113,7 +113,7 @@ pub fn spawn_tracked(block_id: &str, cmd: &mut tokio::process::Command, join: Jo
     place_spawn(block_id, cmd, join == Join::Agent);
     #[cfg(windows)]
     let suspended = start_suspended(block_id, cmd, join == Join::Agent);
-    let mut child = cmd.spawn()?;
+    let child = cmd.spawn()?;
     if let Some(pid) = child.id() {
         match join {
             Join::Agent => track_spawned_agent(block_id, pid),
@@ -124,6 +124,7 @@ pub fn spawn_tracked(block_id: &str, cmd: &mut tokio::process::Command, join: Jo
         #[cfg(windows)]
         if suspended {
             if let Err(e) = agentmux_common::win32::resume_main_thread(pid) {
+                let mut child = child;
                 let _ = child.start_kill();
                 return Err(std::io::Error::other(format!("resume suspended child {pid}: {e}")));
             }
@@ -333,6 +334,7 @@ impl AgentProcessRegistry {
     /// count that grows without bound (no matching `remove` on pane close)
     /// or a PID count far exceeding what's actually open would both be
     /// visible here well before the commit-side symptom is undeniable.
+    #[cfg(any(windows, test))]
     pub fn stats(&self) -> (usize, usize) {
         let map = self.inner.lock();
         let pids: usize = map.values().map(|e| e.last_pids.len()).sum();

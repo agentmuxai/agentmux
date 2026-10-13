@@ -13,7 +13,7 @@ import { connectorsPaneTab } from "@/app/view/connectors/connectors";
 import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW, LEGACY_REMOTES_VIEW } from "@/app/view/section-pane/panes";
 
 /** The meta patch that turns a saved Remotes block into Connectors → Remotes. */
-export const REMOTES_MIGRATION_PATCH = { view: CONNECTORS_VIEW, [CONNECTORS_SECTION_KEY]: "remotes" } as const;
+const REMOTES_MIGRATION_PATCH = { view: CONNECTORS_VIEW, [CONNECTORS_SECTION_KEY]: "remotes" } as const;
 
 export const remotesPaneTab: PaneTabManifest = {
     apiVersion: 1,

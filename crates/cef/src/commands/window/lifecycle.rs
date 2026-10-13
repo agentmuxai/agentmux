@@ -602,7 +602,7 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
         return;
     }
     // Fast path.
-    if let Some(mut browser) = state.get_browser(label) {
+    if let Some(browser) = state.get_browser(label) {
         if let Some(host) = browser.host() {
             let hwnd = host.window_handle();
             if !hwnd.0.is_null() {

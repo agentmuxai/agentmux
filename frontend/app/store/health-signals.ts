@@ -44,7 +44,7 @@ export interface HealthSignal {
 
 const KINDS: HealthKind[] = ["backend", "pagefile", "ram"];
 
-export function severity(level: HealthLevel): number {
+function severity(level: HealthLevel): number {
     return level === "critical" ? 2 : level === "warn" ? 1 : 0;
 }
 

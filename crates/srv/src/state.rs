@@ -9,7 +9,7 @@
 //
 // What's here:
 //   * `LifecyclePhase` (re-exported from agentmux-common::ipc) — E.1b
-//   * `ProcessRecord` — pid, kind, state, spawned_at — E.1b
+//   * `ProcessRecord` — state — E.1b
 //   * `ProcessState` — Running / Exited — E.1b
 //   * `WorkspaceRecord` — workspace_id, name — E.2
 //   * `State` — top-level: lifecycle + process map + workspaces +
@@ -22,7 +22,6 @@
 
 use std::collections::HashMap;
 
-use agentmux_common::ipc::ClientKind;
 pub use agentmux_common::ipc::LifecyclePhase;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,10 +32,8 @@ pub enum ProcessState {
 
 #[derive(Debug, Clone)]
 pub struct ProcessRecord {
-    pub pid: u32,
-    pub kind: ClientKind,
     pub state: ProcessState,
-    pub spawned_at: String,
+    #[cfg(test)]
     pub version: String,
 }
 

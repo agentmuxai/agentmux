@@ -36,7 +36,7 @@ export const QUIET_CAP_MS = 15_000;
 export const OPEN_TIMEOUT_MS = 120_000;
 
 /** Steps, in the order they normally happen — also the line's key order. */
-export const OPEN_PHASES = [
+const OPEN_PHASES = [
     "cli",
     "config",
     "committed",

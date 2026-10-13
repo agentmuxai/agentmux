@@ -8,7 +8,7 @@
  * it, as file managers do. docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.3.
  */
 
-export const TYPEAHEAD_RESET_MS = 500;
+const TYPEAHEAD_RESET_MS = 500;
 
 export class TypeAhead {
     private buffer = "";
