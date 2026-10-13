@@ -30,6 +30,7 @@ export function makePaneTabHostContext(blockId: string, nodeModel: NodeModel): P
         },
         isFocused: () => nodeModel.isFocused?.() ?? false,
         visibility: usePaneTabVisibility(blockId),
+        splitterDragging: () => nodeModel.isSplitterDragging?.() ?? false,
     };
 }
 

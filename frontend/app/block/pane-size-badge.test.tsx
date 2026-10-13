@@ -24,17 +24,10 @@ describe("PaneSizeBadge", () => {
         return el;
     };
 
-    it("shows the frame's size, bottom-left by default", () => {
+    it("shows the frame's size", () => {
         const el = frame();
         const { container } = render(() => <PaneSizeBadge target={() => el} />);
         const badge = container.querySelector(".pane-size-badge")!;
         expect(badge.textContent).toBe("812×438");
-        expect(badge.classList.contains("pane-size-badge--top")).toBe(false);
-    });
-
-    it("anchors top-left for a native-surface pane, whose page covers the bottom", () => {
-        const el = frame();
-        const { container } = render(() => <PaneSizeBadge target={() => el} atTop />);
-        expect(container.querySelector(".pane-size-badge")!.classList.contains("pane-size-badge--top")).toBe(true);
     });
 });

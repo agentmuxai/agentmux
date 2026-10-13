@@ -25,14 +25,4 @@
     pointer-events: none;         // never blocks pane interactions
     user-select: none;
     white-space: nowrap;
-
-    // A browser pane's page is a native window above the DOM ("airspace"),
-    // so a bottom-left badge sits under it and never shows. Its top edge
-    // (pane header / nav bar) is DOM, so the badge goes there instead. No
-    // overlay registration: that would re-clip every pane on every frame of
-    // the drag. REPORT_PANE_SIZE_BADGE_HIDDEN_ON_BROWSER_PANES_RCA_2026_10_12.md.
-    &.pane-size-badge--top {
-        top: var(--space-2);
-        bottom: auto;
-    }
 }

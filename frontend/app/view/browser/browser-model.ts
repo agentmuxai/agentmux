@@ -275,6 +275,12 @@ export class BrowserViewModel {
     private get _diagTag(): string { return `[browser-pane:diag][${this.blockId.slice(0, 7)} vm=${this.__diagVmId}]`; }
     private diag(msg: string): void { console.log(`${this._diagTag} ${msg}`); }
 
+    /** A splitter of this pane's layout is being dragged (pane size badges
+     *  are showing): the native page leaves the badge's strip to the DOM. */
+    splitterDragging(): boolean {
+        return this.ctx.splitterDragging?.() ?? false;
+    }
+
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
     // (browser.tsx); its own block's meta comes from, and goes to, the host
     // context.
