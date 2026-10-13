@@ -58,9 +58,18 @@ export function wpsNames(source) {
  *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal. */
 export function untypedSubscriptions(sources, typed, wps) {
     const errors = [];
+    // A subscription can also name its event through a string constant of its own
+    // (`const EVENT_AGENT_SHUTDOWN = "agent:shutdown"`), declared in any source.
+    const consts = new Map();
+    for (const [, text] of sources) {
+        for (const m of text.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*(?::\s*string\s*)?=\s*(?:"([^"]+)"|WpsEvent\.(\w+))/g)) {
+            const name = m[2] ?? wps.get(m[3]);
+            if (name) consts.set(m[1], name);
+        }
+    }
     for (const [path, text] of sources) {
-        for (const m of text.matchAll(/eventType:\s*(?:WpsEvent\.(\w+)|"([^"]+)")/g)) {
-            const name = m[1] ? wps.get(m[1]) : m[2];
+        for (const m of text.matchAll(/eventType:\s*(?:WpsEvent\.(\w+)|"([^"]+)"|([A-Z][A-Z0-9_]*)\b)/g)) {
+            const name = m[1] ? wps.get(m[1]) : m[2] ?? consts.get(m[3]);
             if (!name || !typed.has(name)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: "${name}" has a typed payload; subscribe with onMuxEvent(WpsEvent.${m[1] ?? "…"}, (data) => …), not muxEventSubscribe`);

@@ -20,7 +20,6 @@ use futures_util::StreamExt as _;
 use crate::backend::blockcontroller::{
     core, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
-use crate::backend::mps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
@@ -648,13 +647,7 @@ impl SubprocessController {
             // reconnecting subscribers also receive the last failure without a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(ref b)) = (run_failure.as_ref(), broker.as_ref()) {
-                b.publish(mps::MuxEvent {
-                    event: mps::EVENT_AGENT_FAILURE.to_string(),
-                    scopes: vec![format!("block:{}", block_id)],
-                    sender: String::new(),
-                    persist: 1,
-                    data: serde_json::to_value(failure).ok(),
-                });
+                b.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id)], 1);
             }
 
             run_lock.store(false, std::sync::atomic::Ordering::SeqCst);

@@ -9,6 +9,7 @@ import { turnOutputTokens } from "./turn-contribution";
 import { plausibleReading } from "./context-reading";
 import { AgentPaneState, INTERRUPT_TIMEOUT_MS, LIVENESS_RECOVERY_MS, STUCK_THRESHOLD_MS, SUBMIT_TIMEOUT_MS } from "./types";
 import { streaming, mk, liveReading, ready } from "./reducer-test-fixtures";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 describe("agent-pane-state reducer", () => {
     describe("Tokens", () => {

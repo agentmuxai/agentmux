@@ -22,7 +22,7 @@
  */
 
 import { onCleanup, onMount, createSignal, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { buildPaneArgs } from "./buildRuntimeArgs";
@@ -151,14 +151,10 @@ export function compareRuntime(
 export function useProcessRuntime(blockId: string): Accessor<ProcessRuntime | undefined> {
     const [state, setState] = createSignal<ProcessRuntime | undefined>(undefined);
     onMount(() => {
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.AgentRuntime,
-            scope: MOS.makeORef("block", blockId),
-            handler: (event) => {
-                const parsed = parseAgentRuntimeEvent((event as { data?: unknown })?.data);
+        const unsub = onMuxEvent(WpsEvent.AgentRuntime, (data) => {
+                const parsed = parseAgentRuntimeEvent(data);
                 if (parsed) setState(parsed);
-            },
-        });
+            }, MOS.makeORef("block", blockId));
         onCleanup(() => unsub?.());
     });
     return state;

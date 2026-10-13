@@ -1196,19 +1196,19 @@ pub(crate) fn agent_runtime_status(
     }
 }
 
+/// The `agent-message-accepted` event's payload (`mps_events::AgentMessageAccepted`).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MessageAcceptedEvent {
+    pub block_id: String,
+    pub message_id: String,
+}
+
 /// Publish `agent-message-accepted` for `message_id` on `block:<id>`, telling
 /// the frontend to promote that pending entry from queued to in-document.
 pub(crate) fn publish_message_accepted(broker: &super::mps::Broker, block_id: &str, message_id: &str) {
-    broker.publish(super::mps::MuxEvent {
-        event: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
-        scopes: vec![format!("block:{}", block_id)],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({
-            "block_id": block_id,
-            "message_id": message_id,
-        })),
-    });
+    let payload = MessageAcceptedEvent { block_id: block_id.to_string(), message_id: message_id.to_string() };
+    broker.publish_event::<super::mps_events::AgentMessageAccepted>(&payload, vec![format!("block:{}", block_id)], 0);
 }
 
 #[cfg(test)]

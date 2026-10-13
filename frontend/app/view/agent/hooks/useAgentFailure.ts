@@ -39,7 +39,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
@@ -277,12 +277,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // check is false and it just records the failure.
         if (pf) opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at: Date.now() });
 
-        const unsubFailure = muxEventSubscribe({
-            eventType: WpsEvent.AgentFailure,
-            scope: MOS.makeORef("block", opts.blockId),
-            handler: (event) => {
-                const f = (event as any)?.data as AgentFailure | undefined;
-                if (!f) return;
+        const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
                 cancelCountdown();
                 // A new failure never inherits an armed Take over: its row must
                 // start at the first click again (ReAgent P1 on #3742).
@@ -294,8 +289,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // a still-working turn — see FailureObserved's reducer case.
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
                 if (isTransient(f.code)) armAutoRetry();
-            },
-        });
+            }, MOS.makeORef("block", opts.blockId));
 
         // Restore the full auto-retry budget once the LAST turn genuinely
         // succeeded — a later unrelated transient failure must get its own full

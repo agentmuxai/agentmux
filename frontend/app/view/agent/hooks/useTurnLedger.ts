@@ -5,7 +5,7 @@ import { onCleanup, onMount } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { isNewerLedger, parseTurnLedger, type TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
 import * as MOS from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 
 /**
@@ -31,16 +31,12 @@ export function useTurnLedger(blockId: string, paneModel: Pick<AgentPaneModel, "
     onMount(() => {
         const cached = latestLedger.get(blockId);
         if (cached) paneModel.dispatchPane({ type: "TurnObserved", ledger: cached }, "system");
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.AgentTurn,
-            scope: MOS.makeORef("block", blockId),
-            handler: (event) => {
-                const ledger = parseTurnLedger((event as { data?: unknown })?.data);
+        const unsub = onMuxEvent(WpsEvent.AgentTurn, (data) => {
+                const ledger = parseTurnLedger(data);
                 if (!ledger) return;
                 if (isNewerLedger(ledger, latestLedger.get(blockId))) latestLedger.set(blockId, ledger);
                 paneModel.dispatchPane({ type: "TurnObserved", ledger }, "system");
-            },
-        });
+            }, MOS.makeORef("block", blockId));
         onCleanup(() => unsub?.());
     });
 }

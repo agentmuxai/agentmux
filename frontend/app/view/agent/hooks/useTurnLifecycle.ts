@@ -21,7 +21,7 @@
  */
 
 import { createEffect, onCleanup } from "solid-js";
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { recordTurn } from "@/store/token-usage";
@@ -347,16 +347,12 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
                 opts.model.dispatchPane({ type: "SubmitTimeoutElapsed", at: Date.now() });
             }
         }, SUBMIT_TIMEOUT_MS);
-        const acceptedUnsub = muxEventSubscribe({
-            eventType: WpsEvent.AgentMessageAccepted,
-            scope: MOS.makeORef("block", opts.blockId),
-            handler: () => {
+        const acceptedUnsub = onMuxEvent(WpsEvent.AgentMessageAccepted, () => {
                 if (timer != null) {
                     clearTimeout(timer);
                     timer = null;
                 }
-            },
-        });
+            }, MOS.makeORef("block", opts.blockId));
         onCleanup(() => {
             acceptedUnsub();
             if (timer != null) {

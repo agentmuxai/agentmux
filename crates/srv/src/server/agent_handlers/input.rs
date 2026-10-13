@@ -907,13 +907,7 @@ pub async fn run_agent_turn_joining(
                 &Some(mstore.clone()),
                 &Some(event_bus_gate.clone()),
             );
-            broker.publish(crate::backend::mps::MuxEvent {
-                event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
-                scopes: vec![format!("block:{}", block_id)],
-                sender: String::new(),
-                persist: 1,
-                data: serde_json::to_value(&gate_failure).ok(),
-            });
+            broker.publish_event::<crate::backend::mps_events::AgentFailed>(&gate_failure, vec![format!("block:{}", block_id)], 1);
     };
     let mut env_vars = match env_result {
         Ok(env) => env,

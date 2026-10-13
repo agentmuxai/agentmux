@@ -66,31 +66,6 @@ declare global {
         subblockids?: string[];
     };
 
-    // agents.failure.AgentFailure — payload of the `agentfailure` wave event
-    // (classified cause of a non-zero agent exit). snake_case `code`, camelCase rest.
-    type AgentFailure = {
-        code:
-            | "rate_limited"
-            | "overloaded"
-            | "usage_limit"
-            | "auth"
-            | "context_exceeded"
-            | "max_turns"
-            | "network"
-            | "killed"
-            | "no_output"
-            | "spawn_failure"
-            | "unknown_non_zero"
-            | "agent_deleted"
-            | "live_elsewhere";
-        title: string;
-        detail: string;
-        exitCode?: number;
-        signal?: number;
-        stderrTail?: string;
-        retryable: boolean;
-    };
-
     // waveobj.BlockDef
     type BlockDef = {
         files?: {[key: string]: FileDef};
@@ -803,7 +778,7 @@ declare global {
         "agent:historyTabFor"?: string;
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
-        "agent:last_failure"?: AgentFailure;
+        "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
