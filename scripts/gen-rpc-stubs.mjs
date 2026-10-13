@@ -57,8 +57,13 @@ export function renderStub(entry, row) {
     const opts = entry.opts ?? "opts";
     const lines = [`    // command "${entry.command}"`];
     if (NO_ARGS.has(req)) {
-        const send = entry.send ?? "{}";
+        // A Rust `()` request (ts-rs: `null`) deserializes only from JSON null, so it sends null;
+        // an empty struct (`NoArgsReq`) only from `{}`; `Option<NoArgsReq>` takes either.
+        const unit = req === "null";
+        const send = entry.send ?? (unit ? "null" : "{}");
         if (send !== "{}" && send !== "null") throw new Error(`${entry.command}: "send" for a no-argument command is "{}" or "null", not ${send}`);
+        if (unit && send !== "null") throw new Error(`${entry.command}: its Rust request is (), which only deserializes from null, so "send" must be "null"`);
+        if (/^(NoArgsReq|NotifyNoArgs)$/.test(req) && send !== "{}") throw new Error(`${entry.command}: its Rust request is ${req}, an empty struct, which only deserializes from {}, so "send" must be "{}"`);
         lines.push(`    ${entry.method}(client: RpcClient, opts?: RpcOpts): Promise<${ret}> {`);
         lines.push(`        return client.rpcCall(${JSON.stringify(entry.command)}, ${send}, ${opts});`);
     } else {

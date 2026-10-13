@@ -37,6 +37,16 @@ describe("renderStub", () => {
         expect(renderStub({ command: "c", method: "CCommand" }, row("c", "null", "CResult"))).toContain("CCommand(client: RpcClient, opts?: RpcOpts)");
     });
 
+    it("a () request sends null by default, and can't be told to send {}", () => {
+        // serde deserializes () only from JSON null: {} would fail before the handler runs.
+        expect(renderStub({ command: "u", method: "UCommand" }, row("u", "null", "UResult"))).toContain('rpcCall("u", null, opts)');
+        expect(() => renderStub({ command: "u", method: "UCommand", send: "{}" }, row("u", "null", "UResult"))).toThrow(/only deserializes from null/);
+    });
+
+    it("an empty-struct request must send {}", () => {
+        expect(() => renderStub({ command: "e", method: "ECommand", send: "null" }, row("e", "NoArgsReq", "null"))).toThrow(/only deserializes from {}/);
+    });
+
     it("a unit response is Promise<void>, and raw JSON is any", () => {
         expect(renderStub({ command: "u", method: "UCommand" }, row("u", "UReq", "null"))).toContain("Promise<void>");
         expect(renderStub({ command: "j", method: "JCommand" }, row("j", "JsonValue", "JsonValue"))).toContain("data: any, opts?: RpcOpts): Promise<any>");
