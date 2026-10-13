@@ -357,3 +357,14 @@ describe("the faint AgentMux logo in an empty Media pane", () => {
         expect(v.container.querySelector(".empty-pane-logo")).toBeNull();
     });
 });
+
+describe("two empty panes on screen at once", () => {
+    it("each logo has its own SVG ids, so neither renders blank", () => {
+        const a = mount();
+        const b = mount();
+        const ids = (v: ReturnType<typeof mount>) =>
+            [...v.container.querySelectorAll(".empty-pane-logo [id]")].map((e) => e.id);
+        expect(ids(a).length).toBeGreaterThan(0);
+        expect(ids(a).filter((id) => ids(b).includes(id))).toEqual([]);
+    });
+});
