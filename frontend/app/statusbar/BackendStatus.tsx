@@ -14,6 +14,7 @@ import { healthSignals, startHealthSignals, worstHealthLevel } from "@/app/store
 import { healthLabel } from "@/app/store/health-signals-text";
 import { HealthNotices } from "./HealthNotices";
 import { statusDotColor, statusDotTip } from "./backend-dot";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
     switch (c) {

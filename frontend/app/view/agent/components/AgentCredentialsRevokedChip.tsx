@@ -23,6 +23,7 @@
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { PaneRow } from "./PaneRow";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 interface AgentCredentialsRevokedChipProps {
     /** AgentDefinition id — the scope of the revocation event. */

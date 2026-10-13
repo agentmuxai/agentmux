@@ -17,6 +17,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import type { ActiveSubagent } from "./swarm-model";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 /** Requests in flight, so the dock and the Swarm pane don't ask twice at once. */
 const inFlight = new Set<string>();
 

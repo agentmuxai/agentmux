@@ -167,17 +167,25 @@ const REMAKE_ARR_THRESHOLD: usize = 10 * 1024;
 
 // ---- Types ----
 
+/// One event on the broker. The envelope is typed; `data` is each event's own
+/// payload, still untyped (`any`) on the frontend: srv builds most payloads with
+/// `json!`, so there is no Rust type per event to generate yet.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxEvent {
     pub event: String,
+    // The skipped-when-empty fields are absent on the wire, so optional in TS.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[ts(as = "Option<Vec<String>>", optional)]
     pub scopes: Vec<String>,
     #[serde(skip_serializing_if = "String::is_empty", default)]
+    #[ts(as = "Option<String>", optional)]
     pub sender: String,
     #[serde(skip_serializing_if = "is_zero", default)]
-    #[ts(type = "number")]
+    #[ts(as = "Option<u32>", optional)]
     pub persist: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "any")]
     pub data: Option<serde_json::Value>,
 }
 

@@ -297,6 +297,7 @@ import type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 import type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
 import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 import type { NamedAgentRow } from "@/types/rpc/NamedAgentRow";
 import type { NativeMemoryAdoptionListResult } from "@/types/rpc/NativeMemoryAdoptionListResult";
 import type { NativeMemoryClaimList } from "@/types/rpc/NativeMemoryClaimList";

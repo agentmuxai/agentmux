@@ -18,6 +18,7 @@ import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popo
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { diskFreeColor, formatDiskGb, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 interface DiskVolumesPopoverProps {
     /** The status bar's Disk readout. */

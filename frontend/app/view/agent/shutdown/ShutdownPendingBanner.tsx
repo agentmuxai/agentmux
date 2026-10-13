@@ -26,6 +26,7 @@ import {
     secondsLeft,
     type PendingShutdown,
 } from "./shutdown-pending";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 interface ShutdownPendingBannerProps {
     blockId: string;

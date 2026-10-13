@@ -25,6 +25,7 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
