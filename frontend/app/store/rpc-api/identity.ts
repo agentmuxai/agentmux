@@ -40,8 +40,6 @@ export type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 export type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
 export type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 
-import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
-import type { CommandListAllAgentIdentitiesData } from "@/types/rpc/CommandListAllAgentIdentitiesData";
 import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
@@ -62,16 +60,6 @@ export type AuthStartInput = Pick<StartProviderAuthReq, "providerId" | "cliPath"
 export type { AgentIdentityLink as AgentDefinitionIdentity } from "@/types/rpc/AgentIdentityLink";
 
 export const IdentityApi = {
-    // ── v6: identity / instance / fork ──────────────────────────────────────
-
-    ListIdentityAccountsCommand(
-        client: RpcClient,
-        data: { provider?: string } = {},
-        opts?: RpcOpts
-    ): Promise<IdentityAccount[]> {
-        return client.rpcCall("listidentityaccounts", data, opts);
-    },
-
     UpsertIdentityAccountCommand(
         client: RpcClient,
         data: Partial<IdentityAccount>,
@@ -150,17 +138,6 @@ export const IdentityApi = {
 
     AccountOAuthPollCommand(client: RpcClient, data: { sessionId: string }, opts?: RpcOpts): Promise<OAuthFlowStatus> {
         return client.rpcCall("account.oauth.poll", data, opts);
-    },
-
-    // Every direct link across every agent — powers the Armory "Identities"
-    // read-only rail (issue #1624 PR-C), which needs all agents' bindings
-    // up front rather than one ListAgentIdentitiesCommand call per rail row.
-    ListAllAgentIdentitiesCommand(
-        client: RpcClient,
-        data: CommandListAllAgentIdentitiesData = {},
-        opts?: RpcOpts
-    ): Promise<AgentIdentityLink[]> {
-        return client.rpcCall("listallagentidentities", data, opts);
     },
 
     // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)

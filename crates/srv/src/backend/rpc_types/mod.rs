@@ -38,6 +38,8 @@ mod toolchain;
 mod tower;
 mod viewer;
 mod websocket;
+#[cfg(test)]
+mod optional_fields_tests;
 
 pub use agent::*;
 pub use attachments::*;

@@ -24,9 +24,6 @@ export type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 export type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
 export type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
 
-import type { CreateScratchFileReq } from "@/types/rpc/CreateScratchFileReq";
-import type { CreateScratchFileResult } from "@/types/rpc/CreateScratchFileResult";
-
 // The LSP wire shapes are GENERATED from their Rust definitions by ts-rs.
 // They used to be function-local `Cmd` structs inside each handler, which is
 // exactly why the frontend restated all three by hand: a type declared inside
@@ -62,15 +59,5 @@ export const FileApi = {
 
     FileJoinCommand(client: RpcClient, data: string[], opts?: RpcOpts): Promise<FileInfo> {
         return client.rpcCall("filejoin", data, opts);
-    },
-
-    // Creates a scratch buffer file in ~/.agentmux/cache/scratch/. Returns the backing path + scratch_id.
-    // Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
-    CreateScratchFileCommand(
-        client: RpcClient,
-        data: CreateScratchFileReq = {},
-        opts?: RpcOpts
-    ): Promise<CreateScratchFileResult> {
-        return client.rpcCall("createscratchfile", data, opts);
     },
 };

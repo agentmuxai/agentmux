@@ -70,7 +70,6 @@ import { createMemoryReinjectionController } from "./memory-reinjection-controll
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
 import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { interceptFrame, type FrameInterceptState, type FrameSink } from "./frame-intercepts";
-import { MemoryDeliveryApi } from "@/app/store/rpc-api/memory-delivery";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
 import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
@@ -380,7 +379,7 @@ export function useAgentStream({
         // srv composes the message and the card (CD2b); an older srv rejects
         // and the controller composes here instead.
         compose: async (reason) => {
-            const r = await MemoryDeliveryApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason });
+            const r = await RpcApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason });
             if (!r.text || !r.delivery_id || !r.frame) return null;
             const node = buildMemoryInjectedNode(r.frame, {
                 contextWindow: currentContextWindow(),
@@ -392,7 +391,7 @@ export function useAgentStream({
         // session start and after a compaction; this fallback fires only when
         // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
         claimFallback: (reason, boundaryUuid, eventAtMs) =>
-            MemoryDeliveryApi.ClaimFallbackCommand(TabRpcClient, {
+            RpcApi.ClaimFallbackCommand(TabRpcClient, {
                 block_id: blockId,
                 reason,
                 ...(boundaryUuid ? { boundary_uuid: boundaryUuid } : {}),

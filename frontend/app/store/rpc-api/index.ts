@@ -290,7 +290,6 @@ export type {
     InstallFailure,
     InstallToolResult,
     NoArgsReq,
-    ResolveCliInput,
     ResolveCliResult,
     RunCliLoginResult,
     SubscriptionRequest,

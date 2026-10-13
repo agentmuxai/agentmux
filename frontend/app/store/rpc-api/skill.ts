@@ -11,8 +11,6 @@
 // counterpart (no `check_s1`, global rows only) — that's what the Armory's
 // Skills tab uses.
 
-import { RpcClient } from "../rpc-client";
-
 // Every request and result shape below is GENERATED from its Rust definition by
 // ts-rs. They were function-local anonymous `struct Req` declarations inside
 // each handler closure -- sixteen of them -- so the inline types here were
@@ -38,7 +36,6 @@ export type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
 import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
 import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData";
-import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
 
 // The three upsert commands have every field except their scope key and `name`
 // marked `#[serde(default)]`, so all of them are omittable on the wire. ts-rs
@@ -53,26 +50,4 @@ export type SkillCatalogUpsertInput = Pick<CommandSkillCatalogUpsertData, "name"
 export type SkillCatalogUpsertForBundleInput = Pick<CommandSkillCatalogUpsertForBundleData, "bundle_id" | "name"> &
     Partial<Omit<CommandSkillCatalogUpsertForBundleData, "bundle_id" | "name">>;
 
-export const SkillApi = {
-    // ── Armory catalog (global skills only, no agent_id) ────────────────────
-
-    SkillCatalogListCommand(
-        client: RpcClient,
-        data: SkillCatalogListData = {},
-        opts?: RpcOpts
-    ): Promise<SkillCatalogItem[]> {
-        return client.rpcCall("skill.catalog.list", data, opts);
-    },
-
-    // Creates a NEW, PRIVATE skill scoped directly to a bundle (never
-    // global) — the actual "give this bundle its own skill" path.
-    // SkillCatalogBindToBundleCommand alone can only reference already-global
-    // rows, which already reach every agent.
-    SkillCatalogUpsertForBundleCommand(
-        client: RpcClient,
-        data: SkillCatalogUpsertForBundleInput,
-        opts?: RpcOpts
-    ): Promise<Skill> {
-        return client.rpcCall("skill.catalog.upsert_for_bundle", data, opts);
-    },
-};
+export const SkillApi = {};

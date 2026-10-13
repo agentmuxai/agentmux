@@ -5,11 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sectionsCommand = vi.fn();
 
-vi.mock("@/app/store/rpc-api/bundle", () => ({
-    BundleApi: { GlobalMemorySectionsCommand: (...args: unknown[]) => sectionsCommand(...args) },
-}));
-vi.mock("@/app/store/rpc-api/native-memory", () => ({
-    NativeMemoryApi: {
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        GlobalMemorySectionsCommand: (...args: unknown[]) => sectionsCommand(...args),
         NativeMemoryListCommand: async () => ({ files: [] }),
         NativeMemoryReadFileCommand: async () => ({ content: "" }),
     },

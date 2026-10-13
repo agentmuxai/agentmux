@@ -147,6 +147,14 @@
             "method": "CheckPathCommand"
         },
         {
+            "command": "memorydelivery:claim_fallback",
+            "method": "ClaimFallbackCommand"
+        },
+        {
+            "command": "memorydelivery:compose",
+            "method": "ComposeCommand"
+        },
+        {
             "command": "containerimagecheck",
             "method": "ContainerImageCheckCommand"
         },
@@ -156,16 +164,51 @@
             "send": "{}"
         },
         {
+            "command": "controllerinput",
+            "method": "ControllerInputCommand",
+            "optionalFields": [
+                "inputdata64",
+                "signame"
+            ]
+        },
+        {
             "command": "createagent",
-            "method": "CreateAgentDefinitionCommand"
+            "method": "CreateAgentDefinitionCommand",
+            "optionalFields": [
+                "icon",
+                "description",
+                "working_directory",
+                "shell",
+                "provider_flags",
+                "auto_start",
+                "restart_on_crash",
+                "idle_timeout_minutes",
+                "agent_type",
+                "environment",
+                "agent_bus_id"
+            ]
         },
         {
             "command": "createagentinstance",
-            "method": "CreateAgentInstanceCommand"
+            "method": "CreateAgentInstanceCommand",
+            "optionalFields": [
+                "block_id",
+                "parent_instance_id",
+                "identity_id",
+                "memory_id",
+                "instance_name",
+                "working_directory"
+            ]
         },
         {
             "command": "createagentskill",
-            "method": "CreateAgentSkillCommand"
+            "method": "CreateAgentSkillCommand",
+            "optionalFields": [
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
         },
         {
             "command": "browser_profiles.create",
@@ -178,6 +221,11 @@
         {
             "command": "createeditorfile",
             "method": "CreateEditorFileCommand"
+        },
+        {
+            "command": "createscratchfile",
+            "method": "CreateScratchFileCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "deleteagent",
@@ -239,6 +287,11 @@
             "command": "eventunsuball",
             "method": "EventUnsubAllCommand",
             "send": "null"
+        },
+        {
+            "command": "eventunsub",
+            "method": "EventUnsubCommand",
+            "dataType": "string"
         },
         {
             "command": "exportagents",
@@ -359,6 +412,11 @@
             "method": "GetBundleCommand"
         },
         {
+            "command": "getclaudeglobalconfig",
+            "method": "GetClaudeGlobalConfigCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "getdrone",
             "method": "GetDroneCommand"
         },
@@ -369,6 +427,12 @@
         {
             "command": "geteditorroots",
             "method": "GetEditorRootsCommand"
+        },
+        {
+            "command": "getfullconfig",
+            "method": "GetFullConfigCommand",
+            "send": "null",
+            "returns": "FullConfigType"
         },
         {
             "command": "getidentityaccount",
@@ -403,6 +467,11 @@
         {
             "command": "globalmemory:revert",
             "method": "GlobalMemoryRevertCommand"
+        },
+        {
+            "command": "globalmemory:sections",
+            "method": "GlobalMemorySectionsCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "hidenamedagent",
@@ -453,8 +522,28 @@
             "method": "ListAgentSkillsCommand"
         },
         {
+            "command": "listallagentidentities",
+            "method": "ListAllAgentIdentitiesCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "listbackgroundtasks",
             "method": "ListBackgroundTasksCommand"
+        },
+        {
+            "command": "bookmarks.list",
+            "method": "ListBookmarksCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "browser_profiles.list",
+            "method": "ListBrowserProfilesCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "listmemories",
+            "method": "ListBundlesCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "listdroneruns",
@@ -467,6 +556,11 @@
         {
             "command": "listeditordir",
             "method": "ListEditorDirCommand"
+        },
+        {
+            "command": "listidentityaccounts",
+            "method": "ListIdentityAccountsCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "lspsend",
@@ -491,6 +585,11 @@
         {
             "command": "mcp.catalog.delete",
             "method": "McpCatalogDeleteCommand"
+        },
+        {
+            "command": "mcp.catalog.list",
+            "method": "McpCatalogListCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "mcp.catalog.list_for_agent",
@@ -592,6 +691,14 @@
             "method": "NativeMemoryHistoryCommand"
         },
         {
+            "command": "agent:memory:list",
+            "method": "NativeMemoryListCommand"
+        },
+        {
+            "command": "agent:memory:read_file",
+            "method": "NativeMemoryReadFileCommand"
+        },
+        {
             "command": "agent:memory:revert",
             "method": "NativeMemoryRevertCommand"
         },
@@ -618,6 +725,11 @@
         {
             "command": "notify.focus",
             "method": "NotifyFocusCommand"
+        },
+        {
+            "command": "notify.takeactivation",
+            "method": "NotifyTakeActivationCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "notify.test",
@@ -700,6 +812,13 @@
             "command": "reseedagents",
             "method": "ReseedAgentDefinitionsCommand",
             "send": "{}"
+        },
+        {
+            "command": "resolvecli",
+            "method": "ResolveCliCommand",
+            "optionalFields": [
+                "block_id"
+            ]
         },
         {
             "command": "resolve.prereqs",
@@ -788,6 +907,11 @@
             "method": "SkillCatalogDeleteCommand"
         },
         {
+            "command": "skill.catalog.list",
+            "method": "SkillCatalogListCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "skill.catalog.list_for_agent",
             "method": "SkillCatalogListForAgentCommand"
         },
@@ -805,7 +929,25 @@
         },
         {
             "command": "skill.catalog.upsert",
-            "method": "SkillCatalogUpsertCommand"
+            "method": "SkillCatalogUpsertCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
+        },
+        {
+            "command": "skill.catalog.upsert_for_bundle",
+            "method": "SkillCatalogUpsertForBundleCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
         },
         {
             "command": "skill.delete",
@@ -825,7 +967,14 @@
         },
         {
             "command": "skill.upsert",
-            "method": "SkillUpsertCommand"
+            "method": "SkillUpsertCommand",
+            "optionalFields": [
+                "id",
+                "trigger",
+                "skill_type",
+                "description",
+                "content"
+            ]
         },
         {
             "command": "subprocessspawn",
@@ -866,7 +1015,10 @@
         },
         {
             "command": "unlinkagentidentity",
-            "method": "UnlinkAgentIdentityCommand"
+            "method": "UnlinkAgentIdentityCommand",
+            "optionalFields": [
+                "silent"
+            ]
         },
         {
             "command": "unwatcheditorfile",
@@ -875,6 +1027,27 @@
         {
             "command": "unwatchmediadir",
             "method": "UnwatchMediaDirCommand"
+        },
+        {
+            "command": "updateagent",
+            "method": "UpdateAgentDefinitionCommand",
+            "optionalFields": [
+                "description",
+                "working_directory",
+                "shell",
+                "provider_flags",
+                "auto_start",
+                "restart_on_crash",
+                "idle_timeout_minutes",
+                "agent_type",
+                "environment",
+                "agent_bus_id",
+                "accounts",
+                "container_image",
+                "container_volumes",
+                "auto_continue_enabled",
+                "model_vendor_base_url"
+            ]
         },
         {
             "command": "updateagentinstance",
@@ -917,6 +1090,16 @@
             "method": "WatchMediaDirCommand"
         },
         {
+            "command": "widget.api",
+            "method": "WidgetApiCommand",
+            "dataType": "{ port: number; path: string; method?: string; headers?: Record<string, string>; body?: string }"
+        },
+        {
+            "command": "widget.health",
+            "method": "WidgetHealthCommand",
+            "dataType": "{ port: number; health_check_path: string; health_check_body_contains?: string }"
+        },
+        {
             "command": "widgets.call",
             "method": "WidgetsCallCommand"
         },
@@ -935,7 +1118,10 @@
         },
         {
             "command": "widgets.install",
-            "method": "WidgetsInstallCommand"
+            "method": "WidgetsInstallCommand",
+            "optionalFields": [
+                "replace"
+            ]
         },
         {
             "command": "widgets.list",

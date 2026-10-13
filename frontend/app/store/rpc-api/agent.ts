@@ -251,14 +251,6 @@ export const AgentApi = {
         return client.rpcCall("listagents", data ?? {}, opts);
     },
 
-    UpdateAgentDefinitionCommand(
-        client: RpcClient,
-        data: AgentDefinitionUpdateInput,
-        opts?: RpcOpts
-    ): Promise<AgentDefinition> {
-        return client.rpcCall("updateagent", data, opts);
-    },
-
     // v8: powers the launch modal's "Continue agent" dropdown. Returns
     // named instance rows joined with their definition, account and
     // bundle names for one-shot rendering. Pass `definition_id`

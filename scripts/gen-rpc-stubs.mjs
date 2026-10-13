@@ -40,7 +40,7 @@ const AMBIENT_FILES = [join(ROOT, "frontend/types/srv-types.d.ts"), join(ROOT, "
 /** Request types that mean "no argument": the stub takes no data parameter. */
 const NO_ARGS = new Set(["NoArgsReq", "NoArgsReq | null", "NotifyNoArgs", "NotifyNoArgs | null", "null"]);
 /** Built-in names a type expression may use without an import. */
-const BUILTIN = new Set(["Array", "Record", "Partial", "Promise"]);
+const BUILTIN = new Set(["Array", "Record", "Partial", "Promise", "Omit", "Pick"]);
 
 /** The TypeScript a schema type name becomes in a stub. */
 export function tsOf(name) {
@@ -49,18 +49,41 @@ export function tsOf(name) {
     return name;
 }
 
+/** A raw-JSON (serde_json::Value) request or response that the manifest gives a precise
+ *  TypeScript type, as its hand-written stub had (`dataType` / `returns`). Allowed only where
+ *  the schema really says JsonValue: anywhere else the Rust type is the truth. */
+function overridden(entry, side, schemaName) {
+    const key = side === "data" ? "dataType" : "returns";
+    if (entry[key] === undefined) return null;
+    if (!/^JsonValue( | null)?$/.test(schemaName))
+        throw new Error(`${entry.command}: "${key}" overrides only a serde_json::Value ${side === "data" ? "request" : "response"}; this one is ${schemaName}`);
+    return entry[key];
+}
+
+/** `X` with `entry.optionalFields` made optional: fields srv defaults (`#[serde(default)]`) on a
+ *  non-Option field, which ts-rs can't mark `#[ts(optional)]` itself. The manifest names them and
+ *  a Rust test proves srv accepts the request without them; `generate` checks they exist. */
+function withOptionalFields(entry, baseType) {
+    if (!/^[A-Z]\w*$/.test(baseType)) throw new Error(`${entry.command}: "optionalFields" needs a single named request type, not ${baseType}`);
+    const keys = entry.optionalFields.map((k) => JSON.stringify(k)).join(" | ");
+    return `Omit<${baseType}, ${keys}> & Partial<Pick<${baseType}, ${keys}>>`;
+}
+
+/** Whether the stub takes no data parameter. */
+const takesNoData = (entry, req) => NO_ARGS.has(req) || entry.send === "{}" || entry.send === "null";
+
 /** One stub's source, from its manifest entry and schema row. Exported for the tests. */
 export function renderStub(entry, row) {
     const req = row.requestTs.name;
     const resp = row.responseTs.name;
-    const ret = resp === "null" ? "void" : tsOf(resp);
+    const ret = overridden(entry, "returns", resp) ?? (resp === "null" ? "void" : tsOf(resp));
     const opts = entry.opts ?? "opts";
     const lines = [`    // command "${entry.command}"`];
     const optional = req.endsWith(" | null");
     // No data parameter: a no-argument command, or a request the stub always sends empty
     // (`send` "{}" for an Option or a struct whose fields all default, "null" for an Option),
     // so existing `(client, opts)` calls keep binding opts.
-    if (NO_ARGS.has(req) || entry.send === "{}" || entry.send === "null") {
+    if (takesNoData(entry, req)) {
         // A Rust `()` request (ts-rs: `null`) deserializes only from JSON null, so it sends null;
         // an empty struct (`NoArgsReq`) only from `{}`; `Option<NoArgsReq>` takes either.
         const unit = req === "null";
@@ -73,7 +96,8 @@ export function renderStub(entry, row) {
         lines.push(`    ${entry.method}(client: RpcClient, opts?: RpcOpts): Promise<${ret}> {`);
         lines.push(`        return client.rpcCall(${JSON.stringify(entry.command)}, ${send}, ${opts});`);
     } else {
-        const dataType = tsOf(optional ? req.slice(0, -" | null".length) : req);
+        const baseType = overridden(entry, "data", req) ?? tsOf(optional ? req.slice(0, -" | null".length) : req);
+        const dataType = entry.optionalFields ? withOptionalFields(entry, baseType) : baseType;
         const send = entry.send ?? "data";
         if (send !== "data" && send !== "data ?? {}") throw new Error(`${entry.command}: "send" is "data", "data ?? {}", "{}" or "null", not ${send}`);
         // `data ?? {}` makes the parameter optional even for a non-Option request: the struct
@@ -89,8 +113,8 @@ export function renderStub(entry, row) {
 
 /** The type names a stub uses, so each can be checked and imported. */
 export function namesUsed(entry, row) {
-    const exprs = [row.responseTs.name];
-    if (!NO_ARGS.has(row.requestTs.name)) exprs.push(row.requestTs.name);
+    const exprs = [overridden(entry, "returns", row.responseTs.name) ?? row.responseTs.name];
+    if (!takesNoData(entry, row.requestTs.name)) exprs.push(overridden(entry, "data", row.requestTs.name) ?? row.requestTs.name);
     const names = new Set();
     for (const e of exprs) for (const m of tsOf(e).matchAll(/\b[A-Z][A-Za-z0-9_]*\b/g)) if (!BUILTIN.has(m[0])) names.add(m[0]);
     return names;
@@ -112,7 +136,7 @@ function handWritten() {
     return where;
 }
 
-export function generate({ schema, manifest, ambient, generatedTypes, hand }) {
+export function generate({ schema, manifest, ambient, generatedTypes, hand, fieldsOf = () => null }) {
     const rows = new Map(schema.map((r) => [r.command, r]));
     const errors = [];
     const seenCmd = new Set();
@@ -130,11 +154,23 @@ export function generate({ schema, manifest, ambient, generatedTypes, hand }) {
         const row = rows.get(command);
         if (!row) { errors.push(`${command}: srv doesn't register it with register_typed, so there are no types to generate from`); continue; }
         if (!row.requestTs || !row.responseTs) { errors.push(`${command}: the schema has no TypeScript for it`); continue; }
-        for (const n of namesUsed(entry, row)) {
-            if (generatedTypes.has(n)) imports.add(n);
-            else if (!ambient.has(n)) errors.push(`${command}: type ${n} is neither generated (frontend/types/rpc/${n}.ts) nor a hand-written global`);
+        try {
+            if (entry.optionalFields) {
+                if (takesNoData(entry, row.requestTs.name)) throw new Error(`${command}: "optionalFields" on a command that takes no data`);
+                const t = row.requestTs.name.replace(/ \| null$/, "");
+                const fields = fieldsOf(t);
+                if (!fields) throw new Error(`${command}: "optionalFields" needs a generated request type; ${t} has no frontend/types/rpc/${t}.ts`);
+                const unknown = entry.optionalFields.filter((k) => !fields.has(k));
+                if (unknown.length) throw new Error(`${command}: ${t} has no field(s) ${unknown.join(", ")}`);
+            }
+            for (const n of namesUsed(entry, row)) {
+                if (generatedTypes.has(n)) imports.add(n);
+                else if (!ambient.has(n)) errors.push(`${command}: type ${n} is neither generated (frontend/types/rpc/${n}.ts) nor a hand-written global`);
+            }
+            stubs.push(renderStub(entry, row));
+        } catch (e) {
+            errors.push(e.message);
         }
-        try { stubs.push(renderStub(entry, row)); } catch (e) { errors.push(e.message); }
     }
     if (errors.length) return { errors };
     const head = [
@@ -158,7 +194,14 @@ async function main() {
     const schema = JSON.parse(readFileSync(SCHEMA, "utf8"));
     const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
     const generatedTypes = new Set(readdirSync(RPC_TYPES).filter((f) => f.endsWith(".ts")).map((f) => f.slice(0, -3)));
-    const result = generate({ schema, manifest, ambient: ambientNames(), generatedTypes, hand: handWritten() });
+    const fieldsOf = (t) => {
+        const p = join(RPC_TYPES, `${t}.ts`);
+        if (!existsSync(p)) return null;
+        const body = readFileSync(p, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+        // A field starts a line, or follows `{` or `,` (ts-rs puts short types on one line).
+        return new Set([...body.matchAll(/(?:^|[{,])\s*(\w+)\??:/gm)].map((m) => m[1]));
+    };
+    const result = generate({ schema, manifest, ambient: ambientNames(), generatedTypes, hand: handWritten(), fieldsOf });
     if (result.errors) {
         console.error(`gen-rpc-stubs: ${result.errors.length} problem(s), nothing written:\n${result.errors.map((e) => `  - ${e}`).join("\n")}`);
         process.exit(1);

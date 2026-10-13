@@ -49,10 +49,6 @@ export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBack
 export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
 
 export const BlockApi = {
-    ControllerInputCommand(client: RpcClient, data: BlockInputInput, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("controllerinput", data, opts);
-    },
-
     // Deliver an AskUserQuestion answer to the running agent CLI as a
     // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
     AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
