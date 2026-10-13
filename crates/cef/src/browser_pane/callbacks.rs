@@ -621,10 +621,12 @@ pub fn on_loading_state_change_browser_pane(
 
 /// The main frame's current URL, or empty when the browser has no main frame.
 pub(crate) fn main_frame_url(browser: &Browser) -> String {
-    browser
+    let url = browser
         .main_frame()
         .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // On a load-error page: the address that failed, not the page's data: URI.
+    crate::client::navigation::error_page_failed_url(&url).unwrap_or(url)
 }
 
 /// Resolve the `block_id` for a pane browser. Panes are registered in
