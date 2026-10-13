@@ -152,7 +152,14 @@ impl Scheduler {
     /// is next due one (new) interval after that run, sooner or later than it was
     /// planned, and a pending run isn't kept for a viewer that has gone.
     fn reschedule(&mut self, source: SourceId, now: Ms) {
-        let Some(interval) = self.effective_interval_ms(source, now) else { return };
+        let Some(interval) = self.effective_interval_ms(source, now) else {
+            // Nothing holds it now: forget the plan, so a lease that comes before the
+            // next `due` starts it at once instead of waiting out the old schedule.
+            if let Some(st) = self.state.get_mut(&source) {
+                st.next_due = None;
+            }
+            return;
+        };
         if let Some(st) = self.state.get_mut(&source) {
             if let (Some(_), Some(last)) = (st.next_due, st.last_start) {
                 st.next_due = Some((last + interval).max(last + st.last_took));
@@ -329,6 +336,27 @@ mod tests {
         s.release_source("badge", Panes, 500);
         assert_eq!(s.next_wakeup(500), None);
         assert!(tick(&mut s, 1000, 10).is_empty());
+    }
+
+    #[test]
+    fn a_lease_taken_right_after_the_last_was_released_starts_the_source_at_once() {
+        let mut s = sched();
+        s.lease("badge", Panes, 30_000, None, 0);
+        tick(&mut s, 0, 10);
+        // Released and taken again with no `due` in between, well before its run at 30 s.
+        s.release_source("badge", Panes, 500);
+        s.lease("badge", Panes, 30_000, None, 600);
+        assert_eq!(s.next_wakeup(600), Some(600));
+        assert_eq!(tick(&mut s, 600, 10), [Panes]);
+    }
+
+    #[test]
+    fn an_expired_lease_is_forgotten_the_same_way_when_a_new_one_follows() {
+        let mut s = sched();
+        s.lease("badge", Panes, 30_000, Some(1000), 0);
+        tick(&mut s, 0, 10);
+        s.lease("other", Panes, 30_000, None, 2000);
+        assert_eq!(s.next_wakeup(2000), Some(30_000), "the other lease is the only one, and it just ran at 0 on a 30 s interval");
     }
 
     #[test]
