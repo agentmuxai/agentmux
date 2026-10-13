@@ -1,5 +1,34 @@
 # AgentMux Version History
 
+## 0.59.23 — 2026-10-13
+
+- Theme and opacity are per window. The ☰ menu's Theme and Opacity change only the window they're opened in, and Opacity there is the same setting as the window list's slider in the status bar, so each follows the other. A new window or a torn-off tab starts with the theme and opacity of the window it came from. Settings → Appearance sets the default for windows without their own.
+- SSH and WSL terminals' CPU/memory badge now shows the remote shell's figures, measured on that machine, instead of the local ssh or wsl.exe.
+- The pane size shown while dragging a splitter now appears on browser panes too, in the same bottom-left corner as on every other pane.
+- Every frontend RPC call goes through a generated stub: pane.open and pane.moveTab are typed, and CI rejects hand-written stubs and raw rpcCall calls
+- Screenshot tooling: a landing-workspace shot (the default layout plus the Hangar and a terminal on the demo project), and posterAt for a landing clip's poster frame
+- Browser panes' address bar now suggests as you type, from Chrome's own engine: your history and typed sites (completed inline), and "search for what you typed". Suggestions from your search engine as you type are off unless you turn on Settings → Browser → Search suggestions while typing, since they send it what you type before you press Enter.
+- Broker events can carry a typed payload: controllerstatus and sysinfo subscribers get srv's Rust type through onMuxEvent, and CI keeps new events typed
+- Agent broker events are typed: agentturn, agentfailure, agentruntime, agentcontextusage, agent-message-accepted, agent-resume-retry, agent:shutdown and userattention reach their subscribers as srv's Rust types
+- Subagent and dispatch broker events are typed (spawned, completed, named, updated, abandoned, block_pruned, backfill_status, dispatch updated/activity); the Swarm and the activity dock get srv's Rust types
+- File and block broker events are typed: blockfile, blockstats, waveobj:update, editor/media file changes, files:changed and files:op reach their subscribers as srv's Rust types
+- The no-payload change signals (agents, memories, skills, MCP, accounts, cron, drones, remotes, the work queue) are typed broker events, subscribed through onMuxEvent.
+- Install, Shell, attachment and connection broker events are typed (install_chunk, shell_chunk, shell_node_create, attachment:*, connchange), subscribed through onMuxEvent.
+- Broker events sent under a name per id (agent:memory:changed:<id>, agentidentities:changed:<id>, agentcredentials:revoked:<id>, dronerun:<id> and others) are typed, subscribed through onMuxEvent.
+- The remaining fixed-name broker events (widgets, notification tray, agent progress, narration, process status, side-question answers, dock clears, reactive panes, app-server output) are typed, subscribed through onMuxEvent.
+- A dim grip marks the drag space in the window and pane headers; the pane grip opens the pane menu; the last window tab gets its separator
+- With search suggestions off, the browser address bar still suggests from your history and typed addresses: the setting is now applied, where before no suggestions came back at all.
+- Every broker event srv sends is typed: the notification, process, shutdown, spend, srvinfo, config and floating-pane events too, and the ratchet on hand-built events is at zero.
+- Clicking into a browser pane's address bar selects the whole address, as in Chrome, so typing replaces it; a second click places the cursor, and a drag selects just what you drag over.
+- A remote terminal's CPU/memory badge no longer asks its machine twice every 2 seconds.
+- fix(cef-build): cef-verify-patches.sh works on a module-enabled macOS build
+- Grips sit outside the scrolling tab strips (left of the widgets, left of the pane controls); overflowing tab strips fade at the edges
+- Pinning a widget on a full widget bar no longer makes every widget jump; the title bar menu's Pin Widgets heading doesn't collapse
+- AgentMux now ships CEF 154 r3 on Windows, macOS and Linux, which turns on the browser address bar's suggestions as you type: your history and typed addresses with inline completion, and your search engine's suggestions (Settings → Browser turns those off).
+- The Sysinfo charts show a gap in the samples as a break instead of a ramp up from zero, no longer repeat the last reading to fill short gaps, and label the time axis to the second so neighbouring ticks differ.
+- Raw WebSocket events (object updates, LSP messages, MuxBus status, device pairing) and install progress and block activity are typed broker events, and CI refuses an onMuxEvent handler written against the event.
+- Browser address bar suggestions from your search engine are now on by default, as in Chrome. To keep what you type on this computer until you press Enter, turn off Settings → Browser → Search suggestions while typing.
+
 ## 0.59.22 — 2026-10-13
 
 - Tests: the remote Swarm chip test reads the chip's label, not the spinner glyph beside it
