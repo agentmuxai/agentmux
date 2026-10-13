@@ -144,14 +144,29 @@ export function eventShapedHandlers(sources) {
 /** Event-name constants declared in any source (`const EVENT_AGENT_SHUTDOWN = "agent:shutdown"`,
  *  or `= WpsEvent.X`), by name. */
 function eventConsts(sources, wps) {
-    const consts = new Map();
-    for (const [, text] of sources) {
+    const byFile = new Map();
+    const everywhere = new Map();
+    for (const [path, text] of sources) {
+        const own = new Map();
         for (const m of text.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*(?::\s*string\s*)?=\s*(?:"([^"]+)"|WpsEvent\.(\w+))/g)) {
             const name = m[2] ?? wps.get(m[3]);
-            if (name) consts.set(m[1], name);
+            if (!name) continue;
+            own.set(m[1], name);
+            if (!everywhere.has(m[1])) everywhere.set(m[1], new Set());
+            everywhere.get(m[1]).add(name);
         }
+        byFile.set(path, own);
     }
-    return consts;
+    // The constant declared in the same file wins; one imported from another is used only when
+    // every file declaring it means the same event. Otherwise it's unresolved.
+    return {
+        get(path, ident) {
+            const own = byFile.get(path)?.get(ident);
+            if (own) return own;
+            const all = everywhere.get(ident);
+            return all?.size === 1 ? [...all][0] : undefined;
+        },
+    };
 }
 
 /** `EventReadHistoryCommand` reads of a typed event outside `mps-history.ts`'s
@@ -160,10 +175,10 @@ function eventConsts(sources, wps) {
 export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set()) {
     const errors = [];
     const consts = eventConsts(sources, wps);
-    const nameOf = (e) => {
+    const nameOf = (path, e) => {
         if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "WpsEvent") return wps.get(e.name.text);
         if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
-        if (ts.isIdentifier(e)) return consts.get(e.text);
+        if (ts.isIdentifier(e)) return consts.get(path, e.text);
         if (ts.isTemplateExpression(e) && perIdPrefixes.has(e.head.text)) return `${e.head.text}<id>`;
         return undefined;
     };
@@ -172,14 +187,19 @@ export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set
         const sf = sourceFile(path, text);
         const lineOf = (n) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
         const visit = (node) => {
-            if (ts.isIdentifier(node) && node.text === "EventReadHistoryCommand") {
-                // Only a direct call (`X.EventReadHistoryCommand(…)`) can be checked; an alias or a
-                // destructured reference would hide the call, so any other reference is refused.
+            const named = (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "EventReadHistoryCommand";
+            if (named) {
+                // Only a direct call (`X.EventReadHistoryCommand(…)` or `X["EventReadHistoryCommand"](…)`)
+                // can be checked; an alias, a destructured reference or the name as a string would
+                // hide the call, so any other reference is refused.
                 const access = node.parent;
                 const call = access?.parent;
-                const direct = ts.isPropertyAccessExpression(access) && access.name === node && ts.isCallExpression(call) && call.expression === access;
+                const member =
+                    (ts.isPropertyAccessExpression(access) && access.name === node) ||
+                    (ts.isElementAccessExpression(access) && access.argumentExpression === node);
+                const direct = member && ts.isCallExpression(call) && call.expression === access;
                 // The stub's own declaration (`EventReadHistoryCommand(client, …) {`) names it too.
-                const declared = (ts.isMethodDeclaration(access) || ts.isMethodSignature(access) || ts.isPropertySignature(access)) && access.name === node;
+                const declared = ts.isIdentifier(node) && (ts.isMethodDeclaration(access) || ts.isMethodSignature(access) || ts.isPropertySignature(access)) && access.name === node;
                 if (!declared && !direct) {
                     errors.push(`${path}:${lineOf(node)}: EventReadHistoryCommand referenced other than by calling it; call it directly, or read a typed event's history with readMuxEventHistory (app/store/mps-history.ts)`);
                 } else if (direct) {
@@ -187,7 +207,7 @@ export function untypedHistoryReads(sources, typed, wps, perIdPrefixes = new Set
                     // elsewhere, or an event this can't resolve, is refused: it may be a typed one.
                     const request = call.arguments.find((a) => ts.isObjectLiteralExpression(a));
                     const prop = request?.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "event");
-                    const name = prop && nameOf(prop.initializer);
+                    const name = prop && nameOf(path, prop.initializer);
                     const perId = name && [...perIdPrefixes].some((p) => name.startsWith(p));
                     if (!name) {
                         errors.push(`${path}:${lineOf(call)}: EventReadHistoryCommand without an event named inline (\`event: WpsEvent.X\`, a literal or a constant); a typed event's history is read with readMuxEventHistory (app/store/mps-history.ts)`);
@@ -212,7 +232,7 @@ export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Se
     const consts = eventConsts(sources, wps);
     for (const [path, text] of sources) {
         for (const m of text.matchAll(/eventType:\s*(?:WpsEvent\.(\w+)|"([^"]+)"|([A-Z][A-Z0-9_]*)\b)/g)) {
-            const name = m[1] ? wps.get(m[1]) : m[2] ?? consts.get(m[3]);
+            const name = m[1] ? wps.get(m[1]) : m[2] ?? consts.get(path, m[3]);
             if (!name || !typed.has(name)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: "${name}" has a typed payload; subscribe with onMuxEvent(WpsEvent.${m[1] ?? "…"}, (data) => …), not muxEventSubscribe`);

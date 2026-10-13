@@ -166,6 +166,15 @@ describe("untypedHistoryReads", () => {
         ]);
     });
 
+    it("refuses the computed form, and resolves a constant in its own file", () => {
+        const sources = [
+            ["frontend/m.ts", 'RpcApi["EventReadHistoryCommand"](client, { event: WpsEvent.SysInfo, scope });'],
+            ["frontend/n.ts", "const EVENT = WpsEvent.SysInfo;\nRpcApi.EventReadHistoryCommand(client, { event: EVENT, scope });"],
+            ["frontend/o.ts", "const EVENT = WpsEvent.SingletonClaim;\nRpcApi.EventReadHistoryCommand(client, { event: EVENT, scope });"],
+        ];
+        expect(untypedHistoryReads(sources, typed, wps).map((e) => e.split(":").slice(0, 2).join(":"))).toEqual(["frontend/m.ts:1", "frontend/n.ts:2"]);
+    });
+
     it("leaves the generated stub's own declaration alone", () => {
         const sources = [["frontend/app/store/rpc-api/generated.ts", "export const RpcApi = {\n  EventReadHistoryCommand(client: RpcClient, data: X) {\n    return call(client);\n  },\n};"]];
         expect(untypedHistoryReads(sources, typed, wps)).toEqual([]);
