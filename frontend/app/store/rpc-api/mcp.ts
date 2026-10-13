@@ -20,31 +20,26 @@ import { RpcClient } from "../rpc-client";
 // NAME, and collapsing them would mean renaming a wire field to serve an
 // abstraction. That matches the 09-06 DRY audit's own recommendation on these
 // twin primitives (cause 4).
-export type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
-export type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
+export type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
+export type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 export type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
+export type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
+export type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
+export type { McpBindResult } from "@/types/rpc/McpBindResult";
 export type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
 export type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
-export type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
-export type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
 export type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
-export type { McpBindResult } from "@/types/rpc/McpBindResult";
-export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
-
-import type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
-import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
-import type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
-import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
-import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
-import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
-import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
-import type { CommandMcpCatalogSetReachData } from "@/types/rpc/CommandMcpCatalogSetReachData";
-import type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
 export type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
 export type { McpObservedServer } from "@/types/rpc/McpObservedServer";
-import type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
-import type { McpBindResult } from "@/types/rpc/McpBindResult";
-import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
+export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
+
+import type { CommandMcpCatalogSetReachData } from "@/types/rpc/CommandMcpCatalogSetReachData";
+import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
+import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
+import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
+import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
+import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
+import type { McpObservedAgent } from "@/types/rpc/McpObservedAgent";
 
 // `id`, `transport` and `config` are all `#[serde(default)]` on the Rust side,
 // so they are omittable on the wire, but ts-rs generates them as required (it
@@ -58,60 +53,12 @@ export type McpCatalogUpsertInput = Pick<CommandMcpCatalogUpsertData, "name"> &
     Partial<Omit<CommandMcpCatalogUpsertData, "name">>;
 
 export const McpApi = {
-    McpListCommand(
-        client: RpcClient,
-        data: McpAgentScopeData,
-        opts?: RpcOpts,
-    ): Promise<McpServerListItem[]> {
-        return client.rpcCall("mcp.list", data, opts);
-    },
-
-    McpGetCommand(
-        client: RpcClient,
-        data: McpAgentItemData,
-        opts?: RpcOpts,
-    ): Promise<McpServer | null> {
-        return client.rpcCall("mcp.get", data, opts);
-    },
-
-    McpUpsertCommand(
-        client: RpcClient,
-        data: McpUpsertInput,
-        opts?: RpcOpts,
-    ): Promise<McpServer> {
+    McpUpsertCommand(client: RpcClient, data: McpUpsertInput, opts?: RpcOpts): Promise<McpServer> {
         return client.rpcCall("mcp.upsert", data, opts);
     },
 
-    McpDeleteCommand(
-        client: RpcClient,
-        data: McpAgentItemData,
-        opts?: RpcOpts,
-    ): Promise<McpDeleteResult> {
-        return client.rpcCall("mcp.delete", data, opts);
-    },
-
-    McpBindCommand(
-        client: RpcClient,
-        data: McpAgentBindingData,
-        opts?: RpcOpts,
-    ): Promise<McpBindResult> {
-        return client.rpcCall("mcp.bind", data, opts);
-    },
-
-    McpUnbindCommand(
-        client: RpcClient,
-        data: McpAgentBindingData,
-        opts?: RpcOpts,
-    ): Promise<McpUnbindResult> {
-        return client.rpcCall("mcp.unbind", data, opts);
-    },
-
     /** Health/prerequisite probe — see McpProbeResult (srv-types.d.ts). */
-    McpProbeCommand(
-        client: RpcClient,
-        data: McpAgentItemData,
-        opts?: RpcOpts,
-    ): Promise<McpProbeResult> {
+    McpProbeCommand(client: RpcClient, data: McpAgentItemData, opts?: RpcOpts): Promise<McpProbeResult> {
         return client.rpcCall("mcp.probe", data, opts);
     },
 
@@ -120,16 +67,12 @@ export const McpApi = {
     McpCatalogListCommand(
         client: RpcClient,
         data: McpCatalogListData = {},
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<McpServerCatalogItem[]> {
         return client.rpcCall("mcp.catalog.list", data, opts);
     },
 
-    McpCatalogUpsertCommand(
-        client: RpcClient,
-        data: McpCatalogUpsertInput,
-        opts?: RpcOpts,
-    ): Promise<McpServer> {
+    McpCatalogUpsertCommand(client: RpcClient, data: McpCatalogUpsertInput, opts?: RpcOpts): Promise<McpServer> {
         return client.rpcCall("mcp.catalog.upsert", data, opts);
     },
 
@@ -138,7 +81,7 @@ export const McpApi = {
     McpCatalogSetReachCommand(
         client: RpcClient,
         data: CommandMcpCatalogSetReachData,
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<{ all_agents: boolean; in_containers: boolean }> {
         return client.rpcCall("mcp.catalog.set_reach", data, opts);
     },
@@ -149,55 +92,9 @@ export const McpApi = {
         return client.rpcCall("mcp.observed.list", {}, opts);
     },
 
-    McpCatalogDeleteCommand(
-        client: RpcClient,
-        data: McpCatalogItemData,
-        opts?: RpcOpts,
-    ): Promise<McpDeleteResult> {
-        return client.rpcCall("mcp.catalog.delete", data, opts);
-    },
-
     /** Health/prerequisite probe for a global catalog server — no agent_id
      *  (mirrors mcp.catalog.*'s window-scoped shape). See McpProbeResult. */
-    McpCatalogProbeCommand(
-        client: RpcClient,
-        data: McpCatalogItemData,
-        opts?: RpcOpts,
-    ): Promise<McpProbeResult> {
+    McpCatalogProbeCommand(client: RpcClient, data: McpCatalogItemData, opts?: RpcOpts): Promise<McpProbeResult> {
         return client.rpcCall("mcp.catalog.probe", data, opts);
-    },
-
-    // Catalog-tier sibling of McpBindCommand — no agent_id/check_s1 gate,
-    // since the Armory's connection is never agent-authenticated and can
-    // never satisfy McpBindCommand's check_s1. See
-    // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
-    McpCatalogBindCommand(
-        client: RpcClient,
-        data: McpAgentBindingData,
-        opts?: RpcOpts,
-    ): Promise<McpBindResult> {
-        return client.rpcCall("mcp.catalog.bind", data, opts);
-    },
-
-    // Catalog-tier siblings of McpListCommand / McpUnbindCommand — no
-    // agent_id/check_s1 gate on the *caller*, but agent_id is still required
-    // in the payload (whose bindings to list/unbind). Used by
-    // AgentStashModal's MCP Servers tab, which runs over the dashboard's
-    // connection and can never satisfy McpListCommand/McpUnbindCommand's
-    // check_s1.
-    McpCatalogListForAgentCommand(
-        client: RpcClient,
-        data: McpAgentScopeData,
-        opts?: RpcOpts,
-    ): Promise<McpServerListItem[]> {
-        return client.rpcCall("mcp.catalog.list_for_agent", data, opts);
-    },
-
-    McpCatalogUnbindCommand(
-        client: RpcClient,
-        data: McpAgentBindingData,
-        opts?: RpcOpts,
-    ): Promise<McpUnbindResult> {
-        return client.rpcCall("mcp.catalog.unbind", data, opts);
     },
 };

@@ -18,21 +18,17 @@ import { RpcClient } from "../rpc-client";
 // input-only shape), but the frontend has always called it `FleetStagePlan`
 // and `swarm-model.ts` imports that name. Renaming the Rust type to match
 // would churn the server for a frontend spelling, so the alias lives here.
-export type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 export type { FleetActionFailure } from "@/types/rpc/FleetActionFailure";
+export type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 export type { FleetGroup } from "@/types/rpc/FleetGroup";
 export type { StagePlanInput as FleetStagePlan } from "@/types/rpc/StagePlanInput";
 
 import type { CommandFleetBroadcastData } from "@/types/rpc/CommandFleetBroadcastData";
 import type { CommandFleetBulkStopData } from "@/types/rpc/CommandFleetBulkStopData";
 import type { CommandFleetGroupCreateData } from "@/types/rpc/CommandFleetGroupCreateData";
-import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupListData";
 import type { CommandFleetGroupUpdateData } from "@/types/rpc/CommandFleetGroupUpdateData";
-import type { CommandFleetGroupDeleteData } from "@/types/rpc/CommandFleetGroupDeleteData";
 import type { FleetActionResult as FleetActionResultT } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup as FleetGroupT } from "@/types/rpc/FleetGroup";
-import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
-import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
 
 export const FleetApi = {
     // Broadcasts `message` to every block_id in `targets`, one signed jekt
@@ -42,7 +38,7 @@ export const FleetApi = {
     FleetBroadcastCommand(
         client: RpcClient,
         data: CommandFleetBroadcastData,
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<FleetActionResultT> {
         return client.rpcCall("fleet.broadcast", data, opts);
     },
@@ -52,7 +48,7 @@ export const FleetApi = {
     FleetBulkStopCommand(
         client: RpcClient,
         data: CommandFleetBulkStopData,
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<FleetActionResultT> {
         return client.rpcCall("fleet.bulk-stop", data, opts);
     },
@@ -60,32 +56,16 @@ export const FleetApi = {
     FleetGroupCreateCommand(
         client: RpcClient,
         data: CommandFleetGroupCreateData,
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<FleetGroupT> {
         return client.rpcCall("fleet.group.create", data, opts);
-    },
-
-    FleetGroupListCommand(
-        client: RpcClient,
-        data: CommandFleetGroupListData,
-        opts?: RpcOpts,
-    ): Promise<FleetGroupListResult> {
-        return client.rpcCall("fleet.group.list", data, opts);
     },
 
     FleetGroupUpdateCommand(
         client: RpcClient,
         data: CommandFleetGroupUpdateData,
-        opts?: RpcOpts,
+        opts?: RpcOpts
     ): Promise<FleetGroupT> {
         return client.rpcCall("fleet.group.update", data, opts);
-    },
-
-    FleetGroupDeleteCommand(
-        client: RpcClient,
-        data: CommandFleetGroupDeleteData,
-        opts?: RpcOpts,
-    ): Promise<FleetGroupDeleteResult> {
-        return client.rpcCall("fleet.group.delete", data, opts);
     },
 };
