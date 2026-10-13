@@ -149,7 +149,7 @@ pub struct SettingsType {
     /// A browser pane's address bar also asks the default search engine for
     /// suggestions while you type (each edit is sent to it before you submit),
     /// as Chrome does. Unset: on. Off: suggestions come only from this
-    /// computer (history, typed URLs).
+    /// computer (history, typed URLs). Incognito tabs never ask, as in Chrome.
     #[serde(rename = "browser:searchsuggestions", default, skip_serializing_if = "Option::is_none")]
     pub browser_search_suggestions: Option<bool>,
 

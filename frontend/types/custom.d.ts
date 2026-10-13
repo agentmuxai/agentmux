@@ -43,21 +43,7 @@ declare global {
         reinitVersion: Accessor<number>;
         isTermMultiInput: Accessor<boolean>;
         backendStatusAtom: Accessor<"connecting" | "running" | "crashed">;
-        lanInstancesAtom: Accessor<LanInstance[]>;
-    };
-
-    type LanInstance = {
-        instance_id: string;
-        hostname: string;
-        version: string;
-        /** The peer's channel; empty for a peer that predates advertising it. */
-        channel?: string;
-        address: string;
-        port: number;
-        agents: string[];
-        first_seen: number;
-        last_seen: number;
-        other_ttl_secs: number;
+        lanInstancesAtom: Accessor<import("@/types/rpc/LanInstance").LanInstance[]>;
     };
 
     type WritableMuxObjectAtom<T extends MuxObj> = SignalAtom<T>;

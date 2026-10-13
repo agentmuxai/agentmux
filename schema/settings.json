@@ -69,7 +69,7 @@
         "browser:searchsuggestions": {
           "type": "boolean",
           "default": true,
-          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit, as Chrome does. On by default. Off: suggestions come only from this computer (history, typed addresses)."
+          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit, as Chrome does. On by default. Incognito tabs never ask (Chrome refuses suggest requests from off-the-record profiles). Off: suggestions come only from this computer (history, typed addresses)."
         },
         "keybindings": {
           "type": "array",

@@ -10,7 +10,7 @@ import type { KeyPlatform } from "./keys";
 export type KeyCategory = "Tabs & windows" | "Panes" | "Find & zoom" | "Terminal" | "Documents" | "Editor" | "Files" | "General";
 
 /** A pane that matches its own rows (registry.ts `matchPaneKey`). */
-export type KeyPane = "doctabs" | "editor" | "files";
+export type KeyPane = "browser" | "doctabs" | "editor" | "files";
 
 export interface KeyBindingRow {
     command: string;
@@ -136,6 +136,12 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "editor:saveAs", label: "Save as (scratch documents)", category: "Editor", pane: "editor", mac: ["meta+shift+s"], other: ["ctrl+shift+s"] },
     { command: "editor:find", label: "Find and replace", category: "Editor", pane: "editor", mac: ["meta+f"], other: ["ctrl+f"] },
     { command: "editor:togglePreview", label: "Toggle markdown preview", category: "Editor", pane: "editor", mac: ["meta+shift+v"], other: ["ctrl+shift+v"] },
+
+    // ── Browser pane ──
+    // In the page itself the host catches these keys (crates/cef handlers.rs
+    // `pane_shortcut_before_app_keys`); this row covers the pane's own bar
+    // (address bar, buttons), where focus is in the app, as in Chrome.
+    { command: "browser:newIncognito", label: "New Incognito tab (browser pane)", category: "Tabs & windows", pane: "browser", mac: ["meta+shift+n"], other: ["ctrl+shift+n"] },
 
     // ── Files pane ──
     { command: "files:back", label: "Back", category: "Files", pane: "files", mac: ["alt+ArrowLeft"], other: ["alt+ArrowLeft"] },

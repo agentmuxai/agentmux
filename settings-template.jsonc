@@ -137,7 +137,7 @@
     // The address bar also asks the default search engine for suggestions
     // while you type, sending it each edit before you press Enter, as Chrome
     // does. Off: suggestions come only from this computer (history, typed
-    // addresses).
+    // addresses). Incognito tabs never ask, as in Chrome.
     // "browser:searchsuggestions": true,
 
     // -- Network --
