@@ -18,7 +18,8 @@
 // (widget-shots.mjs, every widget in every size) or `chrome` (chrome-shots.mjs:
 // menus, the status bar and Settings, spec §9) or `agent` (agent-shots.mjs: the
 // agent pane, driven by a scripted Claude Code, spec §10) or `memory`
-// (memory-shots.mjs: Memory, Connectors and a widget approval, spec §11).
+// (memory-shots.mjs: Memory, Connectors and a widget approval, spec §11) or
+// `landing` (landing-shots.mjs: shots for agentmux.ai, each proving one claim).
 // --sizes limits which of
 // sizes.mjs's sizes a shot with `sizes: true` is captured in (default: all);
 // see the spec's §8.
