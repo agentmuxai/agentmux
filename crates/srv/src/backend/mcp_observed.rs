@@ -167,13 +167,7 @@ pub fn forget_owned(block_id: &str, owner: u64) -> bool {
 /// Tell the panes a report changed or went (`mcp:observed`).
 pub fn publish(broker: Option<&crate::backend::mps::Broker>, block_id: &str) {
     let Some(broker) = broker else { return };
-    broker.publish(crate::backend::mps::MuxEvent {
-        event: "mcp:observed".to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({ "block_id": block_id })),
-    });
+    broker.publish_event::<crate::backend::mps_events::McpObserved>(&crate::backend::mps_events::BlockRefEvent { block_id: block_id.to_string() }, vec![], 0);
 }
 
 /// Every pane's last report, by block id.

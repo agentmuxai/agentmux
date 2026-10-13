@@ -34,33 +34,29 @@
 
 import { onCleanup } from "solid-js";
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { AmbientNarrationNode } from "../types";
 
 let narrationSeq = 0;
 
 export function useAmbientNarration(blockId: string, onNarration: (node: AmbientNarrationNode) => void): void {
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.AmbientNarration,
-        scope: `block:${blockId}`,
-        handler: (event: unknown) => {
-            const data = (event as { data?: { text?: unknown; kind?: unknown } } | undefined)?.data;
-            const text = typeof data?.text === "string" ? data.text.trim() : "";
-            if (!text) return;
-            const kind = typeof data?.kind === "string" ? data.kind : "unknown";
-            const at = Date.now();
-            // Unique per arrival: two narrations in the same millisecond must not
-            // collide on id, or the reducer's id-dedup would drop the second.
-            onNarration({
-                type: "ambient_narration",
-                id: `ambient-${at}-${++narrationSeq}`,
-                kind,
-                text,
-                timestamp: at,
-            });
-        },
-    });
+    const unsub = onMuxEvent(WpsEvent.AmbientNarration, (data) => {
+        // Still checked: a throw here would take out the rest of the WS dispatch.
+        const text = typeof data.text === "string" ? data.text.trim() : "";
+        if (!text) return;
+        const kind = typeof data.kind === "string" ? data.kind : "unknown";
+        const at = Date.now();
+        // Unique per arrival: two narrations in the same millisecond must not
+        // collide on id, or the reducer's id-dedup would drop the second.
+        onNarration({
+            type: "ambient_narration",
+            id: `ambient-${at}-${++narrationSeq}`,
+            kind,
+            text,
+            timestamp: at,
+        });
+    }, `block:${blockId}`);
     onCleanup(() => {
         try {
             unsub();

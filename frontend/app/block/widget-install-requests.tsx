@@ -15,7 +15,7 @@ import { createEffect, createRoot, createSignal, on, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetInstallRequest } from "@/app/store/rpc-api/widgets";
@@ -76,12 +76,9 @@ export function startWidgetInstallRequests(): void {
     // An event is newer than the first fetch: once one arrives, the fetch's
     // answer is stale and is dropped.
     let sawEvent = false;
-    muxEventSubscribe({
-        eventType: WpsEvent.WidgetRequests,
-        handler: (event: { data?: { requests?: WidgetInstallRequest[] } }) => {
-            sawEvent = true;
-            setRequests(event?.data?.requests ?? []);
-        },
+    onMuxEvent(WpsEvent.WidgetRequests, (data) => {
+        sawEvent = true;
+        setRequests(data.requests);
     });
     createRoot(() =>
         createEffect(

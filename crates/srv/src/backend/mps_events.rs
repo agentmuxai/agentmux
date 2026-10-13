@@ -130,6 +130,35 @@ events! {
     AttachmentBatchDone: super::mps::EVENT_ATTACHMENT_BATCH_DONE => crate::backend::rpc_types::AttachmentBatchDoneEvent,
     /// A connection's status changed (`backend::remote::status`).
     ConnChange: super::mps::EVENT_CONN_CHANGE => crate::backend::rpc_types::ConnStatus,
+    /// A pane's background tasks changed; the dashboard reads the list again.
+    BackgroundTaskUpdated: "background-task-updated" => BlockRefEvent,
+    /// A line of narration for an agent pane (`continued_note`, the narrate route).
+    AmbientNarration: "ambient-narration" => AmbientNarrationEvent,
+    /// A pane's reported MCP servers changed (`mcp_observed`).
+    McpObserved: "mcp:observed" => BlockRefEvent,
+    /// What the notification tray shows (`notify::router`).
+    NotificationState: crate::backend::notify::router::EVENT_NOTIFICATION_STATE => crate::backend::notify::policy::TrayState,
+    /// An agent's checklist and current tool (`reactive::progress_watcher`).
+    AgentProgress: crate::backend::reactive::progress_watcher::EVENT_AGENT_PROGRESS => AgentProgressEvent,
+    /// The installed widget packages.
+    WidgetPackages: super::mps::EVENT_WIDGET_PACKAGES => WidgetPackagesEvent,
+    /// A widget package's storage changed: which keys, never their values.
+    WidgetStorage: super::mps::EVENT_WIDGET_STORAGE => WidgetStorageEvent,
+    /// The agents' widget install requests waiting for the user.
+    WidgetRequests: super::mps::EVENT_WIDGET_REQUESTS => WidgetRequestsEvent,
+    /// A pane's process status changed (`broker::process`).
+    ProcessStatusChanged: crate::broker::process::EVENT_STATUS_CHANGED => crate::broker::process::ProcessStatus,
+    /// An agent instance's identity has no direct links (`identity::resolver::inject`); a diagnostic.
+    IdentityNoDirectLinks: "identity:no-direct-links" => NoDirectLinksEvent,
+    /// One streamed piece of a side question's answer (`agent_handlers::side_question`).
+    BtwAnswerChunk: super::mps::EVENT_BTW_ANSWER_CHUNK => BtwAnswerChunkEvent,
+    /// `muxspect dock clear` removed a node from a pane's dock.
+    DockClear: super::mps::EVENT_DOCK_CLEAR => DockClearEvent,
+    /// A reactive agent pane registered, or went (the Swarm refreshes).
+    AgentReactiveRegistered: "agent:reactive-registered" => BlockRefEvent,
+    AgentReactiveUnregistered: "agent:reactive-unregistered" => BlockRefEvent,
+    /// One protocol frame from an app-server agent (`app_server_controller`).
+    AppServerOutput: "output" => ProtocolFrame,
 
     // Signals with no payload: something changed, and a subscriber refetches what it shows.
     /// The agents list changed.
@@ -189,6 +218,93 @@ pub fn payload_data<P: Serialize>(payload: &P) -> Option<serde_json::Value> {
 pub struct PathChangedEvent {
     pub path: String,
 }
+
+/// An event about one pane: `background-task-updated`, `mcp:observed`, `agent:reactive-(un)registered`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockRefEvent {
+    pub block_id: String,
+}
+
+/// `ambient-narration`: a line to show in an agent pane.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AmbientNarrationEvent {
+    pub block_id: String,
+    pub kind: String,
+    pub text: String,
+}
+
+/// `agent:progress`: an agent's checklist and the tool it is running.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProgressEvent {
+    pub agent_id: String,
+    pub block_id: String,
+    pub todos: Vec<crate::backend::reactive::progress_watcher::TodoItem>,
+    /// How many rows the cap dropped.
+    pub todos_truncated: usize,
+    pub todos_partial: bool,
+    pub current_tool: Option<String>,
+    #[ts(type = "number")]
+    pub ts: u64,
+}
+
+/// `widgetpackages`: every installed widget package.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetPackagesEvent {
+    pub packages: Vec<crate::backend::widget_packages::WidgetPackageInfo>,
+}
+
+/// `widgetstorage`: the keys of a widget package's storage that changed.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetStorageEvent {
+    pub id: String,
+    pub keys: Vec<String>,
+}
+
+/// `widgetrequests`: the install requests waiting for the user.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetRequestsEvent {
+    pub requests: Vec<crate::backend::widget_requests::WidgetInstallRequest>,
+}
+
+/// `identity:no-direct-links`: the instance and the identity that has no direct links.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct NoDirectLinksEvent {
+    pub definition_id: String,
+    pub identity_id: String,
+}
+
+/// `btw_answer_chunk`: one event of a side question's answer. `done` (not `event.type`) says
+/// the answer is complete.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct BtwAnswerChunkEvent {
+    pub block_id: String,
+    pub request_id: String,
+    pub event: crate::agents::types::AgentEvent,
+    pub done: bool,
+}
+
+/// `dock:clear`: the dock node to remove.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct DockClearEvent {
+    pub node_id: String,
+}
+
+/// `output`: one app-server protocol frame, as the agent sent it.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(transparent)]
+pub struct ProtocolFrame(#[ts(type = "unknown")] pub serde_json::Value);
 
 /// `agentcredentials:revoked:<agent id>`: the agent still holds the provider's tokens until it restarts.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -255,6 +371,35 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), names.len(), "an event listed twice: {names:?}");
+    }
+
+    #[test]
+    fn payloads_that_replaced_json_serialize_the_same() {
+        let progress = AgentProgressEvent {
+            agent_id: "a1".into(),
+            block_id: "b1".into(),
+            todos: vec![],
+            todos_truncated: 2,
+            todos_partial: false,
+            current_tool: None,
+            ts: 5,
+        };
+        assert_eq!(
+            serde_json::to_value(&progress).unwrap(),
+            serde_json::json!({ "agentId": "a1", "blockId": "b1", "todos": [], "todosTruncated": 2, "todosPartial": false, "currentTool": null, "ts": 5 })
+        );
+        let chunk = BtwAnswerChunkEvent {
+            block_id: "b1".into(),
+            request_id: "r1".into(),
+            event: crate::agents::types::AgentEvent::Error { message: "no".into() },
+            done: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&chunk).unwrap(),
+            serde_json::json!({ "blockId": "b1", "requestId": "r1", "event": { "type": "error", "message": "no" }, "done": true })
+        );
+        let frame = ProtocolFrame(serde_json::json!({ "method": "turn/started" }));
+        assert_eq!(serde_json::to_value(&frame).unwrap(), serde_json::json!({ "method": "turn/started" }));
     }
 
     #[test]

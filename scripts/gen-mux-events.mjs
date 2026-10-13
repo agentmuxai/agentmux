@@ -101,6 +101,9 @@ export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Se
             const name = wps.get(m[1]);
             if (!name || !typed.has(name)) continue;
             if (/(?:onMuxEvent\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
+            // A comment naming the event subscribes nothing.
+            const lineHead = text.slice(text.lastIndexOf("\n", m.index) + 1, m.index);
+            if (/^\s*(?:\*|\/\*)|\/\//.test(lineHead)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: WpsEvent.${m[1]} has a typed payload; pass it straight to onMuxEvent(WpsEvent.${m[1]}, (data) => …)`);
         }

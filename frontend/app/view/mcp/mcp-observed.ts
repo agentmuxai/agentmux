@@ -8,7 +8,7 @@
  * SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §4.
  */
 
-import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -156,7 +156,7 @@ export class McpObservedModel {
         // A report changed, or the catalog did (a server's source can become
         // "catalog").
         this.unsubs = [
-            muxEventSubscribe({ eventType: WpsEvent.McpObserved, handler: () => void this.refresh() }),
+            onMuxEvent(WpsEvent.McpObserved, () => void this.refresh()),
             onMuxEvent(WpsEvent.McpChanged, () => void this.refresh()),
         ];
     }

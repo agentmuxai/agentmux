@@ -6,7 +6,7 @@
 // §8.1). The widget loader loads what's approved; Settings → Widgets shows all.
 
 import { createSignal, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetPackageInfo, WidgetPublisherPin } from "@/app/store/rpc-api/widgets";
@@ -38,16 +38,13 @@ export async function refreshWidgetPackages(): Promise<void> {
 /** Start following srv's list; the promise settles after the first fetch. */
 export function startWidgetPackages(): Promise<void> {
     if (started) return started;
-    muxEventSubscribe({
-        eventType: WpsEvent.WidgetPackages,
-        handler: (event: { data?: { packages?: WidgetPackageInfo[] } }) => {
-            setWidgetPackages(event?.data?.packages);
-            // The event carries packages only; a pin changes with an
-            // approval or a Forget key, which this follows.
-            void RpcApi.WidgetsListCommand(TabRpcClient, { timeout: 5000 })
-                .then((r) => setPublishers(r?.publishers ?? []))
-                .catch(() => {});
-        },
+    onMuxEvent(WpsEvent.WidgetPackages, (data) => {
+        setWidgetPackages(data.packages);
+        // The event carries packages only; a pin changes with an
+        // approval or a Forget key, which this follows.
+        void RpcApi.WidgetsListCommand(TabRpcClient, { timeout: 5000 })
+            .then((r) => setPublishers(r?.publishers ?? []))
+            .catch(() => {});
     });
     started = refreshWidgetPackages();
     return started;

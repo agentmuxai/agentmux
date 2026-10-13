@@ -735,13 +735,7 @@ impl Router {
             }
             *last = Some(tray.clone());
         }
-        self.broker.publish(MuxEvent {
-            event: EVENT_NOTIFICATION_STATE.to_string(),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 1,
-            data: serde_json::to_value(&tray).ok(),
-        });
+        self.broker.publish_event::<crate::backend::mps_events::NotificationState>(&tray, vec![], 1);
     }
 
     fn publish(&self, action: &Action) {

@@ -8,23 +8,32 @@
 import type { AgentContextUsageEvent } from "@/types/rpc/AgentContextUsageEvent";
 import type { AgentEvent } from "@/types/rpc/AgentEvent";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
+import type { AgentProgressEvent } from "@/types/rpc/AgentProgressEvent";
 import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
+import type { AmbientNarrationEvent } from "@/types/rpc/AmbientNarrationEvent";
 import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEvent";
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
 import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEvent";
 import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
+import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
+import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
+import type { NoDirectLinksEvent } from "@/types/rpc/NoDirectLinksEvent";
+import type { NotifyTrayState } from "@/types/rpc/NotifyTrayState";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
+import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
+import type { ProtocolFrame } from "@/types/rpc/ProtocolFrame";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
 import type { RunEvent } from "@/types/rpc/RunEvent";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
@@ -41,12 +50,18 @@ import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
+import type { WidgetPackagesEvent } from "@/types/rpc/WidgetPackagesEvent";
+import type { WidgetRequestsEvent } from "@/types/rpc/WidgetRequestsEvent";
+import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
 
 /** Each typed broker event's payload, by its wire name. An event sent under a name per id
  *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
+  "agent:progress": AgentProgressEvent;
+  "agent:reactive-registered": BlockRefEvent;
+  "agent:reactive-unregistered": BlockRefEvent;
   "agent:shutdown": ShutdownLineEvent;
   "agentcontent:changed": null;
   agentcontextusage: AgentContextUsageEvent;
@@ -56,27 +71,36 @@ export type MuxEventPayloads = {
   "agents:changed": null;
   "agentskills:changed": null;
   agentturn: AgentTurnEvent;
+  "ambient-narration": AmbientNarrationEvent;
   "attachment:batch-done": AttachmentBatchDoneEvent;
   "attachment:failed": AttachmentFailedEvent;
   "attachment:progress": AttachmentProgressEvent;
   "attachment:ready": AttachmentReadyEvent;
+  "background-task-updated": BlockRefEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
+  btw_answer_chunk: BtwAnswerChunkEvent;
   connchange: ConnStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
   "dispatch:activity": DispatchActivityEvent;
   "dispatch:updated": DispatchUpdatedEvent;
+  "dock:clear": DockClearEvent;
   "drones:changed": null;
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "identity:no-direct-links": NoDirectLinksEvent;
   "identityaccounts:changed": null;
   install_chunk: InstallChunkEvent;
   "mcp:changed": null;
+  "mcp:observed": BlockRefEvent;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
   "namedagents:changed": null;
+  "notification:state": NotifyTrayState;
+  output: ProtocolFrame;
+  "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
   remoteschange: null;
   shell_chunk: ShellChunkEvent;
@@ -93,6 +117,9 @@ export type MuxEventPayloads = {
   sysinfo: TimeSeriesData;
   userattention: UserAttentionEvent;
   "waveobj:update": MuxObjUpdate;
+  widgetpackages: WidgetPackagesEvent;
+  widgetrequests: WidgetRequestsEvent;
+  widgetstorage: WidgetStorageEvent;
   "workqueue:changed": null;
   [event: `agent:memory:changed:${string}`]: null;
   [event: `agent_event:${string}`]: AgentEvent;
@@ -106,6 +133,9 @@ export type MuxEventPayloads = {
 export const TYPED_MUX_EVENTS = [
   "agent-message-accepted",
   "agent-resume-retry",
+  "agent:progress",
+  "agent:reactive-registered",
+  "agent:reactive-unregistered",
   "agent:shutdown",
   "agentcontent:changed",
   "agentcontextusage",
@@ -115,27 +145,36 @@ export const TYPED_MUX_EVENTS = [
   "agents:changed",
   "agentskills:changed",
   "agentturn",
+  "ambient-narration",
   "attachment:batch-done",
   "attachment:failed",
   "attachment:progress",
   "attachment:ready",
+  "background-task-updated",
   "blockfile",
   "blockstats",
+  "btw_answer_chunk",
   "connchange",
   "controllerstatus",
   "cron_changed",
   "dispatch:activity",
   "dispatch:updated",
+  "dock:clear",
   "drones:changed",
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "identity:no-direct-links",
   "identityaccounts:changed",
   "install_chunk",
   "mcp:changed",
+  "mcp:observed",
   "media:file_changed",
   "memories:changed",
   "namedagents:changed",
+  "notification:state",
+  "output",
+  "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",
   "shell_chunk",
@@ -152,6 +191,9 @@ export const TYPED_MUX_EVENTS = [
   "sysinfo",
   "userattention",
   "waveobj:update",
+  "widgetpackages",
+  "widgetrequests",
+  "widgetstorage",
   "workqueue:changed",
 ] as const;
 

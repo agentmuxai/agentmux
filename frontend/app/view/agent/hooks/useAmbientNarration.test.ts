@@ -7,12 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const handlers: Array<(ev: unknown) => void> = [];
 const unsubs = vi.fn();
 
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (opts: { handler: (ev: unknown) => void }) => {
-        handlers.push(opts.handler);
-        return unsubs;
-    },
-}));
+vi.mock("@/app/store/mps", async () => {
+    const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const mock = {
+        muxEventSubscribe: (opts: { handler: (ev: unknown) => void }) => {
+            handlers.push(opts.handler);
+            return unsubs;
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 // Static import, not `await import(...)`: vitest hoists `vi.mock` above the
 // import graph, so the mock above is already in place — and a top-level await

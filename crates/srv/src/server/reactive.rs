@@ -1861,13 +1861,7 @@ pub(super) async fn handle_reactive_register(
             // (which subscribes to agent:process-added / agent:process-exited)
             // doesn't treat this as a phantom OS process and show a spurious ⚙ N
             // badge or trigger the kill-tree modal on pane close.
-            state.broker.publish(crate::backend::mps::MuxEvent {
-                event: "agent:reactive-registered".to_string(),
-                scopes: vec![format!("block:{}", req.block_id)],
-                sender: String::new(),
-                persist: 0,
-                data: Some(json!({ "block_id": req.block_id })),
-            });
+            state.broker.publish_event::<crate::backend::mps_events::AgentReactiveRegistered>(&crate::backend::mps_events::BlockRefEvent { block_id: req.block_id.clone() }, vec![format!("block:{}", req.block_id)], 0);
 
             Json(json!({"success": true})).into_response()
         }
@@ -2017,13 +2011,7 @@ pub(super) async fn handle_reactive_unregister(
 
     // Symmetric refresh: tell the Swarm view this pane is gone.
     if let Some(bid) = block_id {
-        state.broker.publish(crate::backend::mps::MuxEvent {
-            event: "agent:reactive-unregistered".to_string(),
-            scopes: vec![format!("block:{}", bid)],
-            sender: String::new(),
-            persist: 0,
-            data: Some(json!({ "block_id": bid })),
-        });
+        state.broker.publish_event::<crate::backend::mps_events::AgentReactiveUnregistered>(&crate::backend::mps_events::BlockRefEvent { block_id: bid.to_string() }, vec![format!("block:{}", bid)], 0);
     }
 
     Json(json!({"success": true})).into_response()

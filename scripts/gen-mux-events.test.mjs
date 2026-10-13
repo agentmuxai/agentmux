@@ -75,6 +75,7 @@ describe("untypedSubscriptions", () => {
         const sources = [
             ["frontend/c.ts", "muxEventSubscribe({ eventType: WpsEvent.BlockClose, handler: () => {} });"],
             ["frontend/d.ts", "onMuxEvent(WpsEvent.SysInfo, (data) => use(data.values));"],
+            ["frontend/h.ts", "/**\n * Streamed as `WpsEvent.SysInfo` events.\n */\n// see WpsEvent.SysInfo\nconst x = 1; // WpsEvent.SysInfo"],
             ["frontend/f.ts", "EventReadHistoryCommand(client, { event: WpsEvent.SysInfo, scope });\nconst EVENT_SYS = WpsEvent.SysInfo;"],
         ];
         expect(untypedSubscriptions(sources, typed, wps)).toEqual([]);

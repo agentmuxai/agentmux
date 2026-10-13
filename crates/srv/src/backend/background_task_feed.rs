@@ -34,7 +34,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::mps::{Broker, MuxEvent};
+use super::mps::Broker;
 use super::storage::background_tasks::BackgroundTaskStatus;
 use super::storage::store::Store;
 
@@ -421,13 +421,7 @@ fn observe(
 /// actual rows. See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
 pub(crate) fn publish_background_task_updated(broker: &Broker, block_id: &str) {
-    broker.publish(MuxEvent {
-        event: "background-task-updated".to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({ "block_id": block_id })),
-    });
+    broker.publish_event::<crate::backend::mps_events::BackgroundTaskUpdated>(&crate::backend::mps_events::BlockRefEvent { block_id: block_id.to_string() }, vec![format!("block:{block_id}")], 0);
 }
 
 #[cfg(test)]

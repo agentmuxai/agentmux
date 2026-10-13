@@ -168,13 +168,7 @@ impl AppServerController {
     fn publish_protocol_frame(&self, frame: serde_json::Value, global_zone: Option<&str>) {
         let line = format!("{}\n", frame);
         if let Some(broker) = &self.broker {
-            broker.publish(mps::MuxEvent {
-                event: "output".to_string(),
-                scopes: vec![format!("block:{}", self.block_id)],
-                sender: String::new(),
-                persist: 1,
-                data: Some(frame.clone()),
-            });
+            broker.publish_event::<crate::backend::mps_events::AppServerOutput>(&crate::backend::mps_events::ProtocolFrame(frame.clone()), vec![format!("block:{}", self.block_id)], 1);
         }
         if let (Some(filestore), Some(broker)) = (&self.filestore, &self.broker) {
             // Mirrored into the agent's global zone like every other agent's

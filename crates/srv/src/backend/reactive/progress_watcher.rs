@@ -36,7 +36,7 @@ use tokio::time::interval;
 
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::mps::Broker;
 use crate::backend::work_facts::overlap_notes::{NewEdit, NewPr};
 
 use super::get_global_handler;
@@ -251,7 +251,8 @@ fn note_recent_file(files: &mut Vec<RecentFile>, path: &str, tool: &str, ts_ms: 
 }
 
 /// One checklist entry as the Swarm renders it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TodoItem {
     pub text: String,
     /// `pending` | `in_progress` | `completed`. Passed through as the provider
@@ -796,24 +797,19 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
 
             let ts = agentmux_common::time::now_ms_u64();
 
-            broker.publish(MuxEvent {
-                event: EVENT_AGENT_PROGRESS.to_string(),
-                scopes: vec![format!("block:{}", block_id)],
-                sender: String::new(),
-                // Replayed to a freshly-subscribed route, so a Swarm opened
-                // mid-session sees the current checklist rather than waiting
-                // for the agent's next change — see REPUBLISH_EVERY_TICKS.
-                persist: 1,
-                data: Some(serde_json::json!({
-                    "agentId": agent_id,
-                    "blockId": block_id,
-                    "todos": progress.todos,
-                    "todosTruncated": progress.todos_truncated,
-                    "todosPartial": progress.todos_partial,
-                    "currentTool": progress.current_tool,
-                    "ts": ts,
-                })),
-            });
+            let event = crate::backend::mps_events::AgentProgressEvent {
+                agent_id,
+                block_id: block_id.clone(),
+                todos: progress.todos,
+                todos_truncated: progress.todos_truncated,
+                todos_partial: progress.todos_partial,
+                current_tool: progress.current_tool,
+                ts,
+            };
+            // persist 1: replayed to a freshly-subscribed route, so a Swarm opened
+            // mid-session sees the current checklist rather than waiting
+            // for the agent's next change — see REPUBLISH_EVERY_TICKS.
+            broker.publish_event::<crate::backend::mps_events::AgentProgress>(&event, vec![format!("block:{}", block_id)], 1);
         }
     }
 }

@@ -1033,13 +1033,7 @@ pub async fn refresh_off_thread(
 
 /// Tell every UI the package list (Settings → Widgets and the loader follow it).
 pub fn publish(broker: &super::mps::Broker, packages: &[WidgetPackageInfo]) {
-    broker.publish(super::mps::MuxEvent {
-        event: super::mps::EVENT_WIDGET_PACKAGES.to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({ "packages": packages })),
-    });
+    broker.publish_event::<crate::backend::mps_events::WidgetPackages>(&crate::backend::mps_events::WidgetPackagesEvent { packages: packages.to_vec() }, vec![], 0);
 }
 
 /// Start the service: scan, merge, and watch the widgets folder.

@@ -44,15 +44,18 @@ pub mod scan;
 
 /// A single process tracked by the host — PID + metadata enriched
 /// per-platform. The frontend renders one row per entry.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TrackedProcess {
     pub pid: u32,
     /// Full command line, or best approximation. May be empty if the
     /// platform doesn't expose it cheaply (macOS without `libproc`).
     pub command: String,
     /// Working-set / RSS in bytes. 0 if unavailable.
+    #[ts(type = "number")]
     pub rss_bytes: u64,
     /// Unix ms of process creation, 0 if unavailable.
+    #[ts(type = "number")]
     pub started_at_ms: u64,
     /// Parent PID, if the platform exposes it. Drives
     /// [`agent_started`]'s ancestry walk.
@@ -61,6 +64,7 @@ pub struct TrackedProcess {
     /// classifies by: `command` may be a whole argv (`/bin/bash -c npm
     /// test`). Empty means `command` is the executable.
     #[serde(skip)]
+    #[ts(skip)]
     pub exe: String,
 }
 

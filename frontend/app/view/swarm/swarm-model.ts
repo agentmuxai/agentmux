@@ -24,7 +24,6 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1251,39 +1250,24 @@ export class SwarmViewModel {
         // Background tasks. Payload-free invalidation, scoped to the block
         // whose registry changed; the Swarm listens to every block (no scope)
         // and reloads the fleet list.
-        const unsubBackgroundTask = muxEventSubscribe({
-            eventType: WpsEvent.BackgroundTaskUpdated,
-            handler: () => this.scheduleLoadBackgroundTasks(),
-        });
+        const unsubBackgroundTask = onMuxEvent(WpsEvent.BackgroundTaskUpdated, () => this.scheduleLoadBackgroundTasks());
         if (unsubBackgroundTask) this.unsubs.push(unsubBackgroundTask);
 
         // Todo checklist + in-flight tool. Unlike the buckets above this
         // carries its whole payload on the event, so there's nothing to
         // reload — store it keyed by block and let buildTree read it.
-        const unsubProgress = muxEventSubscribe({
-            eventType: WpsEvent.AgentProgress,
-            handler: (event: MuxEvent) => {
-                const data = event?.data as any;
-                const blockId = data?.blockId;
-                if (typeof blockId !== "string" || !blockId) return;
-                const todos: TodoItem[] = Array.isArray(data?.todos)
-                    ? data.todos
-                          .filter((t: any) => typeof t?.text === "string" && t.text.length > 0)
-                          .map((t: any) => ({
-                              text: t.text as string,
-                              status: typeof t?.status === "string" ? t.status : "pending",
-                          }))
-                    : [];
-                const next: AgentProgress = {
-                    todos,
-                    todosTruncated: typeof data?.todosTruncated === "number" ? data.todosTruncated : 0,
-                    todosPartial: data?.todosPartial === true,
-                    currentTool: typeof data?.currentTool === "string" ? data.currentTool : null,
-                };
-                // Replace the Map (not mutate) so Solid sees a new reference
-                // and buildTree's memo actually re-runs.
-                this.setProgress((prev) => new Map(prev).set(blockId, next));
-            },
+        const unsubProgress = onMuxEvent(WpsEvent.AgentProgress, (data) => {
+            const blockId = data.blockId;
+            if (!blockId) return;
+            const next: AgentProgress = {
+                todos: data.todos.filter((t) => t.text.length > 0),
+                todosTruncated: data.todosTruncated,
+                todosPartial: data.todosPartial,
+                currentTool: data.currentTool,
+            };
+            // Replace the Map (not mutate) so Solid sees a new reference
+            // and buildTree's memo actually re-runs.
+            this.setProgress((prev) => new Map(prev).set(blockId, next));
         });
         if (unsubProgress) this.unsubs.push(unsubProgress);
 
@@ -1312,16 +1296,10 @@ export class SwarmViewModel {
         // unregisters, refresh the block list. These events are distinct from
         // agent:process-added / agent:process-exited so useTrackedProcesses
         // doesn't treat reactive registrations as phantom OS processes.
-        const unsubReactiveReg = muxEventSubscribe({
-            eventType: WpsEvent.AgentReactiveRegistered,
-            handler: () => void this.loadTrackedBlocks(),
-        });
+        const unsubReactiveReg = onMuxEvent(WpsEvent.AgentReactiveRegistered, () => void this.loadTrackedBlocks());
         if (unsubReactiveReg) this.unsubs.push(unsubReactiveReg);
 
-        const unsubReactiveUnreg = muxEventSubscribe({
-            eventType: WpsEvent.AgentReactiveUnregistered,
-            handler: () => void this.loadTrackedBlocks(),
-        });
+        const unsubReactiveUnreg = onMuxEvent(WpsEvent.AgentReactiveUnregistered, () => void this.loadTrackedBlocks());
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
 
         // Authoritative signal, in addition to the four above: published

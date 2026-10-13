@@ -176,6 +176,11 @@ export const WpsEvent = {
     DronesChanged: "drones:changed",
     NamedAgentsChanged: "namedagents:changed",
     WorkQueueChanged: "workqueue:changed",
+    // Typed in srv; nothing subscribes to these yet.
+    ProcessBrokerStatusChanged: "processbroker:status-changed",
+    IdentityNoDirectLinks: "identity:no-direct-links",
+    /** One protocol frame from an app-server agent pane. */
+    AppServerOutput: "output",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
     AgentShutdown: "agent:shutdown",

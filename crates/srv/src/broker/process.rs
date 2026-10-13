@@ -46,7 +46,7 @@ use parking_lot::Mutex;
 
 use crate::backend::blockcontroller::{self, BlockControllerRuntimeStatus};
 use crate::backend::process_tracker::{self, TrackedProcess, TrackingConfidence};
-use crate::backend::mps::{Broker as WpsBroker, MuxEvent};
+use crate::backend::mps::Broker as WpsBroker;
 
 /// MPS event name for a `ProcessStatus` change. Scoped `block:<id>`, same
 /// convention as `agent:process-added`/`controllerstatus`. Consumers that
@@ -64,7 +64,8 @@ pub const EVENT_TRACKED_BLOCKS_CHANGED: &str = "processbroker:tracked-blocks-cha
 /// `turn_active`/`shellprocstatus`/`shellprocexitcode` fields into one enum —
 /// the Pod-phase-equivalent signal in the Kubernetes phase/status/probe
 /// analogy the report draws in §4.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum Lifecycle {
     Running,
@@ -79,7 +80,8 @@ pub enum Lifecycle {
 /// The broker's public read shape — one struct every consumer (Agent pane,
 /// Swarm pane, future consumers) reads instead of composing raw registry
 /// data themselves.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ProcessStatus {
     pub block_id: String,
     pub lifecycle: Lifecycle,
@@ -95,6 +97,7 @@ pub struct ProcessStatus {
     /// matters beyond being informational.
     pub controller_type: String,
     pub is_agent_pane: bool,
+    #[ts(type = "number")]
     pub last_computed_ms: u64,
     /// The raw `BlockControllerRuntimeStatus` `compute_status` already reads
     /// to derive `lifecycle`/`is_agent_pane` above — exposed so callers that
@@ -327,13 +330,7 @@ impl ProcessBroker {
         let Some(ref broker) = self.mps_broker else {
             return;
         };
-        broker.publish(MuxEvent {
-            event: EVENT_STATUS_CHANGED.to_string(),
-            scopes: vec![format!("block:{}", status.block_id)],
-            sender: String::new(),
-            persist: 0,
-            data: serde_json::to_value(status).ok(),
-        });
+        broker.publish_event::<crate::backend::mps_events::ProcessStatusChanged>(status, vec![format!("block:{}", status.block_id)], 0);
     }
 
     /// Announce that `list()`/`list_agent_panes()` membership may have

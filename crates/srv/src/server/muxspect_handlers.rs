@@ -727,13 +727,7 @@ pub async fn handle_muxspect_dock_clear(
             .into_response();
     }
 
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: crate::backend::mps::EVENT_DOCK_CLEAR.to_string(),
-        scopes: vec![format!("block:{}", req.block_id)],
-        sender: String::new(),
-        persist: 0,
-        data: Some(json!({ "node_id": req.node_id })),
-    });
+    state.broker.publish_event::<crate::backend::mps_events::DockClear>(&crate::backend::mps_events::DockClearEvent { node_id: req.node_id.clone() }, vec![format!("block:{}", req.block_id)], 0);
     state.dock_snapshots.remove_node(&req.block_id, &req.node_id);
 
     Json(json!({ "cleared": true, "block_id": req.block_id, "node_id": req.node_id })).into_response()
