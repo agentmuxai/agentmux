@@ -26,7 +26,7 @@ const widgets = (): Record<string, WidgetConfigType> => ({
     "defwidget@agent": w("Agent"),
     "defwidget@drone": w("Drone"),
     "defwidget@messengers": w("Messengers", { children: ["discord"] }),
-    "defwidget@discord": w("Discord", { "display:hidden": true }),
+    "defwidget@discord": w("Discord", { "display:grouponly": true }),
 });
 const labels = (m: LauncherViewModel) => m.filteredWidgets().map((x) => x.label);
 

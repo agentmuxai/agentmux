@@ -610,8 +610,10 @@ pub struct WidgetConfigType {
     #[serde(rename = "display:order", default, skip_serializing_if = "is_zero_f64")]
     pub display_order: f64,
 
-    #[serde(rename = "display:hidden", default, skip_serializing_if = "is_false")]
-    pub display_hidden: bool,
+    /// Shown only inside its parent group's flyout, not on the bar, in More or in the pane
+    /// pickers. Not the user's Hidden (`widget:hidden`). Older files call this `display:hidden`.
+    #[serde(rename = "display:grouponly", alias = "display:hidden", default, skip_serializing_if = "is_false")]
+    pub display_grouponly: bool,
 
     /// Whether this widget is pinned to the action bar by default on new installs.
     /// Once the user has a `widget:pinned` setting this field is ignored.
