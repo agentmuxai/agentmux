@@ -81,10 +81,8 @@ export class RemotesViewModel {
         [this.testing, this.setTesting] = createSignal<string | null>(null);
         if (opts.subscribe !== false) {
             const unsubs = [
-                muxEventSubscribe(
-                    { eventType: WpsEvent.ConnChange, handler: () => this.scheduleRefresh() },
-                    { eventType: WpsEvent.Config, handler: () => this.scheduleRefresh() }
-                ),
+                muxEventSubscribe({ eventType: WpsEvent.Config, handler: () => this.scheduleRefresh() }),
+                onMuxEvent(WpsEvent.ConnChange, () => this.scheduleRefresh()),
                 onMuxEvent(WpsEvent.RemotesChange, () => this.scheduleRefresh()),
             ];
             this.unsubscribe = () => unsubs.forEach((unsub) => unsub());

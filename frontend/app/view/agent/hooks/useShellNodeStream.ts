@@ -16,26 +16,18 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 import type { ShellStatusResult } from "@/app/store/rpc-api";
+import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 
 export interface UseShellNodeStreamOptions {
     blockId: string;
     queue: StreamFlushQueue;
-}
-
-/** Payload carried by a `shell_node_create` MPS event. */
-interface ShellNodeCreateData {
-    shell_id?: unknown;
-    cmd?: unknown;
-    title?: unknown;
-    cwd?: unknown;
-    timestamp?: unknown;
 }
 
 /**
@@ -112,29 +104,26 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
     // block-scope live path, so the same chunk can never arrive twice (the
     // doubled-output bug this fix removes — see shell_node.rs for the full
     // rationale).
-    const handleShellChunk = (event: any) => {
-        const d = event?.data;
-        if (!d || typeof d !== "object") return;
-        const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
+    const handleShellChunk = (d: ShellChunkEvent) => {
+        const shellId = d.shell_id;
         if (!shellId) return;
         if (d.op === "exit") {
-            const exitCode = typeof d.exit_code === "number" ? d.exit_code : -1;
+            const exitCode = d.exit_code;
             // `stopped` = the exit was caused by ShellStop (tree-killed), so show
             // the grey "stopped" status rather than a red exited-err for the
             // non-zero code the kill produces.
-            const status: ShellNode["status"] = d.stopped === true
+            const status: ShellNode["status"] = d.stopped
                 ? "stopped"
                 : exitCode === 0 ? "exited-ok" : "exited-err";
             reallyResolved.add(shellId);
-            opts.queue.pushShellExit(shellId, status, exitCode, d.timestamp ?? Date.now());
+            opts.queue.pushShellExit(shellId, status, exitCode, d.timestamp);
             opts.queue.scheduleFlush();
             return;
         }
-        if (d.op !== "chunk") return;
         opts.queue.pushShellChunk(shellId, {
-            kind: d.kind ?? "stdout",
-            content: d.content ?? "",
-            timestamp: d.timestamp ?? Date.now(),
+            kind: d.kind,
+            content: d.content,
+            timestamp: d.timestamp,
         });
         opts.queue.scheduleFlush();
     };
@@ -154,11 +143,7 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
     const perShellUnsubs = new Map<string, () => void>();
     const subscribeShellScope = (shellId: string) => {
         if (perShellUnsubs.has(shellId)) return;
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.ShellChunk,
-            scope: `shell:${shellId}`,
-            handler: handleShellChunk,
-        });
+        const unsub = onMuxEvent(WpsEvent.ShellChunk, handleShellChunk, `shell:${shellId}`);
         perShellUnsubs.set(shellId, unsub);
     };
     onCleanup(() => {
@@ -177,62 +162,56 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
     // subscribeShellScope below) and queue it for the next RAF flush. We also
     // subscribe to this shell's per-shell `shell_chunk` ring so its chunks/exit
     // replay on remount even if a sibling shell evicted them from the block ring.
-    const shellNodeCreateUnsub = muxEventSubscribe({
-        eventType: WpsEvent.ShellNodeCreate,
-        scope: `block:${opts.blockId}`,
-        handler: (event: any) => {
-            const d = event?.data as ShellNodeCreateData | undefined;
-            if (!d || typeof d !== "object") return;
-            const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
-            if (!shellId) return;
-            const spawnedAt = typeof d.timestamp === "number" ? d.timestamp : Date.now();
-            const node: ShellNode = {
-                type: "shell",
-                id: shellId,
-                cmd: typeof d.cmd === "string" ? d.cmd : "",
-                title: typeof d.title === "string" ? d.title : (typeof d.cmd === "string" ? d.cmd : ""),
-                cwd: typeof d.cwd === "string" ? d.cwd : undefined,
-                status: "running",
-                spawnedAt,
-                log: { chunks: [], open: true },
-            };
-            opts.queue.pushShellCreate(node);
-            subscribeShellScope(shellId);
-            opts.queue.scheduleFlush();
+    const shellNodeCreateUnsub = onMuxEvent(WpsEvent.ShellNodeCreate, (d) => {
+        const shellId = d.shell_id;
+        if (!shellId) return;
+        const spawnedAt = d.timestamp;
+        const node: ShellNode = {
+            type: "shell",
+            id: shellId,
+            cmd: d.cmd,
+            title: d.title,
+            cwd: d.cwd ?? undefined,
+            status: "running",
+            spawnedAt,
+            log: { chunks: [], open: true },
+        };
+        opts.queue.pushShellCreate(node);
+        subscribeShellScope(shellId);
+        opts.queue.scheduleFlush();
 
-            // Resolve the shell's TRUE current status and correct immediately
-            // if it already exited — see shellStatusCorrection's doc comment
-            // for the full "replay vs. live spawn" rationale. This
-            // authoritative registry lookup typically resolves much faster
-            // than the per-shell scope subscription's own subscribe+ring-
-            // replay round trip just kicked off above, so in practice the
-            // correction lands before the "running" row this pushShellCreate
-            // just queued ever actually paints.
-            RpcApi.ShellStatusCommand(TabRpcClient, { shell_id: shellId })
-                .then((status) => {
-                    // The real exit/stop event (a separate, independently-
-                    // racing async round trip via the per-shell scope
-                    // subscribed above) already landed and is authoritative
-                    // — never overwrite it with this synthesized guess. See
-                    // `reallyResolved`'s doc comment.
-                    if (reallyResolved.has(shellId)) return;
-                    const correction = shellStatusCorrection(status, spawnedAt);
-                    if (!correction) return;
-                    opts.queue.pushShellExit(
-                        shellId,
-                        correction.status,
-                        correction.exitCode,
-                        correction.exitedAt,
-                    );
-                    opts.queue.scheduleFlush();
-                })
-                .catch(() => {
-                    // Best-effort — if this shell really did already exit, its
-                    // own exit-chunk replay (already subscribed above) still
-                    // corrects the dock on its own, just not as fast.
-                });
-        },
-    });
+        // Resolve the shell's TRUE current status and correct immediately
+        // if it already exited — see shellStatusCorrection's doc comment
+        // for the full "replay vs. live spawn" rationale. This
+        // authoritative registry lookup typically resolves much faster
+        // than the per-shell scope subscription's own subscribe+ring-
+        // replay round trip just kicked off above, so in practice the
+        // correction lands before the "running" row this pushShellCreate
+        // just queued ever actually paints.
+        RpcApi.ShellStatusCommand(TabRpcClient, { shell_id: shellId })
+            .then((status) => {
+                // The real exit/stop event (a separate, independently-
+                // racing async round trip via the per-shell scope
+                // subscribed above) already landed and is authoritative
+                // — never overwrite it with this synthesized guess. See
+                // `reallyResolved`'s doc comment.
+                if (reallyResolved.has(shellId)) return;
+                const correction = shellStatusCorrection(status, spawnedAt);
+                if (!correction) return;
+                opts.queue.pushShellExit(
+                    shellId,
+                    correction.status,
+                    correction.exitCode,
+                    correction.exitedAt,
+                );
+                opts.queue.scheduleFlush();
+            })
+            .catch(() => {
+                // Best-effort — if this shell really did already exit, its
+                // own exit-chunk replay (already subscribed above) still
+                // corrects the dock on its own, just not as fast.
+            });
+        }, `block:${opts.blockId}`);
     onCleanup(() => { try { shellNodeCreateUnsub(); } catch { /* ignore */ } });
 
     // NOTE: there is intentionally NO block-scope `shell_chunk` subscription.

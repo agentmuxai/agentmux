@@ -21,6 +21,7 @@ import { setBlockMeta } from "@/app/store/block-meta";
 import { refreshRemotes, remotesList } from "@/app/store/remotes-store";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { remoteSuggestionScopes } from "./conn-remote-items";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // newConnList -> connList => filteredList -> remoteItems -> sortedRemoteItems => remoteSuggestion
 // filteredList -> createNew

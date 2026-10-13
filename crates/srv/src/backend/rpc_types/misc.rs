@@ -171,7 +171,8 @@ pub struct WorkspaceInfoData {
 }
 
 /// Matches Go's `ConnStatus`
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ConnStatus {
     pub status: String,
     #[serde(default)]
@@ -183,6 +184,7 @@ pub struct ConnStatus {
     #[serde(default)]
     pub activeconnnum: i32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[ts(as = "Option<String>", optional)]
     pub error: String,
 }
 

@@ -9,15 +9,23 @@ import type { AgentContextUsageEvent } from "@/types/rpc/AgentContextUsageEvent"
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
+import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEvent";
+import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
+import type { AttachmentProgressEvent } from "@/types/rpc/AttachmentProgressEvent";
+import type { AttachmentReadyEvent } from "@/types/rpc/AttachmentReadyEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
+import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
+import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
 import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
@@ -44,8 +52,13 @@ export type MuxEventPayloads = {
   "agents:changed": null;
   "agentskills:changed": null;
   agentturn: AgentTurnEvent;
+  "attachment:batch-done": AttachmentBatchDoneEvent;
+  "attachment:failed": AttachmentFailedEvent;
+  "attachment:progress": AttachmentProgressEvent;
+  "attachment:ready": AttachmentReadyEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
+  connchange: ConnStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
   "dispatch:activity": DispatchActivityEvent;
@@ -55,12 +68,15 @@ export type MuxEventPayloads = {
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
   "identityaccounts:changed": null;
+  install_chunk: InstallChunkEvent;
   "mcp:changed": null;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
   "namedagents:changed": null;
   "processbroker:tracked-blocks-changed": null;
   remoteschange: null;
+  shell_chunk: ShellChunkEvent;
+  shell_node_create: ShellNodeCreateEvent;
   "skills:changed": null;
   "subagent:abandoned": SubagentAbandonedEvent;
   "subagent:activity": SubagentActivityEvent;
@@ -89,8 +105,13 @@ export const TYPED_MUX_EVENTS = [
   "agents:changed",
   "agentskills:changed",
   "agentturn",
+  "attachment:batch-done",
+  "attachment:failed",
+  "attachment:progress",
+  "attachment:ready",
   "blockfile",
   "blockstats",
+  "connchange",
   "controllerstatus",
   "cron_changed",
   "dispatch:activity",
@@ -100,12 +121,15 @@ export const TYPED_MUX_EVENTS = [
   "files:changed",
   "files:op",
   "identityaccounts:changed",
+  "install_chunk",
   "mcp:changed",
   "media:file_changed",
   "memories:changed",
   "namedagents:changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",
+  "shell_chunk",
+  "shell_node_create",
   "skills:changed",
   "subagent:abandoned",
   "subagent:activity",

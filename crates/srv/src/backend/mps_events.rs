@@ -88,6 +88,19 @@ events! {
     FilesChanged: crate::backend::files_watcher::EVENT_FILES_CHANGED => FilesChangedEvent,
     /// A copy/move/delete job's progress (`fs_ops::jobs`).
     FilesOp: crate::backend::fs_ops::jobs::EVENT_FILES_OP => crate::backend::rpc_types::FsOpEvent,
+    /// One line of an install's output, or its end (`install.start`, `system.install`).
+    InstallChunk: "install_chunk" => crate::server::install_handlers::InstallChunkEvent,
+    /// A Shell command started (`server::http_shell`).
+    ShellNodeCreate: super::mps::EVENT_SHELL_NODE_CREATE => crate::backend::shell_node::ShellNodeCreateEvent,
+    /// One line a Shell command wrote, or its exit (`backend::shell_node`).
+    ShellChunk: super::mps::EVENT_SHELL_CHUNK => crate::backend::shell_node::ShellChunkEvent,
+    /// An attachment batch's progress, per item (`backend::attachments`).
+    AttachmentProgress: super::mps::EVENT_ATTACHMENT_PROGRESS => crate::backend::rpc_types::AttachmentProgressEvent,
+    AttachmentReady: super::mps::EVENT_ATTACHMENT_READY => crate::backend::rpc_types::AttachmentReadyEvent,
+    AttachmentFailed: super::mps::EVENT_ATTACHMENT_FAILED => crate::backend::rpc_types::AttachmentFailedEvent,
+    AttachmentBatchDone: super::mps::EVENT_ATTACHMENT_BATCH_DONE => crate::backend::rpc_types::AttachmentBatchDoneEvent,
+    /// A connection's status changed (`backend::remote::status`).
+    ConnChange: super::mps::EVENT_CONN_CHANGE => crate::backend::rpc_types::ConnStatus,
 
     // Signals with no payload: something changed, and a subscriber refetches what it shows.
     /// The agents list changed.

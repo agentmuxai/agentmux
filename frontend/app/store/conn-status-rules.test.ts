@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { connBarShows, resyncsOnConnChange } from "./conn-status-rules";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 const cs = (status: string, extra: Partial<ConnStatus> = {}): ConnStatus => ({
     connection: "area54",

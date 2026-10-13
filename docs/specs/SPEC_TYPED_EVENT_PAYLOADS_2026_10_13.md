@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794; step 5 (the no-payload `*changed` signals) in review; steps 6–7 not started. Verified 2026-10-13.
+**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795; step 6 (install, shell, attachments, connections) in review; step 7 not started. Verified 2026-10-13.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
@@ -42,7 +42,7 @@ One PR per domain, about 10 events each. The busiest subscribers go first:
 3. **Subagents and swarm:** `subagent:*`, `dispatch*`, `backgroundtask*`.
 4. **Files and blocks:** `blockfile`, `blockstats`, `block:activity`, `files*`, `editor*`, `media*`, `waveobj:update`.
 5. **Signals:** the fixed-name `*changed` events with no payload (agents, memories, skills, MCP, accounts, cron, drones, remotes, the work queue). The widget events move to step 7.
-6. **Shell, install, attachments and connections:** `shell_*`, `install_*`, `attachment:*`, `connchange`.
+6. **Shell, install, attachments and connections:** `shell_chunk`, `shell_node_create`, `install_chunk`, `attachment:*`, `connchange`.
 7. **The rest**, including the widget events and the per-id names (`agent:memory:changed:{id}` and the like), and the gate at zero.
 
 **Effort:** about 7 PRs, comparable to the stub work. Every step can be shipped on its own: an unmigrated event works exactly as today.

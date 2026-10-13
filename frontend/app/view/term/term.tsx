@@ -33,6 +33,7 @@ import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
 import { isModKey } from "@/util/platformutil";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,

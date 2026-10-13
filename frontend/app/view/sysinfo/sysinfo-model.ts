@@ -16,6 +16,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
 import { convertMuxEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer

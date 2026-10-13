@@ -6,6 +6,8 @@
 // terminal's ssh at a password prompt), connected once logged in, and
 // disconnected or error once it is gone (crates/srv/src/backend/remote/link.rs).
 
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
+
 /** Whether a pane's connection bar (`ConnStatusOverlay`) shows: when
  *  something went wrong, or the connection it had is gone. Not while
  *  connecting: an SSH terminal shows that itself, ssh's prompts included, at

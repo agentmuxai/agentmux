@@ -8,9 +8,9 @@
 import { createMemo, createSignal } from "solid-js";
 import { isBlank } from "@/util/util";
 import { WpsEvent } from "@/app/store/mps-events";
-import { muxEventSubscribe } from "./mps";
+import { onMuxEvent } from "./mps";
 import { ClientService } from "./services";
-import type { MuxEvent } from "@/types/rpc/MuxEvent";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // Connection status map: connName → ConnStatus signal
 const [connStatusMap, setConnStatusMap] = createSignal(
@@ -32,19 +32,11 @@ export async function loadConnStatus() {
 }
 
 export function subscribeToConnEvents() {
-    muxEventSubscribe({
-        eventType: WpsEvent.ConnChange,
-        handler: (event: MuxEvent) => {
-            try {
-                const connStatus = event.data as ConnStatus;
-                if (connStatus == null || isBlank(connStatus.connection)) return;
-                console.log("connstatus update", connStatus);
-                const [, setter] = getOrCreateConnStatusPair(connStatus.connection);
-                setter(connStatus);
-            } catch (e) {
-                console.log("connchange error", e);
-            }
-        },
+    onMuxEvent(WpsEvent.ConnChange, (connStatus) => {
+        if (isBlank(connStatus.connection)) return;
+        console.log("connstatus update", connStatus);
+        const [, setter] = getOrCreateConnStatusPair(connStatus.connection);
+        setter(connStatus);
     });
 }
 

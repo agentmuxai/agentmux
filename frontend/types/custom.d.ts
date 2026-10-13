@@ -36,7 +36,7 @@ declare global {
         updaterStatusAtom: Accessor<UpdaterStatus>;
         typeAheadModalAtom: Accessor<TypeAheadModalType>;
         modalOpen: Accessor<boolean>;
-        allConnStatus: Accessor<ConnStatus[]>;
+        allConnStatus: Accessor<import("@/types/rpc/ConnStatus").ConnStatus[]>;
         flashErrors: Accessor<FlashErrorType[]>;
         notifications: Accessor<NotificationType[]>;
         notificationPopoverMode: Accessor<boolean>;

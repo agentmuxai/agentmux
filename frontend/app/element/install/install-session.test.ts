@@ -4,7 +4,14 @@
 import { createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: vi.fn(() => vi.fn()) }));
+vi.mock("@/app/store/mps", async () => {
+    const { NO_PAYLOAD_MUX_EVENTS } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const mock = { muxEventSubscribe: vi.fn(() => vi.fn()) };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (NO_PAYLOAD_MUX_EVENTS.has(eventType)) handler(null, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 import { muxEventSubscribe } from "@/app/store/mps";
 
