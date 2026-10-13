@@ -1,10 +1,10 @@
 # Why window-tab switches feel glitchy and pane-tab switches don't, and what VS Code does instead
 
 **Date:** 2026-09-24
-**Status:** analysis. Recommendations are in §6, measurements in §7. Items 1, 2 and 4 shipped as `window:keepinactivetabslaidout` (#3686, #3687) and are **on by default** after the A/B in §7. Setting it to `false` restores the old behavior. Items 3 and 5 are not done. Item 6's measurement is `scripts/tab-switch-report.mjs`.
+**Status:** analysis. Recommendations are in §6, measurements in §7. Items 1, 2 and 4 shipped as `window:keepinactivetabslaidout` (#3686, #3687) and are **on by default** after the A/B in §7. Setting it to `false` restores the old behavior. Items 3 and 5 are not done. Item 6's measurement is [`scripts/tab-switch-report.mjs`](../../scripts/tab-switch-report.mjs).
 **Author:** agentx
 **Trigger:** Repo owner, after the half-window pane offset
-(`docs/reports/REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md`): *"switching
+([`docs/reports/REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md`](../reports/REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md)): *"switching
 tabs feels glitchy. on vscode it is much more solid … the pane tab switch is
 very fast. the window tabs are the slow ones."*
 **Related:** `ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md` (#3239,
@@ -25,11 +25,11 @@ Pane tabs and window tabs hide inactive content in two different ways, and
 that one difference explains the gap.
 
 - **Pane tabs** hide inactive members with `visibility: hidden`
-  (`frontend/app/tab/pane-leaf-chrome.tsx:373`). Hidden members stay fully
+  ([`frontend/app/tab/pane-leaf-chrome.tsx:373`](../../frontend/app/tab/pane-leaf-chrome.tsx)). Hidden members stay fully
   laid out, so a switch is one local signal change. There's no layout to catch
   up on, no gate, no transition and no round trip.
 - **Window tabs** hide inactive tabs with `content-visibility: hidden`
-  (`frontend/app/workspace/workspace.tsx`, the tab container's style). That
+  ([`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx), the tab container's style). That
   skips layout of everything inside the tab while it's hidden. The agents in
   it keep streaming (they aren't dormant; only pane-stack members are), so
   every return has to lay out everything that changed in the meantime.
@@ -69,7 +69,7 @@ had already declared settled.
 Two separate problems show up:
 
 1. **A fixed floor on every switch.** The gate never lifts sooner than about
-   85 ms after it's armed (`SETTLE_MS = 80`, `frontend/app/store/tab-reveal.ts:77`),
+   85 ms after it's armed (`SETTLE_MS = 80`, [`frontend/app/store/tab-reveal.ts:77`](../../frontend/app/store/tab-reveal.ts)),
    even when there's nothing to settle. The 120 ms cross-fade
    (`app.scss`, `workspace-tab-content`) runs on top. So a window-tab switch
    takes at least ~200 ms to finish visually, while a pane-tab switch finishes

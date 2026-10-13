@@ -5,11 +5,11 @@
 
 > **2026-08-07 audit note:** Implemented — `OpenMedia` MCP tool is live in
 > `agentmux-mcp/src/main.rs`. Status field was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Date:** 2026-08-03
-**Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented,
-PR #2299; this spec's target pane, unchanged here), `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md`,
-`docs/specs/SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md`
+**Related:** [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](SPEC_MEDIA_PANE_2026_07_26.md) (v1 — implemented,
+PR #2299; this spec's target pane, unchanged here), [`docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md),
+[`docs/specs/SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md)
 (neither v2 nor v3 touches agent-facing opening — both assume the pane is
 already open and focus on what it shows once it is), `agentmux-mcp/src/main.rs`
 (`OpenEditor` tool, the direct precedent this spec mirrors), `agentmux-srv/src/server/app_api/pane.rs`
@@ -188,7 +188,7 @@ list (see "Corrections from automated review" below):
 
 `MediaViewModel` needs one small addition: a path-derived `viewName`,
 mirroring `EditorViewModel`'s existing pattern exactly
-(`frontend/app/view/editor/editor-model.ts:290-296`, `useBlockAtom` wrapping
+([`frontend/app/view/editor/editor-model.ts:290-296`](../../frontend/app/view/editor/editor-model.ts), `useBlockAtom` wrapping
 a `createMemo` over the tracked file-path signal, falling back to a static
 label — `"Editor"` there — when no path is set yet):
 
@@ -259,6 +259,6 @@ from the finding alone:
 | `agentmux-mcp/src/main.rs:513` | **The actual `tools/list` production registration** — add `open_media` to this array. Missing this is the P1 Codex finding; the tool would exist but be undiscoverable without it |
 | `agentmux-mcp/src/main.rs:1719-1747` | Test-only `defs` array + count assertion — add `OPEN_MEDIA_TOOL`, bump `assert_eq!` to 27. Validity/count coverage only, not a substitute for `main.rs:513` |
 | `frontend/app/view/media/media.tsx:24,169-197` | `media:path` meta read on mount — confirmed unchanged, the target this spec's backend arm populates |
-| `frontend/app/view/media/media.tsx` (new) | Add `viewName` (§3) — fixes the P2 Codex finding (tool description promised a file-name default title that didn't exist) |
-| `frontend/app/view/editor/editor-model.ts:290-296` | `EditorViewModel.viewName` — the exact pattern §3's `MediaViewModel.viewName` mirrors |
-| `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` | v1 — this spec adds an agent entry point to the pane it defines, no other change |
+| [`frontend/app/view/media/media.tsx`](../../frontend/app/view/media/media.tsx) (new) | Add `viewName` (§3) — fixes the P2 Codex finding (tool description promised a file-name default title that didn't exist) |
+| [`frontend/app/view/editor/editor-model.ts:290-296`](../../frontend/app/view/editor/editor-model.ts) | `EditorViewModel.viewName` — the exact pattern §3's `MediaViewModel.viewName` mirrors |
+| [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](SPEC_MEDIA_PANE_2026_07_26.md) | v1 — this spec adds an agent entry point to the pane it defines, no other change |

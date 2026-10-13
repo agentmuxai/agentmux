@@ -21,11 +21,11 @@ this status line is the only change.
 `0.55.23` already contains both recent fixes in this exact area:
 
 - **PR #2773** (`e12f24b30`) — the debounce fix for
-  `docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`'s
+  [`docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`](../reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md)'s
   request-storm (~300 overlapping RPC calls, 7.6s stall, growing latency,
   browser jank). Confirmed still in place and working: both
   `dispatch-source.ts` and `subagent-source.ts` route every subagent/dispatch
-  event through `createDebouncedRefresh` (`frontend/app/view/agent/activity/debounced-refresh.ts`,
+  event through `createDebouncedRefresh` ([`frontend/app/view/agent/activity/debounced-refresh.ts`](../../frontend/app/view/agent/activity/debounced-refresh.ts),
   trailing-edge 100ms + max-wait ceiling 1000ms).
 - **PR #2777** — fixed the BrainSpinner overlay getting stuck **visible**
   forever (a different bug: the spinner never going away, not the dock
@@ -95,7 +95,7 @@ const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) &
 ```
 
 `ready()` — the signal that shows/hides the BrainSpinner overlay
-(`docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md`)
+([`docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md`](retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md))
 — depends **only** on this block's own `blockData`/`viewModel` resolving
 from the object store. That's a fast, largely-local resolution (an
 already-open pane's data is typically warm within the object store almost
@@ -179,7 +179,7 @@ the debounce mechanism itself).
    broadcast payload (or a new, separate `subagent:backfill_done` event
    fired once per pane once `scan_subagents_dir` finishes) so the frontend
    can tell "still replaying history" from "this is live/settled." This is
-   `docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`
+   [`docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`](../reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md)
    §6's option 2, never implemented — and it's the only direction of the
    four that actually gives the frontend the information it's currently
    missing, rather than just tuning timing.
@@ -216,18 +216,18 @@ often") and shouldn't be presented as a full fix if implemented alone.
 
 ## 6. Evidence / sources
 
-- `frontend/app/view/agent/activity/debounced-refresh.ts` — the shipped
+- [`frontend/app/view/agent/activity/debounced-refresh.ts`](../../frontend/app/view/agent/activity/debounced-refresh.ts) — the shipped
   debounce primitive (100ms/1000ms), confirmed unchanged since PR #2773.
-- `frontend/app/view/agent/activity/subagent-source.ts`,
+- [`frontend/app/view/agent/activity/subagent-source.ts`](../../frontend/app/view/agent/activity/subagent-source.ts),
   `dispatch-source.ts` — confirmed both still wire every event through
   `createDebouncedRefresh` with identical (100, 1000) parameters.
-- `frontend/app/view/swarm/swarm-model.ts:458-467` —
+- [`frontend/app/view/swarm/swarm-model.ts:458-467`](../../frontend/app/view/swarm/swarm-model.ts) —
   `mergeSubagentsPreservingIdentity`, confirmed to only preserve reference
   identity for unchanged items, not list membership.
-- `frontend/app/view/agent/components/ActivityDock.tsx:250` — the keyed
+- [`frontend/app/view/agent/components/ActivityDock.tsx:250`](../../frontend/app/view/agent/components/ActivityDock.tsx) — the keyed
   `<For each={renderedIds()}>` render that turns a changed snapshot into
   real mount/unmount.
-- `frontend/app/block/block.tsx:301` — `ready()`'s exact definition,
+- [`frontend/app/block/block.tsx:301`](../../frontend/app/block/block.tsx) — `ready()`'s exact definition,
   confirmed to have no dependency on Activity Dock data sources.
 - `agentmux-srv/src/backend/subagent_watcher/jsonl.rs:35,198,212-231` —
   `process_jsonl_change`'s `live` parameter, confirmed still not present in
@@ -235,11 +235,11 @@ often") and shouldn't be presented as a full fix if implemented alone.
 - `agentmux-srv/src/backend/subagent_watcher/scan.rs:68-70,374` —
   `scan_subagents_dir`, confirmed no "backfill done" event exists anywhere
   in this path.
-- `docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md` —
+- [`docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md`](../reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md) —
   the original incident this retro follows up on, including the directly-
   measured timeline (§1) this retro's §2.2 timing argument is built from.
-- `docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md`
+- [`docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md`](retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md)
   — the unrelated but adjacent BrainSpinner bug, confirmed distinct from
   this one in §4 above.
-- `docs/specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md` — the
+- [`docs/specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md`](../specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) — the
   shipped debounce design doc.

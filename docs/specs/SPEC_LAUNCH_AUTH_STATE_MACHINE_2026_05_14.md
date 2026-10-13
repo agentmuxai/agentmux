@@ -451,4 +451,4 @@ From the user's exact ask, plus the standard spec criteria:
 - Resume notes: [`OAUTH_RESUME_AFTER_REBOOT_2026_05_14.md`](OAUTH_RESUME_AFTER_REBOOT_2026_05_14.md) — what's uncommitted on disk
 - Reducer roadmap: master reducer-stack status doc (slice #11 = workflow-run-state; new slice #12 candidate for this work, or we extend the existing PR B-1 slice in place)
 - Existing reducer: `frontend/app/view/agent/auth/auth-state.ts` (PR B-1, merged via #849)
-- Existing controller: `frontend/app/view/agent/auth/auth-flow-controller.ts` (PR B-2, in #850)
+- Existing controller: [`frontend/app/view/agent/auth/auth-flow-controller.ts`](../../frontend/app/view/agent/auth/auth-flow-controller.ts) (PR B-2, in #850)

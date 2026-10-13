@@ -5,7 +5,7 @@
 **Author:** Naki
 **Repo HEAD at analysis:** `bb255fda`
 **Related:** [[SPEC_FLOATING_PANE_TEAROFF_2026_05_11]], [[SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29]],
-[[SPEC_FLOATING_PANE_REDOCK_2026-05-27]], `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`
+[[SPEC_FLOATING_PANE_REDOCK_2026-05-27]], [`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`](../retro/saga-coordinator-location-analysis-2026-04-30.md)
 
 ---
 
@@ -60,7 +60,7 @@ tear-off flow (drag path, `service.rs:1873` + `CrossWindowDragMonitor.*`):
 So a programmatic float needs a srv→frontend directive.
 
 ### 2.4 srv→frontend directive channel (scoped pub/sub)
-`frontend/app/store/global.ts:259` `initGlobalEventSubs` subscribes via `waveEventSubscribe(
+[`frontend/app/store/global.ts:259`](../../frontend/app/store/global.ts) `initGlobalEventSubs` subscribes via `waveEventSubscribe(
 {eventType, handler, scope?})` (`store/wps.ts`). `scope` becomes a `SubscriptionRequest.scopes`
 entry; srv broadcasts `WSEventType{eventtype, oref, data}` (`backend/eventbus.rs:43,158`) and the
 bus routes by `eventtype` + `oref`-vs-`scope`. The existing `userinput` sub is **scoped to
@@ -134,8 +134,8 @@ across two round-trips. Server-owns keeps the reducer-state move atomic in one `
 | `agentmux-srv/src/backend/rpc_types.rs` | `CommandPaneOpenData.tree_expanded` + `.floating` | ✅ done |
 | `agentmux-srv/src/server/app_api.rs` | `build_pane_meta` tree key; `open_pane` floating branch + `open_pane_floating` (reducer CreateBlock + tear_off_block saga + window resolution + scoped broker directive) | ✅ done |
 | `agentmux-srv/src/server/service.rs` | `setup_torn_off_block_layout` → `pub(crate)` | ✅ done |
-| `frontend/app/store/global.ts` | `openfloatingpane` subscription (scope=windowId) → host `open_floating_pane_window` | ✅ done |
-| `.changesets/` | `feat(pane.open): OpenEditor collapse_tree + floating-pane support` | ✅ done |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | `openfloatingpane` subscription (scope=windowId) → host `open_floating_pane_window` | ✅ done |
+| [`.changesets/`](../../.changesets) | `feat(pane.open): OpenEditor collapse_tree + floating-pane support` | ✅ done |
 
 No new host command, no new reducer `Event` variant, no new saga. `cargo check -p agentmux-srv
 -p agentmux-mcp` green; `tsc --noEmit` clean for `global.ts`. **Floating still needs a CEF-build

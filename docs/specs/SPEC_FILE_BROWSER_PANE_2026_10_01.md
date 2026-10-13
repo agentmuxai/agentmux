@@ -35,7 +35,7 @@ Wave Terminal had a file browser, so the idea is proven in this lineage (§2). W
 - **Drag a file from one directory widget to another to copy it, including across connections** (SSH, WSL, S3). This is its best idea and the reason it was loved.
 - Entries are reported to stream in chunks with a maximum count.
 
-**Does AgentMux still have it?** No remnant. There is no directory or preview view under `frontend/app/view`, and `git log` finds no deleted `frontend/app/view/preview/`. Whatever came with the fork was removed before the history this repo keeps, or was never imported. The editor's tree (#1064, 2026-05-26) is the only browser, and it was written fresh.
+**Does AgentMux still have it?** No remnant. There is no directory or preview view under [`frontend/app/view`](../../frontend/app/view), and `git log` finds no deleted `frontend/app/view/preview/`. Whatever came with the fork was removed before the history this repo keeps, or was never imported. The editor's tree (#1064, 2026-05-26) is the only browser, and it was written fresh.
 
 ## 3. What good file browsers do (research)
 
@@ -131,7 +131,7 @@ Home, Desktop, Documents, Downloads, the drives list (reuse `geteditorroots`), p
 ## 6. Architecture
 
 ### 6.1 Reuse, don't fork
-`frontend/app/view/editor/file-tree-model.ts` (226 lines) and `file-tree.tsx` (349 lines) hold the expand/collapse, lazy load, rename and create flows. Phase 0 extracts the model to `frontend/app/fs/` with no behaviour change. The new view and the editor tree both depend on it, so a fix lands once.
+[`frontend/app/view/editor/file-tree-model.ts`](../../frontend/app/view/editor/file-tree-model.ts) (226 lines) and `file-tree.tsx` (349 lines) hold the expand/collapse, lazy load, rename and create flows. Phase 0 extracts the model to `frontend/app/fs/` with no behaviour change. The new view and the editor tree both depend on it, so a fix lands once.
 
 ### 6.2 View registration
 A `files` (working name) manifest in `block-registry.ts` / the pane-tab registry: name, aliases (`files`, `explorer`, `dir`), label, icon, `lifecycle: "keepAlive"` (so scroll and selection survive a pane-tab switch), and a `defwidget@files` entry in `widgets.json`. Per-pane state in block meta, in the existing namespaced style (`editor:tree_expanded`): `files:path`, `files:view`, `files:sort`, `files:sortdir`, `files:hidden`, `files:sidebar`, `files:preview`, `files:columns`. Nothing derivable is persisted (selection and scroll are not).
@@ -234,9 +234,9 @@ From Apple's documentation and forums, and from this repo.
 | 4 | Child processes are attributed to the responsible app, so a CLI we spawn inside a protected folder prompts, or fails, in **AgentMux's** name. A spawned CLI can die at startup with `EPERM`. | [penguin-harness #846](https://github.com/Prism-Shadow/penguin-harness/pull/846); [t3code #5943](https://github.com/pingdotgg/t3code/issues/5943) |
 | 5 | A denial is sticky. macOS does not ask again; the user must switch the app on in System Settings → Privacy & Security → Files & Folders. | Apple Support |
 | 6 | A grant is keyed to the bundle id and the code-signing requirement. An ad-hoc signature makes the code hash the whole identity, so **every rebuild is a new app**. | [YARG #1695](https://github.com/YARC-Official/YARG/issues/1695) |
-| 7 | Releases are Developer ID signed, notarized and hardened-runtime, but not sandboxed (`build/entitlements.mac.plist`), so TCC applies and no `files.*` entitlement is involved. | repo |
+| 7 | Releases are Developer ID signed, notarized and hardened-runtime, but not sandboxed ([`build/entitlements.mac.plist`](../../build/entitlements.mac.plist)), so TCC applies and no `files.*` entitlement is involved. | repo |
 | 8 | The bundle id is `ai.agentmux.<channel>.<version>`. The owner **accepted** that every release is a distinct macOS app and that granted permissions reset once per version (`SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md` §4). Folder prompts therefore come back after every update, and Settings accumulates an entry per version. **The repo owner confirmed (2026-10-01) that the reset is intended: it means every release re-exercises the first-run permission flow.** | repo, owner |
-| 9 | `Info.plist` (generated in `scripts/package-macos.sh`) declares only `NSMicrophoneUsageDescription`, `NSLocalNetworkUsageDescription` and `NSBonjourServices`. **No folder strings** (`NSDesktopFolderUsageDescription`, `…Documents…`, `…Downloads…`, `…RemovableVolumes…`, `…NetworkVolumes…`). | repo |
+| 9 | `Info.plist` (generated in [`scripts/package-macos.sh`](../../scripts/package-macos.sh)) declares only `NSMicrophoneUsageDescription`, `NSLocalNetworkUsageDescription` and `NSBonjourServices`. **No folder strings** (`NSDesktopFolderUsageDescription`, `…Documents…`, `…Downloads…`, `…RemovableVolumes…`, `…NetworkVolumes…`). | repo |
 | 10 | The existing handlers call `std::fs::read_dir` inside an `async` block, which runs on a Tokio worker. A blocked prompt would hold that worker for as long as the user takes to answer. `fs.list` must use `spawn_blocking`. | repo (`editor_handlers.rs`) |
 | 11 | Precedents to match: the status-bar **Keychain notice** shown on macOS before muxbus sign-in (`HostPopover.tsx`, `status-bar-popover-info-notice`); the opt-in LAN-discovery switch with its usage string; an Accessibility deep link in `SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md`. | repo |
 

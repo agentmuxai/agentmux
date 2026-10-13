@@ -4,7 +4,7 @@
 
 ## Summary
 
-Two separate audits: (1) orphaned diagnostic scripts in `scripts/`, and (2) three bugs in the bump/release pipeline that caused repeated reagentx P0/P2 failures on PR #1548. Both are fixed in this PR.
+Two separate audits: (1) orphaned diagnostic scripts in [`scripts/`](../../scripts), and (2) three bugs in the bump/release pipeline that caused repeated reagentx P0/P2 failures on PR #1548. Both are fixed in this PR.
 
 ---
 
@@ -41,7 +41,7 @@ Three bugs surfaced during the v0.46.3 release (PR #1548) that caused reagentx P
 
 **Symptom:** After `bash scripts/release.sh`, `package.json`, `Cargo.toml`, and `Cargo.lock` were updated on disk but not staged. Running `git commit` produced a release commit with `VERSION_HISTORY.md` and `package-lock.json` bumped but the other three files still at the old version — reagentx caught the mismatch immediately.
 
-**Root cause:** `scripts/release.sh` line 180 only staged `"$HISTORY" package-lock.json`.
+**Root cause:** [`scripts/release.sh`](../../scripts/release.sh) line 180 only staged `"$HISTORY" package-lock.json`.
 
 **Fix:** Stage all five version-bearing files:
 ```bash
@@ -93,4 +93,4 @@ git push -u origin <branch>
 #    Nothing else (no cleanup, no feature code, no analysis docs).
 ```
 
-**Never use `scripts/bump-wrapper.sh` directly for a release** — it bumps versions but does not consume changesets or update `VERSION_HISTORY.md`. It is an internal helper called by `release.sh`.
+**Never use [`scripts/bump-wrapper.sh`](../../scripts/bump-wrapper.sh) directly for a release** — it bumps versions but does not consume changesets or update `VERSION_HISTORY.md`. It is an internal helper called by `release.sh`.

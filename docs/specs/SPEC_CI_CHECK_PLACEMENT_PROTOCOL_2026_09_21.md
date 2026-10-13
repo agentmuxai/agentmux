@@ -9,7 +9,7 @@ branch, so the spec and its implementation reach `main` together. Opened as
 **Trigger:** Repo owner, after the Windows check gated three PRs at 14–15
 minutes each: *"this needs to be organized correct with a protocol... the
 nightly needs all the parts. the PR version needs to be slimmed down."*
-**Measurements:** `docs/reports/REPORT_CI_PR_LANE_BUDGET_2026_09_21.md` — all
+**Measurements:** [`docs/reports/REPORT_CI_PR_LANE_BUDGET_2026_09_21.md`](../reports/REPORT_CI_PR_LANE_BUDGET_2026_09_21.md) — all
 timings and the 32-run outcome analysis cited here come from that report
 rather than being restated in full.
 
@@ -55,7 +55,7 @@ pull request itself:
   *changed files*) only fail a change that **adds** debt. On a nightly run
   there is no diff to attribute new debt to, so the ratchet degrades into a
   whole-repo assertion that fails forever on pre-existing debt — which is
-  precisely the failure mode `.github/workflows/ci-pr.yml`'s own comment says
+  precisely the failure mode [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)'s own comment says
   killed three earlier attempts.
 
 These are **legitimate, permanent PR-only checks**. They must be listed

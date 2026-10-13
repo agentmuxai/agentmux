@@ -66,7 +66,7 @@ npx -p @agentmuxai/widget-sdk agentmux-widget sign ./acme.pr-dashboard --key ~/.
 npx -p @agentmuxai/widget-sdk agentmux-widget verify ./acme.pr-dashboard            # prints the fingerprint
 ```
 
-`sign` computes §8.2's hash exactly as srv does, so a package that verifies with `verify` verifies in AgentMux. The fixture `sdk/widget-sdk/fixtures/acme.fixture/` (stored byte-exact, `-text`) is signed with a fixed test seed; srv's `widget_signature.rs` and the SDK's `widget-sign.test.ts` both check its hash, signature and fingerprint. Signing is the last step: any edit afterwards breaks the signature (`invalid`) until the package is signed again.
+`sign` computes §8.2's hash exactly as srv does, so a package that verifies with `verify` verifies in AgentMux. The fixture [`sdk/widget-sdk/fixtures/acme.fixture/`](../../sdk/widget-sdk/fixtures/acme.fixture) (stored byte-exact, `-text`) is signed with a fixed test seed; srv's `widget_signature.rs` and the SDK's `widget-sign.test.ts` both check its hash, signature and fingerprint. Signing is the last step: any edit afterwards breaks the signature (`invalid`) until the package is signed again.
 
 ### 2.5 What a signature doesn't mean
 
@@ -76,7 +76,7 @@ It names a key, not a person, and it says nothing about what the code does. The 
 
 ### 3.1 Today
 
-A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`, `bundle_import.rs`): instructions, per-provider instructions, context files and skills, all text. Import is preview, then commit, bound by a content digest (`bundle.import.preview`, `bundle.import.commit`, the three import modals in `frontend/app/view/bundle/components/`). Nothing in a bundle runs code, and nothing is signed; non-UTF-8 entries are skipped.
+A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`, `bundle_import.rs`): instructions, per-provider instructions, context files and skills, all text. Import is preview, then commit, bound by a content digest (`bundle.import.preview`, `bundle.import.commit`, the three import modals in [`frontend/app/view/bundle/components/`](../../frontend/app/view/bundle/components)). Nothing in a bundle runs code, and nothing is signed; non-UTF-8 entries are skipped.
 
 ### 3.2 The format: a `widgets` component
 
@@ -98,12 +98,12 @@ A bundle is an Agent Bundle Format zip (`.abf`, v0.3, `backend/bundle_export.rs`
 - `bundle.import.preview` returns `widgets`: each widget's name, version, author, kind, permissions, hash, signature (§2.3), the version installed here if any, and why it can't be imported, if it can't.
 - The preview modal gains a **Widgets** section: each widget's name and version, its signature line and its permissions in the words of spec §6.4, with a checkbox, on by default. It says plainly: "Each widget asks for your approval before it runs." A widget already installed and approved at the same files and key is shown as such and not offered (one installed but still waiting is offered, and asks again); one that would replace an installed version says so.
 - `bundle.import.commit` takes `include_widgets: [id]`. After the bundle is written, srv reads the archive again, holds it to the digest the user previewed, copies each chosen widget into `~/.agentmux/widgets/<id>/` (replacing an installed version), and opens the normal approval prompt for each, as "The bundle "<name>" wants to install <widget>". **A bundle never approves a widget**: they arrive `needs_approval` (or `changed`), exactly as if installed from a folder, and declining one leaves the rest of the bundle imported. The commit answers each widget's outcome: `waiting`, `unchanged` or `failed` with why.
-- An agent importing a bundle through the App API gets the same: the widgets wait for the user's approval, which an agent can't give. (`bundle.import_for_agent` doesn't carry widgets yet.)
+- An agent importing a bundle through MuxAPI gets the same: the widgets wait for the user's approval, which an agent can't give. (`bundle.import_for_agent` doesn't carry widgets yet.)
 
 ### 3.4 Export
 
 - `bundle.export` takes `widgets: [id]` (with `format: "zip"`): installed, approved, sandboxed widgets to include. Export writes their **approved** files, each hashed again against the approval (never a newer, unapproved copy on disk), with `widget.sig` when it still names the approved signer, and lists them in `components.widgets`.
-- AgentMux's UI has no bundle export button today; agents export through the App API. A widget picker belongs with that button when it comes.
+- AgentMux's UI has no bundle export button today; agents export through MuxAPI. A widget picker belongs with that button when it comes.
 
 ### 3.5 What the agent is told
 
@@ -123,7 +123,7 @@ A public list of sandboxed widgets, browsable in Settings → Widgets → **Brow
 |---|---|---|---|
 | **A. A public repo `agentmuxai/widgets`** (recommended) | One folder per widget (`widgets/<id>/`, its source), submitted by PR; CI validates and builds `index.json` and one `.zip` per version, published with GitHub Pages | Contributions and review are PRs; CI checks every rule before a human looks; history of every version; independent of app and docs releases | One more public repo to own |
 | B. The docs site | `agentmux-docs` serves `index.json` and the zips next to the docs | No new repo | Widget submissions mixed with docs PRs; a catalog change waits for a docs deploy |
-| C. The app repo | `docs/examples/widgets/` is the catalog | Nothing new | Only AgentMux's own samples; every catalog change is an app PR |
+| C. The app repo | [`docs/examples/widgets/`](../examples/widgets) is the catalog | Nothing new | Only AgentMux's own samples; every catalog change is an app PR |
 
 ### 4.3 The index
 

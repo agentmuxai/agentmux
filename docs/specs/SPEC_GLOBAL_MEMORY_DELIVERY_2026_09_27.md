@@ -54,7 +54,7 @@ So the requirement has three parts:
 
 | Tier | What it is | Store | Written by |
 |---|---|---|---|
-| **Operator Config** | AgentMux-maintained Global Memory entries (e.g. "App API", "Environment & Gotchas") | `db_bundles`, `is_global=1, is_system=1` | seeded from `agentmux-srv/operator-config-seed.json` at every startup (`operator_config_seed.rs`), unless a human edited the row |
+| **Operator Config** | AgentMux-maintained Global Memory entries (e.g. "MuxAPI", "Environment & Gotchas") | `db_bundles`, `is_global=1, is_system=1` | seeded from `agentmux-srv/operator-config-seed.json` at every startup (`operator_config_seed.rs`), unless a human edited the row |
 | **Global Memory** | Workspace-wide notes, shared by every agent in the workspace | `db_bundles`, `is_global=1, is_system=0` | humans (Armory) and agents (`GlobalMemoryWrite`) |
 | **Personal Memory** | One agent's own provider-native memory files (e.g. Claude's `projects/<dir>/memory/*.md`) | provider files + `db_agent_native_memory` mirror | the agent |
 | **Provider Config** | The provider's own global config (e.g. `~/.claude/CLAUDE.md`) | the host | the user; isolated from spawned agents (#2854) |
@@ -170,7 +170,7 @@ the memory reinjection.
 Only `PreToolUse(Bash)` and `PreCompact` (`agentmux-bashwrap precompact`, a
 "compaction started" ping) are installed (`agent_config.rs`,
 `agent-config-builder.ts`). **There is no `SessionStart` hook.** (The
-`SessionStart` matches in `frontend/app/store/agent-document/` are the
+`SessionStart` matches in [`frontend/app/store/agent-document/`](../../frontend/app/store/agent-document) are the
 reducer's own session events, not Claude Code hooks.)
 
 ## 4. Coverage today, and what has been verified
@@ -443,7 +443,7 @@ P0–P2 are done (P2 awaits live verification); P3–P5 not started.
   - memory following an agent across accounts/channels: `SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md`;
   - export/import: `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`, #3148;
   - the Armory Memory UI specs;
-  - `docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md`.
+  - [`docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md`](../status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md).
 
 ### 8.3 Issues
 

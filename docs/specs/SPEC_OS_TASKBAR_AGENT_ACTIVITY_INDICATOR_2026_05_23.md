@@ -45,7 +45,7 @@ AgentMux already has the data we need; it just isn't aggregated globally.
 
 ### 2.1 Per-pane busy signal (today)
 
-`frontend/app/store/agent-pane-state/types.ts:118` defines `TurnPhase` — a discriminated union `{ Idle | Submitting | Streaming | Interrupting | Done | Disconnected }`. Since PR G this is the **sole** working-state encoding; the legacy `turnActiveAtom` / `stoppingAtom` / `streaming.active` booleans were removed. Per pane, `frontend/app/view/agent/state.ts:83` exposes `turnPhaseAtom: SignalPair<TurnPhase>`, populated by the agent-pane-state reducer (driven by WebSocket events from `agentmux-srv`).
+[`frontend/app/store/agent-pane-state/types.ts:118`](../../frontend/app/store/agent-pane-state/types.ts) defines `TurnPhase` — a discriminated union `{ Idle | Submitting | Streaming | Interrupting | Done | Disconnected }`. Since PR G this is the **sole** working-state encoding; the legacy `turnActiveAtom` / `stoppingAtom` / `streaming.active` booleans were removed. Per pane, [`frontend/app/view/agent/state.ts:83`](../../frontend/app/view/agent/state.ts) exposes `turnPhaseAtom: SignalPair<TurnPhase>`, populated by the agent-pane-state reducer (driven by WebSocket events from `agentmux-srv`).
 
 The canonical "is this agent busy" selector is `workingFromPhase(phase)` (`agent-pane-state/types.ts:250-253`):
 
@@ -128,7 +128,7 @@ Plus a `Query` method on the same object path returning the current state, so la
 
 ### 5.1 Frontend: global busy aggregator
 
-New module: `frontend/app/store/agentActivity.ts`.
+New module: [`frontend/app/store/agentActivity.ts`](../../frontend/app/store/agentActivity.ts).
 
 ```ts
 // Subscribes to every agent pane's turnPhaseAtom and aggregates state.
@@ -145,7 +145,7 @@ export function registerActivity(
 export function unregisterActivity(blockId: string): void;
 ```
 
-Each agent pane (`frontend/app/view/agent/agent-view.tsx`) calls `registerActivity(model.blockId, a.turnPhaseAtom[0])` immediately after the existing `registerAgentPane` block (component-body execution, before any hook's `onMount`), and `unregisterActivity(model.blockId)` in the paired `onCleanup`. Internally the store keeps a `Set<blockId>` of currently-working panes and updates it inside a `createEffect` that reads `workingFromPhase(turnPhase())`.
+Each agent pane ([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)) calls `registerActivity(model.blockId, a.turnPhaseAtom[0])` immediately after the existing `registerAgentPane` block (component-body execution, before any hook's `onMount`), and `unregisterActivity(model.blockId)` in the paired `onCleanup`. Internally the store keeps a `Set<blockId>` of currently-working panes and updates it inside a `createEffect` that reads `workingFromPhase(turnPhase())`.
 
 Names are deliberately `registerActivity` / `unregisterActivity` (not `registerAgentPane`) to avoid clashing with the existing `agent-pane-registration` import that the same file uses.
 
@@ -270,7 +270,7 @@ One command, three platform implementations dispatched at compile time via `#[cf
 
 Branch: `agentx/os-taskbar-agent-activity`.
 
-1. **Frontend store** — `frontend/app/store/agentActivity.ts` with subscribe/unsubscribe API. Per-pane `registerAgentPane` wired in `agent-view.tsx`. No IPC yet; expose the count via a debug `console.log` so we can verify it. Ship behind a `task dev` console check.
+1. **Frontend store** — [`frontend/app/store/agentActivity.ts`](../../frontend/app/store/agentActivity.ts) with subscribe/unsubscribe API. Per-pane `registerAgentPane` wired in `agent-view.tsx`. No IPC yet; expose the count via a debug `console.log` so we can verify it. Ship behind a `task dev` console check.
 2. **Host IPC scaffold** — `set_agent_activity` command, dispatch to a per-platform stub that logs only. Verify the IPC roundtrip.
 3. **Windows implementation** — `ITaskbarList3` init, `TaskbarButtonCreated` gate, `SetProgressState` + `SetOverlayIcon` calls, overlay-icon compositing. Add the three baked overlay PNGs to `agentmux-cef/resources/win/activity/`.
 4. **macOS implementation** — `NSDockTile` `badgeLabel` calls via `objc2-app-kit`.
@@ -287,15 +287,15 @@ Each step is independently revertible. Steps 4 and 5 can land in either order; s
 
 ### Codebase
 
-- `frontend/app/store/agent-pane-state/types.ts:118-152` — `TurnPhase` union.
-- `frontend/app/store/agent-pane-state/types.ts:239-253` — `isWorking` / `workingFromPhase` selectors.
-- `frontend/app/view/agent/state.ts:83` — `turnPhaseAtom` projection.
-- `frontend/app/store/agent-pane-registration.ts:122` — atomic dual-store pane registration (the pattern `agentActivity.ts` registers alongside).
+- [`frontend/app/store/agent-pane-state/types.ts:118-152`](../../frontend/app/store/agent-pane-state/types.ts) — `TurnPhase` union.
+- [`frontend/app/store/agent-pane-state/types.ts:239-253`](../../frontend/app/store/agent-pane-state/types.ts) — `isWorking` / `workingFromPhase` selectors.
+- [`frontend/app/view/agent/state.ts:83`](../../frontend/app/view/agent/state.ts) — `turnPhaseAtom` projection.
+- [`frontend/app/store/agent-pane-registration.ts:122`](../../frontend/app/store/agent-pane-registration.ts) — atomic dual-store pane registration (the pattern `agentActivity.ts` registers alongside).
 - `agentmux-cef/src/window/window.rs:16-100` — existing IPC command pattern (`zoom_factor`, `close_window`).
 - `agentmux-cef/src/window/window.rs:92` — `BrowserHost::window_handle()` (HWND source).
 - `agentmux-cef/Cargo.toml:54-82` — `windows` crate features already include `Win32_UI_Shell`, `Win32_System_Com`.
 - `agentmux-cef/build.rs` — embeds the app `.ico` into the PE resource; no linker change needed for shell32.
-- `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md` — adjacent (taskbar grouping via AUMID and `DeleteTab`). Same HWND, same COM stack; this spec extends it.
+- [`docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md`](SPEC_MULTIWINDOW_TASKBAR_GROUPING.md) — adjacent (taskbar grouping via AUMID and `DeleteTab`). Same HWND, same COM stack; this spec extends it.
 - `assets/linux/icons/hicolor/*/apps/agentmux.png` — Linux icon set.
 - `build/icons/{16,32,48,256}x{...}.png` — overlay-icon source material.
 

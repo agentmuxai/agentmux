@@ -200,7 +200,7 @@ Phase 6 is the productivity power-up for authoring edge cases.
 
 1. **Where does the record harness live?** Probably a small wrapper around `useAgentStream` initialized when `AGENTMUX_RECORD_SESSION=path` env var is set. Frontend-side, since that's where all three channels converge. Alternative: a srv-side recorder that taps the subprocess + broker, but it'd miss `dispatch` events.
 
-2. **Fixture identity / pinning.** Do we commit fixtures alongside the test that uses them, or in a central `frontend/test/fixtures/agent-sessions/`? Central wins for discovery + dedup; local wins for refactor-safety.
+2. **Fixture identity / pinning.** Do we commit fixtures alongside the test that uses them, or in a central [`frontend/test/fixtures/agent-sessions/`](../../frontend/test/fixtures/agent-sessions)? Central wins for discovery + dedup; local wins for refactor-safety.
 
 3. **Should `dispatch` events replay the action, or assert that the action *would have been* dispatched?** Replay is simpler. Assert mode catches divergence (current code dispatches X, fixture has Y) — that's Temporal's non-determinism check. Default to replay; add assert mode in v2.
 
@@ -218,11 +218,11 @@ Phase 6 is the productivity power-up for authoring edge cases.
 
 ## 10. Cross-references
 
-- Live-log streaming spec: `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`
-- Named-agent continuation: `docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md`
-- Live-log retro (motivates this work): `docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md`
-- `useAgentStream`: `frontend/app/view/agent/useAgentStream.ts`
-- Stream parser: `frontend/app/view/agent/stream-parser.ts`
-- Reducer slot store + audit: `frontend/app/store/agent-document/` (PR #764)
+- Live-log streaming spec: [`docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md)
+- Named-agent continuation: [`docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md)
+- Live-log retro (motivates this work): [`docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md`](../retro/2026-05-11-live-log-streaming-wrapper-failures.md)
+- `useAgentStream`: [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts)
+- Stream parser: [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
+- Reducer slot store + audit: [`frontend/app/store/agent-document/`](../../frontend/app/store/agent-document) (PR #764)
 - `recordDispatch` audit: same module
 - WPS broker: `agentmux-srv/src/backend/wps.rs`

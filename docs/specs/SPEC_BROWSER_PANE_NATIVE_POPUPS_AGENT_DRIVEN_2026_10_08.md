@@ -85,7 +85,7 @@ opens the pane); srv re-checks ownership there with its own record. If srv decli
 disagrees with the host's hint, or the pane cap), the request goes to the system browser, links
 included: the host asks srv from its own thread and can no longer load the link in the opener's
 frame. A native popup is created at once and registered after (§4). The routing is one pure
-function (`crates/cef/src/client/popup_route.rs`) with the table above as its tests.
+function ([`crates/cef/src/client/popup_route.rs`](../../crates/cef/src/client/popup_route.rs)) with the table above as its tests.
 
 ## 4. Identity and lifecycle of a bare popup
 
@@ -174,14 +174,14 @@ A bare popup has no AgentMux header; what would appear there appears on the **op
 | Part | Change |
 |---|---|
 | `agentmux-common` | `popup_rules` (from srv's `browser_popup`): `decide`, `same_site`, the loopback same-origin rule; the `psl` crate moves here |
-| `crates/cef/src/client/lifecycle.rs`, `handlers.rs` | disposition → window or pane; admission in the host; the `(opener, url)` queue; register, navigate and close messages; popups of popups to the root opener; tab dispositions no longer load in the opener's frame |
-| `crates/cef/src/state/` | the owned-pane set; `popup -> opener`; per-opener counts; `live_popup_label` |
-| `crates/cef/src/browser_api/` | resolver Path 0; the `owned_panes` route; show and close a popup (for the strip) |
-| `crates/srv/src/server/browser_popup.rs` | popup-window records and owners; the opener's strip value (`browser:popup_windows`) |
-| `crates/srv/src/server/ui_handlers.rs`, `routes.rs`, `main.rs` | `POST /api/v1/host/browser_popup_window`; `target_block_id` popup branch; banners on the opener for a popup target (`banner_for`); `kind` in listings; the owned-pane push task (`spawn_owned_panes_sync`, woken by `browser_owner::changed`, every minute regardless, and on host registration) |
-| `crates/srv/src/server/browser_owner.rs` | `owned_panes`, `changed`; `browser:popup_windows` is srv-only (updates refused, stripped from new blocks) |
-| `crates/cef/src/client/popup_route.rs` | the routing table, pure and tested |
-| `crates/cef/src/ui_tasks/popup.rs`, `ipc.rs` | Show and Close (`browser_popup_show` / `browser_popup_close`) |
+| [`crates/cef/src/client/lifecycle.rs`](../../crates/cef/src/client/lifecycle.rs), `handlers.rs` | disposition → window or pane; admission in the host; the `(opener, url)` queue; register, navigate and close messages; popups of popups to the root opener; tab dispositions no longer load in the opener's frame |
+| [`crates/cef/src/state/`](../../crates/cef/src/state) | the owned-pane set; `popup -> opener`; per-opener counts; `live_popup_label` |
+| [`crates/cef/src/browser_api/`](../../crates/cef/src/browser_api) | resolver Path 0; the `owned_panes` route; show and close a popup (for the strip) |
+| [`crates/srv/src/server/browser_popup.rs`](../../crates/srv/src/server/browser_popup.rs) | popup-window records and owners; the opener's strip value (`browser:popup_windows`) |
+| [`crates/srv/src/server/ui_handlers.rs`](../../crates/srv/src/server/ui_handlers.rs), `routes.rs`, `main.rs` | `POST /api/v1/host/browser_popup_window`; `target_block_id` popup branch; banners on the opener for a popup target (`banner_for`); `kind` in listings; the owned-pane push task (`spawn_owned_panes_sync`, woken by `browser_owner::changed`, every minute regardless, and on host registration) |
+| [`crates/srv/src/server/browser_owner.rs`](../../crates/srv/src/server/browser_owner.rs) | `owned_panes`, `changed`; `browser:popup_windows` is srv-only (updates refused, stripped from new blocks) |
+| [`crates/cef/src/client/popup_route.rs`](../../crates/cef/src/client/popup_route.rs) | the routing table, pure and tested |
+| [`crates/cef/src/ui_tasks/popup.rs`](../../crates/cef/src/ui_tasks/popup.rs), `ipc.rs` | Show and Close (`browser_popup_show` / `browser_popup_close`) |
 | frontend | the opener's popup-windows strip (Show, Close); the banner names the popup window (`window`) |
 
 ## 10. Relationship to P1 (#4478)

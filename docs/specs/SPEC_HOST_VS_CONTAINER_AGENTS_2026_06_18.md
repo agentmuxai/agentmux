@@ -56,7 +56,7 @@ This spec covers:
 | No warning on host selection | `AgentLaunchModal.tsx:750` | Need an amber callout |
 | No runtime badge on the running pane | `agent-view.tsx` | Use a `PaneRow` pin (see §5.2) |
 | No runtime badge on My Agents cards | `AgentCard.tsx` | `agent_type` not currently displayed |
-| Seeded templates are all `"host"` | `scripts/gen-seed.js` | 1 of 7 flips to `"container"` (Claude only — the only built image) |
+| Seeded templates are all `"host"` | [`scripts/gen-seed.js`](../../scripts/gen-seed.js) | 1 of 7 flips to `"container"` (Claude only — the only built image) |
 
 ---
 
@@ -110,10 +110,10 @@ No new CSS tokens needed — `--success-color` and `--warning-color` are already
 
 ### 5.1 RuntimeBadge component (new)
 
-**Location:** `frontend/app/view/agent/components/RuntimeBadge.tsx`
+**Location:** [`frontend/app/view/agent/components/RuntimeBadge.tsx`](../../frontend/app/view/agent/components/RuntimeBadge.tsx)
 
 A tiny pill rendered identically across all surfaces. Uses FontAwesome icons (the existing
-icon system — see `frontend/util/util.ts:100-131` for the `makeIconClass` pattern):
+icon system — see [`frontend/util/util.ts:100-131`](../../frontend/util/util.ts) for the `makeIconClass` pattern):
 
 - Container → `fa-solid fa-box` — box/package = sandboxed
 - Host → `fa-solid fa-server` — server = native machine
@@ -135,7 +135,7 @@ CSS: inline `background: var(--success-color)` / `var(--warning-color)`, white t
 
 ### 5.2 Running pane — PaneRow runtime pin
 
-**File:** `frontend/app/view/agent/agent-view.tsx` (around line 1139)
+**File:** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (around line 1139)
 
 The `AgentControlBar` is **Claude-only** (`if (providerId !== "claude") return null`)
 and is hidden inside the collapsible `agent-composer-details` panel — not a valid
@@ -167,7 +167,7 @@ Data source: `agentMode` from block meta. Read via
 
 ### 5.3 My Agents list — AgentCard badge
 
-**File:** `frontend/app/view/agent/components/AgentCard.tsx`
+**File:** [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx)
 
 Add `<RuntimeBadge runtime={props.agent.agent_type} size="sm" />` to the card row,
 after the agent name, before the timestamp/session status area. Data source:
@@ -180,8 +180,8 @@ in a visually consistent, color-coded form.
 ### 5.4 AgentLaunchModal — default + warning
 
 **Files:**
-- `frontend/app/store/launch-flow-state/types.ts`
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx`
+- [`frontend/app/store/launch-flow-state/types.ts`](../../frontend/app/store/launch-flow-state/types.ts)
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx)
 
 #### 5.4.1 Default to container (`types.ts:51`)
 
@@ -260,8 +260,8 @@ that field is already the source of truth for which CLIs can run in a container:
 | OpenClaw | openclaw | false (needs host ACP) | host |
 
 1 of 7 is container. Only `claude` has a built+published image
-(`ghcr.io/agentmuxai/agent-claude:latest`, built by `docker/Dockerfile.agent-agentmux`
-and `.github/workflows/container-image.yml`). The remaining 5 providers will flip to
+(`ghcr.io/agentmuxai/agent-claude:latest`, built by [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux)
+and [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml)). The remaining 5 providers will flip to
 `containerSupported: true` incrementally as their images ship — at that point update
 `cli-catalog.ts`, `gen-seed.js`, and bump the manifest version.
 
@@ -288,7 +288,7 @@ where `is_seeded = 1`.
 1. `types.ts:51` — `runtime: "container"`
 2. `app_api.rs:2528` — `agent_type: cmd.agent_type.clone()` (caller-supplied, default `"host"`)
 3. `AgentLaunchModal.tsx` — host warning callout + radio subtext
-4. `scripts/gen-seed.js` — update 1 template (claude) to `"container"`, bump schemaVersion
+4. [`scripts/gen-seed.js`](../../scripts/gen-seed.js) — update 1 template (claude) to `"container"`, bump schemaVersion
 
 ~80 LOC frontend, ~5 LOC Rust, ~1 LOC seed script.
 
@@ -308,19 +308,19 @@ Not blocking — users can recreate agents to change runtime today.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/RuntimeBadge.tsx` | **NEW** — pill badge component |
-| `frontend/app/view/agent/components/RuntimeBadge.scss` | **NEW** — badge styles |
-| `frontend/app/view/agent/agent-view.tsx` | Add runtime PaneRow pin (~line 1139) |
-| `frontend/app/view/agent/components/AgentCard.tsx` | Add `<RuntimeBadge>` to card row |
+| [`frontend/app/view/agent/components/RuntimeBadge.tsx`](../../frontend/app/view/agent/components/RuntimeBadge.tsx) | **NEW** — pill badge component |
+| [`frontend/app/view/agent/components/RuntimeBadge.scss`](../../frontend/app/view/agent/components/RuntimeBadge.scss) | **NEW** — badge styles |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Add runtime PaneRow pin (~line 1139) |
+| [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx) | Add `<RuntimeBadge>` to card row |
 
 ### Phase 2
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/launch-flow-state/types.ts:51` | `runtime: "container"` |
+| [`frontend/app/store/launch-flow-state/types.ts:51`](../../frontend/app/store/launch-flow-state/types.ts) | `runtime: "container"` |
 | `agentmux-srv/src/server/app_api.rs:2528` | `agent_type: cmd.agent_type.clone()` (default `"host"`, caller-supplied) |
-| `frontend/app/view/agent/components/AgentLaunchModal.tsx` | Host warning + radio subtext |
-| `scripts/gen-seed.js` | Update 1 template (claude → container) + bump schemaVersion to 9 |
+| [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) | Host warning + radio subtext |
+| [`scripts/gen-seed.js`](../../scripts/gen-seed.js) | Update 1 template (claude → container) + bump schemaVersion to 9 |
 
 ### Phase 3
 
@@ -362,7 +362,7 @@ set. Render via `<i class="fa-solid fa-box" />` pattern used throughout the code
 6 stay `"host"`: openclaw (needs host ACP access) and codex/gemini/kimi/pi/copilot
 (no container images built yet; will flip to container when images ship).
 The `containerSupported` flag in `cli-catalog.ts` is the authoritative source for the
-UI (modal guard, runtime dropdown). `scripts/gen-seed.js` maintains a parallel
+UI (modal guard, runtime dropdown). [`scripts/gen-seed.js`](../../scripts/gen-seed.js) maintains a parallel
 `CLI_DEFS` table that must be kept in sync with the catalog — the `containerImage`
 field in particular is duplicated by design (the seed script cannot import TypeScript).
 The catalog has a `qwen` entry (`containerSupported: false`) not yet in the seed;
@@ -384,14 +384,14 @@ reset on every re-seed (version bump) — that's the correct mechanism.
 - `agentmux-srv/src/server/agent_handlers.rs:3205-3208` — host/container branch
 - `agentmux-srv/src/server/app_api.rs:2528` — user agent create path (current "host" default)
 - `agentmux-srv/src/backend/storage/migrations.rs:141` — `agent_type TEXT NOT NULL DEFAULT 'standalone'`
-- `frontend/app/store/launch-flow-state/types.ts:49-51` — `initialForm()` + runtime default
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx:743-768` — current radio group
-- `frontend/app/view/agent/agent-view.tsx:1139-1156` — failure-recovery PaneRow (placement reference)
+- [`frontend/app/store/launch-flow-state/types.ts:49-51`](../../frontend/app/store/launch-flow-state/types.ts) — `initialForm()` + runtime default
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx:743-768`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) — current radio group
+- [`frontend/app/view/agent/agent-view.tsx:1139-1156`](../../frontend/app/view/agent/agent-view.tsx) — failure-recovery PaneRow (placement reference)
 - `frontend/app/view/agent/components/AgentControlBar.tsx:60-165` — Claude-only, gated on `providerId`
-- `frontend/app/view/agent/agent-model.ts:523` — `agentMode` written to block meta at launch
-- `frontend/app/view/agent/defaults/cli-catalog.ts` — `containerSupported` per provider (source of truth)
+- [`frontend/app/view/agent/agent-model.ts:523`](../../frontend/app/view/agent/agent-model.ts) — `agentMode` written to block meta at launch
+- [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts) — `containerSupported` per provider (source of truth)
 - `frontend/app/view/agent-def/components/AgentDefCard.tsx:38-51` — existing HOST/CONTAINER text badge (forge view)
-- `scripts/gen-seed.js:142` — current `agent_type: "host"` in seed
-- `docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md` — container architecture spec
-- `docker/Dockerfile.agent-agentmux` — container image definition
+- [`scripts/gen-seed.js:142`](../../scripts/gen-seed.js) — current `agent_type: "host"` in seed
+- [`docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) — container architecture spec
+- [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) — container image definition
 - agent color conventions (green=container, amber/red=host), kept in a private tools repo

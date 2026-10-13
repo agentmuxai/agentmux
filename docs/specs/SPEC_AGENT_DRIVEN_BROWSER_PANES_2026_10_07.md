@@ -25,8 +25,8 @@
 
 | Piece | State |
 |---|---|
-| Browser control layer | Built. `crates/cef/src/browser_api/` is a CDP-backed HTTP surface (in-process CDP since #3832): `query`, `focus_info`, `eval`, `screenshot`, `click_element`, `focus_element`, `dispatch_key`, `navigate`, `back`, `forward`, `reload`. |
-| Agent tools | `UIClick`, `UIQuery`, `UIScreenshot`, `BrowserNavigate`, `BrowserBack`, `BrowserForward`, `BrowserReload`, `BrowserEval`, `BrowserDispatchKey`, `BrowserFocusElement`, `BrowserFocusInfo`. All proxied through `crates/srv/src/server/ui_handlers.rs`. |
+| Browser control layer | Built. [`crates/cef/src/browser_api/`](../../crates/cef/src/browser_api) is a CDP-backed HTTP surface (in-process CDP since #3832): `query`, `focus_info`, `eval`, `screenshot`, `click_element`, `focus_element`, `dispatch_key`, `navigate`, `back`, `forward`, `reload`. |
+| Agent tools | `UIClick`, `UIQuery`, `UIScreenshot`, `BrowserNavigate`, `BrowserBack`, `BrowserForward`, `BrowserReload`, `BrowserEval`, `BrowserDispatchKey`, `BrowserFocusElement`, `BrowserFocusInfo`. All proxied through [`crates/srv/src/server/ui_handlers.rs`](../../crates/srv/src/server/ui_handlers.rs). |
 | Scoping | **Own pane only.** `verified_block_id()` (`ui_handlers.rs:72`) derives the target block from the caller's HMAC-signed identity; a client-supplied block id is never trusted (#2662). Navigate/Back/Forward/Reload/Eval also require that block to be a browser pane. |
 | Typing | Good: `dispatch_key` with `text` uses CDP `Input.insertText` (`routes.rs:704`), which is real input that React and Vue controlled fields accept. |
 | Opening a browser pane | **No tool.** Agents have `OpenAgent`, `OpenEditor`, `OpenMedia`, `OpenFiles`, `NewTab`, `Layout`. `pane.open` (`app_api/pane.rs:1011`) can create any view, so the plumbing exists. |
@@ -158,7 +158,7 @@ What counts as committing, as built: a click on an element that submits its form
 2. **Ownership is server-side.** `browser:owner_agent` is written only by srv from a verified identity and checked on every call, the same model as #2662.
 3. **The secret-field guard is a guard, not a boundary.** `BrowserEval` can still type anywhere a page lets it. The boundaries are: the agent's pane starts logged out (§6), the human approves committing actions in the pane, and hand-off refuses the agent's tools while the human is typing.
 4. **Uploads can exfiltrate.** That's why paths are limited to the agent's workspace or what the human approved, and every upload is shown in the pane.
-5. **Same OS user:** a process running as the user can still drive CEF directly; this is the same residual the rest of the App API accepts.
+5. **Same OS user:** a process running as the user can still drive CEF directly; this is the same residual the rest of MuxAPI accepts.
 
 ## 9. Acceptance test: the Microsoft false-positive report
 

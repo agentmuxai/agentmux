@@ -18,7 +18,7 @@
 >
 > Everything below is preserved as the original investigation record.
 
-**This is a follow-up to `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`
+**This is a follow-up to [`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`](STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md)
 (open and unpatched at the time this was written — both are now resolved by
 #2666/#2673, see the banner above).** Today's investigation started from a user report
 framed as "AgentMux causes growing Page File pressure on Windows 11; Windows
@@ -57,7 +57,7 @@ existing leaked handles do not self-heal without that.
 `IsWindows10OrGreater`, `RtlGetVersion`, `dwBuildNumber`, or any OS-version
 branch returns **zero matches** — the app has no Windows-version-conditional
 logic at all. The one place in the repo that reasons explicitly about a
-Win10/Win11 split, `docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`,
+Win10/Win11 split, [`docs/specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`](../specs/SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md),
 found the **opposite** direction (a Windows 10 machine hit OOM-abort crashes
 from a *shrunk* pagefile ceiling) and its own conclusion (§4) was explicit:
 *"Not a kernel-version bug... the dominant lever is environmental (free disk
@@ -70,7 +70,7 @@ runs), not OS version — two machines with different typical session lengths,
 pane counts, or background-service topology will show very different symptom
 severity by coincidence, independent of which Windows version they run. The
 one *confirmed, fixed* Windows-11-specific bug in the repo
-(`docs/retro/retro-windows-terminal-window-leak-2026-06-21.md` — missing
+([`docs/retro/retro-windows-terminal-window-leak-2026-06-21.md`](../retro/retro-windows-terminal-window-leak-2026-06-21.md) — missing
 `CREATE_NO_WINDOW` caused Win11's DefTerm to pop a visible Terminal window
 per CLI/LSP spawn) is real and Windows-11-specific, but it leaks **window
 handles/UX clutter**, not commit/page-file — a different mechanism, already
@@ -85,10 +85,10 @@ fixed in commit `b76ecd1e4`.
    ratchets up because pooled renderers weren't torn down on pane close.
    Tracked as issue **#2218**; fixed by PRs **#2220/#2221/#2222** (shipped
    v0.54.4). `--disable-gpu` was explicitly rejected as a mitigation (owner
-   policy: GPU stays enabled). See `docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`
-   and `docs/retro/retro-commit-restart-reclaim-2026-07-16.md`.
+   policy: GPU stays enabled). See [`docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`](../retro/retro-commit-charge-pagefile-growth-2026-07-02.md)
+   and [`docs/retro/retro-commit-restart-reclaim-2026-07-16.md`](../retro/retro-commit-restart-reclaim-2026-07-16.md).
 2. **2026-07-24 → 2026-07-25 — Audiosrv (OS-level, unrelated to AgentMux).**
-   A ~55 KB, 16-section investigation (`docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`)
+   A ~55 KB, 16-section investigation ([`docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`](STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md))
    chased ~800 MB/hour of unattributed commit growth through several dead
    ends (including reproducing an apparently-identical pattern in plain MS
    Edge) before finding, via a handle-count sweep, that Windows' own
@@ -323,7 +323,7 @@ once the toolchain question is resolved.
    instance under investigation) — a controlled, repeatable, broken-vs-fixed
    A/B on the exact same code, not just an upstream changelog claim.
 
-This also closes out `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`
+This also closes out [`docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`](STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md)
 — same bug, same fix, now landing via PR (see that doc for the original
 live-incident details this fix resolves).
 

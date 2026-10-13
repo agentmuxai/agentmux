@@ -22,7 +22,7 @@ The app has **no editor detection logic**. It does not check `$EDITOR`, `$VISUAL
 
 | File | Location | Role |
 |------|----------|------|
-| `frontend/app/window/action-widgets.tsx` | ~line 31 `handleWidgetSelect` | Triggers the open |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | ~line 31 `handleWidgetSelect` | Triggers the open |
 | `frontend/util/tauri-api.ts` | `openNativePath` | Calls `openPath()` from plugin-opener |
 | `src-tauri/src/commands/platform.rs` | `ensure_settings_file` | Creates file, returns path |
 | Tauri plugin-opener | Cargo.toml `tauri-plugin-opener = "=2.5"` | Delegates to OS `open` |
@@ -122,7 +122,7 @@ Register in `src-tauri/src/lib.rs` under `.invoke_handler(tauri::generate_handle
 
 ### Frontend change
 
-In `frontend/app/window/action-widgets.tsx`, replace:
+In [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx), replace:
 
 ```ts
 // Before

@@ -3,7 +3,7 @@
 **Date:** 2026-08-25
 **Status:** implemented, PR #2805 — see §3.1's two corrections (Codex P1/P2)
 made during that PR's review, before merge.
-**Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md` (original
+**Builds on:** [`docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md`](SPEC_ASK_USER_QUESTION_2026_06_15.md) (original
 design), `SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md` /
 `SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md` /
 `SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md` (the 30s
@@ -22,10 +22,10 @@ governed separately by `SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md`)
 
 ## 1. Current behavior (audited against source, 2026-08-25)
 
-`frontend/app/view/agent/components/AgentQuestionPanel.tsx` renders the
+[`frontend/app/view/agent/components/AgentQuestionPanel.tsx`](../../frontend/app/view/agent/components/AgentQuestionPanel.tsx) renders the
 live AskUserQuestion prompt (`AgentQuestionPanel`, JSX at lines 512-650),
 mounted as a normal-flow sibling inside `.agent-view`
-(`frontend/app/view/agent/agent-view.tsx:2273-2277`), directly below
+([`frontend/app/view/agent/agent-view.tsx:2273-2277`](../../frontend/app/view/agent/agent-view.tsx)), directly below
 `AgentDecisionPanel` and directly above the message queue / composer.
 
 Structure (lines 541-645):
@@ -39,7 +39,7 @@ Structure (lines 541-645):
 </div>
 ```
 
-`frontend/app/view/agent/components/AgentQuestionPanel.scss` has **no
+[`frontend/app/view/agent/components/AgentQuestionPanel.scss`](../../frontend/app/view/agent/components/AgentQuestionPanel.scss) has **no
 `max-height`, `height`, or `overflow` rule anywhere** on `.agent-question-panel`
 or any descendant — confirmed by reading the full 251-line file. It's a plain
 `display: flex; flex-direction: column` (lines 19-31) that grows to fit
@@ -65,7 +65,7 @@ short or split agent pane's available height.
 
 **Established precedent for the fix already exists in a sibling panel**:
 `AgentDecisionPanel`'s tool-arg preview
-(`frontend/app/view/agent/styles/_decision-panel.scss:150-167`,
+([`frontend/app/view/agent/styles/_decision-panel.scss:150-167`](../../frontend/app/view/agent/styles/_decision-panel.scss),
 `.agent-decision-panel-preview`) already uses `max-height: 160px;
 overflow-y: auto;` for exactly this reason, just on a much smaller content
 block. This spec applies the same idea to the whole panel, with header/footer
@@ -111,7 +111,7 @@ themselves) scrolls.
 the header/actions was inert, not just unnecessary):** the first draft of
 this design put `position: sticky; top: 0` on the header and `position:
 sticky; bottom: 0` on the actions bar, claiming it mirrored
-`frontend/app/view/agent/styles/_search.scss`'s header-pinning pattern.
+[`frontend/app/view/agent/styles/_search.scss`](../../frontend/app/view/agent/styles/_search.scss)'s header-pinning pattern.
 That claim was wrong, and the CSS did nothing as a result: `position: sticky`
 only sticks an element within its nearest *scrolling* ancestor. The header
 and actions are siblings of `.agent-question-panel-scroll` (the actual
@@ -213,7 +213,7 @@ PR/tests, not just in this doc.
 ### 3.4 Scrollbar styling
 
 No new work needed: `*::-webkit-scrollbar-track` / `*::-webkit-scrollbar-thumb`
-/ `*::-webkit-scrollbar-thumb:hover` (`frontend/app/app.scss:104-116`) are
+/ `*::-webkit-scrollbar-thumb:hover` ([`frontend/app/app.scss:104-116`](../../frontend/app/app.scss)) are
 already global wildcard selectors — any new scrollable element, including
 `.agent-question-panel-scroll`, automatically inherits the app's custom
 scrollbar coloring with no extra rule. Only *width* is ever customized

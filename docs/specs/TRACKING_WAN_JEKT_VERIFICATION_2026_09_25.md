@@ -44,7 +44,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
   `wan_key_unavailable`, and the jekt arrived `TRUST=network-claimed`.
   #3865 loads a fresh token per lookup; #3866 does the same for the lease and
   pending-fetch calls. Retro:
-  `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`.
+  [`docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`](../retro/retro-wan-verify-stale-directory-token-2026-09-26.md).
 
 ## 3. Needs a person
 

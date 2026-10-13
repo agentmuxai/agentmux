@@ -286,7 +286,7 @@ export function registerChordCapture() {
 const NO_KEY: MuxKeyboardEvent = { type: "keydown", key: "", code: "", repeat: false };
 
 /**
- * Focuses a pane for the App API, as a click would: layout focus and the
+ * Focuses a pane for MuxAPI, as a click would: layout focus and the
  * caret. `blockId` may be any pane in this window, in any tab, or one of a
  * pane's tabs: the window switches to that tab, the pane shows that tab, and
  * a minimized or hidden pane is brought back (revealBlockLocally; the kinks
@@ -315,7 +315,7 @@ async function caretArrives(blockId: string, ms = 500): Promise<boolean> {
 
 /**
  * Publishes the shortcut table to the host as `window.__agentmux_shortcuts`,
- * for the App API's ListShortcuts, RunCommand and PressKeys
+ * for MuxAPI's ListShortcuts, RunCommand and PressKeys
  * (keybindings/app-api.ts). The host reaches it only in the window that
  * holds the calling agent's pane.
  */

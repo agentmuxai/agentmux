@@ -138,7 +138,7 @@ available for prompt templates via `AGENTMUX_AGENT_DISPLAY`.
 The claw host template (in the private claw repo) already
 uses `{{AGENT_DISPLAY}}` — this spec doesn't touch that, but once the
 AgentMux seed → claw bridge lands (see the sibling report
-`docs/analysis/agentx-git-identity-2026-04-14.md`), claw can source
+[`docs/analysis/agentx-git-identity-2026-04-14.md`](../analysis/agentx-git-identity-2026-04-14.md)), claw can source
 `AGENT_DISPLAY` from `AGENTMUX_AGENT_DISPLAY` and stay stable through
 renames.
 
@@ -290,7 +290,7 @@ changes; step 4 is the external-identity coupling.
 
 ### Step 2 — Launch: use slug for filesystem paths
 
-- **Touch:** `frontend/app/view/agent/agent-model.ts:236-271`,
+- **Touch:** [`frontend/app/view/agent/agent-model.ts:236-271`](../../frontend/app/view/agent/agent-model.ts),
   backend `WriteAgentConfigCommand` handler.
 - Change `workDir` default to
   `~/.agentmux/agents/${agent.slug}/` (no fallback to `name`).
@@ -347,7 +347,7 @@ changes; step 4 is the external-identity coupling.
   from `AGENTMUX_AGENT_DISPLAY` instead of hardcoding the agent name.
   (Separate PR on the claw side — out of scope for AgentMux but
   tracked in the migration notes.)
-- Add a section to `docs/analysis/agentx-git-identity-2026-04-14.md`
+- Add a section to [`docs/analysis/agentx-git-identity-2026-04-14.md`](../analysis/agentx-git-identity-2026-04-14.md)
   that cross-references this spec — once slug lands, claw can trust
   that `~/.agentmux/agents/<slug>/` never moves.
 - Write a short "How to rename an agent" note in the main README.
@@ -470,21 +470,21 @@ After all five steps land:
 - `agentmux-srv/forge-seed.json` — add slug to every entry
 
 **Launch path:**
-- `frontend/app/view/agent/agent-model.ts:236-271` — derivations
-- `frontend/app/view/agent/agent-model.ts:380-487` — template vars
+- [`frontend/app/view/agent/agent-model.ts:236-271`](../../frontend/app/view/agent/agent-model.ts) — derivations
+- [`frontend/app/view/agent/agent-model.ts:380-487`](../../frontend/app/view/agent/agent-model.ts) — template vars
 
 **UI components:**
-- `frontend/app/view/agent/components/AgentCard.tsx` — rename affordance
+- [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx) — rename affordance
 - `frontend/app/view/agent/components/AgentCardSettingsPanel.tsx` — rename field
 - `frontend/app/view/agent/components/IdentityPanel.tsx` — agent-scoped view
 - New: `frontend/app/view/agent/components/InlineRenameField.tsx`
 
 **Identity store:**
-- `frontend/app/view/identity/identity-model.ts` — deprecate
+- [`frontend/app/view/identity/identity-model.ts`](../../frontend/app/view/identity/identity-model.ts) — deprecate
   `assigned_agents`, add reverse index
 - `frontend/app/view/identity/identity-view.tsx` — "which agents use
   this account?" section (derived)
 
 **Docs:**
 - `README.md` — how to rename
-- `docs/analysis/agentx-git-identity-2026-04-14.md` — cross-reference
+- [`docs/analysis/agentx-git-identity-2026-04-14.md`](../analysis/agentx-git-identity-2026-04-14.md) — cross-reference

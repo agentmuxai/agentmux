@@ -3,9 +3,9 @@
 **Date:** 2026-04-24
 **Status:** Draft, ready to implement
 **Owner:** AgentA
-**Supersedes UX of:** `docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md` §6
-**Touches:** `frontend/app/view/agent/components/AgentLaunchModal.tsx`,
-             `frontend/app/view/agent/styles/_launch-modal-body.scss`
+**Supersedes UX of:** [`docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md`](SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md) §6
+**Touches:** [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx),
+             [`frontend/app/view/agent/styles/_launch-modal-body.scss`](../../frontend/app/view/agent/styles/_launch-modal-body.scss)
 
 ---
 
@@ -44,7 +44,7 @@ finish the task.
 - **G5.** Stylelint-clean, zero visual regression for users who
   don't open Advanced, tsc clean, same `.agent-launch-modal-*`
   BEM prefix (SCSS partial already exists at
-  `frontend/app/view/agent/styles/_launch-modal-body.scss`).
+  [`frontend/app/view/agent/styles/_launch-modal-body.scss`](../../frontend/app/view/agent/styles/_launch-modal-body.scss)).
 
 ## 3. Non-goals
 
@@ -96,7 +96,7 @@ language.
 
 Line 107-110 of the current modal renders the catalog entry's
 `popoverMarkdown` above the form. This copy lives in
-`frontend/app/view/agent/defaults/cli-catalog.ts` and often
+[`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts) and often
 contains CLI-specific phrasing ("Anthropic's Claude Code CLI",
 "Codex — OpenAI's CLI", etc.).
 
@@ -220,12 +220,12 @@ PR focused). Validation is manual + the automated build.
 
 ## 8. Cross-references
 
-- `docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md` §6 —
+- [`docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md`](SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md) §6 —
   original spec this refines.
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx` —
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) —
   target component.
-- `frontend/app/view/agent/styles/_launch-modal-body.scss` —
+- [`frontend/app/view/agent/styles/_launch-modal-body.scss`](../../frontend/app/view/agent/styles/_launch-modal-body.scss) —
   target SCSS partial.
-- `frontend/app/view/agent/defaults/cli-catalog.ts` — the catalog
+- [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts) — the catalog
   entries whose copy is out of scope for this spec but could
   benefit from a similar plain-language pass.

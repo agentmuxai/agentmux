@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Global Memory App API bodies, moved out of app_api/mod.rs unchanged
+//! Global Memory MuxAPI bodies, moved out of app_api/mod.rs unchanged
 //! (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md item 9).
 
 use super::*;

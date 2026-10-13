@@ -39,7 +39,7 @@ A **Settings pane** widget — same scaffold as Toolchain / Armory — that:
 
 ## Settings Catalog & Grouping
 
-The full settings schema (`schema/settings.json`) defines ~70 keys. The pane exposes
+The full settings schema ([`schema/settings.json`](../../schema/settings.json)) defines ~70 keys. The pane exposes
 the user-facing subset grouped into 7 sections. Internal/debug keys, platform-only
 keys, and secret keys (API tokens) are either hidden or in an Advanced section.
 
@@ -135,7 +135,7 @@ password fields with copy/clear buttons only. Never log or display in plaintext.
 
 ### SettingsViewModel
 
-**File:** `frontend/app/view/settings/settings-model.ts`
+**File:** [`frontend/app/view/settings/settings-model.ts`](../../frontend/app/view/settings/settings-model.ts)
 
 ```typescript
 export class SettingsViewModel implements ViewModel {
@@ -170,7 +170,7 @@ type SettingsSection =
 
 ### SettingsView
 
-**File:** `frontend/app/view/settings/settings.tsx`
+**File:** [`frontend/app/view/settings/settings.tsx`](../../frontend/app/view/settings/settings.tsx)
 
 ```tsx
 function SettingsView(props: ViewComponentProps<SettingsViewModel>) {
@@ -376,12 +376,12 @@ the theme's CSS variable values without requiring a full page re-render.
 | File | Change |
 |---|---|
 | `agentmux-srv/src/config/widgets.json` | Add `defwidget@settings` |
-| `frontend/app/block/block-registry.ts` | Register `"settings"` view type |
-| `frontend/app/view/settings/settings-model.ts` | **New** — ViewModel |
-| `frontend/app/view/settings/settings.tsx` | **New** — ViewComponent |
-| `frontend/app/view/settings/settings.scss` | **New** — styles |
-| `frontend/app/window/hamburger-menu.tsx` | Replace Settings action; remove theme/opacity submenus |
-| `frontend/app/store/global.ts` | `openOrFocusPaneByView()` (shared with toolchain/trust spec) |
+| [`frontend/app/block/block-registry.ts`](../../frontend/app/block/block-registry.ts) | Register `"settings"` view type |
+| [`frontend/app/view/settings/settings-model.ts`](../../frontend/app/view/settings/settings-model.ts) | **New** — ViewModel |
+| [`frontend/app/view/settings/settings.tsx`](../../frontend/app/view/settings/settings.tsx) | **New** — ViewComponent |
+| [`frontend/app/view/settings/settings.scss`](../../frontend/app/view/settings/settings.scss) | **New** — styles |
+| [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) | Replace Settings action; remove theme/opacity submenus |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | `openOrFocusPaneByView()` (shared with toolchain/trust spec) |
 
 ---
 

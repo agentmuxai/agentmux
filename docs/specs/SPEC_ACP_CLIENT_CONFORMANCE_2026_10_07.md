@@ -8,7 +8,7 @@
 
 Copilot, OpenClaw and Pi are ACP harnesses (`controllerType: "acp"`). None of
 them can hold a conversation in AgentMux today. Make the ACP client, the
-`AcpController` in `crates/srv/src/backend/blockcontroller/acp.rs` and the
+`AcpController` in [`crates/srv/src/backend/blockcontroller/acp.rs`](../../crates/srv/src/backend/blockcontroller/acp.rs) and the
 paths that start it and send it messages, follow ACP v1, so all three work.
 
 ## What happens today
@@ -23,7 +23,7 @@ checked against the ACP SDK's schema (`@agentclientprotocol/sdk` 0.26.0,
    (`blockcontroller/mod.rs`), so a UI-launched ACP agent runs under the
    per-turn subprocess controller. pi-acp then received the startup message
    as plain text lines and rejected each one ("Failed to parse JSON
-   message"). Only `agent.open` (app API) writes `"acp"`.
+   message"). Only `agent.open` (MuxAPI) writes `"acp"`.
 2. **Messages can't reach an ACP controller.** `run_agent_turn`
    (`agentinput`, reactive delivery, fleet broadcast) and `agent.send`
    handle only the persistent and subprocess controllers, and return

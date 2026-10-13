@@ -12,7 +12,7 @@
 
 Today, AgentMux does not know when a Claude Code session is compacting. It finds out **after the fact**, and only heuristically:
 
-`frontend/app/store/agent-pane-state/reducer.ts` — on every `TokensIn` event, if the new input-token count is `< 50%` of the previous count (and the previous count was `> 10,000`), the reducer *infers* a compaction happened and emits a synthetic `context-compacted` pane event. This is consumed by `useAgentStream.ts` to push a `ContextCompactedNode` into the transcript (`DocumentRow.tsx`, a fixed 48px summary row).
+[`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) — on every `TokensIn` event, if the new input-token count is `< 50%` of the previous count (and the previous count was `> 10,000`), the reducer *infers* a compaction happened and emits a synthetic `context-compacted` pane event. This is consumed by `useAgentStream.ts` to push a `ContextCompactedNode` into the transcript (`DocumentRow.tsx`, a fixed 48px summary row).
 
 This has three real gaps, all of which showed up in the AgentA incident:
 
@@ -114,7 +114,7 @@ So the authoritative signal was already on the wire, in the exact process AgentM
 
 ### 4.4 Observability (not yet implemented)
 
-- Log a structured line per compaction event (`identity`-prefix-style: `agent.compaction: trigger=… pre=… post=… duration_ms=…`) so compaction frequency/cost is greppable in the field — directly useful input to the existing `docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md` line of investigation already in this repo. Tracked as a follow-up; the data is already flowing through `AgentEvent::CompactionBoundary` so this is low-effort whenever prioritized.
+- Log a structured line per compaction event (`identity`-prefix-style: `agent.compaction: trigger=… pre=… post=… duration_ms=…`) so compaction frequency/cost is greppable in the field — directly useful input to the existing [`docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md`](../analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md) line of investigation already in this repo. Tracked as a follow-up; the data is already flowing through `AgentEvent::CompactionBoundary` so this is low-effort whenever prioritized.
 
 ## 5. What this does and doesn't fix
 
@@ -169,5 +169,5 @@ Tier 1 → Tier 2 → Tier 3 enhancement → Tier 4 (only if requested after the
 - [PreCompact and PostCompact Hooks — Developers Digest](https://www.developersdigest.tech/guides/pre-post-compact-hook)
 - [Claude Code Hooks: Complete Guide to All 30 Lifecycle Events](https://claudefa.st/blog/tools/hooks/hooks-guide)
 - [anthropics/claude-code#14258 — PostCompact Hook Event feature request](https://github.com/anthropics/claude-code/issues/14258)
-- In-repo: `agentmux-srv/src/agents/translator/claude.rs`, `agentmux-srv/src/agents/runner.rs`, `agentmux-srv/src/agents/types.rs`, `agentmux-srv/src/backend/agent_config.rs`, `agentmux-bashwrap/src/precompact.rs`, `agentmux-bashwrap/src/wps_client.rs`, `frontend/app/store/agent-pane-state/reducer.ts`, `frontend/app/store/agent-pane-state/types.ts`, `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/view/agent/hooks/useCompactionStream.ts`, `frontend/app/view/agent/types.ts`, `frontend/app/view/agent/virtualization/DocumentRow.tsx`, `frontend/app/view/agent/components/AgentComposerStrip.tsx`
+- In-repo: `agentmux-srv/src/agents/translator/claude.rs`, `agentmux-srv/src/agents/runner.rs`, `agentmux-srv/src/agents/types.rs`, `agentmux-srv/src/backend/agent_config.rs`, `agentmux-bashwrap/src/precompact.rs`, `agentmux-bashwrap/src/wps_client.rs`, [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts), [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts), [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts), [`frontend/app/view/agent/hooks/useCompactionStream.ts`](../../frontend/app/view/agent/hooks/useCompactionStream.ts), [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts), [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx), [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx)
 - Live evidence: `compact_boundary` event captured from `~/.claude/projects/C--Users-area54/67b0905c-f0f9-4ff3-8278-45ed8b40b926.jsonl` (2026-07-21 session)

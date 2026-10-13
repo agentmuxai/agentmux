@@ -23,7 +23,7 @@ The intent — based on user feedback — is that the number should help answer 
 - **G1** The number rendered to the right of the version is the **total active window count**, identical in every window.
 - **G2** The display still hides when there's only one window (no useful information to convey).
 - **G3** Behavior updates reactively when windows open or close.
-- **G4** No backend changes — both source signals already exist in `frontend/app/store/global.ts`.
+- **G4** No backend changes — both source signals already exist in [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts).
 
 ## 3. Non-goals
 
@@ -32,7 +32,7 @@ The intent — based on user feedback — is that the number should help answer 
 
 ## 4. Current state
 
-`frontend/app/statusbar/StatusBar.tsx:80-94`:
+[`frontend/app/statusbar/StatusBar.tsx:80-94`](../../frontend/app/statusbar/StatusBar.tsx):
 
 ```tsx
 <button ... class="status-version clickable" ...>
@@ -45,7 +45,7 @@ The intent — based on user feedback — is that the number should help answer 
 
 - `instanceNum()` = `windowInstanceNumAtom` (per-window ordinal, set when the window is created).
 - `windowCount()` = `windowCountAtom` (total active windows, updated as windows open/close).
-- Both atoms are declared at `frontend/app/store/global.ts:132-133` and already kept in sync by the existing window-management plumbing.
+- Both atoms are declared at [`frontend/app/store/global.ts:132-133`](../../frontend/app/store/global.ts) and already kept in sync by the existing window-management plumbing.
 
 ## 5. Proposed change
 

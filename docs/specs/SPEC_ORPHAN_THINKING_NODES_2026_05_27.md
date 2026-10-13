@@ -138,11 +138,11 @@ Called from:
 
 ## Files likely to change
 
-- `frontend/app/store/agent-document/types.ts` — add `ScrubOrphanedInProgress` command + the `canceled` metadata field + the `canceled` tool status.
-- `frontend/app/store/agent-document/reducer.ts` — handler for `ScrubOrphanedInProgress`; call from `SessionEnd` and `SessionStart`/`HistoryLoaded` handlers.
-- `frontend/app/view/agent/components/MarkdownBlock.tsx` (or equivalent thinking renderer) — render path for `canceled`.
-- `frontend/app/view/agent/components/ToolBlock.tsx` — render `canceled` status (icon + label + default-collapsed).
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx` — the inline "Thinking..." label currently lives here; gate on turn-active.
+- [`frontend/app/store/agent-document/types.ts`](../../frontend/app/store/agent-document/types.ts) — add `ScrubOrphanedInProgress` command + the `canceled` metadata field + the `canceled` tool status.
+- [`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts) — handler for `ScrubOrphanedInProgress`; call from `SessionEnd` and `SessionStart`/`HistoryLoaded` handlers.
+- [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) (or equivalent thinking renderer) — render path for `canceled`.
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — render `canceled` status (icon + label + default-collapsed).
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — the inline "Thinking..." label currently lives here; gate on turn-active.
 - Tests: `agent-document/reducer.test.ts`, `MarkdownBlock.test.tsx`, `ToolBlock.test.tsx`.
 
 Estimated scope: ~150 LOC + tests. Single PR.

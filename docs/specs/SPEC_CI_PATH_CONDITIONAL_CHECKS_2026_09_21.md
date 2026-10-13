@@ -1,8 +1,8 @@
 # SPEC: skip the build on documentation-only PRs, safely
 
 **Date:** 2026-09-21
-**Status:** implemented — #3491 (`scripts/ci-classify-changes.mjs` + its unit
-tests, and the `changes` job in `.github/workflows/ci-pr.yml`). **Corrected
+**Status:** implemented — #3491 ([`scripts/ci-classify-changes.mjs`](../../scripts/ci-classify-changes.mjs) + its unit
+tests, and the `changes` job in [`.github/workflows/ci-pr.yml`](../../.github/workflows/ci-pr.yml)). **Corrected
 2026-09-22 (#3507):** #3491 shipped with a real regression this spec did not
 anticipate — see the erratum in §1 and §5's now-outdated "No `ci-gate`
 aggregate job" bullet. Original text preserved below; corrections are called
@@ -75,7 +75,7 @@ system must be a wasted six minutes, never an untested merge.
 
 ### R3 — CI configuration is never documentation
 
-A change under `.github/`, `scripts/`, `tools/`, or the Taskfile must run
+A change under [`.github/`](../../.github), [`scripts/`](../../scripts), [`tools/`](../../tools), or the Taskfile must run
 everything. Otherwise a PR editing the test configuration could skip the very
 tests it edits. This is the single most dangerous misclassification available,
 because it is self-concealing.
@@ -115,14 +115,14 @@ additionally never exits non-zero: every internal failure path writes
 
 ### R6 — The decision is code, and it is tested
 
-The classification lives in `scripts/ci-classify-changes.mjs` with unit tests,
+The classification lives in [`scripts/ci-classify-changes.mjs`](../../scripts/ci-classify-changes.mjs) with unit tests,
 not in a YAML expression. YAML conditionals cannot be tested, and R1–R3 are
 exactly the kind of logic that is wrong in ways nobody notices — the whole
 point is that a wrong answer is invisible. A reviewer can read the tests.
 
 ### R7 — A PR that only moves the release version needs no build (added 2026-10-08)
 
-A release PR (`scripts/release.sh`, `task release:patch`) bumps the version
+A release PR ([`scripts/release.sh`](../../scripts/release.sh), `task release:patch`) bumps the version
 in `Cargo.toml`, `Cargo.lock`, `package.json` and `package-lock.json`, adds
 `VERSION_HISTORY.md` lines and deletes the consumed changesets. The manifests
 are code by path, so it ran the full Rust, frontend and specs-index jobs, plus
@@ -190,7 +190,7 @@ build. Same for `frontend`. Concretely, a path is docs-only when it matches:
 - `docs/**` — except that a doc change still runs the `docs` job, which always runs
 - `**/*.md`, `**/*.mdx`
 - `.changesets/**`
-- `LICENSE`, `NOTICE`, `**/*.txt` under `docs/`
+- `LICENSE`, `NOTICE`, `**/*.txt` under [`docs/`](..)
 
 Everything else — including any path this list does not recognise — means run
 (R2).
@@ -239,7 +239,7 @@ A PR touching any code is completely unaffected.
   `ci-pr.yml` `needs: [changes, rust, frontend]`, runs unconditionally
   (`if: always()`), and avoids exactly the trap this bullet warned about: it
   does NOT rely on GitHub's default `needs`-success gating (which would fail
-  it on any legitimately skipped leg) — `scripts/ci-required-check.mjs`
+  it on any legitimately skipped leg) — [`scripts/ci-required-check.mjs`](../../scripts/ci-required-check.mjs)
   inspects each dependency's own `result` explicitly, treating `success`/
   `skipped` as passing and everything else (`failure`, `cancelled`, an
   unrecognized value) as failing closed. Branch protection was repointed at

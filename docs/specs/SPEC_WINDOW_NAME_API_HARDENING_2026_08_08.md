@@ -1,4 +1,4 @@
-# SPEC: Window-name App API hardening (phantom-id success + status codes)
+# SPEC: Window-name MuxAPI hardening (phantom-id success + status codes)
 
 **Date:** 2026-08-08
 **Status:** active — §3 guards shipped same day; §4 (clear-to-default, grapheme-safe clamp, dev-discovery helper) not started. Verified 2026-08-10. — PRs touching this work, newest first: #2475

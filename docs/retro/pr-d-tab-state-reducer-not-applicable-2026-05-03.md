@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-03
 **Status:** retro — Plan stop-condition triggered. Writing this BEFORE proceeding so the architecture decision is captured.
-**Plan reference:** `docs/specs/frontend-reducer-implementation-plan-2026-05-03.md` PR-D (slice #7)
+**Plan reference:** [`docs/specs/frontend-reducer-implementation-plan-2026-05-03.md`](../specs/frontend-reducer-implementation-plan-2026-05-03.md) PR-D (slice #7)
 
 ## What the plan said
 
@@ -14,7 +14,7 @@ The plan assumed there was tab-related state on the frontend that needed to be m
 
 ## What I actually found
 
-After ~10 minutes of code inspection (`frontend/app/store/global.ts:40–110`, `command-registry.ts`, `keymodel.ts`, `layoutModel.ts`):
+After ~10 minutes of code inspection ([`frontend/app/store/global.ts:40–110`](../../frontend/app/store/global.ts), `command-registry.ts`, `keymodel.ts`, `layoutModel.ts`):
 
 1. **There are no local tab atoms.** All tab/workspace/window state is derived via `createMemo` over `WOS.getObjectValue`. Wstore already does the mirror.
    ```ts
@@ -27,7 +27,7 @@ After ~10 minutes of code inspection (`frontend/app/store/global.ts:40–110`, `
    });
    ```
 2. **`setActiveTab` is a one-line RPC wrapper** (`global.ts:866`): `WorkspaceService.SetActiveTab(ws.oid, tabId)`. The result lands back in wstore, which reactively updates `activeTabId` automatically. Single chokepoint already exists.
-3. **`pendingbackendactions` is part of the LAYOUT slice**, not tab state — it lives in `frontend/layout/lib/layoutModel.ts` + `layoutPersistence.ts`. The plan flagged this as a decision point (lean: tab-state) but the answer is now obvious: it's already in the layout module.
+3. **`pendingbackendactions` is part of the LAYOUT slice**, not tab state — it lives in [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) + `layoutPersistence.ts`. The plan flagged this as a decision point (lean: tab-state) but the answer is now obvious: it's already in the layout module.
 
 ## Why a tab-state reducer would be wrong
 

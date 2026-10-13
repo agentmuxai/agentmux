@@ -12,7 +12,7 @@ When AgentMux closes and reopens, the agent-pane shows a conversation that's **v
 
 **Root cause** (validated against the codebase):
 
-1. The agent-pane reducer (`frontend/app/store/agent-document/reducer.ts`) is **in-memory only** — fresh on every pane mount.
+1. The agent-pane reducer ([`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts)) is **in-memory only** — fresh on every pane mount.
 2. On reopen, `useHistoryPagination` reads the **trailing 200 lines** of the FileStore NDJSON `output` file (`PAGE_SIZE = 200`, hard-coded) and replays them through `ClaudeCodeStreamParser` into `HistoryLoaded`.
 3. For long conversations (thousands of events), 200 lines is a fraction. Anything BEFORE the window is gone. Anything CROSSING the boundary (a markdown table that started at line 50, a tool-call whose `tool_use_start` is at line 30 but `tool_use_result` at line 220) renders as a broken / orphaned fragment.
 4. `loadOlder()` exists but **no UI wires it up** — users can't pull in more.
@@ -214,7 +214,7 @@ The first smoke build of v0.33.899 produced an uncaught `dispatch for unregister
 
 This PR is the likely **trigger** (the new `createEffect` on `documentAtom` is the only new subscriber to that atom in months), but the underlying lifecycle vulnerability has been present since the multi-store pattern landed in §4 of `frontend-reducer-conventions-2026-05-03.md`.
 
-Full breakdown: `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`. Cascade-detection instrumentation has been installed in `agent-pane-state-store.ts` and `agent-document-store.ts`; the next reproduction will identify the exact projection setter that triggers the cascade.
+Full breakdown: [`docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`](../analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md). Cascade-detection instrumentation has been installed in `agent-pane-state-store.ts` and `agent-document-store.ts`; the next reproduction will identify the exact projection setter that triggers the cascade.
 
 **Followup PRs** (status):
 - **PR #878** ships the cascade-detection instrumentation AND the soft-dispatch migration in a single bundle. Adds `dispatchIfRegistered` to both pane stores, migrates 22 async dispatch sites across `useAgentStream.ts`, `useAgentCommands.ts`, `useHistoryPagination.ts`, `agent-view.tsx` (onLoginSuccess callback), and fixes the unguarded RAF in `browser-model.reload()`. Backed by 5 new regression tests in `agent-pane-state-store.test.ts`.
@@ -226,4 +226,4 @@ The `highWaterMark` gap-replay (read NDJSON lines from `[snapshot.highWaterMark,
 
 ---
 
-🤖 Authored by AgentA. Implementation rides in the same PR — file is committed alongside the code change (per `feedback_no_doc_only_prs.md`). §11 added 2026-05-15 after the v0.33.899 smoke-build crash surfaced the lifecycle issue documented in `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`.
+🤖 Authored by AgentA. Implementation rides in the same PR — file is committed alongside the code change (per `feedback_no_doc_only_prs.md`). §11 added 2026-05-15 after the v0.33.899 smoke-build crash surfaced the lifecycle issue documented in [`docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`](../analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md).

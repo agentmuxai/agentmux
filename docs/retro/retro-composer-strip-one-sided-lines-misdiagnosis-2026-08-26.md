@@ -5,7 +5,7 @@
 **Date:** 2026-08-26
 **Severity:** Medium — no data loss or functional break, but a visibly broken layout shipped to `main` (PR #2808) and stayed undiagnosed across at least three separate verification passes by the agent, including two AFTER a real, correct screenshot was already in hand.
 **Observed by:** Manoz (Claude agent), composer-strip zone-balance work
-**Related:** `docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` (Rev 1-6 full history), `docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`, `docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md` (the fix this retro leads into)
+**Related:** [`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`](../specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) (Rev 1-6 full history), [`docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`](../status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md), [`docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`](../specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) (the fix this retro leads into)
 
 ---
 
@@ -49,7 +49,7 @@ Not a screenshot, not a test, not the agent's own re-examination — **the user 
 
 ## Prevention / Follow-ups
 
-- **Write the real invariant down before touching this file again.** `docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md` states it explicitly: every row must have both a left and right occupant, except the one mathematically unavoidable case (an odd total slot count leaves exactly one singleton row, and a total of exactly 1 slot has nothing to pair with at all). Any future change to this file's balancing logic must be checked against that written invariant, not against "do the aggregate widths look close."
+- **Write the real invariant down before touching this file again.** [`docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md`](../specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) states it explicitly: every row must have both a left and right occupant, except the one mathematically unavoidable case (an odd total slot count leaves exactly one singleton row, and a total of exactly 1 slot has nothing to pair with at all). Any future change to this file's balancing logic must be checked against that written invariant, not against "do the aggregate widths look close."
 - **Add a test that asserts the row-level invariant directly** on the new row-building function's output — not just spot-checking individual widths, but literally counting rows with an empty side and failing if that count exceeds the mathematically-justified minimum for the given slot count.
 - **Screenshot more than one width before calling a fix verified.** A single confirmed screenshot at the tier the original bug report was about does not confirm behavior at OTHER tiers, especially when the change touches shared logic (the balance algorithm) that ALL tiers depend on. Treat an inherited code comment describing "how a different tier behaves" as a claim to re-verify, not a fact to build on.
 - **When a human's description of a bug doesn't immediately parse, don't reach for the nearest previously-documented adjacent explanation.** Ask them to restate more precisely, or force yourself to re-derive the geometry from the actual pixels again, before offering a diagnosis that happens to match something already on file.

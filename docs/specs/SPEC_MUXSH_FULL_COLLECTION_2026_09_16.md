@@ -1,28 +1,28 @@
-# SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API
+# SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI
 
 **Author:** Vmer
 **Date:** 2026-09-16
 **Status:** active — Phases 1, 2a, and 2b are implemented (Phase 2b's real scope corrected during implementation, see §5.5/§5.6 — two commands originally planned there turned out not to be buildable as designed). Phase 3 not started. — PRs touching this work, newest first: #3281, #3263
-**Related:** `docs/specs/SPEC_MUXSH_CLI_2026_09_16.md` (Phase 1 — shipped, PR #3255, `muxsh open`/`muxsh web`), `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (the research this builds on), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import `wsh`'s literal command set), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (`muxopen`), `agentmux-docs/.../internals/agent-app-api.md`
+**Related:** [`docs/specs/SPEC_MUXSH_CLI_2026_09_16.md`](SPEC_MUXSH_CLI_2026_09_16.md) (Phase 1 — shipped, PR #3255, `muxsh open`/`muxsh web`), [`docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md`](../reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md) (the research this builds on), [`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](archive/SPEC_RETIRE_WSH_2026_04_12.md) (why AgentMux doesn't import `wsh`'s literal command set), [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) (`muxopen`), `agentmux-docs/.../internals/agent-app-api.md`
 
 ---
 
 ## 0. TL;DR
 
-The previous spec deliberately shipped a narrow first cut (`open`/`web`) and left family-consolidation as an open question. This spec answers it: **`muxsh` becomes the unified, noun-verb dispatcher for AgentMux's Agent App API** — the collection old Wave Terminal `wsh` users would recognize the shape of, without importing capabilities AgentMux doesn't have (SSH/WSL, OSC hijacking, a bolt-on AI query).
+The previous spec deliberately shipped a narrow first cut (`open`/`web`) and left family-consolidation as an open question. This spec answers it: **`muxsh` becomes the unified, noun-verb dispatcher for AgentMux's MuxAPI** — the collection old Wave Terminal `wsh` users would recognize the shape of, without importing capabilities AgentMux doesn't have (SSH/WSL, OSC hijacking, a bolt-on AI query).
 
 Three things make this different from just "add more subcommands":
 
 1. **A house style, defined once, applied to every subcommand.** This is what "consistent API" actually means in practice — one grammar, one set of global flags, one output-mode convention, one exit-code contract, one auth-error message shape. §2 is the part of this spec every future `muxsh` subcommand must be reviewed against.
 2. **DRY bindings, not a fourth hand-written copy of every route's field names.** Every route already has two independent Rust implementations (the REST handler and the MCP tool binding); Phase 1 added a third by hand in Node. §2.8 proposes a shared Node client library (removes duplication *within* the CLI family) plus a checked-in manifest + contract tests on both the Rust and Node sides (keeps the CLI honest against the real Rust structs across the language boundary) — done *before* scaling to six more subcommands, not after.
-3. **An honest per-command mapping**, not a wishlist. Every one of `wsh`'s ~20 subcommands gets a real verdict: *maps cleanly onto an existing App API route (build now)*, *maps onto a capability that needs backend work first (build later, and say what)*, or *doesn't apply to AgentMux's product at all (don't build, and say why — same rigor the 2026-04-12 retirement spec applied)*.
+3. **An honest per-command mapping**, not a wishlist. Every one of `wsh`'s ~20 subcommands gets a real verdict: *maps cleanly onto an existing MuxAPI route (build now)*, *maps onto a capability that needs backend work first (build later, and say what)*, or *doesn't apply to AgentMux's product at all (don't build, and say why — same rigor the 2026-04-12 retirement spec applied)*.
 
 Net result, by phase:
 
 | Phase | What | Backend work needed? |
 |---|---|---|
 | **1 — shipped** | `muxsh open`, `muxsh web` | No (PR #3255) |
-| **2a — shipped** | `lib/muxclient.mjs`; the App API manifest + Rust/Node contract tests, covering `pane/open` | No — refactor + tests only, §2.8 (PR #3263) |
+| **2a — shipped** | `lib/muxclient.mjs`; MuxAPI manifest + Rust/Node contract tests, covering `pane/open` | No — refactor + tests only, §2.8 (PR #3263) |
 | **2b — shipped** | `muxsh view`, `muxsh edit`, `muxsh pane list`, `muxsh run`, `muxsh config edit/path`, `muxsh agent list/send` | No — every one is a thin wrapper over an already-existing, verified-unsigned route, built DRY on top of 2a. Manifest extended to cover `shell.{create,status,stop}` and `agent.send` too. |
 | **3 — needs backend work first** | `muxsh getmeta`/`setmeta`, `muxsh termscrollback`, `muxsh notify`, `muxsh pane close` (§5.5 — real route exists but is agent-signed, not `X-AuthKey`-gated like the rest; needs a new unsigned self-close route) | Yes — see §5 for exactly what |
 | **Not building** | `ssh`/`wsl`/`conn`, `file`, `launch`, `ai`, `setbg`/`badge`, `setconfig`, `secret list` (§5.6 — not a missing route, a conceptual mismatch: identity accounts are agent-scoped, and a terminal pane isn't an agent) | N/A — structurally doesn't map, see §6 |
@@ -33,7 +33,7 @@ Net result, by phase:
 
 The 2026-04-12 retirement spec's core finding still stands and this spec doesn't relitigate it: importing `wsh`'s ~400 lines of Go, its OSC-escape-code protocol, its SSH/WSL remote-deployment machinery, and its token-exchange auth model would be reviving dead weight, because none of that machinery maps to AgentMux's actual product.
 
-What *is* being revived is narrower and more honest: **`wsh`'s command *vocabulary and grammar* — not its implementation — as a design reference for AgentMux's own, independently-justified CLI surface**, built entirely on infrastructure that already exists (the Agent App API, the `muxlog`/`muxspect`/`muxopen`/`muxsh` deployment pattern). Every command below is justified on its own AgentMux-specific merits in §3/§4, not on "`wsh` had one."
+What *is* being revived is narrower and more honest: **`wsh`'s command *vocabulary and grammar* — not its implementation — as a design reference for AgentMux's own, independently-justified CLI surface**, built entirely on infrastructure that already exists (MuxAPI, the `muxlog`/`muxspect`/`muxopen`/`muxsh` deployment pattern). Every command below is justified on its own AgentMux-specific merits in §3/§4, not on "`wsh` had one."
 
 ---
 
@@ -43,7 +43,7 @@ This is the actual mechanism for "old wsh users feel at home with a consistent A
 
 ### 2.1 Grammar: `muxsh <noun> <verb> [args] [flags]`
 
-`wsh` itself was mostly flat (`wsh view`, `wsh web`, `wsh file cp`) because Wave Terminal has one real resource type — the block. AgentMux's domain has several distinct resource types (panes, agents, the work queue, config, secrets) that already have separate MCP tool families (`pane.*` vs `agent.*` vs `identity.*` vs `Work*`) — collapsing them into flat verbs the way `wsh file cp/mv/rm` did would create naming collisions almost immediately (`muxopen`'s own verb is "open an **agent**"; this spec's Phase 1 verb "open" already means "open a **pane/file**" — those cannot both be bare `muxsh open` in one dispatcher). Noun-verb avoids this permanently, and mirrors the App API's own namespacing (`agent.*`, `pane.*`, `identity.*`) that a reader of `agent-app-api.md` already has to learn anyway — the CLI grammar and the API grammar teach each other.
+`wsh` itself was mostly flat (`wsh view`, `wsh web`, `wsh file cp`) because Wave Terminal has one real resource type — the block. AgentMux's domain has several distinct resource types (panes, agents, the work queue, config, secrets) that already have separate MCP tool families (`pane.*` vs `agent.*` vs `identity.*` vs `Work*`) — collapsing them into flat verbs the way `wsh file cp/mv/rm` did would create naming collisions almost immediately (`muxopen`'s own verb is "open an **agent**"; this spec's Phase 1 verb "open" already means "open a **pane/file**" — those cannot both be bare `muxsh open` in one dispatcher). Noun-verb avoids this permanently, and mirrors MuxAPI's own namespacing (`agent.*`, `pane.*`, `identity.*`) that a reader of `agent-app-api.md` already has to learn anyway — the CLI grammar and the API grammar teach each other.
 
 Nouns, fixed set for this spec (extend deliberately, not ad hoc):
 
@@ -98,7 +98,7 @@ Implementation note so the "one binary" goal doesn't become one giant file: `mux
 
 ### 2.8 DRY: one source of truth for bindings, not a fourth hand-written copy per route
 
-**The problem, stated precisely.** Every App API route Phase 1 touched already has *two* independent, hand-maintained representations before this spec adds a third: the Rust REST handler + its `rpc_types::CommandXxxData`/`XxxResult` struct (the actual source of truth), and `agentmux-mcp`'s Rust `TOOLS` JSON-schema entry + `match` arm (`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md` §3 — "each tool is (a) a JSON-schema entry... and (b) a match arm that builds a request"). Phase 1's `muxsh.mjs` added a *third*, hand-written in Node, with its own independent knowledge of field names (`view`, `split_reference_block_id`, `tree_expanded`, ...). Scaling to six more subcommands (§4) without addressing this means six more independently-typed copies of field names that only stay correct by human review — exactly the failure mode Phase 1 already hit once (ReAgent, PR #3255: a field silently not sent). This gets worse, not better, as the collection grows, which is the whole reason this section exists before §4's build list, not after.
+**The problem, stated precisely.** Every MuxAPI route Phase 1 touched already has *two* independent, hand-maintained representations before this spec adds a third: the Rust REST handler + its `rpc_types::CommandXxxData`/`XxxResult` struct (the actual source of truth), and `agentmux-mcp`'s Rust `TOOLS` JSON-schema entry + `match` arm (`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md` §3 — "each tool is (a) a JSON-schema entry... and (b) a match arm that builds a request"). Phase 1's `muxsh.mjs` added a *third*, hand-written in Node, with its own independent knowledge of field names (`view`, `split_reference_block_id`, `tree_expanded`, ...). Scaling to six more subcommands (§4) without addressing this means six more independently-typed copies of field names that only stay correct by human review — exactly the failure mode Phase 1 already hit once (ReAgent, PR #3255: a field silently not sent). This gets worse, not better, as the collection grows, which is the whole reason this section exists before §4's build list, not after.
 
 **Cross-language constraint that has to be designed around, not wished away:** `agentmux-mcp`/`agentmux-srv` are Rust; every `muxsh`/`muxlog`/`muxspect`/`muxopen` core is Node. These cannot literally `import` the same compiled module. "Same bindings" therefore has to mean *generated from, or contract-tested against, one checked-in source of truth* — not "one file both languages load directly." (Precedent for taking generation seriously here already exists in this codebase's own lineage: `SPEC_RENAME_WSH_TO_RPC_2026_04_17.md` describes the frontend's `rpc-api.ts` as "generated-style" typed wrappers over the Go/Rust RPC types — this spec proposes the same discipline for the CLI/MCP boundary, not a novel pattern for the repo.)
 
@@ -108,7 +108,7 @@ Implementation note so the "one binary" goal doesn't become one giant file: `mux
 
 **Tier 2 — across the Rust/Node boundary. The real ask, and the harder one; propose a contract, not a rewrite.** Rather than generating Node code from Rust (a bigger investment than this CLI's current scale justifies, and a bigger single PR to get right), propose a **checked-in JSON manifest + two contract tests**, one per language:
 
-1. A manifest file (e.g. `docs/specs/app-api-manifest.json`, or `agentmux-common/app-api-manifest.json` if it should ship in a crate other tooling can read) listing, for every route this spec's subcommands touch: the REST path, method, request field names, and response field names — hand-authored once per route, from the real `rpc_types` structs, not invented.
+1. A manifest file (e.g. [`docs/specs/app-api-manifest.json`](app-api-manifest.json), or `agentmux-common/app-api-manifest.json` if it should ship in a crate other tooling can read) listing, for every route this spec's subcommands touch: the REST path, method, request field names, and response field names — hand-authored once per route, from the real `rpc_types` structs, not invented.
 2. A Rust test (alongside the existing `rpc_types`/`app_api` tests) that asserts each manifest entry's field names match the real `CommandXxxData`/`XxxResult` struct's `serde` field names — catching the case where a Rust field is renamed and the manifest wasn't updated.
 3. A Node test (`muxsh.contract.test.mjs`, same `vitest` setup as every other `muxsh` test) that asserts each subcommand's `buildRequestBody()` only emits field names present in the manifest for that route — catching the case where `muxsh` drifts from what the manifest (and therefore the real Rust struct) says is valid.
 
@@ -149,7 +149,7 @@ Every `wsh` subcommand (from `docs.waveterm.dev/wsh-reference`, cross-checked ag
 
 ## 4. Phase 2b — build now, zero backend work (each is a thin wrapper over an already-existing, already-shipped route)
 
-Each of these lands on top of Phase 2a (§2.8): every subcommand below imports the shared `lib/muxclient.mjs` from day one (no new copy of the auth/fetch/error boilerplate) and adds its route to the App API manifest with the matching Rust-side field-name assertion, rather than being written and tested in isolation the way Phase 1 was.
+Each of these lands on top of Phase 2a (§2.8): every subcommand below imports the shared `lib/muxclient.mjs` from day one (no new copy of the auth/fetch/error boilerplate) and adds its route to MuxAPI manifest with the matching Rust-side field-name assertion, rather than being written and tested in isolation the way Phase 1 was.
 
 ### 4.1 `muxsh view <path-or-url>` / `muxsh edit <file>`
 
@@ -251,8 +251,8 @@ AgentMux has no SSH/WSL pane type and no remote-connection story — confirmed u
 
 ## 7. Open questions for the repo owner
 
-1. **Phase 2b as one PR or several?** Six independent additions (§4.1–4.7); each is small and independently testable, same as Phase 1. Recommend several small PRs over one large one (with Phase 2a, §2.8, landing first as its own PR regardless), for the same reviewability reasons `docs/specs/README.md`'s conventions generally favor — but sequencing is a judgment call.
+1. **Phase 2b as one PR or several?** Six independent additions (§4.1–4.7); each is small and independently testable, same as Phase 1. Recommend several small PRs over one large one (with Phase 2a, §2.8, landing first as its own PR regardless), for the same reviewability reasons [`docs/specs/README.md`](README.md)'s conventions generally favor — but sequencing is a judgment call.
 2. **`muxsh secret list`'s exact REST route** needs confirming against source (the one item in §4 not independently re-verified this pass) before implementation starts.
 3. **Priority order within Phase 3** (§5.1–5.4) — none are blocking Phase 2, but whoever scopes them next should decide which (if any) is worth the real backend work first. `getmeta`/`setmeta` seems the most clearly justified (closest `wsh` analogue with a real, if narrow, use case); `getvar`/`setvar` the least (no concrete use case identified yet).
 4. **Should `view`'s type-detection list (media extensions) live in `muxsh.mjs` or be fetched from something the frontend already uses** (if AgentMux has a canonical "is this a media file" check somewhere in the frontend/pane-type resolution code) — worth checking before hand-rolling a second list that can drift from the real one.
-5. **Where should the App API manifest (§2.8 Tier 2) live**, and does it belong to this CLI effort or is it a more general artifact `agentmux-mcp`'s own maintainers should own regardless of `muxsh`? The manifest's value isn't specific to the CLI — it would catch Rust-struct/MCP-tool drift too, which is a pre-existing risk this spec didn't create. Worth raising as a question rather than assuming `muxsh`'s implementer should also own the manifest's long-term maintenance.
+5. **Where should MuxAPI manifest (§2.8 Tier 2) live**, and does it belong to this CLI effort or is it a more general artifact `agentmux-mcp`'s own maintainers should own regardless of `muxsh`? The manifest's value isn't specific to the CLI — it would catch Rust-struct/MCP-tool drift too, which is a pre-existing risk this spec didn't create. Worth raising as a question rather than assuming `muxsh`'s implementer should also own the manifest's long-term maintenance.

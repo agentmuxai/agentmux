@@ -3,11 +3,11 @@
 **Date:** 2026-09-25
 **Status:** implemented — #3762 (Phase 1 and Phase 2 together; see §3.5 for the decisions made during implementation). Follow-ups: #3774 (Ctrl+Shift+V / Ctrl+Shift+C, §3.6) and #3772 (the JS menu now draws sublabels, §3.5).
 **Related:**
-`docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md` (same root cause — a pane-body handler swallows right-click and never offers Paste; fixed there per-`<input>`, not for terminals nested in a non-terminal pane),
-`docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (the `getBodyContextMenuItems` extension point this builds on),
-`docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md` (drawer layout),
-`docs/specs/SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md` (why the drawer renders outside `.agent-view-zoomed`),
-`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (agent lock on the shared shell).
+[`docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md`](REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md) (same root cause — a pane-body handler swallows right-click and never offers Paste; fixed there per-`<input>`, not for terminals nested in a non-terminal pane),
+[`docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) (the `getBodyContextMenuItems` extension point this builds on),
+[`docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) (drawer layout),
+[`docs/specs/SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md`](SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md) (why the drawer renders outside `.agent-view-zoomed`),
+[`docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) (agent lock on the shared shell).
 
 ---
 
@@ -76,7 +76,7 @@ Grouping (which sections share a separator group) preserves today's layout exact
 
 ### 2.2 Region registry
 
-New module `frontend/app/block/context-menu-region.ts`:
+New module [`frontend/app/block/context-menu-region.ts`](../../frontend/app/block/context-menu-region.ts):
 
 ```ts
 export interface ContextMenuRegion {
@@ -182,7 +182,7 @@ Click: `clipboardReadText()` → empty check → `termWrap.terminal.paste(text)`
 
 `TermViewModel.sendDataToController` splits input over 4 KB into paced `blockinput` frames with a serialized queue and a progress toast, specifically to avoid saturating Windows ConPTY. The drawer's `sendDataHandler` used to be a bare single-frame send (its own comment: "No chunked-paste handling for this spike"). Right-click Paste makes big pastes (stack traces, logs) the *expected* use, so the drawer would inherit that failure mode.
 
-Implemented as specced: the chunked sender moved out of `TermViewModel` **verbatim** into `frontend/app/view/term/block-input-sender.ts` (`BlockInputSender`, one instance per block id), `TermViewModel.sendDataToController` delegates to it, and the drawer's `sendDataHandler` uses it too — so Ctrl+V and menu Paste in the drawer both get pacing, ordering behind an in-flight paste, and the ≥ 8 KB "Pasting…" toast. The extraction had no prior tests; `block-input-sender.test.ts` now pins chunk size, exact reassembly, a multi-byte character straddling a chunk boundary, ordering of a keystroke arriving mid-paste, and toast lifecycle.
+Implemented as specced: the chunked sender moved out of `TermViewModel` **verbatim** into [`frontend/app/view/term/block-input-sender.ts`](../../frontend/app/view/term/block-input-sender.ts) (`BlockInputSender`, one instance per block id), `TermViewModel.sendDataToController` delegates to it, and the drawer's `sendDataHandler` uses it too — so Ctrl+V and menu Paste in the drawer both get pacing, ordering behind an in-flight paste, and the ≥ 8 KB "Pasting…" toast. The extraction had no prior tests; `block-input-sender.test.ts` now pins chunk size, exact reassembly, a multi-byte character straddling a chunk boundary, ordering of a keystroke arriving mid-paste, and toast lifecycle.
 
 **Gate (the "~100 KB manual paste") — outcome.** Whether an *unchunked* large paste actually fails in the drawer was never established, and no longer needs to be: the drawer now takes the same proven path as terminal panes regardless of the answer, so the extraction is justified on parity alone. See §3.5 for what was and wasn't verified in the running app.
 
@@ -215,18 +215,18 @@ Verified live after the fix: Ctrl+Shift+V pasted the clipboard at the shell prom
 
 | File | Change |
 |---|---|
-| `frontend/app/block/context-menu-region.ts` | **New.** `ContextMenuRegion`, `registerContextMenuRegion`, `resolveContextMenuRegion` |
-| `frontend/app/block/pane-actions.ts` | Export `PaneMenuSection`; restructure `buildPaneContextMenu` into sections joined by generated separators; add `omit?: ReadonlySet<PaneMenuSection>` to `PaneContextMenuOpts`; move `buildReplaceSubmenu`'s trailing separator out |
-| `frontend/app/block/blockframe.tsx` | `onBodyContextMenu` resolves the region, prepends `region.items()`, honours `omit` (incl. `viewItems`) |
-| `frontend/app/view/agent/agent-view.tsx` | `handleContextMenu` early-returns inside a registered region |
-| `frontend/app/view/agent/components/AgentShellSubblock.tsx` | Register the drawer region; use `BlockInputSender` for input |
-| `frontend/app/view/agent/components/shell-drawer-menu.ts` | **New.** Copy/Paste items, size limit, `formatSize` (kept out of the component so it is unit-testable without xterm) |
-| `frontend/app/view/agent/components/shell-drawer-keys.ts` | **New (#3774, §3.6).** `handleShellDrawerKeydown` — Ctrl+Shift+V / Ctrl+Shift+C for the drawer's xterm; shares `pasteClipboardIntoShell` with the menu |
-| `frontend/app/view/term/block-input-sender.ts` | **New.** Chunked, ordered `blockinput` sender extracted from `TermViewModel` (§3.4) |
-| `frontend/app/view/term/termViewModel.ts` | `sendDataToController` delegates to `BlockInputSender` |
-| `frontend/app/block/pane-actions.test.ts` (new or extended) | §5 |
-| `frontend/app/block/context-menu-region.test.ts` | **New.** §5 |
-| `frontend/app/view/agent/components/AgentShellSubblock.test.tsx` | Region registered on mount, unregistered on cleanup; Copy/Paste enablement |
+| [`frontend/app/block/context-menu-region.ts`](../../frontend/app/block/context-menu-region.ts) | **New.** `ContextMenuRegion`, `registerContextMenuRegion`, `resolveContextMenuRegion` |
+| [`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts) | Export `PaneMenuSection`; restructure `buildPaneContextMenu` into sections joined by generated separators; add `omit?: ReadonlySet<PaneMenuSection>` to `PaneContextMenuOpts`; move `buildReplaceSubmenu`'s trailing separator out |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | `onBodyContextMenu` resolves the region, prepends `region.items()`, honours `omit` (incl. `viewItems`) |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | `handleContextMenu` early-returns inside a registered region |
+| [`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) | Register the drawer region; use `BlockInputSender` for input |
+| [`frontend/app/view/agent/components/shell-drawer-menu.ts`](../../frontend/app/view/agent/components/shell-drawer-menu.ts) | **New.** Copy/Paste items, size limit, `formatSize` (kept out of the component so it is unit-testable without xterm) |
+| [`frontend/app/view/agent/components/shell-drawer-keys.ts`](../../frontend/app/view/agent/components/shell-drawer-keys.ts) | **New (#3774, §3.6).** `handleShellDrawerKeydown` — Ctrl+Shift+V / Ctrl+Shift+C for the drawer's xterm; shares `pasteClipboardIntoShell` with the menu |
+| [`frontend/app/view/term/block-input-sender.ts`](../../frontend/app/view/term/block-input-sender.ts) | **New.** Chunked, ordered `blockinput` sender extracted from `TermViewModel` (§3.4) |
+| [`frontend/app/view/term/termViewModel.ts`](../../frontend/app/view/term/termViewModel.ts) | `sendDataToController` delegates to `BlockInputSender` |
+| [`frontend/app/block/pane-actions.test.ts`](../../frontend/app/block/pane-actions.test.ts) (new or extended) | §5 |
+| [`frontend/app/block/context-menu-region.test.ts`](../../frontend/app/block/context-menu-region.test.ts) | **New.** §5 |
+| [`frontend/app/view/agent/components/AgentShellSubblock.test.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.test.tsx) | Region registered on mount, unregistered on cleanup; Copy/Paste enablement |
 
 No backend, RPC, or schema change. Header right-click (`handleHeaderContextMenu`) calls the same builder with no `omit` and is unaffected.
 

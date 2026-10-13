@@ -4,8 +4,8 @@
 **Type:** Process spec (not primarily a code-change spec — most action items are checks/automation, small in scope individually)
 **Status:** Proposed — item 1 (Dockerfile pin-consistency check) already implemented as part of the exercise that prompted this doc; the rest is unimplemented and intentionally incremental.
 **Owner:** unassigned
-**Scope:** `frontend/app/view/agent/providers/catalog.ts` (model catalog), the five Claude CLI version pin locations documented in `docs/spec-claude-code-versioning.md` (a matching semver string, mechanically checkable), plus that same file's curated model-alias `label` (a semantic claim about upstream state, not a version string — see §1's distinction), and — by extension, since the mechanism generalizes — any other provider's pinned CLI (`codex`, `gemini`, etc.).
-**Related:** `docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md` (the concrete exercise this generalizes from), `docs/spec-claude-code-versioning.md` (the existing, narrower CLI-pin checklist this spec builds on top of, not replaces), `docs/specs/SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md` (the live API-catalog-overlay design), `docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` (original pin-consistency-test proposal), `frontend/app/view/agent/providers/pin-consistency.test.ts`.
+**Scope:** [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) (model catalog), the five Claude CLI version pin locations documented in [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) (a matching semver string, mechanically checkable), plus that same file's curated model-alias `label` (a semantic claim about upstream state, not a version string — see §1's distinction), and — by extension, since the mechanism generalizes — any other provider's pinned CLI (`codex`, `gemini`, etc.).
+**Related:** [`docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`](../retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md) (the concrete exercise this generalizes from), [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) (the existing, narrower CLI-pin checklist this spec builds on top of, not replaces), [`docs/specs/SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md`](SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md) (the live API-catalog-overlay design), [`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) (original pin-consistency-test proposal), [`frontend/app/view/agent/providers/pin-consistency.test.ts`](../../frontend/app/view/agent/providers/pin-consistency.test.ts).
 
 > This is explicitly framed as the **first** of a recurring exercise (model
 > releases and Claude Code CLI releases will keep happening), not a one-off.
@@ -21,7 +21,7 @@ bumping as upstream ships:
 
 1. **The CLI version** (`@anthropic-ai/claude-code@X.Y.Z`) — five source
    locations that must literally match, one matching semver string each
-   (see `docs/spec-claude-code-versioning.md`), mechanically enforced by
+   (see [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md)), mechanically enforced by
    `pin-consistency.test.ts`.
 2. **The model catalog** — a curated fallback list (`catalog.ts`) whose
    `label`/`description` fields describe what a stable alias (`opus`,
@@ -141,7 +141,7 @@ Tiers 2–3 are proposed, not yet built** — deliberately incremental, per
 ### 3.1 Tier 1 — Close known gaps by turning prose into assertions (done today)
 
 Every time a hand-maintained checklist doc says "X isn't automatically
-checked, verify by hand" — as `docs/spec-claude-code-versioning.md` already
+checked, verify by hand" — as [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) already
 did for the Dockerfile `ARG` — that sentence is itself the spec for a missing
 test. `pin-consistency.test.ts` now has 6 assertions instead of 5, covering
 that exact gap. **Standing rule going forward: a checklist doc is allowed to
@@ -152,7 +152,7 @@ was ever actually hit.
 
 ### 3.2 Tier 2 — A single bump script (proposed, not built)
 
-Replace `docs/spec-claude-code-versioning.md`'s "How to bump" numbered list
+Replace [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md)'s "How to bump" numbered list
 (5 version-pin file edits, a separate model-label recheck, and 2 manual
 verification steps) with one script,
 `scripts/bump-provider-cli.sh <provider> <version>`, that:
@@ -167,7 +167,7 @@ verification steps) with one script,
    maintained pattern). Does **not** touch the model-alias `label` here —
    that's a distinct, non-mechanical edit, step 4 below.
 3. Runs `pin-consistency.test.ts` immediately and fails loudly on mismatch,
-   the same way `scripts/release.sh` already re-reads all five version
+   the same way [`scripts/release.sh`](../../scripts/release.sh) already re-reads all five version
    locations after a release bump and fails loudly on disagreement
    (`CLAUDE.md`'s "Release consistency invariant" — same pattern, same
    author intent, not yet applied here).
@@ -240,9 +240,9 @@ of premature process weight).
 |---|---|---|
 | 1. Bump Claude CLI pin `2.1.198` → `2.1.247` (all 6 locations) | ✅ Done | Verified against the real npm registry via `WebFetch`; see the retro. |
 | 2. Relabel `opus` catalog entry "Opus 4.8" → "Opus 5" | ✅ Done | Per user direction (relabel, not a dual entry) — `catalog.ts`. |
-| 3. Fix stale file-path reference in `docs/spec-claude-code-versioning.md` | ✅ Done | `providers/index.ts` → `providers/catalog.ts`. |
+| 3. Fix stale file-path reference in [`docs/spec-claude-code-versioning.md`](../spec-claude-code-versioning.md) | ✅ Done | `providers/index.ts` → `providers/catalog.ts`. |
 | 4. Extend `pin-consistency.test.ts` to cover the Dockerfile `ARG` (Tier 1) | ✅ Done | 6th assertion; closes the gap the doc had named but never enforced. |
-| 5. Retro this exercise | ✅ Done | `docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`. |
+| 5. Retro this exercise | ✅ Done | [`docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`](../retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md). |
 | 6. This spec | ✅ Done | |
 | 7. `scripts/bump-provider-cli.sh` (Tier 2) | ⬜ Not started | Proposed in §3.2; deliberately deferred past this exercise per "small and often." |
 | 8. Catalog-label staleness signal (Tier 3) | ⬜ Open question | §3.3 — recommend deferring until/unless a real stale-label bug ships. |

@@ -14,8 +14,8 @@ Three distinct issues observed during smoke testing:
 | # | Issue | Severity | Files |
 |---|-------|----------|-------|
 | 1 | Pool "exhaustion" on macOS — by design, Phase 7 gap | Info | `agentmux-cef/src/commands/window_pool.rs:477` |
-| 2 | Ghost indicator missing when dwell arm fires at the IPC boundary | Bug | `frontend/app/workspace/floating-pane-workspace.tsx:777-815` |
-| 3 | Wrong-tab block delete on floating pane close (BUG-TRACE loop) | Bug | `frontend/app/tab/tabcontent.tsx:61-71` |
+| 2 | Ghost indicator missing when dwell arm fires at the IPC boundary | Bug | [`frontend/app/workspace/floating-pane-workspace.tsx:777-815`](../../frontend/app/workspace/floating-pane-workspace.tsx) |
+| 3 | Wrong-tab block delete on floating pane close (BUG-TRACE loop) | Bug | [`frontend/app/tab/tabcontent.tsx:61-71`](../../frontend/app/tab/tabcontent.tsx) |
 
 ---
 
@@ -162,7 +162,7 @@ tab (which changes each time: `93fc9be0`, `97b33da6`, `a83370ef`).
 
 ### Root Cause
 
-`onNodeDelete` in `frontend/app/tab/tabcontent.tsx:61-71`:
+`onNodeDelete` in [`frontend/app/tab/tabcontent.tsx:61-71`](../../frontend/app/tab/tabcontent.tsx):
 
 ```ts
 async function onNodeDelete(data: TabLayoutData) {

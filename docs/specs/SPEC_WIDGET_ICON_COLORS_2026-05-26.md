@@ -22,8 +22,8 @@ The top-bar widget menu renders a visually inconsistent row of icons:
 The hex values are hardcoded in `agentmux-srv/src/config/widgets.json`
 and applied as inline `style={{ color: widget.color }}` at:
 
-- `frontend/app/window/action-widgets.tsx:117` — pinned widget bar
-- `frontend/app/window/action-widgets.tsx:192` — More dropdown
+- [`frontend/app/window/action-widgets.tsx:117`](../../frontend/app/window/action-widgets.tsx) — pinned widget bar
+- [`frontend/app/window/action-widgets.tsx:192`](../../frontend/app/window/action-widgets.tsx) — More dropdown
 
 These hardcoded hex values:
 
@@ -74,7 +74,7 @@ theme.**
 
 ### 4.1 New semantic tokens
 
-Add to `frontend/app/theme.scss` (the `:root` block):
+Add to [`frontend/app/theme.scss`](../../frontend/app/theme.scss) (the `:root` block):
 
 ```scss
 --widget-icon-color: var(--secondary-text-color);
@@ -206,10 +206,10 @@ Three small, isolated PRs in order:
 
 - `frontend/app/window/action-widgets.tsx:117,192` — render sites in
   scope
-- `frontend/app/theme.scss` — semantic token home
+- [`frontend/app/theme.scss`](../../frontend/app/theme.scss) — semantic token home
 - `frontend/app/themes/*.scss` — per-theme overrides
 - `agentmux-srv/src/config/widgets.json` — widget defs (`color` field;
   unchanged by this spec)
-- `docs/specs/SPEC_DESIGN_SYSTEM_2026_04_23.md` — token taxonomy
+- [`docs/specs/SPEC_DESIGN_SYSTEM_2026_04_23.md`](SPEC_DESIGN_SYSTEM_2026_04_23.md) — token taxonomy
 - Reference UIs that follow the monochrome-default pattern: Stripe,
   Linear, GitHub, VS Code activity bar, macOS Big Sur+ sidebars.

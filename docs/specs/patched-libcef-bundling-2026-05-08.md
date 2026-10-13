@@ -16,7 +16,7 @@ AgentMux's Linux build needs **two patches to `libcef.so`** that are not in upst
 
 The patches live in a built `libcef.so` at `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/libcef.so` (642 MB stripped, head `5ab41b6` on the `agentmux/7680-...` branch — see `~/.claude/projects/-home-snowbark/memory/cef_build_in_progress.md`).
 
-**The pain:** `task bundle:linux` and `scripts/build-appimage-linux.sh` both source `libcef.so` from cef-dll-sys's cargo cache (`target/debug/build/cef-dll-sys-*/out/cef_linux_x86_64/`), which is the **upstream unpatched** prebuilt downloaded by cef-dll-sys's build script. Every clean build silently regresses to upstream libcef, breaking left-click drag (and, in the future, transparency).
+**The pain:** `task bundle:linux` and [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) both source `libcef.so` from cef-dll-sys's cargo cache (`target/debug/build/cef-dll-sys-*/out/cef_linux_x86_64/`), which is the **upstream unpatched** prebuilt downloaded by cef-dll-sys's build script. Every clean build silently regresses to upstream libcef, breaking left-click drag (and, in the future, transparency).
 
 Workaround today: manually overlay the patched libcef + matching V8 paks after every `task bundle` run. Easy to forget, time-consuming, and the only diagnostic when forgotten is "left-click drag silently does nothing" (the runtime ABI guard logs a warning but the user-visible failure mode looks like an unrelated bug).
 
@@ -26,14 +26,14 @@ Workaround today: manually overlay the patched libcef + matching V8 paks after e
 
 ## TL;DR
 
-- Add a `CEF_RUNTIME_DIR` resolver to `bundle:linux` and `scripts/build-appimage-linux.sh` with three sources, in priority order:
+- Add a `CEF_RUNTIME_DIR` resolver to `bundle:linux` and [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) with three sources, in priority order:
   1. `$AGENTMUX_CEF_RUNTIME_DIR` env var (explicit override).
   2. `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/` (the cef-build standard layout for anyone following `docs/cef-build/...`).
   3. The cef-dll-sys cargo cache (`target/.../cef_linux_x86_64/`) — current behavior.
 - Add a sanity-check at copy time: warn (and exit non-zero in CI mode) if the chosen `libcef.so` is the unpatched upstream — detected by the same `_cef_window_t.size` field the runtime ABI guard reads, or by a simpler heuristic (file size: patched is ~613 MB stripped, unpatched debug is ~1.3 GB).
-- Factor the resolver into one shell helper (`scripts/resolve-cef-runtime.sh`) so the Taskfile bundle command and the AppImage build script share one source of truth.
-- Document the build-from-source path for libcef in `docs/cef-build/build-patched-libcef.md` (existing build notes from `cef_build_in_progress.md` memory) and link from this spec.
-- Estimated change: 1 new ~50-line shell helper, 1 new docs page, ~10 line edits to `Taskfile.yml` (`bundle:linux`) and `scripts/build-appimage-linux.sh`. No Rust changes. No new versions to bump.
+- Factor the resolver into one shell helper ([`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh)) so the Taskfile bundle command and the AppImage build script share one source of truth.
+- Document the build-from-source path for libcef in [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md) (existing build notes from `cef_build_in_progress.md` memory) and link from this spec.
+- Estimated change: 1 new ~50-line shell helper, 1 new docs page, ~10 line edits to `Taskfile.yml` (`bundle:linux`) and [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh). No Rust changes. No new versions to bump.
 
 ---
 
@@ -214,7 +214,7 @@ Today the patched libcef has no version of its own — it's whatever `5ab41b6` o
 
 ## Implementation plan
 
-1. Add `scripts/resolve-cef-runtime.sh` as specified above. `chmod +x`.
+1. Add [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) as specified above. `chmod +x`.
 2. Replace the inline `CEF_DIR=$(find target ...)` lookup in `Taskfile.yml::bundle:linux` with `CEF_DIR="$(bash scripts/resolve-cef-runtime.sh)"`.
 3. Smoke-test:
    - `unset AGENTMUX_CEF_RUNTIME_DIR && task bundle` → resolver picks `~/cef-build/...` (patched), libcef.so in dist/cef is ~613 MB.
@@ -222,7 +222,7 @@ Today the patched libcef has no version of its own — it's whatever `5ab41b6` o
    - `mv ~/cef-build /tmp/hide && task bundle && mv /tmp/hide ~/cef-build` → resolver falls back to cef-dll-sys cache, prints "WARNING ... unpatched upstream" if size > 1 GB.
 4. `task package:linux` end-to-end: build AppImage, extract, verify `usr/bin/libcef.so` is the patched 613 MB version.
 5. Run agentmux from the AppImage; verify left-click drag works (the symptom that originally surfaced this issue).
-6. Commit `docs/cef-build/build-patched-libcef.md` consolidating the build memory.
+6. Commit [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md) consolidating the build memory.
 7. Bump patch version, open PR.
 
 ---
@@ -252,8 +252,8 @@ Today the patched libcef has no version of its own — it's whatever `5ab41b6` o
 ## File-by-file change summary
 
 **New:**
-- `scripts/resolve-cef-runtime.sh` (~50 lines, executable).
-- `docs/cef-build/build-patched-libcef.md` (consolidate `cef_build_in_progress.md` memory; ~80 lines).
+- [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) (~50 lines, executable).
+- [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md) (consolidate `cef_build_in_progress.md` memory; ~80 lines).
 
 **Edited:**
 - `Taskfile.yml` — `bundle:linux` task body, replace inline find with `bash scripts/resolve-cef-runtime.sh`.
@@ -262,4 +262,4 @@ Today the patched libcef has no version of its own — it's whatever `5ab41b6` o
 - agentmux-cef Rust source (the runtime ABI guard already handles the mismatch case).
 - frontend / TS / SCSS.
 - macOS / Windows packaging.
-- `scripts/build-appimage-linux.sh` (uses `dist/cef/` post-bundle; correct as long as bundle is fixed).
+- [`scripts/build-appimage-linux.sh`](../../scripts/build-appimage-linux.sh) (uses `dist/cef/` post-bundle; correct as long as bundle is fixed).

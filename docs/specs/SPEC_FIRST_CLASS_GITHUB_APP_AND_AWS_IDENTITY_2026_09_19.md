@@ -3,10 +3,10 @@
 **Date:** 2026-09-19
 **Status:** proposed — exploratory design, nothing implemented.
 **Author:** Agenty (agent), at the repo owner's request.
-**Related:** `docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md` (the
-login pattern this generalises), `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`,
-`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`.
+**Related:** [`docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md`](SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md) (the
+login pattern this generalises), [`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md),
+[`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`](SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md),
+[`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md).
 
 ---
 
@@ -89,7 +89,7 @@ codebase has to a real extension point.
 - No `key_validator` arm for `aws` (`key_validator.rs:73-82`), so an AWS
   account can never validate.
 - `AccountContext.aws_profile / aws_role_arn / aws_region`
-  (`frontend/app/view/identity/identity-model.ts:45-47`) are display-only.
+  ([`frontend/app/view/identity/identity-model.ts:45-47`](../../frontend/app/view/identity/identity-model.ts)) are display-only.
 - The AWS tile carries an explicit comment that IAM Identity Center "isn't
   wired in the backend yet" (`accounts-catalog.ts:40`).
 - **`credential_process` appears nowhere in the codebase.**

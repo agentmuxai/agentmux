@@ -3,9 +3,9 @@
 **Date:** 2026-10-03
 **Status:** implemented — PR #4297 (phone client: agentmuxai/agentmux-mobile#34). Checked against the phone client on an isolated loopback srv; `siblings` not yet seen live on real hosts (section 7).
 **Author:** Clamk, at the owner's request
-**Affects:** `crates/srv/src/backend/fleet_feed.rs` (new), `crates/srv/src/server/http_fleet.rs` (new), `crates/srv/src/server/routes.rs`, `crates/srv/src/server/http_health.rs`, `crates/srv/src/backend/lan_discovery.rs`, `crates/srv/src/backend/lan_discovery/lan_instances.rs` (new), `crates/srv/src/backend/lan_discovery/udp_peers.rs`, `crates/srv/src/registry/paths.rs`, `crates/srv/src/main.rs`
+**Affects:** [`crates/srv/src/backend/fleet_feed.rs`](../../crates/srv/src/backend/fleet_feed.rs) (new), [`crates/srv/src/server/http_fleet.rs`](../../crates/srv/src/server/http_fleet.rs) (new), [`crates/srv/src/server/routes.rs`](../../crates/srv/src/server/routes.rs), [`crates/srv/src/server/http_health.rs`](../../crates/srv/src/server/http_health.rs), [`crates/srv/src/backend/lan_discovery.rs`](../../crates/srv/src/backend/lan_discovery.rs), [`crates/srv/src/backend/lan_discovery/lan_instances.rs`](../../crates/srv/src/backend/lan_discovery/lan_instances.rs) (new), [`crates/srv/src/backend/lan_discovery/udp_peers.rs`](../../crates/srv/src/backend/lan_discovery/udp_peers.rs), [`crates/srv/src/registry/paths.rs`](../../crates/srv/src/registry/paths.rs), [`crates/srv/src/main.rs`](../../crates/srv/src/main.rs)
 **Source of the contract:** agentmux-mobile's [`SPEC_LIVE_FLEET_TOPOLOGY_2026_10_03.md`](https://github.com/agentmuxai/agentmux-mobile/blob/main/docs/specs/SPEC_LIVE_FLEET_TOPOLOGY_2026_10_03.md) §4 (adopted 2026-10-03). Field names, headers, timings and limits are defined there; this document records the desktop side and where it differs.
-**Aligns with:** `docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md` (the same host → channel → agent tree, and its names-only line for `lan_key` holders)
+**Aligns with:** [`docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) (the same host → channel → agent tree, and its names-only line for `lan_key` holders)
 
 ## 1. Why
 

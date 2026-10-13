@@ -20,7 +20,7 @@ state, and nothing bridges the two.
 ## Root cause: one state update flips two independent DOM shapes at once, and neither is transitioned
 
 The `running`→terminal transition is driven by a single object replacement,
-`mergeReplacement()` (`frontend/app/store/agent-document/reducer.ts:659-679`). When a
+`mergeReplacement()` ([`frontend/app/store/agent-document/reducer.ts:659-679`](../../frontend/app/store/agent-document/reducer.ts)). When a
 `tool_result` arrives, the parser's replacement node is merged with the existing node's live-log
 buffer, and — critically — `log.open` is force-cleared to `false` in the same merge whenever the
 new status is terminal:
@@ -54,7 +54,7 @@ Two independent pieces of UI key off exactly these two signals, and both change 
 
 Net effect: one flex row (`.agent-tool-summary`) loses one child (`.agent-tool-live-tail`) and
 gains another (`.agent-tool-result-pill`) simultaneously, with no transition on either —
-confirmed by `frontend/app/view/agent/styles/_document-nodes.scss`: the live-tail rule (around
+confirmed by [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss): the live-tail rule (around
 line 219-241) and the result-pill rule (around line 424-442) carry no `transition` property, and
 grepping the whole file for `transition` turns up only an unrelated hover rule (line 142) and the
 panel collapse/expand transition (lines 297-307, see below — doesn't apply here).
@@ -113,7 +113,7 @@ cannot animate as written regardless).
 same file (`ToolOverlayLog.tsx`) — double scrollbars and a wheel-scroll dead zone at the box's
 scroll boundary. Its own addendum explicitly disambiguates: "Not a jerk, a dead zone." That
 "jerk" language describes native browser scroll-chaining bounce, unrelated to the DOM-reflow jerk
-here. No spec or analysis doc anywhere under `docs/specs/` or `docs/analysis/` mentions this
+here. No spec or analysis doc anywhere under [`docs/specs/`](../specs) or [`docs/analysis/`](.) mentions this
 running→completed rendering jerk; the closest related docs
 (`PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`,
 `ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`,
@@ -176,20 +176,20 @@ at line 180).
 
 | File | Role |
 |---|---|
-| `frontend/app/store/agent-document/reducer.ts:659-679` | `mergeReplacement` — the single state update that couples `status` and `log.open`, root cause of both A and B firing on the same tick |
-| `frontend/app/view/agent/components/ToolBlock.tsx:177-322` | Summary row — `resultPill()` (177-229), live-tail/elapsed-ticker (267-303), status icon (236), the flex row that gains/loses children (256-322) |
+| [`frontend/app/store/agent-document/reducer.ts:659-679`](../../frontend/app/store/agent-document/reducer.ts) | `mergeReplacement` — the single state update that couples `status` and `log.open`, root cause of both A and B firing on the same tick |
+| [`frontend/app/view/agent/components/ToolBlock.tsx:177-322`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Summary row — `resultPill()` (177-229), live-tail/elapsed-ticker (267-303), status icon (236), the flex row that gains/loses children (256-322) |
 | `frontend/app/view/agent/components/ToolOverlayLog.tsx:90, 187-220` | `isStreaming()` gate + the exclusive `<Switch>` that swaps `ChunkList` ↔ `ToolOverlayResult`; comment at 187-196 explains its crash-safety history |
-| `frontend/app/view/agent/components/ToolBlockOverlay.tsx:49-63` | Overlay header `display` toggle — secondary contributor for non-success terminations |
+| [`frontend/app/view/agent/components/ToolBlockOverlay.tsx:49-63`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) | Overlay header `display` toggle — secondary contributor for non-success terminations |
 | `frontend/app/view/agent/styles/_document-nodes.scss:142, 219-241, 297-307, 424-442` | `.agent-tool-block` hover transition (142, unrelated); live-tail rule (219-241, no transition); panel hidden↔flow transition (297-307, doesn't cover this case); result-pill rule (424-442, no transition) |
-| `frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-68` | `.agent-tool-overlay-log` — the panel-body container; zero `transition` declarations anywhere in this file |
+| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss:34-68`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | `.agent-tool-overlay-log` — the panel-body container; zero `transition` declarations anywhere in this file |
 
 ## Related docs (checked, confirmed unrelated or tangential)
 
 | Path | Relevance |
 |---|---|
-| `docs/specs/SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (PR #1963) | Different bug (scroll dead zone / double scrollbar) in the same file; explicitly disclaims being this "jerk" |
-| `docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`, `docs/analysis/ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md` | About *when* the panel auto-collapses on scroll, not content swaps while open |
-| `docs/specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md` | About *when* the panel auto-expands |
-| `docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md` | About what the live log streams, predates the terminal-state pill/switch design |
+| [`docs/specs/SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md`](../specs/SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md) (PR #1963) | Different bug (scroll dead zone / double scrollbar) in the same file; explicitly disclaims being this "jerk" |
+| [`docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`](../specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md), [`docs/analysis/ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`](ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md) | About *when* the panel auto-collapses on scroll, not content swaps while open |
+| [`docs/specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md`](../specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md) | About *when* the panel auto-expands |
+| [`docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`](../specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) | About what the live log streams, predates the terminal-state pill/switch design |
 
 No prior doc addresses this issue — it appears genuinely unreported until now.

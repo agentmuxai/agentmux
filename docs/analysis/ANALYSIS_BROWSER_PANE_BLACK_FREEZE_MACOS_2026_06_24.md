@@ -22,7 +22,7 @@
 > half** — it did not.
 >
 > A retrospective on the fix exists alongside this file:
-> `docs/analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md`. It was never
+> [`docs/analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md`](RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md). It was never
 > linked from here — which is why this analysis still read as an open bug.
 
 **Date:** 2026-06-24

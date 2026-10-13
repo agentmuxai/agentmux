@@ -157,7 +157,7 @@ Permission modes map to agy's own flags: bypass is
 - **The user's message** is written to the transcript by the subprocess
   controller (`persists_user_record`), as for Codex and Kimi, since `agy`
   doesn't echo it; the live feed's roll-off includes the format.
-- **The app API's `agent.open`** stamped every provider outside a hard-coded
+- **MuxAPI's `agent.open`** stamped every provider outside a hard-coded
   list as `claude-stream-json`. It now writes the provider's own
   `styled_output_format`, as the UI launch does.
 - **Containers** refuse a provider that takes its prompt as an argument: the
@@ -183,7 +183,7 @@ Permission modes map to agy's own flags: bypass is
   stdin; resume adds `--conversation <id>`; an over-long prompt is refused.
 - CLI resolution for an `argv` provider never returns a `.cmd` or `.bat` path.
 - Translator unit tests from the captured runs, stored in
-  `frontend/test/fixtures/providers/agy/1.1.11/` with the local user name and
+  [`frontend/test/fixtures/providers/agy/1.1.11/`](../../frontend/test/fixtures/providers/agy/1.1.11) with the local user name and
   temp folder replaced.
 - Manual, in a `task dev` build: create an Antigravity agent, send two
   prompts (the second resumes the same conversation), run one that uses a

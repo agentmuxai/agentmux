@@ -9,14 +9,14 @@
 > hand. The fix is to **pin** `var(--cursor-default)` on the scrollbar pseudo-
 > elements; the stylelint ban this doc proposed (§3.4) actually *blocks* that fix
 > and was replaced with a value-scoped grep gate. Full post-mortem and the
-> corrected approach: **`docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`**.
+> corrected approach: **[`docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`](../retro/retro-scrollbar-cursor-regression-2026-06-17.md)**.
 
 **Date:** 2026-06-15
 **Status:** superseded — the core claim was wrong; see the correction banner
 above (2026-06-17) and `Superseded-by:` below.
 **Superseded-by:** [`docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`](../retro/retro-scrollbar-cursor-regression-2026-06-17.md)
 ~~Analysis + refactor proposal (no code landed yet)~~
-**Scope:** `frontend/` CSS cursor styling, app-wide
+**Scope:** [`frontend/`](../../frontend) CSS cursor styling, app-wide
 **Trigger:** Scrollbars (notably on agent panes) show the link **hand** (`cursor: pointer`)
 instead of the default **arrow**. It should be the arrow everywhere on scrollbars.
 
@@ -25,7 +25,7 @@ instead of the default **arrow**. It should be the arrow everywhere on scrollbar
 ## 0. TL;DR
 
 - **The bug is two global lines.** Scrollbars get the link-hand from exactly two
-  `cursor: pointer` declarations in `frontend/app/app.scss`:
+  `cursor: pointer` declarations in [`frontend/app/app.scss`](../../frontend/app/app.scss):
   - **`app.scss:69`** — `*::-webkit-scrollbar-thumb { cursor: pointer; }` (every
     Chromium scrollbar in the app).
   - **`app.scss:104`** — `.os-scrollbar-handle { cursor: pointer; }`
@@ -52,7 +52,7 @@ defaults render the scrollbar thumb with the **default arrow**; `cursor: pointer
 (the link hand) on a thumb is a category error — it tells the user "this navigates"
 when it scrolls. Two global rules force the hand:
 
-`frontend/app/app.scss:68-73`
+[`frontend/app/app.scss:68-73`](../../frontend/app/app.scss)
 ```scss
 *::-webkit-scrollbar-thumb {
     cursor: pointer;                       /* ← BUG: link-hand on every scrollbar */
@@ -62,7 +62,7 @@ when it scrolls. Two global rules force the hand:
 }
 ```
 
-`frontend/app/app.scss:103-105`
+[`frontend/app/app.scss:103-105`](../../frontend/app/app.scss)
 ```scss
 .os-scrollbar-handle {
     cursor: pointer;                       /* ← BUG: same, for OverlayScrollbars */
@@ -70,12 +70,12 @@ when it scrolls. Two global rules force the hand:
 ```
 
 **Why the agent pane is the obvious victim.** The agent conversation renders through
-`frontend/app/element/markdown.tsx` with `<Markdown scrollable={true} />`, which mounts
+[`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) with `<Markdown scrollable={true} />`, which mounts
 **OverlayScrollbars**. So agent panes hit `.os-scrollbar-handle` (line 104) on the
 conversation scroll, and `*::-webkit-scrollbar-thumb` (line 69) on every other
 scrollable region. Both say "hand".
 
-**No spec/changeset justifies it.** A search of `.changesets/`, `docs/`, and history
+**No spec/changeset justifies it.** A search of [`.changesets/`](../../.changesets), [`docs/`](..), and history
 turned up no decision record for scrolling-thumb-as-pointer. It reads as an early
 default that was never revisited. (Color *is* tokenized — `--scrollbar-thumb-color`
 et al. — the cursor just rode along hard-coded.)
@@ -247,6 +247,6 @@ marginal gain over the guardrail).
 3. **Phase 3** — migrate the agent-pane SCSS to the cursor utilities as a first
    exemplar; leave the rest to opportunistic cleanup.
 
-**Files referenced:** `frontend/app/app.scss` (59-105), `frontend/app/theme.scss`
-(92-96, 224-316), `frontend/app/themes/*.scss`, `frontend/app/element/markdown.tsx`,
-`frontend/tailwindsetup.css` (84).
+**Files referenced:** [`frontend/app/app.scss`](../../frontend/app/app.scss) (59-105), [`frontend/app/theme.scss`](../../frontend/app/theme.scss)
+(92-96, 224-316), `frontend/app/themes/*.scss`, [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx),
+[`frontend/tailwindsetup.css`](../../frontend/tailwindsetup.css) (84).

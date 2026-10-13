@@ -123,10 +123,10 @@ terminal modes do, which is why it looked like "vim breaks the terminal".
   0.56.2→0.56.3 delta cleared it — correctly. Nothing in the diff is wrong; the
   *build* introduces the defect.
 - **Source maps are stripped from packaged runtimes**
-  (`scripts/stage-linux-runtime.sh` deletes `*.map`), so the renderer logged
+  ([`scripts/stage-linux-runtime.sh`](../../scripts/stage-linux-runtime.sh) deletes `*.map`), so the renderer logged
   `Uncaught ReferenceError: r is not defined` at `index-….js (190)` with a 404
   for the map and no usable stack. `vite.config.ts` sets `sourcemap: true`
-  specifically so `frontend/log/source-map-resolver.ts` can symbolicate at
+  specifically so [`frontend/log/source-map-resolver.ts`](../../frontend/log/source-map-resolver.ts) can symbolicate at
   runtime — packaging then removes the maps that feature depends on. Worth its
   own fix; see §7.
 - **Investigation tooling kept targeting the wrong instance.** Several rounds of
@@ -175,7 +175,7 @@ The specific miscompile is fixed twice over. The *class* is not: any uncaught
 throw inside xterm's `parse()` — or a handler that hangs — wedges a pane the same
 silent way, and that silence is why this took as long as it did.
 
-`frontend/app/view/term/parser-wedge.ts` detects it by **liveness**, deliberately
+[`frontend/app/view/term/parser-wedge.ts`](../../frontend/app/view/term/parser-wedge.ts) detects it by **liveness**, deliberately
 not by inspecting `error.stack` for xterm frames: stack sniffing is unreliable
 against minified vendor code, which is precisely the condition being survived.
 `Terminal.write(data, cb)` invokes `cb` once that chunk is parsed, so writes

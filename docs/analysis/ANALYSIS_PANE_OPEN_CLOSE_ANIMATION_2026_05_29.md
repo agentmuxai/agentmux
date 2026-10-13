@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-29
 - **Author:** AgentX
-- **Area:** `frontend/layout/` (SolidJS tiling layout) + `frontend/app/block/` + (for full coverage) `agentmux-cef` host
+- **Area:** [`frontend/layout/`](../../frontend/layout) (SolidJS tiling layout) + [`frontend/app/block/`](../../frontend/app/block) + (for full coverage) `agentmux-cef` host
 - **Goal:** When a pane opens/closes/splits, neighbors should glide into their new geometry instead of snapping.
 - **Status:** analysis — Root-caused. Initial one-line attempt reverted (PR #1156). Awaiting a direction decision (see §7).
 
@@ -26,7 +26,7 @@ Opening, closing, splitting, or rebalancing a pane makes the surrounding panes *
 
 ## 3. What was attempted (and reverted)
 
-PR #1156 changed `frontend/layout/lib/layoutModel.ts:103`:
+PR #1156 changed [`frontend/layout/lib/layoutModel.ts:103`](../../frontend/layout/lib/layoutModel.ts):
 
 ```ts
 const DefaultAnimationTimeS = 0;   // → 0.15
@@ -161,11 +161,11 @@ A reasonable phased path: **A now** (covers the common panes and the literal com
 | File | Role |
 |---|---|
 | `frontend/layout/lib/layoutModel.ts:103,365` | `DefaultAnimationTimeS`; constructor wiring |
-| `frontend/layout/lib/layoutModelHooks.ts:87-119` | **inner-rect debounce** (the crux); `:113` instant on resize/reduced-motion |
+| [`frontend/layout/lib/layoutModelHooks.ts:87-119`](../../frontend/layout/lib/layoutModelHooks.ts) | **inner-rect debounce** (the crux); `:113` instant on resize/reduced-motion |
 | `frontend/app/block/block.tsx:166,172-183` | block content sized from the (debounced) inner rect |
 | `frontend/layout/lib/TileLayout.win32.tsx:111-116,136,142,177,336,527,531` | `.animate` gate, `--animation-time-s`, `.tile-node` render |
 | `frontend/layout/lib/tilelayout.scss:164-172,203-231` | `.tile-node` transition; `.placeholder` enter/exit reference |
-| `frontend/layout/lib/utils.ts:63-88` | `setTransform` → `translate3d` + px width/height |
-| `frontend/layout/lib/layoutGeometry.ts:145-191` | per-node rect/transform computation |
-| `frontend/app/platform/pane-rect-registry.ts` | native **browser-pane** HWND rects (only browser is native) |
-| `frontend/app/view/term/term.tsx` | terminal = xterm (DOM) |
+| [`frontend/layout/lib/utils.ts:63-88`](../../frontend/layout/lib/utils.ts) | `setTransform` → `translate3d` + px width/height |
+| [`frontend/layout/lib/layoutGeometry.ts:145-191`](../../frontend/layout/lib/layoutGeometry.ts) | per-node rect/transform computation |
+| [`frontend/app/platform/pane-rect-registry.ts`](../../frontend/app/platform/pane-rect-registry.ts) | native **browser-pane** HWND rects (only browser is native) |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | terminal = xterm (DOM) |

@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-10
 **Status:** implemented. — #2526
-**Related:** `docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`
+**Related:** [`docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md)
 (shrink-to-fit width + hide-single-tab-pill, already shipped, unchanged by
-this spec), `docs/specs/SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md`
+this spec), [`docs/specs/SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md`](SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md)
 (same investigation thread, same branch/PR — landed first).
 
 ---
@@ -63,7 +63,7 @@ underneath the rest of that row.
 
 ### 1.1 Why this doesn't affect the editor or terminal panes
 
-`PaneTabStrip` is shared (`frontend/app/element/PaneTabStrip.tsx`/`.scss`,
+`PaneTabStrip` is shared ([`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx)/`.scss`,
 also used by `editor-tab-strip.tsx` and `term.tsx`). This spec does **not**
 touch the shared component's own base rule — the new `position: absolute`
 override is scoped to `.agent-pane-stack-content > .pane-tab-strip`, a
@@ -169,15 +169,15 @@ patch every time reagent finds another one.
 
 ## 2. Files touched
 
-- `frontend/app/view/agent/agent-view.tsx` — `<PaneTabStrip>` moved from a
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — `<PaneTabStrip>` moved from a
   sibling of `.agent-pane-progress-bar-slot` (before `.agent-pane-stack-content`)
   to a child of `.agent-pane-stack-content`, first before the `<Show>` for
   `AgentPicker`/`AgentPresentationView`.
-- `frontend/app/view/agent/agent-view.scss` — removed
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) — removed
   `.agent-pane-stack > .pane-tab-strip { flex: 0 0 auto; }` (no longer a
   direct child there); added the `position: absolute` override scoped to
   `.agent-pane-stack-content > .pane-tab-strip`.
-- No changes to `frontend/app/element/PaneTabStrip.tsx`/`.scss` (§1.1) or
+- No changes to [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx)/`.scss` (§1.1) or
   any other pane type.
 - No `agentmux-srv` (Rust) changes. No wire-format changes.
 
@@ -186,7 +186,7 @@ patch every time reagent finds another one.
 ## 3. Verification
 
 - `npx tsc --noEmit` — clean.
-- Full `frontend/app/view/agent/` suite — 85 files / 1102 tests passing.
+- Full [`frontend/app/view/agent/`](../../frontend/app/view/agent) suite — 85 files / 1102 tests passing.
 - `bash scripts/vite-build.sh --mode production` — compiles cleanly;
   confirmed the compiled CSS contains
   `.agent-pane-stack-content>.pane-tab-strip{position:absolute;top:0;left:0;z-index:var(--z-pane-overlay, 4)}`.

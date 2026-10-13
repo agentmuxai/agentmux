@@ -165,7 +165,7 @@ The backend's `ConfigWatcher` (wconfig.rs) monitors the config directory. When `
 
 - **Config dir:** `~/.agentmux/config/` (override: `AGENTMUX_CONFIG_HOME`)
 - **Settings file:** `~/.agentmux/config/settings.json`
-- **Schema:** `schema/settings.json` (strict, `additionalProperties: false`)
+- **Schema:** [`schema/settings.json`](../../schema/settings.json) (strict, `additionalProperties: false`)
 - **Backend:** `agentmuxsrv-rs/src/backend/wconfig.rs` -- `SettingsType` struct, file constants, config watcher
 - **RPC:** `SetConfigCommand` writes settings, `GetConfigCommand` reads them
 

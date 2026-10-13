@@ -30,12 +30,12 @@ standalone Terminal widget (`view: "term"`) does not have this problem.
 Font size *is* correctly persisted per-shell, across drawer close/reopen and
 app restarts. It is **not** lost on drawer close (`DeleteSubBlockCommand` is
 only fired when the whole agent pane closes —
-`frontend/app/view/agent/agent-view.tsx:579-581` — not when just the drawer
+[`frontend/app/view/agent/agent-view.tsx:579-581`](../../frontend/app/view/agent/agent-view.tsx) — not when just the drawer
 is collapsed). So "each open uses a default" is not what's happening; the
 correct value exists and is fetched, it just doesn't win the race to be
 applied before first paint.
 
-Font size computation (`frontend/app/view/agent/components/AgentShellSubblock.tsx`):
+Font size computation ([`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx)):
 
 ```
 :79   const BASE_FONT_SIZE = 13;
@@ -85,7 +85,7 @@ Sequence on drawer open:
    1`, since it's divided out). This is the "opens at a very small zoom"
    symptom.
 4. `TermWrap.init()` calls `this.terminal.open(this.connectElem)`
-   (`frontend/app/view/term/termwrap.ts:221`) immediately — the terminal
+   ([`frontend/app/view/term/termwrap.ts:221`](../../frontend/app/view/term/termwrap.ts)) immediately — the terminal
    **paints at that (possibly wrong) size right away**.
 5. A correction effect exists (`AgentShellSubblock.tsx:111-117`):
    ```
@@ -140,7 +140,7 @@ class historically and was fixed by seeding the value **before** block
 creation:
 
 - `69de7d5e2` "fix(agent): seed term:zoom from ui:zoom when opening agent
-  pane" — `frontend/app/store/command-registry.ts:416-450` fetches the
+  pane" — [`frontend/app/store/command-registry.ts:416-450`](../../frontend/app/store/command-registry.ts) fetches the
   persisted zoom (`RpcApi.GetAgentContentCommand(..., content_type:
   "ui:zoom")`) **before** `createBlock(...)`, passing it as part of the
   block's **initial** meta. The block's reactive atom is therefore correct
@@ -193,14 +193,14 @@ parent agent pane's zoom (`command-registry.ts:416-450`):
   to avoid a FOUC-style flash at the wrong size (the drawer itself has no
   open/close animation to hide behind, per `_composer-strip.scss:517-557`,
   so there's nothing else masking an interim state). **Use the existing
-  `BrainSpinner` stand-in** (`frontend/app/element/BrainSpinner.tsx`) as the
+  `BrainSpinner` stand-in** ([`frontend/app/element/BrainSpinner.tsx`](../../frontend/app/element/BrainSpinner.tsx)) as the
   loading placeholder for this interim state, rather than a blank drawer or
   a new bespoke spinner — this is the codebase's established pattern for
   exactly this class of problem (avoid painting wrong/empty content while
   a value that will change the paint is still in flight), already used by:
   - The **agent pane's own** blank-load case
     (`frontend/app/view/agent/agent-view.tsx:715-716,1721-1725` — see
-    `docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`,
+    [`docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`](REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md),
     which is the same problem category this spec addresses, one level up).
   - The **browser pane** (`frontend/app/view/browser/browser-view.tsx:81-118,189-193`),
     which is the closer structural match: two local signals

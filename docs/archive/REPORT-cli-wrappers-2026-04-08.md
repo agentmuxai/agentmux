@@ -110,7 +110,7 @@ git reflog --since="2026-04-08T04:00:00" | head -30
 |------|------|
 | `agentmux-srv/src/backend/cli_handlers.rs` | CLI resolution, npm install, `make_cli_cmd`, version detection |
 | `agentmux-cef/src/platform.rs` | CEF host auth login handler (`.cmd` → `node cli.js` bypass) |
-| `frontend/app/view/agent/agent-view.tsx` | Launch flow UI, auth URL display, processing indicator |
-| `frontend/app/view/agent/agent-model.ts` | Agent model, CLI path computation |
-| `frontend/util/cef-api.ts` | IPC bridge for `run_cli_login`, `resolve_cli_command` |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | Launch flow UI, auth URL display, processing indicator |
+| [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | Agent model, CLI path computation |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | IPC bridge for `run_cli_login`, `resolve_cli_command` |
 | `frontend/app/store/providers.ts` | Provider definitions (npm packages, args, env vars) |

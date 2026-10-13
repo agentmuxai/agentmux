@@ -37,10 +37,10 @@ Backward compatibility is **explicitly out of scope** — we don't migrate exist
 
 ### Docs that mention `wave.db` (informational updates, non-breaking)
 
-- `docs/analysis/offline-crash.md` (lines 105, 186) — update prose to match new name.
-- `docs/analysis/blank-panes-orphaned-layout-nodes.md` (lines 4, 64) — update sqlite paths in examples.
-- `docs/specs/portable-data-dir.md` (line 34) — `wave.db` → `objects.db` in the directory layout diagram.
-- `docs/specs/SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md` (lines 22, 202) — same.
+- [`docs/analysis/offline-crash.md`](../analysis/offline-crash.md) (lines 105, 186) — update prose to match new name.
+- [`docs/analysis/blank-panes-orphaned-layout-nodes.md`](../analysis/blank-panes-orphaned-layout-nodes.md) (lines 4, 64) — update sqlite paths in examples.
+- [`docs/specs/portable-data-dir.md`](portable-data-dir.md) (line 34) — `wave.db` → `objects.db` in the directory layout diagram.
+- [`docs/specs/SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md`](SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md) (lines 22, 202) — same.
 - `specs/runtime-logging.md` (line 271) — `db_path` example line.
 - `specs/archive/go-to-rust-backend-port.md` — **archive**, no changes needed.
 

@@ -1,21 +1,21 @@
 # AgentMux widget samples
 
-**Status:** living — the starter samples for the widget API (`docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`).
+**Status:** living — the starter samples for the widget API ([`docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`](../../specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md)).
 
-A widget adds your own kind of pane to AgentMux. Each folder here is a complete widget package you can install as it is, then copy and change. The full reference is `docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`; the SDK is `sdk/widget-sdk/`.
+A widget adds your own kind of pane to AgentMux. Each folder here is a complete widget package you can install as it is, then copy and change. The full reference is [`docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`](../../specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md); the SDK is [`sdk/widget-sdk/`](../../../sdk/widget-sdk).
 
 | Sample | Shows | Kind |
 |---|---|---|
-| `hello-sandboxed/` | The smallest widget: connect, set the title, count clicks in the pane's meta, a header action, follow the theme. Plain HTML, no build step. | sandboxed |
-| `react-vite/` | The same, built with React and Vite. | sandboxed |
-| `notes/` | Notes kept with `storage`, exported and imported with `files`, copied with `clipboard:write`. | sandboxed |
-| `pr-dashboard/` | A repository's open pull requests from GitHub's API, with `net:https://api.github.com`; polls only while shown; adds a palette command and a status bar item. | sandboxed |
-| `ask-agent/` | Your agents and whether they're working (`agents:read`), and a message to one (`agents:send`). | sandboxed |
-| `hello/` | A trusted widget: a Solid module that runs as part of AgentMux. | trusted |
+| [`hello-sandboxed/`](hello-sandboxed) | The smallest widget: connect, set the title, count clicks in the pane's meta, a header action, follow the theme. Plain HTML, no build step. | sandboxed |
+| [`react-vite/`](react-vite) | The same, built with React and Vite. | sandboxed |
+| [`notes/`](notes) | Notes kept with `storage`, exported and imported with `files`, copied with `clipboard:write`. | sandboxed |
+| [`pr-dashboard/`](pr-dashboard) | A repository's open pull requests from GitHub's API, with `net:https://api.github.com`; polls only while shown; adds a palette command and a status bar item. | sandboxed |
+| [`ask-agent/`](ask-agent) | Your agents and whether they're working (`agents:read`), and a message to one (`agents:send`). | sandboxed |
+| [`hello/`](hello) | A trusted widget: a Solid module that runs as part of AgentMux. | trusted |
 
 ## Quickstart: your first widget in five minutes
 
-1. **Copy a sample.** Copy `hello-sandboxed/` somewhere of your own, say `~/my-widgets/acme.todo/`.
+1. **Copy a sample.** Copy [`hello-sandboxed/`](hello-sandboxed) somewhere of your own, say `~/my-widgets/acme.todo/`.
 2. **Name it.** In its `widget.json`, set `id` to `<publisher>.<name>` (lowercase letters, digits and `-`, one dot, e.g. `acme.todo`). It must match the folder name. Set `name`, `description` and the pane's `label`.
 3. **Install it.** In AgentMux: **Settings → Widgets → Install…**, pick your `widget.json`. AgentMux copies the folder into `~/.agentmux/widgets/acme.todo/` and asks you to approve it.
 4. **Open it.** It's in the widget bar's **more** menu, and in any pane's **+** menu. Pin it from there.

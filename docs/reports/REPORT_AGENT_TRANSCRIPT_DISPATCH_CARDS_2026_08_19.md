@@ -44,21 +44,21 @@ instead (grouped by `dispatch_id`, min per group).
 ## What changed
 
 **New files:**
-- `frontend/app/view/agent/activity/dispatch-source.ts` — module-singleton
+- [`frontend/app/view/agent/activity/dispatch-source.ts`](../../frontend/app/view/agent/activity/dispatch-source.ts) — module-singleton
   fetch of `ListDispatches`, mirroring the existing `subagent-source.ts`
   pattern. Subscribes to `subagent:spawned/completed/named` +
   `dispatch:updated` (the last one needed for Workflow member-count/status
   updates, not needed by `subagent-source.ts`).
-- `frontend/app/view/agent/activity/dispatch-correlation.ts` —
+- [`frontend/app/view/agent/activity/dispatch-correlation.ts`](../../frontend/app/view/agent/activity/dispatch-correlation.ts) —
   `correlateDispatchesForBlock(blockId, documentNodes, subagents, dispatches)`,
   the pure ordinal-matching algorithm with an all-or-nothing confidence gate.
   Pure function (subagents/dispatches passed in, not read from atoms
   internally) for testability.
-- `frontend/app/view/agent/activity/dispatch-correlation.test.ts` — 6 unit
+- [`frontend/app/view/agent/activity/dispatch-correlation.test.ts`](../../frontend/app/view/agent/activity/dispatch-correlation.test.ts) — 6 unit
   tests: exact match, order-independent-of-input-order (defends the
   `last_event_at` vs spawn-order correction above), count mismatch fallback,
   unorderable-dispatch fallback, cross-block isolation, no-dispatch-nodes.
-- `frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx` —
+- [`frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx`](../../frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx) —
   the new renderer: compact card (name, running/done, member count for
   Workflow), falls back to `CompactResult` when no match. Registered at
   priority 10 via `byKind("Agent","Task","Workflow")`. Click opens the
@@ -172,7 +172,7 @@ again here after three failed tries.
 
 ## Verification
 
-- `tsc --noEmit`: clean (282 files under `frontend/app/view/agent` checked
+- `tsc --noEmit`: clean (282 files under [`frontend/app/view/agent`](../../frontend/app/view/agent) checked
   via `--listFiles`).
 - `vitest run frontend/app/view/agent`: 1228/1228 tests pass across 96
   files, including the 6 new `dispatch-correlation.test.ts` cases.

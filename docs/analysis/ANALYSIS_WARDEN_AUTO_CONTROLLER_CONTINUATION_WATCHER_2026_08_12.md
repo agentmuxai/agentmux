@@ -6,7 +6,7 @@ per request to (1) research external best practices, (2) propose terminology,
 "nothing in this document has been implemented" was accurate for a few hours
 and was never revised. `db_agents.auto_continue_enabled` (schema v17, #2555) is
 the per-agent opt-in §4.1 step 1 calls for, fail-by-default and toggled from
-the Warden Supervisor panel (`frontend/app/view/warden/`); the nudge itself
+the Warden Supervisor panel ([`frontend/app/view/warden/`](../../frontend/app/view/warden)); the nudge itself
 goes through the `SupervisorNudge` MCP tool, subject to a server-side
 consecutive-nudge ceiling, and its argument surface was tightened in #2557
 (see `reactive/handler.rs`). §2.3's consent-chain-degradation concern is what
@@ -197,22 +197,22 @@ which is **not** limited to the structured `AskUserQuestion` case at all.
 ### 3.2 Swarm and Warden: two existing "watch other agents" surfaces
 
 - **Swarm is deliberately read-only, and a full orchestrator was already
-  proposed and rejected.** `docs/specs/swarm-analysis.md` states outright:
+  proposed and rejected.** [`docs/specs/swarm-analysis.md`](../specs/swarm-analysis.md) states outright:
   *"AgentMux's swarm feature is not about orchestrating agents or managing
   task queues... AgentMux does not create, manage, or orchestrate these
   subagents. It only watches them."* An earlier, more ambitious proposal
-  (`docs/specs/swarm-orchestration.md` — task queues, planner/executor/reviewer
+  ([`docs/specs/swarm-orchestration.md`](../specs/swarm-orchestration.md) — task queues, planner/executor/reviewer
   roles, an auto-routing daemon) was explicitly superseded by this
   observability-only design. **This is a real architectural precedent this
   feature must not contradict** — hence scoping the new work under Warden,
   not Swarm, per your direction.
 - **Warden already has the right shape, half-built.** Its own spec
-  (`docs/specs/SPEC_WARDEN_WIDGET_2026-05-25.md`, still Draft) envisions a
+  ([`docs/specs/SPEC_WARDEN_WIDGET_2026-05-25.md`](../specs/SPEC_WARDEN_WIDGET_2026-05-25.md), still Draft) envisions a
   governance console: identity, capability policy, kill-switches, quotas,
   an **audit trail**, and **human-approval gates for sensitive jekts** —
   i.e. Warden was always meant to be the *active* governance surface, in
   contrast to Swarm's read-only stance. What's actually shipped today
-  (`frontend/app/view/warden/warden.tsx`, "Phase 2... Host L1 read-only"):
+  ([`frontend/app/view/warden/warden.tsx`](../../frontend/app/view/warden/warden.tsx), "Phase 2... Host L1 read-only"):
   a polled agent list + a "recent jekts" audit feed
   (`GET /agentmux/reactive/agents`, `GET /agentmux/reactive/audit`), and one
   soft control action (deregister a routing entry — explicitly documented as

@@ -222,10 +222,10 @@ per-platform differences. CEF would need its own `.cef.tsx` variant (Phase 3).
 
 | File | Change |
 |------|--------|
-| `frontend/app/hook/useWindowDrag.win32.ts` | Return both data-tauri-drag-region + onMouseDown |
-| `frontend/app/window/window-header.win32.scss` | Remove -webkit-app-region (doesn't work) |
+| [`frontend/app/hook/useWindowDrag.win32.ts`](../../frontend/app/hook/useWindowDrag.win32.ts) | Return both data-tauri-drag-region + onMouseDown |
+| [`frontend/app/window/window-header.win32.scss`](../../frontend/app/window/window-header.win32.scss) | Remove -webkit-app-region (doesn't work) |
 | `agentmux-cef/src/commands/platform.rs` | Add `copy_file_to_dir` command |
 | `agentmux-cef/src/client.rs` | Add `CefDragHandler` for file path extraction |
 | `agentmux-cef/src/state.rs` | Add `drag_file_paths: Mutex<Vec<String>>` |
 | `agentmux-cef/src/ipc.rs` | Route `copy_file_to_dir`, `get_drag_file_paths` |
-| `frontend/app/view/term/term.tsx` | CEF drop handler: get paths then copy |
+| [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx) | CEF drop handler: get paths then copy |

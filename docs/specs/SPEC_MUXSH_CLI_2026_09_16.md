@@ -1,9 +1,9 @@
-# SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API
+# SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI
 
 **Author:** Vmer
 **Date:** 2026-09-16
 **Status:** active — PRs touching this work, newest first: #3255
-**Related:** `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (research + naming decision this spec implements), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (the `muxopen` precedent this follows exactly), `agentmux-docs/.../internals/agent-app-api.md` (`OpenEditor` / `pane.open`), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import Wave Terminal's `wsh` wholesale)
+**Related:** [`docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md`](../reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md) (research + naming decision this spec implements), [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) (the `muxopen` precedent this follows exactly), `agentmux-docs/.../internals/agent-app-api.md` (`OpenEditor` / `pane.open`), [`docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`](archive/SPEC_RETIRE_WSH_2026_04_12.md) (why AgentMux doesn't import Wave Terminal's `wsh` wholesale)
 
 ---
 
@@ -20,7 +20,7 @@ First cut, two subcommands, both thin wrappers over the already-existing, alread
 
 This is deliberately narrow. Per the linked research report §4: don't import Wave Terminal's `wsh` wholesale (its SSH/WSL deployment, OSC hijacking, and bolt-on-AI subcommands don't map to AgentMux, exactly as the 2026-04-12 retirement spec found and nothing has changed there). Close the one specific, real gap instead — nothing on the command line can open a pane today; everything else goes through the GUI or an agent's MCP tool call.
 
-## 2. Why through the Agent App API, and why this exact route
+## 2. Why through MuxAPI, and why this exact route
 
 `agentmux-docs/.../agent-app-api.md` already draws the two-layer distinction this spec relies on: MCP tools are for agent/LLM callers going through `agentmux-mcp`'s stdio session; a terminal CLI is the *other* documented category — "scripts or tooling that run with explicit access to the auth key." `muxopen.mjs`'s own header comment states the precedent directly: *"authenticated exactly the way muxspect and agentmux-mcp already are... No new IPC, no new auth scheme."* `muxsh` reuses that same trust tier, not MCP, not a new WebSocket client.
 
@@ -96,7 +96,7 @@ Only `--collapse-tree` is editor-only (`tree_expanded` is documented in `rpc_typ
 
 ## 6. Implementation plan
 
-Exact mechanical mirror of `muxopen`'s existing deployment (`agentmux-srv/src/backend/shellintegration.rs`, `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`):
+Exact mechanical mirror of `muxopen`'s existing deployment (`agentmux-srv/src/backend/shellintegration.rs`, [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md)):
 
 1. `agentmux-srv/src/backend/shellintegration/muxsh.mjs` — new core. Pure `parseArgs`/`renderResult` functions (unit-testable, no I/O — same contract `muxopen.mjs` and `muxspect.mjs` already follow), `main()` does the fetch + auth-env checks + error rendering.
 2. `agentmux-srv/src/backend/shellintegration/muxsh.test.mjs` — vitest unit tests for `parseArgs`/`renderResult`, mirroring `muxopen.test.mjs`'s structure.
@@ -110,7 +110,7 @@ Exact mechanical mirror of `muxopen`'s existing deployment (`agentmux-srv/src/ba
    - `bash.sh` / `zsh.sh` — `_AGENTMUX_MUXSH_JS=...`, `muxsh() { ... }`
    - `fish.fish` — `set -g _agentmux_muxsh_js ...`, `function muxsh ... end`
    - `pwsh.ps1` — `$global:AgentmuxMuxshJs = ...`, `function Global:muxsh { ... }`
-5. `docs/MUXSH.md` — new reference doc, same shape as `docs/MUXLOG.md`/`docs/MUXSPECT.md`.
+5. [`docs/MUXSH.md`](../MUXSH.md) — new reference doc, same shape as [`docs/MUXLOG.md`](../MUXLOG.md)/[`docs/MUXSPECT.md`](../MUXSPECT.md).
 6. Changeset: `task changeset -- minor "feat(shell): add muxsh — open editor/browser panes from the terminal"` (new user-facing command surface, not a patch-level fix).
 
 ## 7. Verification

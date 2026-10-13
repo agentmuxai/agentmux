@@ -154,10 +154,10 @@ SolidJS's delegated events list may or may not include drag events. The tab comp
 
 | File | Changes |
 |------|---------|
-| `frontend/layout/lib/types.ts` | `dragHandleRef` → `dragHandlers` in NodeModel |
-| `frontend/layout/lib/layoutNodeModels.ts` | Removed `dragHandleRef` from nodeModel creation |
+| [`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts) | `dragHandleRef` → `dragHandlers` in NodeModel |
+| [`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts) | Removed `dragHandleRef` from nodeModel creation |
 | `frontend/layout/lib/TileLayout.tsx` | Replaced createEffect with `nodeModel.dragHandlers = {...}` |
-| `frontend/app/block/blockframe.tsx` | Header div has drag props from `nodeModel.dragHandlers` |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Header div has drag props from `nodeModel.dragHandlers` |
 
 ---
 

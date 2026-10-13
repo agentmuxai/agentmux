@@ -55,7 +55,7 @@ This pattern was never backported to the Linux file.
 
 ## Fix plan
 
-**File:** `frontend/layout/lib/TileLayout.linux.tsx`, lines 351–416.
+**File:** [`frontend/layout/lib/TileLayout.linux.tsx`](../../frontend/layout/lib/TileLayout.linux.tsx), lines 351–416.
 
 **Change:** Mirror the win32 pattern exactly:
 

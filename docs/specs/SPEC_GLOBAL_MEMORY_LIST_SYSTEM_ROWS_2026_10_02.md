@@ -3,14 +3,14 @@
 **Date:** 2026-10-02
 **Status:** implemented — PR #4219.
 **Author:** AgentX (narko), at the owner's request
-**Affects:** `crates/srv/src/server/app_api/global_memory.rs` (`global_memory_list_impl`), `crates/srv/src/server/app_api/tests/global_memory_impl_tests.rs`, `crates/mcp/src/tool_schemas.rs` (the tool text)
-**Builds on:** `docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (the system tier and why it is write-protected)
+**Affects:** [`crates/srv/src/server/app_api/global_memory.rs`](../../crates/srv/src/server/app_api/global_memory.rs) (`global_memory_list_impl`), [`crates/srv/src/server/app_api/tests/global_memory_impl_tests.rs`](../../crates/srv/src/server/app_api/tests/global_memory_impl_tests.rs), [`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs) (the tool text)
+**Builds on:** [`docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) (the system tier and why it is write-protected)
 
 ## 1. What the owner saw
 
 The owner's Armory Global Memory pane showed a full list. An agent calling `GlobalMemoryList` got `{"entries": []}`, and the owner called it a bug.
 
-The live store for that instance held six Global Memory rows: the five "AgentMux Operator Config" system rows (App API, Environment & Gotchas, Rich output in the agent pane, Your workspace, Swarm broadcasts) and one ordinary row that was added a few seconds after the empty answer. The pane lists all six (`global-bundle-model.ts` builds its sections from every `is_global` row and splits them into system and ordinary for display). The tool listed only the ordinary one, because `global_memory_list_impl` filtered `!is_system`, so before the ordinary row existed it returned nothing.
+The live store for that instance held six Global Memory rows: the five "AgentMux Operator Config" system rows (MuxAPI, Environment & Gotchas, Rich output in the agent pane, Your workspace, Swarm broadcasts) and one ordinary row that was added a few seconds after the empty answer. The pane lists all six (`global-bundle-model.ts` builds its sections from every `is_global` row and splits them into system and ordinary for display). The tool listed only the ordinary one, because `global_memory_list_impl` filtered `!is_system`, so before the ordinary row existed it returned nothing.
 
 So the code did what it said. The result was still wrong for a reader: an empty list reads as "there is no Global Memory", when the truth was "there is Global Memory, and none of it is yours to edit".
 

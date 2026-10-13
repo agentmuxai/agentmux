@@ -12,7 +12,7 @@
 ## 0. TL;DR
 
 1. **The owner is right: the launcher is essential**, not just a splash host. The launcher owns a **window/pool/instance reducer + a durable saga coordinator** (`agentmux-launcher/src/reducer/`, `src/saga/`). The host talks to it over IPC (`agentmux-cef/src/launcher_ipc.rs`); when the launcher is absent, **every `report_*` call silently no-ops** and the window-pool / tear-off / instance-numbering / supervision machinery runs degraded and untested.
-2. **Packaged macOS bundles only the host** (`scripts/package-macos.sh`, `CFBundleExecutable = agentmux-cef`). No launcher → no single-instance enforcement, no srv supervision (orphan-prone), no saga coordination, no instance numbering, weaker tear-off path. **This is the architectural gap to close.**
+2. **Packaged macOS bundles only the host** ([`scripts/package-macos.sh`](../../scripts/package-macos.sh), `CFBundleExecutable = agentmux-cef`). No launcher → no single-instance enforcement, no srv supervision (orphan-prone), no saga coordination, no instance numbering, weaker tear-off path. **This is the architectural gap to close.**
 3. **The splash MUST be launcher-owned and instant.** The whole point of the tiny launcher is that it is up in milliseconds and can paint a splash *before* the multi-second CEF host load. A host-owned splash is rejected: by the time `agentmux-cef` reaches `main`, the delay the user is staring at has already elapsed. The Win32 splash (`agentmux-launcher/src/splash.rs`, `#![cfg(target_os = "windows")]`) is a layered Win32 window and can't be reused — macOS needs a **new native AppKit splash in the launcher**. This makes "the launcher is the macOS entry point" a **hard prerequisite** for the splash.
 4. **The tear-off crash is a separate, host-side bug** that must be root-caused with symbols. It is *plausibly aggravated* by the missing launcher (the pooled tear-off path is launcher-coordinated; without it the host falls back to the less-tested cold `CreateWindowTask` path) but that is **not yet proven**. Treat crash-hardening as its own workstream.
 
@@ -148,7 +148,7 @@ The dev spec's Phase 1 (launcher supervises srv+host on macOS) has landed (`run_
 - `setpgid` + `killpg`-on-exit containment; host parent-death watcher as backstop.
 
 ### A.2 Bundle layout
-Extend `scripts/package-macos.sh` so the `.app` is launcher-rooted:
+Extend [`scripts/package-macos.sh`](../../scripts/package-macos.sh) so the `.app` is launcher-rooted:
 
 ```
 AgentMux.app/Contents/

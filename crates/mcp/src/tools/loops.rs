@@ -74,8 +74,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 }
                 loop {
                     crate::self_keys::refresh_if_stale(&task_client, &task_local_url, &task_auth).await;
-                    let req = sign_outgoing_jekt(task_source.as_deref(), &task_target, &task_prompt)
-                        .into_request(task_target.clone(), task_prompt.clone(), task_source.clone());
+                    let req = signed_jekt(task_source.clone(), &task_target, &task_prompt);
                     let _ = task_client
                         .post(&url)
                         .header(AUTH_KEY_HEADER, &task_auth)

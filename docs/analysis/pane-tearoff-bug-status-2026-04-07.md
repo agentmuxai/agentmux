@@ -88,11 +88,11 @@ The new window opens (via `post_create_window`) and starts loading JS immediatel
 | File | Status |
 |------|--------|
 | `frontend/wave.ts` | Read fully — `initHostNewWindow()` and `showStartupError()` understood |
-| `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` | Read fully — `performTearOff()` flow traced |
+| [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) | Read fully — `performTearOff()` flow traced |
 | `agentmux-cef/src/commands/drag.rs` | Read fully — `open_window_at_position()` URL building traced |
-| `frontend/types/custom.d.ts` | Diff reviewed — only optional params added |
-| `frontend/layout/lib/TileLayout.win32.tsx` | Diff reviewed — `onDragStart` paneRect capture |
-| `frontend/util/cef-api.ts` | Noted — needs re-read for `openWindowAtPosition` impl |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Diff reviewed — only optional params added |
+| [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) | Diff reviewed — `onDragStart` paneRect capture |
+| [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts) | Noted — needs re-read for `openWindowAtPosition` impl |
 | `agentmux-cef/src/main.rs` | Read partially — CEF data dir naming understood |
 | `agentmux-srv` sidecar log | Read — TearOffBlock succeeds, no CreateWindow from new window |
 
@@ -100,8 +100,8 @@ The new window opens (via `post_create_window`) and starts loading JS immediatel
 
 | File | Why it matters |
 |------|---------------|
-| `frontend/cef-init.ts` | Bootstrap for CEF windows — sets IPC port/token from URL |
+| [`frontend/cef-init.ts`](../../frontend/cef-init.ts) | Bootstrap for CEF windows — sets IPC port/token from URL |
 | `frontend/cef-bootstrap.ts` | Entry point — does it call `setupCefApi()` for all windows? |
 | `agentmux-cef/src/commands/window.rs` | `resolve_frontend_base_url()` — URL correctness |
 | `agentmux-cef/src/ui_tasks.rs` | `post_create_window()` — how the new window is actually created |
-| `frontend/app/platform/ipc.ts` | `callBackendService()` — error handling for IPC failures |
+| [`frontend/app/platform/ipc.ts`](../../frontend/app/platform/ipc.ts) | `callBackendService()` — error handling for IPC failures |

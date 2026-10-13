@@ -23,8 +23,8 @@ This spec wires both to live data from CEF. After this change the pane header sh
 
 | Component | Status | File |
 |-----------|--------|------|
-| `TitleChanged` reducer command | ✅ Fully implemented | `frontend/app/store/browser-pane-state/reducer.ts:172` |
-| `title` cell in `BrowserPaneState` | ✅ Fully implemented | `frontend/app/store/browser-pane-state/types.ts:73` |
+| `TitleChanged` reducer command | ✅ Fully implemented | [`frontend/app/store/browser-pane-state/reducer.ts:172`](../../frontend/app/store/browser-pane-state/reducer.ts) |
+| `title` cell in `BrowserPaneState` | ✅ Fully implemented | [`frontend/app/store/browser-pane-state/types.ts:73`](../../frontend/app/store/browser-pane-state/types.ts) |
 | `title` projection → `setTitle(next)` | ✅ Wired in `BrowserViewModel` | `browser-model.ts:234` |
 | `viewName` returns `titleAtom()` | ✅ Plumbed to header | `browser-model.ts:250` |
 | `faviconUrl` cell in state | ✅ Exists, derived from URL | `types.ts:91` |
@@ -370,17 +370,17 @@ The title truncates via the existing `.block-frame-view-type` ellipsis CSS — n
 ### Sub-feature 1 (title)
 - `agentmux-cef/src/client/mod.rs` — add IPC emit in `on_title_change` for panes
 - `agentmux-cef/src/browser_pane/callbacks.rs` — make `resolve_pane_block_id` `pub(crate)`
-- `frontend/app/view/browser/browser-model.ts` — add `browser-pane-title-change` subscription, `_titleUnsub`
+- [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts) — add `browser-pane-title-change` subscription, `_titleUnsub`
 
 ### Sub-feature 2 (favicon)
 - `agentmux-cef/src/client/mod.rs` — add `on_favicon_urlchange` override
 - `agentmux-cef/src/browser_pane/callbacks.rs` — `resolve_pane_block_id` already `pub(crate)` from sub-feature 1
-- `frontend/app/store/browser-pane-state/types.ts` — add `FaviconUrlsReceived` command, `faviconOverridden` field, `favicon-urls-received` event
-- `frontend/app/store/browser-pane-state/reducer.ts` — handle `FaviconUrlsReceived`, clear `faviconOverridden` in `Navigate`
-- `frontend/types/custom.d.ts` — extend `ViewModel.viewIcon` union to include `JSX.Element`
-- `frontend/app/block/blockframe.tsx` — `getViewIconElem` handles JSX.Element, `isJSXElement` discriminator
-- `frontend/app/view/browser/browser-model.ts` — `viewIcon` memo, `browser-pane-favicon-urls` subscription, `_faviconUnsub`
-- `frontend/app/view/browser/browser-view.scss` — `.browser-pane-favicon` sizing
+- [`frontend/app/store/browser-pane-state/types.ts`](../../frontend/app/store/browser-pane-state/types.ts) — add `FaviconUrlsReceived` command, `faviconOverridden` field, `favicon-urls-received` event
+- [`frontend/app/store/browser-pane-state/reducer.ts`](../../frontend/app/store/browser-pane-state/reducer.ts) — handle `FaviconUrlsReceived`, clear `faviconOverridden` in `Navigate`
+- [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) — extend `ViewModel.viewIcon` union to include `JSX.Element`
+- [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) — `getViewIconElem` handles JSX.Element, `isJSXElement` discriminator
+- [`frontend/app/view/browser/browser-model.ts`](../../frontend/app/view/browser/browser-model.ts) — `viewIcon` memo, `browser-pane-favicon-urls` subscription, `_faviconUnsub`
+- [`frontend/app/view/browser/browser-view.scss`](../../frontend/app/view/browser/browser-view.scss) — `.browser-pane-favicon` sizing
 
 ---
 

@@ -31,7 +31,7 @@ new behavior *removes* a timer rather than adding one.
 
 ### 2.1 The timer is 3 s, not a minute
 
-`frontend/app/view/agent/components/ToolBlock.tsx:82`
+[`frontend/app/view/agent/components/ToolBlock.tsx:82`](../../frontend/app/view/agent/components/ToolBlock.tsx)
 ```ts
 const POST_COMPLETION_HOLD_MS = 3000; // 1s (#988) → 5s (#1006) → 3s (2026-05-26)
 ```
@@ -67,7 +67,7 @@ const expanded = () => props.pinned || autoExpanded() || userHolding();
 The virtualization layout slice computes each row's height from a **separate**
 pure mapper, `currentExpansion()`:
 
-`frontend/app/view/agent/virtualization/expansion-source.ts:50-56`
+[`frontend/app/view/agent/virtualization/expansion-source.ts:50-56`](../../frontend/app/view/agent/virtualization/expansion-source.ts)
 ```ts
 case "tool":
     if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };
@@ -97,7 +97,7 @@ source of truth** — exactly the "Phase 2" the layout-reducer spec anticipates.
 | pinned (any) | always (pin overrides) | stays expanded |
 
 Collapse state ownership: `pinnedNodes` / `collapsedNodes` are `Set<string>` in
-`documentState` (`frontend/app/view/agent/types.ts`) — **persisted, survive
+`documentState` ([`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)) — **persisted, survive
 virtualization unmount**. `postCompletionHold` / `userHolding` are component
 signals — **ephemeral, reset on remount**.
 
@@ -264,7 +264,7 @@ unboundedly and matches "collapse is a scroll artifact, not a saved preference."
 
 ## 7. Implementation sketch (files)
 
-1. **`frontend/app/view/agent/types.ts`** — add `scrolledOff: Set<string>` to
+1. **[`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)** — add `scrolledOff: Set<string>` to
    `DocumentState` (+ a `markScrolledOff(ids)` mutator). Widen
    `ExpansionInputs` (expansion-source.ts:40) to include it.
 2. **`expansion-source.ts:50-56`** — completed unpinned tool: open unless in

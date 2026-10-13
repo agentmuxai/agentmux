@@ -90,7 +90,7 @@ Build from the repo root: `docker build -f docker/Dockerfile.srv -t agentmux-srv
 - **Auth key:** `AGENTMUX_AUTH_KEY` in the environment, a mounted file via `--auth-key-file`, or generated. A generated key's path is printed at start; the key never is.
 - **Health:** `HEALTHCHECK` runs `curl http://127.0.0.1:8190/health`, which answers whether or not `--frontend-dir` is given (§3.5).
 - **Loopback only, in the container too.** srv is reachable only from its own network namespace: a reverse proxy sharing it (a sidecar in the same pod or task, or `docker run --network container:<proxy>`) terminates TLS, authenticates users and sends the key. `docker run -p` can't reach it, on purpose.
-- **CI:** `.github/workflows/srv-image.yml` builds the image (linux/amd64, no push) when its inputs change, or on demand. It then smoke-tests it:
+- **CI:** [`.github/workflows/srv-image.yml`](../../.github/workflows/srv-image.yml) builds the image (linux/amd64, no push) when its inputs change, or on demand. It then smoke-tests it:
   - it goes healthy;
   - the key file is mode `600`;
   - `/agentmux/discovery` gives 200 with the key and 401 without;
@@ -111,7 +111,7 @@ For a browser client that reaches srv through a reverse proxy on one public orig
   - Written the way browsers send `Origin`: http or https, host, optional port; no path, user or query. Lowercased, a trailing `/` dropped, and the scheme's default port removed, so `https://App.example.com:443/` matches `https://app.example.com`.
   - Exact match only: no wildcards, no subdomains, never `null`.
 - **Serving the frontend is not enough on its own** for a browser client to work: the UI still gets its endpoints and key through the desktop host today. A pluggable host is `SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md`; srv's machine facts arrive with `srvinfo` (`SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md`).
-- **The key can stay with the proxy.** srv reads `X-AuthKey` before the `?authkey=` fallback on every route, `/ws` included, so a proxy that sets the header on every request (including the WebSocket upgrade) authenticates the browser's traffic. The UI sends `X-AuthKey` only when its host gave it a key (`frontend/app/store/auth-headers.ts`, the one place requests get the header), and opens `/ws` without `?authkey=` when it has none.
+- **The key can stay with the proxy.** srv reads `X-AuthKey` before the `?authkey=` fallback on every route, `/ws` included, so a proxy that sets the header on every request (including the WebSocket upgrade) authenticates the browser's traffic. The UI sends `X-AuthKey` only when its host gave it a key ([`frontend/app/store/auth-headers.ts`](../../frontend/app/store/auth-headers.ts), the one place requests get the header), and opens `/ws` without `?authkey=` when it has none.
 - **Live check** (headless, `--frontend-dir` with a fixture, `--allowed-origin https://App.Example.test/`):
   - `GET /` gives the UI; `/assets/app.js` gives 200; `/health` gives the health JSON;
   - `/agentmux/discovery` gives 401 without the key and 200 with it;
@@ -149,7 +149,7 @@ srv keeps every secret through `identity::secret_store`: Armory API keys, OAuth 
 | Slice | Content |
 |---|---|
 | **1** | §3: `--headless`, `prepare_env`, per-channel lock, auth-key file, fixed loopback ports, no stdin/parent watchers, cloud subscriber off by default |
-| **2** | §3.4: `docker/Dockerfile.srv` and its CI smoke test |
+| **2** | §3.4: [`docker/Dockerfile.srv`](../../docker/Dockerfile.srv) and its CI smoke test |
 | **3** | §3.6: a file-backed secret store, headless by default (`--secret-store keychain` to opt out) |
 | **4** | §3.5: `--frontend-dir` serves the built frontend (health at `/health`); `--allowed-origin` for CORS and the `/ws` check |
 

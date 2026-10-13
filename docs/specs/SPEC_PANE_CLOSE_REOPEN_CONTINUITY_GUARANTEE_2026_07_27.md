@@ -4,7 +4,7 @@
 **Author:** Agent1
 **Date:** 2026-07-27
 **Triggered by:** a user question about whether an agent's Armory-sourced workspace rules (Bundles/Skills/MCP) are "always available," which surfaced that reopening a pane goes through a resume (`--resume <sid>`) whose success is unverified end-to-end. Investigating that led to two real, evidenced gaps below.
-**Related:** `docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md`, `docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md` (commit `3e720422`, #2059 — closed the *cross-channel* half of the June retro), `docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` (the banner mechanism this spec extends), commit `c39911c2` (#2224 — the silent resume-poison recovery this spec makes visible).
+**Related:** [`docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md`](../retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md), [`docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md`](../plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md) (commit `3e720422`, #2059 — closed the *cross-channel* half of the June retro), [`docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the banner mechanism this spec extends), commit `c39911c2` (#2224 — the silent resume-poison recovery this spec makes visible).
 
 ---
 
@@ -59,7 +59,7 @@ Preferred approach — make the local row authoritative instead of stale, since 
 
 ### 4.2 Surface resume failure/degradation to the user (closes 3.2, mitigates 3.3)
 
-Extend the existing `AgentFailure` taxonomy (`docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`, `failure-accessory.ts`) rather than inventing a new banner system:
+Extend the existing `AgentFailure` taxonomy ([`docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md), `failure-accessory.ts`) rather than inventing a new banner system:
 
 - New failure class, e.g. `session_resume_failed` (naming TBD at implementation time — `resume_poisoned` or `session_continuity_lost` are alternatives). Fired from `persistent.rs`'s `poison_resume` path (and the subprocess-controller equivalent) via `persist_last_failure` (`core.rs`) the same way every other classified failure already reaches the frontend, instead of only `tracing::warn!`.
 - Banner copy should be unambiguous that this is not a normal error: something like *"Couldn't resume the previous conversation — started a new one. Your prior conversation is still saved."* (Confirm the prior transcript really is still reachable — e.g. via the CLI's own session picker / `--resume` history — before finalizing this claim in copy; don't assert recoverability without checking.)

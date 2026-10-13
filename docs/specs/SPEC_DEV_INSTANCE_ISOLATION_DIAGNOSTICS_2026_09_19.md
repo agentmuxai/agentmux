@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Status:** implemented — PR #3429.
-**Related:** `docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`
+**Related:** [`docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`](../reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md)
 (Attempts 1-3 — the live repro this spec fixes). Surfaced while building a
 separate, not-yet-landed UI-manual screenshot tool — not cited by path
 here since it hadn't merged as of this spec.
@@ -62,7 +62,7 @@ Two places give the wrong impression that `task dev:local` is the fix:
 
 1. `second_instance.rs`'s own refusal message: *"Use `task dev:local` to
    launch a second isolated session."*
-2. `Taskfile.yml`'s `dev:local` task description and `scripts/dev-local.sh`'s
+2. `Taskfile.yml`'s `dev:local` task description and [`scripts/dev-local.sh`](../../scripts/dev-local.sh)'s
    own header comment, both of which describe its purpose primarily in
    terms of cargo-cache invalidation and a distinguishable version label —
    accurate for THAT purpose — but the refusal message's phrasing
@@ -91,7 +91,7 @@ itself (that's out of scope — see §3):
    line now also logs `data_dir` (already in scope), so a silent
    second-instance hang is diagnosable directly from the log line instead
    of requiring a source read to know what to `fuser`/inspect.
-3. ~~`Taskfile.yml` + `scripts/dev-local.sh`~~ — checked both directly:
+3. ~~`Taskfile.yml` + [`scripts/dev-local.sh`](../../scripts/dev-local.sh)~~ — checked both directly:
    neither actually claims `dev:local` enables a second same-branch
    instance. `Taskfile.yml`'s own `dev:local` description already
    correctly frames it as cargo-cache invalidation + a distinguishable

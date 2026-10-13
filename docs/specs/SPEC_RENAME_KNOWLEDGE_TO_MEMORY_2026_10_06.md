@@ -19,7 +19,7 @@ The operator, 2026-10-06:
 
 The word currently covers six different things, and the code, UI and docs use them inconsistently.
 
-| Meaning | What it is | Where it lives | App API |
+| Meaning | What it is | Where it lives | MuxAPI |
 |---|---|---|---|
 | **Global Memory** | Entries composed into every agent's startup instructions file (CLAUDE.md, GEMINI.md, …) at launch | Knowledge → Global (`GlobalBundleManager`, global bundle rows) | `GlobalMemoryList/Read/Write/Remove/History/Diff/Revert` |
 | **Personal Memory** | One agent's own memory files, the provider's native memory folder (`<config>/projects/<name>/memory`, its `MEMORY.md` index), versioned by AgentMux | Knowledge → Personal (`NativeMemoryManager`) **and** the agent Stash's Memory tab. Same `agent:memory:*` data, live in both | `MemoryList/Read/Write/History/Diff/Revert` |
@@ -75,7 +75,7 @@ The new pane needs the `memory` id. The bundle-summary pane holds it today, and 
 - Pane label, tab pill, title (`Memory · Global`), aria label, widget bar, hamburger menu, command palette (keywords keep "knowledge" so the old name still finds it), macOS app menu (`Memory…`), Settings → Widget colors row, layout-import summary.
 - Pointers: "Knowledge → Bundles", "Knowledge → Skills", "Knowledge → Personal", "Browse all in Knowledge →", "Manage/Edit in Knowledge" become Memory (`AgentNewBundleModal`, `AgentSkillsModal`, `AgentStartupModal`, `bundle-summary.tsx`, `bundle-manager.tsx` help text, `MemoryAdoptionApprovalWindow`).
 - The new-agent form changes as in §3.6. The Drone node's "Memory" field becomes **Bundle**, or **Bundles** once agents take several (§6 D6).
-- Agent-facing text: the `GlobalMemoryWrite` and `GlobalMemoryRemove` tool descriptions (`crates/mcp/src/tool_schemas.rs`), and the CLAUDE.md placeholder text that says to use "Knowledge -> Global" (`crates/srv/src/backend/providers.rs:888`). Files already written aren't rewritten; that's acceptable, the text stays understandable.
+- Agent-facing text: the `GlobalMemoryWrite` and `GlobalMemoryRemove` tool descriptions ([`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs)), and the CLAUDE.md placeholder text that says to use "Knowledge -> Global" ([`crates/srv/src/backend/providers.rs:888`](../../crates/srv/src/backend/providers.rs)). Files already written aren't rewritten; that's acceptable, the text stays understandable.
 - Comments and test names that describe the pane (about 45 lines), including the stale "Armory 'Memory' tab" ones in §2.
 
 ### 3.6 The new-agent form
@@ -95,7 +95,7 @@ The form opened from a template card in the agent picker (`AgentCreateFromTempla
 | D | A Drone node's bundle | the Drone graph's `agent_ref.memoryId` | Nothing: the runner ignores it |
 | G | Global Memory (`is_global` bundles) | `db_bundles.is_global` | Composed into the startup file (`format_global_bundle_block`) |
 
-Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers a bundle's MCP servers, only the App API's `agent.open` does; and deleting a bundle leaves its id on agents.
+Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers a bundle's MCP servers, only MuxAPI's `agent.open` does; and deleting a bundle leaves its id on agents.
 
 **The design: one ordered Bundles list per agent.** What the user picks is what the agent gets.
 
@@ -134,11 +134,11 @@ Operator, 2026-10-07: the identity-bundle and memory-bundle concepts are over, s
 - The README's alpha warning, which listed identity and memory bundles among the moving interfaces.
 - The seeded "AgentMux Development" bundle's own text ("Select this Memory bundle"). It is seeded once, so only new installs get the new text.
 - The comments about an `identitybundlebindings:changed` event that nothing publishes.
-- The App API docs' identity-bundle RPC row, whose commands no longer exist.
+- MuxAPI docs' identity-bundle RPC row, whose commands no longer exist.
 
 ### 3.7 What does not change
 
-- The App API tool names (`MemoryWrite`, `GlobalMemoryWrite`, …), the `agent:memory:*` RPCs, and the Personal Memory storage.
+- MuxAPI tool names (`MemoryWrite`, `GlobalMemoryWrite`, …), the `agent:memory:*` RPCs, and the Personal Memory storage.
 - Historical docs: dated specs, retros, reports, analyses and `VERSION_HISTORY.md` stay as written (§4.1).
 - Unrelated uses of the word "knowledge" (about 70 lines in code, more in docs): "acknowledge", "knowledge cutoff", "to my knowledge", third-party "knowledge graph".
 
@@ -148,7 +148,7 @@ Operator, 2026-10-07: the identity-bundle and memory-bundle concepts are over, s
 
 - `README.md`: line 60 still sends users to "the Armory tab"; line 175 describes "Accounts / Memories / MCP Servers / Skills / Startup" tabs. Update both to Connectors, Memory and the Stash.
 - **Active specs that describe the current pane** get one dated amendment line each, not a rewrite: `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md`, `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (its color table row), `SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md`. Spec file names stay, because they are linked from `INDEX.md` and other specs.
-- Everything else under `docs/` is historical, and left alone.
+- Everything else under [`docs/`](..) is historical, and left alone.
 
 ### 4.2 agentmux-docs (public docs site)
 

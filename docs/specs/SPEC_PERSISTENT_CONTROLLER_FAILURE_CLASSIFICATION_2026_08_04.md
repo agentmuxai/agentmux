@@ -19,7 +19,7 @@ normal completion. This reproduces the exact symptom reported: "sometimes it
 returns too busy [and] currently it just quits."
 
 **"Quits" here means the turn silently completes, not that the app or the CLI
-process crashes.** `frontend/app/view/agent/hooks/useTurnLifecycle.ts:113`
+process crashes.** [`frontend/app/view/agent/hooks/useTurnLifecycle.ts:113`](../../frontend/app/view/agent/hooks/useTurnLifecycle.ts)
 dispatches `TurnEnd` unconditionally whenever a `session_end` frame arrives,
 and the Claude translator always emits `session_end` alongside an
 `error_result` event (`claude-translator.ts`'s "Case 5a") — so the pane lands
@@ -47,7 +47,7 @@ already works correctly — **for every provider except Claude**:
   switches/reloads) and is the gate before the WPS publish below.
 - `wps::EVENT_AGENT_FAILURE` — the per-block event the frontend subscribes
   to.
-- `frontend/app/view/agent/hooks/useAgentFailure.ts` — subscribes to that
+- [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts) — subscribes to that
   event, and for `isTransient(code)` classes (`rate_limited` / `overloaded`
   / `network`, `failure-accessory.ts:79-81`) already arms an auto-retry
   countdown, capped at the `AUTO_RETRY_BACKOFF_S` ladder length

@@ -8,7 +8,7 @@ later specs changed its behaviour. Read those before relying on anything below. 
 > **2026-08-07 audit note:** Implemented — `tab-reveal.ts`/`tab-reveal.test.ts`
 > exist, wired into `startup-splash.ts` and `editor-model.ts`. Status field
 > was never updated. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 >
 > **2026-08-31 amendment — the gate is no longer one global boolean:**
 > - `SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md` added a **leaf-scoped**
@@ -26,7 +26,7 @@ later specs changed its behaviour. Read those before relying on anything below. 
 > The timer-based lift below (80ms clean-frame settle / 800ms hard cap) is
 > unchanged and remains the known weak point — it guesses at readiness rather
 > than observing it. See
-> `docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §3.4 for the
+> [`docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md`](SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md) §3.4 for the
 > proposed causal replacement.
 **Driving observation:** Switching tabs in AgentMux reveals content in stages — title bar updates first, then pane shells, then block content fills in pane-by-pane, then final layout settles. The user perceives this as visual jank: "different parts of the window appear at different times." Reported as a general cleanup concern, not specific to any one pane type.
 
@@ -57,7 +57,7 @@ After tab switch, hide the new tab's content with a CSS `visibility: hidden` ove
 
 **Pros:**
 - No per-pane coordination needed. Works for every pane type, present and future.
-- Reuses the Long Tasks observer already in `frontend/perf/observers.ts`.
+- Reuses the Long Tasks observer already in [`frontend/perf/observers.ts`](../../frontend/perf/observers.ts).
 - Self-tuning — a pane that loads fast doesn't pay extra latency; a pane that loads slow naturally takes longer.
 
 **Cons:**
@@ -118,7 +118,7 @@ const [tabSwitching, setTabSwitching] = createSignal(false);
 
 ### Wrap setActiveTab
 
-In `frontend/app/store/global.ts`'s `setActiveTab`:
+In [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts)'s `setActiveTab`:
 
 ```ts
 export async function setActiveTab(tabId: string): Promise<void> {
@@ -184,7 +184,7 @@ function scheduleRevealLift() {
 
 ### Apply to tab content
 
-In whatever component renders the active tab's pane tree (likely `frontend/app/workspace/workspace.tsx` or a layout component):
+In whatever component renders the active tab's pane tree (likely [`frontend/app/workspace/workspace.tsx`](../../frontend/app/workspace/workspace.tsx) or a layout component):
 
 ```tsx
 <div classList={{ "tab-content--switching": tabSwitching() }}>
@@ -220,7 +220,7 @@ In whatever component renders the active tab's pane tree (likely `frontend/app/w
 
 - Tab-switch mark coverage (PR #772) — measures total switch duration, complements this spec's stability gate.
 - Agent pane virtualization (PR #773) — reduces the per-tab Long Tasks that this gate is waiting on.
-- Phase 0 perf observers: `frontend/perf/observers.ts` — Long Tasks observer this design reuses.
+- Phase 0 perf observers: [`frontend/perf/observers.ts`](../../frontend/perf/observers.ts) — Long Tasks observer this design reuses.
 
 ## Driving observation (verbatim)
 

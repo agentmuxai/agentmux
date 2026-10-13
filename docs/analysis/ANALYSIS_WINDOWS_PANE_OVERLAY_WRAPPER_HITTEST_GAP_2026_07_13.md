@@ -45,13 +45,13 @@ silent behavioral gap, not a fault.
 
 ## 2. Background: how the airspace hole-punch works (unchanged since May)
 
-Fully described in `docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md`
+Fully described in [`docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md`](ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md)
 (read in full before this doc); short version:
 
 On Windows, an embedded browser pane is a **native child HWND**, which always
 composites *above* DOM regardless of CSS z-index (the "airspace" problem).
 Any DOM element that must show through a pane tags itself `data-pane-overlay`
-+ calls `usePaneOverlay()` (`frontend/app/platform/pane-overlay.ts`). Both
++ calls `usePaneOverlay()` ([`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts)). Both
 `FlyoutMenu` (hamburger + its submenus, `frontend/app/element/flyoutmenu.tsx:253,378`)
 and the widget bar's `MoreDropdown` (`frontend/app/window/action-widgets.tsx:159,221`)
 do this — **same primitive, same code path**, which is why the user sees the
@@ -67,7 +67,7 @@ whatever's underneath is what the user sees *and interacts with* — normally.
 
 ## 3. What changed five weeks later: the app-owned wrapper HWND
 
-`docs/specs/SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md` (2026-07-03)
+[`docs/specs/SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md`](../specs/SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md) (2026-07-03)
 and its implementation, PR #1957 (`fix(browser-pane): app-owned wrapper HWND
 fixes Windows renderer leak on pane close`), inserted a **new HWND** into the
 parent chain, for a completely unrelated bug (closing a pane never tore down
@@ -145,7 +145,7 @@ separately, which is exactly how Win32 treats them:
 
 ## 5. Why macOS was clean (and why AgentO's verification didn't catch this)
 
-macOS/Linux don't use child HWNDs for panes at all — `docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md`
+macOS/Linux don't use child HWNDs for panes at all — [`docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md`](ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md)
 §1: panes there are `CefBrowserView`s, and the "hide the whole pane instead
 of punching a hole" workaround is architecturally different (no
 `SetWindowRgn` equivalent, no wrapper window, no region-vs-rectangle
@@ -206,16 +206,16 @@ and report first.
 - `agentmux-cef/src/browser_pane/wrapper.rs` — wrapper HWND module; class
   registration (`hbrBackground: null`, `:159`), `wrapper_wndproc` (`:81-130`,
   only handles `WM_SIZE`/`WM_DESTROY`), `peek_wrapper_hwnd` (`:66-68`)
-- `docs/specs/SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md` — why
+- [`docs/specs/SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md`](../specs/SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md) — why
   the wrapper exists (renderer-teardown leak, unrelated to airspace)
-- `docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md` —
+- [`docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md`](ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md) —
   the airspace/overlay-clip mechanism this gap sits inside; predates the
   wrapper by 5 weeks
-- `frontend/app/platform/pane-overlay.ts` — `usePaneOverlay`, frontend side
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) — `usePaneOverlay`, frontend side
   of the clip pipeline (unaffected — the frontend's contract is honored
   correctly; the gap is entirely on the Rust/Win32 side)
-- `frontend/app/element/flyoutmenu.tsx` (`:253`, `:378`) and
-  `frontend/app/window/action-widgets.tsx` (`:159`, `:221`) — the two
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) (`:253`, `:378`) and
+  [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) (`:159`, `:221`) — the two
   reported-affected surfaces, both going through the identical
   `usePaneOverlay` primitive
 - Instance logs analyzed: `C:\Users\user\.agentmux\channels\local-main-b28b7a-577e65c6\versions\0.53.4\logs\agentmux-host-v0.53.4.log.2026-07-14`

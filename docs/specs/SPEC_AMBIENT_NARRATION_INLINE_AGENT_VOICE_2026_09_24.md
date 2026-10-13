@@ -3,7 +3,7 @@
 **Date:** 2026-09-24
 **Status:** implemented in PR #3719 — Q1 resolved as live-only (not persisted — corrected after review), Q2–Q3 as recommended; Q4 (deterministic template instead of Haiku) still open. Not yet observed in a live app.
 **Builds on:** PR #3169 (`feat(agent-pane): narrate backgrounded tasks into the conversation`),
-`docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md` §8.3
+[`docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md`](../reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md) §8.3
 **Scope:** frontend rendering + where the narration lives. No backend change.
 
 ---
@@ -59,7 +59,7 @@ Design constraints on the tag:
 ### 4.1 Data: a distinct document node type
 
 Add `AmbientNarrationNode` to the `DocumentNode` union in
-`frontend/app/view/agent/types.ts`:
+[`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts):
 
 ```ts
 export interface AmbientNarrationNode {
@@ -220,11 +220,11 @@ break the append-only assumption the virtualiser relies on. Open question Q2.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/types.ts` | add `AmbientNarrationNode`, extend `DocumentNode` |
-| `frontend/app/view/agent/virtualization/DocumentRow.tsx` | new `ambient_narration` branch |
-| `frontend/app/view/agent/components/AmbientNarrationBlock.tsx` (+ scss) | new; replaces `AmbientNarrationRow` |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | add `AmbientNarrationNode`, extend `DocumentNode` |
+| [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) | new `ambient_narration` branch |
+| [`frontend/app/view/agent/components/AmbientNarrationBlock.tsx`](../../frontend/app/view/agent/components/AmbientNarrationBlock.tsx) (+ scss) | new; replaces `AmbientNarrationRow` |
 | `frontend/app/view/agent/components/AmbientNarrationRow.tsx` / `.scss` | delete |
-| `frontend/app/view/agent/hooks/useAmbientNarration.ts` (+ test) | dispatch into document instead of local signal |
-| `frontend/app/view/agent/agent-view.tsx` | remove strip mount; wire hook to queue |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | tag style |
+| [`frontend/app/view/agent/hooks/useAmbientNarration.ts`](../../frontend/app/view/agent/hooks/useAmbientNarration.ts) (+ test) | dispatch into document instead of local signal |
+| [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | remove strip mount; wire hook to queue |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | tag style |
 | `agentmux-srv/src/server/websocket.rs` (optional) | add `dedupe_key` to broadcast payload |

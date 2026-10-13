@@ -4,7 +4,7 @@
 - **Date:** 2026-08-03
 - **Reported by:** user (this machine), v0.54.9
 - **Scope:** A minimal, bounded extension of Step D from
-  `docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md`. Does not touch Steps A-C, the
+  [`docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md`](../specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md). Does not touch Steps A-C, the
   `should_quit_on_last_window` gate itself, or any of the reducer/`reconcile_quit` machinery.
   Deliberately does not attempt the larger L1 "retire the win_event parallel authority" effort
   those specs reference — this is a targeted fix for one specific gap in the existing bounded
@@ -143,8 +143,8 @@ Give the `registered > 0 && !draining` desync flavor the same kind of bounded re
 
 ## 8. Sources
 
-- `docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` (Step D, the fallback this plan extends)
-- `docs/retro/retro-last-window-close-quit-race-2026-07-16.md` (related but distinct window-close
+- [`docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md`](../specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md) (Step D, the fallback this plan extends)
+- [`docs/retro/retro-last-window-close-quit-race-2026-07-16.md`](../retro/retro-last-window-close-quit-race-2026-07-16.md) (related but distinct window-close
   gap, same subsystem, confirms this area was still being hardened through mid-July)
 - Code read for this plan: `agentmux-cef/src/wrr/win_event.rs:196-573`
 - Log evidence: this session's incident triage (Google-sign-in-in-Browser-pane → full app exit),

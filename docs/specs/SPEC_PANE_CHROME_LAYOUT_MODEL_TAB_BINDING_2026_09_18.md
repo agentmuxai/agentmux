@@ -2,10 +2,10 @@
 
 **Date:** 2026-09-18
 **Status:** implemented — PR #3392.
-**Related:** `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`
+**Related:** [`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md)
 (the chrome-stability design whose "constructed once, never remounts"
 contract makes a wrong one-time capture permanent),
-`docs/specs/SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md` (the
+[`docs/specs/SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md`](SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md) (the
 deliberate `activate: false` new-tab sequencing that triggers this every
 time). An unrelated, concurrently-developed fix in the same file family
 (agent-tab keep-alive in the pane tab strip) was in flight the same day on
@@ -43,7 +43,7 @@ ERROR [fe] Cannot apply eventbus layout action DeleteNode, could not find
 `skip_placement` (`agentmux-srv/src/server/app_api/mod.rs`) is not itself a
 bug — it's the normal first half of "add this widget to an existing pane's
 stack": create the block without placing it in any tree, and the caller
-(`addWidgetAsPaneTab`, `frontend/layout/lib/layoutStack.ts`) pushes it onto
+(`addWidgetAsPaneTab`, [`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts)) pushes it onto
 the target leaf's `blockStack` itself. The second half is what failed:
 `addWidgetAsPaneTab`'s own `findNode(model.treeState.rootNode, nodeId)`
 returned `null` — the leaf genuinely wasn't in `model`'s tree — so it fell
@@ -72,13 +72,13 @@ should act against" via:
 const layoutModel = getLayoutModelForStaticTab();
 ```
 
-— `renderPaneChromeShell` (`frontend/app/element/PaneChrome.tsx`),
-`buildAgentPaneChromeModel` (`frontend/app/view/agent/agent-view.tsx`),
-`buildTermPaneChromeModel` (`frontend/app/view/term/term.tsx`) — plus a
+— `renderPaneChromeShell` ([`frontend/app/element/PaneChrome.tsx`](../../frontend/app/element/PaneChrome.tsx)),
+`buildAgentPaneChromeModel` ([`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)),
+`buildTermPaneChromeModel` ([`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx)) — plus a
 fourth, `PaneLeafChrome`'s own `stackBlockIds` lookup
-(`frontend/app/tab/pane-leaf-chrome.tsx`).
+([`frontend/app/tab/pane-leaf-chrome.tsx`](../../frontend/app/tab/pane-leaf-chrome.tsx)).
 
-`getLayoutModelForStaticTab()` (`frontend/layout/lib/layoutModelHooks.ts`) is
+`getLayoutModelForStaticTab()` ([`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts)) is
 `atoms.activeTabId()` read once, non-reactively — "whichever tab the app is
 showing right now." Per
 `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`, a pane's chrome
@@ -89,7 +89,7 @@ happened to be active at the single moment chrome first constructed is
 lives in.
 
 It diverges every time a tab is created. `createTab()`
-(`frontend/app/store/tab-actions.ts`) creates the new tab with
+([`frontend/app/store/tab-actions.ts`](../../frontend/app/store/tab-actions.ts)) creates the new tab with
 `activate: false`, then calls `applyTabPreset(tabId, DEFAULT_TAB_PRESET)` —
 which builds the tab's starter layout, **including its default agent
 pane** — and only calls `setActiveTab(tabId)` once that finishes. The
@@ -109,9 +109,9 @@ active when they added it.
 
 ## 3. The fix
 
-Give `NodeModel` (`frontend/layout/lib/types.ts`) its own `layoutModel`
+Give `NodeModel` ([`frontend/layout/lib/types.ts`](../../frontend/layout/lib/types.ts)) its own `layoutModel`
 field, populated at construction (`getNodeModel`,
-`frontend/layout/lib/layoutNodeModels.ts`) from the very `LayoutModel`
+[`frontend/layout/lib/layoutNodeModels.ts`](../../frontend/layout/lib/layoutNodeModels.ts)) from the very `LayoutModel`
 parameter that function already receives — which IS the correct, tab-scoped
 model for the node being built, by construction, with no lookup and no
 timing dependency (the same "resolve via the leaf's own stable identity, not
@@ -131,7 +131,7 @@ log signature above, applied the fix, hot-reloaded, and confirmed the same
 "+" click on a freshly-created tab's default agent pane now correctly adds a
 new pane tab with no `DeleteNode` error in either log.
 
-Regression coverage: `frontend/app/element/PaneChrome.test.tsx`'s "resolves
+Regression coverage: [`frontend/app/element/PaneChrome.test.tsx`](../../frontend/app/element/PaneChrome.test.tsx)'s "resolves
 the OWNING tab's LayoutModel, never the globally-active one" suite —
 `getLayoutModelForStaticTab` is mocked as a spy returning a distinguishably
 wrong model, and every mutating handler (`onActivate`/`onClose`/`onAdd`) is

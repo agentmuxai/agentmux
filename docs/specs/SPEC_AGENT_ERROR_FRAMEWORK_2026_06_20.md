@@ -9,15 +9,15 @@ SPDX-License-Identifier: Apache-2.0
 - **Status:** Proposed
 - **2026-08-27 note:** the `FailureClass::Unresponsive` taxonomy entry this
   framework carried was removed in
-  `docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md` — every
+  [`docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`](SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md) — every
   other failure class and this framework's general durable-error-state design
   are unaffected.
 - **Author:** AgentA
-- **Area:** `agentmux-srv` blockcontroller, `frontend/app/view/agent`, `frontend/app/view/accounts`
+- **Area:** `agentmux-srv` blockcontroller, [`frontend/app/view/agent`](../../frontend/app/view/agent), [`frontend/app/view/accounts`](../../frontend/app/view/accounts)
 - **Related:**
   - `SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` — classification (Phase 1/2, shipped #1353+#1464)
   - `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` — recovery banner UI (in progress)
-  - `docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md` — re-auth flow
+  - [`docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md`](archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md) — re-auth flow
 
 ---
 
@@ -235,26 +235,26 @@ And bump `persist: 0` → `persist: 1` on the event.
 ```
 
 ### P1.2 — Load persisted failure on pane mount (frontend)
-**File:** `frontend/app/view/agent/hooks/useAgentFailure.ts`
+**File:** [`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts)
 
 Read block meta `"agent:last_failure"` via `useBlockMeta(blockId, "agent:last_failure")`
 on mount, hydrate `setFailure()` if present and if no live failure is already set.
 
 ### P1.3 — Inline auth error node in transcript (frontend)
-**File:** `frontend/app/view/agent/providers/claude-translator.ts`
+**File:** [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts)
 
 When `type: "result"` arrives with `is_error: true` and `api_error_status` present,
 emit an additional `{ type: "error_result", code: api_error_status, message: result }`
 stream event rather than silently emitting only `session_end`.
 
-**File:** `frontend/app/view/agent/stream-parser.ts`
+**File:** [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
 
 Add `case "error_result"` → produce a `DocumentNode` of type `"agent_error"` rendered
 as an inline red message block in the transcript. This gives the user a visible in-pane
 signal even if they miss the banner.
 
 ### P1.4 — Health transition nodes in transcript (frontend)
-**File:** `frontend/app/view/agent/hooks/useControllerStatusEvents.ts`
+**File:** [`frontend/app/view/agent/hooks/useControllerStatusEvents.ts`](../../frontend/app/view/agent/hooks/useControllerStatusEvents.ts)
 
 When block health transitions to `Stalled` or `Dead`, emit a lightweight status node
 into the transcript (a grey italicized system line: "Agent became unresponsive" /

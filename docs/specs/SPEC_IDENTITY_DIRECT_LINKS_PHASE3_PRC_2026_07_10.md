@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10
 **Author:** AgentX
-**Governing decisions:** `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` §Phase 3 (target: `instance/bundle → account` directly, ≤1 account per provider enforced at resolve time). Tracking issue: **#1624** ("Reconcile per-agent keychain with the live identity-bundle system").
+**Governing decisions:** [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) §Phase 3 (target: `instance/bundle → account` directly, ≤1 account per provider enforced at resolve time). Tracking issue: **#1624** ("Reconcile per-agent keychain with the live identity-bundle system").
 
 ---
 
@@ -31,9 +31,9 @@ Three PRs, each independently reviewable:
 
 **Design decision — new `listallagentidentities` RPC vs. N+1 `ListAgentIdentitiesCommand` calls**: chose the new RPC. `Store::agent_identity_list_all()` (`agentmux-srv/src/backend/storage/identities.rs:325`) already existed, already tested (m0011/m0012/m0013 backfill migrations), and returns exactly the shape the rail needs. Wrapping it in `COMMAND_LIST_ALL_AGENT_IDENTITIES = "listallagentidentities"` (mirrors the existing `listagentidentities` handler, no `agent_id` filter) avoids issuing one RPC per rail row.
 
-**Shape**: rail = every `AgentDefinition` (`useAgentDefinitions()`, already exported and live-refreshing). Detail = the selected agent's provider→account rows, sourced from one `ListAllAgentIdentitiesCommand` call filtered client-side (`joinAgentIdentityRows`, `frontend/app/view/identity/agent-identities-model.ts`), joined against the existing account cache (`loadAccounts()`/`subscribeAccountChanges()`). No create/edit/delete/bind/unbind — this view only shows what's already linked.
+**Shape**: rail = every `AgentDefinition` (`useAgentDefinitions()`, already exported and live-refreshing). Detail = the selected agent's provider→account rows, sourced from one `ListAllAgentIdentitiesCommand` call filtered client-side (`joinAgentIdentityRows`, [`frontend/app/view/identity/agent-identities-model.ts`](../../frontend/app/view/identity/agent-identities-model.ts)), joined against the existing account cache (`loadAccounts()`/`subscribeAccountChanges()`). No create/edit/delete/bind/unbind — this view only shows what's already linked.
 
-New files: `frontend/app/view/identity/agent-identities-model.ts` (pure join logic, unit-tested), `frontend/app/view/identity/agent-identities-panel.tsx` (the component, mounted at the Armory "Identities" rail slot in place of the old `<IdentityManager/>`). Reuses the `.identity-pane-readonly` table markup + `statusBadge()` helper from `identity-manager.tsx` (exported for this purpose) rather than duplicating it.
+New files: [`frontend/app/view/identity/agent-identities-model.ts`](../../frontend/app/view/identity/agent-identities-model.ts) (pure join logic, unit-tested), `frontend/app/view/identity/agent-identities-panel.tsx` (the component, mounted at the Armory "Identities" rail slot in place of the old `<IdentityManager/>`). Reuses the `.identity-pane-readonly` table markup + `statusBadge()` helper from `identity-manager.tsx` (exported for this purpose) rather than duplicating it.
 
 **Dropped for v1**: the "Reconnect" action (re-running OAuth on an expired token in place). It needs PR 2's direct-account OAuth primitive to wire against; adding it now against the bundle-based OAuth flow would be throwaway work. Fast-follow once PR 2 lands.
 

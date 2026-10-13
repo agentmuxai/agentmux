@@ -5,7 +5,7 @@
 **Date:** 2026-07-02
 **Author:** Agent1
 **Purpose:** Explain the composable agent model (what replaces "preset") in plain terms, connect it to what a user actually touches, and record the **agent-pane header decision**: replace the two icons (brain/Memory + id-card/Identity) with a **single `id-card` icon** opening a unified per-agent management modal (Accounts · Memory · MCP · Skills · Briefs · Bundle). See §4.
-**Companion docs:** `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the merged decision), `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (the implementation phases), `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (the umbrella rename).
+**Companion docs:** `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the merged decision), [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](../SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) (the implementation phases), [`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`](SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md) (the umbrella rename).
 
 ---
 
@@ -49,14 +49,14 @@ So: Armory = manage the whole catalog; Agent pane icon = "open THIS agent's setu
 
 ## 4. The agent pane icon — today vs. the decision
 
-**Today** the agent pane's title bar renders **two** icon buttons (`frontend/app/view/agent/agent-model.ts:141`, `endIconButtons`):
+**Today** the agent pane's title bar renders **two** icon buttons ([`frontend/app/view/agent/agent-model.ts:141`](../../../frontend/app/view/agent/agent-model.ts), `endIconButtons`):
 
 | Icon (today) | Title (today) | Opens | Primitive |
 |--------------|---------------|-------|-----------|
 | `brain` | "Agent memory" | Memory modal | **Memory** |
 | `id-card` | "Agent identity" | Identity modal (`IdentityTab = "accounts" \| "assignments"`) | **Account** |
 
-That second modal is *already* account management — its tabs are literally **Accounts** and **Assignments** (`frontend/app/view/identity/identity-model.ts:22`). It's only *labeled* "identity."
+That second modal is *already* account management — its tabs are literally **Accounts** and **Assignments** ([`frontend/app/view/identity/identity-model.ts:22`](../../../frontend/app/view/identity/identity-model.ts)). It's only *labeled* "identity."
 
 ### DECISION (product owner, 2026-07-02): consolidate to a **single icon**
 

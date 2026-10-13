@@ -8,14 +8,14 @@ above everything else. Engineering cost and time are not constraints. Nothing
 in this plan is optional for cost reasons; every "measure first" step below is
 there because a decision depends on data, not to save work.
 **Related:**
-`docs/analysis/ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md` (§6 is the starting point),
-`docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` (introduced the 50-node streaming buffer this spec replaces),
-`docs/specs/SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md` (the crash class every tail change must respect),
-`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md` (the input-path rules §6.5 implements for streaming),
-`docs/specs/SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md` (session-scope clamp),
-`docs/specs/SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md` (the History tab this spec makes follow the live pane),
-`docs/specs/SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md`,
-`docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`.
+[`docs/analysis/ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md`](../analysis/ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md) (§6 is the starting point),
+[`docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`](SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md) (introduced the 50-node streaming buffer this spec replaces),
+[`docs/specs/SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md`](SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md) (the crash class every tail change must respect),
+[`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) (the input-path rules §6.5 implements for streaming),
+[`docs/specs/SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) (session-scope clamp),
+[`docs/specs/SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md`](SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) (the History tab this spec makes follow the live pane),
+[`docs/specs/SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md),
+[`docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`](SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md).
 
 ---
 
@@ -97,26 +97,26 @@ user then reported the jitter returning as conversations grew.
 
 ### 2.2 How the pane works today
 
-**Stream intake** — `frontend/app/view/agent/useAgentStream.ts`. Subscribes to
+**Stream intake** — [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts). Subscribes to
 the block's output file (`getFileSubject(blockId, OutputFileName)`, `:424`),
 parses NDJSON into nodes, dedups with a hook-local `nodeIdSet` that is never
 pruned (`:246`), and pushes into a per-pane rAF-batched flush queue.
 
-**Document store** — `frontend/app/store/agent-document/reducer.ts`.
+**Document store** — [`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts).
 `StreamFlush` (`:484`) copies `state.nodes`, `nodeIdSet` and `nodeIndexById`
 on every flush that changes anything (`:497`, `:503`, `:538`). The only trim is
 the session-scope clamp (`clampToSessionScope`, `:43`). Within one session the
 document grows without bound, and scrolling up pulls older pages back in via
 `useHistoryPagination.loadOlder` (200 lines a page).
 
-**Layout store** — `frontend/app/store/agent-pane-layout/reducer.ts`.
+**Layout store** — [`frontend/app/store/agent-pane-layout/reducer.ts`](../../frontend/app/store/agent-pane-layout/reducer.ts).
 Heights (measured, else per-kind estimate, else default); `positions()` is an
 O(n) prefix sum materializing a `RowPosition` for every virtualized row;
 `totalSize()` is another O(n) sum; `windowRangeOf()` binary-searches the
 materialized array. Rows report heights through one ResizeObserver that
 dispatches `RowMeasured` (`AgentDocumentVirtualList.tsx:1003`).
 
-**Virtual list** — `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`.
+**Virtual list** — [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx).
 Two regions in one scroll container:
 
 - *Virtualized head*: absolutely positioned rows from the layout store's
@@ -145,7 +145,7 @@ Two regions in one scroll container:
 already used to schedule the tools-only orphan scrub 2 s after a turn ends
 (`:1070`).
 
-**History tab** — `frontend/app/view/agent/history/AgentHistoryView.tsx`. A
+**History tab** — [`frontend/app/view/agent/history/AgentHistoryView.tsx`](../../frontend/app/view/agent/history/AgentHistoryView.tsx). A
 separate blockStack tab, read-only, not a consumer of the document store. Reads
 the transcript via `BlockfileLineCountCommand` + `BlockfileReadRangeCommand`
 in 600-line pages. Loads once on mount; **does not follow new output**.
@@ -296,7 +296,7 @@ applicable) a CI guardrail.
 - `collapseScrolledOffTools()` moves into the same controller pass.
 - **Guardrail:** a CI grep (pattern of `input-handler-guardrails.yml`) fails
   on `scrollHeight|offsetHeight|getBoundingClientRect|scrollTop` reads in
-  `frontend/app/view/agent/virtualization/` outside an allow-listed set of RO
+  [`frontend/app/view/agent/virtualization/`](../../frontend/app/view/agent/virtualization) outside an allow-listed set of RO
   callbacks and `jumpToBottom`.
 - **Test:** a counter-instrumented unit test asserts ≤ 1 `scrollHeight` read
   per simulated flush; the resize-contract suites
@@ -886,7 +886,7 @@ to §6.3.6; paths under `agentmux-srv/src/`):
    The parser still assigns today's ids in 5a. Its input just becomes
    `{ stream, gen, line, text }`, ready for 5b.
 
-   As built in 5a-4 (`frontend/app/view/agent/transcript-cursor.ts`, wired in
+   As built in 5a-4 ([`frontend/app/view/agent/transcript-cursor.ts`](../../frontend/app/view/agent/transcript-cursor.ts), wired in
    `useAgentStream`):
    - **Which stream.** The cursor pins the stream the history load was
      served from (`read_range`'s `{ stream, gen }`), with `next` at the end of
@@ -1201,7 +1201,7 @@ prerequisites shrink to what already shipped:
   still keeping at least one.
 - **A turn** starts at a `user_message` node (parser-produced or optimistic);
   nodes before the first one form a leading turn. Same rule as
-  `turnScopedFrontier` (`frontend/app/view/agent/virtualization/streaming-buffer.ts`,
+  `turnScopedFrontier` ([`frontend/app/view/agent/virtualization/streaming-buffer.ts`](../../frontend/app/view/agent/virtualization/streaming-buffer.ts),
   Phase 3b, §6.2). A turn is **finished** when it is not the
   last turn and none of its nodes is in progress (`isNodeInProgress`, same file).
 - **Kill switch:** `agent:livefeed` (default true). Off restores today's
@@ -1210,7 +1210,7 @@ prerequisites shrink to what already shipped:
 **When turns roll off** — never mid-render, never mid-turn:
 
 - when a turn ends (the edge of `turnJustEndedAtom`,
-  `frontend/app/view/agent/agent-view.tsx`);
+  [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx));
 - when a new `user_message` enters the feed (the next send);
 - when the pane becomes dormant (hidden tab or window tab);
 - once after the initial history load, so a pane opens with K turns, not the
@@ -1218,7 +1218,7 @@ prerequisites shrink to what already shipped:
 
 Each point schedules one roll-off pass off the input path
 (`requestIdleCallback`, 1 s timeout — the stream scheduler,
-`frontend/app/view/agent/stream-scheduler.ts`, has no housekeeping lane yet).
+[`frontend/app/view/agent/stream-scheduler.ts`](../../frontend/app/view/agent/stream-scheduler.ts), has no housekeeping lane yet).
 If the user typed in the last 150 ms the pass is **re-queued**, never dropped:
 it runs at the latest at the 1 s deadline, even with input pending, so a fast
 last turn can't leave overdue turns resident waiting for a next trigger
@@ -1293,19 +1293,19 @@ last turn can't leave overdue turns resident waiting for a next trigger
   same record (PR 4c below).
 
 **How.** Reducer command `RollOff { ranges }`
-(`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as
+([`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts)): removes whole turns given as
 index ranges — usually one prefix, more only around a blocked turn — in one
 pass, rebuilding the id set and index as `clampToSessionScope` in that file
 does, and emitting `turns-rolled-off { removedCount, turns }`. The layout store already prunes
 ids no longer present (`NodesChanged` → `pruneMap`,
-`frontend/app/store/agent-pane-layout/reducer.ts`); the document state's
+[`frontend/app/store/agent-pane-layout/reducer.ts`](../../frontend/app/store/agent-pane-layout/reducer.ts)); the document state's
 collapsed / pinned / expanded id sets are pruned in the same pass. The pane
 keeps a count of turns rolled off since mount.
 
 **The top of the live feed.** Paging older content into the feed is off
 while `agent:livefeed` is on (`onLoadOlder` not passed, `hasOlderHistory`
-false; `frontend/app/view/agent/hooks/useHistoryPagination.ts`). The existing
-`history_link` row (`frontend/app/view/agent/inject-history-link.ts`) shows whenever anything rolled off or
+false; [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts)). The existing
+`history_link` row ([`frontend/app/view/agent/inject-history-link.ts`](../../frontend/app/view/agent/inject-history-link.ts)) shows whenever anything rolled off or
 the load didn't start at line 0, and reads "N earlier turns · open in
 History" when N is known (turns rolled off since mount, and the load started
 at line 0), otherwise "Earlier turns · open in History". Clicking it opens or
@@ -1316,14 +1316,14 @@ opens at its end, which is where the rolled-off turns are.
 **History follows the transcript** (replaces §6.4's design with the same
 goal):
 
-- The History tab (`frontend/app/view/agent/history/AgentHistoryView.tsx`)
+- The History tab ([`frontend/app/view/agent/history/AgentHistoryView.tsx`](../../frontend/app/view/agent/history/AgentHistoryView.tsx))
   keeps **one incremental parser** (`HistoryParser`, the body of
-  `parseHistoryLines` in `frontend/app/view/agent/parseHistoryLines.ts` made
+  `parseHistoryLines` in [`frontend/app/view/agent/parseHistoryLines.ts`](../../frontend/app/view/agent/parseHistoryLines.ts) made
   resumable) for the range it has loaded; new
   lines go through the same instance, so open text runs continue and counter
   ids don't collide. `parseHistoryLines` becomes "a `HistoryParser` fed once",
   and a test requires feeding in arbitrary chunks to give identical nodes.
-- It reuses `TranscriptCursor` (`frontend/app/view/agent/transcript-cursor.ts`)
+- It reuses `TranscriptCursor` ([`frontend/app/view/agent/transcript-cursor.ts`](../../frontend/app/view/agent/transcript-cursor.ts))
   as-is on the source block's output file subject: settled from its own
   initial read (`historyPin`, same file), gaps filled by
   range reads (a gap it won't fill makes History reload — "No silent holes"

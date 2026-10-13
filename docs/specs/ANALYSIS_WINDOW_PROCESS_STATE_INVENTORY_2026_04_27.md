@@ -404,5 +404,5 @@ spec, not here.
 - Sidecar spawn / Job Object: `agentmux-cef/src/sidecar.rs` (`create_job_object_for_child` at `:424`)
 - Sidecar lifecycle: `agentmux-srv/src/main.rs:28-236`
 - Frontend poll: `frontend/app-init.ts:~120-160`
-- Pool frontend: `frontend/app/init/pool.ts:17-75`
-- Instance panel: `frontend/app/statusbar/InstancePanel.tsx:1-180`
+- Pool frontend: [`frontend/app/init/pool.ts:17-75`](../../frontend/app/init/pool.ts)
+- Instance panel: [`frontend/app/statusbar/InstancePanel.tsx:1-180`](../../frontend/app/statusbar/InstancePanel.tsx)

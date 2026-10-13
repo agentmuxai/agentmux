@@ -17,8 +17,8 @@ AskUserQuestion, so nothing routes here on that path.
             permission UI for agent panes") + user follow-up:
             "remember the options the user last set"
 **Touches:** `agentmux-srv/src/server/websocket.rs`,
-             `frontend/app/view/agent/` (new decision panel +
-             event types + state), `frontend/app/store/` (new
+             [`frontend/app/view/agent/`](../../frontend/app/view/agent) (new decision panel +
+             event types + state), [`frontend/app/store/`](../../frontend/app/store) (new
              memory store), settings-template.
 
 ---
@@ -368,7 +368,7 @@ New `decisionPrompt` block in `settings-template.jsonc`:
 ## 9. Provider adapters
 
 Today each provider has an adapter under
-`frontend/app/view/agent/providers/` (entries: `claude-translator.ts`,
+[`frontend/app/view/agent/providers/`](../../frontend/app/view/agent/providers) (entries: `claude-translator.ts`,
 `codex-translator.ts`, `gemini-translator.ts`, `kimi-translator.ts`,
 `acp-translator.ts`, dispatched via `translator-factory.ts`). Add a
 `parsePermissionRequest(raw): PermissionRequestEvent | null` hook
@@ -502,11 +502,11 @@ decision *goes* once it's made.
 ## 13. Cross-references
 
 - agentmuxai/agentmux#551 — parent issue (this spec extends it)
-- `frontend/app/view/agent/buildRuntimeArgs.ts:18-24` —
+- [`frontend/app/view/agent/buildRuntimeArgs.ts:18-24`](../../frontend/app/view/agent/buildRuntimeArgs.ts) —
   pre-turn PermissionMode → flag mapping
-- `frontend/app/view/agent/types.ts` — `ToolCallEvent`
+- [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) — `ToolCallEvent`
   definition to extend
-- `frontend/app/platform/pane-overlay.ts` — `usePaneOverlay`
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) — `usePaneOverlay`
   reused for the decision panel's airspace
 - `frontend/app/element/modal-v2.tsx` — ConfirmModal preset
   for the high-risk shift-click confirmation (when used)

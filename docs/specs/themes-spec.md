@@ -355,7 +355,7 @@ Power users set `window:theme` directly in `settings.json`. The picker is a conv
 
 ## Schema Update
 
-Add `window:theme` to `schema/settings.json` so the settings editor validates and autocompletes it:
+Add `window:theme` to [`schema/settings.json`](../../schema/settings.json) so the settings editor validates and autocompletes it:
 
 ```json
 "window:theme": {
@@ -371,9 +371,9 @@ Add it alongside the other `window:*` entries.
 
 ## Implementation Order
 
-1. `schema/settings.json` — add `window:theme` with enum + description
+1. [`schema/settings.json`](../../schema/settings.json) — add `window:theme` with enum + description
 2. `frontend/app/themes/*.scss` — all theme files + barrel
-3. `frontend/app/app.scss` — add `@use './themes/index'`
+3. [`frontend/app/app.scss`](../../frontend/app/app.scss) — add `@use './themes/index'`
 4. `frontend/app/store/theme.ts` — atom that reads from settings store, applies `data-theme` on `<html>`
 5. `frontend/app/element/themepicker.tsx` — optional UI picker in Settings → Appearance (writes to settings store)
 6. Verify each theme with a smoke test (set in settings.json, reopen app, confirm theme applies)
@@ -387,4 +387,4 @@ Add it alongside the other `window:*` entries.
 - [ ] Terminal ANSI colors apply correctly per theme
 - [ ] High Contrast theme meets WCAG AA (4.5:1 minimum contrast ratio)
 - [ ] Default theme is unchanged (`:root` values untouched)
-- [ ] `schema/settings.json` enum validates correctly (invalid theme name rejected)
+- [ ] [`schema/settings.json`](../../schema/settings.json) enum validates correctly (invalid theme name rejected)

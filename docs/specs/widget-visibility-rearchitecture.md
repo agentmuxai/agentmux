@@ -6,7 +6,7 @@
 > menu entry this spec proposed removing is absent from current code; the
 > pinned/More-dropdown model matches this spec and `README.md`'s widget
 > table. 5-month-stale status for shipped code. See
-> `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 
 ---
 
@@ -138,8 +138,8 @@ Round-trip time: ~50ms (fs watcher debounce).
 
 | File | Change |
 |------|--------|
-| `frontend/app/menu/base-menus.ts` | Rebuild `createWidgetsMenu`: read visibility from `settings["widget:hidden@key"]`; write same key on toggle; remove "Edit widgets.json" |
-| `frontend/app/window/action-widgets.tsx` | Replace `widget["display:hidden"]` with `isWidgetHidden()`; remove "Edit widgets.json" and `widget:showhelp` from context menu |
+| [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) | Rebuild `createWidgetsMenu`: read visibility from `settings["widget:hidden@key"]`; write same key on toggle; remove "Edit widgets.json" |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | Replace `widget["display:hidden"]` with `isWidgetHidden()`; remove "Edit widgets.json" and `widget:showhelp` from context menu |
 | `agentmuxsrv-rs/src/config/widgets.json` | Add `defwidget@help` entry (promotes help widget to first-class) |
 | `agentmuxsrv-rs/src/backend/wconfig.rs` | Accept `widget:hidden@*` keys in settings schema |
 | `frontend/types/gotypes.d.ts` | No change needed (settings is `Record<string, any>`) |

@@ -316,9 +316,9 @@ correctly — no additional flex recalculation is needed.
 
 | File | Change |
 |---|---|
-| `frontend/app/drag/CrossWindowDragMonitor.win32.tsx` | Add `spansFullHeight` detection before `TearOffBlock`; pass `mother_resize_to_width` |
-| `frontend/app/drag/CrossWindowDragMonitor.linux.tsx` | Same (Linux/macOS share this path) |
-| `frontend/app/drag/tear-off-pool-helper.ts` | Export `MIN_MOTHER_WIDTH`, `spansFullHeight` helper |
+| [`frontend/app/drag/CrossWindowDragMonitor.win32.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.win32.tsx) | Add `spansFullHeight` detection before `TearOffBlock`; pass `mother_resize_to_width` |
+| [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx) | Same (Linux/macOS share this path) |
+| [`frontend/app/drag/tear-off-pool-helper.ts`](../../frontend/app/drag/tear-off-pool-helper.ts) | Export `MIN_MOTHER_WIDTH`, `spansFullHeight` helper |
 | `agentmux-cef/src/commands/floating_pane.rs` | Add `mother_resize_to_width: Option<i32>` to `OpenFloatingPaneArgs`; call resize task |
 | `agentmux-cef/src/ui_tasks.rs` | Add `post_resize_window_width` (Windows) and `post_set_window_width` (non-Windows) |
 

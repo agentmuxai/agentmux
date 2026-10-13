@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-11
 **Author:** AgentY@narko
-**Status:** analysis. The cause is fixed in the same PR; self-heal is designed in `docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`.
+**Status:** analysis. The cause is fixed in the same PR; self-heal is designed in [`docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`](../specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md).
 **Affects:** every Claude Code agent started or restarted on v0.59.19, on every platform.
 
 ## 1. What the operator saw
@@ -58,7 +58,7 @@ When a prefixed script has no `eval` in it (a hook, or an MCP server with argume
 
 ## 6. The fix (this PR)
 
-In `crates/bashwrap/src/prefix.rs`:
+In [`crates/bashwrap/src/prefix.rs`](../../crates/bashwrap/src/prefix.rs):
 
 1. **A lone word is a prefix call too.** Any single argument that isn't a subcommand or a flag is now taken as the CLI's prefix call.
 2. **Only a Bash call's script claims a Bash call's record.** A script without the CLI's `eval` runs as it is and never claims: a lone word is started directly as a program (found through `PATHEXT` on Windows, so a `.cmd` shim starts; on Unix by `exec`, so the CLI's signals reach it), and a command line goes to `bash -c` as before. On Windows, a command line whose program is a Windows path (`C:\tools\server.exe --port 1`) is split back into words and started directly instead, because bash would strip its backslashes; only an MCP server's line can have one, since the CLI makes a hook's paths POSIX.
@@ -70,6 +70,6 @@ Checked by hand on Windows: the fixed binary started as `agentmux-bashwrap agent
 
 ## 7. Follow-ups
 
-- **Self-heal** (`docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`): srv notices a dead `agentmux` MCP server, tells the operator and the agent, and repairs it in bounded steps, ending with a CLI restart without the shell prefix (the step that would have fixed this incident with no code change). `agentmux-mcp doctor` gives an agent with no MCP tools the diagnosis above in one command.
+- **Self-heal** ([`docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`](../specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md)): srv notices a dead `agentmux` MCP server, tells the operator and the agent, and repairs it in bounded steps, ending with a CLI restart without the shell prefix (the step that would have fixed this incident with no code change). `agentmux-mcp doctor` gives an agent with no MCP tools the diagnosis above in one command.
 - **Hooks through the prefix** each start a `bash -c` just to run `agentmux-bashwrap hook`. Dispatching a prefixed `agentmux-bashwrap <subcommand>` in-process would save a bash start per Bash call. Not needed for correctness.
-- **Users on v0.59.19** need a build with this fix. Until then, the workaround is to start AgentMux with `AGENTMUX_BASHWRAP_MODE=rewrite` in its environment: srv then sets no shell prefix, the hook rewrites Bash commands as it did before #4592, and agents started after that connect to their MCP server (`crates/srv/src/server/agent_handlers/bash_prefix.rs`).
+- **Users on v0.59.19** need a build with this fix. Until then, the workaround is to start AgentMux with `AGENTMUX_BASHWRAP_MODE=rewrite` in its environment: srv then sets no shell prefix, the hook rewrites Bash commands as it did before #4592, and agents started after that connect to their MCP server ([`crates/srv/src/server/agent_handlers/bash_prefix.rs`](../../crates/srv/src/server/agent_handlers/bash_prefix.rs)).

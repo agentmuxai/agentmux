@@ -50,13 +50,13 @@ rather than erroring — a second, smaller instance of the same class of bug.
 `db_agents.id` **is** a properly enforced-unique `TEXT PRIMARY KEY`. It is
 already used correctly as the canonical key for agent CRUD, credential
 injection at spawn, and (after a prior fix, see §4) the Memory/Identity/
-Preset App API family. It is simply not used consistently — most of the
+Preset MuxAPI family. It is simply not used consistently — most of the
 runtime-messaging and work-tracking surfaces never adopted it.
 
 ## 2. Inventory (full audit — see below for methodology)
 
 A full-codebase audit was run against `agentmux` @ `4ab7a9ea9` across
-`agentmux-srv/`, `agentmux-mcp/`, `frontend/`, and `agentmux-bashwrap/`.
+`agentmux-srv/`, `agentmux-mcp/`, [`frontend/`](../../frontend), and `agentmux-bashwrap/`.
 Every site reading `AGENTMUX_AGENT_ID` (or an `agent_id`/`agent`/
 `target_agent`/`source_agent` parameter that traces back to it rather than
 to `db_agents.id`) was categorized:
@@ -76,7 +76,7 @@ to `db_agents.id`) was categorized:
 | 2 | **Work Queue** | `backend/storage/work_queue.rs`, `server/work_queue.rs`, `agentmux-mcp/src/main.rs` (WorkEnqueue/Claim/Heartbeat/Complete/Release) | Raw SQL string comparison: `target_agent`, `claimed_by` columns hold the slug directly. No resolution anywhere in this path — the starkest example. |
 | 3 | **S1 WS-RPC authorization** | `server/app_api/mod.rs` (`check_s1`), ~24 call sites across `bundle.rs`, `identity.rs`, `mcp.rs`, `memory.rs`, `skill.rs` | `ctx.agent_id != req_agent_id` — a raw string-equality **authorization** decision, not just a data lookup. Highest-severity category, since a collision here is an access-control bug, not just a wrong-answer bug. |
 | 4 | **Cron** | `backend/cron/mod.rs`, `agentmux-mcp/src/main.rs` (CronCreate) | `target` fires through the reactive-handler registry (#1) at trigger time — same root map, different entry point. |
-| 5 | **Frontend block registration** | `frontend/app/view/term/termagent.ts`, `frontend/app/view/agent/agent-view.tsx` | POSTs the slug to `/reactive/register`, i.e. this is the frontend half of #1, not a separate registry. |
+| 5 | **Frontend block registration** | [`frontend/app/view/term/termagent.ts`](../../frontend/app/view/term/termagent.ts), [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | POSTs the slug to `/reactive/register`, i.e. this is the frontend half of #1, not a separate registry. |
 | 6 | **muxbus / WAN / cloud relay** | `muxbus/relay.rs`, `muxbus/cloud_subscriber.rs`, `muxbus/agent_credentials.rs` | **Deliberately excluded from this migration — see §5.** The slug is the only identity concept that currently has any meaning *across machines*; `db_agents.id` is a per-machine-local UUID with no cross-machine relationship to "the same" logical agent on another host. |
 | 7 | **bashwrap cwd-state** | `agentmux-bashwrap/src/bash_wrap.rs` (`cwd_state_path`) | Already downgraded to a fallback (`AGENTMUX_INSTANCE_SLUG` preferred) after a prior related bug. Low priority; folds into Phase 5 cleanup, not its own phase. |
 
@@ -517,7 +517,7 @@ separate defect in the same files and should land on its own, ideally first.
 > cause is now understood — the work queue has no per-agent identity to check
 > against because `AGENTMUX_AUTH_KEY` is instance-wide and inherited, which
 > `backend/pane_env.rs` and
-> `docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`
+> [`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`](../retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md)
 > (recommendation 4) already track as a redesign, not a bug fix. Tracked as
 > #3501.
 >
@@ -595,7 +595,7 @@ belt-and-suspenders — low-stakes either way, a judgment call for that PR).
 
 > **Correction, 2026-09-22: the bashwrap cleanup is not low-stakes, and the
 > "only one needed" premise is wrong.** `AGENTMUX_INSTANCE_SLUG` is set in
-> exactly one place — `frontend/app/view/agent/agent-model.ts` — while
+> exactly one place — [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) — while
 > `AGENTMUX_AGENT_ID` is set in several, including the MCP server env written
 > by `backend/agent_config.rs`. So the fallback is load-bearing for every
 > launch path the frontend does not drive; removing it silently re-keys their

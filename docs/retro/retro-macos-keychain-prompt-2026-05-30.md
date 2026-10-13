@@ -99,7 +99,7 @@ parity.
 
 - [ ] Ungate the OSCrypt switches (option 1) — `agentmux-cef/src/app.rs`. Keep the macOS `cfg`.
 - [ ] Re-run `task package:macos`; verify no prompt + window opens + renderer connects.
-- [ ] Note the encryption tradeoff in the code comment + `docs/macos-signing.md`.
+- [ ] Note the encryption tradeoff in the code comment + [`docs/macos-signing.md`](../macos-signing.md).
 - [ ] Decide Linux/Windows parity (same prompt on those installed builds).
 - [ ] Only then resume the v0.40.1 macOS release-asset upload (still also blocked on notarization — the
       Apple Developer agreement 403, tracked in the build-cleanup issue).

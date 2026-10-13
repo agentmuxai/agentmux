@@ -171,7 +171,7 @@ P0 should not wait for P2. P1 and P2 are what stop the next variant of this bug.
 
 ## 8. Method and evidence
 
-- Code read at `origin/main` 6943d5fd5: `context-window.ts`, `reducer.ts` (`ReconcileContextFromHistory`, `TokensIn`, `TurnReset`, `mergeStats`), `useHistoryPagination.ts`, `parseHistoryLines.ts`, `claude-translator.ts`, `main-agent-usage.ts`, `useAgentStream.ts`, `agent-view.tsx`, `AgentComposerStrip.tsx`, `AgentSessionStats.tsx`, `providers/catalog.ts`, `swarm-model.ts`, `turn-contribution.ts`, `util/format-count.ts`. No backend (`crates/`) code computes a window.
+- Code read at `origin/main` 6943d5fd5: `context-window.ts`, `reducer.ts` (`ReconcileContextFromHistory`, `TokensIn`, `TurnReset`, `mergeStats`), `useHistoryPagination.ts`, `parseHistoryLines.ts`, `claude-translator.ts`, `main-agent-usage.ts`, `useAgentStream.ts`, `agent-view.tsx`, `AgentComposerStrip.tsx`, `AgentSessionStats.tsx`, `providers/catalog.ts`, `swarm-model.ts`, `turn-contribution.ts`, `util/format-count.ts`. No backend ([`crates/`](../../crates)) code computes a window.
 - Two throwaway probes of the pinned CLI (2.1.288, `--model sonnet`, `--output-format stream-json`, read-only tool, a scratch directory outside any repo), together about 20 cents of list-price usage. Raw output is kept in the author's scratch area, not in the repo.
 - The CLI binary's embedded result schema was searched for `contextWindow`, `modelUsage` and the usage field descriptions.
 - Not done: reproducing the owner's exact pane; running the app. Nothing was changed in the repo other than this file.
@@ -266,7 +266,7 @@ A report that an accepted prompt contradicts emits `context-window-refuted`, log
 
 ### 9.9 Follow-up: the CLI's own auto-compact point
 
-srv asks a control-protocol process `get_context_usage` (`detail: "summary"`, answered locally) at spawn and at every turn boundary, next to `get_settings`, and publishes the answer as the persisted per-pane `agentcontextusage` event (`crates/srv/src/backend/agent_context_usage.rs`): the model, the auto-compact window, the threshold (absent when off) and whether auto-compaction is on. An unchanged answer is not re-published; one from a replaced process is ignored.
+srv asks a control-protocol process `get_context_usage` (`detail: "summary"`, answered locally) at spawn and at every turn boundary, next to `get_settings`, and publishes the answer as the persisted per-pane `agentcontextusage` event ([`crates/srv/src/backend/agent_context_usage.rs`](../../crates/srv/src/backend/agent_context_usage.rs)): the model, the auto-compact window, the threshold (absent when off) and whether auto-compaction is on. An unchanged answer is not re-published; one from a replaced process is ignored.
 
 The pane (`store/agent-pane-state/auto-compact.ts`, subscribed in `useContextReading`) uses the reported threshold when the report is for the reading's model (compared without case, a `[1m]` suffix or a date stamp). When the CLI says auto-compaction is off, it shows no countdown and bands against the window. Until the CLI has answered, it assumes window − 33K, and the tooltip says which. The CLI's reported threshold ignores `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (probed), so with that override the real point is earlier than shown.
 

@@ -57,7 +57,7 @@ code's own doc comments say so, in two places:
 > landed ~2.08s after `on_load_end`."*
 
 That 2.08s figure is not a worst case pulled from thin air — it's a measured
-number from `docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`'s
+number from [`docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`](../specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md)'s
 own verification run, on the same class of machine this investigation ran on
 (a resource-shared dev box running several concurrent CEF instances). Also
 measured that day: pool-window prewarms (an unrelated code path, so this is a
@@ -73,7 +73,7 @@ tail case.**
 `#[cfg(target_os = "linux")]`:
 
 - The frontend fires a double-`requestAnimationFrame` at the very top of
-  `bootstrap.ts` (`frontend/bootstrap.ts:40-46`) — the standard proxy for "the
+  `bootstrap.ts` ([`frontend/bootstrap.ts:40-46`](../../frontend/bootstrap.ts)) — the standard proxy for "the
   compositor actually presented a frame" — and reports it via the
   `report_first_paint` IPC command.
 - On Linux, `on_load_end` **arms a gate instead of showing the window**, with a
@@ -108,7 +108,7 @@ user action shortens it; only time (and whatever the frontend is doing) does.
 
 Confirmed by reading every `stage_begin`/`stage_end` call site
 (`agentmux-launcher/src/supervisor/windows.rs`, `agentmux-cef/src/lib.rs`) and
-cross-checked against `docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md`
+cross-checked against [`docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md`](../specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md)
 (items #2 and #7, both explicitly verified there by exhaustive grep — this
 report's own grep reproduces the same result independently):
 
@@ -127,13 +127,13 @@ report's own grep reproduces the same result independently):
 - Frontend bootstrap: `setupCefApi()` (an async IPC round-trip),
   `initApp()`, RPC/store hydration, tab/pane mount
 - The tab-content reveal gate's own settle window
-  (`frontend/app/store/tab-reveal.ts`) — up to `MAX_GATE_MS` (800ms) of
+  ([`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts)) — up to `MAX_GATE_MS` (800ms) of
   intentional additional hold, waiting for a window of long-task-free frames
   after mount, before the in-page "brain" overlay (`#startup-loading`,
-  `frontend/app/init/startup-splash.ts`) cross-fades out
+  [`frontend/app/init/startup-splash.ts`](../../frontend/app/init/startup-splash.ts)) cross-fades out
 
 Grep confirms zero frontend-side stage reporting exists at all:
-`frontend/` has no reference to `sendLauncherMsg`, `startup_stage_begin`, or
+[`frontend/`](../../frontend) has no reference to `sendLauncherMsg`, `startup_stage_begin`, or
 `startup_stage_end` anywhere. The original telemetry spec
 (`SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md`, Implementation Order step 7,
 "Frontend events") was never built. `PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md`
@@ -378,17 +378,17 @@ ways:
 - `agentmux-cef/src/client/navigation.rs` — `on_load_end`,
   `reveal_top_level_window`, `reveal_gated_window`, `handle_first_paint_signal`
 - `agentmux-cef/src/commands/backend.rs::report_first_paint`
-- `frontend/bootstrap.ts:20-46` — the double-rAF signal
-- `frontend/app/init/startup-splash.ts`, `frontend/app/store/tab-reveal.ts`
+- [`frontend/bootstrap.ts:20-46`](../../frontend/bootstrap.ts) — the double-rAF signal
+- [`frontend/app/init/startup-splash.ts`](../../frontend/app/init/startup-splash.ts), [`frontend/app/store/tab-reveal.ts`](../../frontend/app/store/tab-reveal.ts)
 - `agentmux-launcher/src/supervisor/windows.rs:258-300,450-490` — splash spawn,
   `host` stage bounds
 - `agentmux-cef/src/lib.rs:396-415,714-723,1055-1056` — `dlopen`/`cef_init`
   stage reporting
-- `docs/specs/SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md` — original design,
+- [`docs/specs/SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md`](../specs/SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md) — original design,
   step 7 ("Frontend changes") never implemented
-- `docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md` — items #2, #4,
+- [`docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md`](../specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md) — items #2, #4,
   #7 independently confirm §3's findings from a prior, separate pass
-- `docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md` — the
+- [`docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`](../specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md) — the
   Linux investigation and fix defect A needed ported (§5.1: now done)
 - `agentmux-cef/src/state/mod.rs` — `linux_paint_gate_pending`/
   `linux_first_paint_seen`, doc comments updated to say Windows populates

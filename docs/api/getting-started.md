@@ -1,145 +1,144 @@
-# Getting Started with the AgentMux App API
+# Getting Started with MuxAPI
 
-The App API lets external tools and agents control a running AgentMux
-host — open agent panes, send messages, read output, and (soon) open
-file/view panes. It speaks WSH RPC over a local WebSocket.
+MuxAPI, AgentMux's own API (formerly called the App API), lets agents and local tools control a running AgentMux: open
+agent and other panes, send messages, read output, arrange tabs and
+windows, run shells, and more. It has three faces over one server:
 
-This guide shows how to connect and make your first call.
+| Surface | Who uses it | Where |
+|---|---|---|
+| **MCP server** (`agentmux-mcp`) | Agents. It is added to every agent's MCP config automatically, with 95 tools (`OpenAgent`, `OpenEditor`, `SendMessage`, `Shell`, `Layout`, `Memory*`, `Work*`, `Cron*`, …). | [`crates/mcp/src/tools/`](../../crates/mcp/src/tools) |
+| **HTTP** (`/api/v1/…`, `/agentmux/…`) | Shell helpers and scripts. About 100 `/api/v1` routes: panes, agents, tabs, windows, shells, memory. | [`crates/srv/src/server/routes.rs`](../../crates/srv/src/server/routes.rs) |
+| **WebSocket RPC** (`/ws`) | The frontend, and tools that want push events. 250 commands, including the intent layer (`agent.open`, `agent.send`, `pane.open`). | [`app-api-extension.md`](../specs/app-api-extension.md) |
+
+This guide shows how to connect and make a first call on each.
 
 ## At a glance
 
-- Transport: WebSocket on `127.0.0.1:{WS_PORT}/ws`
-- Auth: `authkey` query param or `X-AuthKey` header
-- Envelope: WSH RPC JSON
-- Scope: local only, loopback bind, auth-gated
+- Base URL: `AGENTMUX_LOCAL_URL` (for example `http://127.0.0.1:29700`); the WebSocket is `/ws` on the same port.
+- Auth: the `X-AuthKey` header on every HTTP request. The `?authkey=` query parameter is accepted on `/ws` only.
+- The auth key is new every time AgentMux starts, so restarting it invalidates every client.
+- Scope: loopback by default. See [Security model](#security-model) for the opt-in LAN and paired-device listeners.
 
-Full command reference: [`docs/specs/app-api-extension.md`](../specs/app-api-extension.md).
-Current implementation status: [`docs/specs/app-api-status.md`](../specs/app-api-status.md).
+## Find the URL and key
 
-## Discover connection info
+AgentMux puts both in the environment of the agents it starts:
 
-AgentMux doesn't publish WS_PORT or AUTH_KEY as fixed values — both
-are per-instance. There are two ways to find them.
+| Variable | In agent panes | In terminal panes |
+|---|---|---|
+| `AGENTMUX_LOCAL_URL` | yes | yes |
+| `AGENTMUX_AUTH_KEY` | yes | no |
+| `AGENTMUX_BLOCKID`, `AGENTMUX_AGENT_ID` | yes | — |
 
-### Method 1 — parse the host log (works from any shell)
+So run your tool from an agent pane, or have an agent run it. A container
+agent gets a URL that points at `host.docker.internal` and a scoped key
+that only opens the routes containers may use.
+
+There is no supported way to read the key from outside AgentMux: the host
+log used to carry a token that unlocked it, and now redacts it.
+
+## First call over HTTP
 
 ```bash
-LOG=$(ls -t ~/.agentmux/logs/agentmux-host-v*.log.* | head -1)
-
-IPC_TOKEN=$(grep "ipc_token=" "$LOG" | tail -1 \
-  | sed 's/.*ipc_token=\([^&"]*\).*/\1/')
-IPC_PORT=$(grep "IPC HTTP server started" "$LOG" | tail -1 \
-  | sed 's/.*127.0.0.1:\([0-9]*\).*/\1/')
-
-AUTH_KEY=$(curl -s \
-  -H "Authorization: Bearer $IPC_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"cmd":"get_auth_key","args":{}}' \
-  "http://127.0.0.1:$IPC_PORT/ipc" | jq -r .data)
-
-WS_PORT=$(curl -s \
-  -H "Authorization: Bearer $IPC_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"cmd":"get_backend_endpoints","args":{}}' \
-  "http://127.0.0.1:$IPC_PORT/ipc" | jq -r '.data.ws | split(":") | last')
-
-echo "ws://127.0.0.1:$WS_PORT/ws?authkey=$AUTH_KEY"
+curl -s -H "X-AuthKey: $AGENTMUX_AUTH_KEY" "$AGENTMUX_LOCAL_URL/agentmux/discovery"
 ```
 
-The IPC token is the bearer token CEF injects into the page URL. Any
-process able to read the AgentMux log can use it to ask the host for
-the backend auth key and WebSocket port.
+It returns `host` (version, hostname, channel, the agents on this
+instance), `lan` and `wan`. Without the header you get `401` and
+`{"error":"unauthorized"}`.
 
-### Method 2 — from inside an agent pane
+Opening a pane:
 
-Agents launched by AgentMux inherit env vars that identify the
-instance. You can read them with the same method above (the log path
-is stable), or — once shipped — use the planned `agentmux` CLI
-wrapper.
+```bash
+curl -s -X POST -H "X-AuthKey: $AGENTMUX_AUTH_KEY" -H "Content-Type: application/json" \
+  -d '{"view":"editor","file":"/path/to/file.md"}' \
+  "$AGENTMUX_LOCAL_URL/api/v1/pane/open"
+```
 
-## Send your first command
+## First call over the WebSocket
 
-With `WS_PORT` and `AUTH_KEY` in hand, send a WSH RPC envelope:
+Send a WSH RPC envelope:
 
 ```json
 {
   "wscommand": "rpc",
-  "message": {
-    "command": "agent.list",
-    "reqid": "demo-1",
-    "data": {}
-  }
+  "message": { "command": "agent.list", "reqid": "demo-1", "data": {} }
 }
 ```
 
-Minimal Node example:
+Node 22 or later has `WebSocket` built in:
 
 ```javascript
-import WebSocket from "ws";
+const url = process.env.AGENTMUX_LOCAL_URL.replace(/^http/, "ws")
+  + "/ws?authkey=" + process.env.AGENTMUX_AUTH_KEY;
+const ws = new WebSocket(url);
 
-const ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}/ws?authkey=${AUTH_KEY}`);
+ws.onopen = () => ws.send(JSON.stringify({
+  wscommand: "rpc",
+  message: { command: "agent.list", reqid: "demo-1", data: {} },
+}));
 
-ws.on("open", () => {
-  ws.send(JSON.stringify({
-    wscommand: "rpc",
-    message: { command: "agent.list", reqid: "demo-1", data: {} },
-  }));
-});
-
-ws.on("message", (buf) => console.log(buf.toString()));
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  // Replies arrive as { eventtype: "rpc", data: { resid, data } }.
+  if (msg.data?.resid === "demo-1") { console.log(msg.data.data); ws.close(); }
+};
 ```
 
-You should see a response listing every agent pane currently open.
+You should see every agent pane currently open. The socket also carries
+events the app publishes, so expect other messages besides your reply.
 
 ## Common commands
 
 | Command | What it does |
 |---------|--------------|
-| `agent.list` | List open agent panes (good first call to verify the connection) |
+| `agent.list` | List open agent panes (a good first call) |
 | `agent.open` | Open a pane running a registered agent |
 | `agent.send` | Send a user message to a running agent |
 | `agent.status` | Report an agent's state and session ID |
 | `agent.output` | Read accumulated output lines |
 | `agent.stop` | Stop an agent's controller process |
+| `pane.open` | Open an editor, terminal, browser or other pane, split against a pane, floating, or in a given tab |
+| `pane.moveTab` | Move a tab into another pane |
 
-Request/response shapes for each are in
-[`docs/specs/app-api-extension.md`](../specs/app-api-extension.md).
+Request and response shapes: [`docs/specs/app-api-extension.md`](../specs/app-api-extension.md).
+What is built and what isn't: [`docs/specs/app-api-status.md`](../specs/app-api-status.md).
+
+## From the shell
+
+AgentMux installs small helpers in every terminal and agent shell. They
+read the same two variables:
+
+| Command | What it does |
+|---|---|
+| `muxsh` | Open files, URLs and panes, list panes, run commands, and send to agents ([docs/MUXSH.md](../MUXSH.md)) |
+| `muxopen <agent>` | Open an agent's pane, or focus it if it is already open |
+| `muxspect` | Inspect a running instance live ([docs/MUXSPECT.md](../MUXSPECT.md)) |
+| `muxlog` | Find and follow logs across instances ([docs/MUXLOG.md](../MUXLOG.md)) |
 
 ## Security model
 
-- The WebSocket listens on loopback only.
-- Every request requires the backend auth key.
-- The auth key is rotated per AgentMux process — restarting the host
-  invalidates outstanding clients.
-- There is no remote/network surface.
-
-If you're writing an integration that runs on the same machine as
-AgentMux, this is the path. If you need cross-machine access, wait
-for the planned HTTP REST gateway
-([`docs/specs/app-api-extension.md`](../specs/app-api-extension.md)
-Tier 3).
+- Every listener AgentMux opens at startup binds to loopback.
+- Every request needs the instance's auth key, and the key changes on each start.
+- **LAN access is opt-in** (`network:lan_discovery`). It adds a listener on each
+  network interface, gated by a separate per-process LAN key that opens only the
+  routes peers need (message delivery and fleet status), and announces the
+  instance over mDNS. Headless mode never enables it.
+- **Paired devices** (Settings → Paired devices) use their own TLS listener and
+  a per-device token, and can only read agent feeds. The instance key and the
+  LAN key don't work there.
 
 ## Troubleshooting
 
-- **`connection refused`** — AgentMux isn't running, or the log's
-  WS_PORT is stale (the host restarted). Re-run the discovery step.
-- **`401 unauthorized`** — the auth key rotated (host restart), or
-  you pasted the IPC token instead of the backend auth key. These
-  are different values.
-- **`unknown command`** — check the command name against
-  `app-api-status.md`. Tier 1 is implemented; Tier 2+ may not be yet.
-- **`CLI_INSTALLING` on `agent.open`** — the provider's CLI is being
-  installed (first use, or just after an upgrade moved its pin). Retry in
-  a minute; the install carries on in the background.
-- **`CLI_NOT_AVAILABLE` on `agent.open`** — the provider's CLI could not
-  be installed (no `npm`, offline, or a provider with no npm package).
-  The error says why; fix that and retry.
-
-## What's next
-
-- Tier 2 (`pane.open` and friends) — draft in
-  [`docs/specs/app-api-pane-open.md`](../specs/app-api-pane-open.md).
-- Tier 3 HTTP REST gateway and Tier 4 MCP exposure are planned; see
-  the extension spec.
-- A shell wrapper (`agentmux` CLI) that hides the discovery dance is
-  being discussed.
+- **`connection refused`** — AgentMux isn't running, or it restarted and the
+  port changed. Read `AGENTMUX_LOCAL_URL` again from a pane started after the restart.
+- **`401 unauthorized`** — the key is missing or stale (AgentMux restarted), or
+  you put it in the query string of an HTTP route; only `/ws` reads it there.
+- **`403`** — a container agent's scoped key, on a route containers may not use.
+- **`unknown command: <name>`** — the RPC name is wrong; check it against
+  [`app-api-extension.md`](../specs/app-api-extension.md).
+- **`CLI_INSTALLING` on `agent.open`** (`503` over HTTP) — the provider's CLI is
+  being installed (first use, or just after an upgrade moved its pin). Retry in a
+  minute; the install carries on in the background.
+- **`CLI_NOT_AVAILABLE` on `agent.open`** — the provider's CLI could not be
+  installed (no `npm`, offline, or a provider with no npm package). The error
+  says why; fix that and retry.

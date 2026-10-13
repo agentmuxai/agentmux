@@ -1,7 +1,7 @@
 # SPEC: Widget bar parent widgets (grouped submenus)
 
 **Date:** 2026-08-12
-**Status:** implemented — #2633 (2026-08-12), the PR this doc was added in. Parent widgets with grouped submenus live in `frontend/app/window/action-widgets-config.ts` (with tests) and render through `view/launcher/launcher.tsx`. §2's non-goals are unchanged — one of them is cited from the code as a deliberate gap ("this spec doesn't cover this").
+**Status:** implemented — #2633 (2026-08-12), the PR this doc was added in. Parent widgets with grouped submenus live in [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) (with tests) and render through `view/launcher/launcher.tsx`. §2's non-goals are unchanged — one of them is cited from the code as a deliberate gap ("this spec doesn't cover this").
 
 ---
 
@@ -19,7 +19,7 @@ Two placements a parent widget can be interacted from, both need to work:
 - **A. Pinned** — the parent sits directly in the bar like any other pinned
   widget.
 - **B. Inside "More"** — the parent is one row in the `···More` overflow
-  dropdown (`frontend/app/window/more-dropdown.tsx`).
+  dropdown ([`frontend/app/window/more-dropdown.tsx`](../../frontend/app/window/more-dropdown.tsx)).
 
 ---
 
@@ -27,14 +27,14 @@ Two placements a parent widget can be interacted from, both need to work:
 
 ### 1.1 Widget bar today (flat, two tiers)
 
-`frontend/app/window/action-widgets.tsx` renders **pinned** widgets directly
+[`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) renders **pinned** widgets directly
 in the bar; everything else lives in the **More** dropdown
 (`more-dropdown.tsx`). Both tiers are flat lists — no grouping concept
 exists anywhere in the widget system today. Config helpers live in
 `action-widgets-config.ts` (`getPinnedWidgets`/`getMoreWidgets`/`pinWidget`/
 `unpinWidget`), driven by the `widget:pinned` settings array (ordered
 short-names) with `display:pinned` in `widgets.json` as the new-install
-default (see `docs/specs/widget-pinning.md`).
+default (see [`docs/specs/widget-pinning.md`](widget-pinning.md)).
 
 Widget definitions live in `agentmux-srv/src/config/widgets.json`, typed as
 `WidgetConfigType` in `agentmux-srv/src/backend/wconfig/types.rs:478` (Rust)
@@ -77,7 +77,7 @@ the stale table.
 Two DOM submenu implementations exist, and — as of
 `SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10.md`, already
 merged to `main` — both route through one shared, framework-agnostic
-hover-intent core: **`frontend/app/util/submenu-hover.ts`**
+hover-intent core: **[`frontend/app/util/submenu-hover.ts`](../../frontend/app/util/submenu-hover.ts)**
 (`createSubmenuHover`). It gives:
 
 - **90ms open delay** on trigger-row hover (avoids opening every submenu
@@ -93,10 +93,10 @@ hover-intent core: **`frontend/app/util/submenu-hover.ts`**
   instant a new sibling row is entered, on top of (not instead of) the
   safe-triangle grace period for that row's own approach.
 
-`FlyoutMenu`/`SubMenu` (`frontend/app/element/flyoutmenu.tsx`) is the
+`FlyoutMenu`/`SubMenu` ([`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx)) is the
 SolidJS-native consumer: `MenuItem.subItems?: MenuItem[]` renders a nested
 `<SubMenu>` positioned via the shared `computeMenuPosition()` primitive
-(`frontend/app/util/menu-position.ts`) — anchored to the parent row's rect,
+([`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts)) — anchored to the parent row's rect,
 preferred placement `right-start` (flips to `left-start` near the window
 edge), `autoUpdate` from `@floating-ui/dom` keeps it live on scroll/resize,
 and it stays `visibility:hidden` until the real position is known (fixes
@@ -113,7 +113,7 @@ anchored to a trigger button via `computeMenuPosition()` +
 `PopoverMenu` for per-item right-click actions that must stay open
 independently of the dropdown itself.
 
-`ContextMenuModel.showContextMenu()` (`frontend/app/store/contextmenu.ts`)
+`ContextMenuModel.showContextMenu()` ([`frontend/app/store/contextmenu.ts`](../../frontend/app/store/contextmenu.ts))
 is a **third**, unrelated path — it hands off to the OS-native context
 menu (`NativeContextMenuItem.submenu`), used for actual right-click
 (`handlePinnedContextMenu` in `action-widgets.tsx`). It is **not** a
@@ -123,7 +123,7 @@ needs to be. Case A/B below build on the DOM path (`submenu-hover.ts` +
 `computeMenuPosition()`), matching what right-click submenus look and feel
 like without literally routing through the native-menu API.
 
-`PopoverMenu` (`frontend/app/element/popover-menu.tsx`) — used today for
+`PopoverMenu` ([`frontend/app/element/popover-menu.tsx`](../../frontend/app/element/popover-menu.tsx)) — used today for
 the pin/unpin item menu spawned from `ActionWidgets`/`MoreDropdown` — is
 **single-level only** (sections, but no nested `subItems`/hover-intent). Not
 a fit for the parent/child expand itself; still the right tool for the
@@ -403,12 +403,12 @@ recent widget addition has done that either.
 | `agentmux-srv/src/backend/wconfig/types.rs` | Add `children: Vec<String>` to `WidgetConfigType`; load-time validation (blockdef xor children) |
 | `agentmux-srv/src/config/widgets.json` | Add `defwidget@messengers`; add `"display:hidden": true` to the 5 messenger entries |
 | `frontend/types/gotypes.d.ts` | Mirror `children?: string[]` on `WidgetConfigType` |
-| `frontend/app/window/action-widgets-config.ts` | `getGroupedChildKeys()`; filter it out of `getPinnedWidgets`/`getMoreWidgets`; `pinGroup`/`unpinGroup` (or reuse `pinWidget`/`unpinWidget` — parent is just another key in `widget:pinned`) |
-| `frontend/app/window/action-widgets.tsx` | Parent-aware click handler (toggle vs `handleWidgetSelect`); per-slot `createSubmenuHover`; peer-close across pinned parents; render `PinnedWidgetFlyout`; group-scoped right-click menu |
-| `frontend/app/window/pinned-widget-flyout.tsx` *(new)* | Case A panel — modeled on `more-dropdown.tsx` |
-| `frontend/app/window/more-dropdown.tsx` | Parent-row branch → nested `SubMenu`-equivalent (§3.4 option 1) |
-| `frontend/app/util/submenu-hover.ts` *(maybe)* | Hoist `createPeerRegistry()` out of `flyoutmenu.tsx` if Case A needs it too (§3.3) |
-| `schema/widgets.json` | Mirror the `children` field for editor/schema validation, if this file is hand-maintained JSON Schema rather than generated |
+| [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) | `getGroupedChildKeys()`; filter it out of `getPinnedWidgets`/`getMoreWidgets`; `pinGroup`/`unpinGroup` (or reuse `pinWidget`/`unpinWidget` — parent is just another key in `widget:pinned`) |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | Parent-aware click handler (toggle vs `handleWidgetSelect`); per-slot `createSubmenuHover`; peer-close across pinned parents; render `PinnedWidgetFlyout`; group-scoped right-click menu |
+| [`frontend/app/window/pinned-widget-flyout.tsx`](../../frontend/app/window/pinned-widget-flyout.tsx) *(new)* | Case A panel — modeled on `more-dropdown.tsx` |
+| [`frontend/app/window/more-dropdown.tsx`](../../frontend/app/window/more-dropdown.tsx) | Parent-row branch → nested `SubMenu`-equivalent (§3.4 option 1) |
+| [`frontend/app/util/submenu-hover.ts`](../../frontend/app/util/submenu-hover.ts) *(maybe)* | Hoist `createPeerRegistry()` out of `flyoutmenu.tsx` if Case A needs it too (§3.3) |
+| [`schema/widgets.json`](../../schema/widgets.json) | Mirror the `children` field for editor/schema validation, if this file is hand-maintained JSON Schema rather than generated |
 
 ---
 

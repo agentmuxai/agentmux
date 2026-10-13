@@ -29,7 +29,7 @@ instance's identity instead of the one baked into it at compile time.**
 surface was five `env_remove` calls for agent-identity vars in one branch.
 
 Confirmed failures, all observed live (full RCA:
-`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`):
+[`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`](../retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md)):
 
 1. A 0.56.3 build launched from a pane inherited `AGENTMUX_CHANNEL` and wrote
    into a 0.56.2 instance's channel.
@@ -54,7 +54,7 @@ It was set in exactly one live place — the interactive shell-pane branch
 has no callers. **The agent-pane path never set it**, so a build launched from
 an agent's shell tool had `nested == false` while carrying the launching
 instance's channel, and the leak was honoured as a deliberate override.
-`docs/retro/retro-portable-0496-pool-window-false-close-2026-06-27.md:143-145`
+[`docs/retro/retro-portable-0496-pool-window-false-close-2026-06-27.md:143-145`](../retro/retro-portable-0496-pool-window-false-close-2026-06-27.md)
 predicted this exact hole.
 
 ## 3. Design
@@ -235,7 +235,7 @@ through.
 **`AGENTMUX_LOCAL_URL` + `AGENTMUX_AUTH_KEY` remain inheritable**, and they are
 the largest residual coupling: a process inheriting both holds an authenticated
 handle to the instance that spawned it, and `AGENTMUX_AUTH_KEY` is the sole auth
-factor for the whole App API (`server/mod.rs`, a string equality against a
+factor for the whole MuxAPI (`server/mod.rs`, a string equality against a
 per-launch UUID with no scoping, expiry or rate limit).
 
 Removing them is a redesign of how helpers reach the server — a per-invocation

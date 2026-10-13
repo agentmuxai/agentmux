@@ -4,7 +4,7 @@
 with_version`, and the `bootstrap.rs` startup hook are all in place and
 tested. §6's open question (what to do with the Claude-only Provider Config
 placeholder) remains genuinely unresolved, deliberately, per that section. — #3244
-**Current delivery state:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
+**Current delivery state:** [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
 **Date:** 2026-09-15
 **Related:** `SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (the `is_system`
 isolation this spec builds on top of, unweakened), `SPEC_GLOBAL_MEMORY_
@@ -45,7 +45,7 @@ content" — same concept, now with one settled name.
 ## 1. Problem, confirmed against current code
 
 AgentMux should ship Operator Config an agent genuinely needs regardless of
-what the deployment is used for — how to call the App API, environment
+what the deployment is used for — how to call MuxAPI, environment
 quirks, known gotchas — but today there is **no seeding path for this
 content at all**:
 
@@ -66,7 +66,7 @@ content at all**:
   Gemini agent never sees it at all, and it is not part of `format_global_
   bundle_block`'s injected content either.
 
-Net effect: today, "how does this agent learn about the App API" has no
+Net effect: today, "how does this agent learn about MuxAPI" has no
 answer that survives a fresh install, and the one thing that gestures at an
 answer is provider-specific and structurally disconnected from the
 mechanism (`is_system` Global Memory) this codebase already built to solve
@@ -139,7 +139,7 @@ a version number, is the correct check here — this is a deliberate
 departure from `agent_seed.rs`'s field, which research confirmed is
 similarly present but *not actually read* by its own reseed comparison).
 
-Authoring the actual Operator Config prose (what the App API section says,
+Authoring the actual Operator Config prose (what MuxAPI section says,
 which gotchas make the cut) is implementation-time work, out of scope for
 this spec.
 
@@ -219,7 +219,7 @@ upsert` calls: catch the constraint violation and warn-and-skip
 (`agent_seed.rs:285-298`) rather than aborting the whole seed pass. The new
 seeder applies the identical warn-and-skip per entry — a user who happens
 to have an unrelated bundle already named e.g. "AgentMux Operator Config:
-App API" should not block every other manifest entry from seeding.
+MuxAPI" should not block every other manifest entry from seeding.
 
 ### 3.5 Why not the `skill_seed.rs`/`mcp_seed.rs` one-time-migration pattern
 
@@ -229,7 +229,7 @@ correct for starter skills/MCP servers: a user can freely delete a starter
 skill they don't want, and AgentMux should never resurrect it. Operator
 Config is different in kind — it describes AgentMux's own current behavior,
 so stale cached content left over from an old release is actively
-misleading (a note describing a since-changed App API is worse than no
+misleading (a note describing a since-changed MuxAPI is worse than no
 note). That's why §3.3's ownership-aware reseed-every-startup approach is
 required here, not the one-time seed.
 

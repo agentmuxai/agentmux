@@ -6,14 +6,14 @@ meant to land as one PR. Intended to be worked incrementally via
 follow-up `SPEC_` docs, each scoped to one theme below, sequenced per §4.
 **Author:** Agent1 (agent1-06309)
 **Related:**
-`docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md`
+[`docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md)
 (the memory-versioning spec whose research surfaced most of the findings
 below — see §6 for how the two relate),
-`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md`,
-`docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` (in-flight —
+[`docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`](ARCHITECTURE_ARMORY_2026_07_20.md),
+[`docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md),
+[`docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md`](SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md) (in-flight —
 overlaps with §3.2, coordinate before implementing either),
-`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (PR #1918,
+[`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) (PR #1918,
 the Preset→Bundle rename this doc extends to completion).
 
 ---

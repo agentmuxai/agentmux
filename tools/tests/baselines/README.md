@@ -1,7 +1,7 @@
 # Input-latency bench baselines
 
 Committed baselines for the input-first latency benches, consumed by
-`tools/tests/bench-aggregate.mjs` (Phase 0.1, discussion #1161).
+[`tools/tests/bench-aggregate.mjs`](../bench-aggregate.mjs) (Phase 0.1, discussion #1161).
 
 ## Why baselines, not absolute thresholds
 

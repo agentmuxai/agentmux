@@ -5,8 +5,8 @@
 **Problem:** The `add-tab-btn` (+ button) in the tab bar is not vertically centered with the tab text.
 
 **Files:**
-- `frontend/app/tab/tabbar.tsx` — renders `<button className="add-tab-btn">`
-- `frontend/app/tab/tabbar.scss` — styles the button and tab bar layout
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) — renders `<button className="add-tab-btn">`
+- [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) — styles the button and tab bar layout
 
 **Fix:** Ensure `.add-tab-btn` uses `display: flex; align-items: center; justify-content: center` and its height/line-height matches the tab bar height. The tab bar is `height: 36px` (or whatever the design token is). The button should be `align-self: center` within a flex row.
 
@@ -91,10 +91,10 @@ menu.push({ label: "Color", type: "submenu", submenu: colorSubmenu });
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tab.tsx` | Add color dot to JSX; add Color submenu to context menu; read `tabData?.["tab:color"]` |
-| `frontend/app/tab/tab.scss` | Add `.tab-color-dot` styles |
-| `frontend/app/tab/tabbar.tsx` | No change needed (context menu lives in tab.tsx) |
-| `frontend/app/tab/tabbar.scss` | Fix `.add-tab-btn` vertical alignment |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Add color dot to JSX; add Color submenu to context menu; read `tabData?.["tab:color"]` |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | Add `.tab-color-dot` styles |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | No change needed (context menu lives in tab.tsx) |
+| [`frontend/app/tab/tabbar.scss`](../../frontend/app/tab/tabbar.scss) | Fix `.add-tab-btn` vertical alignment |
 | `frontend/types/gotypes.d.ts` | Add `"tab:color"?: string` to `TabType` if needed |
 
 ---

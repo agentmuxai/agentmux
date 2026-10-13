@@ -4,10 +4,10 @@
 **Status:** implemented — §1-§6 shipped in PR #3165, including a stickiness
 regression fix (codex P2: re-check `stickToBottom` inside the deferred rAF
 callback, not just at schedule time) caught by review before merge.
-**Related:** `docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md` (built
-the component §1-§4 fix), `docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`
+**Related:** [`docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) (built
+the component §1-§4 fix), [`docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md)
 (the `install.start` / `install_chunk` streaming machinery both installers
-share, and the modal §5 restyles), `docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`
+share, and the modal §5 restyles), [`docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md)
 (built `ToolOverlayLog.tsx`'s auto-stick-to-bottom scrolling — the pattern
 §3 and §5 both reuse).
 
@@ -33,7 +33,7 @@ opens Details to watch progress has to keep manually scrolling down as
 output arrives, or ends up staring at stale lines from seconds ago.
 
 **Root cause, confirmed in source:**
-`frontend/app/view/toolchain/SystemToolInstallInline.tsx` — the `installing`
+[`frontend/app/view/toolchain/SystemToolInstallInline.tsx`](../../frontend/app/view/toolchain/SystemToolInstallInline.tsx) — the `installing`
 phase renders
 
 ```tsx
@@ -55,7 +55,7 @@ re-renders the `<pre>`. Nothing ever touches `scrollTop`. The `<pre>` itself
 is disabled, it's that nothing drives it as content streams in.
 
 **This is the only install-log "Details" panel in the codebase today** —
-grep for `<details` across `frontend/` turns up exactly four hits: this
+grep for `<details` across [`frontend/`](../../frontend) turns up exactly four hits: this
 one, a static "Raw payload" dump in `JektBubble.tsx` (already-complete
 content, never streams, no scroll concern), a form's "Advanced options"
 section in `AgentLaunchModal.tsx` (not a log at all), and a startup-error
@@ -63,9 +63,9 @@ dump in `error-display.ts` (also static). `SystemToolInstallInline` is
 shared by **every** *system-tool* install screen in the app — its only two
 callers are:
 
-- `frontend/app/view/toolchain/toolchain-view.tsx:349` — the Toolchain
+- [`frontend/app/view/toolchain/toolchain-view.tsx:349`](../../frontend/app/view/toolchain/toolchain-view.tsx) — the Toolchain
   modal's core-tools list (where this was reported, installing Node).
-- `frontend/app/view/agent/components/AgentPrereqModal.tsx:178` — the
+- [`frontend/app/view/agent/components/AgentPrereqModal.tsx:178`](../../frontend/app/view/agent/components/AgentPrereqModal.tsx) — the
   agent-launch-time missing-prereq blocker.
 
 Neither caller has its own log/Details rendering — both just mount
@@ -115,7 +115,7 @@ today; §5 brings it in line.
 This exact problem — a box with `overflow-y: auto` fed by a growing,
 streamed content signal, needing to follow new output but yield the moment
 a user scrolls away — is already solved and shipped in this codebase:
-`frontend/app/view/agent/components/ToolOverlayLog.tsx` §136-144 and
+[`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) §136-144 and
 §210-231 (`SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`). Port the same shape
 rather than invent a new one:
 
@@ -188,7 +188,7 @@ scroll-away state.
 
 ## 4. Testing (§1-§4)
 
-`frontend/app/view/toolchain/SystemToolInstallInline.test.tsx` already
+[`frontend/app/view/toolchain/SystemToolInstallInline.test.tsx`](../../frontend/app/view/toolchain/SystemToolInstallInline.test.tsx) already
 exists and covers phase transitions / the install flow. Add:
 
 - A new line arriving while the log body is scrolled to (or near) the
@@ -234,7 +234,7 @@ the whole modal.
    `@keyframes system-tool-install-progress-slide` (§68-84 of that file) —
    extract them into a small shared SCSS partial (e.g.
    `frontend/app/view/toolchain/_install-progress.scss` or promote to
-   `frontend/app/element/`) with generic class names
+   [`frontend/app/element/`](../../frontend/app/element)) with generic class names
    (`.install-progress`, `.install-progress-bar`) rather than duplicating
    the animation under an `agent-install-modal-` prefix. Both
    `SystemToolInstallInline.scss` and `AgentInstallModal.scss` (new file —
@@ -311,14 +311,14 @@ field is documented as "Font Awesome (solid) icon name, rendered as
 `fa-solid fa-<icon>`" and today holds generic, non-brand glyphs: `node` →
 `"cube"`, `npm` → `"box"`, `git` → `"code-branch"`, `docker` → `"box-open"`,
 `python` → `"snake"`, `uv` → `"bolt"`. Rendered identically at two sites in
-`frontend/app/view/toolchain/toolchain-view.tsx` (§294 and its twin around
+[`frontend/app/view/toolchain/toolchain-view.tsx`](../../frontend/app/view/toolchain/toolchain-view.tsx) (§294 and its twin around
 §440): `<i class={\`toolchain-row-icon fa-solid fa-${row.icon}\`} />`.
 
 **Font Awesome's brand set is already bundled and loaded app-wide**
 (`index.html:74`, `<link rel="stylesheet" href="/fontawesome/css/brands.min.css" />`)
 and already used elsewhere (`about.tsx:47`,
 `<i class="fa-brands fa-github mr-2"></i>`). Verified present in the
-bundled `public/fontawesome/css/brands.min.css` — all five core tools that
+bundled [`public/fontawesome/css/brands.min.css`](../../public/fontawesome/css/brands.min.css) — all five core tools that
 have an official brand mark are covered:
 
 | Tool | Current `icon` (solid) | Brand glyph (confirmed bundled) |
@@ -373,7 +373,7 @@ have an official brand mark are covered:
    initial prompt.
 
 **Explicitly out of scope — provider brand icons (Claude Code, Codex,
-Gemini, Qwen, Kimi, Pi, OpenClaw, Copilot).** `frontend/app/view/agent/defaults/cli-catalog.ts`'s
+Gemini, Qwen, Kimi, Pi, OpenClaw, Copilot).** [`frontend/app/view/agent/defaults/cli-catalog.ts`](../../frontend/app/view/agent/defaults/cli-catalog.ts)'s
 `CliCatalogEntry.icon` field holds plain Unicode glyphs today (`"✖"` for
 Claude, `"✦"` for Codex, `"π"` for Pi, etc. — §50-166 of that file), used
 by `AgentInstallModalPanel.tsx`'s header (`catalog()?.icon ?? "📦"`, §379).

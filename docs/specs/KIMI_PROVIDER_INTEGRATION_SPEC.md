@@ -106,17 +106,17 @@ kimi acp
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/providers/index.ts` | Add `kimi` to `PROVIDERS` record; extend `outputFormat` union type |
-| `frontend/app/view/agent/providers/kimi-translator.ts` | **New file** — translate Kimi NDJSON → `StreamEvent` |
-| `frontend/app/view/agent/providers/translator-factory.ts` | Add `kimi-stream-json` case |
-| `frontend/app/view/agent/buildRuntimeArgs.ts` | Add Kimi permission flags (`--yolo` mapping) |
-| `frontend/app/view/agent/types.ts` | Extend `PermissionMode` or `ModelChoice` if Kimi-specific values needed |
+| [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts) | Add `kimi` to `PROVIDERS` record; extend `outputFormat` union type |
+| [`frontend/app/view/agent/providers/kimi-translator.ts`](../../frontend/app/view/agent/providers/kimi-translator.ts) | **New file** — translate Kimi NDJSON → `StreamEvent` |
+| [`frontend/app/view/agent/providers/translator-factory.ts`](../../frontend/app/view/agent/providers/translator-factory.ts) | Add `kimi-stream-json` case |
+| [`frontend/app/view/agent/buildRuntimeArgs.ts`](../../frontend/app/view/agent/buildRuntimeArgs.ts) | Add Kimi permission flags (`--yolo` mapping) |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Extend `PermissionMode` or `ModelChoice` if Kimi-specific values needed |
 
 ### Docs
 
 | File | Change |
 |------|--------|
-| `docs/specs/app-api-status.md` | Update Tier 1 status if applicable |
+| [`docs/specs/app-api-status.md`](app-api-status.md) | Update Tier 1 status if applicable |
 
 ---
 

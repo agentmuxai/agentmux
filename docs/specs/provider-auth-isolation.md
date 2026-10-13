@@ -82,7 +82,7 @@ Per-agent isolation (the generated per-agent project config: CLAUDE.md, .mcp.jso
 
 ### 1. Provider Definition — Add `authConfigDirEnvVar` and `authDirName`
 
-In `frontend/app/view/agent/providers/index.ts`:
+In [`frontend/app/view/agent/providers/index.ts`](../../frontend/app/view/agent/providers/index.ts):
 
 ```typescript
 export interface ProviderDefinition {

@@ -7,7 +7,7 @@
 //! TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md for this module's own design)
 //! in sync with a compiled-in manifest, every startup — not a one-time
 //! seed like `skill_seed.rs`/`mcp_seed.rs`, because stale Operator Config
-//! (describing a since-changed App API) would actively mislead an agent
+//! (describing a since-changed MuxAPI) would actively mislead an agent
 //! rather than merely being absent.
 //!
 //! The reseed decision (§3.3 of the spec above) is ownership-based, not a

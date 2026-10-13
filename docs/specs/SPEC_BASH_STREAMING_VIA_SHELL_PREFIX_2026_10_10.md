@@ -3,7 +3,7 @@
 **Status:** implemented (#4592)
 **Date:** 2026-10-10
 **Replaces (for Claude Code):** the command rewrite in `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §2 and §5.
-**Background:** `docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`.
+**Background:** [`docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`](../retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md).
 
 ## 1. The problem
 
@@ -47,7 +47,7 @@ model: Bash {command: "cargo build", description, timeout, run_in_background}
 
 ### 2.1 What the CLI does with the prefix (verified on the pinned 2.1.288)
 
-Checked against the real CLI with a fake API (`scripts/cli-contract/`):
+Checked against the real CLI with a fake API ([`scripts/cli-contract/`](../../scripts/cli-contract)):
 
 | Question | Answer |
 |---|---|
@@ -132,7 +132,7 @@ command can't be taken out, the script runs as is (no tee).
 
 ## 3. Plan
 
-1. **bashwrap prefix mode** (`crates/bashwrap`):
+1. **bashwrap prefix mode** ([`crates/bashwrap`](../../crates/bashwrap)):
    - `main.rs`: detect the prefix call;
    - `prefix.rs`: take the command out of the script, records, claims;
    - `bash_wrap.rs`: run a script instead of a decoded command;

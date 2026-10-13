@@ -1,4 +1,4 @@
-# SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename)
+# SPEC: Test-Harness Access to MuxAPI (+ /wave → /agentmux rename)
 
 **Status:** draft
 Date: 2026-04-18
@@ -66,7 +66,7 @@ External processes can't obtain the key because:
 - The CEF host binding isn't reachable over any documented channel from
   outside the CEF process.
 
-Result: test harnesses have no way to call the app API. They currently
+Result: test harnesses have no way to call MuxAPI. They currently
 simulate user input via UIAutomation + mouse clicks, which is slow,
 flaky, layout-sensitive, and can't reach operations that don't have UI
 bindings (bulk data manipulation, fixture setup, etc).
@@ -239,9 +239,9 @@ harness doc. Scope from `grep -rn /wave/ .`:
 - `agentmux-srv/src/server/tests.rs` — test URIs
 - `agentmux-srv/tests/integration_test.rs` — integration test URIs
 - `frontend/app/store/wos.ts` — `getWebServerEndpoint() + "/wave/service"`
-- `frontend/app/store/global.ts` — `/wave/file?...`
+- [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) — `/wave/file?...`
 - `frontend/app/view/term/*` — termosc / termsticker / termagent URL builders
-- `frontend/app/element/markdown-util.ts`, `frontend/util/waveutil.ts`
+- [`frontend/app/element/markdown-util.ts`](../../frontend/app/element/markdown-util.ts), `frontend/util/waveutil.ts`
 - `agentmux-cef/src/client.rs` — one internal URL, if any matches
 - Spec-side references (`specs/*.md`, `docs/analysis/*.md`) — docs update only,
   no behaviour change
@@ -341,13 +341,13 @@ boundary.
 
 ### 6.4 Harness README update
 
-`tools/tests/README.md` adds a section:
+[`tools/tests/README.md`](../../tools/tests/README.md) adds a section:
 
 > **Getting the auth key.** A dev-mode `agentmux-cef` writes its auth
 > key and endpoints to `<data_dir>/authkey.dev`. The dev data dir on
 > Windows is `%APPDATA%\ai.agentmux.cef.v<version>` (format: `v0-33-264`
 > for version `0.33.264`). Read the file as JSON. The structure is
-> documented in `docs/specs/SPEC_TEST_API_ACCESS.md` §5.
+> documented in [`docs/specs/SPEC_TEST_API_ACCESS.md`](SPEC_TEST_API_ACCESS.md) §5.
 
 ### 6.5 Harness library (`tools/tests/authfile.ps1`)
 
@@ -389,7 +389,7 @@ the harness.
    blocked on auth-file work.
 3. PR 3: add `authkey.dev` file write + ACL, unit tests, release-build
    no-op verification.
-4. PR 4: update `pane-focus-stress.ps1` and `tools/tests/README.md` to
+4. PR 4: update `pane-focus-stress.ps1` and [`tools/tests/README.md`](../../tools/tests/README.md) to
    use the auth file. Retire the "fill in coords manually" step for
    layout setup — harness creates the 3-pane layout via
    `object.CreateBlock` + `workspace.UpdateTabIds` directly.

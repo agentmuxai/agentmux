@@ -293,9 +293,9 @@ export function WindowControls() {
 | `src-tauri/src/commands/window.rs` | Add `get_instance_number`, `get_window_count`; update `open_new_window` to register + emit |
 | `src-tauri/src/lib.rs` | Initialize registry in app state; unregister + emit on window close |
 | `src-tauri/src/state.rs` | Add `WindowInstanceRegistry` struct (or inline in lib.rs) |
-| `frontend/types/custom.d.ts` | Add `getInstanceNumber`, `getWindowCount` to `AppApi` |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Add `getInstanceNumber`, `getWindowCount` to `AppApi` |
 | `frontend/util/tauri-api.ts` | Wire up `invoke` calls for both new commands |
-| `frontend/app/store/global.ts` | Add `windowInstanceNumAtom`, `windowCountAtom` |
+| [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) | Add `windowInstanceNumAtom`, `windowCountAtom` |
 | `frontend/wave.ts` | Init atoms + subscribe to `window-instances-changed` event |
 | `frontend/app/window/window-controls.tsx` | Consume atoms, conditionally render `(N)` |
 | `frontend/app/window/window-controls.scss` | Style `.instance-num` |

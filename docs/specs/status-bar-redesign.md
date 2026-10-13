@@ -156,11 +156,11 @@ If sysinfo publishes network I/O rates, show `↑1.2M ↓340K`. Skip if not avai
 
 | File | Change |
 |------|--------|
-| `frontend/app/statusbar/SystemStats.tsx` | **New** — CPU + memory display |
-| `frontend/app/statusbar/BackendStatus.tsx` | Compact to dot + uptime |
+| [`frontend/app/statusbar/SystemStats.tsx`](../../frontend/app/statusbar/SystemStats.tsx) | **New** — CPU + memory display |
+| [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx) | Compact to dot + uptime |
 | `frontend/app/statusbar/ConnectionStatus.tsx` | Filter to remote-only, rename label |
-| `frontend/app/statusbar/StatusBar.tsx` | Layout restructure |
-| `frontend/app/statusbar/StatusBar.scss` | Styles for new items |
+| [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) | Layout restructure |
+| [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) | Styles for new items |
 
 ---
 

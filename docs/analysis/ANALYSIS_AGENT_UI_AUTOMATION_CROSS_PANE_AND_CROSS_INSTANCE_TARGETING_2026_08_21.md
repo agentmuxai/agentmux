@@ -4,9 +4,9 @@
 other half is a genuine security-design task, not a quick widening.
 **Author:** AgentY
 **Date:** 2026-08-21
-**Related:** `docs/specs/SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md` (the
+**Related:** [`docs/specs/SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md`](../specs/SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) (the
 sibling "make agent-facing pane control general-purpose" effort this
-continues), `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`
+continues), [`docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`](../specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
 (the existing design — already anticipates and explicitly defers exactly this
 ask), `agentmux-srv/src/server/ui_handlers.rs`, `agentmux-mcp/src/main.rs`
 (`UIScreenshot`/`UIClick`/`UIQuery`/`FocusWindow` handlers),
@@ -132,7 +132,7 @@ already technically unrestricted underneath.
 ### 2.2 This is not an oversight — it's deliberate, documented, and was
 ### already exploited once
 
-`docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` §6
+[`docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`](../specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md) §6
 ("Security model — the actual hard part") **already considered and rejected**
 exactly the ask being made now. Quoting its own reasoning: a Click/Screenshot
 tool that could target another pane "can read another pane's on-screen

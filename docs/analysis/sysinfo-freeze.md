@@ -55,7 +55,7 @@ map iteration order and whether the stale handler's scope still matches.
 
 ### 2. Stale closure in sysinfo subscription handler (HIGH)
 
-**File:** `frontend/app/view/sysinfo/sysinfo.tsx:379-405`
+**File:** [`frontend/app/view/sysinfo/sysinfo.tsx:379-405`](../../frontend/app/view/sysinfo/sysinfo.tsx)
 
 The `useEffect` subscribes to `"sysinfo"` events with a handler that closes
 over `addContinuousData` (a Jotai `useSetAtom` return value). When React

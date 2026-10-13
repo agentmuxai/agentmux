@@ -116,8 +116,8 @@ Both channels reference the same `tool_use_id`, so the frontend reducer naturall
 | **`.claude/hooks.json` auto-injection** | `agentmux-srv/src/backend/agent_config.rs` | Writes the `PreToolUse` matcher on `Bash` pointing at the hook subcommand |
 | **WPS subject schema** | `agentmux-common/src/wps.rs` (or wherever subject naming lives) | New subject `tool_chunk:<id>`; payload shape defined here |
 | **WPS publish auth** | `agentmux-bashwrap` (both subcommands) | Reads `AGENTMUX_AUTH_KEY` from env (set by the parent claude spawn); attaches `X-AuthKey` on HTTP publish to the sidecar |
-| **Frontend bridge** | `frontend/app/view/agent/useAgentStream.ts` | Subscribes to chunk subjects per active tool; dispatches `ToolChunkAppend` |
-| **Reducer** | `frontend/app/store/agent-document/reducer.ts` | Tiny shape change to accept multi-chunk batches (RAF coalescing). PR #800's logic absorbs unchanged. |
+| **Frontend bridge** | [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Subscribes to chunk subjects per active tool; dispatches `ToolChunkAppend` |
+| **Reducer** | [`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts) | Tiny shape change to accept multi-chunk batches (RAF coalescing). PR #800's logic absorbs unchanged. |
 
 ---
 
@@ -237,7 +237,7 @@ Stderr lines get prefixed with `[stderr] ` when interleaved into the model-visib
 - The text is generic, because how to escalate differs per deployment. Its job is to make the agent look up the path at the moment of failure, which is when the rule matters. Agents on bare `aws` and `cdk` denials otherwise looked for another credential or skipped verification.
 - A command that succeeds never gets the hint, so a `grep` for `AccessDenied` stays clean.
 - The line is part of the tool result, not of the streamed chunks.
-- Code: `access_denied_hint` in `crates/bashwrap/src/bash_wrap.rs`.
+- Code: `access_denied_hint` in [`crates/bashwrap/src/bash_wrap.rs`](../../crates/bashwrap/src/bash_wrap.rs).
 
 ### 4.6 Concurrency
 
@@ -330,7 +330,7 @@ fn wrapper_invocation(tool_id: &str, b64: &str) -> String {
 > **Superseded for Claude Code, 2026-10-10:** commands are no longer rewritten when srv sets `CLAUDE_CODE_SHELL_PREFIX` (the default); the hook only records each call, and `agentmux-bashwrap` runs as the CLI's shell prefix. The rewrite below remains the fallback. See `SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md`.
 
 > [!IMPORTANT]
-> **Amended 2026-10-10.** `updatedInput` *replaces* the tool's whole input; Claude Code does not merge it. The sketch above, which returns `command` alone, made the CLI drop the call's `description`, `timeout` and `run_in_background`: background calls ran in the foreground, every command was cut at 120 s, and tasks were labelled with the wrapper. The hook (`crates/bashwrap/src/hook.rs`) now copies `tool_input` and replaces only `command`. See `docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`.
+> **Amended 2026-10-10.** `updatedInput` *replaces* the tool's whole input; Claude Code does not merge it. The sketch above, which returns `command` alone, made the CLI drop the call's `description`, `timeout` and `run_in_background`: background calls ran in the foreground, every command was cut at 120 s, and tasks were labelled with the wrapper. The hook ([`crates/bashwrap/src/hook.rs`](../../crates/bashwrap/src/hook.rs)) now copies `tool_input` and replaces only `command`. See [`docs/retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md`](../retro/RETRO_BASHWRAP_HOOK_DROPS_BASH_TOOL_FIELDS_2026_10_10.md).
 
 ### 5.3 Merging with user-provided hooks
 
@@ -423,7 +423,7 @@ Four landable PRs after PR #800:
 - New `agentmux-bashwrap/src/hook.rs` for the `hook` subcommand.
 - `agentmux-bashwrap/src/main.rs` adds two subcommands to the dispatch table.
 - `agentmux-srv/src/backend/agent_config.rs` extended to write the `PreToolUse` entry.
-- `frontend/app/view/agent/useAgentStream.ts` chunk subscription lifecycle.
+- [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) chunk subscription lifecycle.
 - Reducer change to multi-chunk `ToolChunkAppend` + test extension.
 
 ### PR γ — RAF coalescing + perf
@@ -559,10 +559,10 @@ Strongest perf + UX path. **Out of scope for this spec.** Requires losing OAuth-
 | `agentmux-bashwrap/Cargo.toml` | Add `portable_pty`, `base64`, `reqwest` | ~5 |
 | `agentmux-srv/src/backend/agent_config.rs` | Auto-inject hook entry; merge logic | ~50 |
 | `agentmux-common/src/wps.rs` | Subject naming + auth helper | ~30 |
-| `frontend/app/view/agent/useAgentStream.ts` | Chunk subscription lifecycle | ~80 |
-| `frontend/app/store/agent-document/reducer.ts` + tests | Multi-chunk `ToolChunkAppend` | ~60 |
-| `frontend/app/store/agent-document/types.ts` | `chunks: ToolLogChunk[]` shape | ~5 |
-| `docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md` | Phase 2 section rewritten to point at this spec | — |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Chunk subscription lifecycle | ~80 |
+| [`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts) + tests | Multi-chunk `ToolChunkAppend` | ~60 |
+| [`frontend/app/store/agent-document/types.ts`](../../frontend/app/store/agent-document/types.ts) | `chunks: ToolLogChunk[]` shape | ~5 |
+| [`docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) | Phase 2 section rewritten to point at this spec | — |
 | Tests across all of the above | | ~350 |
 | **Total** | | **~1000** |
 
@@ -605,6 +605,6 @@ Strongest perf + UX path. **Out of scope for this spec.** Requires losing OAuth-
 - Hooks writer: `agentmux-srv/src/backend/agent_config.rs:112-119`
 - Claude CLI spawn args: `agentmux-srv/src/backend/providers.rs:100-107`
 - Subprocess output → WPS pattern (mirror this): `agentmux-srv/src/backend/blockcontroller/subprocess.rs:442-561`
-- ToolBlock rendering (replaced in PR α): `frontend/app/view/agent/components/ToolBlock.tsx`
-- DocumentRow tool node wiring: `frontend/app/view/agent/virtualization/DocumentRow.tsx:232-238`
+- ToolBlock rendering (replaced in PR α): [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)
+- DocumentRow tool node wiring: [`frontend/app/view/agent/virtualization/DocumentRow.tsx:232-238`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx)
 - Reducer-stack master status (this lands as a Slice item): `reference_master_reducer_status.md`

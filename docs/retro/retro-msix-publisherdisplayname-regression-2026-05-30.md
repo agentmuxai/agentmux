@@ -7,8 +7,8 @@
 **Severity:** Medium — no data lost, no bad artifact shipped to users, but it
 blocked the Microsoft Store submission and is a **third occurrence of the same
 one-line bug** (fixed twice in March, regressed in May).
-**Area:** MSIX packaging — `packaging/msix/AppxManifest.xml.template`,
-`scripts/package-msix.ps1`, `docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md`.
+**Area:** MSIX packaging — [`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template),
+[`scripts/package-msix.ps1`](../../scripts/package-msix.ps1), [`docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md`](../specs/SPEC_MSIX_PACKAGING_2026_05_30.md).
 
 ---
 
@@ -39,7 +39,7 @@ the wrong value again.
 | **2026-03-21** | `bb391461` | agentx-workflow[bot] | **"Fix MSIX PublisherDisplayName to match Store account": → AgentMux** ✅ (1st fix) |
 | 2026-03-26 | `e5389810` → `f74eb732` | AgentX (#240) | "correct MSIX identity for Partner Center" — reaffirmed **→ AgentMux** ✅ |
 | 2026-04-03 | `12333fa2` | AgentA | "delete src-tauri and all Tauri build infrastructure" — deleted the manifest that held the correct **AgentMux**; the fix died with the file |
-| **2026-05-30** | `cc5f7368` | **AgentX** | rebuilt packaging for the CEF app — created a **new** `packaging/msix/AppxManifest.xml.template` and re-typed **AgentMux Corp**, regressing the March fixes. Also baked the wrong value into the spec with a "✅ recovered" annotation. |
+| **2026-05-30** | `cc5f7368` | **AgentX** | rebuilt packaging for the CEF app — created a **new** [`packaging/msix/AppxManifest.xml.template`](../../packaging/msix/AppxManifest.xml.template) and re-typed **AgentMux Corp**, regressing the March fixes. Also baked the wrong value into the spec with a "✅ recovered" annotation. |
 
 **The regression was introduced by AgentX in `cc5f7368`** (the May 30 CEF
 packaging PR, #1209). It was not a malicious or external change — it was a

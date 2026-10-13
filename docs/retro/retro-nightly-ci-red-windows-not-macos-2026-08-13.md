@@ -3,7 +3,7 @@
 **Status:** retro
 
 **Date:** 2026-08-13
-**Area:** `.github/workflows/ci-nightly-build.yml`, `agentmux-srv/tests/subprocess_io.rs`
+**Area:** [`.github/workflows/ci-nightly-build.yml`](../../.github/workflows/ci-nightly-build.yml), `agentmux-srv/tests/subprocess_io.rs`
 
 ---
 

@@ -7,12 +7,12 @@
 needed. The first one should be just 1m, and every one after can build off that. Second, the colour of the bar
 should be the same as the progress status text, which derives from the agent pane colour."
 
-Builds on `docs/specs/SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md` (the estimated bar).
+Builds on [`docs/specs/SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md`](../specs/SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) (the estimated bar).
 Read against `main` at e3a741dcc.
 
 ## 1. How it works today
 
-- `frontend/app/view/agent/compaction-estimate.ts` keeps the last 30 finished compactions (`uuid`, `preTokens`,
+- [`frontend/app/view/agent/compaction-estimate.ts`](../../frontend/app/view/agent/compaction-estimate.ts) keeps the last 30 finished compactions (`uuid`, `preTokens`,
   `durationMs`, `model`) in the window's `localStorage` under `agentmux:compaction-samples:v1`. They are recorded
   from each `compact_boundary` frame in `useAgentStream.ts`.
 - `estimateCompactionMs(samples, contextTokens)` returns the median duration, scaled by the current context size

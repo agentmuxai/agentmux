@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { computeForkSet, type ForkDefinition } from "./fork-set";
+import { computeForkSet, forkPills, type ForkDefinition, type ForkSetEntry } from "./fork-set";
 
 const def = (id: string, over: Partial<ForkDefinition> = {}): ForkDefinition => ({
     id,
@@ -135,5 +135,37 @@ describe("computeForkSet", () => {
         const r = computeForkSet(defs, new Map(), "direct-fork");
         expect(r.map((e) => e.definitionId)).toEqual(["tpl-claude", "direct-fork"]);
         expect(r.find((e) => e.definitionId === "tpl-claude")?.isRoot).toBe(true);
+    });
+});
+
+describe("forkPills", () => {
+    const fork = (id: string, blockId?: string): ForkSetEntry => ({
+        definitionId: id,
+        title: id,
+        isRoot: false,
+        isActive: false,
+        blockId,
+        depth: 1,
+    });
+
+    // The fork-isolation report in #4744, F1: "Loap" open in Tab 1
+    // showed as a tab of Loap #3's pane in Tab 4.
+    const here = new Set(["b-here", "b-here-2"]);
+    const inThisTab = (f: ForkSetEntry) => [f.blockId].find((b) => !!b && here.has(b));
+
+    it("gives a pill only to forks open in this window tab", () => {
+        const forks = [fork("Loap", "b-tab1"), fork("Loap #2", "b-here"), fork("Loap #4")];
+        expect(forkPills(forks, inThisTab)).toEqual([{ blockId: "b-here", label: "Loap #2" }]);
+    });
+
+    it("gives no pill to a fork that isn't open anywhere", () => {
+        expect(forkPills([fork("Loap #4")], inThisTab)).toEqual([]);
+    });
+
+    // #4747: the fork set names one block per definition; the picker may find
+    // another one of the same definition in this tab.
+    it("uses the fork's block in this tab, whichever block the fork set named", () => {
+        const pick = (f: ForkSetEntry) => (f.definitionId === "Loap #2" ? "b-here-2" : undefined);
+        expect(forkPills([fork("Loap #2", "b-tab1")], pick)).toEqual([{ blockId: "b-here-2", label: "Loap #2" }]);
     });
 });

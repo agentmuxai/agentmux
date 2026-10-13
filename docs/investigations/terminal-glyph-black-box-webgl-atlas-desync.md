@@ -17,7 +17,7 @@ mechanism, different code path. Do not conflate the two when triaging.
 
 ## Executive summary
 
-AgentMux's terminal (`frontend/app/view/term/`) is xterm.js v6 rendered through
+AgentMux's terminal ([`frontend/app/view/term/`](../../frontend/app/view/term)) is xterm.js v6 rendered through
 `@xterm/addon-webgl` (WebGL2) by default, with a DOM-renderer fallback. The WebGL renderer
 keeps a CPU-side "shadow model" of what it believes is currently painted per cell
 (character code + fg/bg/ext) purely as a diffing cache to skip redundant GPU draw calls. It
@@ -52,7 +52,7 @@ From `package.json`:
 "@xterm/addon-fit": "^0.11.0",
 ```
 
-`frontend/app/view/term/termwrap.ts:641-683` (`loadRendererAddon`) chooses between the WebGL
+[`frontend/app/view/term/termwrap.ts:641-683`](../../frontend/app/view/term/termwrap.ts) (`loadRendererAddon`) chooses between the WebGL
 addon and xterm's built-in DOM renderer:
 
 ```ts
@@ -82,13 +82,13 @@ WebGL there.
 
 ## 2. The default-value bug that defeats that intent
 
-`useWebGl` is computed in `frontend/app/view/term/term.tsx:188`:
+`useWebGl` is computed in [`frontend/app/view/term/term.tsx:188`](../../frontend/app/view/term/term.tsx):
 
 ```ts
 useWebGl: !ts?.["term:disablewebgl"],
 ```
 
-`term:disablewebgl` has no configured default (`schema/settings.json:35-37` declares only
+`term:disablewebgl` has no configured default ([`schema/settings.json:35-37`](../../schema/settings.json) declares only
 `"type": "boolean"`, no `"default"`), and `settings-template.jsonc:16` ships it
 **commented out**. So for any user who has not explicitly set it, `ts?.["term:disablewebgl"]`
 is `undefined`, and `!undefined === true` — meaning **`useWebGl` is `true` by default on every
@@ -195,7 +195,7 @@ oddity):**
   invalidated — conceptually the same failure mode as §3, one layer lower in the stack.
 
 **Already-known-but-distinct AgentMux-internal precedent:**
-`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md` documents eight prior fix attempts at a
+[`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md`](../archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md) documents eight prior fix attempts at a
 *different* terminal rendering bug (cursor/glyph misalignment after rapid pane creation, not
 scattered black boxes). Its hypothesis list explicitly ruled out disabling WebGL as a fix for
 *that* bug (entry #6: "`term:disablewebgl: true` + DOM-only path; bug persists") — that result

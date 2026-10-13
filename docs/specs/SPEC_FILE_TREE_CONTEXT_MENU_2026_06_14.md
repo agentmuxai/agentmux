@@ -9,7 +9,7 @@ Related: `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md`
 
 ## Problem
 
-The editor pane's file tree (`frontend/app/view/editor/file-tree.tsx`) supports
+The editor pane's file tree ([`frontend/app/view/editor/file-tree.tsx`](../../frontend/app/view/editor/file-tree.tsx)) supports
 single-click (preview open) and double-click (pin tab) — nothing else. Users have
 no way to create, rename, delete, or copy file paths from inside the tree. Every
 such action requires switching to a terminal. This is a significant friction point
@@ -125,7 +125,7 @@ that makes the editor pane feel incomplete as a file-management surface.
 
 ### Open in Terminal flow
 
-1. Backend: `pane.open { view: "term", cwd: folder_path }` via the existing App API.
+1. Backend: `pane.open { view: "term", cwd: folder_path }` via the existing MuxAPI.
 2. The terminal opens in a split-right position by default.
 
 ---

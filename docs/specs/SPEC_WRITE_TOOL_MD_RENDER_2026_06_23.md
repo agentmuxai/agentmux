@@ -6,10 +6,10 @@
 
 > **2026-08-07 audit note:** Implemented (`isMarkdown` detection in
 > `renderRead`/`renderWrite`, `ToolOverlayLog.tsx`). Status field was never
-> updated. See `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+> updated. See [`docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`](../reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md).
 **Extends:** `SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19.md` (implemented in PR #1601)
-**Related:** `frontend/app/view/agent/components/ToolOverlayLog.tsx` (`renderWrite`),
-             `frontend/app/element/markdown.tsx` (`Markdown`)
+**Related:** [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) (`renderWrite`),
+             [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) (`Markdown`)
 
 ---
 
@@ -116,7 +116,7 @@ function renderWrite(node: ToolNode): JSX.Element {
 ### 3.4 Styling
 
 Add `.agent-tool-write-md` to the existing SCSS for the Write tool
-(`frontend/app/view/agent/styles/_document-nodes.scss`):
+([`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss)):
 
 ```scss
 .agent-tool-write-md {
@@ -155,8 +155,8 @@ per-type variant materialises, extract to the registry then.
 
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` | Add `Markdown` import; add `isMarkdown` branch inside `renderWrite` |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Add `.agent-tool-write-md` prose wrapper styles |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) | Add `Markdown` import; add `isMarkdown` branch inside `renderWrite` |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Add `.agent-tool-write-md` prose wrapper styles |
 
 No new components. `Markdown` is already used in the editor pane and `MarkdownBlock`
 pulls it transitively — this adds one direct import to `ToolOverlayLog.tsx`.

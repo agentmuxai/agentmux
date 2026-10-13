@@ -4,7 +4,7 @@
 **Author:** Agent3
 **Verified against:** `main` @ `38978e6ba`, live-verified against the running `task dev` build (branch `agent3/agent-armory-rename-stash`, no relevant divergence from `main` for this area).
 **Status:** Analysis — root causes confirmed (one live-verified via CDP), fix not yet implemented.
-**Scope:** `frontend/app/view/skill/skill-manager.tsx` (Armory's Skills tab) + its backend, `agentmux-srv/src/server/app_api/skill.rs`.
+**Scope:** [`frontend/app/view/skill/skill-manager.tsx`](../../frontend/app/view/skill/skill-manager.tsx) (Armory's Skills tab) + its backend, `agentmux-srv/src/server/app_api/skill.rs`.
 
 ## User's request (verbatim, for traceability)
 
@@ -12,7 +12,7 @@
 
 ## 1. Skill content renders as plain text, not Markdown
 
-`frontend/app/view/skill/skill-manager.tsx:75-84` renders `description`, `trigger`, and `content` as raw `<pre>` text nodes — no Markdown processing:
+[`frontend/app/view/skill/skill-manager.tsx:75-84`](../../frontend/app/view/skill/skill-manager.tsx) renders `description`, `trigger`, and `content` as raw `<pre>` text nodes — no Markdown processing:
 
 ```tsx
 <Show when={skill().description}>
@@ -29,7 +29,7 @@
 
 Confirmed live (screenshot below) — the "Systematic Debugging" skill's `content` field is genuine Markdown (`# Systematic Debugging`, `**bold**`, numbered lists, a code-style trigger) rendered completely unstyled.
 
-**Fix: reuse the existing `Markdown` component** (`frontend/app/element/markdown.tsx`) — a `unified`/`remark-gfm`/`rehype-sanitize` pipeline already used throughout the app (agent chat messages via `MarkdownBlock.tsx`, the editor, tool-result overlays), not a new dependency. Standard invocation:
+**Fix: reuse the existing `Markdown` component** ([`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx)) — a `unified`/`remark-gfm`/`rehype-sanitize` pipeline already used throughout the app (agent chat messages via `MarkdownBlock.tsx`, the editor, tool-result overlays), not a new dependency. Standard invocation:
 
 ```tsx
 <Markdown text={skill().content || "(none)"} scrollable={false} />
@@ -39,7 +39,7 @@ Confirmed live (screenshot below) — the "Systematic Debugging" skill's `conten
 
 **Scope decision — `content` only, not `description`/`trigger`.** `description` and `trigger` are short, single-line-ish free text (a UI label + a trigger phrase, per the create/edit form's plain `<input type="text">` fields, `skill-manager.tsx:147-152` and `:138-145`) — there's no evidence they're meant to hold Markdown, and the create form doesn't offer a Markdown-authoring affordance for them (single-line inputs, not a textarea). Only `content` is authored via a multi-line `<textarea>` (`skill-manager.tsx:154-160`) and is the field the example skill's real body demonstrates is genuine prose Markdown. Recommend leaving `description`/`trigger` as `<pre>` (or even a plain `<span>`, since they're single-line) and converting only `content`.
 
-**Two render sites need this fix, not one.** `frontend/app/view/agent/components/AgentSkillsModal.tsx:107-116` (the per-agent Skills tab, opened via the Stash modal) has the byte-for-byte identical `<pre>`-for-`content` pattern — it's effectively a duplicated detail view, not a shared component. Both need the same `<Markdown>` swap; there's no single shared "skill detail" component to fix once. (Extracting one is a reasonable follow-up but out of scope for this fix — matching the existing duplication rather than doing an unrelated refactor alongside a bug fix.)
+**Two render sites need this fix, not one.** [`frontend/app/view/agent/components/AgentSkillsModal.tsx:107-116`](../../frontend/app/view/agent/components/AgentSkillsModal.tsx) (the per-agent Skills tab, opened via the Stash modal) has the byte-for-byte identical `<pre>`-for-`content` pattern — it's effectively a duplicated detail view, not a shared component. Both need the same `<Markdown>` swap; there's no single shared "skill detail" component to fix once. (Extracting one is a reasonable follow-up but out of scope for this fix — matching the existing duplication rather than doing an unrelated refactor alongside a bug fix.)
 
 The Brain/Memories manager (`global-brain-manager.tsx:199-200`) has the same `<pre>`-for-user-content pattern independently — noted for awareness, but out of scope (not part of this request).
 
@@ -78,7 +78,7 @@ pub(super) fn check_s1(ctx: &RpcContext, req_agent_id: &str) -> Result<(), Strin
 }
 ```
 
-`ctx.agent_id` is stamped exactly once per connection, only when that connection sends a `bus:register` frame (`agentmux-srv/src/server/websocket.rs:373-380`) — something only an actual agent CLI process does on its own out-of-band connection. The Armory pane's WebSocket (`TabRpcClient` / the shared per-window `globalWS`, `frontend/app/store/rpc-util.ts`) is the ordinary human/CEF dashboard connection and **never** sends `bus:register` — grepped the entire `frontend/` tree, zero matches outside a manual test harness script. So `ctx.agent_id` is permanently empty for every RPC call the Armory ever makes, and `check_s1` rejects the bind request before `wstore.skill_bind(...)` (the actual DB write, `skill.rs:209`) is ever reached.
+`ctx.agent_id` is stamped exactly once per connection, only when that connection sends a `bus:register` frame (`agentmux-srv/src/server/websocket.rs:373-380`) — something only an actual agent CLI process does on its own out-of-band connection. The Armory pane's WebSocket (`TabRpcClient` / the shared per-window `globalWS`, [`frontend/app/store/rpc-util.ts`](../../frontend/app/store/rpc-util.ts)) is the ordinary human/CEF dashboard connection and **never** sends `bus:register` — grepped the entire [`frontend/`](../../frontend) tree, zero matches outside a manual test harness script. So `ctx.agent_id` is permanently empty for every RPC call the Armory ever makes, and `check_s1` rejects the bind request before `wstore.skill_bind(...)` (the actual DB write, `skill.rs:209`) is ever reached.
 
 **This is a design/wiring gap, not a data bug.** No DB schema mismatch, no wrong column, no swallowed error — the write path (`Store::skill_bind`, `skills.rs:355-363`, `INSERT OR IGNORE INTO db_agent_skills_ref`) and the read-back path (`skill_list_global`'s `bound_count`) both correctly agree on parameter names and would work fine *if the write ever ran*.
 
@@ -96,8 +96,8 @@ Add a **catalog-scoped bind command**, mirroring the existing `skill.catalog.lis
 
 - `agentmux-srv/src/backend/rpc_types/commands.rs`: new `COMMAND_SKILL_CATALOG_BIND = "skill.catalog.bind"`.
 - `agentmux-srv/src/server/app_api/skill.rs`: new `register_skill_catalog_bind`, same handler body as `register_skill_bind` minus the `check_s1` call (keep the existing "only global skills, or already-bound ones, may be bound" safety check — that's an ownership/data-integrity rule, unrelated to the auth gate being removed).
-- `frontend/app/store/rpc-api/skill.ts`: new `SkillCatalogBindCommand`.
-- `frontend/app/view/skill/skill-model.ts:112`: `bindToAgent` calls the new command instead of `SkillBindCommand`.
+- [`frontend/app/store/rpc-api/skill.ts`](../../frontend/app/store/rpc-api/skill.ts): new `SkillCatalogBindCommand`.
+- [`frontend/app/view/skill/skill-model.ts:112`](../../frontend/app/view/skill/skill-model.ts): `bindToAgent` calls the new command instead of `SkillBindCommand`.
 
 **Why a new command instead of just removing `check_s1` from `skill.bind`:** `skill.bind` may still be the intended future surface for an agent binding a skill to *itself* (self-service), and its `check_s1` gate (same-agent-only) is a real, meaningful restriction for that caller — removing it would silently widen what an authenticated agent connection can do (bind arbitrary skills to *other* agent ids), a security-relevant change nobody asked for. A catalog-tier sibling command is the same pattern already established for list/upsert/delete, costs one small mirrored handler, and leaves the existing command's contract untouched.
 
@@ -114,12 +114,12 @@ Add a **catalog-scoped bind command**, mirroring the existing `skill.catalog.lis
 
 | Concern | File | Line(s) |
 |---|---|---|
-| Armory Skills detail view — plain-text render | `frontend/app/view/skill/skill-manager.tsx` | 75-84 |
-| Per-agent Skills detail view — same bug | `frontend/app/view/agent/components/AgentSkillsModal.tsx` | 107-116 |
-| Markdown component to reuse | `frontend/app/element/markdown.tsx` | 67-75 (props), exported component |
-| Bind button / call site | `frontend/app/view/skill/skill-manager.tsx` | 97-103 |
-| `bindToAgent` view-model method | `frontend/app/view/skill/skill-model.ts` | 105-117 |
-| `SkillBindCommand` RPC wrapper | `frontend/app/store/rpc-api/skill.ts` | 47-53 |
+| Armory Skills detail view — plain-text render | [`frontend/app/view/skill/skill-manager.tsx`](../../frontend/app/view/skill/skill-manager.tsx) | 75-84 |
+| Per-agent Skills detail view — same bug | [`frontend/app/view/agent/components/AgentSkillsModal.tsx`](../../frontend/app/view/agent/components/AgentSkillsModal.tsx) | 107-116 |
+| Markdown component to reuse | [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) | 67-75 (props), exported component |
+| Bind button / call site | [`frontend/app/view/skill/skill-manager.tsx`](../../frontend/app/view/skill/skill-manager.tsx) | 97-103 |
+| `bindToAgent` view-model method | [`frontend/app/view/skill/skill-model.ts`](../../frontend/app/view/skill/skill-model.ts) | 105-117 |
+| `SkillBindCommand` RPC wrapper | [`frontend/app/store/rpc-api/skill.ts`](../../frontend/app/store/rpc-api/skill.ts) | 47-53 |
 | `register_skill_bind` handler (the `check_s1` failure site) | `agentmux-srv/src/server/app_api/skill.rs` | 182-215 |
 | `check_s1` definition | `agentmux-srv/src/server/app_api/mod.rs` | ~856-864 |
 | `bus:register` — the only thing that ever sets `ctx.agent_id` | `agentmux-srv/src/server/websocket.rs` | 373-380 |

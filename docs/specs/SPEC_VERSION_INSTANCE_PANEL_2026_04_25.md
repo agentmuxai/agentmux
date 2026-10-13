@@ -13,7 +13,7 @@ codebase. Two are fortunate (less work), one is scope-trimming:
    `agentmux-cef/src/commands/window.rs:324-348`, complete with
    `SetForegroundWindow` already imported. §5.1 is no-op.
 2. **`token-usage` store is global / session-scoped, NOT
-   per-window** (`frontend/app/store/token-usage.ts:14`). The V1
+   per-window** ([`frontend/app/store/token-usage.ts:14`](../../frontend/app/store/token-usage.ts)). The V1
    ships **without** per-window token totals in the window list
    to avoid blocking on a token-usage refactor. The row format
    simplifies to `Window N · focused-agent · started-at`. A
@@ -36,15 +36,15 @@ HostPopover.
 already returns the labels we need; richer per-window data is a
 follow-up that requires extending the host registry.
 
-Bonus: `AboutModalDetails` TS type at `frontend/types/custom.d.ts`
+Bonus: `AboutModalDetails` TS type at [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)
 has `buildTime: number` but the Rust handler at
 `agentmux-cef/src/commands/platform.rs:127-140` returns string,
 plus `platform`, `arch`, `backendEndpoints` fields the TS type
 omits. V1 fixes the type.
-**Touches:** `frontend/app/statusbar/StatusBar.tsx`,
-             new `frontend/app/statusbar/InstancePanel.tsx`,
-             new `frontend/app/statusbar/_instance-panel.scss`,
-             `frontend/app/store/global.ts` (read-only —
+**Touches:** [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx),
+             new [`frontend/app/statusbar/InstancePanel.tsx`](../../frontend/app/statusbar/InstancePanel.tsx),
+             new [`frontend/app/statusbar/_instance-panel.scss`](../../frontend/app/statusbar/_instance-panel.scss),
+             [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) (read-only —
              consumes existing window/LAN atoms)
 
 ---
@@ -205,7 +205,7 @@ implemented at `agentmux-cef/src/commands/window.rs:324-348` with
 ### 5.2 New frontend atom (V1 — token totals deferred)
 
 `openWindowsAtom: Accessor<WindowInstance[]>` in
-`frontend/app/store/global.ts`. Each `WindowInstance`:
+[`frontend/app/store/global.ts`](../../frontend/app/store/global.ts). Each `WindowInstance`:
 
 ```ts
 interface WindowInstance {
@@ -273,14 +273,14 @@ write the value to clipboard, briefly flash the icon as
 
 ## 9. Cross-references
 
-- `frontend/app/statusbar/StatusBar.tsx` — version-chip
+- [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) — version-chip
   current click handler
-- `frontend/app/statusbar/HostPopover.tsx` — reference
+- [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx) — reference
   popover anchored from the status bar; LAN list source
-- `frontend/app/statusbar/TokenBreakdownPopover.tsx` — the
+- [`frontend/app/statusbar/TokenBreakdownPopover.tsx`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx) — the
   closest sibling; airspace + outside-click handling to
   copy
-- `frontend/app/store/token-usage.ts` — per-window token
+- [`frontend/app/store/token-usage.ts`](../../frontend/app/store/token-usage.ts) — per-window token
   scoping (extend if needed)
 - `agentmux-cef/src/commands/window.rs` — where
   `focusWindow` would land

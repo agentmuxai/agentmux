@@ -5,7 +5,7 @@
 end-to-end through the real `LayoutModel.updateTree()`; one seam flagged for a
 product decision (§4); one item investigated and **withdrawn as a defect** — it
 turned out to be intentional, regression-locked behaviour (§5).
-**Area:** `frontend/layout/lib/layoutGeometry.ts`, `frontend/layout/lib/layoutMinimize.ts`
+**Area:** [`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts), [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts)
 **Trigger:** operator report — "multiple panes open side-by-side with 1 pane atop
 and 1 below; if I start minimizing the middle panes, we get distorted behavior."
 
@@ -205,7 +205,7 @@ const shrunkRect = { ...targetProps.rect,
 ```
 
 But it is **deliberate and locked in by a test**.
-`frontend/layout/tests/layoutModel.test.ts` (the "scales down chip heights
+[`frontend/layout/tests/layoutModel.test.ts`](../../frontend/layout/tests/layoutModel.test.ts) (the "scales down chip heights
 proportionally when a slip group's total height exceeds the target's space" case,
 added for a reagent P1 on **PR #2211**) sets up exactly this saturated slip group
 and asserts:
@@ -254,7 +254,7 @@ zero-height host finds the reasoning instead of re-opening it.
 All measurements came from scratch vitest files, since deleted.
 
 **§2 and §3 (end-to-end).** Copy the preamble of
-`frontend/layout/tests/layoutModel.test.ts` (lines 1–99: its imports, the
+[`frontend/layout/tests/layoutModel.test.ts`](../../frontend/layout/tests/layoutModel.test.ts) (lines 1–99: its imports, the
 `@/app/store/global` `vi.mock`, and `createLayoutModel()`), then build the tree
 shape with `newLayoutNode`, set `n.minimized = true` on the intended leaves,
 assign `model.treeState.rootNode`, call `model.updateTree()`, and read
@@ -264,7 +264,7 @@ assign `model.treeState.rootNode`, call `model.updateTree()`, and read
 
 **§4 (pure functions).** `resolveRowSlipTargets` and
 `computeMainAxisAllocation`, both exported from
-`frontend/layout/lib/layoutGeometry.ts`, called directly.
+[`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts), called directly.
 
 Constants: `HeaderHeightPx = 33`, gap 3, container 800×600 unless stated.
 `createLayoutModel()`'s default bounding rect is 800×600, which is where §2's
@@ -285,13 +285,13 @@ absolute y-coordinates come from.
 
 ## References
 
-- `frontend/layout/lib/layoutGeometry.ts` — `minimizedFixedPx`,
+- [`frontend/layout/lib/layoutGeometry.ts`](../../frontend/layout/lib/layoutGeometry.ts) — `minimizedFixedPx`,
   `minimizedCrossAxisPx`, `computeMainAxisAllocation`, `resolveRowSlipTargets`,
   `updateTreeHelper` Phases A/B/C
-- `frontend/layout/lib/layoutMinimize.ts` — the display-mode model
-- `frontend/layout/tests/layoutMinimize.test.ts` — existing coverage; note its
+- [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts) — the display-mode model
+- [`frontend/layout/tests/layoutMinimize.test.ts`](../../frontend/layout/tests/layoutMinimize.test.ts) — existing coverage; note its
   branch-level cases are all Column
-- `docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`
-- `docs/retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md`
-- `docs/specs/SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md`,
+- [`docs/research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md`](../research/RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md)
+- [`docs/retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md`](../retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md)
+- [`docs/specs/SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md`](../specs/SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md),
   `SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md` — the slip/dissolve requirement

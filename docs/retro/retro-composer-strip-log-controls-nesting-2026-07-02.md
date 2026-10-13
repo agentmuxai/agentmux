@@ -6,7 +6,7 @@ explicitly specified and shipped incorrectly)
 **Status:** retro — Root-caused; fix not yet implemented (design in
 `SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md`)
 **Reporter:** asaf
-**Component:** agent pane composer strip / details region (`frontend/app/view/agent`)
+**Component:** agent pane composer strip / details region ([`frontend/app/view/agent`](../../frontend/app/view/agent))
 
 ---
 
@@ -31,7 +31,7 @@ Log**, not nested inside anything the Log button opens.
 
 ## 2. How the flow is supposed to work (per the most recent spec)
 
-`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` Part C ("Log button — one toggle, no
+[`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md`](../specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) Part C ("Log button — one toggle, no
 middle level") documents this exact nesting problem and explicitly names three levels:
 - **L1** — the Log button (`AgentComposerStrip.tsx`) → `detailsOpenAtom` → renders
   `.agent-composer-details`, which mounts **both** `<ActivityLogPanel>` and `<AgentControlBar>`
@@ -104,7 +104,7 @@ explicit scope decision in the accompanying design doc rather than silently reso
 
 ## 5. Recommended fixes (ranked)
 
-See `docs/specs/SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md` for the full design. Summary:
+See [`docs/specs/SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md`](../specs/SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md) for the full design. Summary:
 
 1. **Add an editable Mode `<select>` to `AgentComposerStrip.tsx`**, top-level, alongside Model and
    Effort, before the Log button. Replace the read-only permission pill (redundant once Mode is an
@@ -139,10 +139,10 @@ See `docs/specs/SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md` for the full de
   (nested Controls chevron + Mode/Model/Effort body); `view/agent/agent-view.tsx:1005-1016`
   (`.agent-composer-details` mounts both `ActivityLogPanel` and `AgentControlBar`);
   `view/agent/components/ActivityLogPanel.tsx:48-56` (L2 fix, already shipped).
-- Specs: `docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` Part C (names this exact
-  nesting, ships (a) instead of (b)); `docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md`
+- Specs: [`docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md`](../specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) Part C (names this exact
+  nesting, ships (a) instead of (b)); [`docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md`](../specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md)
   (earlier pass that promoted Model/Effort but not Mode, and explicitly called the
-  `AgentControlBar` duplication "acceptable" at the time); `docs/specs/SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md`
+  `AgentControlBar` duplication "acceptable" at the time); [`docs/specs/SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md`](../specs/SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md)
   (renamed Shell → Log, removed the strip-level chevron).
 - Commits: `1db3a8a2` (#1899, removed L2 middle collapse layer), `1087eec8` (#1900, registry-driven
   model dropdowns).

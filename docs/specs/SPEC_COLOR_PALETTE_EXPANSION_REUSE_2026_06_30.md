@@ -126,7 +126,7 @@ Result: 7 cols × 2 rows = 14 swatches, same 20px swatch size, same gap.
 
 ### 2. Extract reusable `ColorSwatchPalette` module
 
-**New file:** `frontend/app/components/color-swatch-palette.tsx`
+**New file:** [`frontend/app/components/color-swatch-palette.tsx`](../../frontend/app/components/color-swatch-palette.tsx)
 
 ```tsx
 export interface SwatchColor {
@@ -149,7 +149,7 @@ export function ColorSwatchPalette(props: ColorSwatchPaletteProps): JSX.Element 
 }
 ```
 
-**New file:** `frontend/app/components/color-swatch-palette.scss`  
+**New file:** [`frontend/app/components/color-swatch-palette.scss`](../../frontend/app/components/color-swatch-palette.scss)\
 Contains `.color-swatch-grid`, `.color-swatch`, and `.color-swatch-clear` rules,
 extracted and generalized from the tab-specific rules in `tab.scss`.
 
@@ -319,14 +319,14 @@ setColorPanelAnchor(headerEl.getBoundingClientRect());
 
 | File | Change |
 |------|--------|
-| `frontend/app/tab/tab.tsx` | Expand `TAB_COLORS` to 14; replace inline swatch block with `<ColorSwatchPalette columns={7} />` |
-| `frontend/app/tab/tab.scss` | `repeat(5, 20px)` → `repeat(7, 20px)`; remove swatch styles (move to palette scss) |
-| `frontend/app/components/color-swatch-palette.tsx` | **NEW** reusable swatch grid + clear button |
-| `frontend/app/components/color-swatch-palette.scss` | **NEW** extracted + generalized swatch styles |
-| `frontend/app/block/pane-color-menu.ts` | Replace 8-hue `PANE_HUE_OPTIONS` with 12 at 30° steps; add `PANE_SWATCH_COLORS`; delete `buildPaneColorSubmenu` |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Expand `TAB_COLORS` to 14; replace inline swatch block with `<ColorSwatchPalette columns={7} />` |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | `repeat(5, 20px)` → `repeat(7, 20px)`; remove swatch styles (move to palette scss) |
+| [`frontend/app/components/color-swatch-palette.tsx`](../../frontend/app/components/color-swatch-palette.tsx) | **NEW** reusable swatch grid + clear button |
+| [`frontend/app/components/color-swatch-palette.scss`](../../frontend/app/components/color-swatch-palette.scss) | **NEW** extracted + generalized swatch styles |
+| [`frontend/app/block/pane-color-menu.ts`](../../frontend/app/block/pane-color-menu.ts) | Replace 8-hue `PANE_HUE_OPTIONS` with 12 at 30° steps; add `PANE_SWATCH_COLORS`; delete `buildPaneColorSubmenu` |
 | `frontend/app/block/pane-color-panel.tsx` | **NEW** `PaneColorPanel` portal component (separator + 4×3 grid + clear button) |
 | `frontend/app/block/pane-color-panel.scss` | **NEW** panel frame styles |
-| `frontend/app/block/blockframe.tsx` | Wire `colorPanelAnchor` signal; show `<PaneColorPanel>` for all pane types; remove `buildPaneColorSubmenu` call |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | Wire `colorPanelAnchor` signal; show `<PaneColorPanel>` for all pane types; remove `buildPaneColorSubmenu` call |
 
 ---
 

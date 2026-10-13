@@ -3,14 +3,14 @@
 **Status:** implemented — Windows #2308, macOS rebuild (tag cef-macos-arm64-148.23.23-codecs) closed via #2347/#2399, Linux release cut, CI resolver #2353; H.264/AAC verified on all three platforms. Verified 2026-08-10.
 **Author:** Agent2
 **Date:** 2026-07-26
-**Related:** `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`
+**Related:** [`docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`](../reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md)
 (the finding that triggered this spec — MP4/MOV fail to play anywhere in
-the app on the current CEF build), `docs/cef-build/build-patched-libcef.md`
-(Linux build process this extends), `docs/cef-build/build-patched-framework-macos.md`
-(macOS counterpart), `docs/specs/patched-libcef-bundling-2026-05-08.md`
+the app on the current CEF build), [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md)
+(Linux build process this extends), [`docs/cef-build/build-patched-framework-macos.md`](../cef-build/build-patched-framework-macos.md)
+(macOS counterpart), [`docs/specs/patched-libcef-bundling-2026-05-08.md`](patched-libcef-bundling-2026-05-08.md)
 (the Linux CI-sourcing design this generalizes to Windows),
-`docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md`,
-`docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md` (contains
+[`docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md`](SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md),
+[`docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) (contains
 a stale claim corrected here — see "Doc fix" below).
 
 ## Key finding — corrects the original request's premise
@@ -35,8 +35,8 @@ support**, and it's worth explaining precisely why before describing what
   binary release" as a distinct, deliberately-separate, manual step from
   any source PR — never something a PR itself triggers or completes.
 - The GN args that *do* need changing are already version-controlled —
-  **in this repo**, not the fork: `scripts/cef-build/args.gn` (Linux),
-  `scripts/cef-build/args-darwin.gn` (macOS). Adding the codec flags there
+  **in this repo**, not the fork: [`scripts/cef-build/args.gn`](../../scripts/cef-build/args.gn) (Linux),
+  [`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn) (macOS). Adding the codec flags there
   is a normal PR against `agentmux`, exactly like any other change in this
   spec.
 - What the fork's GitHub Releases mechanism actually is: a **distribution
@@ -59,7 +59,7 @@ silently reinterpreting the request — worth confirming before proceeding.
 
 ## Doc fix (small, unrelated to the main plan, found during research)
 
-`docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md` line
+[`docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) line
 283 states Windows "already ships its own patched CEF via the launcher
 bundle." This is stale/incorrect — confirmed at every layer (Taskfile
 tasks, all CI workflows, resolver scripts, the codec-gap report filed
@@ -131,8 +131,8 @@ simply doesn't have a decoder for them, licensed or otherwise. "Wide
 coverage" here means everything Chromium's own media stack is *capable*
 of, not literally every codec that exists.
 
-Add to `scripts/cef-build/args.gn`, `scripts/cef-build/args-darwin.gn`,
-and the new `scripts/cef-build/args-windows.gn` (§2 below):
+Add to [`scripts/cef-build/args.gn`](../../scripts/cef-build/args.gn), [`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn),
+and the new [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) (§2 below):
 
 ```
 proprietary_codecs=true
@@ -156,13 +156,13 @@ up automatically without needing to change the *selection* logic itself
 
 Windows needs everything Linux/macOS already have, built fresh:
 
-- **`scripts/cef-build/args-windows.gn`** — new file. Base: standard CEF
+- **[`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn)** — new file. Base: standard CEF
   Release GN args (mirroring the shape of `args.gn`/`args-darwin.gn`) plus
   `proprietary_codecs=true ffmpeg_branding="Chrome"`. Does **not** need
   the Linux/macOS size-reduction block's rationale re-derived from
   scratch — copy the `is_official_build=true` reasoning, it applies
   identically on Windows.
-- **`docs/cef-build/build-patched-cef-windows.md`** — new doc, Windows
+- **[`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md)** — new doc, Windows
   counterpart to the two existing per-platform build docs. Same
   chromium/depot_tools/GN mechanics, Windows-specific toolchain
   prerequisites (Visual Studio, Windows SDK — same ones this repo's own
@@ -179,7 +179,7 @@ Windows needs everything Linux/macOS already have, built fresh:
   source branch across all three platforms, and it costs nothing
   functionally on Windows today) but this is a real judgment call, not
   something to pick silently.
-- **`scripts/resolve-cef-runtime-windows.ps1`** — new PowerShell resolver,
+- **[`scripts/resolve-cef-runtime-windows.ps1`](../../scripts/resolve-cef-runtime-windows.ps1)** — new PowerShell resolver,
   same three-tier priority as the bash ones (`$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS`
   env override → standard local build-output layout → stock
   cef-dll-sys cache fallback).
@@ -274,18 +274,18 @@ plan, and not something this spec attempts to solve.
 
 | File | Relevance |
 |------|-----------|
-| `scripts/cef-build/args.gn` | Linux GN args — add codec flags |
-| `scripts/cef-build/args-darwin.gn` | macOS GN args — add codec flags |
-| `scripts/cef-build/args-windows.gn` (new) | Windows GN args — new file |
-| `scripts/cef-build/configure-cef-build.sh` | Linux configure script — Windows needs an equivalent (or a cross-platform rewrite) |
-| `docs/cef-build/build-patched-cef-windows.md` (new) | Windows build instructions |
-| `docs/cef-build/build-patched-libcef.md`, `build-patched-framework-macos.md` | Existing Linux/macOS build docs — precedent to mirror |
-| `scripts/resolve-cef-runtime.sh`, `scripts/resolve-cef-runtime-darwin.sh` | Existing resolvers — precedent for the new Windows one |
-| `scripts/resolve-cef-runtime-windows.ps1` (new) | Windows resolver |
+| [`scripts/cef-build/args.gn`](../../scripts/cef-build/args.gn) | Linux GN args — add codec flags |
+| [`scripts/cef-build/args-darwin.gn`](../../scripts/cef-build/args-darwin.gn) | macOS GN args — add codec flags |
+| [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) (new) | Windows GN args — new file |
+| [`scripts/cef-build/configure-cef-build.sh`](../../scripts/cef-build/configure-cef-build.sh) | Linux configure script — Windows needs an equivalent (or a cross-platform rewrite) |
+| [`docs/cef-build/build-patched-cef-windows.md`](../cef-build/build-patched-cef-windows.md) (new) | Windows build instructions |
+| [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md), `build-patched-framework-macos.md` | Existing Linux/macOS build docs — precedent to mirror |
+| [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh), [`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh) | Existing resolvers — precedent for the new Windows one |
+| [`scripts/resolve-cef-runtime-windows.ps1`](../../scripts/resolve-cef-runtime-windows.ps1) (new) | Windows resolver |
 | `Taskfile.yml` (`build:host:windows`, `bundle:windows`, `build:host:linux`'s `patched-libcef` feature gate for reference) | Needs the same override capability Linux already has |
-| `.github/workflows/build-linux.yml`, `build-macos.yml` | Precedent for the new `build-windows.yml` |
-| `.github/workflows/build-windows.yml` (new) | New reusable workflow |
-| `.github/workflows/release.yml` (`build-windows` job) | Switch to calling the new reusable workflow |
-| `.github/workflows/ci-nightly-artifacts.yml` (Windows job) | Add the same inline CEF-provisioning block Linux/macOS jobs already have there |
+| [`.github/workflows/build-linux.yml`](../../.github/workflows/build-linux.yml), `build-macos.yml` | Precedent for the new `build-windows.yml` |
+| [`.github/workflows/build-windows.yml`](../../.github/workflows/build-windows.yml) (new) | New reusable workflow |
+| [`.github/workflows/release.yml`](../../.github/workflows/release.yml) (`build-windows` job) | Switch to calling the new reusable workflow |
+| [`.github/workflows/ci-nightly-artifacts.yml`](../../.github/workflows/ci-nightly-artifacts.yml) (Windows job) | Add the same inline CEF-provisioning block Linux/macOS jobs already have there |
 | `agentmux-cef/Cargo.toml` (`patched-libcef` feature) | Reference for whether Windows needs an equivalent feature gate (likely not, since no FFI-level source patch is needed for codecs — worth confirming during implementation, not assumed here) |
-| `docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md:283` | Stale Windows claim to correct |
+| [`docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md:283`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) | Stale Windows claim to correct |

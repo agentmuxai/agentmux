@@ -12,7 +12,7 @@ When a pane is "moved" to a new window, the block controller (PTY, agent session
 
 ### Magnify button
 - **Icon:** `frontend/app/asset/magnify.svg` — rendered via `frontend/app/element/magnify.tsx`
-- **Placement:** `BlockFrame_Header` in `frontend/app/block/blockframe.tsx` (~line 120)
+- **Placement:** `BlockFrame_Header` in [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) (~line 120)
 - **Behavior:** Toggles in-place magnification (pane fills tab, siblings fade)
 - **Disabled when:** Only one pane in the tab (`numLeafs <= 1`)
 

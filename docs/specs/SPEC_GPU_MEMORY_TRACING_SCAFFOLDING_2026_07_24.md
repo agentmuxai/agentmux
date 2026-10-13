@@ -1,7 +1,7 @@
 # Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess
 
 **Date:** 2026-07-24
-**Motivating issue:** #2218 (reopened) — `docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`
+**Motivating issue:** #2218 (reopened) — [`docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`](../status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md)
 §9-§12 established, from ~9 hours of real telemetry on a single idle-ish pane, that system commit
 grows ~0.8 GB/hour **independent of renderer count** (ruled out by the July 16 restart experiment)
 **and independent of logged content/activity** (ruled out §12, same session). Neither of the two

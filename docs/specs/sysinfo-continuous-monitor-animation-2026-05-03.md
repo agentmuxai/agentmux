@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-03
 **Status:** historical — Analysis + spec draft. Brittleness assessment in §5 — read that first before deciding to build.
-**Scope:** `frontend/app/view/sysinfo/sysinfo-plot.tsx`
+**Scope:** [`frontend/app/view/sysinfo/sysinfo-plot.tsx`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx)
 
 ## Problem
 
@@ -128,9 +128,9 @@ A is better. Build A.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/sysinfo/sysinfo-plot.tsx` | Wrap data layer in masked div; add RAF loop with transform updates; reset on new sample |
-| `frontend/app/view/sysinfo/sysinfo-plot.scss` (new) | Mask wrapper styling (`overflow: hidden`, fixed width) |
-| `frontend/app/view/sysinfo/sysinfo-model.ts` | (No change — already exposes `intervalSecs`) |
+| [`frontend/app/view/sysinfo/sysinfo-plot.tsx`](../../frontend/app/view/sysinfo/sysinfo-plot.tsx) | Wrap data layer in masked div; add RAF loop with transform updates; reset on new sample |
+| [`frontend/app/view/sysinfo/sysinfo-plot.scss`](../../frontend/app/view/sysinfo/sysinfo-plot.scss) (new) | Mask wrapper styling (`overflow: hidden`, fixed width) |
+| [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) | (No change — already exposes `intervalSecs`) |
 
 ### Behavior change
 

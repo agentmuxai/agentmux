@@ -207,7 +207,7 @@ partial list.
 | [`SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07`](SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md) | Spec: Make AgentMux's ACP client speak ACP v1 |
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
 | [`SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) | Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound |
-| [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via the Agent App API |
+| [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via MuxAPI |
 | [`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05`](SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md) | SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
@@ -501,7 +501,7 @@ partial list.
 | [`SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md) | SPEC: Harden the "Working…" indicator and message-list auto-follow against four related recurring bugs |
 | [`SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19`](SPEC_WRITE_TOOL_CONTENT_VIEW_2026_06_19.md) | SPEC: Write tool expanded content view |
 | [`SPEC_WRITE_TOOL_MD_RENDER_2026_06_23`](SPEC_WRITE_TOOL_MD_RENDER_2026_06_23.md) | SPEC: Render `.md` content as markdown in the Write tool overlay |
-| [`app-api-extension`](app-api-extension.md) | App API Extension Spec |
+| [`app-api-extension`](app-api-extension.md) | MuxAPI Extension Spec |
 | [`cef-portable-build`](cef-portable-build.md) | Spec: CEF Portable Build Pipeline |
 | [`command-palette`](command-palette.md) | Command Palette — Spec |
 | [`dev-build-env-isolation`](dev-build-env-isolation.md) | Dev-Build Env Isolation |
@@ -612,8 +612,8 @@ partial list.
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
-| [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API |
-| [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
+| [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
+| [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03`](SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md) | SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
@@ -655,7 +655,7 @@ partial list.
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
-| [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
+| [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name MuxAPI hardening (phantom-id success + status codes) |
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
 | [`linux-pool-startup-fill-2026-05-08`](linux-pool-startup-fill-2026-05-08.md) | Linux/macOS: wire startup-time window-pool fill |
@@ -749,6 +749,7 @@ partial list.
 | [`SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02`](SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md) | SPEC: macOS Launch Speed + Splash Load-Time Telemetry |
 | [`SPEC_MACOS_PACKAGING_2026_05_30`](SPEC_MACOS_PACKAGING_2026_05_30.md) | Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg` |
 | [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29`](SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md) | macOS Tear-off Stability — implementation spec |
+| [`SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12`](SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md) | Media pane: a faint AgentMux logo when no file is open |
 | [`SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | Spec: Media pane v2 — gaps found running a real agent video-editing workflow through it |
 | [`SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29`](SPEC_MEDIA_PANE_V3_BROWSER_AND_CUSTOM_TRANSPORT_2026_07_29.md) | Spec: Media pane v3 — persistent browser + custom playback/scrub UI |
 | [`SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02`](SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md) | SPEC — Commit-attribution correction + genuine AgentMux memory-hygiene fixes |
@@ -883,7 +884,7 @@ partial list.
 | [`SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20`](SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20.md) | SPEC: Move Activity Dock to Bottom of Agent Pane |
 | [`SPEC_ADD_PROVIDERS_QWEN_AIDER_2026_06_02`](SPEC_ADD_PROVIDERS_QWEN_AIDER_2026_06_02.md) | SPEC: Add Qwen Code & aider as agent providers |
 | [`SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17`](SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md) | Agent API: First-Class Surface (naming, layout, identity, introspection) |
-| [`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28`](SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md) | SPEC: Agent App API — MCP is the Agent Entry Point |
+| [`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28`](SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md) | SPEC: MuxAPI — MCP is the Agent Entry Point |
 | [`SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24`](SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24.md) | SPEC: Robust cross-instance window discovery, capture, and naming |
 | [`SPEC_AGENT_BROWSER_CONTROL_2026_04_17`](SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md) | SPEC: Agent Browser Control |
 | [`SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26`](SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md) | SPEC: Slim composer status strip + expandable details panel |
@@ -917,7 +918,7 @@ partial list.
 | [`SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08`](SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md) | SPEC: Working-Indicator Shimmer + Mic Button Relocation |
 | [`SPEC_ALWAYS_RESPOND_TO_USER_ACTIONS_2026_04_15`](SPEC_ALWAYS_RESPOND_TO_USER_ACTIONS_2026_04_15.md) | SPEC: Always Respond to User Actions |
 | [`SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08`](SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md) | SPEC: Ambient Haiku-Summary Sanitization + Terseness Pass |
-| [`SPEC_APP_API_AGENT_DEFINE_2026_06_06`](SPEC_APP_API_AGENT_DEFINE_2026_06_06.md) | SPEC: App API — `agent.define` (Import / Upsert Agent Definition) |
+| [`SPEC_APP_API_AGENT_DEFINE_2026_06_06`](SPEC_APP_API_AGENT_DEFINE_2026_06_06.md) | SPEC: MuxAPI — `agent.define` (Import / Upsert Agent Definition) |
 | [`SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16`](SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16.md) | SPEC — Armory Accounts: AgentMux icon (already correct) + remove modals, match single-pane page dynamics |
 | [`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) | SPEC — Armory Phase 5: drop Identities, rename/reorder tabs, seed a starter Skill catalog |
 | [`SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05`](SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05.md) | SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file |
@@ -1059,7 +1060,7 @@ partial list.
 | [`SPEC_TERMINAL_FLOW_CONTROL_2026_05_30`](SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md) | SPEC: Terminal flow control (PTY backpressure) |
 | [`SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31`](SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md) | SPEC: Terminal Predictive Local Echo |
 | [`SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10`](SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10.md) | SPEC: Zero-Width Terminal Gap at All Zoom Levels |
-| [`SPEC_TEST_API_ACCESS`](SPEC_TEST_API_ACCESS.md) | SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename) |
+| [`SPEC_TEST_API_ACCESS`](SPEC_TEST_API_ACCESS.md) | SPEC: Test-Harness Access to MuxAPI (+ /wave → /agentmux rename) |
 | [`SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16`](SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md) | SPEC: Tool Auto-Expand Panel (Replace Portal Overlay) |
 | [`SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13`](SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md) | Spec: Tool Hover Overlay + Scroll-on-Type |
 | [`SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10`](SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md) | SPEC: Unified Agent Conversation-History Store |
@@ -1125,6 +1126,7 @@ partial list.
 | [`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23`](TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md) | TRACKING — Agent pane bounded live window (phase progress) |
 | [`TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | TRACKING — Typing & terminal input responsiveness |
 | [`TRACKING_WAN_JEKT_VERIFICATION_2026_09_25`](TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md) | TRACKING — WAN jekt verification (same-account, W3-S) |
+| [`app-api-status`](app-api-status.md) | MuxAPI — Implementation Status |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions |
 
 ### historical
@@ -1198,7 +1200,7 @@ Fix one when you touch it and know its real state.
 | [`SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11`](SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md) | SPEC: Agent Failure Diagnostics — Surfacing the "Why" Behind a Non-Zero Exit |
 | [`SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) | SPEC: Agent Failure Recovery UI (per-error-class actions) |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN`](SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md) | SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md |
-| [`SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18`](SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md) | SPEC: Agent UI Automation (Click + Screenshot) as a First-Class Agent App API Capability |
+| [`SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18`](SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md) | SPEC: Agent UI Automation (Click + Screenshot) as a First-Class MuxAPI Capability |
 | [`SPEC_ARMORY_MCP_SERVER_DEFAULT_SEED_CATALOG_2026_07_13`](SPEC_ARMORY_MCP_SERVER_DEFAULT_SEED_CATALOG_2026_07_13.md) | Spec: Default Seed Catalog for the Armory's MCP Servers Tab |
 | [`SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12`](SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md) | Spec: Completing Armory Phase 4 — the Storage Rename |
 | [`SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10`](SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10.md) | Spec: Preloaded MCP Server Connectors for Creative Apps (Ableton Live, TouchDesigner, and Others) |
@@ -1260,8 +1262,7 @@ Fix one when you touch it and know its real state.
 | [`agent-6-buttons-plan`](agent-6-buttons-plan.md) | Plan: Agent Pane — 6 Provider Buttons (Raw + Styled) |
 | [`agent-health-codebase-audit`](agent-health-codebase-audit.md) | Agent Health/Liveness Detection — Codebase Audit |
 | [`agent-widget-forge-integration`](agent-widget-forge-integration.md) | Spec: Agent Widget — Forge Integration |
-| [`app-api-pane-open`](app-api-pane-open.md) | App API — `pane.open` Spec |
-| [`app-api-status`](app-api-status.md) | App API — Implementation Status |
+| [`app-api-pane-open`](app-api-pane-open.md) | MuxAPI — `pane.open` Spec |
 | [`app-update-check`](app-update-check.md) | App Update Check |
 | [`backend-status-tests`](backend-status-tests.md) | Test Spec: Backend Status Atom (`backendStatusAtom`) |
 | [`cef-white-flash-testbed`](cef-white-flash-testbed.md) | CEF White Flash Testbed — Spec |

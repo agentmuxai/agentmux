@@ -19,7 +19,7 @@ This document is the execution roadmap for the spec's seven action items. Items 
 
 **Concrete steps:**
 
-1. Locate the Enter handler in `frontend/app/view/agent/components/AgentFooter.tsx` (grep for `Enter` in `onKeyDown`).
+1. Locate the Enter handler in [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) (grep for `Enter` in `onKeyDown`).
 2. Add the guard:
    ```ts
    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
@@ -30,7 +30,7 @@ This document is the execution roadmap for the spec's seven action items. Items 
 3. Gate the slash-autocomplete prefix tracker on composition state — add `compositionstart`/`compositionend` listeners that pause input processing while composing.
 4. Manual test: open agent pane, switch input source to a CJK IME (or use Windows IME emulator), type pinyin/romaji, press Space to bring up candidates, press Enter to confirm — should commit to textarea, NOT submit the agent prompt. Then press Enter again — should submit.
 
-**Files touched:** `frontend/app/view/agent/components/AgentFooter.tsx` (one file).
+**Files touched:** [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) (one file).
 
 **Acceptance:**
 - Enter-during-composition does not call submit (verified via manual test + a unit test that synthesizes a `KeyboardEvent` with `isComposing: true`).
@@ -51,7 +51,7 @@ This document is the execution roadmap for the spec's seven action items. Items 
 
 **Concrete steps:**
 
-1. Read `frontend/app/view/term/termwrap.ts` to see the existing `performance.mark()` / `performance.measure()` shape (look for `term-keypress`, `term-echo-render`, `term-raf-write`).
+1. Read [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) to see the existing `performance.mark()` / `performance.measure()` shape (look for `term-keypress`, `term-echo-render`, `term-raf-write`).
 2. Add identical pattern to `AgentFooter.tsx`:
    - `agent-keystroke` — `onInput` entry → return
    - `agent-input-raf` — RAF enqueue → callback start
@@ -60,7 +60,7 @@ This document is the execution roadmap for the spec's seven action items. Items 
 3. Wire each pair into `performance.measure()` so they show up in the Perf HUD's Timings row.
 4. Verify in DevTools: type a character, see the marks appear in the Timings row; the `agent-keystroke` span should be <2 ms per the current target.
 
-**Files touched:** `frontend/app/view/agent/components/AgentFooter.tsx`. Possibly extend the Perf HUD label list if it has a hardcoded set (check `frontend/app/perf/` or similar).
+**Files touched:** [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx). Possibly extend the Perf HUD label list if it has a hardcoded set (check `frontend/app/perf/` or similar).
 
 **Acceptance:**
 - All four marks visible in CEF DevTools Performance tab.
@@ -93,10 +93,10 @@ Three candidates:
 **Q2: How to drive synthetic keystrokes without firing the agent?**
 
 Two options:
-- (a) Use the App API (`pane.open agent` + send synthetic keys via CDP `Input.dispatchKeyEvent`).
+- (a) Use MuxAPI (`pane.open agent` + send synthetic keys via CDP `Input.dispatchKeyEvent`).
 - (b) Bench the textarea in isolation, mounted in a fixture page outside the agent pane.
 
-**Decision: (a).** Same approach as the terminal bench — it drives a real pane via App API. Isolating the textarea would miss interaction with the surrounding pane (virtualized document above, status strip below). Need a "dry-run" mode: type characters into the textarea, never actually submit (never trigger an agent invocation, never spend tokens). Spec §6.1 already establishes the textarea is uncontrolled, so typing without submitting is the natural pattern.
+**Decision: (a).** Same approach as the terminal bench — it drives a real pane via MuxAPI. Isolating the textarea would miss interaction with the surrounding pane (virtualized document above, status strip below). Need a "dry-run" mode: type characters into the textarea, never actually submit (never trigger an agent invocation, never spend tokens). Spec §6.1 already establishes the textarea is uncontrolled, so typing without submitting is the natural pattern.
 
 **Q3: What latency target does the bench enforce?**
 
@@ -104,21 +104,21 @@ Per spec §2: P50 ≤ 16 ms, P95 ≤ 50 ms (the "internal snappy" budget for age
 
 ### Approach
 
-1. Copy `tools/tests/bench-term-echo.mjs` skeleton.
-2. Open an agent pane via App API (`pane.open` with widget `agent`).
+1. Copy [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs) skeleton.
+2. Open an agent pane via MuxAPI (`pane.open` with widget `agent`).
 3. Focus the textarea (CDP `Element.focus` on the `.agent-input` selector).
 4. Drive N synthetic keystrokes (e.g. 200) via CDP `Input.dispatchKeyEvent`, each spaced ≥ 50 ms apart (avoid burst collapse).
 5. For each keystroke: timestamp at dispatch → wait for the matching `agent-keystroke` mark + next RAF callback → compute latency.
 6. Compute P50, P95, max. Report.
 7. Exit non-zero if P95 > 50 ms (configurable via `--p95-threshold-ms`).
 
-**Files touched:** `tools/tests/bench-agent-keystroke.mjs` (new). Possibly a small `tools/tests/lib/bench-common.mjs` if shared logic with `bench-term-echo.mjs` is worth extracting.
+**Files touched:** [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) (new). Possibly a small `tools/tests/lib/bench-common.mjs` if shared logic with `bench-term-echo.mjs` is worth extracting.
 
 **Acceptance:**
 - Bench runs from `agent1` container against a `task dev` instance.
 - Reports P50, P95, max latency; produces a JSON line consumable by CI.
 - Reproducible run-to-run (P95 variance < 5 ms).
-- Documented in `tools/tests/README.md` next to the term bench.
+- Documented in [`tools/tests/README.md`](../../tools/tests/README.md) next to the term bench.
 
 **Risk:** Synthetic key dispatch may not perfectly emulate real OS keystrokes (timing jitter, IME interactions). Mitigation: state explicitly in the bench README that it measures the *handler + render path*, not OS input pipeline.
 
@@ -145,8 +145,8 @@ Per spec §2: P50 ≤ 16 ms, P95 ≤ 50 ms (the "internal snappy" budget for age
 
 ### Approach (v1: grep)
 
-1. Add `tools/lint/check-input-handler-layout-reads.sh`:
-   - Scans `frontend/app/view/term/**/*.ts*` and `frontend/app/view/agent/components/AgentFooter.tsx`.
+1. Add [`tools/lint/check-input-handler-layout-reads.sh`](../../tools/lint/check-input-handler-layout-reads.sh):
+   - Scans `frontend/app/view/term/**/*.ts*` and [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx).
    - Identifies functions attached to `onInput|onKeyDown|onKeyPress|onKeyUp|onBeforeInput|onCompositionUpdate` props.
    - Within those functions' line ranges, greps for the banned identifiers: `scrollHeight`, `scrollTop`, `scrollWidth`, `scrollLeft`, `offsetHeight`, `offsetTop`, `offsetWidth`, `offsetLeft`, `clientHeight`, `clientTop`, `clientWidth`, `clientLeft`, `getBoundingClientRect`, `getClientRects`, `getComputedStyle`.
    - Exits non-zero with a diff-style report on match.
@@ -164,7 +164,7 @@ Custom ESLint rule under `tools/eslint-rules/no-layout-read-in-input-handler.js`
 
 Decision point for v2: if grep produces >5 false positives in the first month, escalate to ESLint.
 
-**Files touched:** `tools/lint/check-input-handler-layout-reads.sh` (new), `.github/workflows/<frontend-ci>.yml` (modify).
+**Files touched:** [`tools/lint/check-input-handler-layout-reads.sh`](../../tools/lint/check-input-handler-layout-reads.sh) (new), `.github/workflows/<frontend-ci>.yml` (modify).
 
 **Acceptance:**
 - Grep script runs in <1 s on the full frontend tree.
@@ -233,7 +233,7 @@ If profiling triggers implementation:
 3. Wire `targetFps` to a setting (`terminal:target_fps` or auto-derived from `navigator.getBattery()`).
 4. Re-run profile to confirm the predicted thermal benefit.
 
-**Files touched (if coding):** `frontend/app/view/term/termwrap.ts`, settings schema.
+**Files touched (if coding):** [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts), settings schema.
 
 **Acceptance (if coding):**
 - Profile shows ≥10°C reduction in sustained GPU temp under heavy output, with coalescer at 60 fps AC / 30 fps battery.
@@ -279,7 +279,7 @@ Cross-stack change:
 
 This needs its own spec doc — outline only here. Cite the [xterm.js flow control guide](https://xtermjs.org/docs/guides/flowcontrol/) as the reference pattern.
 
-**Files touched (if coding):** `agentmux-srv/src/backend/blockcontroller/shell.rs`, `agentmux-srv/src/ws/term.rs` (or wherever WS term messages live), `frontend/app/view/term/term-rpc.tsx`, `frontend/app/view/term/termwrap.ts`.
+**Files touched (if coding):** `agentmux-srv/src/backend/blockcontroller/shell.rs`, `agentmux-srv/src/ws/term.rs` (or wherever WS term messages live), [`frontend/app/view/term/term-rpc.tsx`](../../frontend/app/view/term/term-rpc.tsx), [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts).
 
 **Acceptance (if coding):**
 - Bench from item #3 + a load-generator script show P95 keystroke echo < 50 ms even under sustained `yes` output.

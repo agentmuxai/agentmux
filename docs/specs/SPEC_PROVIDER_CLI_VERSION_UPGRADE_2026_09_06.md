@@ -42,7 +42,7 @@ than silently reporting "no drift". There is nothing to bump for either provider
 
 ## 4. Fix — bump six pins across all locations the pin-consistency test enforces
 
-Per `frontend/app/view/agent/providers/pin-consistency.test.ts`'s header
+Per [`frontend/app/view/agent/providers/pin-consistency.test.ts`](../../frontend/app/view/agent/providers/pin-consistency.test.ts)'s header
 comment, the **claude** pin is duplicated across five locations that must
 agree; **codex** and **gemini** across three (no container/Dockerfile
 copy — those are Claude-specific because the container image is a Claude
@@ -54,18 +54,18 @@ consistency even though nothing currently machine-checks them.
 
 | Location | claude | codex | gemini | qwen | openclaw | copilot |
 |---|---|---|---|---|---|---|
-| `frontend/app/view/agent/providers/catalog.ts` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `agentmux-srv/src/backend/providers.rs` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `agentmux-cef/src/commands/providers.rs` | ✅ | ✅ | ✅ | — | — | — |
-| `.github/workflows/container-image.yml` (`claude_version` default) | ✅ | — | — | — | — | — |
-| `docker/Dockerfile.agent-agentmux` (`ARG CLAUDE_VERSION`) | ✅ | — | — | — | — | — |
+| [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml) (`claude_version` default) | ✅ | — | — | — | — | — |
+| [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) (`ARG CLAUDE_VERSION`) | ✅ | — | — | — | — | — |
 
 New pins: claude `2.1.263`, codex `0.153.4`, gemini `0.58.0`, qwen `0.23.0`,
 openclaw `2026.9.2`, copilot `1.0.83`.
 
 ## 4.1. Codex default-model re-verification (ReAgent finding on this PR)
 
-`frontend/app/view/agent/buildRuntimeArgs.ts`'s `CODEX_DEFAULT_MODEL`
+[`frontend/app/view/agent/buildRuntimeArgs.ts`](../../frontend/app/view/agent/buildRuntimeArgs.ts)'s `CODEX_DEFAULT_MODEL`
 comment explicitly instructs: "re-verify ChatGPT-account availability when
 bumping the codex CLI pin" — codex 0.116.0's own baked default
 (`gpt-5.3-codex`) was rejected for ChatGPT-account auth, which is why

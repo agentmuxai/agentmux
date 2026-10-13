@@ -5,7 +5,7 @@
 **Status:** active — tracking spec (restamped to the closed enum 2026-09-07; Phase 3b resumed, see the note below). **2026-09-08: the resumed 5-PR database-layer migration (below) is complete** — both legacy tables are dropped as of PR 5. Left `active`, not `implemented`, because this doc's own acceptance criteria describe a broader scope (JSON registry sunset, orphan working-dir cleanup, frontend type rename) that the 5-PR plan never covered and nobody has since picked up — see the acceptance-criteria section for exactly which boxes are and aren't checked. Supersedes `SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md` for ongoing planning. The 2026-05-24 spec laid out the design; this one is the live status doc with the per-handler matrix and the migration plan. — PRs touching this work, newest first: #3096, #3092, #3088 (+6 more)
 **Tracking discussion:** [#1095 — Architecture: agent data-model consolidation — tracking](https://github.com/agentmuxai/agentmux/discussions/1095). All PRs that touch agent data-layer code link there.
 
-> **Staleness note (2026-08-03):** this doc has not been edited since 2026-05-28 (`6584c024`). Phase 3b is only partially shipped and Phase 3c has not happened — `db_agent_definitions`/`db_agent_instances` still exist in the current schema, contradicting this doc's own acceptance criteria. Confirmed stalled, not just unread — see `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` §1.4 and `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` for the audit that found this. Treat the phase table below as historical intent, not current status, until someone either finishes the migration or formally re-scopes it here.
+> **Staleness note (2026-08-03):** this doc has not been edited since 2026-05-28 (`6584c024`). Phase 3b is only partially shipped and Phase 3c has not happened — `db_agent_definitions`/`db_agent_instances` still exist in the current schema, contradicting this doc's own acceptance criteria. Confirmed stalled, not just unread — see [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) §1.4 and `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` for the audit that found this. Treat the phase table below as historical intent, not current status, until someone either finishes the migration or formally re-scopes it here.
 
 > **Resumed 2026-09-07** (repo-owner decision: finish, not park — `SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 4 option (a)). Inventory of every remaining legacy read/write, FK and caller is in the PR description of the first PR below. The plan grew from four PRs to five once PR 4's own scope turned out too large for one review — the definition flip forced removing the per-boot gap-repair pass in the same PR that stopped writing `db_agent_definitions` (leaving it running would have resurrected every deletion), which is more than "flip reads" alone; the physical `DROP TABLE` is cleaner split into its own PR 5 rather than riding along:
 >
@@ -57,7 +57,7 @@ From `SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md` §"The lean model":
 | 2 | **`db_agent_definitions`** | `objects.db` | Legacy | Active (live reads + writes) | Templates + user-clones; provider/cmd config |
 | 3 | **`db_agent_instances`** | `objects.db` | Legacy | Active (live reads + writes) | Per-launch instance rows; bindings; status; continuation chain |
 | 4 | **JSON registry** | `~/.agentmux/agents/registry/*.json` | May-13 SQLite → JSON migration (one-shot) | Live writes; reads are **dead code** | Holds named-agent JSON files for instances not yet retired. Read code exists but is `#[allow(dead_code)]` — fallback never triggers. |
-| 5 | **Working dirs** | `~/.agentmux/agents/<slug>/` | Created per agent launch | Active (FS-level) | Per-agent cwd for the CLI. Includes a `.claude/` config dir + `.mcp.json`. Orphans accumulate when corresponding SQL/registry rows are removed but the dir isn't. |
+| 5 | **Working dirs** | `~/.agentmux/agents/<slug>/` | Created per agent launch | Active (FS-level) | Per-agent cwd for the CLI. Includes a [`.claude/`](../../.claude) config dir + `.mcp.json`. Orphans accumulate when corresponding SQL/registry rows are removed but the dir isn't. |
 
 ### Why this is a mess in practice
 
@@ -238,8 +238,8 @@ Each sub-PR: read swap + targeted handler test that asserts the new behavior + s
 
 ## References
 
-- `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md` — original design spec.
-- `docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md` — Phase 1 (shipped).
+- [`docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`](SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md) — original design spec.
+- [`docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md`](SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md) — Phase 1 (shipped).
 - `agentmux-srv/src/backend/storage/agents_consolidate.rs` — Phase 3a backfill code.
 - `agentmux-srv/src/backend/storage/store.rs` — all SQL read/write sites.
 - `agentmux-srv/src/registry/` — JSON registry module (sunset target).

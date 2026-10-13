@@ -98,7 +98,7 @@ The gap is that `queue_target_layout_insert` always uses `InsertNode` instead.
 
 This gap is explicitly noted in the source (added during Phase 4a MVP):
 
-- `frontend/app-init.ts:106–109`:
+- [`frontend/app-init.ts:106–109`](../../frontend/app-init.ts):
   ```
   // The block STILL lands as a sibling in the target tab's layout for
   // MVP (backend ignores the direction). Phase 4b will wire the
@@ -245,9 +245,9 @@ No changes needed here.
 | `agentmux-cef/src/state.rs` | Add `FloatingRedockGhostState` + `floating_redock_ghost` field |
 | `agentmux-cef/src/commands/window/motion.rs` | Add `set_floating_redock_target`, `get_floating_redock_target`; clear in `clear_floating_redock_hover` |
 | `agentmux-cef/src/ipc.rs` | Register two new commands |
-| `frontend/app-init.ts` | Push ghost state on hover, clear on `clearPlaceholder()` |
-| `frontend/app/store/services.ts` | Add optional `targetBlockId`, `direction` to `RedockFloatingPane` |
-| `frontend/app/workspace/floating-pane-workspace.tsx` | Query ghost state before RPC call |
+| [`frontend/app-init.ts`](../../frontend/app-init.ts) | Push ghost state on hover, clear on `clearPlaceholder()` |
+| [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts) | Add optional `targetBlockId`, `direction` to `RedockFloatingPane` |
+| [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) | Query ghost state before RPC call |
 | `agentmux-srv/src/server/service.rs` | Parse optional args 5/6; add `queue_target_layout_split`; call split vs insert |
 
 ---
@@ -257,7 +257,7 @@ No changes needed here.
 | Test | File |
 |---|---|
 | `rectForDirection` returns correct sub-rect per DropDirection (9 directions) | `frontend/layout/tests/rectForDirection.test.ts` |
-| `handleBackendAction` routes `SplitHorizontal`/`SplitVertical` correctly | `frontend/layout/tests/layoutPersistence.test.ts` |
+| `handleBackendAction` routes `SplitHorizontal`/`SplitVertical` correctly | [`frontend/layout/tests/layoutPersistence.test.ts`](../../frontend/layout/tests/layoutPersistence.test.ts) |
 | `onNodeDelete` NOT called for moved blocks (R1 regression guard) | existing `layoutTree.test.ts` extended |
 | Rust `redock_floating_pane` saga queues `SplitHorizontal` when `dir=3` | `redock_floating_pane.rs` tests |
 | Rust saga falls back to `InsertNode` when direction is absent | `redock_floating_pane.rs` tests |

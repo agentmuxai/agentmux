@@ -99,7 +99,7 @@ The LIFO slot is not work-stealable (tokio 1.52.3, stock `#[tokio::main]`, `disa
 ## 5. Stage 3 — why nothing noticed
 
 1. **Status ≠ progress.** The status dot reflects process/connection liveness. Both were genuinely fine for six hours.
-2. **The frontend holds the last value by design.** `resolveUptimeSecs` returns `null` on a missing tick and the caller keeps the previous value "rather than flashing a zero" (`frontend/app/statusbar/backend-uptime.ts`). A frozen plausible number conceals this; a zero would have screamed.
+2. **The frontend holds the last value by design.** `resolveUptimeSecs` returns `null` on a missing tick and the caller keeps the previous value "rather than flashing a zero" ([`frontend/app/statusbar/backend-uptime.ts`](../../frontend/app/statusbar/backend-uptime.ts)). A frozen plausible number conceals this; a zero would have screamed.
 3. **256 seconds of pure silence.** The lane buffers before it drops. The first WARN came four minutes after the UI froze.
 4. **18,230 identical WARNs, no escalation.** The bounded lane worked exactly as designed and correctly identified a stalled consumer. Nothing was listening.
 5. **The liveness probe measures the wrong process.** `[ui-liveness] UI thread alive rtt=0ms` passed throughout. It probes the browser-process UI thread, which was fine. It does not traverse the WS data path, the srv's async runtime, or the reactive lock.

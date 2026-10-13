@@ -5,7 +5,7 @@
 
 **Status:** Implemented — report: audit + design synthesis, all open questions resolved (§4). **Largely implemented since; see the status table below (refreshed 2026-08-30).** This is **not** a from-scratch analysis: it verifies and consolidates two existing same-topic reports against `main` as of today, and updates them with what has (and hasn't) shipped in the 10 days since.
 
-> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> **Implementing PR not recoverable (checked 2026-09-17).** [`docs/specs/README.md`](README.md)
 > requires an `implemented` Status to cite its PR. This one cannot, and a guess would
 > be worse than the gap: the only commit that set this Status was a bulk restamp
 > (or predates the PR-squash convention), so git alone does not identify who
@@ -48,9 +48,9 @@ on cache state.
 **Author:** Agent3
 **Verified against:** `main` @ `45155f864` (pulled 2026-07-26).
 **Supersedes/updates:**
-- `docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md` (Agent2, 2026-07-16) — the direct prior version of this exact question, with a concrete 6a/6b design already worked out. **Everything in that report's §1–§7 was independently re-verified against today's code by a fresh audit and still holds true — nothing there is stale.**
-- `docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md` (Agent3, same day) — the sibling report covering the Swarm-pane and subagent-watcher angles the user asked about here ("close collab with swarm pane").
-- Background specs: `SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md`, `SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md` (the dock's existing design), `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` (the concrete incident this all generalizes from).
+- [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md`](REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) (Agent2, 2026-07-16) — the direct prior version of this exact question, with a concrete 6a/6b design already worked out. **Everything in that report's §1–§7 was independently re-verified against today's code by a fresh audit and still holds true — nothing there is stale.**
+- [`docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md`](REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md) (Agent3, same day) — the sibling report covering the Swarm-pane and subagent-watcher angles the user asked about here ("close collab with swarm pane").
+- Background specs: `SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md`, `SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md` (the dock's existing design), [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) (the concrete incident this all generalizes from).
 
 ## User's request (verbatim, for traceability)
 
@@ -66,7 +66,7 @@ Checked via `git log --since=2026-07-16 -- frontend/app/view/agent/activity/ fro
 - **#2203** (already described in the 07-16 report as "landed same day," confirmed still the shipped shape) — subagent flood fix: one dock row per Agent/Workflow-tool call, not per individual subagent, via `groupSubagentsByWorkflow`.
 - **#2232 / #2208** — Swarm pane's own "two-bucket Agent Tool / Workflow row model" — a Swarm-side grouping refinement, same spirit as #2203 but on the Swarm tree.
 
-**None of this touches the actual ask.** All three are quality-of-life fixes to the *existing* shell+subagent dock/Swarm mechanisms. The specific gap both prior reports identified — nothing detects a long-running/backgrounded **ordinary Bash tool call** and turns it into a dockable, Swarm-visible activity — is completely untouched. `BashParams` (`frontend/app/view/agent/types.ts:122-125`) still has only `{ command: string; timeout?: number }`; `ShellNode` (`types.ts:377-388`) still has no background/duration flag. Re-verified directly today, not assumed from the old report.
+**None of this touches the actual ask.** All three are quality-of-life fixes to the *existing* shell+subagent dock/Swarm mechanisms. The specific gap both prior reports identified — nothing detects a long-running/backgrounded **ordinary Bash tool call** and turns it into a dockable, Swarm-visible activity — is completely untouched. `BashParams` ([`frontend/app/view/agent/types.ts:122-125`](../../frontend/app/view/agent/types.ts)) still has only `{ command: string; timeout?: number }`; `ShellNode` (`types.ts:377-388`) still has no background/duration flag. Re-verified directly today, not assumed from the old report.
 
 ## 2. Current-state audit (consolidated)
 
@@ -90,7 +90,7 @@ AgentMux's own answer to "I want a long-running thing" is a **different, explici
 
 ### 2.4 Turn-phase / "Working…" — tied 1:1 to the CLI's own turn boundary, no early-exit
 
-`TurnPhase` (`frontend/app/store/agent-pane-state/types.ts:133-171`): `Idle | Submitting | Streaming | Interrupting | Done | Disconnected`. `workingFromPhase` (`types.ts:332-335`) is `true` for exactly `Submitting | Streaming | Interrupting`. The only path out of a working phase is `TurnEnd`, fed exclusively by the CLI's own top-level `result` event (via `claude-translator.ts`'s `session_end` → `useAgentStream.ts`'s `finalizeTurn()`) — i.e. the *whole turn's* own boundary, not any individual tool call's.
+`TurnPhase` ([`frontend/app/store/agent-pane-state/types.ts:133-171`](../../frontend/app/store/agent-pane-state/types.ts)): `Idle | Submitting | Streaming | Interrupting | Done | Disconnected`. `workingFromPhase` (`types.ts:332-335`) is `true` for exactly `Submitting | Streaming | Interrupting`. The only path out of a working phase is `TurnEnd`, fed exclusively by the CLI's own top-level `result` event (via `claude-translator.ts`'s `session_end` → `useAgentStream.ts`'s `finalizeTurn()`) — i.e. the *whole turn's* own boundary, not any individual tool call's.
 
 `ToolStart`/`ToolEnd` (`reducer.ts:560-580`) only mutate `currentTool`/`currentToolArg`/`toolsActive` on the `Streaming` phase's payload — **they never end the phase**. So a `sleep 300` inside an otherwise-ordinary turn just makes the entire `Streaming` phase, and `AgentWorkingRow`'s "Working…" banner, run for 300 seconds. The three bounded watchdogs that *can* force a phase transition (`SubmitTimeoutElapsed` 30s, `InterruptTimeoutElapsed` 5s, and the liveness-recovery arm of `StreamWatchdogTick` at `LIVENESS_RECOVERY_MS = 180_000` / 3 min) are failure-detectors, not this feature's mechanism — and the liveness one **explicitly refuses to fire while any tool is active** (`toolsActive === 0` gate, `reducer.ts:309`), so a running tool call — sleep included — is treated as proof-of-life and can pin "Working…" indefinitely. This is exactly the Agent1 incident's root cause (a `sleep`-based heartbeat kept a pane "Working…/Waiting…" for ~12 hours, healthy the entire time).
 
@@ -102,7 +102,7 @@ AgentMux's own answer to "I want a long-running thing" is a **different, explici
 
 ### 2.6 Swarm pane — the "close collab" the user specifically flagged
 
-`frontend/app/view/swarm/swarm-view.tsx`/`swarm-model.ts`: shows a roster of tracked agent panes (`AgentTrackedBlocksCommand`, refreshed on `agent:process-added`/`-exited`/`agent:reactive-registered`/`-unregistered`) plus their subagents (`subagent:spawned`/`-completed`), each row's status derived from `ControllerStatus`/`turn_active` — i.e. it renders the **same turn-phase axis** §2.4 describes, with the same blind spot. The "14 idle" pattern seen in a screenshot is a context-token badge next to the status chip, not a process count — worth noting since it's easy to misread as "14 background processes." The Swarm pane today has **zero visibility into attached long-running processes or backgrounded Bash tasks** — neither a shell, nor a `run_in_background` task, nor even the `AgentProcessRegistry`'s own `processCount` surfaces there directly (the `⚙N` badge just opens the Swarm pane; it doesn't hand off *which* process to look at).
+[`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx)/`swarm-model.ts`: shows a roster of tracked agent panes (`AgentTrackedBlocksCommand`, refreshed on `agent:process-added`/`-exited`/`agent:reactive-registered`/`-unregistered`) plus their subagents (`subagent:spawned`/`-completed`), each row's status derived from `ControllerStatus`/`turn_active` — i.e. it renders the **same turn-phase axis** §2.4 describes, with the same blind spot. The "14 idle" pattern seen in a screenshot is a context-token badge next to the status chip, not a process count — worth noting since it's easy to misread as "14 background processes." The Swarm pane today has **zero visibility into attached long-running processes or backgrounded Bash tasks** — neither a shell, nor a `run_in_background` task, nor even the `AgentProcessRegistry`'s own `processCount` surfaces there directly (the `⚙N` badge just opens the Swarm pane; it doesn't hand off *which* process to look at).
 
 This is exactly the gap the sibling 07-16 consolidation report named: **the pane, the dock, and Swarm each answer "what is this agent doing" from a different, non-composing vantage point**, all missing the same attached-process axis. Fixing it in one place (the dock) without also feeding Swarm leaves the fleet-wide view blind to precisely the thing a user managing several agents most wants to spot at a glance: "which of my agents is sitting on a live dev server / sleep / background task right now."
 
@@ -153,14 +153,14 @@ Resolved: **the dock takes over, `AgentWorkingRow` goes calm/neutral for that pa
 
 | File | Role |
 |------|------|
-| `frontend/app/view/agent/components/ActivityDock.tsx` + `activity/{types,shell-adapter,subagent-adapter}.ts` | The dock — already the target abstraction for a new tool-call/background kind |
+| [`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) + `activity/{types,shell-adapter,subagent-adapter}.ts` | The dock — already the target abstraction for a new tool-call/background kind |
 | `frontend/app/store/agent-pane-state/{reducer,types}.ts` | Turn-phase state machine; `ToolStart`/`ToolEnd`, `workingFromPhase`, the liveness watchdog thresholds |
-| `frontend/app/view/agent/useAgentStream.ts` | `extractToolArg` (Bash command already flows here), `ToolStart` dispatch site |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | `AgentWorkingRow` — today's only "what's running" UI; where a calmer/two-axis status lands |
-| `frontend/app/view/agent/types.ts` | `BashParams` (no `run_in_background`), `ShellNode` (no background flag) — both still-open gaps, re-verified today |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | `extractToolArg` (Bash command already flows here), `ToolStart` dispatch site |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | `AgentWorkingRow` — today's only "what's running" UI; where a calmer/two-axis status lands |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | `BashParams` (no `run_in_background`), `ShellNode` (no background flag) — both still-open gaps, re-verified today |
 | `agentmux-srv/src/backend/process_tracker/{registry,mod,windows}.rs` | OS-process membership tracking — no duration/classification, `started_at_ms` unpopulated on Windows |
-| `frontend/app/view/swarm/swarm-view.tsx` / `swarm-model.ts` | Swarm roster + status derivation — the collab surface this session's request specifically named |
+| [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx) / `swarm-model.ts` | Swarm roster + status derivation — the collab surface this session's request specifically named |
 | `agentmux-mcp/src/main.rs` (`Shell` tool) | AgentMux's existing, explicit "long-running process" tool — the only backgrounded-thing kind visible anywhere today |
-| `docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md` | Prior deep-dive this report verifies and updates — §6/§7/§8 (heuristic design, UX design, phasing) still fully valid |
-| `docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md` | Sibling report — the Swarm/subagent-watcher half of this same initiative |
-| `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` | The Agent1 incident — concrete precedent for step 3's watchdog-exemption fix |
+| [`docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md`](REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) | Prior deep-dive this report verifies and updates — §6/§7/§8 (heuristic design, UX design, phasing) still fully valid |
+| [`docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md`](REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md) | Sibling report — the Swarm/subagent-watcher half of this same initiative |
+| [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) | The Agent1 incident — concrete precedent for step 3's watchdog-exemption fix |

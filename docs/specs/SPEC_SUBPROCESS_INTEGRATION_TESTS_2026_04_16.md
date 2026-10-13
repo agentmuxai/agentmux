@@ -161,12 +161,12 @@ describe("ClaudeTranslator dedup", () => {
 });
 ```
 
-**Location:** `frontend/app/view/agent/providers/claude-translator.test.ts`
+**Location:** [`frontend/app/view/agent/providers/claude-translator.test.ts`](../../frontend/app/view/agent/providers/claude-translator.test.ts)
 
 ### 5. Startup Payload Assembly Test (TypeScript, vitest)
 
 **Status:** Already implemented — 17 tests in
-`frontend/app/view/agent/startup/buildStartupPayload.test.ts`. Covers identity,
+[`frontend/app/view/agent/startup/buildStartupPayload.test.ts`](../../frontend/app/view/agent/startup/buildStartupPayload.test.ts). Covers identity,
 accounts, peers, template expansion, skip sentinel, and peer capping.
 
 ---

@@ -50,6 +50,7 @@ import { ensureCapability, getCapability } from "@/app/store/toolchain-capabilit
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
+import { blockEnv } from "@/app/store/block-meta";
 import { BlockService } from "@/app/store/services";
 import { staticTabId } from "@/app/store/global";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
@@ -273,11 +274,16 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // uses the same isolated auth dir that was validated in Phase 2.
     // Without this, the subprocess runs without the env var and falls back
     // to the global ~/.claude/ dir, failing auth silently after login.
+    // Merged into the block's env, not replacing it: this runs on every pane
+    // mount, and a replace dropped the launch's AGENTMUX_AGENT_ID, slug and
+    // git identity (REPORT_FORK_AGENT_ISOLATION_2026_10_12.md F2).
     await RpcApi.SetMetaCommand(TabRpcClient, {
         oref,
         meta: {
             cmd: cliResult.cli_path,
-            ...(effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0 ? { "cmd:env": effectiveAuthEnv } : {}),
+            ...(effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0
+                ? { "cmd:env": { ...blockEnv(blockId), ...effectiveAuthEnv } }
+                : {}),
         },
     });
 

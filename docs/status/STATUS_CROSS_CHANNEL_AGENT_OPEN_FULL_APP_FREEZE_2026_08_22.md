@@ -165,7 +165,7 @@ minimum two cheap Win32 reads), not 7,149 IPC round-trips.
 (not confirmed) trigger is layout instability in a pane rendering a very
 large document, which is the subject of today's separate
 scroll-height-oscillation investigation
-(`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`,
+([`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`](../analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md),
 issue #2718) on this same `0.55.18`/`0.55.19` host, same day. **Flagging
 the correlation, not claiming the link, and not claiming this flood alone
 is expensive enough to explain minutes of unresponsiveness** — no direct
@@ -242,7 +242,7 @@ lead, not the diagnosis.
   fixed for the unnecessary-rebuild case by PR #2701)
 - `agentmux-cef/src/wrr/win_event.rs:719-920` (`win_event_callback`,
   `EVENT_OBJECT_LOCATIONCHANGE` handling)
-- `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`
+- [`docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`](../analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md)
   (§5's possibly-related scroll-instability signal, same host/day)
 - `data/db/objects.db`'s `db_agent_definitions` table (used to resolve
   definition ids to agent names for this report)

@@ -3,7 +3,7 @@
 **Date:** 2026-10-03
 **Status:** active — Phases 1 (#4285), 2a (#4290) and 3 (#4298) built, see §11; Phase 2b not started; §8 lists the decisions that block Phase 4.
 **Author:** AgentY, at the owner's request
-**Related:** `docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md` (§4 the "(ambient creds)" regression, §5 the snapshot states, §5a the Haiku fallback), `SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md`, `SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`, `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 (the retired ambient-login escape hatch), `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`, `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
+**Related:** [`docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md`](../reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md) (§4 the "(ambient creds)" regression, §5 the snapshot states, §5a the Haiku fallback), `SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md`, `SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`, `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 (the retired ambient-login escape hatch), `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`, [`docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`](../retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md).
 
 ## 1. The request (owner, 2026-10-03)
 
@@ -17,7 +17,7 @@ In the agent pane's **My Agents** list ("MY AGENTS 20"):
 
 ## 2. How a tile is built today
 
-One backend call fills the list: `ListRecentSessionsCommand`, handled in `crates/srv/src/server/agent_handlers/session.rs` (`register()`), returning `RecentSessionRow` (`crates/srv/src/backend/rpc_types/instance.rs:164-231`). The frontend is `frontend/app/view/agent/components/MyAgentsList.tsx`; tile styling is `frontend/app/view/agent/styles/_recent-sessions.scss`.
+One backend call fills the list: `ListRecentSessionsCommand`, handled in [`crates/srv/src/server/agent_handlers/session.rs`](../../crates/srv/src/server/agent_handlers/session.rs) (`register()`), returning `RecentSessionRow` ([`crates/srv/src/backend/rpc_types/instance.rs:164-231`](../../crates/srv/src/backend/rpc_types/instance.rs)). The frontend is [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx); tile styling is [`frontend/app/view/agent/styles/_recent-sessions.scss`](../../frontend/app/view/agent/styles/_recent-sessions.scss).
 
 | Element | Where it comes from |
 |---|---|
@@ -48,7 +48,7 @@ The owner's screenshot was of a dev build (an isolated channel), so the first ca
 
 That text is chosen by `noSnapshotText` when `snapshot_check_failed` is false and `block_id_hint` is empty. Three separate problems stack up, any one of which would blank the preview:
 
-1. **No per-block snapshot is written any more.** The frontend now persists a lightweight overlay under the agent's *global* zone `agent:<definition_id>:current` (`useSnapshotPersistence.ts:114`, `AgentSessionWriteStateCommand`). Nothing in `frontend/app` writes the per-block `output.state.json` any more, yet the list handler still stats `<block_id>/output.state.json` (`session.rs:436`). So `has_snapshot` is false for any agent launched by a current build.
+1. **No per-block snapshot is written any more.** The frontend now persists a lightweight overlay under the agent's *global* zone `agent:<definition_id>:current` (`useSnapshotPersistence.ts:114`, `AgentSessionWriteStateCommand`). Nothing in [`frontend/app`](../../frontend/app) writes the per-block `output.state.json` any more, yet the list handler still stats `<block_id>/output.state.json` (`session.rs:436`). So `has_snapshot` is false for any agent launched by a current build.
 2. **The snapshot it would read has no messages.** `read_session_preview` (`agent_handlers/mod.rs:94-150`) needs a top-level `nodes` array to find the first user message. The current overlay is under 1 KB and deliberately has no `nodes` (`useSnapshotPersistence.ts:61-67`). Even a found snapshot gives `preview = ""` and `node_count = 0`.
 3. **The Haiku fallback never runs for these rows.** `db_agent_activity_summaries` is written by `generate_definition_activity_summary` (`ambient/tasks.rs:139-222`), but the call site (`session.rs:477`) requires a non-empty `block_id` and reads the per-block raw output (`ambient/digest.rs:66-93`). A row with no `block_id` can never get one. It also runs **once per definition and is cached forever**, so a summary goes stale the moment the agent does more work.
 

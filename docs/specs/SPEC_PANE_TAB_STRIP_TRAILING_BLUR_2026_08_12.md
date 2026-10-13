@@ -4,9 +4,9 @@
 **Status:** implemented and live-verified in `task dev` (blur radius
 revised from an initial `8px` proposal to `2px` after live feedback —
 see §1.3). — #2566
-**Related:** `docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`
+**Related:** [`docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`](SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md)
 (made the agent-pane strip float, shrink-to-fit, "unobstructed except for
-the `+` sign" — this spec revises that stated goal), `docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`
+the `+` sign" — this spec revises that stated goal), [`docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md)
 (introduced the shrink-to-fit width behavior, unchanged for editor/terminal).
 
 ---
@@ -176,11 +176,11 @@ border. Decide after seeing it in `task dev`, not before.
 
 ## 3. Files touched
 
-- `frontend/app/view/agent/agent-view.scss` — extend the existing
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) — extend the existing
   `.agent-pane-stack-content > .pane-tab-strip` override: `right: 0`,
   `background`, `backdrop-filter`/`-webkit-backdrop-filter`,
   `pointer-events` (§1.1).
-- No changes to `frontend/app/element/PaneTabStrip.tsx`/`.scss` — shared
+- No changes to [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx)/`.scss` — shared
   component stays exactly as-is; editor and terminal panes are
   unaffected.
 - No `agentmux-srv` (Rust) changes. No wire-format changes.

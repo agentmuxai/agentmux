@@ -3,13 +3,13 @@
 **Status:** proposed — verified unimplemented as of 2026-08-10 (docs-only commit #2346; no PlaybackTransport anywhere).
 **Author:** AgentY
 **Date:** 2026-07-29
-**Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (v1 — implemented,
+**Related:** [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](SPEC_MEDIA_PANE_2026_07_26.md) (v1 — implemented,
 PR #2299, commit `bd7c20609`),
-`docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md` (v2 —
+[`docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) (v2 —
 merged, PR #2344; this spec supersedes v2 §3's interaction model, **and
 also v2 §4's "keep the native `<audio>` element, no custom playback UI"
 decision** — see "Custom transport bar" below for why), `agentmux-srv/src/config/widgets.json`,
-`frontend/app/view/media/`.
+[`frontend/app/view/media/`](../../frontend/app/view/media).
 
 ## Motivation
 
@@ -254,7 +254,7 @@ rather than adding new decode-on-hover cost to every grid cell.
 
 | File | Relevance |
 |------|-----------|
-| `frontend/app/view/media/media.tsx` | Split-pane layout, replaces v2 §3's picker/viewer-toggle sketch |
-| `frontend/app/view/media/` (new) | `PlaybackTransport` component (shared video/audio transport bar), grid component with hover-scrub, resizable-divider component (check for an existing shared one in this codebase before building new — panes elsewhere likely already need resizable splits) |
+| [`frontend/app/view/media/media.tsx`](../../frontend/app/view/media/media.tsx) | Split-pane layout, replaces v2 §3's picker/viewer-toggle sketch |
+| [`frontend/app/view/media/`](../../frontend/app/view/media) (new) | `PlaybackTransport` component (shared video/audio transport bar), grid component with hover-scrub, resizable-divider component (check for an existing shared one in this codebase before building new — panes elsewhere likely already need resizable splits) |
 | `agentmux-srv/src/server/files.rs` | Extend v2 §3's thumbnail route to optionally return a frame strip (N timestamps) for hover-scrub, not just one midpoint frame |
-| `docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md` | §3's picker/viewer-toggle interaction model is superseded by this spec's persistent split; §4's native-`<audio>`-element decision is also superseded (see "Custom transport bar"); §1/§2/§5/§6 unaffected |
+| [`docs/specs/SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md`](SPEC_MEDIA_PANE_V2_AGENT_WORKFLOW_GAPS_2026_07_28.md) | §3's picker/viewer-toggle interaction model is superseded by this spec's persistent split; §4's native-`<audio>`-element decision is also superseded (see "Custom transport bar"); §1/§2/§5/§6 unaffected |

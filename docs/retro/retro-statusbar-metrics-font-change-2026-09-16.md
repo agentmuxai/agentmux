@@ -5,7 +5,7 @@
 correct); root-caused here, and the pre-existing look was then restored on
 purpose in `StatusBar.scss` per the Outcome section below.
 **Severity:** Cosmetic. No data or functionality was ever affected.
-**Affects:** `.stat-mono` in `frontend/app/statusbar/StatusBar.scss` — the CPU,
+**Affects:** `.stat-mono` in [`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss) — the CPU,
 GPU, memory, commit/pagefile, disk, network, and uptime readouts in the status
 bar (`SystemStats.tsx`, `BackendStatus.tsx`, `GpuStatus.tsx`).
 
@@ -36,7 +36,7 @@ investigation.
 
 ## What actually changed, line by line
 
-`frontend/app/statusbar/StatusBar.scss`, PR #3254:
+[`frontend/app/statusbar/StatusBar.scss`](../../frontend/app/statusbar/StatusBar.scss), PR #3254:
 
 ```diff
      .stat-mono {
@@ -47,7 +47,7 @@ investigation.
      }
 ```
 
-`--fixed-font` (`frontend/app/theme.scss`, pre-#3254) was never a valid value
+`--fixed-font` ([`frontend/app/theme.scss`](../../frontend/app/theme.scss), pre-#3254) was never a valid value
 for `font-family`:
 
 ```scss
@@ -88,7 +88,7 @@ issue, not specific to the status bar. `.stat-mono` was simply one instance.
 
 ## Why it now looks like Consolas
 
-`--font-mono` (defined once, `frontend/tailwindsetup.css`) is:
+`--font-mono` (defined once, [`frontend/tailwindsetup.css`](../../frontend/tailwindsetup.css)) is:
 
 ```css
 --font-mono: "Hack", Consolas, Menlo, monospace;
@@ -97,7 +97,7 @@ issue, not specific to the status bar. `.stat-mono` was simply one instance.
 `"Hack"` here refers to the bundled Hack Nerd Font Mono webfont
 (`public/fonts/hacknerdmono-{regular,bold,italic,bolditalic}.woff2`),
 registered globally via the JS `FontFace` API in
-`frontend/util/fontutil.ts`'s `loadHackNerdFont()`, called once at startup
+[`frontend/util/fontutil.ts`](../../frontend/util/fontutil.ts)'s `loadHackNerdFont()`, called once at startup
 from `app-init.ts`. `Consolas`/`Menlo`/`monospace` are only reached if that
 webfont fails to load.
 

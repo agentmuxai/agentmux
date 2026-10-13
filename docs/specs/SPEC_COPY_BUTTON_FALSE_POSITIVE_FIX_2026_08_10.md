@@ -24,7 +24,7 @@ state, which is what caught them.
 
 ## Bug 1 — `CopyButton` showed the checkmark unconditionally
 
-**File:** `frontend/app/element/copybutton.tsx`
+**File:** [`frontend/app/element/copybutton.tsx`](../../frontend/app/element/copybutton.tsx)
 
 The click handler set `isCopied(true)` (driving the checkmark) synchronously
 on click, before the caller's **async** `onClick` (the actual clipboard
@@ -96,7 +96,7 @@ write instead of a successful-but-empty one.
 
 ## Bug 3 (root cause) — code block text extraction always produced `""`
 
-**File:** `frontend/app/element/markdown-codeblock.tsx`
+**File:** [`frontend/app/element/markdown-codeblock.tsx`](../../frontend/app/element/markdown-codeblock.tsx)
 
 After fixing Bugs 1 and 2, the checkmark still appeared and paste was still
 empty. Direct inspection of the OS clipboard confirmed why:
@@ -126,7 +126,7 @@ const getTextContent = (children: any): string => {
 };
 ```
 
-But `frontend/app/element/markdown.tsx:17` builds this markdown renderer's
+But [`frontend/app/element/markdown.tsx:17`](../../frontend/app/element/markdown.tsx) builds this markdown renderer's
 elements via `solid-js/h/jsx-runtime` (feeding `hast-util-to-jsx-runtime`).
 Solid has no virtual DOM — this runtime creates **real DOM nodes** eagerly.
 `children` passed into `CodeBlock` is an actual `<code>` `HTMLElement` (with

@@ -115,7 +115,7 @@ and resolves paths purely from the exe's location on disk.
 Without this guard, a pane shell running inside a stable instance would pass
 `AGENTMUX_RUNTIME_MODE=installed` (or `AGENTMUX_CHANNEL=stable`) into the dev
 launcher, routing it into the stable data dir and hitting the process-singleton
-("already running"). See `docs/specs/dev-build-env-isolation.md` for the
+("already running"). See [`docs/specs/dev-build-env-isolation.md`](dev-build-env-isolation.md) for the
 original failure analysis (PR #719).
 
 ---
@@ -222,10 +222,10 @@ After any change to the isolation stack, verify:
 
 | Document | Coverage |
 |----------|----------|
-| `docs/specs/dev-build-env-isolation.md` | Original fix for nested-pane env inheritance (PR #719) |
-| `docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md` | Per-version CFBundleIdentifier and reopen handler |
-| `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md` | Multi-instance socket hardening |
-| `docs/specs/SPEC_VERSION_ISOLATION_2026_06_01.md` | Version-scoped data dirs |
+| [`docs/specs/dev-build-env-isolation.md`](dev-build-env-isolation.md) | Original fix for nested-pane env inheritance (PR #719) |
+| [`docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md`](SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md) | Per-version CFBundleIdentifier and reopen handler |
+| [`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) | Multi-instance socket hardening |
+| [`docs/specs/SPEC_VERSION_ISOLATION_2026_06_01.md`](SPEC_VERSION_ISOLATION_2026_06_01.md) | Version-scoped data dirs |
 | `agentmux-launcher/src/data_dir.rs` | `resolve_paths` — the single authoritative isolation call site |
 | `agentmux-launcher/src/hash.rs` | `data_dir_hash16` — socket hash function |
 | `agentmux-launcher/src/splash_mac.rs` | `set_reopen_target` / `should_handle_reopen` |

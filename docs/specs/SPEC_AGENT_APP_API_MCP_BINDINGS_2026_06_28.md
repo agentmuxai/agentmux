@@ -1,4 +1,4 @@
-# SPEC: Agent App API — MCP is the Agent Entry Point
+# SPEC: MuxAPI — MCP is the Agent Entry Point
 
 **Date:** 2026-06-28
 **Status:** Draft
@@ -10,7 +10,7 @@
 
 ## 1. Problem
 
-The predecessor spec added three agent-facing namespaces to the App API —
+The predecessor spec added three agent-facing namespaces to MuxAPI —
 `identity.*`, `preset.*`, `memory.*` — gated by the **S1 security invariant**
 (`ctx.agent_id` must be non-empty and equal the request's `agent_id`). Those
 handlers shipped, are registered in `app_api.rs`, and pass an end-to-end smoke
@@ -53,13 +53,13 @@ contract: the security model intends agents to reach privileged surfaces
 > (`agentmux-srv/src/server/service/credential.rs` names it). What was *not*
 > documented anywhere until recently is the cross-instance consequence, and the
 > plan to remove the ambient credential altogether:
-> `docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md` §2.4
-> and `docs/specs/SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md`.
+> [`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`](../retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md) §2.4
+> and [`docs/specs/SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md`](SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md).
 
 ## 2. Goal
 
 Establish **MCP as the canonical, and only supported, entry point** for agents to
-reach the App API — and make that true for the new namespaces by adding the
+reach MuxAPI — and make that true for the new namespaces by adding the
 bindings.
 
 Concretely:
@@ -104,7 +104,7 @@ All shipped in the predecessor spec; names verified against
 `agentmux-srv/src/backend/rpc_types.rs` (`COMMAND_*` constants) and the
 `register_*` handlers in `app_api.rs`.
 
-| RPC command | Request shape (App API) | Reads/Writes | Sensitivity |
+| RPC command | Request shape (MuxAPI) | Reads/Writes | Sensitivity |
 |---|---|---|---|
 | `memory.list` | `{ agent_id }` | read | low |
 | `memory.read` | `{ agent_id, filename }` | read | low |
@@ -247,7 +247,7 @@ see §7.
 
 ## 9. Validation (already performed against 0.49.8)
 
-A raw-WS smoke client (`scripts/test-app-api.mjs`) exercised all twelve commands
+A raw-WS smoke client ([`scripts/test-app-api.mjs`](../../scripts/test-app-api.mjs)) exercised all twelve commands
 end to end as agent `AgentX`:
 
 - `identity.self.accounts` empty → `identity.account.upsert` (dummy, `validate:false`)
@@ -266,7 +266,7 @@ The handlers are correct; this spec adds the *supported* way to call them.
 
 ## 10. Docs follow-up (separate task)
 
-The `agentmux-docs` site repo's internals page for the Agent App API
+The `agentmux-docs` site repo's internals page for MuxAPI
 (`src/content/docs/internals/`, `agent-app-api`) currently states that
 identity/memory are "driven by the frontend and internal tooling over the
 authenticated WebSocket transport." After §8 lands, audit that page to:

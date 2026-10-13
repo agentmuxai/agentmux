@@ -3,7 +3,7 @@
 **Date:** 2026-06-15
 **Status:** Draft — implementation plan
 **Goal:** Remove the `NodeHoverStrip` / `.node-strip` — the strip that fades into the top-right of each conversation row on hover, showing a **timestamp** + an **expand/collapse** button.
-**Analysis:** `docs/analysis/ANALYSIS_AGENT_ROW_HOVER_STRIP_2026_06_15.md`
+**Analysis:** [`docs/analysis/ANALYSIS_AGENT_ROW_HOVER_STRIP_2026_06_15.md`](../analysis/ANALYSIS_AGENT_ROW_HOVER_STRIP_2026_06_15.md)
 
 > **Why:** it's the last remnant of the legacy "popups on hover" model the tool block already moved away from (`ToolBlock.tsx:18-21` — the deliberate consolidation away from "three popups on hover: browser title tooltip + larger log panel + fast expand/collapse"). Removing it makes rows quieter and removes a moving surface that floats over line content.
 
@@ -57,10 +57,10 @@ Default: **(a) drop**. The plan below assumes (a); (b) is an additive follow-up 
 | File | Change |
 |------|--------|
 | `frontend/app/view/agent/components/NodeHoverStrip.tsx` | **Delete** the component file (and `formatLocalized`). |
-| `frontend/app/view/agent/virtualization/DocumentRow.tsx` | Remove the `import` + the `<NodeHoverStrip …/>` render. **Keep** `canExpand`/`isExpanded`/`onExpand` (used by the keyboard handler). |
+| [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) | Remove the `import` + the `<NodeHoverStrip …/>` render. **Keep** `canExpand`/`isExpanded`/`onExpand` (used by the keyboard handler). |
 | `frontend/app/view/agent/components/ActivityLogPanel.tsx` | Remove the `import` + the `<NodeHoverStrip …/>` render (§4 Q3). |
-| `frontend/app/view/agent/styles/_document.scss` | Delete the `.node-strip`, `.node-strip-time`, `.node-strip-btn` rules and the `&:hover .node-strip / &:focus-within .node-strip` reveal block. **Audit** whether `.agent-document-node-wrapper { position: relative }` is still needed by any other absolutely-positioned child (search highlight, pin marker); keep it only if so, else drop. |
-| `frontend/app/view/agent/components/ToolBlock.tsx` *(only if §4 Q2 = section header)* | n/a — section lives in `DocumentRow`'s `DocumentNodeBody`; add `onClick={() => props.onToggleCollapse(node.id)}` + `cursor` to the `.agent-section` header there. |
+| [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) | Delete the `.node-strip`, `.node-strip-time`, `.node-strip-btn` rules and the `&:hover .node-strip / &:focus-within .node-strip` reveal block. **Audit** whether `.agent-document-node-wrapper { position: relative }` is still needed by any other absolutely-positioned child (search highlight, pin marker); keep it only if so, else drop. |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) *(only if §4 Q2 = section header)* | n/a — section lives in `DocumentRow`'s `DocumentNodeBody`; add `onClick={() => props.onToggleCollapse(node.id)}` + `cursor` to the `.agent-section` header there. |
 | Tests | Grep for any test asserting `.node-strip` / `NodeHoverStrip` (e.g. DocumentRow/ActivityLog tests) and remove/adjust. |
 
 ## 6. Implementation steps
@@ -78,7 +78,7 @@ Default: **(a) drop**. The plan below assumes (a); (b) is an additive follow-up 
 - Tool/shell/agent_message rows still expand/collapse by **clicking their header** and by **Enter on the focused row**.
 - Section rows still collapse (via the new header click if Q2=clickable, else via keyboard).
 - No `.node-strip` element renders on hover; no console refs to `NodeHoverStrip`.
-- `grep -rn "NodeHoverStrip\|node-strip"` returns nothing under `frontend/app/view/agent`.
+- `grep -rn "NodeHoverStrip\|node-strip"` returns nothing under [`frontend/app/view/agent`](../../frontend/app/view/agent).
 - Manual: hover several rows — no floating strip appears; line content isn't overlaid.
 
 ## 8. Scope / non-goals

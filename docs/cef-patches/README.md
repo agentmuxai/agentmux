@@ -30,10 +30,10 @@ the FeatureList initializes, so the runtime flag never applies.
    macOS-specific DCHECKs fail (`ScopedSendingEvent` CrAppControlProtocol conformance on every drag
    event, `CefShutdownChecker` on exit, `util_mac::BasicStartupComplete`), causing SIGABRT on pane
    drag and window close. Building with `dcheck_always_on=false` matches the production config and
-   eliminates them. See `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`.
+   eliminates them. See [`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`](../retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md).
 3. **Per-type helper apps** — the from-source CEF framework uses CEF's standard macOS layout:
    renderer/GPU/utility run as `AgentMux Helper (<Type>).app` (Renderer/GPU/Plugin/Alloy + generic
-   + Alerts). `scripts/package-macos.sh` creates all six.
+   + Alerts). [`scripts/package-macos.sh`](../../scripts/package-macos.sh) creates all six.
 
 Result: the signed + **notarized** `.app` launches with a **working, stable renderer** and a live UI.
 

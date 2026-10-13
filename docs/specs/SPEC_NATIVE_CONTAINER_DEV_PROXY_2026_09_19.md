@@ -6,7 +6,7 @@ the end of this document for what shipped, verification depth, and where the
 actual implementation diverged (or didn't) from what's proposed below.
 **Author:** Camper
 **Repo state:** main @ `bdd3270aa` (v0.56.8+)
-**Related:** `docs/reports/REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md`
+**Related:** [`docs/reports/REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md`](../reports/REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md)
 (the container-lifecycle investigation this grew out of), `a5af/claw`'s
 `specs/DOCKER_NETWORK_ALIASES.md` (the precedent this replaces — archived,
 independent of `agentmux` by `container.rs`'s own doc comment), issue #2939
@@ -126,11 +126,11 @@ inside the container:
    required, but "guessing" is doing a lot of work in that sentence — this
    is the least reliable option and should be the fallback, not the
    primary mechanism.
-2. **Explicit registration call.** A new App API verb / MCP tool (e.g.
+2. **Explicit registration call.** A new MuxAPI verb / MCP tool (e.g.
    `RegisterDevServer { project: string, port: u16 }`) an agent calls once
    its dev server is up. Matches the existing pattern of agent-facing App
    API verbs already documented in
-   `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` and this
+   [`docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md`](../reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) and this
    session's own restart-control-gap report — both already establish that
    agent-facing control surface as the right place for this kind of thing.
    Requires the agent (or a convention baked into `CLAUDE.md`/a skill) to

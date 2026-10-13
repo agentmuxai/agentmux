@@ -5,8 +5,8 @@
 **Owner:** AgentA
 **Related:**
 - [SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md](./SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md) — consumer; z-index + token names land here first
-- `frontend/app/theme.scss` / `frontend/app/reset.scss` / `frontend/app/app.scss` — current token + reset layer
-- `frontend/app/mixins.scss` — current (minimal) mixin library
+- [`frontend/app/theme.scss`](../../frontend/app/theme.scss) / [`frontend/app/reset.scss`](../../frontend/app/reset.scss) / [`frontend/app/app.scss`](../../frontend/app/app.scss) — current token + reset layer
+- [`frontend/app/mixins.scss`](../../frontend/app/mixins.scss) — current (minimal) mixin library
 
 ---
 
@@ -370,6 +370,6 @@ The user asked whether the modal spec or this one comes first. Answer:
 ## 11. Cross-references
 
 - `SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md` — direct consumer of the z-index re-rank in §5.3.
-- `frontend/app/theme.scss` — current token file being refactored.
-- `frontend/app/reset.scss` — kept as-is; already well-layered.
-- `frontend/app/view/agent/agent-view.scss` — primary target for Phase 5 mega-file split.
+- [`frontend/app/theme.scss`](../../frontend/app/theme.scss) — current token file being refactored.
+- [`frontend/app/reset.scss`](../../frontend/app/reset.scss) — kept as-is; already well-layered.
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) — primary target for Phase 5 mega-file split.

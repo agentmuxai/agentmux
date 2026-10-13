@@ -10,7 +10,7 @@
 
 `AGENTMUX_AUTH_KEY` is injected into every spawned agent's environment
 (`server/agent_handlers/input.rs`) and is the **sole** authentication factor for
-the entire App API. `auth_middleware` (`server/mod.rs`) is a string comparison:
+the entire MuxAPI. `auth_middleware` (`server/mod.rs`) is a string comparison:
 
 ```rust
 match auth_key {

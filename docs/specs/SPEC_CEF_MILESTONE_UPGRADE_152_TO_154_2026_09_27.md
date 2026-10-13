@@ -3,10 +3,10 @@
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-27
 **Status:** implemented — shipped 2026-09-30: consumer PR #3992 merged 06:51:13 UTC and the three runtimes were published 06:51:19–22 UTC (tags on agentmuxai/cef 660112374b79). Also #3987 (prerequisite), #3989 (spec), #3991 (Linux args), agentmuxai/cef#10, agentmuxai/cef-rs#1; `agentmuxai/cef` default branch is now `8037`.
-**Executes:** `docs/cef-build/CEF_FORK_MAINTENANCE.md` §6 (upgrade runbook), §5 (carry-set gate),
+**Executes:** [`docs/cef-build/CEF_FORK_MAINTENANCE.md`](../cef-build/CEF_FORK_MAINTENANCE.md) §6 (upgrade runbook), §5 (carry-set gate),
 §7 (artifact verification), §8 (release pinning), §9 (checklists). This spec does not restate them;
 it adds what is specific to 154, the schedule, and the traps 148 → 152 already hit.
-**Predecessor:** `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` (took 2026-09-07 →
+**Predecessor:** [`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) (took 2026-09-07 →
 09-15 for the pins, 09-23 for the tracer-free Windows `-r2`).
 
 ## 1. Why now, and why straight to 154
@@ -68,7 +68,7 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
    - `use_static_angle` is **per platform** — `false` on Windows and Linux (152 shipped stub ANGLE
      otherwise, #3172, #3229); macOS links ANGLE statically and must **not** override it.
      A clean compile does not prove GPU works. On **Windows and Linux** run
-     **`scripts/verify-angle-libs.sh`** (the ANGLE export check — `eglGetProcAddress`/`glGetString`
+     **[`scripts/verify-angle-libs.sh`](../../scripts/verify-angle-libs.sh)** (the ANGLE export check — `eglGetProcAddress`/`glGetString`
      in the separate `libEGL`/`libGLESv2`) on each built runtime and on the packaged app, as
      `Taskfile.yml` already does at package time. On **macOS** that script proves nothing: there are
      no separate ANGLE libraries, and it skips absent ones and still prints success. Instead `nm` the
@@ -156,7 +156,7 @@ repository access covers it (org settings → GitHub Apps) before Day 1 — its 
 
 #### Day 1 results (2026-09-29)
 
-- **Prerequisite** merged: agentmuxai/agentmux#3987 (pins in `scripts/cef-build/cef-runtime-pins.sh`);
+- **Prerequisite** merged: agentmuxai/agentmux#3987 (pins in [`scripts/cef-build/cef-runtime-pins.sh`](../../scripts/cef-build/cef-runtime-pins.sh));
   the drift reporter reads that file (updated in the private infrastructure repo, deployed).
 - **`agentmuxai/cef` `8037`** cut from upstream **682c378d7**, not 564dd6c4: four later upstream
   fixes, same `refs/tags/154.0.8037.58`. Port PR #10, one commit per item, all 18 Layer B files
@@ -224,14 +224,14 @@ for lack of disk is the expensive failure). Warm-cache rebuilds after a patch tw
    left stale, the next Cargo run may resolve an unverified 154 crate); **the shared pin file from
    the prerequisite** (read by `release.yml` and every `build-*.yml`'s blank-tag path) — all three
    tags together; left on 152, nightly and blank-tag builds keep fetching 152 runtimes against the
-   154 binding; **`scripts/cef-build/windows-runtime-pin.sh` — all three of its values**
+   154 binding; **[`scripts/cef-build/windows-runtime-pin.sh`](../../scripts/cef-build/windows-runtime-pin.sh) — all three of its values**
    (`CEF_WINDOWS_RELEASE_TAG`, `CEF_WINDOWS_ASSET`, `CEF_WINDOWS_LIBCEF_SHA256` of the new
    `libcef.dll`). That file, not `fetch-patched-cef-windows.sh` (which only sources it), is the
    Windows pin local and package builds use: leave it on 152 and they fetch the 152 runtime and fail
    the version guard, while a 154 runtime fails `verify-cef-runtime-windows.sh`'s SHA check. Also
    the Taskfile CEF tiers if they name a version, `docs/cef-build/*` version references, and the
    public ones: `README.md` (the architecture image's alt text and the "Desktop: CEF 152" line) and
-   the version text inside `assets/architecture.svg` (edited in place — it has no generator; #3270
+   the version text inside [`assets/architecture.svg`](../../assets/architecture.svg) (edited in place — it has no generator; #3270
    did the same for 148 → 152).
 4. **On the consumer branch**, a packaged build on each platform — using the locally built runtime
    (or the draft asset) — runs the §7.3 checks end to end. **Gate: the blank = pinned prerequisite
@@ -260,12 +260,12 @@ What cost time, none of it source or patch work (the lessons are now in
 - **Linux:** the fontconfig bindgen `-Dwarnings` failure (#3991); stale Dawn Go files from
   syncing the 152 tree in place; the charlie VM halting at 09:48 UTC when gamerlove's
   NVIDIA driver crashed (about 3 h); and a packaged-app window that stayed invisible with
-  the VM's 3D off (a GPU-tier bug, `docs/retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md`,
+  the VM's 3D off (a GPU-tier bug, [`docs/retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md`](../retro/RETRO_INVISIBLE_WINDOW_ON_DEAD_GPU_2026_09_29.md),
   fixed by #3995).
 - **Windows:** a `subst` drive broke a TypeScript step; `-j 20` exceeded narko's commit limit.
 - **macOS:** the first §7.3 pass used `main`'s 152 binding; it was repeated on #3992.
 - **Coordination:** Korp sat unreachable for an hour after a deferred config restart left
-  it with no process (`docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`,
+  it with no process ([`docs/retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md`](../retro/RETRO_DEFERRED_RESTART_NEVER_RESPAWNS_2026_09_29.md),
   fixed by #3990), and the relay briefly stopped delivering to Opaz.
 
 **Known issue carried forward:** Linux window transparency fails, identically on the

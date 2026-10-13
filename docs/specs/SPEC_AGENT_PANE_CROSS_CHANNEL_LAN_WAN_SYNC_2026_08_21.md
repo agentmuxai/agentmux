@@ -10,7 +10,7 @@ discovery/forwarding (`backend/reactive/registry.rs`), jekt trust model
 `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`,
 `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`,
 `SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md`, `specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md`
-(**note the path** — this repo has two spec trees, `docs/specs/` and a
+(**note the path** — this repo has two spec trees, [`docs/specs/`](.) and a
 top-level `specs/`; this doc lives in the latter. §2.2 there: `Command::MoveTab`
 reducer — "blocks and layout state are children of the Tab object — they
 travel automatically" — is the real, verified basis for this spec's
@@ -94,7 +94,7 @@ review of PR #2721 claimed the file didn't exist. I re-checked with a
 genuinely present, just past the truncation point in a 29-result list — and
 wrongly concluded reagent was right, replacing a valid citation with a false
 "does not exist" claim. reagent's second review caught that error and
-supplied the real path (`specs/`, not `docs/specs/` — this repo has two
+supplied the real path (`specs/`, not [`docs/specs/`](.) — this repo has two
 spec trees). Restored correctly here.
 
 **`FleetBroadcast` is not a stream — don't build on the name.**
@@ -111,7 +111,7 @@ trap — this spec's mirror feature needs new plumbing, not a rename of this too
 in the `/agentmux/discovery` endpoint — a host-global filesystem registry letting
 agents in *different* channels on the *same machine* find and jekt each other over
 127.0.0.1-only forwarding. Exercised for real on 2026-08-21
-(`docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md` — two
+([`docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`](../retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md) — two
 agents in different channels messaged each other and it correctly surfaced under
 `host.cross_channel` vs. same-channel `host.addressable`). This registry/forwarding
 mechanism (`registry/paths.rs`, `resolve_shared_reactive_dir`) is the right
@@ -367,7 +367,7 @@ specifically asks for true simultaneous co-typing.
 Internal (this repo, cited above): `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`,
 `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`,
 `specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`,
-`docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`.
+[`docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`](../retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md).
 
 External (research for this spec, 2026-08-21):
 - Terminal-sharing architecture survey (tmate/upterm/ttyd/sshx) —

@@ -5,19 +5,19 @@
 **Status:** Draft
 **Scope:** `SubagentInfo`/`ActiveSubagent` status end to end —
 `agentmux-srv/src/backend/subagent_watcher.rs` (backend) and
-`frontend/app/view/swarm/swarm-model.ts` / `swarm-view.tsx` (frontend).
+[`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) / `swarm-view.tsx` (frontend).
 Explicitly **not** the parent agent pane's own `TurnPhase` — that
 already has a reducer and was already fixed (see §2).
 **Related (must-read first):**
-`docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`
+[`docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md)
 (Finding 1 — the parent-pane fix this spec extends to subagents;
 Finding 2 — subagent completion detection, already fixed, confirmed
 in §2 below),
-`docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`
+[`docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`](archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md)
 (the "flood on reopen" mechanism this spec's Goal 2 targets — that
 report fixed row *count* via grouping; this spec fixes event *volume*
 and *correctness*, which grouping didn't touch),
-`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md` (precedent
+[`docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) (precedent
 shape — the reducer pattern this spec proposes mirrors it),
 issue reported directly by the user: *"the subagent lifecycle is
 shakey .. do we have a reducer system for it? We always see 'working'
@@ -116,7 +116,7 @@ Whatever `process_jsonl_change` last wrote is exactly what's reported.
 
 **Parent/root agent pane status** flows through a real reducer with an
 explicit `TurnPhase` discriminated union
-(`frontend/app/store/agent-pane-state/reducer.ts`,
+([`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts),
 `types.ts` — see `SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md` for the
 full design). Critically, this pipeline **has already been fixed** for
 the "stuck/wrong status at mount" class of bug
@@ -177,7 +177,7 @@ captured live traces of 45 and 227 subagents replayed this way in a
 single reopen.
 
 **No polling exists anywhere in this pipeline** — confirmed by
-exhaustive search of `frontend/app/view/swarm/`. The "flood that never
+exhaustive search of [`frontend/app/view/swarm/`](../../frontend/app/view/swarm). The "flood that never
 stops" is fully explained by the combination of: (1) every backfilled
 subagent broadcasts its own event, each independently triggering a
 `loadSubagents()` RPC; (2) a meaningful fraction of those subagents

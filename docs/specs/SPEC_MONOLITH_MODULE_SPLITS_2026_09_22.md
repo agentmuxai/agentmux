@@ -105,7 +105,7 @@ tool and the result, not the tool, is what gets reviewed.
 
 `backend/pane_env.rs`'s `SPAWN_INVENTORY` pins every `Command::new(` site
 in the crate by *file path* (retro
-`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`,
+[`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`](../retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md),
 #3365 P1). One entry named `persistent.rs` for a `"echo"` that appears only
 inside a comment; that comment now lives in `persistent/tests/send_input.rs`
 and the entry is repointed. This is the guardrail working as designed — a

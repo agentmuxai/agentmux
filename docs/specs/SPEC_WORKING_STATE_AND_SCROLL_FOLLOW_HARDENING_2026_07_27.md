@@ -6,7 +6,7 @@
 **Date:** 2026-07-27
 **Status:** implemented — this pass's mechanisms shipped; of §5's two deferred items, the tool-liveness gap was closed by the attached-task axis (PR #2489 + #2472) and the scroll input-gating race remains open, conditional on live reports. Verified 2026-08-10.
 **Author:** Agent1
-**Scope:** `agentmux-srv/src/backend/blockcontroller/{mod,persistent}.rs`, `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts`, `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`
+**Scope:** `agentmux-srv/src/backend/blockcontroller/{mod,persistent}.rs`, [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts), [`frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts`](../../frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts), [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx)
 
 ---
 
@@ -15,9 +15,9 @@
 Four distinct-but-related live incidents surfaced in one session, each a variant of "the pane's status doesn't match what actually happened, with no explanation":
 
 1. This agent's own pane got stuck showing "Working…" after a PR merge that had genuinely completed.
-2. Research into (1) surfaced a cataloged, still-open architectural gap: the backend's turn-end event is fire-once with no replay, so a missed push has no self-heal path (`docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md` §3/§4 item 5).
-3. The message list's auto-scroll-follow, previously "fixed" (`docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`), was still observed silently drifting off true bottom.
-4. Live, mid-session: Agent2's pane got stuck on an unanswerable AskUserQuestion prompt, and separately, a pane was observed going "Worked" → "Working…" again with no user input in between (`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`).
+2. Research into (1) surfaced a cataloged, still-open architectural gap: the backend's turn-end event is fire-once with no replay, so a missed push has no self-heal path ([`docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`](REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md) §3/§4 item 5).
+3. The message list's auto-scroll-follow, previously "fixed" ([`docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`](SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md)), was still observed silently drifting off true bottom.
+4. Live, mid-session: Agent2's pane got stuck on an unanswerable AskUserQuestion prompt, and separately, a pane was observed going "Worked" → "Working…" again with no user input in between ([`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`](../reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md)).
 
 Each was investigated independently (two parallel research agents for #1/#3, direct code-grounded analysis for #4's two issues). This spec folds the findings into one implementation pass, since three of the four root causes are small, independent, and low-risk enough to land together; the fourth (settled-grace) and the AskUserQuestion race are handled with more care (see §4, §5).
 
@@ -47,7 +47,7 @@ The 2026-07-24 fix (three tracked dependencies in the pin-to-bottom effect: `nod
 
 ## 4. "Worked" reverting to "Working…" with no user input — settled-grace invariant
 
-Root cause (`frontend/app/store/agent-pane-state/reducer.ts`'s `StreamFlushObserved` case): `Done.completed` → `Streaming` re-promotion on any live flush is **intentional**, not a bug — the CLI's `session_end` fires after every model round, not just true turn end, so a genuine multi-round tool continuation needs this path; removing it would leave the UI falsely showing "Worked" during real work, a worse failure than the reverse.
+Root cause ([`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts)'s `StreamFlushObserved` case): `Done.completed` → `Streaming` re-promotion on any live flush is **intentional**, not a bug — the CLI's `session_end` fires after every model round, not just true turn end, so a genuine multi-round tool continuation needs this path; removing it would leave the UI falsely showing "Worked" during real work, a worse failure than the reverse.
 
 **Fix (`agent-view.tsx`, additive only — no reducer/`TurnPhase` changes):** a `SETTLE_GRACE_MS` (500ms) timer arms when `turnPhase` enters `Done.completed`. If no further activity arrives within the window, the episode is considered *settled*. If a `StreamFlushObserved` re-promotion to `Streaming` arrives **after** the episode settled, a visible system notification ("Picked up more work — starting another round…") is posted into the conversation instead of letting the indicator silently flip back with no explanation. An episode still within its grace window (the genuine same-breath multi-round case) re-promotes exactly as before, silently — no regression to the common case, only the "user already saw it settle" case gets disclosed.
 
@@ -57,7 +57,7 @@ Root cause (`frontend/app/store/agent-pane-state/reducer.ts`'s `StreamFlushObser
 
 - **Frontend tool-liveness gap** (report 1's #1 finding: `toolsActive > 0` is an unconditional, unbounded watchdog exemption). Needs a real `TurnPhase`/reducer change plus a backend process-liveness signal threaded into `controllerstatus` — sized as its own follow-up spec, not bundled here to keep this pass's risk low.
 - **Scroll input-gating** (race root cause #2) — only pursue if live reports continue after mechanism 4 above ships; needs telemetry to confirm it actually fires before investing in wheel/pointer/touch listener plumbing.
-- **Agent2's stuck-AskUserQuestion panel** — root cause is a hypothesis (an optimistic client-side "answered" transition racing a document resync that rebuilds from a transcript where the tail question is still `awaiting_answer`), not yet live-confirmed. Needs direct inspection of a live instance's document/transcript state before sizing a fix. See `docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md` §2.
+- **Agent2's stuck-AskUserQuestion panel** — root cause is a hypothesis (an optimistic client-side "answered" transition racing a document resync that rebuilds from a transcript where the tail question is still `awaiting_answer`), not yet live-confirmed. Needs direct inspection of a live instance's document/transcript state before sizing a fix. See [`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`](../reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md) §2.
 
 ## 6. Verification
 

@@ -18,12 +18,12 @@ a purpose-built tool should collapse into one command.
 
 ## 0. This is a planned extension, not a new idea — read this first
 
-`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md` §7 already
+[`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`](SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) §7 already
 named "Phase 2: cross-instance query" as the next step after Phase 1 shipped.
-`docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`
+[`docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`](../reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md)
 §3 point 3 already proposed the specific missing primitive this spec builds
 (a real "list live instances" command cross-referencing actual processes
-against disk). `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
+against disk). [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md)
 already built and shipped the *transport, trust, and consent* pattern this
 spec reuses (jekt-riding request/response, per-agent visibility setting,
 TOFU-pinned LAN identity) — for transcripts specifically — and its own

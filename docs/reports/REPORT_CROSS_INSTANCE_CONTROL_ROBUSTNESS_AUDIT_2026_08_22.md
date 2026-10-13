@@ -107,7 +107,7 @@ repoints — hard-scoped to the instance the calling agent's own pane lives
 in. `CaptureWindow` is the sole, deliberately narrow exception
 (screenshot-only, same host, own-instance excluded, audit-logged —
 `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` §6.1's
-2026-08-21 addendum). `docs/specs/computer-use-pane.md`'s "Remote mode —
+2026-08-21 addendum). [`docs/specs/computer-use-pane.md`](../specs/computer-use-pane.md)'s "Remote mode —
 control another machine over AgentBus" is explicitly listed as an unbuilt
 Phase 3 idea (line 191) with no design yet. Not a bug — this is
 `muxspect`'s own Phase 1 restriction, applied consistently — but it means

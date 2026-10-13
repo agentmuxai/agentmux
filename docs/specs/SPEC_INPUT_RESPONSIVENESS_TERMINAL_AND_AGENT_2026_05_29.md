@@ -10,7 +10,7 @@
 
 ## TL;DR
 
-Typing must remain fast **as the app grows**. AgentMux already shipped pointed fixes for terminal echo (`PR #926`, `SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`) and agent textarea reflow (`docs/analysis/agent-typing-lag-trace-2026-04-12.md` → `field-sizing: content`). Those are reactive: one regression, one chase. This spec captures the **structural rules** that must hold across both surfaces so we don't keep paying the same debugging cost.
+Typing must remain fast **as the app grows**. AgentMux already shipped pointed fixes for terminal echo (`PR #926`, `SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`) and agent textarea reflow ([`docs/analysis/agent-typing-lag-trace-2026-04-12.md`](../analysis/agent-typing-lag-trace-2026-04-12.md) → `field-sizing: content`). Those are reactive: one regression, one chase. This spec captures the **structural rules** that must hold across both surfaces so we don't keep paying the same debugging cost.
 
 Three rules to enforce going forward:
 
@@ -64,7 +64,7 @@ Key invariants already in code:
 - **Fast path** (`scheduleRafWrite()` @ `termwrap.ts:494`): `data.length ≤ 512 B` AND `rafBuffer.length === 0` → immediate `terminal.write()`. Bypasses the RAF coalescer for single-character echoes.
 - **`writeInFlight` is NOT in the fast-path predicate** anymore (PR #926). xterm.js serializes `write()` internally; the guard was redundant and caused jitter when any large batch was in flight.
 - **Perf marks** (`term-keypress`, `term-echo-render`, `term-raf-write`) per `SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md` §2.2.
-- **Bench tooling**: `tools/tests/bench-term-echo.mjs` gives a CI-runnable echo-latency P95 number.
+- **Bench tooling**: [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs) gives a CI-runnable echo-latency P95 number.
 
 ### 3.2 Agent pane composer (`frontend/app/view/agent/components/AgentFooter.tsx`)
 
@@ -233,12 +233,12 @@ Cost per mark: ~50 ns. Surfaced in the dev-mode Perf HUD per `SPEC_PERFORMANCE_I
 
 ### 7.2 Per-surface bench
 
-- Terminal: extend `tools/tests/bench-term-echo.mjs` to capture P95 echo latency in CI on every PR that touches `frontend/app/view/term/**`.
-- Agent: write a parallel `tools/tests/bench-agent-keystroke.mjs` that drives the agent pane via the App API (`pane.open` → focus → simulated keydown sequence → measure `agent-keystroke` mark P95).
+- Terminal: extend [`tools/tests/bench-term-echo.mjs`](../../tools/tests/bench-term-echo.mjs) to capture P95 echo latency in CI on every PR that touches `frontend/app/view/term/**`.
+- Agent: write a parallel [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) that drives the agent pane via MuxAPI (`pane.open` → focus → simulated keydown sequence → measure `agent-keystroke` mark P95).
 
 ### 7.3 ESLint / grep guardrails
 
-Add an ESLint custom rule (or CI grep step) that flags the following in `frontend/app/view/term/**` and `frontend/app/view/agent/components/AgentFooter.tsx`:
+Add an ESLint custom rule (or CI grep step) that flags the following in `frontend/app/view/term/**` and [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx):
 
 - Direct reads of `scrollHeight`, `offsetHeight`, `getBoundingClientRect`, `getComputedStyle` inside any function attached to `onInput`, `onKeyDown`, `onKeyPress`, `onKeyUp`, `onBeforeInput`, or any function called from such a handler.
 - Any new `setTimeout(fn, 0)` — should be `scheduler.yield()` or `queueMicrotask` per intent.
@@ -269,7 +269,7 @@ The [Long Animation Frames API (LoAF)](https://web.dev/articles/optimize-long-ta
 |---|---|---|---|
 | 1 | Ship IME-composition fix for agent textarea Enter handler | **HIGH** | Real user-facing bug for CJK / IME users. Tiny diff. |
 | 2 | Add `agent-keystroke` + RAF perf marks to `AgentFooter.tsx` | Medium | Mirrors terminal pattern. Enables agent bench. |
-| 3 | Write `tools/tests/bench-agent-keystroke.mjs` | Medium | Counterpart to `bench-term-echo.mjs`. |
+| 3 | Write [`tools/tests/bench-agent-keystroke.mjs`](../../tools/tests/bench-agent-keystroke.mjs) | Medium | Counterpart to `bench-term-echo.mjs`. |
 | 4 | Add ESLint rule / CI grep for layout reads in input handlers | Medium | Prevents the 22 ms reflow regression from recurring. |
 | 5 | Adopt `scheduler.yield()` in slash-autocomplete matcher (preemptively) | Low | Before the matcher grows. |
 | 6 | Add `targetFps` coalescer to `termwrap.ts` non-input write path | Low | Battery/thermal benefit on laptops. Measure first. |
@@ -322,5 +322,5 @@ Items 1, 2, 3, 4 are the "do these now" set — they're cheap, they prevent know
 - [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`](./SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) — user-message rendering
 - [`SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md`](./SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md) — voice-driven input integration
 - [`docs/analysis/agent-typing-lag-trace-2026-04-12.md`](../analysis/agent-typing-lag-trace-2026-04-12.md) — the 22-ms `scrollHeight` incident
-- `frontend/app/view/term/termwrap.ts` — terminal write scheduler (fast path + RAF coalescer)
-- `frontend/app/view/agent/components/AgentFooter.tsx` — agent composer textarea
+- [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) — terminal write scheduler (fast path + RAF coalescer)
+- [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) — agent composer textarea

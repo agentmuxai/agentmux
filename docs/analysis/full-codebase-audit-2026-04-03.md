@@ -2,7 +2,7 @@
 
 **Status:** Historical — a point-in-time snapshot, not current status.
 
-> **Staleness note (2026-08-03):** confirmed stale, not just old. `src-tauri/` (issue #1) is gone — no longer in the workspace or referenced by the build. The "dual state management" finding (issue #2) is also out of date — the frontend is now essentially SolidJS-only. Read this for historical context on the Tauri→CEF migration, not as a current-state audit; see `docs/reports/` for more recent repo-health passes.
+> **Staleness note (2026-08-03):** confirmed stale, not just old. `src-tauri/` (issue #1) is gone — no longer in the workspace or referenced by the build. The "dual state management" finding (issue #2) is also out of date — the frontend is now essentially SolidJS-only. Read this for historical context on the Tauri→CEF migration, not as a current-state audit; see [`docs/reports/`](../reports) for more recent repo-health passes.
 
 ## Executive Summary
 
@@ -51,7 +51,7 @@ The codebase is **solid but carries significant technical debt** from the Tauri�
 - `vite.config.tauri.ts` (watch ignore — harmless but confusing name)
 - `.gitignore`
 - `scripts/sync-version.sh`, `scripts/update-tauri.sh`, `scripts/verify-tauri-versions.sh`
-- `scripts/benchmarks/measure-performance.{ps1,sh}`, `scripts/build-appimage.sh`, `scripts/package-msix.ps1`
+- `scripts/benchmarks/measure-performance.{ps1,sh}`, `scripts/build-appimage.sh`, [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1)
 - `wdio.conf.cjs` (test config)
 - `BUILD.md`, `CONTRIBUTING.md`
 
@@ -64,13 +64,13 @@ The codebase is **solid but carries significant technical debt** from the Tauri�
 | Issue | File(s) | Details |
 |-------|---------|---------|
 | **Dead Jotai in BlockModel** | `frontend/app/block/block-model.ts:4-5, 14-32` | Still imports and uses `jotai.atom()` despite migration to SolidJS signals. Creates unmaintained dual-state system |
-| **Direct Tauri imports in active code** | `frontend/app/drag/CrossWindowDragMonitor.linux.tsx:14`, `darwin.tsx:61`, `frontend/app/view/term/term.tsx:274` | Hardcoded `import { invoke } from "@tauri-apps/api/core"` instead of using platform IPC abstraction — breaks on CEF |
+| **Direct Tauri imports in active code** | [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx:14`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx), `darwin.tsx:61`, [`frontend/app/view/term/term.tsx:274`](../../frontend/app/view/term/term.tsx) | Hardcoded `import { invoke } from "@tauri-apps/api/core"` instead of using platform IPC abstraction — breaks on CEF |
 
 ### HIGH
 
 | Issue | File(s) | Details |
 |-------|---------|---------|
-| **God file: global.ts** | `frontend/app/store/global.ts` (917 lines) | 104+ exports mixing atoms, services, utilities, counters, notifications. Split into focused modules |
+| **God file: global.ts** | [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) (917 lines) | 104+ exports mixing atoms, services, utilities, counters, notifications. Split into focused modules |
 | **globalStore shim used in 11 files** | `blockframe.tsx`, `termwrap.ts`, `keymodel.ts`, `agent-model.ts`, `term.tsx`, etc. | Jotai compatibility shim obscures incomplete migration to SolidJS signals |
 | **Dual state management** | Across frontend | Code uses SolidJS signals + globalStore shim + raw Jotai atoms + window globals simultaneously |
 
@@ -83,9 +83,9 @@ The codebase is **solid but carries significant technical debt** from the Tauri�
 | **52 `(window as any)` casts** | `wave.ts` (19 occurrences), `ipc.ts`, `cef-api.ts`, `tauri-api.ts` | Should use proper type declarations for window globals |
 | **Tauri-only features silently broken on CEF** | `frontend/util/notification.ts:56-71` — `sendNativeNotification()` no-ops on CEF; `frontend/wave.ts:68-106` — instance ID title no-ops on CEF | Features that work on Tauri but silently fail on CEF |
 | **Dead Tauri bootstrap files** | `frontend/tauri-bootstrap.ts` (210 lines), `frontend/tauri-init.ts` (31 lines) | Conditional on `__TAURI_INTERNALS__` — never active on CEF, but add weight |
-| **Leaked setInterval in TermViewModel** | `frontend/app/view/term/termViewModel.ts:32-33` | Global `setInterval(() => ..., 60_000)` never cleaned up — accumulates on re-creation |
+| **Leaked setInterval in TermViewModel** | [`frontend/app/view/term/termViewModel.ts:32-33`](../../frontend/app/view/term/termViewModel.ts) | Global `setInterval(() => ..., 60_000)` never cleaned up — accumulates on re-creation |
 | **Global mutable state in drag handlers** | `CrossWindowDragMonitor.linux.tsx:23`, `darwin.tsx:22-30` | Module-level `let _currentDragPayload` — concurrent drags overwrite each other |
-| **Unbounded OSC buffer** | `frontend/app/view/term/termosc.ts:45-100` | No size limit on JSON parsing from terminal escape sequences |
+| **Unbounded OSC buffer** | [`frontend/app/view/term/termosc.ts:45-100`](../../frontend/app/view/term/termosc.ts) | No size limit on JSON parsing from terminal escape sequences |
 
 ### LOW
 
@@ -170,7 +170,7 @@ The codebase is **solid but carries significant technical debt** from the Tauri�
 | `scripts/verify-tauri-versions.sh` | Delete |
 | `scripts/build-release.ps1` | Delete (unused, not called by any task) |
 | `scripts/build-appimage.sh` | Rewrite for CEF or delete |
-| `scripts/package-msix.ps1` | Rewrite for CEF or delete |
+| [`scripts/package-msix.ps1`](../../scripts/package-msix.ps1) | Rewrite for CEF or delete |
 | `scripts/benchmarks/measure-performance.{ps1,sh}` | Update paths from src-tauri to target/release |
 
 ### Stale dist/ Artifacts

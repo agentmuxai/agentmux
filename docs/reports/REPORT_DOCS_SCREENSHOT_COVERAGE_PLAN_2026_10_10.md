@@ -3,8 +3,8 @@
 **Date:** 2026-10-10
 **Status:** proposed — a plan, not started. Nothing here is implemented yet.
 **Context:** AgentMux is a UI product, but its docs site (agentmuxai/agentmux-docs)
-is almost all prose. The screenshot tooling in `scripts/ui-screenshots/`
-(spec: `docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md`) now captures
+is almost all prose. The screenshot tooling in [`scripts/ui-screenshots/`](../../scripts/ui-screenshots)
+(spec: [`docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md`](../specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md)) now captures
 every widget at fixed sizes from an isolated instance, and the first images
 landed in agentmux-docs#163 (the widget gallery). This report surveys every
 user-facing docs page, lists each UX experience on it (anything the user sees or
@@ -73,7 +73,7 @@ on 2026-10-10).
 |---|---|
 | `capture.mjs` | Runner. Connects to an instance's CDP port, picks the app's main page target, runs a suite's shots in order: `prep` → settle → measure selector → `Page.captureScreenshot` with a clip → write PNG → append to `manifest.json`. Flags: `--port`, `--suite manual\|widgets`, `--only`, `--sizes`, `--out`. No npm dependencies. |
 | `shots.mjs` | The `manual` suite: 10 hand-written chrome shots (top bar, hamburger menu, agent picker, pane header, Swarm, Sysinfo, Memory → Bundles, Settings → Appearance, fresh terminal, whole window). From the first run on 2026-09-19. |
-| `widget-shots.mjs` | The `widgets` suite, generated from `crates/srv/src/config/widgets.json`: per widget, open a new window tab, open the widget (pinned icon → More list → hamburger → command palette), find its pane, maximize it, capture at each size, close the tab. `EXCLUDE` skips Messengers and Browser. |
+| `widget-shots.mjs` | The `widgets` suite, generated from [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json): per widget, open a new window tab, open the widget (pinned icon → More list → hamburger → command palette), find its pane, maximize it, capture at each size, close the tab. `EXCLUDE` skips Messengers and Browser. |
 | `sizes.mjs` | `small` 800×600, `medium` 1280×800, `large` 1920×1080, each with a `scale` (device pixel ratio). Re-layout via `Emulation.setDeviceMetricsOverride`, not a scaled copy. |
 | `demo-env.mjs` | Writes the made-up `acme-web` project and a user `widgets.json` pointing Hangar, Terminal and Editor at it (and Sysinfo at CPU + Mem + Net). Refuses a demo path containing the user name or under the home folder. |
 | `lib/bench-page.js`, `lib/one-way-soak-page.js` | Not screenshot code, but relevant: they inject synthetic history into an agent pane's document store and stream scripted Claude stream-json (tool calls, diffs, parallel tools, long reads) through the pane's real output pipeline. No agent, no tokens. Built for performance benches; reusable as the seeding layer for conversation shots (§5.2). |
@@ -106,7 +106,7 @@ right-click menus are native. That's no longer true: they're page overlays, see
   2026-10-08.
 - `widget-gallery.md` shows all 14; `pane-types.md` links to it. No other page
   uses them yet.
-- Every PR needs a changeset (`scripts/changeset.sh`), and merging to `main`
+- Every PR needs a changeset ([`scripts/changeset.sh`](../../scripts/changeset.sh)), and merging to `main`
   deploys to production.
 
 ### 1.3 Direction already agreed in agentmux-docs#162
@@ -229,7 +229,7 @@ constraints:
 Options, cheapest first:
 
 1. **Run the content suites against an isolated `task dev` instance** started
-   with `AGENTMUX_HOME_OVERRIDE` (honored by `crates/common/src/data_paths.rs`,
+   with `AGENTMUX_HOME_OVERRIDE` (honored by [`crates/common/src/data_paths.rs`](../../crates/common/src/data_paths.rs),
    which every binary uses; confirm it isolates a dev instance end to end before
    relying on it) and a CDP port. Reuse the bench helpers as-is. Fastest path to
    a first conversation shot.
@@ -280,7 +280,7 @@ never a real login, and mark any shot showing them `containsWorkspaceData:
 Class-D states are driven by srv events (failure classification, install
 progress, auth checks, pending shutdown) or by modal requests. Two routes:
 
-- Where a state is a modal (`frontend/app/element/modal-layer.ts`'s request
+- Where a state is a modal ([`frontend/app/element/modal-layer.ts`](../../frontend/app/element/modal-layer.ts)'s request
   kinds), open it directly through the modal layer from `evaluate` with a
   canned request. Cheap and exact.
 - Where it's an srv-driven row or banner, inject the event the pane already
@@ -323,7 +323,7 @@ future UI tests can use it.
 ### 5.6 Variants (Part 7)
 
 - **Light theme.** The app has four light themes (Light, Catppuccin Latte,
-  Solarized Light, Gruvbox Light; `frontend/app/menu/base-menus.ts`), and the
+  Solarized Light, Gruvbox Light; [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts)), and the
   docs site has light and dark modes. Capture one dark (Default) and one light
   (Light) set of the key shots and, if wanted, a small docs component that shows
   the one matching the site's mode. Not every shot needs both: start with the
@@ -568,7 +568,7 @@ In docs sidebar order. **Shot id** is a suggested stable id for the manifest
 (prefix = the suite it would live in). **Class** is from §3. **Part** is §6. A
 shot listed once is reused on other pages by linking the same image; each page
 below lists only the shots that belong to it first. Crop selectors come from the
-code survey (paths under `frontend/app/`); they're starting points, verified when
+code survey (paths under [`frontend/app/`](../../frontend/app)); they're starting points, verified when
 the shot is written.
 
 Privacy marks: **⚠** = always shows machine or workspace data, so it must come
@@ -937,12 +937,12 @@ all of Internals.
 
 | Surface | Why | Plan |
 |---|---|---|
-| Browser-pane web content | native child window (Windows, `crates/cef/src/browser_pane/creation.rs`) or CEF overlay view (macOS/Linux) | Composite its own capture (#162). |
-| OS file dialogs | `rfd::FileDialog` (`crates/cef/src/commands/platform.rs`) | Start the flow one step later from a fixture. |
+| Browser-pane web content | native child window (Windows, [`crates/cef/src/browser_pane/creation.rs`](../../crates/cef/src/browser_pane/creation.rs)) or CEF overlay view (macOS/Linux) | Composite its own capture (#162). |
+| OS file dialogs | `rfd::FileDialog` ([`crates/cef/src/commands/platform.rs`](../../crates/cef/src/commands/platform.rs)) | Start the flow one step later from a fixture. |
 | OS notifications ("Send test notification", agent alerts) | OS toast | Text. |
 | System tray icon and menu | OS | One OS-level shot on Installation. |
-| macOS menu bar | `crates/cef/src/macos_menu.rs` | Text. |
+| macOS menu bar | [`crates/cef/src/macos_menu.rs`](../../crates/cef/src/macos_menu.rs) | Text. |
 | Window translucency | OS layered window | Optional OS-level shot. |
-| Native pre-splash | `crates/launcher/src/splash.rs` (shows `user@host`) | Skip. |
+| Native pre-splash | [`crates/launcher/src/splash.rs`](../../crates/launcher/src/splash.rs) (shows `user@host`) | Skip. |
 | DevTools, "Online Docs" (external browser), "Open raw settings.json" (external editor) | external windows | Text. |
 | `<select>` dropdown popups (inferred, not verified) | Chromium popup widget | Capture with the select closed. |

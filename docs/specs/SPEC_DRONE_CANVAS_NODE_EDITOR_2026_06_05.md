@@ -12,7 +12,7 @@
 
 The feature is tracked by **issue #753** + **discussion #832**, but the RFC predates the code as shipped and is wrong on two points this spec corrects:
 
-1. **Naming.** The feature shipped as **Drone**: the widget is `defwidget@drone` and the code lives in `frontend/app/view/drone/`. ("Workflows" is unrelated — that term now refers strictly to Claude's own workflows feature.) This spec uses the shipped names.
+1. **Naming.** The feature shipped as **Drone**: the widget is `defwidget@drone` and the code lives in [`frontend/app/view/drone/`](../../frontend/app/view/drone). ("Workflows" is unrelated — that term now refers strictly to Claude's own workflows feature.) This spec uses the shipped names.
 2. **Canvas library.** #753's headline decision (§2 Q1) was "drop the ~750-LOC custom canvas, adopt `solid-flow` (miguelsalesvieira/solid-flow)." The team **did not** do this — a custom SVG canvas shipped instead. Independent research (2026-06-05) confirms `miguelsalesvieira/solid-flow` is **abandoned since 2022** (v1.0.4, Oct 2022; different non-xyflow API), and the alternative `@dschz/solid-flow` is a single-maintainer v0.1.x alpha. So the team's instinct to keep a custom canvas was correct. §3 here formalizes that: **build custom, borrow `@xyflow/system` for the d3/geometry math + `@dagrejs/dagre` for layout.**
 
 Everything else in #753 (5-block taxonomy, Mustache `{{...}}` interpolation, Agent-block-references-identity, SQLite run history, validator rules) **matches the shipped backend** and stands. Recommend posting this spec under discussion #832 and adding a correcting note to #753 rather than opening a new tracking issue.
@@ -371,16 +371,16 @@ Each phase is an independently shippable PR (changesets workflow — `task chang
 
 ## 10. File-level change map
 
-- `frontend/app/view/drone/block-registry.ts` — add `emoji` to `BlockKindMeta` + each entry; (drop unused `icon` or repurpose).
-- `frontend/app/view/drone/drone-model.ts` — `createSignal`→`createStore`; rewrite `addNode/removeNode/updateNodeData/moveNode/addEdge/removeEdge` as path mutations; `reconcile` in `openDrone/newDrone/save`; add `setViewport`, dirty/autosave scheduler, `isValidConnection`, `addNodeAtCenter`, multi-select state.
-- `frontend/app/view/drone/drone-view.tsx` — **split** into:
+- [`frontend/app/view/drone/block-registry.ts`](../../frontend/app/view/drone/block-registry.ts) — add `emoji` to `BlockKindMeta` + each entry; (drop unused `icon` or repurpose).
+- [`frontend/app/view/drone/drone-model.ts`](../../frontend/app/view/drone/drone-model.ts) — `createSignal`→`createStore`; rewrite `addNode/removeNode/updateNodeData/moveNode/addEdge/removeEdge` as path mutations; `reconcile` in `openDrone/newDrone/save`; add `setViewport`, dirty/autosave scheduler, `isValidConnection`, `addNodeAtCenter`, multi-select state.
+- [`frontend/app/view/drone/drone-view.tsx`](../../frontend/app/view/drone/drone-view.tsx) — **split** into:
   - `node-type-bar.tsx` (`<NodeTypeBar>`, `<NodeChip>`)
   - `canvas.tsx` (`<Canvas>`, `<NodeLayer>`, `<EdgeLayer>`, `<DroneNode>`, `<Handle>`, `<ConnectionPreview>`, `<Background>`, `<Controls>`, `<MiniMap>`)
   - `inspector-drawer.tsx` (existing `InspectorForm`/editors moved here)
   - `run-overlay.tsx` (existing `RunPanel` restyled)
   - `drone-view.tsx` becomes the thin `<DronePane>` shell (grid: topbar / canvas).
 - `frontend/app/view/drone/canvas-geometry.ts` (new) — `screenToFlow`, `flowToScreen`, bbox/fit math, dagre adapter, `@xyflow/system` wrappers.
-- `frontend/app/view/drone/drone-view.scss` — rewrite to full-bleed grid + overlays + node/handle/edge styles.
+- [`frontend/app/view/drone/drone-view.scss`](../../frontend/app/view/drone/drone-view.scss) — rewrite to full-bleed grid + overlays + node/handle/edge styles.
 - `package.json` — add `@xyflow/system` (pinned exact) + `@dagrejs/dagre`.
 - **No backend changes** (optional viewport RPC tracked separately).
 

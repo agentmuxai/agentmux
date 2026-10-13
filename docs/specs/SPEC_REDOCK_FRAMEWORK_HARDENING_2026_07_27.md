@@ -14,17 +14,17 @@
 
 ## Context
 
-`docs/retro/retro-redock-ghost-landing-reliability-2026-07-27.md` (2026-07-27)
+[`docs/retro/retro-redock-ghost-landing-reliability-2026-07-27.md`](../retro/retro-redock-ghost-landing-reliability-2026-07-27.md) (2026-07-27)
 diagnosed the current "redock no longer lands reliably" complaint as the
 latest symptom of a subsystem that has regressed before. The prior regression
 already produced a living architecture doc —
-`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — with a
+[`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) — with a
 concrete, already-scoped modularization proposal (§9, P1-P6). **P1, P2, and
 P4 shipped** (canonical window resolver; explicit target-window threading
 through pane creation; unowned floaters — `cf71cd06`/#1574, 2026-06-19,
 predates this spec by over a month). **P3 and P6 did not**, and this spec's
 own gate framing below now applies only to those two. A companion spec,
-`docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md`, independently
+[`docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md`](SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md), independently
 proposed the same P4 idea under the name **R2** ("unowned floaters") and
 deferred it at the time — that gate has since been opened by the same commit
 that shipped P4.
@@ -114,7 +114,7 @@ the way every prior fix in this history has.
   window invariant. Taskbar suppression already goes through
   `WS_EX_TOOLWINDOW` independent of ownership, exactly as originally
   proposed here.
-  - **Cross-reference:** `docs/specs/SPEC_FLOATING_PANE_MULTI_MONITOR_TASKBAR_2026_07_27.md`
+  - **Cross-reference:** [`docs/specs/SPEC_FLOATING_PANE_MULTI_MONITOR_TASKBAR_2026_07_27.md`](SPEC_FLOATING_PANE_MULTI_MONITOR_TASKBAR_2026_07_27.md)
     (new, same day as this spec) proposes *reintroducing* real taskbar
     presence for floating panes under specific multi-monitor conditions.
     Since the owner-independent `WS_EX_TOOLWINDOW` flag this phase would have

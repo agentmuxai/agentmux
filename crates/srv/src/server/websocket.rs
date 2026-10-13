@@ -556,7 +556,7 @@ async fn handle_incoming_text(
             "bus:register" => {
                 if let Some(ref agent_id) = incoming.agent_id {
                     let rx = state.messagebus.register(agent_id, "websocket");
-                    // Stamp agent_id on the RPC context so App API S1 checks work.
+                    // Stamp agent_id on the RPC context so MuxAPI S1 checks work.
                     engine.set_rpc_context(crate::backend::rpc_types::RpcContext {
                         agent_id: agent_id.clone(),
                         ..Default::default()
@@ -1788,7 +1788,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // these sessions too, no new cancel command needed).
     super::system_install_handlers::register_system_install_handlers(engine, &state);
 
-    // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
+    // MuxAPI handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
 
     // MuxBus cloud connectivity (muxbus.login / muxbus.login.cancel / muxbus.status / muxbus.disconnect / muxbus.cloudconfig)

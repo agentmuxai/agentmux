@@ -70,7 +70,7 @@ already-shipped one, every new call site adopts the *existing* convention —
 (`"agent:memory:changed:{agent_id}"`), not `WaveEvent.scopes`.
 
 One correction made to the existing calls in the same pass: they keyed the
-event by the raw `agent_id` **slug** parameter (App API's own calling
+event by the raw `agent_id` **slug** parameter (MuxAPI's own calling
 convention), not the resolved canonical UUID `version_agent_id` the function
 already computes for version storage — the exact slug/UUID keyspace split
 `memory_write_impl`'s own doc comment already warns about for versions,
@@ -89,8 +89,8 @@ more — publish added/fixed at all five:
 
 | Call site | Surface | Status before this spec |
 |---|---|---|
-| `app_api/mod.rs` `memory_write_impl` | App API write (`MemoryWrite` MCP tool) | Already published — re-keyed to the canonical UUID |
-| `app_api/mod.rs` `memory_revert_impl` | App API revert | Already published — re-keyed to the canonical UUID |
+| `app_api/mod.rs` `memory_write_impl` | MuxAPI write (`MemoryWrite` MCP tool) | Already published — re-keyed to the canonical UUID |
+| `app_api/mod.rs` `memory_revert_impl` | MuxAPI revert | Already published — re-keyed to the canonical UUID |
 | `native_memory_handlers.rs` `write_file` | WS RPC (Armory UI) | New |
 | `native_memory_handlers.rs` `revert` | WS RPC (Armory UI) | New |
 | `native_memory_drift.rs` fast path + `sweep_one_agent_dir` | Out-of-band write detection | New |
@@ -176,7 +176,7 @@ one.
 The fs-watch fast path only watches **known** agents' memory directories
 (`list_all_memory_targets` — agents already in `db_agents` or the live
 registry). An agent's very first write, before any watch is established for
-it, is caught by the WS RPC / App API call sites directly (those publish
+it, is caught by the WS RPC / MuxAPI call sites directly (those publish
 regardless of watch state) — so this gap only affects an out-of-band write
 (bypassing both RPC surfaces) to a *brand-new, not-yet-tracked* agent, which
 falls back to the 30s reconciliation sweep's own latency. This mirrors
@@ -234,7 +234,7 @@ speculatively.
 - **No change to the initial per-agent-set count-fetch effect** — this adds
   a second, event-triggered refresh path alongside it, not a replacement.
 - **No toast/notification UI** for "agent X's memory changed" — `data` is
-  `None` at every call site (matching the pre-existing App API convention);
+  `None` at every call site (matching the pre-existing MuxAPI convention);
   the event name (which agent) is all a "refetch" handler needs, and no
   `filename` payload was added since nothing needs it yet.
 - **No retroactive backfill** for the known gap above (brand-new,
@@ -275,8 +275,8 @@ cleanup, not inventing a new lifecycle pattern per file.
 |---|---|---|
 | `frontend/app/view/brain/global-brain-model.ts` | `memories:changed` | Yes — `refresh()` |
 | `frontend/app/view/memory/memory-model.ts` (`MemoryViewModel`, ABF) | `memories:changed` | Yes — `refresh()` |
-| `frontend/app/view/mcp/mcp-model.ts` | `mcp:changed` | Yes — `refresh()` |
-| `frontend/app/view/skill/skill-model.ts` | `skills:changed` | Yes — `refresh()` |
+| [`frontend/app/view/mcp/mcp-model.ts`](../../frontend/app/view/mcp/mcp-model.ts) | `mcp:changed` | Yes — `refresh()` |
+| [`frontend/app/view/skill/skill-model.ts`](../../frontend/app/view/skill/skill-model.ts) | `skills:changed` | Yes — `refresh()` |
 
 No backend changes for any of these four — `memories:changed`, `mcp:changed`,
 and `skills:changed` are already published correctly (proven by their

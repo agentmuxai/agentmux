@@ -49,7 +49,7 @@ punctuation/keys, the bundled blob reliably exceeds 2560 bytes on this
 account. macOS Keychain and Linux Secret Service have no comparable limit,
 so this is Windows-specific and was not caught when MuxBus tokens were moved
 from plaintext SQLite columns to keychain-backed storage (see
-`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md:27-28`,
+[`docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md:27-28`](REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md),
 written just before that migration landed and still describing the old
 plaintext-only design).
 

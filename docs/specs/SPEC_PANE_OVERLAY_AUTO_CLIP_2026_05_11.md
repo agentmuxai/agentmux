@@ -3,7 +3,7 @@
 **Status:** Proposed
 **Owner:** AgentA
 **Date:** 2026-05-11
-**Driving observation:** The browser pane is a native Win32 HWND that paints above DOM regardless of CSS z-index — the "airspace problem." We already solve this for modals via `frontend/app/platform/pane-overlay.ts` + `browser_panes_set_overlay_clip` IPC + host-side `SetWindowRgn(hwnd, RGN_DIFF, ...)`. Menus (FlyoutMenu / `ContextMenuModel.showContextMenu`) don't register their rects with that mechanism, so they paint *under* the browser pane unless a modal is concurrently open. Symptom: "menu over browser pane sometimes works, sometimes the browser leaks through" — a registration gap.
+**Driving observation:** The browser pane is a native Win32 HWND that paints above DOM regardless of CSS z-index — the "airspace problem." We already solve this for modals via [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts) + `browser_panes_set_overlay_clip` IPC + host-side `SetWindowRgn(hwnd, RGN_DIFF, ...)`. Menus (FlyoutMenu / `ContextMenuModel.showContextMenu`) don't register their rects with that mechanism, so they paint *under* the browser pane unless a modal is concurrently open. Symptom: "menu over browser pane sometimes works, sometimes the browser leaks through" — a registration gap.
 
 We need an architecture where any new DOM overlay automatically participates in clipping, without each callsite having to remember to call a hook. Proposes a `data-pane-overlay` attribute as the declarative contract.
 
@@ -20,9 +20,9 @@ pane in the actual Win32 paint order.
 ```
 
 Examples in the codebase today:
-- `frontend/app/element/flyoutmenu.tsx` (hamburger menu + submenus) — **not registered**
+- [`frontend/app/element/flyoutmenu.tsx`](../../frontend/app/element/flyoutmenu.tsx) (hamburger menu + submenus) — **not registered**
 - `frontend/app/store/contextmenu.tsx` (right-click menus on the tab bar empty space) — **not registered**
-- `frontend/app/element/tooltip.tsx` — **probably not registered**, may not have been noticed
+- [`frontend/app/element/tooltip.tsx`](../../frontend/app/element/tooltip.tsx) — **probably not registered**, may not have been noticed
 - `frontend/app/element/popover.tsx` — same
 - `frontend/app/modals/*` — **registered correctly** via `usePaneOverlay()` today
 
@@ -59,7 +59,7 @@ The attribute is also self-documenting: a code reader sees `data-pane-overlay` a
 
 ## 3. The service
 
-New module: `frontend/app/platform/pane-overlay-auto.ts`. Singleton, initialized once at app startup (in `app-init.ts` or equivalent).
+New module: [`frontend/app/platform/pane-overlay-auto.ts`](../../frontend/app/platform/pane-overlay-auto.ts). Singleton, initialized once at app startup (in `app-init.ts` or equivalent).
 
 ```ts
 type RectKey = string;  // generated per-element via WeakMap
@@ -194,7 +194,7 @@ function unregisterSubtree(root: Element): boolean {
 }
 ```
 
-`startService()` called once from `frontend/app-init.ts` after the DOM is ready.
+`startService()` called once from [`frontend/app-init.ts`](../../frontend/app-init.ts) after the DOM is ready.
 
 ### IPC reuse
 
@@ -313,11 +313,11 @@ Two options:
 
 ## 10. Cross-references
 
-- Existing modal clip path: `frontend/app/platform/pane-overlay.ts`
+- Existing modal clip path: [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts)
 - IPC dispatcher: `agentmux-cef/src/ipc.rs` line 381+
 - Host-side region math: `agentmux-cef/src/browser_panes.rs` line 396-472
 - Airspace problem doc: `specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md`
-- Modal clip spec: `docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md`
+- Modal clip spec: [`docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md`](SPEC_MODAL_PANE_CLIP_2026_04_24.md)
 - Snappy menu PR (companion): #792
 - Discussion #707 (reducer-stack ongoing thread) — append a pointer to this spec if/when implemented, since it touches the "what *isn't* in the reducer" boundary.
 

@@ -239,9 +239,9 @@ Before picking a fix:
 - [BrowserStack — Resolve sub-pixel rendering issues under
   CSS `zoom`][browserstack]
 - Prior retro:
-  `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`
+  [`docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`](RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md)
 - Prior spec (current implementation reference):
-  `docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`
+  [`docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`](../specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md)
 
 [resig]: https://johnresig.com/blog/sub-pixel-problems-in-css/
 [browserstack]: https://www.browserstack.com/docs/percy/common-issue/sub-pixel-rendering

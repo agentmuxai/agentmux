@@ -3,8 +3,8 @@
 **Date:** 2026-07-30
 **Type:** Bug-fix spec (behavior change to an existing heuristic)
 **Status:** implemented — PR #2369, hardened by #2469 (stop_reason gate); verified in code 2026-08-10.
-**Scope:** `frontend/app/view/agent/providers/claude-translator.ts` (`handleAssistantMessage`),
-`frontend/app/view/agent/providers/claude-translator.test.ts`
+**Scope:** [`frontend/app/view/agent/providers/claude-translator.ts`](../../frontend/app/view/agent/providers/claude-translator.ts) (`handleAssistantMessage`),
+[`frontend/app/view/agent/providers/claude-translator.test.ts`](../../frontend/app/view/agent/providers/claude-translator.test.ts)
 **Trigger:** User observation — *"the 'Working...' stopping and restarting nearly always happens
 after a tool call that is not followed by an explanation. Working... can only reliably stop after
 an explanation, but not necessarily."*

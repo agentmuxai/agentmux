@@ -34,10 +34,10 @@ The widget bar (`ActionWidgets`) sits on the right of the window header, inside
 ```
 
 Files:
-- `frontend/app/window/action-widgets.tsx` — widget bar component
-- `frontend/app/window/action-widgets.scss` — widget bar styles
-- `frontend/app/window/system-status.tsx` — host container
-- `frontend/app/window/window-header.tsx` — title bar root
+- [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) — widget bar component
+- [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) — widget bar styles
+- [`frontend/app/window/system-status.tsx`](../../frontend/app/window/system-status.tsx) — host container
+- [`frontend/app/window/window-header.tsx`](../../frontend/app/window/window-header.tsx) — title bar root
 
 ### Label gating
 
@@ -178,7 +178,7 @@ repo's `CLAUDE.md` must be updated to match (all rows become "Pinned").
 
 | File | Change |
 |---|---|
-| `frontend/app/window/action-widgets.tsx` | Default flip, mirror, `ResizeObserver`, `tooNarrow`, `effectiveIconOnly` |
-| `frontend/app/window/action-widgets.scss` | Off-screen mirror styling |
+| [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx) | Default flip, mirror, `ResizeObserver`, `tooNarrow`, `effectiveIconOnly` |
+| [`frontend/app/window/action-widgets.scss`](../../frontend/app/window/action-widgets.scss) | Off-screen mirror styling |
 | `agentmux-srv/src/config/widgets.json` | `display:pinned: true` on all widgets |
 | `CLAUDE.md` (repo root) | Widget table — all rows become "Pinned" |

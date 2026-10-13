@@ -44,7 +44,7 @@ task: Failed to run task "build:host:windows": exit status 101
 `task dev`'s existing `||` fallback (`build:host:windows`,
 `bash scripts/repair-cef-extract.sh && cargo build ...`, added for the
 unrelated Defender-extraction race — see
-`docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md`) fired automatically on one
+[`docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md`](RETRO_CEF_BUILD_RACE_2026_04_24.md)) fired automatically on one
 of the three runs and reproduced the exact same failure on retry. That repair
 script targets a missing-directory extraction problem, not this one, so it
 correctly no-ops and doesn't help here.
@@ -333,7 +333,7 @@ any deeply-nested checkout hits this limit in the first place.
    PDB writing specifically? The error text ("compiler generated file: ''")
    is generic enough that either is plausible; no deeper MSVC-internals
    instrumentation was done here.
-3. Would splitting `libcef_dll_wrapper`'s `test/` subdirectory compile into
+3. Would splitting `libcef_dll_wrapper`'s [`test/`](../../test) subdirectory compile into
    a smaller-batch/non-`/FS` shared-PDB config reduce contention
    independent of `-j`? Not investigated — out of scope for an in-session
    diagnosis.
@@ -342,7 +342,7 @@ any deeply-nested checkout hits this limit in the first place.
 
 | Order | Event |
 |-------|-------|
-| 1 | `task dev` (via `scripts/dev-agent.cmd`) run in background for manual smoke-testing the tab-reorder fix (PR #2148). Failed: `ninja: build stopped: subcommand failed`, C1083, panic in `cmake-0.1.58`. |
+| 1 | `task dev` (via [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd)) run in background for manual smoke-testing the tab-reorder fix (PR #2148). Failed: `ninja: build stopped: subcommand failed`, C1083, panic in `cmake-0.1.58`. |
 | 2 | Retried `task dev` a second time, output redirected to a file for full visibility. Failed identically; the Taskfile's own `\|\| repair-cef-extract.sh && cargo build ...` fallback fired automatically and reproduced the same failure on its retry too (50 distinct C1083 occurrences logged across the pair of attempts). |
 | 3 | User chose to hold off on further `task dev` retries; PR #2148 merged and released as v0.53.5 without a live in-app smoke test. |
 | 4 | Later, asked to pull latest `main` and produce a fresh portable. `task package` hit the identical C1083 signature a third time, same `libcef_dll/*/test/*.cc` batch. |

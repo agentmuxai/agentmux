@@ -13,7 +13,7 @@ When an agent session runs for days, the conversation history grows unbounded. T
 - FileStore accumulates output indefinitely with no pagination
 - WPS broker caps at 4096 in-memory events, but FileStore has no such limit
 - Frontend renders the entire conversation in DOM — no virtualization
-- FileStore cache holds decoded blocks in RAM (OOM risk, see `docs/analysis/oom-filestore-cache.md`)
+- FileStore cache holds decoded blocks in RAM (OOM risk, see [`docs/analysis/oom-filestore-cache.md`](../analysis/oom-filestore-cache.md))
 - On reconnect/reload, there's no way to replay old output — only new appends arrive
 - No session bookmarking, search, or navigation for long histories
 

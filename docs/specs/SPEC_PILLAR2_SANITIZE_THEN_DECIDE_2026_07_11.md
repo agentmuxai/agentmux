@@ -246,7 +246,7 @@ Each phase lands independently and leaves every existing test green.
 set + `should_begin_drain` input + reducer truth-table tests.
 (b) `HostCommand::ReconcileQuit` no-op poke (§1.H) + test that it computes `request_drain`.
 (c) Extract `begin_drain_and_cascade` to `ui_tasks` free function; handler delegates (§1.G).
-(d) This spec into `docs/specs/`.
+(d) This spec into [`docs/specs/`](.).
 Verification: `cargo check -p agentmux-cef`, full crate unit tests. The arming bit is the
 only semantic change and is strictly drain-narrowing, in a window where no consumer exists.
 
@@ -317,5 +317,5 @@ Stage-2 executions, (d) WRR's draining-gated executor; `ReconcilePlan` has no `b
   `begin_drain_and_cascade`, Stage-2 gate, RegisterBrowser kind derivation)
 - `agentmux-cef/src/ui_tasks/window.rs` (`unregister_after_parking_close`)
 - `agentmux-cef/src/app.rs` (main-window startup path — no pending-creation enqueue)
-- `docs/specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md` §3.3 + 2026-07-08 addendum
-- `docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md`; PR #1993, #2043 descriptions
+- [`docs/specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md`](SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md) §3.3 + 2026-07-08 addendum
+- [`docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md`](SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md); PR #1993, #2043 descriptions

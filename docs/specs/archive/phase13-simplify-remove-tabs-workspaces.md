@@ -194,8 +194,8 @@ export const workspaceAtom = atom<Workspace>({
 ```
 
 **Files to MODIFY:**
-- `frontend/app/view/term/term.tsx` - Remove tab-related props
-- `frontend/app/view/term/termwrap.ts` - Remove tab visibility logic
+- [`frontend/app/view/term/term.tsx`](../../../frontend/app/view/term/term.tsx) - Remove tab-related props
+- [`frontend/app/view/term/termwrap.ts`](../../../frontend/app/view/term/termwrap.ts) - Remove tab visibility logic
 
 **Acceptance Criteria:**
 - ✅ Terminal renders without tab context
@@ -327,7 +327,7 @@ contextBridge.exposeInMainWorld('api', {
 
 **Files to MODIFY:**
 - `emain/preload.ts` - Remove tab IPC methods
-- `frontend/types/custom.d.ts` - Remove ElectronApi tab types
+- [`frontend/types/custom.d.ts`](../../../frontend/types/custom.d.ts) - Remove ElectronApi tab types
 
 ---
 

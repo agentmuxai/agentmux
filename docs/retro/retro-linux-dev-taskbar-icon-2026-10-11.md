@@ -46,7 +46,7 @@ There were two, and either alone gives the cog.
 `agentmux-dev-<slug>-<version>.desktop`, and expected the host it starts next to
 inherit the variable. It didn't. `task dev` starts the host through the launcher,
 and the launcher gives every process it starts its own environment,
-`DataPaths::to_env_vars()` (`crates/common/src/data_paths.rs`), including
+`DataPaths::to_env_vars()` ([`crates/common/src/data_paths.rs`](../../crates/common/src/data_paths.rs)), including
 `AGENTMUX_CHANNEL` set to the launcher's dev channel, `dev-<branch>-<clone id>`
 (#1053). The slug also turned git's trailing newline into a dash.
 

@@ -3,9 +3,9 @@
 **Date:** 2026-10-02
 **Status:** active — Phase 1 (this machine's other channels) in PR #4239, Phase 2 (LAN hosts) in PR #4241, Phase 4's `status` (no `line`) built 2026-10-11; Phase 3 not started. Section 9 asks for decisions.
 **Author:** AgentX (narko), at the owner's request
-**Affects:** `frontend/app/view/swarm/` (`swarm-model.ts`, `swarm-view.tsx`), `crates/srv/src/server/http_health.rs` (`/agentmux/discovery`), `crates/srv/src/backend/lan_discovery.rs`, `crates/srv/src/server/reactive.rs`, `crates/srv/src/registry/`, and, for the cloud tier, `crates/srv/src/muxbus/` plus the separate `agentmux-cloud` repository
-**Builds on:** `docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` (the same-host registry), `docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (install identities), `docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md` (how LAN peers are found), `docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md` §3 (the per-account directory this needs)
-**Related:** `docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md` (the line a row shows)
+**Affects:** [`frontend/app/view/swarm/`](../../frontend/app/view/swarm) (`swarm-model.ts`, `swarm-view.tsx`), [`crates/srv/src/server/http_health.rs`](../../crates/srv/src/server/http_health.rs) (`/agentmux/discovery`), [`crates/srv/src/backend/lan_discovery.rs`](../../crates/srv/src/backend/lan_discovery.rs), [`crates/srv/src/server/reactive.rs`](../../crates/srv/src/server/reactive.rs), [`crates/srv/src/registry/`](../../crates/srv/src/registry), and, for the cloud tier, [`crates/srv/src/muxbus/`](../../crates/srv/src/muxbus) plus the separate `agentmux-cloud` repository
+**Builds on:** [`docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) (the same-host registry), [`docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) (install identities), [`docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) (how LAN peers are found), [`docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) §3 (the per-account directory this needs)
+**Related:** [`docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`](SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md) (the line a row shows)
 
 ## 1. What the owner asked for
 
@@ -87,7 +87,7 @@ RemoteAgent  { name, block_id?, status?: "running"|"idle", provider?, line? }
 
 **Phase 4's `status` is built (2026-10-11), and needed no new route.** The owner's decision D1 of 2026-10-07 (agentmux-mobile's `SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07`) had already added `agent_status` (`{name: {state, since_ms}}`) to `/agentmux/reactive/agent-names`, the `lan_key` route LAN peers already poll for names. That answers decision 1 below as far as `status` goes.
 
-- **LAN:** the discovery loop's 30 s poll now keeps each listed agent's state (`LanInstance.agent_status`) instead of dropping it.
+- **LAN:** the discovery loop's 30 s poll now keeps each listed agent's state (`LanInstance.agent_status`) instead of dropping it. A poll that fails keeps the last names but clears the states: mDNS can keep a peer looking fresh long after it stopped answering, and its last state would otherwise show indefinitely.
 - **This machine's other channels:** srv asks each live channel's same route over loopback, with that channel's key from the shared registry, as the cross-channel fleet forwarder does. It asks once per `swarm.other-instances` call, concurrently, with a 1.5 s limit, so a hung channel costs its rows their chip, not the poll.
 - **The row:** the same status chip as a local row (`working`, `question` for `waiting`, `idle` for idle, stopped and error), with the exact state as its tooltip. A stale section shows no chip, since its last state may be long out of date, and an agent whose instance gives no state (a build from before it did) shows its name alone, as §3.2 requires.
 - **Not carried:** `since_ms`, which the chip doesn't show and which would need moving from the peer's clock to this one; and `line`, which is content and still waits on decision 1.

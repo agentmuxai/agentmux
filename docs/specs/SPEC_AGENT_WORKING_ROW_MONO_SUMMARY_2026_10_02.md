@@ -3,9 +3,9 @@
 **Status:** implemented in #4226 (spec and change together).
 **Date:** 2026-10-02
 **Owner:** Manoz
-**Component:** `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx`)
-**Styles:** `.agent-working-row-anchor .agent-working-row--loading` (`frontend/app/view/agent/styles/_control-bar.scss`)
-**Token accounting:** `frontend/app/store/agent-pane-state/turn-contribution.ts`, `reducer.ts` (`TokensIn`, `TokensOut`, `mergeStats`)
+**Component:** `AgentWorkingRow` ([`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx))
+**Styles:** `.agent-working-row-anchor .agent-working-row--loading` ([`frontend/app/view/agent/styles/_control-bar.scss`](../../frontend/app/view/agent/styles/_control-bar.scss))
+**Token accounting:** [`frontend/app/store/agent-pane-state/turn-contribution.ts`](../../frontend/app/store/agent-pane-state/turn-contribution.ts), `reducer.ts` (`TokensIn`, `TokensOut`, `mergeStats`)
 **Supersedes in part:** `SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md` (typeface and color) and the shimmer half of `SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md` §2.
 
 ## 1. Request, as given
@@ -60,7 +60,7 @@ Priority, first match wins:
 2. **The ambient summary**, `readSwarmSummary(block.meta)`: the same line the Swarm row and pane tooltip show. That is `term:ambient_summary` (Haiku-written, validated by `isUsableTitle`), falling back to the CLI's own `term:osc_title` topic.
 3. The cycling "Working…" phrase, until a summary exists.
 
-What this text actually is: `useAgentActivitySummary.ts` keeps a stable, PR-title-style phrase for the session's **overall goal**, re-evaluated when the user submits a message. It is not a per-tool-call description. So the row reads, for example, "Fix the login redirect loop" for the whole turn rather than changing with every tool. A per-activity ambient call would be a new feature (prompt, rate limit and token cost in `crates/srv/src/ambient/`); it is out of scope here.
+What this text actually is: `useAgentActivitySummary.ts` keeps a stable, PR-title-style phrase for the session's **overall goal**, re-evaluated when the user submits a message. It is not a per-tool-call description. So the row reads, for example, "Fix the login redirect loop" for the whole turn rather than changing with every tool. A per-activity ambient call would be a new feature (prompt, rate limit and token cost in [`crates/srv/src/ambient/`](../../crates/srv/src/ambient)); it is out of scope here.
 
 The pane header stopped showing this summary on 2026-09-20 (`agent-model.ts`, "pane-color unification"). This change surfaces it in the working row instead; the Swarm row is unaffected.
 

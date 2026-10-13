@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-17
 **Status:** active — PRs touching this work, newest first: #3309
-**Companion (design):** `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`
+**Companion (design):** [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md)
 — read that first; this doc is the task-level execution plan for it, not a
 restatement of the design.
 **Branch policy:** implemented on a dedicated long-lived branch
@@ -28,7 +28,7 @@ it deliberately leaves for a follow-up plan.
 ## Task Group A — Groundwork (no visible behavior change yet)
 
 ### A1. `PaneHeaderTabStrip` component
-**New file:** `frontend/app/element/PaneHeaderTabStrip.tsx`.
+**New file:** [`frontend/app/element/PaneHeaderTabStrip.tsx`](../../frontend/app/element/PaneHeaderTabStrip.tsx).
 Supersedes the combination of `BlockFrame_Header` + `PaneTabStrip` for hoisted
 panes (design spec §4.1). Renders, left to right: optional leading Pane icon, the
 tab pills (reusing `PaneTabStrip`'s existing pill rendering — do not reinvent tab
@@ -67,7 +67,7 @@ existing `pane.open` RPC already supports exactly this generically via
 frontend then calls `pushBlockOntoStack` itself. No new backend parameter, no new
 RPC. The full, confirmed sequence (extract into a shared helper,
 `addWidgetAsPaneTab(layoutModel, nodeId, blockDef)`, in
-`frontend/layout/lib/layoutStack.ts`, so A4 and any future caller don't
+[`frontend/layout/lib/layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts), so A4 and any future caller don't
 re-duplicate agent's inline version a third time):
 
 ```ts
@@ -129,7 +129,7 @@ unchanged membership for this task group, since B2/B3 only migrate those two; th
 membership only grows in Task Group C.
 
 ### B2. Retire `AgentPaneChrome`'s two-row structure
-In `frontend/app/view/agent/agent-view.tsx` (`AgentPaneChrome`, lines 350-895 as of
+In [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (`AgentPaneChrome`, lines 350-895 as of
 this plan's writing — re-verify current line numbers before editing, per the
 ReAgent finding on the design spec's own citations drifting): replace the
 `headerElem` (built from `BlockFrame_Header`, lines ~427-435) + separate
@@ -147,7 +147,7 @@ parity). Add one new test: a single-conversation agent pane renders exactly one
 `PaneHeaderTabStrip` row, not a header-plus-strip pair.
 
 ### B3. Retire `TermPaneChrome`'s two-row structure
-Same operation as B2, applied to `frontend/app/view/term/term.tsx`'s
+Same operation as B2, applied to [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx)'s
 `TermPaneChrome` (lines 442-751 as of this plan's writing). Terminal's
 `KEEP_ALIVE_TYPES` membership (§4.3) is UNCHANGED by this task — B3 only touches
 the chrome/header structure, not the mount-lifecycle behavior.

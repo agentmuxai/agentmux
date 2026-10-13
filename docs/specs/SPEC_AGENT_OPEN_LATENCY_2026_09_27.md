@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** implemented — #3927, #3930, #3939, #3940, #3962, #3964, #3965 (§4.7: #3929); §4.2 deferred. See §7.
 **Author:** Manoz
-**Repos touched:** `agentmux` (`agentmux-srv/src/server/cli_handlers.rs`, `agentmux-srv/src/backend/history/`, `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`, `frontend/app/view/agent/hooks/useHistoryPagination.ts`, `frontend/app/notification/sound/`, `docs/MUXLOG.md`)
+**Repos touched:** `agentmux` (`agentmux-srv/src/server/cli_handlers.rs`, `agentmux-srv/src/backend/history/`, [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx), [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts), [`frontend/app/notification/sound/`](../../frontend/app/notification/sound), [`docs/MUXLOG.md`](../MUXLOG.md))
 **Related:** `SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md` (live feed, K turns), `SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md` (the muxlog recipe pattern reused in §4.6)
 
 ## 1. Report

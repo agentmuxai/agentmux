@@ -16,7 +16,7 @@ slice of the composable model. After v1: define an MCP server or a skill **once*
 reference it from many agents; manage both in the Armory.
 
 **In scope (v1):** standalone storage for skills + MCP servers, ownership/global
-flags, direct **agent→primitive references**, the `skill.*`/`mcp.*` App API, the
+flags, direct **agent→primitive references**, the `skill.*`/`mcp.*` MuxAPI, the
 config-generation rewrite to read references, migration of existing inline data,
 and two Armory tabs.
 
@@ -101,7 +101,7 @@ handlers (§5) must also explicitly purge matching ref rows in the same transact
 An agent's effective set = its referenced records. (Bundle membership unions in at
 v2; the resolver shape is identical — just another source of references.)
 
-## 5. App API (`skill.*`, `mcp.*`)
+## 5. MuxAPI (`skill.*`, `mcp.*`)
 
 Add command consts in `rpc_types.rs` and handlers in `app_api.rs`, mirroring
 `preset.*` exactly (S1 identity check + ownership/global guard):
@@ -119,7 +119,7 @@ Add command consts in `rpc_types.rs` and handlers in `app_api.rs`, mirroring
   write (strip caller escalation); reject mutating/deleting an existing global; an
   agent may write/delete only a non-global record it references — never a global or
   another agent's.
-- Expose the same set over the **REST** routes the App API already mirrors, and as
+- Expose the same set over the **REST** routes MuxAPI already mirrors, and as
   **MCP tools** in `agentmux-mcp` (parallel to the memory tools) so agents manage
   their own skills/servers.
 
@@ -141,7 +141,7 @@ No change to *when* files are written (still `write_agent_config_files` at launc
 
 ## 7. Migration
 
-One-time, idempotent, behind the App API surface:
+One-time, idempotent, behind MuxAPI surface:
 
 1. **Skills:** for each existing `AgentSkill` row → create a `db_skills` record
    (`is_global = 0`) + a `db_agent_skills_ref` (agent_id → new skill id); the ref
@@ -182,7 +182,7 @@ pick existing or create new). Mirrors the existing Presets tab surface.
 
 - **Storage:** CRUD + ownership/global guard unit tests for `db_skills` /
   `db_mcp_servers` and the ref tables.
-- **App API:** S1 + ownership guard tests for `skill.*` / `mcp.*` (reject global
+- **MuxAPI:** S1 + ownership guard tests for `skill.*` / `mcp.*` (reject global
   edit, reject cross-agent), mirroring the `preset.*` tests.
 - **Config gen:** an agent with refs produces the same `.mcp.json` + skill files as
   the legacy inline path (golden-file equivalence); the synthetic `agentmux-mcp`

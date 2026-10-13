@@ -3,19 +3,19 @@
 **Status:** living — handoff doc for the Agent3 session that diagnosed the freeze; update as the follow-ups in §5 land.
 **Date:** 2026-09-23
 **Author:** Agent3 (Claude Fable 5.1), written at the operator's request before a model switch.
-**Canonical RCA:** `docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md` (merged, #3549). This doc is the *state* on top of it, not a second copy of the analysis.
+**Canonical RCA:** [`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`](../incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md) (merged, #3549). This doc is the *state* on top of it, not a second copy of the analysis.
 
 ---
 
 ## 1. One paragraph
 
-On 2026-09-22 22:42 the operator's v0.56.12 main window froze permanently. The renderer's Compositor thread self-deadlocked on the global mutex of Chromium's raw_ptr InstanceTracer (re-entered through GWP-ASan's contended-lock metrics timer); every other renderer thread then queued behind it; srv, host and launcher stayed healthy so every health signal was green. The tracer was on only because `scripts/cef-build/args-windows.gn` carried `enable_backup_ref_ptr_instance_tracer=true` (copied from a generated args.gn in #2308, 2026-07-27); upstream CEF's `tools/gn_args.py` sets it for every non-debug Windows build. Fix: flag off, Windows CEF rebuilt, published as `agentmuxai/cef` release `cef-windows-x86_64-152.0.7977.83-r2`, pinned on main by #3561. macOS/Linux were never affected (flag absent, Chromium default false, upstream only forces it on Windows).
+On 2026-09-22 22:42 the operator's v0.56.12 main window froze permanently. The renderer's Compositor thread self-deadlocked on the global mutex of Chromium's raw_ptr InstanceTracer (re-entered through GWP-ASan's contended-lock metrics timer); every other renderer thread then queued behind it; srv, host and launcher stayed healthy so every health signal was green. The tracer was on only because [`scripts/cef-build/args-windows.gn`](../../scripts/cef-build/args-windows.gn) carried `enable_backup_ref_ptr_instance_tracer=true` (copied from a generated args.gn in #2308, 2026-07-27); upstream CEF's `tools/gn_args.py` sets it for every non-debug Windows build. Fix: flag off, Windows CEF rebuilt, published as `agentmuxai/cef` release `cef-windows-x86_64-152.0.7977.83-r2`, pinned on main by #3561. macOS/Linux were never affected (flag absent, Chromium default false, upstream only forces it on Windows).
 
 ## 2. What is DONE (all merged / published, verified)
 
 | Item | Where | State |
 |---|---|---|
-| RCA + recovery procedure | `docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md` | merged in #3549 (2026-09-23 07:04Z) |
+| RCA + recovery procedure | [`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`](../incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md) | merged in #3549 (2026-09-23 07:04Z) |
 | `args-windows.gn` tracer `true` → `false` | #3549 | merged |
 | Windows CEF rebuilt with tracer off | `~/cef-build/chromium_git/chromium/src/out/Release_GN_152` | done 02:15 local; 34,869 steps, 0 errors; buildflag header reads `(0)`; cdb finds no `InstanceTracer` symbols in the new DLL; cefsimple boots |
 | Release `cef-windows-x86_64-152.0.7977.83-r2` | `agentmuxai/cef` (author agent3-workflow[bot]) | runtime zip 192 MB + `libcef.dll.pdb-152.0.7977.83-r2.xz` 598 MB + `SHA256SUMS.txt` |
@@ -44,7 +44,7 @@ Symbolising this or any future dump: `cdb -z <dmp> -y <dir containing the matchi
 - Changing this flag rebuilds everything (the header is included everywhere): 2h18m on the 9950X3D at `-j 20 -l 28`, ~33 GB RAM free throughout.
 - `build-windows.yml` resolves the **newest** `cef-windows-x86_64-*` release by publish date when given no tag and downloads `*.zip`; a release must contain exactly one zip, and any extra asset (PDB) must not be a `.zip`.
 - Agent credentials: the Agent3 GitHub App token CAN create releases on `agentmuxai/cef` even though `GET repos/agentmuxai/cef` reports `push=false` for it. The older PAT-based agent credentials are retired. For cross-repo writes, get Agent3's App token for that account with the installed `gh-agent` CLI: `gh-agent token --owner agentmuxai` (run as Agent3). The repo-local `scripts/gh-agent.sh` and `scripts/github-app-token.py` this note originally cited have since been removed.
-- `scripts/cef-build/fetch-patched-cef-windows.sh` bails on `gh auth status` failing, and `gh auth status` exits non-zero in any shell that sees AgentY's stale keyring entry — even with a valid `GH_TOKEN`. Environmental; the pin itself is fine.
+- [`scripts/cef-build/fetch-patched-cef-windows.sh`](../../scripts/cef-build/fetch-patched-cef-windows.sh) bails on `gh auth status` failing, and `gh auth status` exits non-zero in any shell that sees AgentY's stale keyring entry — even with a valid `GH_TOKEN`. Environmental; the pin itself is fine.
 - Git Bash mangles `taskkill /PID` and relative paths passed to `gh`; use PowerShell `Stop-Process` and `cygpath -w` absolute paths.
 - The srv warning `ws egress lane full … consumer stalled` means the frontend stopped reading; it is a symptom of a dead renderer, not an srv fault (contrast `INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`, where srv itself was wedged with the same surface signature). Distinguish them with the DevTools liveness test above.
 

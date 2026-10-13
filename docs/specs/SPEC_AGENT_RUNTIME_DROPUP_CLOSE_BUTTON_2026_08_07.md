@@ -7,7 +7,7 @@
 to auto close after selection, because sometimes the user wants to change
 multiple entries. instead add a close button and also clicking away will
 close it too."*
-**Amends:** `docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md` §5, §9.2,
+**Amends:** [`docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) §5, §9.2,
 §11 — read that spec first. This one only adds what's missing; it does not
 re-litigate anything already decided there.
 
@@ -16,7 +16,7 @@ re-litigate anything already decided there.
 ## 0. Scope check against current `main` — two of three asks are already shipped
 
 Before scoping new work, I verified the panel's current behavior against
-`frontend/app/view/agent/components/AgentRuntimeDropup.tsx` on `main`
+[`frontend/app/view/agent/components/AgentRuntimeDropup.tsx`](../../frontend/app/view/agent/components/AgentRuntimeDropup.tsx) on `main`
 directly (not just the base spec's intent):
 
 | User ask | Current state | Evidence |
@@ -45,8 +45,8 @@ hasn't internalized "this one's different, it waits for you" may not think
 to reach for `Esc` or click elsewhere — an explicit, visible close button
 removes that ambiguity and matches the one first-class precedent already in
 the codebase for "stays open, dismiss when you're done" panels: `Modal`'s
-`showCloseButton` (`frontend/app/element/modal.tsx:416-426`,
-`.modal-panel-close-btn` in `frontend/app/element/modal.scss:164-190`).
+`showCloseButton` ([`frontend/app/element/modal.tsx:416-426`](../../frontend/app/element/modal.tsx),
+`.modal-panel-close-btn` in [`frontend/app/element/modal.scss:164-190`](../../frontend/app/element/modal.scss)).
 
 No non-modal popover in this codebase has a close button today
 (`HostPopover`, `TokenBreakdownPopover`, generic `PopoverMenu` all rely on

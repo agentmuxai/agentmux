@@ -6,7 +6,7 @@ deviation: `TerminalOutput` lives in `view/agent/components/` (next to the cap
 utilities and sibling renderers) rather than `element/`, so the view→element
 dependency direction stays correct; it imports `AnsiLine` from `element/`. — #1511
 **Author:** analysis pass over `main` @ `f958fdd0`
-**Components:** `agentmux-bashwrap` (hook), `frontend/app/view/agent/components/*`, `frontend/app/element/ansiline.tsx`
+**Components:** `agentmux-bashwrap` (hook), `frontend/app/view/agent/components/*`, [`frontend/app/element/ansiline.tsx`](../../frontend/app/element/ansiline.tsx)
 
 ---
 
@@ -53,8 +53,8 @@ the "JSON blob."**
 
 Reusable assets already in the tree:
 - Live chunk pipeline (WPS → reducer → `ChunkList`) — proven by
-  `frontend/test/replay/bash-with-live-log.replay.test.ts`.
-- `AnsiLine` (default export, props `{ line: string }`) at `frontend/app/element/ansiline.tsx` —
+  [`frontend/test/replay/bash-with-live-log.replay.test.ts`](../../frontend/test/replay/bash-with-live-log.replay.test.ts).
+- `AnsiLine` (default export, props `{ line: string }`) at [`frontend/app/element/ansiline.tsx`](../../frontend/app/element/ansiline.tsx) —
   parses SGR (`\x1b[…m`) into `text-ansi-*`/`bg-ansi-*` spans.
 - Output capping: `output-cap.ts` (`capText`, `MAX_TOOL_OUTPUT_LINES`).
 
@@ -223,9 +223,9 @@ F1 needs **no frontend work** (reuses the chunk pipeline). F2 needs **no backend
 ## 9. Key file references
 - `agentmux-bashwrap/src/hook.rs` — command rewrite (F1 insertion point + `tee_redirect_rewrite`)
 - `agentmux-bashwrap/src/bash_wrap.rs` — exec/PTY capture, `strip_ansi`, model blob
-- `frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312` — `renderToolResultBody` switch
-- `frontend/app/view/agent/components/CompactResult.tsx` — summary + terminal/JSON branch (F2)
-- `frontend/app/view/agent/components/TerminalOutput.tsx` — terminal renderer (F2)
-- `frontend/app/view/agent/components/terminal-text.ts` — result→terminal-string helper (F2)
-- `frontend/app/element/ansiline.tsx` — `AnsiLine` (reused for terminal coloring)
-- `frontend/app/view/agent/components/output-cap.ts` — `capText`, `MAX_TOOL_OUTPUT_LINES`
+- [`frontend/app/view/agent/components/ToolOverlayLog.tsx:233-312`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) — `renderToolResultBody` switch
+- [`frontend/app/view/agent/components/CompactResult.tsx`](../../frontend/app/view/agent/components/CompactResult.tsx) — summary + terminal/JSON branch (F2)
+- [`frontend/app/view/agent/components/TerminalOutput.tsx`](../../frontend/app/view/agent/components/TerminalOutput.tsx) — terminal renderer (F2)
+- [`frontend/app/view/agent/components/terminal-text.ts`](../../frontend/app/view/agent/components/terminal-text.ts) — result→terminal-string helper (F2)
+- [`frontend/app/element/ansiline.tsx`](../../frontend/app/element/ansiline.tsx) — `AnsiLine` (reused for terminal coloring)
+- [`frontend/app/view/agent/components/output-cap.ts`](../../frontend/app/view/agent/components/output-cap.ts) — `capText`, `MAX_TOOL_OUTPUT_LINES`

@@ -1,7 +1,7 @@
 # SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest
 
 **Date:** 2026-08-05
-**Status:** active — Part A (session-outcome transcript event) shipped in PR #2426, and extended 2026-08-27 to cover the no-`--resume`-attempted case (§2.1's superseded callout). Parts B (rehydrate-before-resume) and C (session_id backfill) still not started — `rehydrate_claude_session` exists only in `scripts/import-agents.sh`, not in `agentmux-srv`. Verified against `main` 2026-08-27. See also SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md, which builds on Part A.
+**Status:** active — Part A (session-outcome transcript event) shipped in PR #2426, and extended 2026-08-27 to cover the no-`--resume`-attempted case (§2.1's superseded callout). Parts B (rehydrate-before-resume) and C (session_id backfill) still not started — `rehydrate_claude_session` exists only in [`scripts/import-agents.sh`](../../scripts/import-agents.sh), not in `agentmux-srv`. Verified against `main` 2026-08-27. See also SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md, which builds on Part A.
 **Severity:** Medium — no data loss, but a real correctness gap: the pane can
 imply the agent remembers a conversation it does not, with no visible signal
 that anything went wrong.
@@ -36,7 +36,7 @@ Three asks, in order of what this doc actually solves:
 3. **The actual data needs to be saved and organized.** Already substantially
    true (see §1) — the global per-agent transcript zone
    (`agent:<definitionId>:current`) built in
-   `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`
+   [`docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`](../analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md)
    steps 1–4 is exactly this. What's missing is (a) the resume-outcome record
    from Part A, and (b) the backfill/rehydrate step that doc's own §9 deferred
    (Part B, C below).
@@ -53,7 +53,7 @@ Three asks, in order of what this doc actually solves:
   and is already the read-fallback for cross-channel opens
   (`agentmux-srv/src/server/app_api/blockfile.rs`).
 - **The pane loads the tail, not everything, on mount** — 200 lines, paged
-  further back on scroll (`frontend/app/view/agent/hooks/useHistoryPagination.ts`).
+  further back on scroll ([`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts)).
   This is a UI/virtualization bound, unrelated to model context, and out of
   scope here — it's already correct for its purpose (instant open on very long
   sessions).
@@ -73,8 +73,8 @@ Three asks, in order of what this doc actually solves:
 - **There is exact precedent for a synthetic, non-CLI-native transcript event
   rendered as a distinct divider node**: `compact_boundary` /
   `ContextCompactedNode`
-  (`docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`,
-  `frontend/app/view/agent/compact-boundary.ts`). Both the live path
+  ([`docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`](SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md),
+  [`frontend/app/view/agent/compact-boundary.ts`](../../frontend/app/view/agent/compact-boundary.ts)). Both the live path
   (`useAgentStream.ts`) and the history-replay path (`parseHistoryLines.ts`)
   intercept a raw `{"type":"system","subtype":"compact_boundary",...}` frame
   directly (bypassing the generic provider `Translator`, which has no shape for
@@ -171,7 +171,7 @@ where AgentMux *positively knows* what happened to a resume attempt.
 
 > **Superseded (2026-08-27).** The "no session existed to lose" reasoning has
 > one real exception, which
-> `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
+> [`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`](../status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md)
 > then observed live: a long-lived named agent opened in a **fresh channel**
 > whose shared-registry pointer is empty gets no `--resume` at all, so the CLI
 > never errors and no outcome is ever emitted — while the pane renders the
@@ -329,7 +329,7 @@ empty") has a concrete next step rather than staying an open question.
 
 ### 6.1 Why this is still open
 
-`docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md` §9
+[`docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`](../analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md) §9
 already shipped steps 1–4 (global transcript zone, hot-path mirror, read
 fallback, snapshot overlay) — the pane-display half of "retain whatever is
 there" is done. Its own §6 and §9 "step 5" flag what's still missing for the

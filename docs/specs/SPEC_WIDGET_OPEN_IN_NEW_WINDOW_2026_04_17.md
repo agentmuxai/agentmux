@@ -75,7 +75,7 @@ implies the widget would be pre-loaded).
 
 ## Implementation
 
-One file change: `frontend/app/window/action-widgets.tsx`
+One file change: [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx)
 
 Add to both `handlePinnedContextMenu` and `handleItemContextMenu`:
 ```typescript

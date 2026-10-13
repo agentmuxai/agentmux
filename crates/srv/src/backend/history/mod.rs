@@ -43,7 +43,7 @@ pub struct HistoryOwner {
 }
 
 impl HistoryOwner {
-    /// Resolve an App API slug (the pre-M4c-2 path, and the one an
+    /// Resolve a MuxAPI slug (the pre-M4c-2 path, and the one an
     /// Unattributed caller keeps).
     pub fn from_slug(store: &crate::backend::storage::store::Store, agent_id: &str) -> Self {
         // `agent_id` arrives as the SLUG (`AGENTMUX_AGENT_ID`) from every App

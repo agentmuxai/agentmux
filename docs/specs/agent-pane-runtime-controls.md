@@ -225,10 +225,10 @@ expect code changes).
 - `frontend/app/view/agent/components/AgentControlBar.tsx`
 
 **Files to modify:**
-- `frontend/app/view/agent/agent-view.tsx` — insert control bar
-- `frontend/app/view/agent/agent-model.ts` — add `updateRuntimeArgs()`
-- `frontend/app/view/agent/agent-view.scss` — control bar styles
-- `frontend/app/view/agent/types.ts` — `AgentRuntimeConfig` interface
+- [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) — insert control bar
+- [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) — add `updateRuntimeArgs()`
+- [`frontend/app/view/agent/agent-view.scss`](../../frontend/app/view/agent/agent-view.scss) — control bar styles
+- [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) — `AgentRuntimeConfig` interface
 
 ### Phase 2: Budget Guards + Tool Restrictions
 

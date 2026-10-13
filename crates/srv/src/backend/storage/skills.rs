@@ -390,7 +390,7 @@ impl Store {
 
     /// List every GLOBAL skill — the Armory catalog view. Unlike
     /// `skill_list`, this takes no `agent_id` and never includes an agent's
-    /// private skills; it backs the window-scoped `skill.catalog.*` App API
+    /// private skills; it backs the window-scoped `skill.catalog.*` MuxAPI
     /// (no `check_s1`, so there is no agent context to scope by). Each row
     /// carries `bound_count` — how many agents currently hold a
     /// `db_agent_skills_ref` to it — per

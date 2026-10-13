@@ -14,10 +14,10 @@ Two surfaces overlap on the same tool row and neither does what the user expects
 | Surface | File | Content | State |
 |---|---|---|---|
 | **`NodeHoverStrip`** floats over every document row | `frontend/app/view/agent/components/NodeHoverStrip.tsx` | Buttons: bookmark, expand/collapse, open-in-pane, open-in-window, new-agent-from-here | Three of the five are **stubs** logging `console.warn` ("not yet implemented") |
-| **`ToolBlock` portal overlay** (`agent-tool-content--portal`) | `frontend/app/view/agent/components/ToolBlock.tsx:336-348` | Per-kind tool content: `BashOutputViewer`, `DiffViewer`, `CompactResult`, etc. | Only renders when pinned (click). Hover doesn't show this content. |
+| **`ToolBlock` portal overlay** (`agent-tool-content--portal`) | [`frontend/app/view/agent/components/ToolBlock.tsx:336-348`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Per-kind tool content: `BashOutputViewer`, `DiffViewer`, `CompactResult`, etc. | Only renders when pinned (click). Hover doesn't show this content. |
 
 For Bash specifically:
-- The stream parser delivers a single `tool_result` event when the command completes (`frontend/app/view/agent/stream-parser.ts:207`).
+- The stream parser delivers a single `tool_result` event when the command completes ([`frontend/app/view/agent/stream-parser.ts:207`](../../frontend/app/view/agent/stream-parser.ts)).
 - `BashResult = { stdout, stderr, exitCode }` lands whole on `ToolNode.result`.
 - `BashOutputViewer` renders it as a static `<pre>` once.
 
@@ -91,7 +91,7 @@ case "tool_chunk":
 
 ### 3.3 Reducer changes
 
-New command (`frontend/app/store/agent-document-store.ts`):
+New command ([`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts)):
 
 ```ts
 type Command =
@@ -127,7 +127,7 @@ Why a separate command instead of `StreamFlush` carrying chunks: chunks fire at 
 └────────────────────────────────────────────────┘
 ```
 
-**New component:** `frontend/app/view/agent/components/ToolBlockOverlay.tsx` replaces the inline `renderToolContent()` switch and the embedded action button in `ToolBlock.tsx`. Shape:
+**New component:** [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) replaces the inline `renderToolContent()` switch and the embedded action button in `ToolBlock.tsx`. Shape:
 
 ```tsx
 <div class="agent-tool-overlay">
@@ -228,16 +228,16 @@ All three actions in `DocumentRow.onOpenInNewPane / onOpenInNewWindow / onNewAge
 
 | Path | Change |
 |---|---|
-| `frontend/app/view/agent/types.ts` | Add `log?: ToolStreamingLog` to `ToolNode`; add `ToolChunkEvent` |
-| `frontend/app/view/agent/stream-parser.ts` | New `toolChunkToNode` + arm in `eventToNode` |
-| `frontend/app/store/agent-document-store.ts` (or `agent-document-store/reducer.ts`) | New `ToolChunkAppend` command + reducer arm |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Replace inline `renderToolContent()` and embedded button with `<ToolBlockOverlay>` |
-| `frontend/app/view/agent/components/ToolBlockOverlay.tsx` (new) | Header, virtualized log, action bar |
-| `frontend/app/view/agent/components/ToolOverlayLog.tsx` (new) | Virtualized chunk renderer |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `log?: ToolStreamingLog` to `ToolNode`; add `ToolChunkEvent` |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | New `toolChunkToNode` + arm in `eventToNode` |
+| [`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts) (or `agent-document-store/reducer.ts`) | New `ToolChunkAppend` command + reducer arm |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Replace inline `renderToolContent()` and embedded button with `<ToolBlockOverlay>` |
+| [`frontend/app/view/agent/components/ToolBlockOverlay.tsx`](../../frontend/app/view/agent/components/ToolBlockOverlay.tsx) (new) | Header, virtualized log, action bar |
+| [`frontend/app/view/agent/components/ToolOverlayLog.tsx`](../../frontend/app/view/agent/components/ToolOverlayLog.tsx) (new) | Virtualized chunk renderer |
 | `frontend/app/view/agent/components/ToolOverlayActions.tsx` (new) | Bottom action bar |
 | `frontend/app/view/agent/components/NodeHoverStrip.tsx` | Remove branching buttons; keep bookmark + expand only |
-| `frontend/app/view/agent/virtualization/DocumentRow.tsx` | Wire `onOpenInPane` / `onOpenInWindow` / `onNewAgentFromHere` to real implementations or disabled state |
-| `frontend/app/view/agent/styles/_tool-overlay-portal.scss` | Add `--log-body` + `--action-bar` slots |
+| [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) | Wire `onOpenInPane` / `onOpenInWindow` / `onNewAgentFromHere` to real implementations or disabled state |
+| [`frontend/app/view/agent/styles/_tool-overlay-portal.scss`](../../frontend/app/view/agent/styles/_tool-overlay-portal.scss) | Add `--log-body` + `--action-bar` slots |
 | Backend (`agentmux-srv`): tool execution providers | Emit `tool_chunk` events as stdout/stderr arrives (Claude provider as starting point) |
 
 ---
@@ -274,12 +274,12 @@ Each phase is independently shippable and reviewable. Phase 1 + 2 are invisible 
 
 ## 12. Cross-references
 
-- Reducer family: `frontend/app/store/agent-document-store.ts`, master status in `docs/specs/SPEC_MASTER_REDUCER_STATUS_*.md`
-- Tool block render: `frontend/app/view/agent/components/ToolBlock.tsx`
+- Reducer family: [`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts), master status in `docs/specs/SPEC_MASTER_REDUCER_STATUS_*.md`
+- Tool block render: [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx)
 - Hover strip: `frontend/app/view/agent/components/NodeHoverStrip.tsx`
-- Stream parser: `frontend/app/view/agent/stream-parser.ts`
-- Predecessor analysis (tool collapse spec, related): `docs/specs/tool-collapse.md`
-- Virtualization predecessor: `docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`
+- Stream parser: [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts)
+- Predecessor analysis (tool collapse spec, related): [`docs/specs/tool-collapse.md`](tool-collapse.md)
+- Virtualization predecessor: [`docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`](SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md)
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-10
 **Status:** implemented. — #2515
-**Amends:** `docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md` §4.3,
+**Amends:** [`docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md`](SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md) §4.3,
 specifically its second bullet ("must clear the instant the user starts
 typing"). Everything else in that spec — the AMC gateway wiring, the
 Haiku prompt, guard 1 (clear on `Submitting`) and guard 4 (clear on session
@@ -23,7 +23,7 @@ end) in `useNextPromptSuggestion.ts` — is unchanged; see §2.
 ## 1. Current behavior (audited against source, 2026-08-10)
 
 The "ghost text" is the native HTML `<textarea placeholder>` attribute
-(`frontend/app/view/agent/components/AgentFooter.tsx` line 933), driven by
+([`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) line 933), driven by
 a `createMemo` (lines 475-484):
 
 ```ts
@@ -264,7 +264,7 @@ suggestion back.
 
 ## 7. Files touched
 
-- `frontend/app/view/agent/components/AgentFooter.tsx` — remove the
+- [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) — remove the
   `boxWasEmpty`-gated clear block in `handleInput` (§3.2), remove the
   `boxWasEmpty` local and its upkeep in `writeComposerValue` (§3.2), remove
   the explicit meta-null after Tab/Right-Arrow accept (§3.3). Update the
@@ -274,7 +274,7 @@ suggestion back.
   `suggestionGenMaskedAtSend` signal + its read in `placeholder` (compared
   against a generation number, not suggestion text — §10) + its write in
   `handleSend`.
-- `frontend/app/view/agent/hooks/useNextPromptSuggestion.ts` — §10
+- [`frontend/app/view/agent/hooks/useNextPromptSuggestion.ts`](../../frontend/app/view/agent/hooks/useNextPromptSuggestion.ts) — §10
   (post-review): new module-level `suggestionGenCounter` + `writeSuggestionMeta`
   helper, used by both `clearSuggestion` (guard 1) and the RPC
   success-write, pairing every write to `term:next_prompt_suggestion` with

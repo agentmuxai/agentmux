@@ -37,9 +37,9 @@ Three findings worth acting on independently of any single initiative:
 
 ## 1. Method, and how much to trust this
 
-- **Doc sweep:** all 857 specs under `docs/specs/` (+61 archived), 70 reports, 137 analyses,
+- **Doc sweep:** all 857 specs under [`docs/specs/`](../specs) (+61 archived), 70 reports, 137 analyses,
   15 status docs, 5 plans. `**Status:**` lines extracted in one pass and tallied.
-- **Status lines are not trusted on their own.** `docs/specs/README.md` says so itself
+- **Status lines are not trusted on their own.** [`docs/specs/README.md`](../specs/README.md) says so itself
   ("statuses rot... spot-verify against current code"), and the numbers back it: of 754 specs
   with a Status line, only 544 use the closed enum — 210 use non-canonical words and 150 have
   no Status line at all. Every claim in §2–§4 below is marked **[verified]** (checked against
@@ -68,7 +68,7 @@ remains in any `Cargo.toml` or `package.json`. The 29 files matching "tauri" are
 ### 2.2 React → SolidJS  ✅ **[verified]** — and nothing says so
 
 390 frontend files import `solid-js`. **Zero** import `react`.
-`docs/reports/solidjs-migration-analysis.md` (2026-03-11) opens with "Current stack: React 19 +
+[`docs/reports/solidjs-migration-analysis.md`](solidjs-migration-analysis.md) (2026-03-11) opens with "Current stack: React 19 +
 Jotai + Vite + Tauri" — three of those four are now false. The analysis doc was the *proposal*;
 no doc anywhere records that the migration happened, let alone finished.
 
@@ -95,7 +95,7 @@ without updating it. Two "current status" docs disagree about which is current. 
 Issue #1549. Verified by locating the artifacts each item was supposed to produce:
 
 - **A1** — `rpc_types.rs` (2,427 lines) → `agentmux-srv/src/backend/rpc_types/` (directory);
-  `rpc-api.ts` (1,568 lines) → `frontend/app/store/rpc-api/` (directory).
+  `rpc-api.ts` (1,568 lines) → [`frontend/app/store/rpc-api/`](../../frontend/app/store/rpc-api) (directory).
 - **A4** — `service.rs` (2,892 lines, one 2,272-line `match`) → `server/service/` split into
   `client.rs`, `object.rs`, `credential.rs`, `introspect.rs`, `reducer_helpers.rs`, and more.
 - **A5** — `blockcontroller/shell.rs` (2,358 lines) → `shellexec.rs`, `shellintegration.rs`,
@@ -166,11 +166,11 @@ and beyond — so this is hardening a working system, not finishing a broken one
 
 `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`: Phase 0 (PR #2394) and Phase 1 (closed Status
 vocabulary, 2026-08-10) shipped; **Phases 2, 3, 5 not started**; Phase 4 partially covered by
-the reader guardrail in `docs/specs/README.md`.
+the reader guardrail in [`docs/specs/README.md`](../specs/README.md).
 
-Phase 3's generated `INDEX.md` and `scripts/gen-docs-index.sh` **do** exist and run, which
+Phase 3's generated `INDEX.md` and [`scripts/gen-docs-index.sh`](../../scripts/gen-docs-index.sh) **do** exist and run, which
 suggests Phase 3 landed after that Status line was last edited. The enforcement gate
-(`scripts/check-doc-status.sh`) exists and is deliberately scoped to changed files only.
+([`scripts/check-doc-status.sh`](../../scripts/check-doc-status.sh)) exists and is deliberately scoped to changed files only.
 
 **The measured backlog this leaves:** of 857 specs, **150 have no Status line** and **210 use a
 non-canonical status word** (`ready` ×38, `spec` ×34, `design` ×13, `shipped` ×12, `approved`
@@ -227,14 +227,14 @@ agent"). Nothing built. This is the largest fully-designed-but-unbuilt item foun
 
 ### 4.2 DRY / modularity slimming plan  🔴 **[doc-claim, 1 of 5 started]**
 
-`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md` (**written today**, Status:
+[`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md`](REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md) (**written today**, Status:
 proposed). Measured duplication is low (2.8% frontend / 3.2% Rust) but it found **334 "keep in
 sync" comments across 210 source files** — one file in six. Five root causes, in its own payoff
 order:
 
 1. **No Rust↔TypeScript codegen** — 322 hand-maintained RPC stubs + a 2,819-line
    hand-maintained `gotypes.d.ts`. **[verified]** `frontend/types/gotypes.d.ts` is 2,819 lines
-   and no codegen script exists in `scripts/`. Note this is the *unfinished half of A1*: A1
+   and no codegen script exists in [`scripts/`](../../scripts). Note this is the *unfinished half of A1*: A1
    split the god-files and added a contract-enforcement test, but never removed the
    hand-maintenance the test was guarding.
 2. **`agentmux-common` isn't used as a common** — 8K shared lines vs 300K Rust.
@@ -275,7 +275,7 @@ signalling "we are mid-rename" to every new reader.
 ## 5. Stale claims found while verifying
 
 Reported separately because each will actively mislead the next reader, and because the repo's
-own guardrail (`docs/specs/README.md`) asks for exactly this kind of spot-check.
+own guardrail ([`docs/specs/README.md`](../specs/README.md)) asks for exactly this kind of spot-check.
 
 ### 5.1 `CLAUDE.md` says `transcript_request` doesn't exist. It does. **[verified]**
 
@@ -313,7 +313,7 @@ proposals. A one-word fix.
 
 ### 5.4 The SolidJS analysis doc describes a stack that no longer exists **[verified]**
 
-`docs/reports/solidjs-migration-analysis.md` still opens "Current stack: React 19 + Jotai +
+[`docs/reports/solidjs-migration-analysis.md`](solidjs-migration-analysis.md) still opens "Current stack: React 19 + Jotai +
 Vite + Tauri (WebView2/Chromium)". Every element except Vite is wrong, and the migration it
 proposes is done. Restamp `historical`.
 

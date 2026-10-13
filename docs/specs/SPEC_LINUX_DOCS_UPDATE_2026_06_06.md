@@ -3,7 +3,7 @@
 **Date:** 2026-06-06
 **Author:** AgentU
 **Status:** proposed — Ready to implement
-**Scope:** `BUILD.md`, `README.md`, new `docs/linux.md`
+**Scope:** `BUILD.md`, `README.md`, new [`docs/linux.md`](../linux.md)
 **Motivated by:** ~4 major Linux milestones (CEF migration, AppImage launcher, Unix-socket IPC, X11 ozone default, native window drag) shipped since the Linux docs were last updated. Docs still describe the old WebKitGTK/Tauri architecture.
 
 ---

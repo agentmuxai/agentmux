@@ -35,7 +35,7 @@ function getBlockIdFromEvent(e: WheelEvent): string | null {
 
 ### 2. Split zoom entry points
 
-In `frontend/app/store/keymodel.ts` (or wherever Ctrl+Scroll is handled):
+In [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) (or wherever Ctrl+Scroll is handled):
 
 - **Keyboard (Ctrl+/-):** Keep calling `zoomIn(store)` / `zoomOut(store)` which uses `getFocusedBlockId()`.
 - **Wheel (Ctrl+Scroll):** Pass the blockId from the event target instead.
@@ -81,8 +81,8 @@ The global wheel handler (in `keymodel.ts` or the app-level `onWheel`) should:
 
 | File | Change |
 |------|--------|
-| `frontend/app/store/zoom.ts` | Add `zoomBlockIn`/`zoomBlockOut`, refactor internals to accept blockId |
-| `frontend/app/store/keymodel.ts` | Wire Ctrl+Scroll to `zoomBlockIn`/`zoomBlockOut` with event-derived blockId |
+| [`frontend/app/store/zoom.ts`](../../frontend/app/store/zoom.ts) | Add `zoomBlockIn`/`zoomBlockOut`, refactor internals to accept blockId |
+| [`frontend/app/store/keymodel.ts`](../../frontend/app/store/keymodel.ts) | Wire Ctrl+Scroll to `zoomBlockIn`/`zoomBlockOut` with event-derived blockId |
 
 ### 6. Edge cases
 

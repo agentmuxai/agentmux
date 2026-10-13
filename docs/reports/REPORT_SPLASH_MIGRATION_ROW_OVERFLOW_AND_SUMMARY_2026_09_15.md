@@ -3,7 +3,7 @@
 **Date:** 2026-09-15
 **Status:** active — findings stand; the fix is tracked by
 [#3258](https://github.com/agentmuxai/agentmux/issues/3258) and designed in
-`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
+[`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`](../specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md)
 **Scope:** The per-migration sub-rows added by `feat(srv,launcher): show real
 per-migration progress on the splash instead of a silent clock (#3223)`
 (commit `e03678a39`), and how all three platform splash renderers
@@ -11,7 +11,7 @@ per-migration progress on the splash instead of a silent clock (#3223)`
 `splash_linux/mod.rs` [Linux]) display a stage's `subs` list once it's
 longer than the fixed row budget.
 **Not in scope:** the broader splash timing/DRY rethink already covered by
-`docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md` — this
+[`docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`](REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md) — this
 report is one specific, newer symptom sitting on top of that architecture,
 and reuses its file references rather than re-deriving them.
 

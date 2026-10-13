@@ -14,7 +14,7 @@ controller and cover, the cover's styles moved out of the `.agent-view` cascade 
 Not started: phase 4's `isLoading()` subscription and phase 5 (browser pane, §2 #6-#7) —
 both blocked on the same missing plumbing, and phase 5 also needs a different
 design than originally specified — see §6.1.
-**Motivating evidence:** `docs/reports/REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md`
+**Motivating evidence:** [`docs/reports/REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md`](../reports/REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md)
 (measured timeline, `spin:2` observation, §F regression).
 **Related:** `REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`,
 `SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`,

@@ -29,7 +29,7 @@
   - 118 files hand-roll 389 `<button>` elements under 163 different class names.
   - There are three implementations of section navigation and five of popup menus.
   - Settings and the new-agent modals each build their own form fields.
-- **This spec defines one line-style component set** under `frontend/app/element/ui/`, with two densities and tones named by intent: `Button`, `IconButton`, `SegmentedControl`, `Tabs`, `Field`, `TextInput`, `Select`, `Switch`, and the rest of the form controls. One `Tabs` component becomes the single menu system for section navigation. The spec also plans the migration and a CI gate that stops the drift coming back.
+- **This spec defines one line-style component set** under [`frontend/app/element/ui/`](../../frontend/app/element/ui), with two densities and tones named by intent: `Button`, `IconButton`, `SegmentedControl`, `Tabs`, `Field`, `TextInput`, `Select`, `Switch`, and the rest of the form controls. One `Tabs` component becomes the single menu system for section navigation. The spec also plans the migration and a CI gate that stops the drift coming back.
 
 ---
 
@@ -39,7 +39,7 @@ The findings are ranked by how much each one contributes to what you see.
 
 ### 2.1 The shared `<Button>` fills by default, and its hover is a hard-coded lime green
 
-`frontend/app/element/button.tsx` defaults any button without a category class to `solid` and any button without a colour class to `green`. The `solid green` style (`button.scss:32-41`) is:
+[`frontend/app/element/button.tsx`](../../frontend/app/element/button.tsx) defaults any button without a category class to `solid` and any button without a colour class to `green`. The `solid green` style (`button.scss:32-41`) is:
 
 | Property | Value | Result with the default theme |
 |---|---|---|
@@ -51,7 +51,7 @@ The findings are ranked by how much each one contributes to what you see.
 | transition | `0.3s` | a slow colour fade |
 | focus | `1px solid var(--success-color)` outline | not the app's focus ring (`--shadow-focus-ring`) |
 
-None of the 13 themes in `frontend/app/themes/` overrides `--button-green-border-color`. In every theme, then, a solid button is an accent-coloured block with a lime outline that turns fully lime on hover. The name "green" dates from when the accent colour was green. When the accent became a theme token, this border and hover colour were left behind.
+None of the 13 themes in [`frontend/app/themes/`](../../frontend/app/themes) overrides `--button-green-border-color`. In every theme, then, a solid button is an accent-coloured block with a lime outline that turns fully lime on hover. The name "green" dates from when the accent colour was green. When the accent became a theme token, this border and hover colour were left behind.
 
 Usage: 26 `<Button>` elements pass no class at all, so they get `solid green`; 16 pass `green solid`; 6 pass `grey solid`; 2 pass `ghost grey`. The `outlined`, `red` and `yellow` variants are never used.
 
@@ -120,7 +120,7 @@ Nothing in the new-agent flow imports `settings-controls.tsx`.
 | CSS variables used but defined nowhere (with fallbacks) | 20, e.g. `--panel-bg-alt` ×19, `--tertiary-text-color` ×20, `--highlight-bg` ×9 |
 | Uses of the existing `focus-ring` mixin (`mixins.scss:420`) | 0 |
 
-`SPEC_DESIGN_SYSTEM_2026_04_23.md` added the spacing, type, radius, shadow and motion tokens. It added no components, so every view kept writing its own button. Stylelint is configured, but it **doesn't run in CI** (`scripts/check-no-transition-all.sh:22` says so), and it has no rules for spacing, font size or corner radius. That's how `settings.scss` ships 4px corners and hex fallbacks without a failure.
+`SPEC_DESIGN_SYSTEM_2026_04_23.md` added the spacing, type, radius, shadow and motion tokens. It added no components, so every view kept writing its own button. Stylelint is configured, but it **doesn't run in CI** ([`scripts/check-no-transition-all.sh:22`](../../scripts/check-no-transition-all.sh) says so), and it has no rules for spacing, font size or corner radius. That's how `settings.scss` ships 4px corners and hex fallbacks without a failure.
 
 ---
 
@@ -186,7 +186,7 @@ That adds up to **four different "active" looks** (solid accent fill, accent und
   - `comfortable` is for full panes such as Settings, and for modals.
   - A density class on a container sets `--ui-*` custom properties, and components read only those. No component hard-codes its own size.
 - **L4. Tone by intent, not colour name.** The tones are `accent`, `neutral`, `danger` and `quiet`. They map to theme tokens, so every theme works.
-  - **One exception fills (2026-10-10):** `attention`, at the operator's request. It's used only for the main action of a call to action an agent waits on: a browser hand-off or approval, a question, a tool permission, an SSH consent, a widget install. Those must stand out from everything else on screen, and an outline doesn't. It fills with the theme's fluorescent `--attention-color`, with `--attention-text-color` on it, and glows gently, without the glow under reduced motion. A destructive answer keeps `danger`, so the loudest colour never pushes a risky yes. See `docs/reports/REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md` §1.
+  - **One exception fills (2026-10-10):** `attention`, at the operator's request. It's used only for the main action of a call to action an agent waits on: a browser hand-off or approval, a question, a tool permission, an SSH consent, a widget install. Those must stand out from everything else on screen, and an outline doesn't. It fills with the theme's fluorescent `--attention-color`, with `--attention-text-color` on it, and glows gently, without the glow under reduced motion. A destructive answer keeps `danger`, so the loudest colour never pushes a risky yes. See [`docs/reports/REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md`](../reports/REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md) §1.
 - **L5. Every state, every time.**
   - Every control has rest, hover, `:focus-visible` (via `--shadow-focus-ring` and the existing `focus-ring` mixin) and disabled (0.4 opacity, `--cursor-disabled`).
   - A control that can be on or off also has a pressed or selected state, exposed with the correct ARIA attribute.
@@ -234,7 +234,7 @@ Also:
 
 ### 5.3 The components
 
-All of them live in `frontend/app/element/ui/` and are exported from `index.ts`. Their styles are in `element/ui/ui.scss`, built from two mixins in `element/ui/_line.scss`: `line-control` (the shape and every state) and `tone($tone)`, which sets the custom properties a tone is made of (`--ui-fg`, `--ui-line`, `--ui-bg`, `--ui-tone` and their hover forms).
+All of them live in [`frontend/app/element/ui/`](../../frontend/app/element/ui) and are exported from `index.ts`. Their styles are in `element/ui/ui.scss`, built from two mixins in `element/ui/_line.scss`: `line-control` (the shape and every state) and `tone($tone)`, which sets the custom properties a tone is made of (`--ui-fg`, `--ui-line`, `--ui-bg`, `--ui-tone` and their hover forms).
 
 | Component | Replaces | API sketch |
 |---|---|---|
@@ -379,7 +379,7 @@ Recommendation: leave both as they are.
 
 ## 7. Enforcement
 
-Stylelint doesn't run in CI, so this follows the repo's own gate pattern (`scripts/check-no-transition-all.sh`, `check-scrollbar-cursor.sh`). `scripts/check-ui-primitives.mjs` runs in `ci-pr.yml` and compares four counts in the PR with the same counts at its merge-base on the base branch:
+Stylelint doesn't run in CI, so this follows the repo's own gate pattern ([`scripts/check-no-transition-all.sh`](../../scripts/check-no-transition-all.sh), `check-scrollbar-cursor.sh`). [`scripts/check-ui-primitives.mjs`](../../scripts/check-ui-primitives.mjs) runs in `ci-pr.yml` and compares four counts in the PR with the same counts at its merge-base on the base branch:
 
 | Check | What it counts | When this started (2026-10-05) |
 |---|---|---|
@@ -427,12 +427,12 @@ The operator approved going ahead on these recommendations on 2026-10-05. Each c
 
 ## 11. References
 
-- `frontend/app/element/button.tsx`, `button.scss`, `modal.scss`, `mixins.scss`
-- `frontend/app/theme.scss` (`:71` accent, `:295-308` button colours, `:316-441` spacing, type, radius, shadow, motion and cursor tokens)
-- `frontend/app/view/settings/settings-view.tsx`, `settings-controls.tsx`, `settings.scss`
-- `frontend/app/view/agent/components/AgentLaunchModal.tsx`, `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
-- `frontend/app/view/agent/styles/_composer-strip.scss:328-433` (Shell, Compact)
+- [`frontend/app/element/button.tsx`](../../frontend/app/element/button.tsx), `button.scss`, `modal.scss`, `mixins.scss`
+- [`frontend/app/theme.scss`](../../frontend/app/theme.scss) (`:71` accent, `:295-308` button colours, `:316-441` spacing, type, radius, shadow, motion and cursor tokens)
+- [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx), `settings-controls.tsx`, `settings.scss`
+- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx), `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
+- [`frontend/app/view/agent/styles/_composer-strip.scss:328-433`](../../frontend/app/view/agent/styles/_composer-strip.scss) (Shell, Compact)
 - `frontend/app/view/agent/components/AgentStashModal.tsx/.scss`, `styles/_stash-drawer.scss`
-- `frontend/app/view/section-pane/`, `frontend/app/view/warden/`
-- `frontend/app/tab/tab-close-confirm-modal.tsx`
-- `docs/specs/SPEC_DESIGN_SYSTEM_2026_04_23.md`, `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md`, `SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md`
+- [`frontend/app/view/section-pane/`](../../frontend/app/view/section-pane), [`frontend/app/view/warden/`](../../frontend/app/view/warden)
+- [`frontend/app/tab/tab-close-confirm-modal.tsx`](../../frontend/app/tab/tab-close-confirm-modal.tsx)
+- [`docs/specs/SPEC_DESIGN_SYSTEM_2026_04_23.md`](SPEC_DESIGN_SYSTEM_2026_04_23.md), `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md`, `SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md`

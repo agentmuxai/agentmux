@@ -76,4 +76,4 @@ Or: close the blank panes via the UI (click X on the pane header), which should 
 | `agentmux-srv/src/server/service.rs` | Add layout pruning after `DeleteBlock` |
 | `agentmux-srv/src/backend/wcore/tab.rs` | Add `validate_layout()` called on tab activation |
 | `agentmux-srv/src/backend/obj.rs` | Helper: `prune_orphaned_layout_nodes(layout, valid_block_ids)` |
-| `frontend/app/tab/tabcontent.tsx` | Render empty placeholder + trigger prune RPC for missing blocks |
+| [`frontend/app/tab/tabcontent.tsx`](../../frontend/app/tab/tabcontent.tsx) | Render empty placeholder + trigger prune RPC for missing blocks |

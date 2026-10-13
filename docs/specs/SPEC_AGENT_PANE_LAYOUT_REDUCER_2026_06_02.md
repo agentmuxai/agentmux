@@ -5,7 +5,7 @@
 **Date:** 2026-06-02
 **Author:** AgentA
 **Tracking:** issue #1235 (the drift this eliminates); builds on PRs #1231/#1233/#1234
-**Pattern:** follows `docs/specs/frontend-reducer-conventions-2026-05-03.md` (Slice #11)
+**Pattern:** follows [`docs/specs/frontend-reducer-conventions-2026-05-03.md`](frontend-reducer-conventions-2026-05-03.md) (Slice #11)
 
 ---
 
@@ -302,7 +302,7 @@ reducer would add state with no layout meaning.
   divergence between slice `positions()` and TanStack measurements. Goal: validate
   the model against live traffic with zero user-visible change. Ship behind the
   existing dev-only instrumentation.
-  *Verify:* `frontend/app/store/agent-pane-layout/` exists (reducer + types + tests).
+  *Verify:* [`frontend/app/store/agent-pane-layout/`](../../frontend/app/store/agent-pane-layout) exists (reducer + types + tests).
 
 - **Phase 1 — unify expansion (§5). 🟡 THE ONLY PHASE LEFT, and smaller than this
   entry implies — see the audit note below it.** Move `collapsed/pinned/hold/hover/cancel`
@@ -422,15 +422,15 @@ per the project's state-machine testing discipline:
 
 | File | Change |
 |---|---|
-| `frontend/app/store/agent-pane-layout/types.ts` | new — state, commands, events, `initialState` |
-| `frontend/app/store/agent-pane-layout/reducer.ts` | new — pure `update` + selectors |
-| `frontend/app/store/agent-pane-layout-store.ts` | new — dispatch layer, projections, timers, `recordDispatch` |
-| `frontend/app/store/agent-pane-layout/reducer.test.ts` | new — property + cross-product tests (§7) |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | read expansion from slice; dispatch on pin; store-layer hold timer |
-| `frontend/app/view/agent/components/UserMessageBlock.tsx`, `MarkdownBlock.tsx`, `AgentDocumentView.tsx` | dispatch `UserExpanded/UserCollapsed`; drop local expansion signals |
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | (Ph2/3) read positions/window from slice; route measurement |
-| `frontend/app/view/agent/virtualization/renderers.ts` | estimators become `EstimateSet` producers keyed by state |
-| `frontend/app/devtools/diag-panel.tsx` | surfaces the new slice automatically (audit ring) |
+| [`frontend/app/store/agent-pane-layout/types.ts`](../../frontend/app/store/agent-pane-layout/types.ts) | new — state, commands, events, `initialState` |
+| [`frontend/app/store/agent-pane-layout/reducer.ts`](../../frontend/app/store/agent-pane-layout/reducer.ts) | new — pure `update` + selectors |
+| [`frontend/app/store/agent-pane-layout-store.ts`](../../frontend/app/store/agent-pane-layout-store.ts) | new — dispatch layer, projections, timers, `recordDispatch` |
+| [`frontend/app/store/agent-pane-layout/reducer.test.ts`](../../frontend/app/store/agent-pane-layout/reducer.test.ts) | new — property + cross-product tests (§7) |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | read expansion from slice; dispatch on pin; store-layer hold timer |
+| [`frontend/app/view/agent/components/UserMessageBlock.tsx`](../../frontend/app/view/agent/components/UserMessageBlock.tsx), `MarkdownBlock.tsx`, `AgentDocumentView.tsx` | dispatch `UserExpanded/UserCollapsed`; drop local expansion signals |
+| [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) | (Ph2/3) read positions/window from slice; route measurement |
+| [`frontend/app/view/agent/virtualization/renderers.ts`](../../frontend/app/view/agent/virtualization/renderers.ts) | estimators become `EstimateSet` producers keyed by state |
+| [`frontend/app/devtools/diag-panel.tsx`](../../frontend/app/devtools/diag-panel.tsx) | surfaces the new slice automatically (audit ring) |
 
 ---
 

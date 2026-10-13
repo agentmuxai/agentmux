@@ -44,7 +44,7 @@ DocumentRow → per-kind block (MarkdownBlock | ToolBlock | AgentMessageBlock | 
 
 ## 2. DocumentNode types
 
-Discriminated union, one shape per kind. Lives in `frontend/app/view/agent/types.ts`.
+Discriminated union, one shape per kind. Lives in [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts).
 
 | `type` | Renderer | Notes |
 |---|---|---|
@@ -240,7 +240,7 @@ Both `.agent-document` and `.agent-document-streaming-buffer` use `gap: 1px`. Ad
 
 Because consecutive text deltas accumulate into ONE `markdown` node (§3), a single assistant turn that emits "Here's the data:" + a markdown table + "Notice the trend." produces ONE `markdown` node whose `content` contains all three. The `Markdown` component renders them as `<p>` + `<table>` + `<p>` inside one `.agent-markdown-block`. The paragraph-to-table spacing then comes from `markdown.scss`, not from `_document.scss`.
 
-If `markdown.scss` lacks a `table { margin-block }` rule, the table butts directly against neighboring `<p>` elements. This is structurally distinct from suspect B: the symptom looks the same to the user but the CSS to fix lives in `frontend/app/element/markdown.scss`, not `_document-nodes.scss`.
+If `markdown.scss` lacks a `table { margin-block }` rule, the table butts directly against neighboring `<p>` elements. This is structurally distinct from suspect B: the symptom looks the same to the user but the CSS to fix lives in [`frontend/app/element/markdown.scss`](../../frontend/app/element/markdown.scss), not `_document-nodes.scss`.
 
 **Fix sketch:** verify `markdown.scss` has `table { margin-block: var(--space-2); }` (and equivalent for `<pre>`). If not, add it. This also fixes the case where the table is followed by a `text`-then-`thinking` cut, because the table's bottom margin would still apply.
 
@@ -299,22 +299,22 @@ This is the right place to start when a layout symptom appears: if the bug is "t
 
 | Path | Purpose |
 |---|---|
-| `frontend/app/view/agent/stream-parser.ts` | NDJSON → DocumentNode |
-| `frontend/app/view/agent/types.ts` | DocumentNode discriminated union |
-| `frontend/app/view/agent/virtualization/state.ts` | AgentViewState single-source-of-truth |
-| `frontend/app/view/agent/virtualization/streaming-buffer.ts` | Partition logic, `STREAMING_BUFFER_SIZE = 50` |
-| `frontend/app/view/agent/virtualization/renderers.ts` | Per-kind component + estimator + streaming flag |
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | Hybrid renderer |
-| `frontend/app/view/agent/virtualization/DocumentRow.tsx` | Single row, dispatches to per-kind block |
-| `frontend/app/view/agent/virtualization/perf-probe.ts` | Dev-mode perf + estimator-miss + layout-shift |
-| `frontend/app/view/agent/components/MarkdownBlock.tsx` | Markdown / thinking content |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Tool summary + Portal overlay |
-| `frontend/app/view/agent/components/AgentMessageBlock.tsx` | Inter-agent messages |
-| `frontend/app/view/agent/styles/_document.scss` | Scroll container, virtualizer wrapper, streaming buffer, row |
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Per-block-kind styles (markdown, thinking, tool, …) |
-| `frontend/app/element/markdown.tsx` + `markdown.scss` | Inner markdown renderer (tables, code blocks, etc.) |
-| `frontend/app/devtools/agent-pane-perf-section.tsx` | Dev HUD |
-| `docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` | Authoritative design doc |
+| [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) | NDJSON → DocumentNode |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | DocumentNode discriminated union |
+| [`frontend/app/view/agent/virtualization/state.ts`](../../frontend/app/view/agent/virtualization/state.ts) | AgentViewState single-source-of-truth |
+| [`frontend/app/view/agent/virtualization/streaming-buffer.ts`](../../frontend/app/view/agent/virtualization/streaming-buffer.ts) | Partition logic, `STREAMING_BUFFER_SIZE = 50` |
+| [`frontend/app/view/agent/virtualization/renderers.ts`](../../frontend/app/view/agent/virtualization/renderers.ts) | Per-kind component + estimator + streaming flag |
+| [`frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`](../../frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx) | Hybrid renderer |
+| [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) | Single row, dispatches to per-kind block |
+| [`frontend/app/view/agent/virtualization/perf-probe.ts`](../../frontend/app/view/agent/virtualization/perf-probe.ts) | Dev-mode perf + estimator-miss + layout-shift |
+| [`frontend/app/view/agent/components/MarkdownBlock.tsx`](../../frontend/app/view/agent/components/MarkdownBlock.tsx) | Markdown / thinking content |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Tool summary + Portal overlay |
+| [`frontend/app/view/agent/components/AgentMessageBlock.tsx`](../../frontend/app/view/agent/components/AgentMessageBlock.tsx) | Inter-agent messages |
+| [`frontend/app/view/agent/styles/_document.scss`](../../frontend/app/view/agent/styles/_document.scss) | Scroll container, virtualizer wrapper, streaming buffer, row |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Per-block-kind styles (markdown, thinking, tool, …) |
+| [`frontend/app/element/markdown.tsx`](../../frontend/app/element/markdown.tsx) + `markdown.scss` | Inner markdown renderer (tables, code blocks, etc.) |
+| [`frontend/app/devtools/agent-pane-perf-section.tsx`](../../frontend/app/devtools/agent-pane-perf-section.tsx) | Dev HUD |
+| [`docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`](../specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md) | Authoritative design doc |
 
 ---
 

@@ -55,9 +55,9 @@ byte-identical to the agent-less one.
 naming spec's §8 recorded this after an earlier draft claimed otherwise. What
 remains is not implementation but *discoverability* — see §3.1.
 
-**No frontend calls any export RPC.** `frontend/app/store/rpc-api/bundle.ts`
+**No frontend calls any export RPC.** [`frontend/app/store/rpc-api/bundle.ts`](../../frontend/app/store/rpc-api/bundle.ts)
 exposes import only (`bundle.import.preview` at `bundle.ts:103`,
-`bundle.import.commit` at `bundle.ts:119`). Export is reachable from the App API
+`bundle.import.commit` at `bundle.ts:119`). Export is reachable from MuxAPI
 and from agents, not from the Armory UI. Any UI work in §7 starts from zero.
 
 ### 2.2 What an ABF actually contains

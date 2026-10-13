@@ -57,7 +57,7 @@ tabs (none of them is a document) and they aren't pane tabs (they share one bloc
 
 ## 1. The Armory today
 
-One pane tab (`view: "armory"`, alias `"trust"`, `frontend/app/view/armory/`), with a left
+One pane tab (`view: "armory"`, alias `"trust"`, [`frontend/app/view/armory/`](../../frontend/app/view/armory)), with a left
 rail of five sections. Each section is an existing manager component, always mounted and
 shown or hidden by a CSS class (`armory-view.tsx`):
 
@@ -77,17 +77,17 @@ Personal) is `armory:memory:subsection` (`armory-model.ts`).
 
 | Entry point | Where |
 |---|---|
-| Widget bar button "Armory" (pinned, vault icon) | `crates/srv/src/config/widgets.json` (`defwidget@armory`); a click always creates a new block |
-| Hamburger menu → Armory | `frontend/app/window/hamburger-menu.tsx` |
-| Command palette "Identity & Memory" (`app:identity`) | `frontend/app/store/command-registry.ts` |
-| macOS app menu "Identity & Memory…" | `crates/cef/src/macos_menu.rs` |
-| Agent pane failure row: auth with nothing to bind, usage limit ("Armory (switch / upgrade)"), spawn failure | `frontend/app/view/agent/failure/failure-accessory.ts`, via `useAgentFailure.ts` |
+| Widget bar button "Armory" (pinned, vault icon) | [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) (`defwidget@armory`); a click always creates a new block |
+| Hamburger menu → Armory | [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) |
+| Command palette "Identity & Memory" (`app:identity`) | [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) |
+| macOS app menu "Identity & Memory…" | [`crates/cef/src/macos_menu.rs`](../../crates/cef/src/macos_menu.rs) |
+| Agent pane failure row: auth with nothing to bind, usage limit ("Armory (switch / upgrade)"), spawn failure | [`frontend/app/view/agent/failure/failure-accessory.ts`](../../frontend/app/view/agent/failure/failure-accessory.ts), via `useAgentFailure.ts` |
 | Stash dialogs: "Browse the Armory catalog →", "edit it there" | `AgentMcpModal.tsx`, `AgentSkillsModal.tsx` |
 | Startup dialog "Armory → Bundles" | `AgentStartupModal.tsx` |
-| Bundle summary pane "Edit/Manage in Identity & Memory" | `frontend/app/view/bundle-summary.tsx` |
-| Layout files (type `"armory"`, `config.section`) | `crates/srv/src/backend/layout_file.rs` |
+| Bundle summary pane "Edit/Manage in Identity & Memory" | [`frontend/app/view/bundle-summary.tsx`](../../frontend/app/view/bundle-summary.tsx) |
+| Layout files (type `"armory"`, `config.section`) | [`crates/srv/src/backend/layout_file.rs`](../../crates/srv/src/backend/layout_file.rs) |
 
-No MCP or App API tool opens the Armory.
+No MCP or MuxAPI tool opens the Armory.
 
 ### 1.2 Three problems with it as it is
 
@@ -205,7 +205,7 @@ presets and in layout files. None of them should break or fall back to a blank p
   (`native_memory`).
 - **Layout files.** `layout_file.rs` reads type `"armory"` with `config.section`, and maps it
   the same way. It writes the new types (`"connectors"`, `"knowledge"`, each with
-  `config.section`). Update `schema/agentmux-layout.v1.schema.json` to accept both.
+  `config.section`). Update [`schema/agentmux-layout.v1.schema.json`](../../schema/agentmux-layout.v1.schema.json) to accept both.
 - **Widget pins.** A `widget:pinned` setting that names `armory` becomes `connectors` +
   `knowledge`. `defwidget@armory` stays readable for one release.
 - **Unchanged:** `term:zoom`, the per-manager localStorage keys
@@ -217,8 +217,8 @@ presets and in layout files. None of them should break or fall back to a blank p
 | Where | Change |
 |---|---|
 | Frontend strings: the Armory label, failure rows, Stash and Startup dialogs, `AgentNewBundleModal`, `bundle-manager`, `BundleImportSelectModal`, `MemoryAdoptionApprovalWindow`, `useAgentControllerStatus` ("Sign in… from Armory → Accounts") | name the pane and section: "Connectors → Accounts", "Connectors → MCP servers", "Knowledge → Skills" |
-| Spawn error text, `crates/srv/src/identity/resolver/errors.rs` ("Bind an account for this provider in the Armory.") | "…in Connectors → Accounts". **Must change in the same commit as the matcher in `crates/srv/src/agents/failure.rs`, which recognises the error by this text (lowercased: "bind an account for this provider in the armory"),** with its tests; otherwise the "no account bound" error stops being classified |
-| MCP tool descriptions, `crates/mcp/src/tool_schemas.rs` (the Global Memory tools: "managed exclusively through the Armory UI", "shown in the Armory Global Memory list", "the Armory UI's own Remove button", "the Armory can bring entries into an isolated channel") | "the Knowledge pane". Agents read these, so they should name what the operator sees |
+| Spawn error text, [`crates/srv/src/identity/resolver/errors.rs`](../../crates/srv/src/identity/resolver/errors.rs) ("Bind an account for this provider in the Armory.") | "…in Connectors → Accounts". **Must change in the same commit as the matcher in [`crates/srv/src/agents/failure.rs`](../../crates/srv/src/agents/failure.rs), which recognises the error by this text (lowercased: "bind an account for this provider in the armory"),** with its tests; otherwise the "no account bound" error stops being classified |
+| MCP tool descriptions, [`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs) (the Global Memory tools: "managed exclusively through the Armory UI", "shown in the Armory Global Memory list", "the Armory UI's own Remove button", "the Armory can bring entries into an isolated channel") | "the Knowledge pane". Agents read these, so they should name what the operator sees |
 | Placeholder startup file, `backend/providers.rs` ("use Armory -> Memory -> Global") | "Knowledge → Global" |
 | `widgets.json` labels, layout preview summary (`layout_file.rs`) | the new names |
 
@@ -235,7 +235,7 @@ section navs), `block-registry.test.ts` (the view list, the `trust` alias),
 `claude-translator.test.ts`, and the Rust tests around the error text
 (`agents/failure.rs`, `identity/resolver/inject.rs`, `server/tests.rs`, `reactive/tests.rs`),
 layouts (`layout/tests.rs`) and `muxspect_handlers.rs`. The UI screenshot script
-(`scripts/ui-screenshots/shots.mjs`) opens the "Armory" widget and needs the new names.
+([`scripts/ui-screenshots/shots.mjs`](../../scripts/ui-screenshots/shots.mjs)) opens the "Armory" widget and needs the new names.
 
 ### 4.6 Bundles and the Agent Bundle Format
 
@@ -246,7 +246,7 @@ to any agent**, whatever CLI it runs (Claude Code, Codex, Gemini, …).
 **ABF becomes "Agent Bundle Format".** The acronym, the `.abf` extension and the importer stay;
 "Armory" leaves the name.
 
-**Where the code is today** (`frontend/types/rpc/Bundle.ts`, `backend/bundle_export.rs`,
+**Where the code is today** ([`frontend/types/rpc/Bundle.ts`](../../frontend/types/rpc/Bundle.ts), `backend/bundle_export.rs`,
 `bundle_import.rs`):
 
 - A bundle row pins `provider` (`claude` | `codex` | `gemini` | empty) and `model`. That's
@@ -309,8 +309,8 @@ version becomes harness-agnostic, keeping its `provider` / `model` as the hint.
 ### 4.8 The default widget bar
 
 The widget bar shows the operator's own pinned list when they've set one (`widget:pinned`,
-`frontend/app/window/action-widgets-config.ts`); otherwise it's derived from the defaults in
-`crates/srv/src/config/widgets.json` (`display:pinned`, ordered by `display:order`). Today
+[`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts)); otherwise it's derived from the defaults in
+[`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) (`display:pinned`, ordered by `display:order`). Today
 those defaults pin four: Agent, Swarm, Armory, Sysinfo.
 
 **New default (operator, 2026-10-05):** eleven pinned, in this order; everything else goes in More. (Reordered later the same day at the operator's request: Swarm second, Connectors after Hangar. Shipped with the widget default colors work, `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` §7 PR 3.)
@@ -401,7 +401,7 @@ rest. The two "already shipped" items can go now, independent of this spec.
 
 ### 5.2 Phase 1 as built
 
-- **One component, two manifests.** `frontend/app/view/section-pane/section-pane.tsx` is the
+- **One component, two manifests.** [`frontend/app/view/section-pane/section-pane.tsx`](../../frontend/app/view/section-pane/section-pane.tsx) is the
   sectioned pane (rail, narrow-width tab bar, Ctrl+Wheel zoom, every section mounted and
   hidden); `view/connectors/connectors.tsx` and `view/knowledge/knowledge.tsx` list their
   sections. The Armory's stylesheet moved with it and keeps its class names.
@@ -422,7 +422,7 @@ rest. The two "already shipped" items can go now, independent of this spec.
 - **Palette.** `app:connectors` and `app:knowledge`, found by "accounts", "mcp", "memory",
   "skills", "bundles" through a new `keywords` field; `app:identity` is registered hidden
   and opens Connectors. The macOS app menu lists both.
-- **Screenshots.** The `armory-bundles` shot in `scripts/ui-screenshots/shots.mjs` is now
+- **Screenshots.** The `armory-bundles` shot in [`scripts/ui-screenshots/shots.mjs`](../../scripts/ui-screenshots/shots.mjs) is now
   `knowledge-bundles`.
 
 ## 6. Risks

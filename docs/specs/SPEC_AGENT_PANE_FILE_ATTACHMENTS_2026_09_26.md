@@ -19,7 +19,7 @@ Follow-ups from the repo owner (2026-09-26):
 ## 1. What happens today
 
 - The tray, store and delivery are image-only. `attachments.ingest` classifies paths with `is_image_path` and returns everything else as `non_images` (`agentmux-srv/src/backend/attachments/mod.rs:692`, `:748`).
-- The frontend keeps the old behavior for those: `useAgentDropAttach` copies non-images into the agent's `cmd:cwd` and types `@name` (`frontend/app/view/agent/hooks/useAgentDropAttach.ts`). Ctrl+V and right-click Paste skip non-images with a "not images" note (`attachment-draft.ts:206`, `AgentFooter.tsx:517`).
+- The frontend keeps the old behavior for those: `useAgentDropAttach` copies non-images into the agent's `cmd:cwd` and types `@name` ([`frontend/app/view/agent/hooks/useAgentDropAttach.ts`](../../frontend/app/view/agent/hooks/useAgentDropAttach.ts)). Ctrl+V and right-click Paste skip non-images with a "not images" note (`attachment-draft.ts:206`, `AgentFooter.tsx:517`).
 - HEIC, AVIF and SVG are refused as "not supported yet" (`process.rs:145`).
 
 ## 2. What agents can do with documents (research, 2026-09-26)

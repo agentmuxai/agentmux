@@ -4,12 +4,12 @@
 **Status:** analysis — Reference doc — informs Swarm pane data-model design, not itself a spec
 **Scope:** Every distinct shape a Claude Code CLI subagent-spawn can take, as
 observed in AgentMux's own code (`agentmux-srv/src/backend/subagent_watcher.rs`,
-`frontend/app/view/swarm/swarm-model.ts`) and as documented/confirmed by
+[`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts)) and as documented/confirmed by
 Anthropic's official Claude Code docs (`code.claude.com/docs/en/*`) and
 CHANGELOG.
-**Related:** `docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`,
-`docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`,
-`docs/specs/SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md`, memory
+**Related:** [`docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`](../specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md),
+[`docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`](../specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md),
+[`docs/specs/SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md`](../specs/SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md), memory
 `agentmux-swarm-duplicate-subagent-groups.md`.
 
 ---

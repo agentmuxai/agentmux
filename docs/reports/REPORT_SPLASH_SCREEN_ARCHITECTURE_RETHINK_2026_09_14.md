@@ -30,12 +30,12 @@ feature that happens to share the word "splash" in some doc titles.
 Two prior investigations already exist and are not re-derived here, only
 verified against current code and extended:
 
-- `docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md` (2026-07-20) —
+- [`docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md`](../analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md) (2026-07-20) —
   diagnosed macOS's count-up race and the total-vs-items gap, macOS only.
-- `docs/retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md`
+- [`docs/retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md`](../retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md)
   (2026-07-22) — confirmed PR #2244 fixed the gap-accounting complaint but
   not the count-up complaint, on macOS.
-- `docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`
+- [`docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`](REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md)
   (2026-09-03/04) — fixed the blank-window-after-splash defect and added a
   `paint` stage, on Windows + Linux, explicitly not macOS.
 
@@ -106,7 +106,7 @@ on_load_end → paint → frontend bootstrap → tab reveal
 | `dlopen` → `cef_init` | **Windows/Linux: no stage at all** (`dlopen` is macOS-only, `#[cfg(target_os = "macos")]`). | Whatever framework-load cost exists on those platforms is invisible. |
 | `cef_init` end → window creation → `on_load_end` | **No**, any platform. | Real window/browser construction + initial navigation start. |
 | `on_load_end` → real first paint | **Windows + Linux: yes** (`paint` stage, Sept report). **macOS: no.** | Confirmed directly: macOS's `reveal_top_level_window` has no gated path; goes straight to unconditional `window.show()`. The Sept report measured this gap at ~1–2s on Windows/Linux; nothing suggests macOS is different, it's just unmeasured. |
-| `paint` end → frontend bootstrap → store hydration → tab/pane mount | **No**, any platform. | Zero references to `sendLauncherMsg`/`startup_stage_begin`/`startup_stage_end` anywhere in `frontend/`. Spec'd in the original June design (step 7) and never built — confirmed independently by two prior docs and this pass. |
+| `paint` end → frontend bootstrap → store hydration → tab/pane mount | **No**, any platform. | Zero references to `sendLauncherMsg`/`startup_stage_begin`/`startup_stage_end` anywhere in [`frontend/`](../../frontend). Spec'd in the original June design (step 7) and never built — confirmed independently by two prior docs and this pass. |
 | Tab-reveal settle window (up to 800ms) | **No, and structurally can't be** — it now happens *after* the native splash has already dismissed. | The ready-signal that ends `paint` and dismisses the splash fires together (`navigation.rs`'s `signal_gated_reveal_complete`), so this window is outside the splash's lifetime by design, not by oversight. |
 
 ### 2.1 The single biggest gap: migrations are invisible, and the code path that would show them is dead
@@ -305,13 +305,13 @@ timer label, not extending native-splash lifetime to reach it.
 
 ## 7. References
 
-- `docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md`
-- `docs/retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md`
-- `docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`
-- `docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md`
-- `docs/specs/SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md` (original design;
+- [`docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md`](../analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md)
+- [`docs/retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md`](../retro/retro-splash-screen-rows-dont-count-up-2026-07-22.md)
+- [`docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`](REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md)
+- [`docs/specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md`](../specs/PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md)
+- [`docs/specs/SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md`](../specs/SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md) (original design;
   "Running Clock" and "Summary Hold" sections)
-- `docs/specs/SPEC_MIGRATION_FRAMEWORK_2026_06_24.md` (confirms
+- [`docs/specs/SPEC_MIGRATION_FRAMEWORK_2026_06_24.md`](../specs/SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) (confirms
   `AGENTMUXSRV-MIGRATING` is a deadline-extension-only signal today)
 - Code: `agentmux-launcher/src/{startup_events,splash,splash_mac,main}.rs`,
   `agentmux-launcher/src/splash_linux/{mod,x11,wayland}.rs`,

@@ -3,7 +3,7 @@
 **Date:** 2026-06-17
 **Status:** Draft
 **Author:** naki
-**Component:** `frontend/app/view/agent/components/` (`AgentPicker`, `MyAgentsList`, `AgentCard`, `HiddenTemplatesSection`) + `frontend/app/view/agent/styles/_picker.scss`, `_recent-sessions.scss`
+**Component:** [`frontend/app/view/agent/components/`](../../frontend/app/view/agent/components) (`AgentPicker`, `MyAgentsList`, `AgentCard`, `HiddenTemplatesSection`) + [`frontend/app/view/agent/styles/_picker.scss`](../../frontend/app/view/agent/styles/_picker.scss), `_recent-sessions.scss`
 
 ---
 
@@ -89,7 +89,7 @@ Click → launch (template) / reattach (My Agent); modifier keys → force the l
 
 ## 4. Reference
 
-`frontend/app/view/accounts/accounts-gallery.scss` is the existing in-app tile grid (Armory): `display: grid` of bordered tiles, `gap`, hover → `--accent-color` border, accent count badges, `color-mix` accents. The picker grid should mirror its grid/spacing/hover structure (adjusted to hard corners) so the two galleries feel like one system.
+[`frontend/app/view/accounts/accounts-gallery.scss`](../../frontend/app/view/accounts/accounts-gallery.scss) is the existing in-app tile grid (Armory): `display: grid` of bordered tiles, `gap`, hover → `--accent-color` border, accent count badges, `color-mix` accents. The picker grid should mirror its grid/spacing/hover structure (adjusted to hard corners) so the two galleries feel like one system.
 
 ---
 
@@ -117,9 +117,9 @@ Phase 1 alone delivers "fills the screen / many columns"; Phase 2 makes them pro
 
 | What | Location |
 |---|---|
-| Picker container + sections | `frontend/app/view/agent/components/AgentPicker.tsx` |
-| Template card | `frontend/app/view/agent/components/AgentCard.tsx` |
-| My Agents list | `frontend/app/view/agent/components/MyAgentsList.tsx` |
-| Hidden templates | `frontend/app/view/agent/components/HiddenTemplatesSection.tsx` |
-| Current layout (520px caps) | `frontend/app/view/agent/styles/_picker.scss`, `_recent-sessions.scss` |
-| Tile-grid precedent | `frontend/app/view/accounts/accounts-gallery.scss` |
+| Picker container + sections | [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) |
+| Template card | [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx) |
+| My Agents list | [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) |
+| Hidden templates | [`frontend/app/view/agent/components/HiddenTemplatesSection.tsx`](../../frontend/app/view/agent/components/HiddenTemplatesSection.tsx) |
+| Current layout (520px caps) | [`frontend/app/view/agent/styles/_picker.scss`](../../frontend/app/view/agent/styles/_picker.scss), `_recent-sessions.scss` |
+| Tile-grid precedent | [`frontend/app/view/accounts/accounts-gallery.scss`](../../frontend/app/view/accounts/accounts-gallery.scss) |

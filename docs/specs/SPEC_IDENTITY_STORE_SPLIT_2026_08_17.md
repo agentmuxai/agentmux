@@ -7,20 +7,20 @@
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main`. Every file:line citation below was independently
 verified, not taken from a sub-agent's report on faith.
 **Related:**
-`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md` (root-cause verification this
+[`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`](REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md) (root-cause verification this
 design fixes),
-`docs/specs/REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`,
-`docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md` (P1 taxonomy this design extends),
-`docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md`,
-`docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md` (original rationale for the store this design
+[`docs/specs/REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md`](REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md),
+[`docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) (P1 taxonomy this design extends),
+[`docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md`](CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md),
+[`docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) (original rationale for the store this design
 splits),
-`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (PR #2431, the regression's origin).
+[`docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) (PR #2431, the regression's origin).
 
 ---
 
 ## 1. Problem, restated briefly
 
-`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md` traced why reopening a named
+[`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`](REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md) traced why reopening a named
 agent after a version/channel switch fails: the account-binding lookup (`db_agent_identity_links`,
 `db_accounts`) lives in a store whose *location* — global vs. per-channel — is decided by one process-wide
 flag, `isolated_auth_enabled()`, which defaults to "isolated" on every non-`"stable"` channel (every local/dev/
@@ -201,7 +201,7 @@ the requirement is that it defaults OFF and is a deliberate, visible choice, not
 
 ## 6. Sequencing (separate, reviewable PRs — mirrors issue #2603's own 6-step pattern)
 
-1. **Store A plumbing, links only** (`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`
+1. **Store A plumbing, links only** ([`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`](REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md)
    verification's tracking issue #2627, first PR — **shipped**): `run_identity_store_schema` /
    `Store::open_identity_store` / `resolve_identity_store_path` (all new — `db_agent_identity_links` has no
    `account_id` FK here, same cross-DB-FK reasoning `run_shared_store_schema` already uses for the

@@ -71,4 +71,4 @@ The header is also the drag handle (`dragHandleRef`). Double-click should NOT tr
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/blockframe.tsx` | Add `onDblClick` to `.block-frame-default-header` div |
+| [`frontend/app/block/blockframe.tsx`](../../../frontend/app/block/blockframe.tsx) | Add `onDblClick` to `.block-frame-default-header` div |

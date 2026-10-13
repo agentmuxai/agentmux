@@ -123,5 +123,5 @@ errors.
   `visible_skills`/`visible_mcp` computation)
 - `agentmux-srv/src/backend/storage/skills.rs` (`skill_list`)
 - `agentmux-srv/src/backend/storage/mcp_servers.rs` (`mcp_server_list`)
-- `frontend/app/view/agent/components/AgentMcpModal.tsx` /
+- [`frontend/app/view/agent/components/AgentMcpModal.tsx`](../../frontend/app/view/agent/components/AgentMcpModal.tsx) /
   `AgentSkillsModal.tsx` (caveat UI added in PR #2329)

@@ -1,6 +1,6 @@
 # Phase B roadmap (canonical, post-#605)
 
-**Status:** retro — **Phase B is DONE** as of 2026-04-29 (PR #605 merged). All sub-phases (B.1–B.9 + B.8 exit) shipped. Next: Phase D (durability/resync) → Phase E (srv reducer) → Phase F (host reducer + scaffolding retirement). See `docs/retro/multi-reducer-status-2026-04-29.md` for the full architectural status and forward plan.
+**Status:** retro — **Phase B is DONE** as of 2026-04-29 (PR #605 merged). All sub-phases (B.1–B.9 + B.8 exit) shipped. Next: Phase D (durability/resync) → Phase E (srv reducer) → Phase F (host reducer + scaffolding retirement). See [`docs/retro/multi-reducer-status-2026-04-29.md`](multi-reducer-status-2026-04-29.md) for the full architectural status and forward plan.
 **Author:** AgentA.
 **Read first if resuming Phase B work**, then `b5-migration-architecture-2026-04-28.md` and `multi-reducer-proposal-2026-04-28.md`.
 
@@ -97,7 +97,7 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 
 - B.7.1 (#596): replaced `app-init.ts::refreshLabels(retriesLeft)` polling with launcher-driven re-emit carrying resolved entries.
 - B.7.2 (#597): re-emit on `BackendWindowIdRegistered/Unregistered` so windowId `null → real` transitions update the InstancePanel without a follow-up RPC.
-- **B.7.3.1 (done — PR #602)**: host outbound CEF JS bridge `launcher_event_bridge.rs` forwards every typed `Event` to every top-level renderer via `Frame::ExecuteJavaScript` calling `window.__agentmux_launcher_event(<json>)`. Renderer-side `frontend/util/launcher-events.ts` registers the dispatcher into a SolidJS signal pair; `frontend/app/store/launcher-event-reducer.ts` runs `createEffect` over it. B.7.3.1 logs only — bespoke `window-instances-changed` still feeds atoms.
+- **B.7.3.1 (done — PR #602)**: host outbound CEF JS bridge `launcher_event_bridge.rs` forwards every typed `Event` to every top-level renderer via `Frame::ExecuteJavaScript` calling `window.__agentmux_launcher_event(<json>)`. Renderer-side [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts) registers the dispatcher into a SolidJS signal pair; [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) runs `createEffect` over it. B.7.3.1 logs only — bespoke `window-instances-changed` still feeds atoms.
 - **B.7.3.2 (done — PR #603)**: typed events promoted to authoritative for `openWindowLabelsAtom`, `openWindowEntriesAtom`, `windowCountAtom`. Reducer maintains in-memory `knownEntries` map; `recomputeAtoms()` runs after every apply. Bespoke `window-instances-changed` listener gated by `!launcherEventsActive()` — only fires in `task dev` / no-launcher mode. `seedKnownEntriesFromSnapshot` merges (doesn't clobber) — protects against the race where typed events arrive between snapshot fetch and seed (codex P1 fix).
 - **B.7.3.3 (done — PR #604)**: bespoke `window-instances-changed` channel + 4 sync emit sites retired. Typed launcher events are the SOLE source for InstancePanel state. Net deletion ~210 LoC. Codex P2 from #603 (pre-seed close tombstone) folded in. Codex P2 follow-up #604 (pre-seed close recompute when WindowOpened-then-WindowClosed both arrive pre-seed) folded in.
 

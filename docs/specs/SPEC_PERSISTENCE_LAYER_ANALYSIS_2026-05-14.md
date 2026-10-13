@@ -49,7 +49,7 @@ Plus `launcher-sagas.db` (same shape, owned by launcher).
 
 ### 2.3 How the choice was made
 
-**Inherited from the Wave Terminal fork.** No design-rationale doc exists in `docs/specs/`. `agentmux-srv` is a Rust port of Wave's Go backend, which used SQLite for the same OID→serde(JSON) pattern. The choice carried over without being re-evaluated.
+**Inherited from the Wave Terminal fork.** No design-rationale doc exists in [`docs/specs/`](.). `agentmux-srv` is a Rust port of Wave's Go backend, which used SQLite for the same OID→serde(JSON) pattern. The choice carried over without being re-evaluated.
 
 The team *has* re-evaluated SQLite for one specific case — the **shared agent registry** (cross-version, cross-instance shared state) explicitly rejected SQLite because:
 

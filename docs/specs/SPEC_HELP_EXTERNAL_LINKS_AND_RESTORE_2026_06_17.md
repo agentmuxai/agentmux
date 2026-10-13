@@ -32,7 +32,7 @@ fix, with a documented escalation for the rest.
 
 ### 2.1 The navigation hijack
 
-`frontend/app/element/quicktips.tsx` renders external links as plain
+[`frontend/app/element/quicktips.tsx`](../../frontend/app/element/quicktips.tsx) renders external links as plain
 `<a target="_blank" href="https://github.com/...">`. In CEF, `target="_blank"`
 fires `LifeSpanHandler::on_before_popup`. The host's handler
 (`agentmux-cef/src/client/mod.rs`) cancels the popup and **navigates the current
@@ -62,12 +62,12 @@ race in the reload path:
 
 - On first load, the host opens the window with creds in the URL
   (`?ipc_port=..&ipc_token=..&windowLabel=..`). `cef-init.ts setupCefApi()`
-  reads them **synchronously** (`frontend/cef-init.ts:50-58`), then strips them
+  reads them **synchronously** ([`frontend/cef-init.ts:50-58`](../../frontend/cef-init.ts)), then strips them
   from the URL for security (`:66-71`).
 - On any later load (reload, or the back-navigation here) the URL no longer
   carries creds. `setupCefApi()` then depends on the host's `on_load_end`
   re-injection landing inside its `await waitForIpcCreds(2500)` window
-  (`frontend/cef-init.ts:73-77`).
+  ([`frontend/cef-init.ts:73-77`](../../frontend/cef-init.ts)).
 - The injection is unconditional but asynchronous
   (`agentmux-cef/src/client/mod.rs` `on_load_end`, executes JS after load
   commit). When it lands *after* the 2.5s budget, `setupCefApi` gives up,
@@ -76,7 +76,7 @@ race in the reload path:
 
 ### 2.3 Why both recovery buttons failed
 
-`frontend/app/init/error-display.ts` (before):
+[`frontend/app/init/error-display.ts`](../../frontend/app/init/error-display.ts) (before):
 
 - "Reload" -> `location.reload()` -> reloads the **creds-stripped** URL -> hits
   the exact same `waitForIpcCreds` race -> fails again.
@@ -268,8 +268,8 @@ bootstrap fails (window.api not ready)
 |------|--------|
 | `agentmux-cef/src/commands/platform.rs` | Extract `open_url_in_default_browser`; add `is_external_http_url` + unit tests |
 | `agentmux-cef/src/client/mod.rs` | `on_before_popup` routes external URLs to the system browser; doc updated |
-| `frontend/app/init/error-display.ts` | Single "Restore"; credentialed re-navigate + escalation; auto-recover upgraded; copy updated |
-| `frontend/app/init/error-display.test.ts` | Reconcile assertions with new copy/markup |
+| [`frontend/app/init/error-display.ts`](../../frontend/app/init/error-display.ts) | Single "Restore"; credentialed re-navigate + escalation; auto-recover upgraded; copy updated |
+| [`frontend/app/init/error-display.test.ts`](../../frontend/app/init/error-display.test.ts) | Reconcile assertions with new copy/markup |
 
 ---
 

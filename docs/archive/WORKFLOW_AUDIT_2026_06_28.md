@@ -4,12 +4,12 @@
 > doc's own recommendations), plus this PR's own deletion of
 > `input-bench-report.yml` and merge of the two `input-handler-*` guardrails
 > into one file. Superseded by
-> `docs/analysis/ANALYSIS_CI_WORKFLOW_CATALOG_2026_07_18.md`, which catalogs
+> [`docs/analysis/ANALYSIS_CI_WORKFLOW_CATALOG_2026_07_18.md`](../analysis/ANALYSIS_CI_WORKFLOW_CATALOG_2026_07_18.md), which catalogs
 > the current state. Kept for historical reference only.
 
 # GitHub Actions Workflow Audit — 2026-06-28
 
-11 workflow files in `.github/workflows/`.
+11 workflow files in [`.github/workflows/`](../../.github/workflows).
 
 ---
 
@@ -19,7 +19,7 @@
 
 | File | Trigger | Purpose |
 |------|---------|---------|
-| `build-linux.yml` | `workflow_dispatch`, `repository_dispatch[build-linux]` | Linux AppImage release pipeline. Downloads patched libcef.so from agentmuxai/cef, runs `scripts/package-linux.sh`, uploads AppImage to GitHub Release (when `release-tag` input set). Requires `A5AF_PACKAGES_TOKEN`, `CEF_RUNTIME_TOKEN`. |
+| `build-linux.yml` | `workflow_dispatch`, `repository_dispatch[build-linux]` | Linux AppImage release pipeline. Downloads patched libcef.so from agentmuxai/cef, runs [`scripts/package-linux.sh`](../../scripts/package-linux.sh), uploads AppImage to GitHub Release (when `release-tag` input set). Requires `A5AF_PACKAGES_TOKEN`, `CEF_RUNTIME_TOKEN`. |
 | `build-macos.yml` | `workflow_dispatch`, `repository_dispatch[build-macos]` | macOS signed + notarized DMG (arm64) release pipeline. Creates temp keychain, imports Developer ID cert, runs `task package:macos`, uploads DMG. Requires 5 Apple secrets + `A5AF_PACKAGES_TOKEN`. |
 | `container-image.yml` | `push` (tags `v*`), `workflow_dispatch` | Builds + pushes Docker agent image (`ghcr.io/agentmuxai/agent-claude`) for linux/amd64 + linux/arm64. Pins a specific Claude Code version (defaults to latest). Triggered automatically on every version tag. |
 | `input-bench-report.yml` | `workflow_dispatch` only | Input latency bench (agent or terminal). Requires a self-hosted `[input-bench]` runner — **none registered yet**, so any accidental schedule would queue indefinitely. Report-only mode (never a blocking gate). |
@@ -33,8 +33,8 @@
 | `ci-nightly-build.yml` | **07:00** | Phase A (issue #1718): `cargo build --release --workspace` on 3-platform matrix. Windows required; ubuntu/macOS non-blocking. Surfaces cross-platform compile/link breaks. **Build only — no tests run.** |
 | `ci-fast.yml` | **08:00** | CEF-free `cargo test` on 3-platform matrix (`-p agentmux-launcher -p agentmux-srv -p agentmux-common`, `--test-threads=1`) + `npx vitest run` on ubuntu. Windows required; others non-blocking. Named "fast" because it skips the CEF build cost. |
 | `ci-nightly.yml` | **09:00** | Full workspace `cargo test --workspace -- --test-threads=1` on Windows (with CEF — requires Ninja, pays the full CEF compile). Also runs `npx vitest run` on the same Windows runner. The only nightly that tests CEF-dependent code. |
-| `input-handler-layout-reads.yml` | **10:00** | Lint: enforces the invariant "no layout reads after style mutations on the keystroke path" (SPEC_INPUT_RESPONSIVENESS_... §3). Runs `tools/lint/check-input-handler-layout-reads.sh`. Fast (ubuntu, no build). |
-| `input-handler-sync-ipc.yml` | **10:00** | Lint: enforces "no synchronous IPC on any input path" (invariant I2). Runs `tools/lint/check-input-handler-sync-ipc.sh`. Fast (ubuntu, no build). Fires at same time as layout-reads lint above. |
+| `input-handler-layout-reads.yml` | **10:00** | Lint: enforces the invariant "no layout reads after style mutations on the keystroke path" (SPEC_INPUT_RESPONSIVENESS_... §3). Runs [`tools/lint/check-input-handler-layout-reads.sh`](../../tools/lint/check-input-handler-layout-reads.sh). Fast (ubuntu, no build). |
+| `input-handler-sync-ipc.yml` | **10:00** | Lint: enforces "no synchronous IPC on any input path" (invariant I2). Runs [`tools/lint/check-input-handler-sync-ipc.sh`](../../tools/lint/check-input-handler-sync-ipc.sh). Fast (ubuntu, no build). Fires at same time as layout-reads lint above. |
 
 ---
 

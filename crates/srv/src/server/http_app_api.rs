@@ -7,7 +7,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// Agent App API REST handlers (identity / preset / memory).
+// MuxAPI REST handlers (identity / preset / memory).
 //
 // `agent_id` is the agent slug, supplied by agentmux-mcp from its trusted
 // AGENTMUX_AGENT_ID env. Each handler maps a 4xx for caller/validation errors
@@ -21,7 +21,7 @@ use super::*;
 /// unknown id names a missing resource, not a malformed request
 /// (SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md §3.2). Argument errors are
 /// a 400. Everything unrecognized is a 500 (genuine service faults, e.g.
-/// SQLite write failures). The one classifier for the App API routes here
+/// SQLite write failures). The one classifier for MuxAPI routes here
 /// and the naming routes in `http_naming.rs`.
 pub(super) fn app_api_error_status(e: &str) -> StatusCode {
     if e.starts_with("FORBIDDEN") {
@@ -510,8 +510,8 @@ pub(super) async fn handle_agent_globalmemory_revert(
 mod tests {
     use super::*;
 
-    /// One classification for the App API and naming routes: a missing
-    /// resource is a 404 on both, where the App API used to answer 400.
+    /// One classification for MuxAPI and naming routes: a missing
+    /// resource is a 404 on both, where MuxAPI used to answer 400.
     #[test]
     fn app_api_error_status_classifies_each_kind_once() {
         assert_eq!(app_api_error_status("FORBIDDEN: not your memory"), StatusCode::FORBIDDEN);

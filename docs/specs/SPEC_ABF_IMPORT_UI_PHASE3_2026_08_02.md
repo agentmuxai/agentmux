@@ -3,7 +3,7 @@
 **Date:** 2026-08-02
 **Status:** implemented — PR #2382 (selective import + collision handling, 3-step modal); verified in code 2026-08-10.
 **Relationship to prior work:** builds on
-`docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md`, whose §4.1
+[`docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md`](SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md), whose §4.1
 explicitly scoped Phase 2 to "backend + RPC only... no UI (Phase 3, still
 separately tracked)." This is that Phase 3. The existing `bundle.import` RPC
 (merged, `agentmux-srv/src/backend/bundle_import.rs` +
@@ -35,7 +35,7 @@ engine — no server-side session or preview-caching token. **codex P1 on PR
 #2381, round 3:** an earlier draft of this spec assumed re-sending a
 base64-encoded payload on both calls was "a non-issue at the sizes this
 format already caps itself to" — that's wrong. RPC traffic (confirmed by
-tracing `frontend/app/store/rpc-client.ts` → `frontend/app/store/ws.ts` →
+tracing [`frontend/app/store/rpc-client.ts`](../../frontend/app/store/rpc-client.ts) → [`frontend/app/store/ws.ts`](../../frontend/app/store/ws.ts) →
 `agentmux-srv/src/server/websocket.rs::handle_ws`) rides a single
 WebSocket whose message size is Axum's **unmodified default: 64 MiB**
 (`agentmux-srv/Cargo.toml` pins `axum = "0.7"` → `axum 0.7.9` →
@@ -736,7 +736,7 @@ Implementation notes:
 Three steps, following the existing app's `ModalLayerApi.replace()`
 sequential-modal pattern (used today for the `agent-prereqs` →
 `install-agent` → `launch-agent` chain in
-`frontend/app/element/modal-dispatch.tsx`) rather than one component
+[`frontend/app/element/modal-dispatch.tsx`](../../frontend/app/element/modal-dispatch.tsx)) rather than one component
 carrying internal step state — this codebase has no existing "wizard
 panel," and threading step state through modal-dispatch's request-kind
 union keeps each step's props typed and testable independently.
@@ -747,7 +747,7 @@ union keeps each step's props typed and testable independently.
   opening the modal at this step.
 - File picker: **codex P1 on PR #2381 — `showOpenFileDialog()` cannot be
   reused as originally specified.** It takes no arguments
-  (`frontend/util/cef-api.ts:392-394`) and its host-side handler
+  ([`frontend/util/cef-api.ts:392-394`](../../frontend/util/cef-api.ts)) and its host-side handler
   (`agentmux-cef/src/commands/platform.rs`, `show_open_file_dialog`) has a
   hard-coded `rfd::FileDialog` filter list of image/video/audio extensions
   only — there's no way to make it show `.abf` files through the existing

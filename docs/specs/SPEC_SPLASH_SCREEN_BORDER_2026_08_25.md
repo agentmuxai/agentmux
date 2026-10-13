@@ -4,7 +4,7 @@
 **Author:** AgentY
 **Status:** Draft
 **Scope:** the launcher's native splash window only — `agentmux-launcher/src/splash.rs` (Windows), `splash_mac.rs` (macOS), `splash_linux/{mod,x11,wayland}.rs` (Linux). No other window (main app, modals) is in scope.
-**Related:** `docs/specs/SPEC_LINUX_SPLASH_POLISH_2026_06_20.md` (added Linux's rounded corners + fade — no border), `docs/specs/SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20.md`.
+**Related:** [`docs/specs/SPEC_LINUX_SPLASH_POLISH_2026_06_20.md`](SPEC_LINUX_SPLASH_POLISH_2026_06_20.md) (added Linux's rounded corners + fade — no border), [`docs/specs/SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20.md`](SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20.md).
 
 ---
 

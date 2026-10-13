@@ -3,7 +3,7 @@
 **Status:** proposed — Ready to implement
 **Date:** 2026-03-04
 **Owner:** AgentA
-**Target file:** `frontend/layout/lib/layoutModel.ts` (1,696 lines)
+**Target file:** [`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts) (1,696 lines)
 
 ---
 

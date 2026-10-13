@@ -4,8 +4,8 @@
 **Status:** implemented — SHIPPED — merged as #1595 on 2026-06-20 — #1595
 **Author:** agent investigation + consolidation  
 **Supersedes / consolidates:**
-- `docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` — pool routing for CrossWindowDragMonitor (pane branch now done via #1182/linux PR; tab branch pool-attempts already in `tear-off-pool-helper.ts`)
-- `docs/specs/linux-pool-startup-fill-2026-05-08.md` — UNBLOCKED (both blockers resolved; see §2)
+- [`docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`](SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md) — pool routing for CrossWindowDragMonitor (pane branch now done via #1182/linux PR; tab branch pool-attempts already in `tear-off-pool-helper.ts`)
+- [`docs/specs/linux-pool-startup-fill-2026-05-08.md`](linux-pool-startup-fill-2026-05-08.md) — UNBLOCKED (both blockers resolved; see §2)
 
 ---
 
@@ -388,8 +388,8 @@ First tear-off after a cold launch goes from 3-4 seconds to ~150ms on macOS/Linu
 - `agentmux-cef/src/commands/window_pool.rs` — pool implementation (spawn, register, promote, refill)
 - `agentmux-cef/src/ui_tasks.rs` — CEF UI-thread task wrappers; `SetWindowPositionTask` is the reference pattern
 - `agentmux-cef/src/client/mod.rs:664` — `init_pool()` call site (on_after_created "main")
-- `frontend/app/drag/tear-off-pool-helper.ts` — `openTearOffWindow` with pool-first / cold-path fallback
-- `docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` — original pool routing spec (pane branch now done; tab branch works once host promote is implemented)
-- `docs/specs/linux-pool-startup-fill-2026-05-08.md` — startup fill analysis; both blockers now resolved
-- `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md` — macOS pane tear-off (Phase A done; Phase B deferred)
-- `docs/specs/SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md` — Linux pane tear-off (Phase A done)
+- [`frontend/app/drag/tear-off-pool-helper.ts`](../../frontend/app/drag/tear-off-pool-helper.ts) — `openTearOffWindow` with pool-first / cold-path fallback
+- [`docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`](SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md) — original pool routing spec (pane branch now done; tab branch works once host promote is implemented)
+- [`docs/specs/linux-pool-startup-fill-2026-05-08.md`](linux-pool-startup-fill-2026-05-08.md) — startup fill analysis; both blockers now resolved
+- [`docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`](SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md) — macOS pane tear-off (Phase A done; Phase B deferred)
+- [`docs/specs/SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md`](SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md) — Linux pane tear-off (Phase A done)

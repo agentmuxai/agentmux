@@ -10,13 +10,13 @@ Phase 0(b) may well conclude this should not be built.
 `agentmux-srv/src/backend/blockcontroller/subprocess/host_spawn.rs`,
 `agentmux-srv/src/backend/blockcontroller/subprocess/container_spawn.rs`,
 `agentmux-srv/src/agents/failure.rs`,
-`frontend/app/view/agent/hooks/useAgentFailure.ts`,
-`frontend/app/view/agent/agent-view.tsx`
+[`frontend/app/view/agent/hooks/useAgentFailure.ts`](../../frontend/app/view/agent/hooks/useAgentFailure.ts),
+[`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx)
 **Related:** `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` (the retry policy
 and budget semantics this extends),
 `SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md` (wired
 classification into the persistent controller — deliberately stopped short of
-retry), `docs/reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md`
+retry), [`docs/reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md`](../reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md)
 (the assessment that surfaced this gap),
 `REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md` (identified the
 ladder gaps fixed in PR #2870)

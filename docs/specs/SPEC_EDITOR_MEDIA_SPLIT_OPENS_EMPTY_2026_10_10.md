@@ -10,7 +10,7 @@ In an editor or media pane, a split should open a new pane of the same kind with
 
 ## Today
 
-`handleSplitPane` (`frontend/app/block/pane-actions.ts`) gives any view without a `splitBlockDef` a copy of the source pane's whole meta (`copiedSplitBlockDef`). Both views keep their open documents in that meta:
+`handleSplitPane` ([`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts)) gives any view without a `splitBlockDef` a copy of the source pane's whole meta (`copiedSplitBlockDef`). Both views keep their open documents in that meta:
 
 | View | Keys that hold documents |
 |---|---|

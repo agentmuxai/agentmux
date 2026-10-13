@@ -43,12 +43,12 @@ A full internal audit (see research summary, §8) confirmed every existing
 control primitive in this codebase is single-target by construction — a
 `String` id field, never `Vec<String>`:
 
-- **Swarm** (`frontend/app/view/swarm/`): tracks `AgentTreeNode`s per
+- **Swarm** ([`frontend/app/view/swarm/`](../../frontend/app/view/swarm)): tracks `AgentTreeNode`s per
   top-level block via `RpcApi.AgentTrackedBlocksCommand` → backend
   `agent.tracked-blocks`. No selection signal exists anywhere in
   `SwarmViewModel`. Every action (Focus, Retire, per-shell Stop) is a
   single-row button.
-- **Agent App API** (`agentmux-srv/src/server/app_api/agent_io.rs`):
+- **MuxAPI** (`agentmux-srv/src/server/app_api/agent_io.rs`):
   `agent.send`, `agent.stop`, `agent.kill-process`, `agent.kill-tree` all
   take exactly one `block_id`. `agent.list` / `agent.tracked-blocks` are the
   only "return everything" reads.
@@ -308,7 +308,7 @@ implemented (spec'd, SPEC_WARDEN_WIDGET lines ~199-206, unbuilt).
 <details>
 <summary>Internal: full control-primitive inventory</summary>
 
-**Agent App API** (`agentmux-srv/src/server/app_api/agent_io.rs` +
+**MuxAPI** (`agentmux-srv/src/server/app_api/agent_io.rs` +
 `rpc_types/agent.rs`): `agent.open`, `agent.send`, `agent.stop`,
 `agent.status`, `agent.output`, `agent.process-list`, `agent.kill-process`,
 `agent.kill-tree` — every write/action verb takes exactly one `block_id`.

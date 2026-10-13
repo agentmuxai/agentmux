@@ -143,13 +143,16 @@ pub struct PreflightInput {
     /// (`account_email::identity_key_from_oauth_dir`), for the gate's
     /// identity check. `None` when unknown.
     pub identity_key: Option<String>,
+    /// The chain head of the agent this one was forked from, when it has no
+    /// chain of its own (`continuity_segments::fork_source_head`).
+    pub fork_source: Option<crate::backend::continuity_segments::Head>,
 }
 
 /// The spawn's resume gate (`PersistentSubprocessController::apply_resume_gate_with`),
 /// mirrored: a candidate that isn't the chain head is redirected to the head
 /// when reachable here, else refused. `None` when the candidate stands.
 fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mut Vec<Step>) -> Option<(Verdict, Option<String>)> {
-    use crate::backend::continuity_relocate::{is_resumable_file, source_file};
+    use crate::backend::continuity_relocate::can_relocate;
     use crate::backend::continuity_segments::{resume_gate, GateInput, ResumeGate};
     let t = Instant::now();
     let gate_input = GateInput {
@@ -159,6 +162,7 @@ fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mu
         poisoned: None,
         config_dir: &input.config_dir,
         cwd: &input.working_dir,
+        fork_source: input.fork_source.as_ref(),
     };
     let decision = resume_gate(
         &gate_input,
@@ -168,9 +172,9 @@ fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mu
                 .filter(|m| m.is_file())
                 .map(|m| m.len())
         },
-        |dir, sid| source_file(dir, &input.working_dir, sid).is_some_and(|p| is_resumable_file(&p)),
+        can_relocate,
     );
-    if relocate_only && !matches!(decision, ResumeGate::Relocate { .. }) {
+    if relocate_only && !matches!(decision, ResumeGate::Relocate { .. } | ResumeGate::ForkFrom { .. }) {
         return None;
     }
     match decision {
@@ -191,6 +195,16 @@ fn gate(input: &PreflightInput, candidate: &str, relocate_only: bool, steps: &mu
                 "Checking the agent's conversation",
                 true,
                 format!("{head} is under another login of this identity ({from_config_dir}); continuing it there"),
+                t,
+            ));
+            Some((Verdict::Resume, Some(head)))
+        }
+        ResumeGate::ForkFrom { head, .. } => {
+            steps.push(step(
+                "chain",
+                "Checking the agent's conversation",
+                true,
+                format!("a fork's first start; continuing {head}, the conversation it was forked from"),
                 t,
             ));
             Some((Verdict::Resume, Some(head)))
@@ -362,6 +376,7 @@ mod tests {
             config_dir: config_dir.to_string_lossy().to_string(),
             history_session_id: String::new(),
             chain_head: None,
+            fork_source: None,
             identity_key: None,
         }
     }

@@ -4,7 +4,7 @@
 **Repo state:** `main` @ `c13ea931` (v0.40.0)
 **Author:** AgentO-asaf
 **Status:** Analysis + implementation plan (no code in this PR — report only)
-**Builds on:** PR #1182 (macOS floating-pane tear-off — chromeless floater + draggable header), `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md` (this is the Phase B.3 deep-dive that spec deferred)
+**Builds on:** PR #1182 (macOS floating-pane tear-off — chromeless floater + draggable header), [`docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`](../specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md) (this is the Phase B.3 deep-dive that spec deferred)
 **Related Windows work:** PR #1166 (deterministic redock-onto-main), the floating-pane suite #1073/#1077/#1159/#1166/#1177
 
 ---
@@ -27,11 +27,11 @@ On **macOS**, redock does nothing: the floater drops wherever you release it and
 
 The redock *mutation* is a saga over the backend reducer:
 
-- `WorkspaceService.RedockFloatingPane(sourceBlockId, sourceTabId, sourceWsId, targetTabId, targetWsId)` (frontend RPC, `frontend/app/store/services.ts`).
+- `WorkspaceService.RedockFloatingPane(sourceBlockId, sourceTabId, sourceWsId, targetTabId, targetWsId)` (frontend RPC, [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts)).
 - → `agentmux-srv/src/sagas/redock_floating_pane.rs::run` → `run_saga("redock_floating_pane", …)` → `run_inner` dispatches a single atomic `Command::MoveBlock { block_id, src_tab_id, dst_tab_id, dst_index }` to the reducer.
 - The reducer removes `block_id` from `source_tab.block_ids` and inserts it into `target_tab.block_ids`. Pure state mutation, no OS APIs.
 
-The frontend also *reads* the same global object graph to resolve the target tab: `tryRedockAtCursor` (`frontend/app/workspace/floating-pane-workspace.tsx`) does `WOS.reloadWaveObject("window", window_id)` → `WaveWindow.workspaceid` → `WOS.reloadWaveObject("workspace", …)` → `Workspace.activetabid`. That's the WaveObject store — the global reducer's projected object graph.
+The frontend also *reads* the same global object graph to resolve the target tab: `tryRedockAtCursor` ([`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx)) does `WOS.reloadWaveObject("window", window_id)` → `WaveWindow.workspaceid` → `WOS.reloadWaveObject("workspace", …)` → `Workspace.activetabid`. That's the WaveObject store — the global reducer's projected object graph.
 
 **This layer has zero platform-specific code and already works on macOS.** Tearing off (PR #1182) already drives `TearOffBlock` through the same backend reducer; redock's `MoveBlock` is the symmetric operation.
 

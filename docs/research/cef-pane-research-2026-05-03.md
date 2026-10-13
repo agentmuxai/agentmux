@@ -159,7 +159,7 @@ The recommended path on macOS is again Views. Same-process NSView embedding is a
 
 ## 7. Coordinate / DPI / overlay clipping
 
-The Windows AgentMux pane mechanism uses `SetWindowRgn` to cut transparent holes through the pane HWND so DOM popovers, modals and dropdown menus paint through (`frontend/app/platform/pane-overlay.ts`, lines 1-16). This is the classic "airspace" workaround required because native HWNDs composite above the WebView regardless of CSS z-index.
+The Windows AgentMux pane mechanism uses `SetWindowRgn` to cut transparent holes through the pane HWND so DOM popovers, modals and dropdown menus paint through ([`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts), lines 1-16). This is the classic "airspace" workaround required because native HWNDs composite above the WebView regardless of CSS z-index.
 
 ### Native-child-window approach (Windows / X11):
 - The pane window is a separate OS-level surface, composited above the host window content.

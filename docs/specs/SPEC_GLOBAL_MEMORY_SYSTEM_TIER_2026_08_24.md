@@ -7,7 +7,7 @@ Frontend: `npx tsc --noEmit` clean, full 3060-test vitest suite green (7
 new). Manual live-pane verification (§5, "Manual") not done as part of this
 PR — no live dev instance was available; do before/at merge if practical,
 same caveat as the sibling dedent PR (#2780). — #2782
-**Current delivery state:** `docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
+**Current delivery state:** [`docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) is the single source of truth for how Global Memory reaches agents; this doc remains authoritative for the piece it shipped.
 **Scope:** `agentmux-srv/src/backend/storage/migrations.rs`,
 `agentmux-srv/src/backend/storage/memory_bundles.rs`,
 `agentmux-srv/src/backend/rpc_types/{commands,memory}.rs`,
@@ -25,13 +25,13 @@ verify), `frontend/types/gotypes.d.ts`,
 Every agent already inherits two layers of instructions today: their own
 Bundle's `instructions`, and every **Global Memory** entry (`db_bundles` rows
 with `is_global=true`, editable by any human at the Armory "Memory" tab —
-see `docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md` for
+see [`docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md`](SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md) for
 the current Global/Personal split). Both are concatenated into
 `CLAUDE.md`/`.claude/AGENTMUX_MEMORY.md` at launch with **no priority
 concept** — just concatenation order (Soul → AgentMD → Memory → Skills
 index; see `agent_config.rs:54-117`) and an ownership binary (AgentMux owns
 the file outright, or is relegated to a single `@import` line in a foreign
-`CLAUDE.md` — `docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`).
+`CLAUDE.md` — [`docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md)).
 
 Separately, this very deployment already runs a working, informally
 "highest priority" instructions file: `~/.agentmux/agents/CLAUDE.md`, a
@@ -61,7 +61,7 @@ human at the Armory UI from an agent's own shell.** The single instance-wide
 `X-AuthKey` (`state.auth_key`) is injected into both the frontend/host
 process **and** every agent's own PTY environment
 (`AGENTMUX_AUTH_KEY`/`AGENTMUX_LOCAL_URL`) so that agents can legitimately
-call the App API themselves. `RpcContext.agent_id` (`rpc_types/misc.rs:210`)
+call MuxAPI themselves. `RpcContext.agent_id` (`rpc_types/misc.rs:210`)
 is populated only for connections that explicitly `bus:register`; the
 existing Global-Memory RPC handlers (`agent_handlers/memory.rs`) and the
 sibling `bundle.upsert`/`bundle.delete` handlers (`app_api/bundle.rs`)

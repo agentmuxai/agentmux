@@ -1,7 +1,7 @@
 # Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop)
 
 **Date:** 2026-07-10
-**Status:** implemented — #2073 (2026-07-10), the PR this doc was added in, then reworked and hardened over the next two days in response to the field testing this doc records: #2079 (spring-loaded tabs), #2086 (cross-window tab remount), #2095 (drag stability + hover strobe, "field-testing round 1"), and later #2310 (macOS redock via CGEventTap). The v3 addendum at the end of this file is a *snapshot of an open bug on 2026-07-11*, not a description of current behaviour — its candidate causes were worked through in those PRs and the drag-session architecture was then redesigned in #2105. Live code: `frontend/layout/lib/crossTabDrag.ts`, `frontend/app/tab/droppable-tab.tsx`, `tabbar-dnd.ts`, `tab-reorder.ts`.
+**Status:** implemented — #2073 (2026-07-10), the PR this doc was added in, then reworked and hardened over the next two days in response to the field testing this doc records: #2079 (spring-loaded tabs), #2086 (cross-window tab remount), #2095 (drag stability + hover strobe, "field-testing round 1"), and later #2310 (macOS redock via CGEventTap). The v3 addendum at the end of this file is a *snapshot of an open bug on 2026-07-11*, not a description of current behaviour — its candidate causes were worked through in those PRs and the drag-session architecture was then redesigned in #2105. Live code: [`frontend/layout/lib/crossTabDrag.ts`](../../frontend/layout/lib/crossTabDrag.ts), [`frontend/app/tab/droppable-tab.tsx`](../../frontend/app/tab/droppable-tab.tsx), `tabbar-dnd.ts`, `tab-reorder.ts`.
 **Repo state:** `main` @ `42b95715`
 **Scope:** In-window pane drag onto the tab bar (dropping a tile-layout pane onto a *different tab in the same window*). Cross-window drag (already handled by `DragOverlay`/`CrossWindowDragMonitor`) and touch/pen input are out of scope.
 
@@ -78,7 +78,7 @@ Desired UX (from the request):
 
 ### 2.1 Layout tree = per-tab reducer, already live for hidden tabs
 
-Each tab owns one `LayoutModel` (`frontend/layout/lib/layoutModel.ts`), a classic dispatch reducer (`treeReducer`, `types.ts:65-82` `LayoutTreeActionType` enum) over a mutable `LayoutTreeState`:
+Each tab owns one `LayoutModel` ([`frontend/layout/lib/layoutModel.ts`](../../frontend/layout/lib/layoutModel.ts)), a classic dispatch reducer (`treeReducer`, `types.ts:65-82` `LayoutTreeActionType` enum) over a mutable `LayoutTreeState`:
 
 ```ts
 // frontend/layout/lib/types.ts:193-253
@@ -253,13 +253,13 @@ Mapped to the five UX beats from §1:
 
 | File | Change |
 |---|---|
-| `frontend/app/tab/tabbar.tsx` | Add `hoveredDropTabId`/`bouncingTabId`-style signal; extend (or add a second) `monitorForElements` to accept `tileItemType`; wire flash class + popover mount/unmount |
-| `frontend/app/tab/tabbar-dnd.ts` | Extend tab-wrapper-rect hit-testing helper to be reusable for tile-over-tab hover, not just tab-reorder insertion point |
-| `frontend/app/tab/tab.tsx` | Apply `.tab--drop-flash` class when `hoveredDropTabId === thisTabId` |
-| `frontend/app/tab/tab.scss` | New `.tab--drop-flash` keyframe pulse |
+| [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx) | Add `hoveredDropTabId`/`bouncingTabId`-style signal; extend (or add a second) `monitorForElements` to accept `tileItemType`; wire flash class + popover mount/unmount |
+| [`frontend/app/tab/tabbar-dnd.ts`](../../frontend/app/tab/tabbar-dnd.ts) | Extend tab-wrapper-rect hit-testing helper to be reusable for tile-over-tab hover, not just tab-reorder insertion point |
+| [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx) | Apply `.tab--drop-flash` class when `hoveredDropTabId === thisTabId` |
+| [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) | New `.tab--drop-flash` keyframe pulse |
 | **New:** `frontend/app/tab/tab-drop-preview.tsx` | Schematic popover component: reads target `LayoutModel`, renders via `updateTreeHelper`, hosts ghost rect |
 | `frontend/layout/lib/TileLayout.win32/.darwin/.linux.tsx` | On `onDrop`, if `hoveredDropTabId` was set at release, call the new cross-tab move RPC instead of falling through to in-tab drop handling; ensure `currentDragPayload` is cleared here so `CrossWindowDragMonitor` cannot treat the release as an unhandled tear-off (fixes §7) |
-| `frontend/app/store/services.ts` | New `WorkspaceService.MovePaneToTab(...)` method (or confirm `RedockFloatingPane`'s existing RPC can be called with same-workspace ids — see §4.5.1) |
+| [`frontend/app/store/services.ts`](../../frontend/app/store/services.ts) | New `WorkspaceService.MovePaneToTab(...)` method (or confirm `RedockFloatingPane`'s existing RPC can be called with same-workspace ids — see §4.5.1) |
 | `agentmux-srv/src/server/service/workspace.rs` | New RPC arm (or same-workspace call path into the existing `"RedockFloatingPane"` arm, `workspace.rs:1151-1230`) |
 | `agentmux-srv/src/sagas/redock_floating_pane.rs` | Confirm/relax the "source and target are the same tab" guard doesn't also incorrectly reject same-workspace-different-tab (it shouldn't — re-verify during implementation) |
 
@@ -299,11 +299,11 @@ This spec's new tab-bar drop target (§4.1) must call `event.preventDefault()`-e
 
 ## 10. References
 
-- `docs/analysis/ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md` — the `sizeFraction` fix this feature depends on; read before touching `queue_target_layout_split`.
-- `docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md` — original design doc for `RedockFloatingPane`, the pattern this spec copies.
-- `frontend/layout/lib/layoutModelHooks.ts`, `layoutTree.ts`, `layoutGeometry.ts`, `layoutPersistence.ts` — reducer, tree ops, geometry, and backend-action delivery respectively.
-- `frontend/app/tab/tabbar.tsx`, `tabbar-dnd.ts`, `droppable-tab.tsx` — existing tab-reorder drag to extend.
-- `frontend/app-init.ts:113-273` (`installFloatingRedockHoverListener`) — direction/ghost-rect vocabulary to reuse in §4.4.
+- [`docs/analysis/ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md`](../analysis/ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md) — the `sizeFraction` fix this feature depends on; read before touching `queue_target_layout_split`.
+- [`docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md`](SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) — original design doc for `RedockFloatingPane`, the pattern this spec copies.
+- [`frontend/layout/lib/layoutModelHooks.ts`](../../frontend/layout/lib/layoutModelHooks.ts), `layoutTree.ts`, `layoutGeometry.ts`, `layoutPersistence.ts` — reducer, tree ops, geometry, and backend-action delivery respectively.
+- [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx), `tabbar-dnd.ts`, `droppable-tab.tsx` — existing tab-reorder drag to extend.
+- [`frontend/app-init.ts:113-273`](../../frontend/app-init.ts) (`installFloatingRedockHoverListener`) — direction/ghost-rect vocabulary to reuse in §4.4.
 - `agentmux-srv/src/sagas/redock_floating_pane.rs`, `agentmux-srv/src/server/service/layout_helpers.rs`, `workspace.rs:1151-1230` — backend pattern this spec's new RPC should mirror.
 
 ---

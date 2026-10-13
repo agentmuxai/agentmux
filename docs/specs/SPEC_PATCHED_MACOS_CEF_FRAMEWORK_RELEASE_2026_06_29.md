@@ -25,14 +25,14 @@ and (patched) Linux use.
 
 1. Downloads a pre-built patched `libcef.so` from an `agentmuxai/cef` **release**
    (`cef-linux-x86_64-<ver>.tar.gz`).
-2. Sets `AGENTMUX_CEF_RUNTIME_DIR` → `scripts/resolve-cef-runtime.sh` injects it
+2. Sets `AGENTMUX_CEF_RUNTIME_DIR` → [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) injects it
    into `task bundle:linux`.
-3. `scripts/verify-cef-patch.sh` gates the build so an unpatched `.so` can't ship.
+3. [`scripts/verify-cef-patch.sh`](../../scripts/verify-cef-patch.sh) gates the build so an unpatched `.so` can't ship.
 
 ### 1.2 What macOS does today (the gap)
 
 - `build-macos.yml` runs `task package:macos` with **no CEF override**.
-- `task bundle:darwin` → `scripts/resolve-cef-runtime-darwin.sh` falls through its
+- `task bundle:darwin` → [`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh) falls through its
   three-tier resolution to the **`cef-dll-sys` cargo cache** (tier 3) = upstream
   framework, **no `BeginWindowDrag`**.
 - There is **no macOS patch-verification gate**, so the unpatched framework ships
@@ -170,7 +170,7 @@ repository_dispatch.client_payload.cef_runtime_tag   # threaded in the Resolve-i
 builder repo for Linux; it must be present wherever `build-macos.yml` runs.
 
 > **OPEN QUESTION — workflow home.** `build-macos.yml` currently lives in
-> **this repo** (`.github/workflows/build-macos.yml`), but
+> **this repo** ([`.github/workflows/build-macos.yml`](../../.github/workflows/build-macos.yml)), but
 > `SPEC_BUILDER_MACOS_LINUX_CI` describes the macOS/Linux release workflows as
 > living in **`agentmuxai/agentmux-builder`**. These appear to have diverged.
 > Confirm the canonical home before landing — the diff + the `CEF_RUNTIME_TOKEN`
@@ -195,7 +195,7 @@ already-done build so it's reproducible at the next CEF bump:
 
 ### Piece 4 — macOS patch-verify gate
 
-New `scripts/verify-cef-framework-darwin.sh`, analogue of `verify-cef-patch.sh`:
+New [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh), analogue of `verify-cef-patch.sh`:
 
 - **Target:** the Mach-O dylib `"<framework>/Chromium Embedded Framework"`
   (resolve the `Versions/Current` symlink).
@@ -289,6 +289,6 @@ unchanged except for the inserted verify call. No restructuring required.
   because it never needed the `BeginWindowDrag` patch specifically
   (native drag already works there via Win32) — not because it already
   has an equivalent patched build. See
-  `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md` for
+  [`docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) for
   the first Windows custom-CEF build work, driven by a different need
   (proprietary codec support).

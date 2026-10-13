@@ -4,9 +4,9 @@
 **Status:** proposed — Plan with grounded analysis. Forensic findings citations throughout.
 **Scope:** `agentmux-srv/` — make `LayoutState.rootnode` reducer-shaped on the Rust side
 **Reads-this-first:**
-- `docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — original spec; deferred E.4.B as "the hard part"
+- [`docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) — original spec; deferred E.4.B as "the hard part"
 - `agentmux-srv/src/reducer.rs:655–700` — E.4.A handlers (the pattern to mirror)
-- `frontend/layout/lib/layoutTree.ts` — the 11 pure-ish tree mutators that already encode the operations we'd port
+- [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) — the 11 pure-ish tree mutators that already encode the operations we'd port
 
 ## Two surprises from the forensic pass that change the math
 
@@ -16,7 +16,7 @@ The original Phase E.4 spec framed E.4.B as urgent for perf reasons:
 
 **The forensic pass invalidated both halves:**
 
-1. **Not 60Hz.** Frontend resizes call `treeReducer(SetPendingAction)` locally, then `persistToBackend()` debounces 100ms (`frontend/layout/lib/layoutPersistence.ts:261–279`). One drag gesture produces ~1 backend update, not 60.
+1. **Not 60Hz.** Frontend resizes call `treeReducer(SetPendingAction)` locally, then `persistToBackend()` debounces 100ms ([`frontend/layout/lib/layoutPersistence.ts:261–279`](../../frontend/layout/lib/layoutPersistence.ts)). One drag gesture produces ~1 backend update, not 60.
 2. **Nodes already have UUIDs.** `service.rs:2305` and `dnd.rs` both `Uuid::new_v4()` when building tree nodes; the JSON shape preserves them. Path representation isn't blocked on schema work — by-ID addressing is already the natural fit.
 
 **Consequence for the plan:** E.4.B is **not** an urgent perf project. It's a correctness/architecture project. That changes the right framing from "fix this hot path" to "decide whether the audit + invariants + multi-window-sync benefits are worth the migration cost." The cost is real; the perf benefit is small.
@@ -89,7 +89,7 @@ Idempotent. Single SQL UPDATE. Schema columns already exist.
 
 ## The 15 frontend operations to port
 
-`frontend/layout/lib/types.ts:65–82` defines the action surface. Each becomes a candidate srv command:
+[`frontend/layout/lib/types.ts:65–82`](../../frontend/layout/lib/types.ts) defines the action surface. Each becomes a candidate srv command:
 
 | Frontend action | Mutation shape | E.4.B command target |
 |---|---|---|
@@ -212,7 +212,7 @@ Port the frontend `layoutTree.ts` mutators to Rust as pure helper functions on `
 - `insert_node`, `delete_node`, `move_node`, `swap_nodes`, `resize_nodes`, `replace_node`, `split_horizontal`, `split_vertical`, `clear_tree`
 - Each takes `&mut LayoutNode` (or `&mut Option<LayoutNode>` for clear) and the operation parameters
 
-These are **pure functions** — no SQL, no events, no I/O. Mirror the shape of `frontend/layout/lib/layoutTree.ts`.
+These are **pure functions** — no SQL, no events, no I/O. Mirror the shape of [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts).
 
 **Tests for each** — table-driven, mirror the test suite I just shipped for the frontend (PR #686). The frontend tests act as the **behavioral oracle** — port them.
 
@@ -301,7 +301,7 @@ Budget for this is the honest part — it's never zero.
 
 ### Phase 9 — Frontend slice #8 (~1 week, separate spec)
 
-Once srv E.4.B is stable, slice #8 (frontend-pane-tree-reducer) becomes implementable. The frontend already has `frontend/layout/lib/layoutTree.ts` as its own reducer; the slice #8 work is wiring it to subscribe to srv's `LayoutNode*` events for the multi-window mirror case. **This is a separate spec.**
+Once srv E.4.B is stable, slice #8 (frontend-pane-tree-reducer) becomes implementable. The frontend already has [`frontend/layout/lib/layoutTree.ts`](../../frontend/layout/lib/layoutTree.ts) as its own reducer; the slice #8 work is wiring it to subscribe to srv's `LayoutNode*` events for the multi-window mirror case. **This is a separate spec.**
 
 ## Total effort
 

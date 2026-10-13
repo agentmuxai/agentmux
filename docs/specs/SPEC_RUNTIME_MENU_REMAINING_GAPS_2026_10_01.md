@@ -4,7 +4,7 @@
 **Status:** proposed — nothing here is built, **but §7's harness has since been used and its results are recorded there**
 (2026-10-01): several assumptions below are now observed facts, and one claim (Plan mode is read-only) was observed to be
 false and has been corrected. The four items below are what is left after the runtime-menu work in
-`docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md` §8 (#4098 … #4171). Each states what exists, what is
+[`docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md`](../reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md) §8 (#4098 … #4171). Each states what exists, what is
 missing, a proposal, how to test it, and what is still unknown.
 **Author:** Agento
 **Owner decisions needed:** §2.7 (what "Default" mode should do), §5.8 (how aggressive pruning may be), §3.7 (whether
@@ -39,7 +39,7 @@ running build or a third-party CLI, this spec says so and says how to verify it.
 
 A persistent Claude agent runs on the control protocol (`--permission-prompt-tool stdio`). The CLI sends a
 `can_use_tool` request for each tool call its mode wants approval for, and srv answers **every one** of them itself
-(`handle_control_frame`, `crates/srv/src/backend/blockcontroller/persistent/input.rs`):
+(`handle_control_frame`, [`crates/srv/src/backend/blockcontroller/persistent/input.rs`](../../crates/srv/src/backend/blockcontroller/persistent/input.rs)):
 
 - `AskUserQuestion` is parked and shown to the user (works).
 - Every other tool, **including the request to leave plan mode**, gets `behavior: "allow"`.
@@ -97,7 +97,7 @@ Mechanics:
 ### 2.5 The hard problem: prompts nobody can answer
 
 A parked request blocks the turn until someone answers. Several callers have no human watching:
-`agent.send` over the App API, jekt delivery, cron, the work queue, a pane closed mid-turn, a window that isn't
+`agent.send` over MuxAPI, jekt delivery, cron, the work queue, a pane closed mid-turn, a window that isn't
 focused. Today none of them can hang on a prompt. After this change they could.
 
 Required behaviour, in this order of preference:
@@ -410,7 +410,7 @@ is the "live check" the report keeps listing as outstanding, minus the need for 
 
 ### 7.3 Results (pinned CLI 2.1.285, macOS arm64, 2026-10-01)
 
-Run with the cli-probe harness (`scripts/cli-probe`, landing in #4189; a fake API, a `security` shim that answers "not found", a from-scratch environment).
+Run with the cli-probe harness ([`scripts/cli-probe`](../../scripts/cli-probe), landing in #4189; a fake API, a `security` shim that answers "not found", a from-scratch environment).
 **No account was used, no real keychain item was read, and no consent dialog appeared**; the shim's log shows the CLI
 tried to read two items (`Claude Code-credentials-<hash>`, `Claude Code-<hash>`) and was told neither exists. Each
 probe takes 3-6 seconds.
@@ -421,7 +421,7 @@ probe takes 3-6 seconds.
 | What does an alias resolve to? | `sonnet` → `claude-sonnet-5-5`; `opus` → `claude-opus-5-5`; `haiku` → `claude-haiku-4-5-20251001` (the model id on the API request). |
 | What runs with no `--model`? | **`claude-opus-5-5`, effort `medium`**: the 2026-09-29 incident, reproduced. |
 | `--effort high` on Sonnet? | Sent as `output_config.effort: "high"`. |
-| `--effort high` on Haiku? | **The CLI drops it**: no `output_config`, `get_settings` reports `effort: null`. So on this CLI the flag is **harmless** on Haiku. The earlier claim that it "400s" is true of older CLIs per `docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md`, and is **not** established for 2.1.285. Not passing it remains right; the menu's "not applied" is true. |
+| `--effort high` on Haiku? | **The CLI drops it**: no `output_config`, `get_settings` reports `effort: null`. So on this CLI the flag is **harmless** on Haiku. The earlier claim that it "400s" is true of older CLIs per [`docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md`](../providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md), and is **not** established for 2.1.285. Not passing it remains right; the menu's "not applied" is true. |
 | When is `system/init` emitted? | Only after the first user message (~0.5 s later). Nothing at all before one. It carries `model` and `permissionMode`. |
 | Does `get_settings` work? | Yes, immediately after spawn, with no message and no account. `applied` = `{model, effort, advisor, ultracode, ...}`. |
 | Do control requests change a running process? | Yes: `set_model` (incl. `"default"` → Opus/medium), `apply_flag_settings` (`effortLevel`), `set_permission_mode` all answer `ok` and take effect; `get_settings` reflects the model and effort. Sent back-to-back, a later request can be answered before an earlier one finishes, so send one at a time. |

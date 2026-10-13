@@ -5,7 +5,7 @@ follow-up so it doesn't get rediscovered from scratch next time a pane
 needs to play video.
 **Author:** Agent2
 **Date:** 2026-07-26
-**Related:** `docs/specs/SPEC_MEDIA_PANE_2026_07_26.md` (where this was
+**Related:** [`docs/specs/SPEC_MEDIA_PANE_2026_07_26.md`](../specs/SPEC_MEDIA_PANE_2026_07_26.md) (where this was
 discovered while testing MP4 playback in the new Media pane).
 
 ## Finding
@@ -57,7 +57,7 @@ an H.264/AAC MP4 (Browser pane included, not just Media) will hit the same
 1. **Rebuild the `agentmuxai/cef` fork with `proprietary_codecs=true`.**
    The complete, "real" fix — playback would work the same way it does in
    Chrome itself. Cost: this repo's only existing custom-CEF build process
-   (`docs/cef-build/build-patched-libcef.md`) is Linux-only, for an
+   ([`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md)) is Linux-only, for an
    unrelated window-drag/transparency patch — a Windows build pipeline for
    this doesn't exist yet and would need to be built from scratch. Also a
    multi-hour (3-6h), ~100GB-disk Chromium compile per the existing Linux
@@ -84,7 +84,7 @@ an H.264/AAC MP4 (Browser pane included, not just Media) will hit the same
    environment/build limitation that would resolve itself if the CEF
    binary were ever rebuilt with the right flags. The pane's `onError`
    handler now surfaces the real `MediaError` code/message
-   (`frontend/app/view/media/media.tsx`'s `describeMediaError`) instead of
+   ([`frontend/app/view/media/media.tsx`](../../frontend/app/view/media/media.tsx)'s `describeMediaError`) instead of
    a generic "failed" message, so this failure mode is at least legible
    in-app rather than a silent blank pane.
 

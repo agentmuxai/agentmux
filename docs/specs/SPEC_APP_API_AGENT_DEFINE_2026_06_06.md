@@ -1,18 +1,18 @@
-# SPEC: App API — `agent.define` (Import / Upsert Agent Definition)
+# SPEC: MuxAPI — `agent.define` (Import / Upsert Agent Definition)
 
 **Status:** Draft  
 **Date:** 2026-06-06  
 **Author:** AgentA  
 **Tier:** 1 extension (same auth + transport as existing `agent.open`)  
-**Tracking:** Discussion #1205 (app API long-term thread)  
-**Related:** `docs/specs/app-api-extension.md`, `docs/specs/app-api-status.md`
+**Tracking:** Discussion #1205 (MuxAPI long-term thread)\
+**Related:** [`docs/specs/app-api-extension.md`](app-api-extension.md), [`docs/specs/app-api-status.md`](app-api-status.md)
 
 ---
 
 ## 1. Purpose
 
 Allow any process — including a Claude agent running inside an AgentMux pane — to **create
-or update an agent definition** via the HTTP/WebSocket app API, without requiring:
+or update an agent definition** via the HTTP/WebSocket MuxAPI, without requiring:
 - direct SQLite access, or
 - an application restart for the definition to become visible.
 
@@ -28,7 +28,7 @@ Sidecar inserts/updates db_agent_definitions
 Broadcast agents:changed  →  all frontends refresh My Agents instantly
 ```
 
-This is the **robust, restart-free alternative** to `scripts/import-agents.sh`.
+This is the **robust, restart-free alternative** to [`scripts/import-agents.sh`](../../scripts/import-agents.sh).
 
 ---
 
@@ -306,7 +306,7 @@ broadcast_agents_changed(&state).await;
 
 ## 10. Fit within the Tier taxonomy
 
-From `docs/specs/app-api-extension.md`:
+From [`docs/specs/app-api-extension.md`](app-api-extension.md):
 
 | Tier | Scope | This endpoint |
 |---|---|---|

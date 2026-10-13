@@ -23,7 +23,7 @@ The shipped binaries include or link against, among others:
 - SolidJS — MIT
 - [Font Awesome Free](https://fontawesome.com) 6.7.2 — icons CC BY 4.0, fonts
   SIL OFL 1.1, CSS MIT. Copyright Fonticons, Inc. Shipped as web fonts in
-  `public/fontawesome/` (licence: `public/fontawesome/LICENSE.txt`). The
+  [`public/fontawesome/`](public/fontawesome) (licence: [`public/fontawesome/LICENSE.txt`](public/fontawesome/LICENSE.txt)). The
   `custom-icons` font there holds Wave Terminal's own glyphs (Apache 2.0).
 - Fonts: Hack Nerd Font Mono (Hack: MIT and Bitstream Vera licence; Nerd
   Fonts: OFL 1.1 and MIT), Inter (SIL OFL 1.1), and DejaVu Sans Mono glyphs in
@@ -34,7 +34,7 @@ The shipped binaries include or link against, among others:
 **Rust backend**
 
 - Tokio, Axum, SQLx, portable-pty, serde, tracing, and many others — see
-  `Cargo.toml` and `Cargo.lock`
+  [`Cargo.toml`](Cargo.toml) and [`Cargo.lock`](Cargo.lock)
 
 **Build & test**
 
@@ -44,9 +44,9 @@ The shipped binaries include or link against, among others:
 Every AgentMux package carries the full list, with each component's licence
 text, in `THIRD_PARTY_NOTICES.txt` in the app's `frontend/licenses/` folder,
 next to AgentMux's own `LICENSE.txt` and `NOTICE.txt`. The build generates it
-(`scripts/third-party-notices.mjs`) from what it actually ships: the
+([`scripts/third-party-notices.mjs`](scripts/third-party-notices.mjs)) from what it actually ships: the
 JavaScript packages in the bundle, the Rust crates in the programs, and the
-fonts and tools in `licenses/bundled/`. A production build writes it to
+fonts and tools in [`licenses/bundled/`](licenses/bundled). A production build writes it to
 `dist/frontend/licenses/`.
 
 ## License Compliance

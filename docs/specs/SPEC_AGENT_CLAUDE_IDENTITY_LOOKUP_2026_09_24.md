@@ -62,7 +62,7 @@ way, because nothing states it:
    took longer than it should have only because nothing documents that this
    is the move.
 
-Separately, `docs/retro/retro-cross-agent-conversation-lookup-2026-09-20.md`
+Separately, [`docs/retro/retro-cross-agent-conversation-lookup-2026-09-20.md`](../retro/retro-cross-agent-conversation-lookup-2026-09-20.md)
 (this same agent, four days earlier — not previously in this repo; added by
 this PR alongside this spec) hit the mirror-image problem for *another*
 agent's identity: `GetAgentTranscript` reads a stale live buffer,
@@ -83,7 +83,7 @@ Environment variables and file contents are not already present in the
 model's context — reading them still costs a `Bash`/`Read` invocation, which
 is a tool call in Claude Code's own sense. What this recipe actually
 eliminates is the *AgentMux-specific* round trip: no `IdentityAccounts`, no
-`IdentityValidate`, no App API/MCP RPC to agentmux-srv at all — one local
+`IdentityValidate`, no MuxAPI/MCP RPC to agentmux-srv at all — one local
 file read instead of two failed AgentMux tool calls plus a wrong guess
 (§2). That is the guarantee this spec makes for §3.1. §3.1b below describes
 the strictly stronger version — genuinely zero tool calls of any kind —
@@ -107,7 +107,7 @@ SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 TRANSCRIPT="$CLAUDE_CONFIG_DIR/projects/<slug>/$SESSION_ID.jsonl"
 ```
 
-None of this requires `IdentityAccounts`, `WhoAmI`, or any App API call —
+None of this requires `IdentityAccounts`, `WhoAmI`, or any MuxAPI call —
 `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_SESSION_ID` are both already exported
 into every Claude Code agent's process at spawn (confirmed live this
 session; no code change needed to produce them). It still requires the
@@ -140,7 +140,7 @@ resolved account in hand at that exact moment, it could append one line —
 *"Your current Claude login is `<email>`."* — to that same seeded
 `CLAUDE.md`. Composed into context at launch the same way Global Memory and
 Personal Memory already are (see `.claude/AGENTMUX_MEMORY.md`'s own
-"App API" entry), this needs no read and no tool call of any kind: the
+"MuxAPI" entry), this needs no read and no tool call of any kind: the
 agent already knows its own login email before its first turn starts.
 
 This is deliberately **not** folded into P1 below. It is a real code
@@ -177,7 +177,7 @@ independent, small fixes cover it:
    (a) and only doing (b) would still return nothing for any account whose
    `context.email` was never backfilled by an Armory-side list call — a
    real, named failure mode Codex's review caught, not a hypothetical one.
-2. **A `GetAgentIdentity` (or `WhoAmI`-extension) App API call**, scoped to
+2. **A `GetAgentIdentity` (or `WhoAmI`-extension) MuxAPI call**, scoped to
    read-only, that given an `agent_id` resolves: its current
    `db_agents.session_id`, its bound `identity_id`/account (`db_agent_identity_links`,
    confirmed empty for this agent today — a real gap this call would also
@@ -227,7 +227,7 @@ neither `GetAgentTranscript` nor `SearchHistory` provide.
 |---|---|---|
 | **P1** | Document §3.1's recipe in `AGENTMUX_MEMORY.md`'s Operator Config env/gotchas entry | Docs only, no code |
 | **P2** | `identity_self_accounts_impl` (`agentmux-srv/src/server/app_api/mod.rs:801-821`): call `account_email::refresh_account_email`, persist via the correct `account_store`, add `email` to its response | Small, additive, no schema break — one new optional field, backed by a real backfill call, not just a field name |
-| **P3** | `GetAgentIdentity` App API call: agent_id → session_id, identity/account, transcript path (`shared/identities/`, channel-scoped fallback) | New read-only RPC + MCP tool |
+| **P3** | `GetAgentIdentity` MuxAPI call: agent_id → session_id, identity/account, transcript path (`shared/identities/`, channel-scoped fallback) | New read-only RPC + MCP tool |
 | **P4 (optional, not required for P1-P3)** | §3.1b: append the resolved email to the `CLAUDE.md` `inject_identity_env` already seeds at spawn, for genuinely zero-tool-call delivery | Small change to a spawn-critical path; own review |
 
 P1 alone would have answered this session's actual question in one read

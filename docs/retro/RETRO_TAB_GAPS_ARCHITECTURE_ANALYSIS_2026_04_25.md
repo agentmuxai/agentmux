@@ -4,7 +4,7 @@
 **Status:** Analysis report (research + ground truth)
 **Owner:** AgentA
 **Trigger:** A naïve one-line CSS fix to
-            `frontend/app/tab/tab.scss` (removed
+            [`frontend/app/tab/tab.scss`](../../frontend/app/tab/tab.scss) (removed
             active-tab `::after` bar-hiding) did NOT
             resolve the reported gap drift. The user
             asked for a full architecture analysis
@@ -265,7 +265,7 @@ masks its perceptibility.
 - Switch `gap: 1px` to `gap: 2px` and drop the `::after`
   bar (Option A's CSS) — combined with integer zoom,
   every gap renders at the same pixel rounding bucket.
-- May require touching `frontend/app/window/` zoom code
+- May require touching [`frontend/app/window/`](../../frontend/app/window) zoom code
   (search for `--zoomfactor` usage) and verifying that
   pane content (terminals especially) doesn't break
   under `transform: scale`.

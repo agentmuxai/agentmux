@@ -1,11 +1,11 @@
 # Frontend Reducer Conventions
 
 **Date:** 2026-05-03
-**Status:** living — the conventions this document sets out are in force, and §10's questions were answered here rather than left open ("answers proposed", not "answers needed"). Eight slices under `frontend/app/store/` have been built on them since — `agent-document`, `agent-pane-state`, `agent-pane-layout`, `browser-pane-state`, `drone-run-state`, `launch-flow-state`, `launcher-event`, `window-opacity` — all following Q1's per-slice dispatch and Q2's per-slice subscription. Seven source files cite this doc directly. Treat it as the standing convention for a new slice, not as a design still awaiting sign-off; §10's "Reconsider when" clauses are the trigger for revisiting it.
+**Status:** living — the conventions this document sets out are in force, and §10's questions were answered here rather than left open ("answers proposed", not "answers needed"). Eight slices under [`frontend/app/store/`](../../frontend/app/store) have been built on them since — `agent-document`, `agent-pane-state`, `agent-pane-layout`, `browser-pane-state`, `drone-run-state`, `launch-flow-state`, `launcher-event`, `window-opacity` — all following Q1's per-slice dispatch and Q2's per-slice subscription. Seven source files cite this doc directly. Treat it as the standing convention for a new slice, not as a design still awaiting sign-off; §10's "Reconsider when" clauses are the trigger for revisiting it.
 **Reads-this-first:**
-- `docs/specs/frontend-reducer-architecture-2026-05-03.md` — the spec roadmap; this is spec #2 of 8
-- `docs/specs/agent-pane-document-reducer-2026-05-03.md` — slice #1, shipped as PR #681; serves as the de facto template
-- `frontend/app/store/launcher-event-reducer.ts` — the only pre-existing frontend reducer, single-file pattern
+- [`docs/specs/frontend-reducer-architecture-2026-05-03.md`](frontend-reducer-architecture-2026-05-03.md) — the spec roadmap; this is spec #2 of 8
+- [`docs/specs/agent-pane-document-reducer-2026-05-03.md`](agent-pane-document-reducer-2026-05-03.md) — slice #1, shipped as PR #681; serves as the de facto template
+- [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) — the only pre-existing frontend reducer, single-file pattern
 - `agentmux-srv/src/reducer.rs` — canonical Rust reducer style we're echoing
 
 ## Purpose

@@ -7,8 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 
 - **Date:** 2026-06-14
 - **Status:** Draft / proposed
-- **Area:** `frontend/app/view/agent` (runtime config, `buildRuntimeArgs`, control bar, `/model` + `/effort` slash commands, provider defs), `agentmux-srv/src/backend/providers.rs`
-- **Source:** `docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md` (provider report)
+- **Area:** [`frontend/app/view/agent`](../../frontend/app/view/agent) (runtime config, `buildRuntimeArgs`, control bar, `/model` + `/effort` slash commands, provider defs), `agentmux-srv/src/backend/providers.rs`
+- **Source:** [`docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md`](../providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md) (provider report)
 - **Related:** PR #1411 (landed the `xhigh` effort level + Claude default → Opus/xhigh), provider report §0/§11
 
 ---
@@ -32,7 +32,7 @@ This spec covers the **remaining** gaps from the report (§11 items 1, 3, 5, 7).
 
 ## 1. Background — current behavior (code-grounded)
 
-- `AgentRuntimeConfig` (`frontend/app/view/agent/types.ts:528`) is global:
+- `AgentRuntimeConfig` ([`frontend/app/view/agent/types.ts:528`](../../frontend/app/view/agent/types.ts)) is global:
   `{ permissionMode: PermissionMode, model: ModelChoice, effort: EffortLevel }`.
 - `ModelChoice = "opus" | "sonnet" | "haiku"` (`types.ts:525`) — **Claude names only**.
 - `EffortLevel = "low" | "medium" | "high" | "xhigh" | "max"` (`types.ts:526`).
@@ -177,11 +177,11 @@ pinning — model strings move):
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/types.ts:525-526` | `model: string` on `AgentRuntimeConfig`; keep `EffortLevel` as the canonical scale |
-| `frontend/app/view/agent/providers/index.ts:35-88` | add `models`, `modelFlag`, `reasoning` to `ProviderDefinition`; populate per provider (§4) |
+| [`frontend/app/view/agent/types.ts:525-526`](../../frontend/app/view/agent/types.ts) | `model: string` on `AgentRuntimeConfig`; keep `EffortLevel` as the canonical scale |
+| [`frontend/app/view/agent/providers/index.ts:35-88`](../../frontend/app/view/agent/providers/index.ts) | add `models`, `modelFlag`, `reasoning` to `ProviderDefinition`; populate per provider (§4) |
 | `agentmux-srv/src/backend/providers.rs:34-83` | mirror the new fields on `ProviderConfig` (kept in parity with TS) |
-| `frontend/app/view/agent/buildRuntimeArgs.ts:96-114` | replace Claude-only `--model`/`--effort` + Codex special-case with provider-driven `modelFlag`/`reasoning.emit`; honor `noReasoning`; bump `CODEX_DEFAULT_MODEL`→`gpt-5.5` (interim) |
-| `frontend/app/view/agent/commands/global/runtime.ts` | `/model` + `/effort` choices read the active provider's `models` / `reasoning.levels` |
+| [`frontend/app/view/agent/buildRuntimeArgs.ts:96-114`](../../frontend/app/view/agent/buildRuntimeArgs.ts) | replace Claude-only `--model`/`--effort` + Codex special-case with provider-driven `modelFlag`/`reasoning.emit`; honor `noReasoning`; bump `CODEX_DEFAULT_MODEL`→`gpt-5.5` (interim) |
+| [`frontend/app/view/agent/commands/global/runtime.ts`](../../frontend/app/view/agent/commands/global/runtime.ts) | `/model` + `/effort` choices read the active provider's `models` / `reasoning.levels` |
 | `frontend/app/view/agent/components/AgentControlBar.tsx` | model + effort dropdowns render the active provider's lists; hide when empty |
 
 ---

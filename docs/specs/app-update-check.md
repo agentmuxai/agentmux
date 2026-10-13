@@ -209,8 +209,8 @@ Map install type to GitHub release asset filename pattern:
 | `agentmuxsrv-rs/src/main.rs` | Spawn updater check loop on startup |
 | `agentmuxsrv-rs/src/server/` | RPC handler for `install_update` and `check_for_update` |
 | `src-tauri/src/commands/stubs.rs` | Remove `install_update` stub, wire to real backend RPC |
-| `frontend/types/custom.d.ts` | Add `available` to `UpdaterStatus`, add `UpdateInfo` type |
-| `frontend/app/statusbar/UpdateStatus.tsx` | Handle `available` state with green indicator |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Add `available` to `UpdaterStatus`, add `UpdateInfo` type |
+| [`frontend/app/statusbar/UpdateStatus.tsx`](../../frontend/app/statusbar/UpdateStatus.tsx) | Handle `available` state with green indicator |
 | `frontend/util/tauri-api.ts` | Wire up update info (version, release URL) |
 
 ### Backend Data Model

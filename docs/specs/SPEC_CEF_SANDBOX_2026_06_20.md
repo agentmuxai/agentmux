@@ -71,7 +71,7 @@ Ubuntu (23.10, later backported to 22.04/20.04) added an AppArmor policy
 that blocks unprivileged user-namespace creation by default, breaking the
 namespace sandbox for any Chromium/CEF-based app system-wide unless the
 binary has an explicit AppArmor exception. See
-`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md` for the
+[`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md`](SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md) for the
 recovery mechanism (a one-time, `pkexec`-installed AppArmor exception,
 scoped to survive AgentMux updates) — this doesn't change anything below,
 just narrows the "no setup needed" framing.
@@ -313,7 +313,7 @@ Document in `settings-template.jsonc` and `CEF_ARCHITECTURE.md`.
 | `agentmux-cef/src/main.rs` | Sandbox init on macOS, conditional `no_sandbox`, escape hatch |
 | `agentmux-cef/src/app.rs` | `--disable-setuid-sandbox` on Linux |
 | `agentmux-cef/Cargo.toml` | `default = ["sandbox"]`, `libloading` dep (macOS) |
-| `docs/CEF_ARCHITECTURE.md` | Document sandbox status + escape hatch |
+| [`docs/CEF_ARCHITECTURE.md`](../CEF_ARCHITECTURE.md) | Document sandbox status + escape hatch |
 
 ## 10. Files changed (Phase 3, Windows)
 

@@ -95,9 +95,9 @@ a host check, or replaced with the platform-agnostic `invokeCommand`/`listenEven
 from `ipc.ts`.
 
 **Remaining direct Tauri imports:**
-- `frontend/app/drag/CrossWindowDragMonitor.linux.tsx` — Linux only, not active
+- [`frontend/app/drag/CrossWindowDragMonitor.linux.tsx`](../../frontend/app/drag/CrossWindowDragMonitor.linux.tsx) — Linux only, not active
 
-**Files:** `frontend/app/view/term/term.tsx`, `frontend/app/window/action-widgets.tsx`
+**Files:** [`frontend/app/view/term/term.tsx`](../../frontend/app/view/term/term.tsx), [`frontend/app/window/action-widgets.tsx`](../../frontend/app/window/action-widgets.tsx)
 
 ---
 
@@ -120,7 +120,7 @@ Renders `NativeContextMenuItem[]` as a positioned popup with support for:
 Fires the `onContextMenuClick` callback directly with the item ID — no IPC
 roundtrip needed.
 
-**Files:** `frontend/util/cef-api.ts`
+**Files:** [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)
 
 ---
 
@@ -135,7 +135,7 @@ creates a CSS clipping context. Absolutely-positioned submenus (with
 **Fix applied:** Removed overflow constraints from the menu container. Added
 z-index to submenu panels.
 
-**Files:** `frontend/util/cef-api.ts`
+**Files:** [`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)
 
 ---
 

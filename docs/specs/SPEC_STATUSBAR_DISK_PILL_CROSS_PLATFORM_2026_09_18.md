@@ -11,7 +11,7 @@
 There is no Disk readout in the status bar on Linux or macOS. Only Windows
 shows one.
 
-The pill is gated on a single value (`frontend/app/statusbar/SystemStats.tsx`):
+The pill is gated on a single value ([`frontend/app/statusbar/SystemStats.tsx`](../../frontend/app/statusbar/SystemStats.tsx)):
 
 ```tsx
 <Show when={s().pagefileVolumeFreePct != null}>

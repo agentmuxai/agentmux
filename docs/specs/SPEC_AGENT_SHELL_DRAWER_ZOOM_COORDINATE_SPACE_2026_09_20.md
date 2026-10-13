@@ -9,16 +9,16 @@ and the loading overlay must move out of the wrapper or it stops covering the dr
 (§8.6). Geometry is verified by measurement; the two user-visible rendering outcomes in
 §9 (whole top line, correctly placed hover underline) were NOT confirmed by a human at
 merge time — see the note there.
-**Scope (confirmed affected):** `frontend/app/view/agent/agent-view.tsx` (the
+**Scope (confirmed affected):** [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) (the
 `zoom:` style at :2145 and the drawer mount at :2585-2594),
-`frontend/app/view/agent/components/AgentShellSubblock.tsx` (`termFontSize`
-compensation), `frontend/app/view/term/termwrap.ts` (`customFit`).
+[`frontend/app/view/agent/components/AgentShellSubblock.tsx`](../../frontend/app/view/agent/components/AgentShellSubblock.tsx) (`termFontSize`
+compensation), [`frontend/app/view/term/termwrap.ts`](../../frontend/app/view/term/termwrap.ts) (`customFit`).
 **Not affected:** standalone terminal panes (`term.tsx` / `term-connectelem`) — measured
 at ratio 1.0, see §3.
-**Related:** `docs/specs/zoom-architecture.md` (the design this violates),
+**Related:** [`docs/specs/zoom-architecture.md`](zoom-architecture.md) (the design this violates),
 `SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md` (same disease, same cure, in
 the status bar), `SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`,
-`docs/reports/REPORT_SHELL_DRAWER_ZOOM_HISTORY_ALIGNMENT_2026_09_19.md` (investigation
+[`docs/reports/REPORT_SHELL_DRAWER_ZOOM_HISTORY_ALIGNMENT_2026_09_19.md`](../reports/REPORT_SHELL_DRAWER_ZOOM_HISTORY_ALIGNMENT_2026_09_19.md) (investigation
 log, addenda A and B).
 
 ---
@@ -130,7 +130,7 @@ numbers. The terminal must render in an unscaled space.
 
 ## 5. This violates the project's own documented design
 
-`docs/specs/zoom-architecture.md` states the intended split:
+[`docs/specs/zoom-architecture.md`](zoom-architecture.md) states the intended split:
 
 > **Per-pane zoom** — "scales terminal font size via block metadata (`term:zoom`) …
 > This is the primary zoom mechanism users interact with."

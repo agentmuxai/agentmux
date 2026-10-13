@@ -61,7 +61,7 @@ time. This is a genuine asymmetry, not an oversight — cloud can be made live
 by starting a task; LAN cannot, by the same means.
 
 The good news: the repo already has the right *pattern* for the live half —
-`LanDiscoveryController`'s slot-based start/stop (`docs/specs/lan-discovery-toggle.md`).
+`LanDiscoveryController`'s slot-based start/stop ([`docs/specs/lan-discovery-toggle.md`](../specs/lan-discovery-toggle.md)).
 What follows extends that same pattern to the listener.
 
 ---

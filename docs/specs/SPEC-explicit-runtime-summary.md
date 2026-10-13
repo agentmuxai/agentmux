@@ -40,7 +40,7 @@ Two viable options. Pick one.
 
 ### Option A — Pin explicit defaults in `DEFAULT_RUNTIME_CONFIG`
 
-Change `DEFAULT_RUNTIME_CONFIG` in `frontend/app/view/agent/types.ts`
+Change `DEFAULT_RUNTIME_CONFIG` in [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)
 from `{ model: null, effort: null }` to explicit values, e.g.
 `{ model: "sonnet", effort: "medium" }`.
 
@@ -69,7 +69,7 @@ render as such.
 
 ## Concrete changes (Option A)
 
-1. `frontend/app/view/agent/types.ts`
+1. [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)
    - `DEFAULT_RUNTIME_CONFIG.model`: `null` → `"sonnet"`
    - `DEFAULT_RUNTIME_CONFIG.effort`: `null` → `"medium"`
 
@@ -80,7 +80,7 @@ render as such.
    - `isNonDefault`: re-check that "non-default" indicator still works
      when defaults are no longer null.
 
-3. `frontend/app/view/agent/buildRuntimeArgs.ts`
+3. [`frontend/app/view/agent/buildRuntimeArgs.ts`](../../frontend/app/view/agent/buildRuntimeArgs.ts)
    - No code change needed; the existing `if (config.model)` branch
      fires automatically.
 
@@ -104,7 +104,7 @@ render as such.
 
 ## Affected files
 
-- `frontend/app/view/agent/types.ts`
+- [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)
 - `frontend/app/view/agent/components/AgentControlBar.tsx`
-- `frontend/app/view/agent/buildRuntimeArgs.ts` (read-only)
-- `frontend/app/view/agent/commands/global/runtime.ts` (review "Default" entry)
+- [`frontend/app/view/agent/buildRuntimeArgs.ts`](../../frontend/app/view/agent/buildRuntimeArgs.ts) (read-only)
+- [`frontend/app/view/agent/commands/global/runtime.ts`](../../frontend/app/view/agent/commands/global/runtime.ts) (review "Default" entry)

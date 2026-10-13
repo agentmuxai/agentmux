@@ -44,7 +44,7 @@ for (idx, cpu) in cpus.iter().enumerate() {
 
 The panel extracts the aggregate `cpu` and every key matching `^cpu:\d+$`.
 
-> Note: the existing sysinfo *graph* view already enumerates per-core keys (`frontend/app/view/sysinfo/sysinfo-types.ts` — `PlotTypes["All CPU"]` filters `cpu:*`≠`cpu`; `DefaultPlotMeta` pre-labels cores 0–31). We don't reuse the plot, but it confirms the key convention.
+> Note: the existing sysinfo *graph* view already enumerates per-core keys ([`frontend/app/view/sysinfo/sysinfo-types.ts`](../../frontend/app/view/sysinfo/sysinfo-types.ts) — `PlotTypes["All CPU"]` filters `cpu:*`≠`cpu`; `DefaultPlotMeta` pre-labels cores 0–31). We don't reuse the plot, but it confirms the key convention.
 
 ---
 
@@ -52,8 +52,8 @@ The panel extracts the aggregate `cpu` and every key matching `^cpu:\d+$`.
 
 | Concern | Location |
 |---|---|
-| Status bar container | `frontend/app/statusbar/StatusBar.tsx` (left section renders `BackendStatus → SystemStats → GpuStatus`) |
-| CPU readout (target) | `frontend/app/statusbar/SystemStats.tsx:73-80` — static `<span class="stat-mono stat-cpu">CPU {n}%</span>` |
+| Status bar container | [`frontend/app/statusbar/StatusBar.tsx`](../../frontend/app/statusbar/StatusBar.tsx) (left section renders `BackendStatus → SystemStats → GpuStatus`) |
+| CPU readout (target) | [`frontend/app/statusbar/SystemStats.tsx:73-80`](../../frontend/app/statusbar/SystemStats.tsx) — static `<span class="stat-mono stat-cpu">CPU {n}%</span>` |
 | sysinfo subscription | `SystemStats.tsx:48-66` — `waveEventSubscribe({ eventType: "sysinfo", scope: "local" })` |
 | Color thresholds | `SystemStats.tsx:32-36` — `cpuColor()`: >95% error, >80% warning |
 | **Popover pattern to mirror** | `TokenUsageIndicator.tsx` (button + open state + outside-click/Esc) → `TokenBreakdownPopover.tsx` (`usePaneOverlay`, `computeMenuPosition` placement `top-end`, `autoUpdate`, `assertMenuInPaintableArea`) |
@@ -154,11 +154,11 @@ Reuse exactly what `TokenBreakdownPopover` uses:
 ## 5. Files
 
 **New**
-- `frontend/app/statusbar/CpuCoresPopover.tsx` — the panel (clone `TokenBreakdownPopover.tsx` structure: `usePaneOverlay`, `registerFloating`/`computeMenuPosition`/`autoUpdate`, `role="dialog"`). Owns its own `waveEventSubscribe("sysinfo","local")`. Contains: the tier selector (rows/cells/heatmap by core count), the computed square-sizing for tier 3, a `loadColor(pct)` continuous ramp helper (alongside reusing the 3-step `cpuColor` for header text), and the optional hovered/focused-core readout line.
-- `frontend/app/statusbar/_cpu-cores-popover.scss` — styles for all three tiers (rows, `.cpu-cores-grid`, `.cpu-cores-heatmap` with `--cols`/`--sq` custom props, legend swatch). Import into the status-bar SCSS aggregator alongside `_token-usage.scss`/`_instance-panel.scss`.
+- [`frontend/app/statusbar/CpuCoresPopover.tsx`](../../frontend/app/statusbar/CpuCoresPopover.tsx) — the panel (clone `TokenBreakdownPopover.tsx` structure: `usePaneOverlay`, `registerFloating`/`computeMenuPosition`/`autoUpdate`, `role="dialog"`). Owns its own `waveEventSubscribe("sysinfo","local")`. Contains: the tier selector (rows/cells/heatmap by core count), the computed square-sizing for tier 3, a `loadColor(pct)` continuous ramp helper (alongside reusing the 3-step `cpuColor` for header text), and the optional hovered/focused-core readout line.
+- [`frontend/app/statusbar/_cpu-cores-popover.scss`](../../frontend/app/statusbar/_cpu-cores-popover.scss) — styles for all three tiers (rows, `.cpu-cores-grid`, `.cpu-cores-heatmap` with `--cols`/`--sq` custom props, legend swatch). Import into the status-bar SCSS aggregator alongside `_token-usage.scss`/`_instance-panel.scss`.
 
 **Modified**
-- `frontend/app/statusbar/SystemStats.tsx` — wrap the CPU readout in a button; add `open`/`anchorRect` signals + toggle/outside-click/Esc handlers (copy from `TokenUsageIndicator.tsx`); render `<CpuCoresPopover>` in a `<Portal>` when open. Export `cpuColor` (or move it to a shared util) for reuse in the popover.
+- [`frontend/app/statusbar/SystemStats.tsx`](../../frontend/app/statusbar/SystemStats.tsx) — wrap the CPU readout in a button; add `open`/`anchorRect` signals + toggle/outside-click/Esc handlers (copy from `TokenUsageIndicator.tsx`); render `<CpuCoresPopover>` in a `<Portal>` when open. Export `cpuColor` (or move it to a shared util) for reuse in the popover.
 
 **No changes**
 - Backend (`sysinfo.rs`, `wps.rs`) — per-core data already published.

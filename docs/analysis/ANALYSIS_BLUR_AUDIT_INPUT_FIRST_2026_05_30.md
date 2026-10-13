@@ -68,7 +68,7 @@ radius is a known, intentional choice rather than an oversight.
 
 ## Method
 
-`rg backdrop-filter|filter:\s*blur` across `frontend/`, then for each hit traced the owning
+`rg backdrop-filter|filter:\s*blur` across [`frontend/`](../../frontend), then for each hit traced the owning
 component's render guard (Solid `<Show>` / class-toggle) to determine DOM presence during idle
 typing. CSS-variable defaults resolved: `--block-blur: 2px` (`tilelayout.scss:118`),
 `--magnified-block-blur: 10px` (`block.scss:309`).

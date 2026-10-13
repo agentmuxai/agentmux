@@ -79,7 +79,7 @@ class the original bug report described.
 
 ### Finding the mechanism
 
-`frontend/app/view/agent/components/ActivityDock.tsx` renders shell/subagent/
+[`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) renders shell/subagent/
 tool rows derived from the document's `nodes()`. Shell nodes specifically are
 **not** part of the persisted document-history snapshot at all (confirmed:
 zero references to "shell" in `parseHistoryLines.ts`) — they're reconstructed

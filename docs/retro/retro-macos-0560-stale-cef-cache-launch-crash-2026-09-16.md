@@ -28,7 +28,7 @@ that work being wrong.
 The DMG that actually failed was a **local** `task package:macos` build on
 this machine, not the official release artifact. `task package:macos`
 resolves the native CEF framework to bundle via a 3-tier fallback
-(`scripts/resolve-cef-runtime-darwin.sh`), and tier 2 — `$HOME/cef-build/darwin/$ARCH`,
+([`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh)), and tier 2 — `$HOME/cef-build/darwin/$ARCH`,
 where the script maps `uname -m`'s `arm64` to `ARCH=aarch64` (Rust's
 `target_arch` convention, not Apple's), so on this machine it probes
 `~/cef-build/darwin/aarch64` — a symlink to `~/cef-build/darwin/arm64`, the
@@ -130,22 +130,22 @@ addressed — just not with a hard gate:
 > before a CEF milestone bump would be silently accepted, producing a
 > runtime/binding-version mismatch bundle.
 
-The fix landed as `check_version()` in `scripts/resolve-cef-runtime-darwin.sh`
+The fix landed as `check_version()` in [`scripts/resolve-cef-runtime-darwin.sh`](../../scripts/resolve-cef-runtime-darwin.sh)
 — `grep -a` for the expected CEF major version's plain-text version string
 inside the framework binary, warn if it's missing. But by explicit, documented
 design:
 
 > Warns rather than hard-fails — matches this script's own existing
 > warn-not-fail posture (no hard-fail path exists here at all outside the
-> explicit-override case); CI's `scripts/verify-cef-version.sh` remains the
+> explicit-override case); CI's [`scripts/verify-cef-version.sh`](../../scripts/verify-cef-version.sh) remains the
 > hard gate for anything shipped.
 
 That comment (quoted verbatim from `resolve-cef-runtime-darwin.sh` itself) is
-misleading about what `scripts/verify-cef-version.sh` actually covers —
+misleading about what [`scripts/verify-cef-version.sh`](../../scripts/verify-cef-version.sh) actually covers —
 **correcting my own earlier draft here, caught in review (Codex P2 on this
 PR).** `verify-cef-version.sh` reads a bundled `libcef.dll`'s `ProductVersion`
 via `pwsh` and compares it to `Cargo.lock`'s `cef` crate version — it is
-**Windows-only** (`Taskfile.yml`, `scripts/cef-build/fetch-patched-cef-windows.sh`
+**Windows-only** (`Taskfile.yml`, [`scripts/cef-build/fetch-patched-cef-windows.sh`](../../scripts/cef-build/fetch-patched-cef-windows.sh)
 are its only callers), invoked from `build-windows.yml`/`bundle:windows`, and
 could never run against a macOS `.framework` at all.
 
@@ -205,7 +205,7 @@ rebuild Chromium from scratch:
 
 1. Downloaded + extracted the release tarball, confirmed `dlsym(cef_version_full)`
    resolves against it directly (`ctypes.CDLL(...).cef_version_full`).
-2. Ran `scripts/verify-cef-framework-darwin.sh` against the staged copy —
+2. Ran [`scripts/verify-cef-framework-darwin.sh`](../../scripts/verify-cef-framework-darwin.sh) against the staged copy —
    `BeginWindowDrag` patch confirmed present, exit 0.
 3. Moved the stale 148 framework aside (`~/cef-build/darwin/arm64/Chromium
    Embedded Framework.framework.pre-152-bak-20260916`, not deleted), `ditto`'d

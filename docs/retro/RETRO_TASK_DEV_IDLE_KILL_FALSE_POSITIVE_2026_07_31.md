@@ -5,7 +5,7 @@
 **Date:** 2026-07-31
 **Severity:** Medium — agent-launched dev verification silently loses the app it just built; no data loss, but wastes a full build cycle and is confusing to diagnose without reading the bashwrap-side log line closely.
 **Observed by:** AgentA, while verifying PR #2371/#2373's merged fix via a fresh `task dev`.
-**Related retros:** `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md` (introduced the mechanism that causes this), `retro-task-dev-isolation-multi-agent-2026-06-23.md` (adjacent orphaned-launcher-process history), `retro-task-dev-agent-shell-path-2026-06-27.md` (the PATH/Gap A/B issue `scripts/dev-agent.cmd` already solves — orthogonal to this retro), `retro-persistent-agent-working-status-stuck-2026-07-16.md` (**the actual prior art for the correct fix** — see Correction below).
+**Related retros:** `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md` (introduced the mechanism that causes this), `retro-task-dev-isolation-multi-agent-2026-06-23.md` (adjacent orphaned-launcher-process history), `retro-task-dev-agent-shell-path-2026-06-27.md` (the PATH/Gap A/B issue [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) already solves — orthogonal to this retro), `retro-persistent-agent-working-status-stuck-2026-07-16.md` (**the actual prior art for the correct fix** — see Correction below).
 
 ---
 
@@ -13,7 +13,7 @@
 
 The first version of this retro recommended detaching `task dev` entirely from the Bash tool via PowerShell `Start-Process`. That **does** avoid the idle-kill, but has a real cost the first draft didn't weigh: AgentMux's own UI has **two** separate live-process surfaces —
 
-1. **`ActivityDock`** (`frontend/app/view/agent/components/ActivityDock.tsx`, pinned directly above the composer/input in an Agent pane) — driven entirely by the **conversation transcript**: a Bash `ToolNode` gets promoted into the dock once its `status` has been `"running"` for ≥30s (`tool-adapter.ts`, `TOOL_PROMOTION_MS`). It has no concept of OS PIDs at all.
+1. **`ActivityDock`** ([`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx), pinned directly above the composer/input in an Agent pane) — driven entirely by the **conversation transcript**: a Bash `ToolNode` gets promoted into the dock once its `status` has been `"running"` for ≥30s (`tool-adapter.ts`, `TOOL_PROMOTION_MS`). It has no concept of OS PIDs at all.
 2. **`AgentProcessRegistry`** (`agentmux-srv/src/backend/process_tracker/registry.rs`) — real Job-Object-based OS process tracking, feeding the "⚙N" badge / Swarm roster. It only sees descendants inside the agent's own per-block Job Object.
 
 A fully detached `Start-Process` child is invisible to **both** — it was never a tool call AgentMux observed (nothing for the dock to promote) and it's not inside the agent's Job Object (nothing for the registry to enumerate). That's exactly what a user reported: the dev instance was alive and healthy, but nowhere to be found in the app's own UI.
@@ -37,7 +37,7 @@ cd "<repo root>" && (
 
 ## TL;DR (original investigation, still accurate as root-cause analysis)
 
-`scripts/dev-agent.cmd` (the documented, correct way to launch `task dev` from an agent shell — see repo `CLAUDE.md`) still isn't safe to run as a *plain* foregrounded-then-backgrounded Bash tool call with no keepalive. The build succeeds, Vite comes up, the launcher starts the GUI — and then, once the terminal goes quiet (which it always will without a keepalive: a GUI app produces no further stdout once its window is up), `agentmux-bashwrap`'s idle-timeout guard decides the command is "stuck" and kills it, taking the freshly-built dev instance down with it. This is the **exact false-positive risk `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14` explicitly flagged as an open risk** (see its Open Question #6 / the `find /` example in "Corroborating live evidence") — this retro is the concrete case of it actually happening, for a different trigger (a legitimately-silent-forever GUI, not a slow-but-finishing search).
+[`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) (the documented, correct way to launch `task dev` from an agent shell — see repo `CLAUDE.md`) still isn't safe to run as a *plain* foregrounded-then-backgrounded Bash tool call with no keepalive. The build succeeds, Vite comes up, the launcher starts the GUI — and then, once the terminal goes quiet (which it always will without a keepalive: a GUI app produces no further stdout once its window is up), `agentmux-bashwrap`'s idle-timeout guard decides the command is "stuck" and kills it, taking the freshly-built dev instance down with it. This is the **exact false-positive risk `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14` explicitly flagged as an open risk** (see its Open Question #6 / the `find /` example in "Corroborating live evidence") — this retro is the concrete case of it actually happening, for a different trigger (a legitimately-silent-forever GUI, not a slow-but-finishing search).
 
 **Fix (corrected — see above):** keep `task dev` as a normal `run_in_background: true` Bash tool call (dock-visible) and wrap it in a backgrounded heartbeat loop to defeat the idle-timeout. A fully-detached `Start-Process` launch also avoids the kill, but sacrifices all dock/registry visibility — use only when that tradeoff is acceptable.
 
@@ -45,7 +45,7 @@ cd "<repo root>" && (
 
 ## What happened, in order
 
-1. Launched `scripts/dev-agent.cmd` via the Bash tool with `run_in_background: true`, to verify the just-merged PR #2371/#2373 fix in a live dev build.
+1. Launched [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) via the Bash tool with `run_in_background: true`, to verify the just-merged PR #2371/#2373 fix in a live dev build.
 2. Waited, checked the output file periodically — looked empty/stalled for a while, but `tasklist` confirmed `task.exe` was genuinely alive and building (later corroborated by `mem_attribution` telemetry in the shared srv log showing `rustc.exe` consuming ~1.9GB — a real, in-progress compile).
 3. ~17 minutes later, got a `task-notification` reporting the background command **failed with exit code 1**.
 4. Reading the captured output: the build had actually **fully succeeded** — `cargo build --release` finished clean (6m13s), the host/launcher/CEF build finished, Vite came up (`VITE v6.4.3 ready`, `Vite ready at http://localhost:5290`), and the launcher was invoked (`AGENTMUX_DEV=1 ./agentmux-launcher.exe --url=...`). The **very last line** in the captured output was:
@@ -105,14 +105,14 @@ While investigating the above, a user also noticed a `sleep 45` entry still show
 
 - A Bash tool call creates its `ToolNode` (`status: "running"`) the instant the CLI's own `tool_use` content block starts (`claude-translator.ts`'s `handleContentBlockStart`), and only clears it on a matching `tool_result` (matched by `tool_use_id`).
 - The `sleep 45` call in question was **rejected by the Claude Code harness itself** (a built-in guardrail against standalone `sleep` calls, external to this repo — confirmed via a full-repo search: no "standalone sleep"/"Blocked:" validator exists anywhere in `agentmux-srv` or `agentmux-bashwrap`; the one hook agentmux does install, `agentmux-bashwrap/src/hook.rs`, only ever rewrites commands, never denies them).
-- The only cleanup path for an orphaned `"running"` `ToolNode` is `scrubOrphanedInProgress` (`frontend/app/store/agent-document/reducer.ts`), which only fires at a **session boundary** (`SessionEnd`, `HistoryRestored`, `HistoryLoaded`) — not immediately when a tool call is rejected mid-turn. This is a known, already-named class of bug (see `SPEC_ORPHAN_THINKING_NODES_2026_05_27.md`), just not one this retro's fix addresses.
+- The only cleanup path for an orphaned `"running"` `ToolNode` is `scrubOrphanedInProgress` ([`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts)), which only fires at a **session boundary** (`SessionEnd`, `HistoryRestored`, `HistoryLoaded`) — not immediately when a tool call is rejected mid-turn. This is a known, already-named class of bug (see `SPEC_ORPHAN_THINKING_NODES_2026_05_27.md`), just not one this retro's fix addresses.
 - **Practical takeaway:** this specific stuck entry is expected to clear on the pane's next reload/session boundary, not before. There's no lower-cost way to force it from an agent's own tool access. Not fixed as part of this retro — flagged as a known, pre-existing gap.
 
 ### Concrete follow-ups (not yet implemented)
 
-- [ ] Update this repo's `CLAUDE.md` (or `scripts/dev-agent.cmd`'s own header comment) to state the heartbeat-loop pattern explicitly, so the next agent session doesn't have to rediscover it via two different retros (this one and `retro-persistent-agent-working-status-stuck-2026-07-16.md`).
+- [ ] Update this repo's `CLAUDE.md` (or [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd)'s own header comment) to state the heartbeat-loop pattern explicitly, so the next agent session doesn't have to rediscover it via two different retros (this one and `retro-persistent-agent-working-status-stuck-2026-07-16.md`).
 - [ ] Add the distinct "long-running attached process" pane status from `retro-persistent-agent-working-status-stuck-2026-07-16.md`'s "Fix direction" — this would resolve the "pane looks perpetually Working" side effect the heartbeat pattern causes, which is the main remaining rough edge of the *correct* fix.
-- [ ] Consider whether `scripts/dev-agent.cmd` itself should emit its own internal heartbeat (so callers don't need to remember to wrap it) — would close this gap for any caller, not just agents remembering the pattern.
+- [ ] Consider whether [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) itself should emit its own internal heartbeat (so callers don't need to remember to wrap it) — would close this gap for any caller, not just agents remembering the pattern.
 - [ ] Consider whether `agentmux-bashwrap`'s idle-timeout should special-case a detected GUI/daemon launch directly — lower priority given the heartbeat-loop workaround is simple, precedented (twice now), and doesn't require touching bashwrap's core exec path again (which `RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14`'s five review rounds show is easy to subtly regress).
 - [ ] Give `scrubOrphanedInProgress` (or a new mechanism) a way to detect and clear an orphaned `"running"` `ToolNode` sooner than the next session boundary — e.g. a max-age fallback even for `"running"` status, mirroring the retention windows already used for terminal states in `ActivityDock`'s own `types.ts`.
 - [ ] File a note (or fold into the existing pager-hang retro's Open Questions) that Open Question #6 there — the false-positive risk of the idle-kill — has now been observed in a second, distinct form (a GUI dev server, not a slow search) and has a verified, precedented mitigation (the heartbeat-loop pattern, corroborated independently by two different agent sessions).
@@ -121,7 +121,7 @@ While investigating the above, a user also noticed a `sleep 45` entry still show
 
 | Order | Event |
 |-------|-------|
-| 1 | Launched `scripts/dev-agent.cmd` via the Bash tool (`run_in_background: true`), no keepalive, to verify PR #2371/#2373's merged fix. |
+| 1 | Launched [`scripts/dev-agent.cmd`](../../scripts/dev-agent.cmd) via the Bash tool (`run_in_background: true`), no keepalive, to verify PR #2371/#2373's merged fix. |
 | 2 | Polled intermittently; output file appeared stalled, but `tasklist`/shared-log `mem_attribution` telemetry confirmed a genuine, in-progress `rustc.exe` compile. |
 | 3 | ~17 minutes in, received a `task-notification`: background command failed, exit code 1. |
 | 4 | Read the captured output: full build success (backend + host + CEF + bundling), Vite came up ready, launcher was invoked — then the final line showed `agentmux-bashwrap`'s idle-timeout kill message. |

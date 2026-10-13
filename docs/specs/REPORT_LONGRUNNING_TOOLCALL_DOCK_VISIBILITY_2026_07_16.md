@@ -10,9 +10,9 @@ Original status — report: analysis + design direction, not yet implemented (on
 **Author:** Agent2
 **Verified against:** `main` @ `3d1ce73c` (pulled 2026-07-16). The dock subagent-grouping fix referenced in §5 was independently landed twice this session — this report's own version (PR #2201) was closed in favor of AgentY-asaf's more complete PR #2203, which additionally added a full multi-member roster to the expanded view. §5 below is updated to describe #2203's shipped shape.
 **Related:**
-- `docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md` (Agent3, same day) — the consolidated tracker for long-running processes / subagents / Swarm. This report is a deep-dive on that report's Area 1, specifically the "detect a blocking wait and get it out of the turn's critical status path" angle the user asked about directly.
-- `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` (the "Agent1" incident) — the concrete, already-diagnosed case this report generalizes from: a `sleep`-based heartbeat loop inside a backgrounded Bash task pinned a pane's status to ambiguous "Working…/Waiting…" for ~12 hours.
-- `docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md` / `SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md` — the existing dock's design docs.
+- [`docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md`](REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md) (Agent3, same day) — the consolidated tracker for long-running processes / subagents / Swarm. This report is a deep-dive on that report's Area 1, specifically the "detect a blocking wait and get it out of the turn's critical status path" angle the user asked about directly.
+- [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) (the "Agent1" incident) — the concrete, already-diagnosed case this report generalizes from: a `sleep`-based heartbeat loop inside a backgrounded Bash task pinned a pane's status to ambiguous "Working…/Waiting…" for ~12 hours.
+- [`docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) / `SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md` — the existing dock's design docs.
 
 ## User's request (verbatim, for traceability)
 
@@ -24,9 +24,9 @@ Three asks: (1) analyze the current dock system's state — done, §1–§4 belo
 
 ## 1. What "the dock" is
 
-`frontend/app/view/agent/components/ActivityDock.tsx` — a strip **pinned above the composer** (the message input bar), listing every long-running activity a pane's agent has spawned, as uniform rows (`ActivityRow.tsx`). Two kinds exist today:
+[`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) — a strip **pinned above the composer** (the message input bar), listing every long-running activity a pane's agent has spawned, as uniform rows (`ActivityRow.tsx`). Two kinds exist today:
 
-- **`shell`** — a persistent PTY the agent explicitly launched via the AgentMux **`Shell` MCP tool** (`agentmux-mcp`), represented in the transcript as a `ShellNode` (`frontend/app/view/agent/types.ts:376`). Explicitly **not** tied to a tool-call lifecycle — the shell keeps running after the tool call that launched it returns. Adapter: `activity/shell-adapter.ts`.
+- **`shell`** — a persistent PTY the agent explicitly launched via the AgentMux **`Shell` MCP tool** (`agentmux-mcp`), represented in the transcript as a `ShellNode` ([`frontend/app/view/agent/types.ts:376`](../../frontend/app/view/agent/types.ts)). Explicitly **not** tied to a tool-call lifecycle — the shell keeps running after the tool call that launched it returns. Adapter: `activity/shell-adapter.ts`.
 - **`subagent`** — a Task-tool or Workflow-tool child, sourced from the backend subagent watcher via a shared app-lifetime singleton (`activity/subagent-source.ts`) and adapted in `activity/subagent-adapter.ts`.
 - **`cron`** — declared in the `ActivityKind` union (`activity/types.ts:19`) but has **no adapter**. Not built.
 
@@ -36,7 +36,7 @@ Row lifecycle (`ActivityDock.tsx`): running rows always show; terminal rows (`do
 
 ## 2. How an in-flight tool call is represented today (the thing that isn't the dock)
 
-Separately from the dock, the pane-state reducer (`frontend/app/store/agent-pane-state/`) tracks **one** currently-running tool per pane:
+Separately from the dock, the pane-state reducer ([`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state)) tracks **one** currently-running tool per pane:
 
 - `ToolStart { name, arg }` sets `state.currentTool` / `state.currentToolArg` and increments `toolsActive` on the `Streaming` phase (`reducer.ts:588`).
 - `ToolEnd` clears both and decrements.
@@ -53,7 +53,7 @@ So "return conversation to the user" is **not** about unlocking input — it alr
 
 ## 4. The exact failure mode this generalizes from
 
-`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`, same day, is the concrete precedent:
+[`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md), same day, is the concrete precedent:
 
 - Agent1 launched its own dev stack via the Bash tool with `run_in_background: true`.
 - The launched command included a **self-inflicted `sleep`-based heartbeat**: `while true; do sleep 120; echo "[heartbeat] dev still alive $(date +%H:%M:%S)"; done &` — added, per the retro's inference, to defeat AgentMux's own idle-kill of background processes.
@@ -66,7 +66,7 @@ This report's "detect sleep" ask is the sharper, more specific version of that r
 
 While investigating the dock's current state, the user separately reported (mid-session): *"dozens of subagents appear in the dock now, but the agent only made 1 or 2 tool calls...the docked item needs to be per Agent tool call, not per subagent."*
 
-Root cause: `subagent-adapter.ts` mapped every `ActiveSubagent` the backend watcher knows about to its own `PinnedActivity`, with zero grouping. A single Workflow-tool call can spawn dozens of subagents at once — the Swarm pane's own docs cite **45 observed live in one run** (`REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md` Finding 4) — and the Swarm tree already solved this exact problem with `groupSubagentsByWorkflow` (shared `workflow_id` → one `WorkflowGroup`; same-name loose subagents → one `NameGroup`, `frontend/app/view/swarm/swarm-model.ts:151`). The dock adapter simply never adopted that grouping.
+Root cause: `subagent-adapter.ts` mapped every `ActiveSubagent` the backend watcher knows about to its own `PinnedActivity`, with zero grouping. A single Workflow-tool call can spawn dozens of subagents at once — the Swarm pane's own docs cite **45 observed live in one run** (`REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md` Finding 4) — and the Swarm tree already solved this exact problem with `groupSubagentsByWorkflow` (shared `workflow_id` → one `WorkflowGroup`; same-name loose subagents → one `NameGroup`, [`frontend/app/view/swarm/swarm-model.ts:151`](../../frontend/app/view/swarm/swarm-model.ts)). The dock adapter simply never adopted that grouping.
 
 **Fixed** (this session, PR #2203, AgentY-asaf — landed independently of and more completely than this report author's own first attempt at the same fix, PR #2201, closed as redundant): `subagent-adapter.ts` now runs its block-filtered subagent list through the Swarm pane's own `groupSubagentsByWorkflow` before mapping to `PinnedActivity`, reusing `groupCacheKey` for row identity so the dock and the Swarm tree agree on what counts as "one call." One dock row per Agent/Workflow-tool invocation, not per subagent. `PinnedActivity` gained a `subagentGroup?: { members: ActiveSubagent[] }` field (mutually exclusive with the existing single-`subagent` field), and `ActivityRow.tsx`'s expanded view renders a real per-member roster (sigil + label + event count per member) — a proper multi-member view, not a single-representative simplification. Status derivation distinguishes a fully-terminal-but-all-abandoned group as `stopped` rather than folding it into `done`.
 
@@ -89,8 +89,8 @@ This is the narrowest, cheapest, most directly-responsive-to-the-ask fix: it req
 
 Claude's actual Bash tool schema carries a `run_in_background: boolean` parameter (confirmed live in Agent1's own transcript: `run_in_background: true` on the dev-stack launch). **Nothing in AgentMux threads this through anywhere:**
 
-- `BashParams` (`frontend/app/view/agent/types.ts:121`) has only `{ command: string; timeout?: number }` — no `run_in_background` field. If the raw NDJSON event carries it, it survives only as an untyped, unused property on the params bag.
-- `ShellNode` — the dock's only pre-existing "attached long-running thing" representation — has **no background flag** (confirmed: `grep run_in_background` across `frontend/app`, `agentmux-srv`, `agentmux-bashwrap` returns zero hits anywhere except the retro's own prose).
+- `BashParams` ([`frontend/app/view/agent/types.ts:121`](../../frontend/app/view/agent/types.ts)) has only `{ command: string; timeout?: number }` — no `run_in_background` field. If the raw NDJSON event carries it, it survives only as an untyped, unused property on the params bag.
+- `ShellNode` — the dock's only pre-existing "attached long-running thing" representation — has **no background flag** (confirmed: `grep run_in_background` across [`frontend/app`](../../frontend/app), `agentmux-srv`, `agentmux-bashwrap` returns zero hits anywhere except the retro's own prose).
 - The consolidation report (Agent3, same day) already flags this precisely: *"No per-agent tracking of `run_in_background` Bash tasks anywhere… a backgrounded dev stack surfaces (if at all) as an undistinguished shell."*
 
 Unlike text-sniffing for "sleep," this signal is **self-declared by the agent's own tool call** and covers every backgrounded task regardless of what it runs — the general form of "every agent call" the user asked for. It requires: (1) typing the field through `BashParams`/the tool-call event, (2) a `background: boolean` (or similar) flag on whatever node represents the resulting task, (3) wiring that into the dock adapter.
@@ -125,13 +125,13 @@ Given §3 (composer already unlocked) and §4/§6 (what to detect), the actual p
 
 | File | Role |
 |------|------|
-| `frontend/app/view/agent/components/ActivityDock.tsx` | The dock itself — rendering, ordering, retention |
-| `frontend/app/view/agent/components/ActivityRow.tsx` | Per-row chrome; kind-dispatches for expanded view |
-| `frontend/app/view/agent/activity/types.ts` | `PinnedActivity`/`ActivityKind` — the abstraction any new kind extends |
-| `frontend/app/view/agent/activity/shell-adapter.ts` / `subagent-adapter.ts` | Existing adapters — the pattern a new tool-call adapter mirrors |
+| [`frontend/app/view/agent/components/ActivityDock.tsx`](../../frontend/app/view/agent/components/ActivityDock.tsx) | The dock itself — rendering, ordering, retention |
+| [`frontend/app/view/agent/components/ActivityRow.tsx`](../../frontend/app/view/agent/components/ActivityRow.tsx) | Per-row chrome; kind-dispatches for expanded view |
+| [`frontend/app/view/agent/activity/types.ts`](../../frontend/app/view/agent/activity/types.ts) | `PinnedActivity`/`ActivityKind` — the abstraction any new kind extends |
+| [`frontend/app/view/agent/activity/shell-adapter.ts`](../../frontend/app/view/agent/activity/shell-adapter.ts) / `subagent-adapter.ts` | Existing adapters — the pattern a new tool-call adapter mirrors |
 | `frontend/app/store/agent-pane-state/{reducer,types}.ts` | Turn-phase state machine; `ToolStart`/`ToolEnd`, `currentTool`/`currentToolArg`, the liveness watchdog thresholds |
-| `frontend/app/view/agent/useAgentStream.ts` | `extractToolArg` (already surfaces the raw Bash command), `ToolStart` dispatch site |
-| `frontend/app/view/agent/components/AgentFooter.tsx` | `AgentWorkingRow` — today's only "what tool is running" UI, and where a calmer status / new sub-state would land |
-| `frontend/app/view/agent/types.ts` | `BashParams` (no `run_in_background` field — the 6b gap), `ShellNode` (no background flag — same gap, per the consolidation report) |
-| `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` | The Agent1 incident — concrete precedent, fix direction this report builds on |
-| `docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md` | Sibling report, same day — broader tracker this deep-dive feeds into |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | `extractToolArg` (already surfaces the raw Bash command), `ToolStart` dispatch site |
+| [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | `AgentWorkingRow` — today's only "what tool is running" UI, and where a calmer status / new sub-state would land |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | `BashParams` (no `run_in_background` field — the 6b gap), `ShellNode` (no background flag — same gap, per the consolidation report) |
+| [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) | The Agent1 incident — concrete precedent, fix direction this report builds on |
+| [`docs/specs/REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md`](REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md) | Sibling report, same day — broader tracker this deep-dive feeds into |

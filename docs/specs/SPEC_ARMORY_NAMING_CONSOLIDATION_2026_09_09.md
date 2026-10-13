@@ -3,7 +3,7 @@
 **Status:** active — §9 decided; Phase 1 landed (#3133 Rust, #3135 frontend), Phase 2 landed (#3139), Bundles tab label landed (#3138). Phases 3 (wire) and 4 (UI fold) remain.
 **Date:** 2026-09-09
 **Verified against:** `b65df28c2` at authoring time; Phases 1-2 as landed through `a86cdee50`
-**Supersedes the naming proposal in:** `docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md` §4, which was wrong — see §2.4
+**Supersedes the naming proposal in:** [`docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md`](../status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md) §4, which was wrong — see §2.4
 **Related:** #2024 (tracking), `ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md` §3.1/§3.4
 
 ---
@@ -127,13 +127,13 @@ This section is normative. Each of these is already correct under §3.
 | Surface | Why it stays |
 |---|---|
 | MCP tools `MemoryList/Read/Write/History/Diff/Revert` (`agentmux-mcp/src/tool_schemas.rs:596-664`) | native-memory-only; verified none touch `db_bundles`. Agent-facing — renaming breaks running agents for zero gain. |
-| WS RPC `agent:memory:*` (`commands.rs:561-568`), App API `memory.list/read/write` (`:430-432`) | native memory. Correct. |
+| WS RPC `agent:memory:*` (`commands.rs:561-568`), MuxAPI `memory.list/read/write` (`:430-432`) | native memory. Correct. |
 | Tables `db_agent_native_memory`, `db_agent_native_memory_versions` | correct. |
 | Rust `NativeMemory*` types, `native_memory_handlers.rs`, `agent_native_memory*.rs` | correct. |
 | Frontend `NativeMemoryManager`, `view/native-memory/*`, `AgentNativeMemoryModal`, `native-memory-history-model.ts` | correct. **Note:** an earlier draft wrongly flagged `NativeMemoryManager` as misnamed. It is not. |
 | `db_bundles` table name | already correct (renamed in Phase 4a). |
 | **ABF `components.*` keys** | `components.memory` is *correct* under §3 — it carries native memory. No key changes are needed, which is fortunate: §7.3 shows key renames would be silently lossy. |
-| **Persisted format markers** — the `# Memory` section heading in generated `CLAUDE.md` (`agent_config.rs` `BUNDLE_SECTION_HEADING`, `frontend/app/view/agent/agent-config-builder.ts`, and the injector in `editor_handlers.rs` that searches for it) | Written into files on disk and matched later; emitter and injector must agree byte-for-byte. Learned the hard way: #3133's word-boundary replace changed only the Rust side and inverted global/personal precedence (Codex P1). Change all three together, or not at all. |
+| **Persisted format markers** — the `# Memory` section heading in generated `CLAUDE.md` (`agent_config.rs` `BUNDLE_SECTION_HEADING`, [`frontend/app/view/agent/agent-config-builder.ts`](../../frontend/app/view/agent/agent-config-builder.ts), and the injector in `editor_handlers.rs` that searches for it) | Written into files on disk and matched later; emitter and injector must agree byte-for-byte. Learned the hard way: #3133's word-boundary replace changed only the Rust side and inverted global/personal precedence (Codex P1). Change all three together, or not at all. |
 | **Wire and persisted key strings** — legacy RPC aliases `listmemories`/`getmemory`/`upsertmemory`/`deletememory`/`upsertsystemmemory`/`deletesystemmemory`, the `memories:changed` WPS event, `db_agents.memory_id`/`default_memory_id`, `viewType: "memory"`, `armory:section` value `"memory"`, meta key `armory:memory:subsection` | Compatibility surface. Aliases retire in Phase 3 behind the contract-test baseline; the persisted keys never rename (§9 open decision for `viewType`). |
 | **User-visible strings** — Armory rail labels, `bundles.rs` guard error messages, the `providers.rs` placeholder text that names a UI path | Wording moves with the UI in Phase 4, so that what the text says matches what the user can click. Phase 1–3 are identifiers only. **Rule for every rename commit:** grep the diff for `"` and backtick lines and review each hit; a `\bMemory\b` replace does not know it is inside a string. |
 
@@ -168,7 +168,7 @@ Zero contract risk. Nothing user-visible, nothing persisted.
 - `AgentNewMemoryModalPanel` → `AgentNewBundleModalPanel` (its stylesheet is *already* `AgentNewBundleModal.scss` — a half-finished rename)
 - `gotypes.d.ts:481` `type Memory` → `type Bundle`
 
-**Generated bindings caveat:** renaming `CommandDeleteMemoryData`/`DeleteMemoryResult` regenerates `frontend/types/rpc/*.ts`. The old files must be `git rm`'d — `scripts/check-rpc-bindings.sh` uses `git status --porcelain -uall` and will not flag a stale leftover.
+**Generated bindings caveat:** renaming `CommandDeleteMemoryData`/`DeleteMemoryResult` regenerates `frontend/types/rpc/*.ts`. The old files must be `git rm`'d — [`scripts/check-rpc-bindings.sh`](../../scripts/check-rpc-bindings.sh) uses `git status --porcelain -uall` and will not flag a stale leftover.
 
 ### Phase 2 — retire "brain"
 
@@ -215,7 +215,7 @@ hand-maintained in `gotypes.d.ts`. Migrating them to `register_typed` requires
 as part of this phase so all seven land typed and gated rather than perpetuating
 the split.
 
-`test/contract/rpc-contract.test.ts` currently baselines only `bundle.*` and
+[`test/contract/rpc-contract.test.ts`](../../test/contract/rpc-contract.test.ts) currently baselines only `bundle.*` and
 `memory.*` — the seven retiring commands are absent from it, so it will not catch
 their removal. Add them to the baseline *before* removing them.
 

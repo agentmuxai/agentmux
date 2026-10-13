@@ -362,8 +362,8 @@ Ordered, with file:line targets.
 | 2 | `frontend/app/view/tabcontent/tab-modal.ts` | **new** — context, hook, types |
 | 3 | `frontend/app/view/tabcontent/_tab-modal.scss` | **new** — overlay + dim/blur styles |
 | 4 | `frontend/app/view/tabcontent/tabcontent.tsx` | wrap TileLayout in `<TabModalLayer>` (~L114) |
-| 5 | `frontend/app/view/agent/components/AgentPicker.tsx` | remove modal state + render (L70, L81-84, L102, L205-212); use `useTabModal()` |
-| 6 | `frontend/app/view/agent/components/AgentLaunchModal.tsx` | remove `<Modal>` wrapper (L93-219); extract `<LaunchAgentForm>` |
+| 5 | [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) | remove modal state + render (L70, L81-84, L102, L205-212); use `useTabModal()` |
+| 6 | [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx) | remove `<Modal>` wrapper (L93-219); extract `<LaunchAgentForm>` |
 | 7 | `frontend/app/view/theme/theme.scss` | add `--z-tab-modal` token |
 | 8 | (no DB / no RPC changes) | — |
 

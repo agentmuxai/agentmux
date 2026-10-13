@@ -12,8 +12,8 @@
 - **Phase F preview** (§13) — honest realistic-fix framing for browser_panes deadlock and BlockController scope.
 - PR sequence split E.1 into E.1a (coordinator) + E.1b (srv reducer skeleton).
 **Read first:**
-- `docs/retro/multi-reducer-status-2026-04-29.md` — current state across launcher / host / srv
-- `docs/retro/multi-reducer-proposal-2026-04-28.md` — long-term design (sections on cross-reducer-sync, sagas, projections)
+- [`docs/retro/multi-reducer-status-2026-04-29.md`](../retro/multi-reducer-status-2026-04-29.md) — current state across launcher / host / srv
+- [`docs/retro/multi-reducer-proposal-2026-04-28.md`](../retro/multi-reducer-proposal-2026-04-28.md) — long-term design (sections on cross-reducer-sync, sagas, projections)
 - `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — driving spec for the multi-reducer architecture
 - `agentmux-launcher/src/reducer.rs` — pattern to mirror
 
@@ -156,7 +156,7 @@ Srv currently connects to the launcher's pipe as `ClientKind::Srv` (B.3) for lif
 | `\\.\pipe\agentmux-{hash}\command` | launcher | host, srv, renderer-tools | launcher reducer commands + events |
 | **`\\.\pipe\agentmux-{hash}\srv-command`** (new) | srv | host, renderer-tools | **srv reducer commands + events** |
 
-Renderers continue receiving events via the host's CEF JS bridge — the host subscribes to BOTH pipes and forwards both event streams to renderers. The renderer reducer in `frontend/app/store/launcher-event-reducer.ts` becomes a multi-reducer-event reducer: it routes events by their type tags into separate atom domains.
+Renderers continue receiving events via the host's CEF JS bridge — the host subscribes to BOTH pipes and forwards both event streams to renderers. The renderer reducer in [`frontend/app/store/launcher-event-reducer.ts`](../../frontend/app/store/launcher-event-reducer.ts) becomes a multi-reducer-event reducer: it routes events by their type tags into separate atom domains.
 
 ---
 
@@ -437,7 +437,7 @@ Per the multi-reducer-status doc decision: Phase E + F stay multi-PR (mega-PRs h
 | **E.3** | Block lifecycle arms (`CreateBlock`, `DeleteBlock`, `UpdateBlockMeta`). Same pattern as E.2. | ~400 |
 | **E.4** | Layout state arms. Trickier: `LayoutState` has `pendingbackendactions` that hint at an existing async surface; reducer ingests it as commands. | ~500 |
 | **E.5** | Drag/tear-off sagas — first concrete saga consumers of E.1a's coordinator. New `Command::MoveBlockToTab`, `TearOffBlock`, `TearOffTab`, `RestoreTornOffTab`. Plain subscribers for single-reducer reactions (window close → workspace cleanup). | ~700 |
-| **E.6** | Renderer-side: `frontend/util/launcher-events.ts` → `reducer-events.ts`; consumes events from both pipes (host bridge forwards both); per-source version tracking; saga-buffer-until-complete logic. Bespoke WPS WaveObjUpdate path retired or demoted. | ~600 |
+| **E.6** | Renderer-side: [`frontend/util/launcher-events.ts`](../../frontend/util/launcher-events.ts) → `reducer-events.ts`; consumes events from both pipes (host bridge forwards both); per-source version tracking; saga-buffer-until-complete logic. Bespoke WPS WaveObjUpdate path retired or demoted. | ~600 |
 | **E.7 — exit** | Property tests for srv invariants (workspace owns its tabs, tab owns its blocks, no orphan blocks, etc.) + cross-reducer integration tests for saga flows. `agentmux.exe --diag srv` and `agentmux.exe --diag sagas` Tool clients. Dead code sweep. | ~500 |
 
 **Total: ~4600 LoC across 8 PRs.** Each individually shippable + smoke-testable. No PR exceeds ~800 LoC review surface. The coordinator (E.1a) lands BEFORE the saga consumers (E.5) so the framework is proven before the first real saga depends on it.

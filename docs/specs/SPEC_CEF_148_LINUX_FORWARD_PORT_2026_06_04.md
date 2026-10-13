@@ -37,7 +37,7 @@ The correct fix is the forward-port — bring the patches onto CEF 148 so the wo
 
 ## 2. Out of scope
 
-- Frontend changes. `useWindowDrag.linux.ts` and `frontend/app/workspace/floating-pane-workspace.tsx` already call the IPC correctly; no FE changes needed.
+- Frontend changes. `useWindowDrag.linux.ts` and [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) already call the IPC correctly; no FE changes needed.
 - The X11 ozone default. That is tracked separately (PR #1241 / superseded #1261). Once this spec is implemented, X11 default is straightforward and can be re-shipped under its own PR.
 - macOS-26 process_requirement patch (`agentmuxai/cef@agentmux/7778-process-requirement`). That's already on CEF 148 and unchanged here.
 - CEF 148 → 150 / 152 future bumps. The pattern this spec establishes should apply, but each bump may need re-port of conflicting hunks.
@@ -122,7 +122,7 @@ The local cef-build setup at `~/cef-build/chromium_git/chromium/src/cef` already
 2. Run `automate-git.py` with the appropriate Chromium 148 ref.
 3. `cd ~/cef-build/chromium_git/chromium/src` then `autoninja -C out/Release_GN_x64 cef`.
 4. Sanity-check the output is ~600 MB stripped (matches CEF 146 size profile).
-5. Update `scripts/resolve-cef-runtime.sh` to also accept 148 builds.
+5. Update [`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh) to also accept 148 builds.
 
 **Time:** First build from scratch is 6–12 h on the local machine. Incremental rebuild from current 146 cache: estimate 1–3 h (lots of Chromium-side files change between 146 → 148).
 
@@ -144,7 +144,7 @@ The forward-port is "done" when **all** of the following hold:
 
 1. `cargo build --release -p agentmux-cef --features patched-libcef` succeeds on `main` (no Cargo pin, no per-target hack) on Linux, macOS, Windows.
 2. `task build:host` on Linux produces a host binary whose `strings` output contains the `BeginWindowDrag returned` info string (not the disabled-feature warn string).
-3. `scripts/verify-cef-version.sh` passes on all three platforms (asserts workspace Cargo `cef = "148"` matches bundled libcef major version 148).
+3. [`scripts/verify-cef-version.sh`](../../scripts/verify-cef-version.sh) passes on all three platforms (asserts workspace Cargo `cef = "148"` matches bundled libcef major version 148).
 4. Manual: title-bar drag works on Linux under both `--ozone-platform=wayland` and `--ozone-platform=x11`.
 5. Manual: pane-header right-click context menu fires on Linux (proves `41802fe6` HTCAPTION pass-through).
 6. Manual: `window:transparent` setting + magnify backdrop render correctly on Linux (proves transparency cascade).
@@ -163,7 +163,7 @@ The forward-port is "done" when **all** of the following hold:
 | 3 | local `~/cef-build` | Rebuild CEF 148 libcef.so for Linux from PR #1's branch. Stage at `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/libcef.so`. Multi-hour. | None — independent timeline. |
 | 4 | macOS CEF build host | Rebuild CEF 148 libcef framework for macOS from PR #1's branch + cherry-pick `5c9a1b08` (process_requirement). | None — independent. |
 | 5 | `agentmuxai/agentmux` | Workspace `Cargo.toml` adds `[patch.crates-io]` pointing at PR #2's cef-dll-sys fork. `task build:host:linux` succeeds with `--features patched-libcef`. | PRs #1 + #2. |
-| 6 | `agentmuxai/agentmux` | Bundle script updates (`scripts/resolve-cef-runtime.sh`) point at the new Linux libcef.so. macOS DMG pipeline points at the new branch. | PRs #3 + #4. |
+| 6 | `agentmuxai/agentmux` | Bundle script updates ([`scripts/resolve-cef-runtime.sh`](../../scripts/resolve-cef-runtime.sh)) point at the new Linux libcef.so. macOS DMG pipeline points at the new branch. | PRs #3 + #4. |
 | 7 | `agentmuxai/agentmux` | Re-open the X11 ozone default (was #1261, currently reverted via #1265). Now safe because drag works on X11 too. | PRs #5 + #6. |
 
 PR #1 (the cef source forward-port) is the most labor — the rest is downstream of it. Start there.
@@ -202,7 +202,7 @@ Spread across 1–2 weeks of calendar time is realistic, contingent on macOS bui
 - PR #1242 (predict-echo stall cooldown) — orthogonal but in the same typing-perf story.
 - PR #1260 (Cargo pin to 146 — merged then reverted in #1265) — what got us here.
 - PR #1265 (revert of #1260) — current state; ready to merge to restore main.
-- `docs/cef-patches/` — patch files in the AgentMux CEF fork.
+- [`docs/cef-patches/`](../cef-patches) — patch files in the AgentMux CEF fork.
 - `~/cef-build/` — local CEF source/build tree.
 - Memory: `cef_build_in_progress.md` — pre-existing CEF 146 build notes.
 

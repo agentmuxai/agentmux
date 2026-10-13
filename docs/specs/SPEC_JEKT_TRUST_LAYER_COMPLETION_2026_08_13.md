@@ -16,7 +16,7 @@ top of it are their own specs (`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`,
 `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`). — PRs touching this work, newest first: #2565
 **The WAN half of this spec’s title** is not covered here: relay-side work lives in the private cloud repo, and same-account WAN sender verification is its own spec (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`). This status was briefly restamped `implemented` on the strength of the host tier alone and corrected on 2026-09-16 (codex P2 on PR #3284), so the WAN work would not drop out of the backlog, the failure mode `REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md` was written about.
 **Trigger:** User question — "is there a trust layer so agents know they are getting real messages? If not, let's design it."
-**Builds on:** `docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (the original spec — this document completes its never-built §5.3/Phase 5). The WAN tier is addressed by separate work in the private cloud repo.
+**Builds on:** [`docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`](SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) (the original spec — this document completes its never-built §5.3/Phase 5). The WAN tier is addressed by separate work in the private cloud repo.
 
 ---
 
@@ -114,7 +114,7 @@ The WAN design (per-agent OAuth client_credentials tokens) fits its threat model
 
 ## 6. Sources
 
-- `docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (original spec; §5.3, Phase 5 is what this document completes)
+- [`docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`](SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) (original spec; §5.3, Phase 5 is what this document completes)
 - `agentmux-srv/src/backend/reactive/handler.rs` (lines 340-460, escalation + delivery logic)
 - `agentmux-srv/src/backend/reactive/sanitize.rs` (`is_sensitive_message`, `wrap_jekt_message`)
 - `agentmux-srv/src/backend/reactive/types.rs` (`InjectionRequest`)

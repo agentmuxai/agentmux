@@ -4,7 +4,7 @@
 
 **Question:** "why are we maintaining things outside of `~/.agentmux/`? I see `ai.agentmux.cef`?"
 
-**Short answer:** We're not — anymore. The data-dir unification (`SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`, implemented in PR #695) shipped. Everything AgentMux writes today is under `~/.agentmux/`. The `ai.agentmux.cef.*` references the user is seeing are **dead paths** in test harness code that I touched yesterday (the auth-file lookup in `tools/tests/authfile.ps1`). Those references are residue from the pre-unification harness and should be removed.
+**Short answer:** We're not — anymore. The data-dir unification (`SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`, implemented in PR #695) shipped. Everything AgentMux writes today is under `~/.agentmux/`. The `ai.agentmux.cef.*` references the user is seeing are **dead paths** in test harness code that I touched yesterday (the auth-file lookup in [`tools/tests/authfile.ps1`](../../tools/tests/authfile.ps1)). Those references are residue from the pre-unification harness and should be removed.
 
 ---
 
@@ -79,10 +79,10 @@ The on-disk view confirms the spec landed: `~/.agentmux/dev/agenta-perf-baseline
 
 ## Cross-references
 
-- `docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original plan (since archived).
+- [`docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — the original plan (since archived).
 - `agentmux-common/src/data_paths.rs` — the unified resolver.
 - `agentmux-launcher/src/data_dir.rs` — compat shim.
 - `agentmux-common/src/runtime_mode.rs` — the `AGENTMUX_RUNTIME_MODE` enum.
-- `scripts/wipe-old-data-dirs.sh` — cleanup script for pre-unification leftovers.
+- [`scripts/wipe-old-data-dirs.sh`](../../scripts/wipe-old-data-dirs.sh) — cleanup script for pre-unification leftovers.
 - PR #695 — implementation.
 - Memory `reference_data_dir_unification_plan.md` — pointer.

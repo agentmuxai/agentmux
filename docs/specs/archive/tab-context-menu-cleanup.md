@@ -55,4 +55,4 @@ Close Tab
 
 ## File
 
-`frontend/app/tab/tab.tsx` — `handleContextMenu` function (~line 229)
+[`frontend/app/tab/tab.tsx`](../../../frontend/app/tab/tab.tsx) — `handleContextMenu` function (~line 229)

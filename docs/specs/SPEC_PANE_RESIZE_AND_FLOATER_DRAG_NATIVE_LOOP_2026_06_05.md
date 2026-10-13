@@ -8,13 +8,13 @@
 **Front:** UX-latency umbrella #1161 (windows family of fixes)
 
 **Related:**
-- `docs/specs/SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md` (the canonical pattern this spec extends)
-- `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` (Option B = JS-driven drag; chosen for the floater)
-- `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` (canonical map of tear-off / floater / redock / browser-pane lifecycle)
+- [`docs/specs/SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md`](SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md) (the canonical pattern this spec extends)
+- [`docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) (Option B = JS-driven drag; chosen for the floater)
+- [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) (canonical map of tear-off / floater / redock / browser-pane lifecycle)
 - PR #1181 (smooth Windows title-bar drag via host-side native move loop)
 - PR #1177 (edge-resize floaters by dragging edges/corners)
-- `frontend/app/workspace/floating-pane-workspace.tsx` (the JS-driven floater drag this spec replaces)
-- `frontend/layout/lib/layoutResize.ts` (the JS-driven gutter resize hot path — secondary scope)
+- [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) (the JS-driven floater drag this spec replaces)
+- [`frontend/layout/lib/layoutResize.ts`](../../frontend/layout/lib/layoutResize.ts) (the JS-driven gutter resize hot path — secondary scope)
 
 ## 0. TL;DR
 
@@ -26,7 +26,7 @@ Pane-gutter resize is the secondary ask. It can ride the same pattern but has ad
 
 ### 1.1 Floater drag — current path
 
-`frontend/app/workspace/floating-pane-workspace.tsx` `onMount` installs a document-level mousedown listener gated by `[data-role="block-header"]`. On qualifying mousedown:
+[`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) `onMount` installs a document-level mousedown listener gated by `[data-role="block-header"]`. On qualifying mousedown:
 
 - `preventDefault()` — **load-bearing.** Blocks the HTML5 `dragstart` pragmatic-dnd would have used to initiate a pane tear-off (`TileLayout.win32.tsx:439`). Without it, dragging the floater's header tears the block off into **another** floating window — the "double tear-off" regression. See `ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` §"Tear-off conflict".
 - Linux branch: fires `start_window_drag({label})` and returns. Host runs the compositor-driven drag (CEF Views `BeginWindowDrag` via the patched libcef).
@@ -299,10 +299,10 @@ Out of scope for v1. Will move into a separate spec when v1 (floater drag) ships
 ## 12. References
 
 - `c63edf18` `feat(window-drag): smooth Windows title-bar drag via host-side native move loop (#1181)` — canonical PR; the pattern this work copies
-- `docs/specs/SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md` — canonical spec for the manual-loop pattern
-- `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` — analysis that picked Option B (JS-driven); we keep Option B's listener pattern but move the move-loop to the host
-- `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — full system map; §0 themes 1/5, §2.4 redock flow, §4 HWND resolution, §6 coord systems, §9 P1 single resolver
-- `frontend/app/workspace/floating-pane-workspace.tsx` lines 131–443 (current `onMount`) — the renderer block to simplify
+- [`docs/specs/SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md`](SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md) — canonical spec for the manual-loop pattern
+- [`docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) — analysis that picked Option B (JS-driven); we keep Option B's listener pattern but move the move-loop to the host
+- [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) — full system map; §0 themes 1/5, §2.4 redock flow, §4 HWND resolution, §6 coord systems, §9 P1 single resolver
+- [`frontend/app/workspace/floating-pane-workspace.tsx`](../../frontend/app/workspace/floating-pane-workspace.tsx) lines 131–443 (current `onMount`) — the renderer block to simplify
 - `agentmux-cef/src/ui_tasks.rs::Win32BeginMoveTask` (lines 248–425) — host-side loop to extend with source_label + hover-emit + cancel-emit
 - `agentmux-cef/src/commands/window/motion.rs::start_window_drag` (line 211) — IPC entry; passes label through to the task
 - I1-I6 isolation invariants in `agentmux/CLAUDE.md` — any new IPC channel names must embed the `dir_hash` to stay per-(channel, version)

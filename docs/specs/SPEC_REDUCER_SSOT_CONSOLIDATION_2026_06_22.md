@@ -133,7 +133,7 @@ opposite behavior). The fix:
   excluded *by type*; the `!starts_with("floating-pool-")` string check is deleted, and
   `counts_as_live_user_window` collapses back into `is_live_user_window` (no label needed).
 - **Policy CANONIZED:** floaters do NOT keep the instance alive (invariant **FP-LIFE**,
-  `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` §1.1), aligning the reducer
+  [`docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md`](../architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md) §1.1), aligning the reducer
   count with the win_event quit trigger that already excludes floaters by class. User-confirmed
   2026-06-22.
 - Out of scope for this slice (separate concerns, left label-based for now): `host_counts_snapshot`

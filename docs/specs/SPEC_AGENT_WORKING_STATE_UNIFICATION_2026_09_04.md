@@ -25,7 +25,7 @@ this plan's Phase 0 was written to unblock. My original research (an
 Explore-style grep for "Working"/"Worked"/"Queued message") missed the
 08-18 spec because its filename doesn't contain any of those strings —
 worth remembering next time: a title-string grep is not a substitute for
-checking `docs/specs/INDEX.md` chronologically for the exact area.
+checking [`docs/specs/INDEX.md`](INDEX.md) chronologically for the exact area.
 
 **What I actually shipped instead**, once I found the real gap: the
 attached-task axis (`AttachedTaskObserved`/`Cleared`/`RegistryAttachedTaskObserved`/
@@ -81,13 +81,13 @@ Swarm view is or isn't the real gap, without that evidence in hand first.
 
 ## Prior art this builds on (not re-derived)
 
-- `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` — the original Agent1 incident. Its own lesson: *"turn-phase and attached-process-liveness are orthogonal — a live process is not the same signal as a live turn."*
-- `docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md` — the watchdog force-recovery model. Mostly shipped; one item (tame `bumpEvent`/`StreamFlushObserved` re-promotion) not shipped.
-- `docs/specs/SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md` — named five-plus independent "is this still going" trackers and recommended unification. This spec is effectively that consolidation's follow-through for the two trackers the user is pointing at (`TurnPhase` and the attached-task axis).
-- `docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md` — added `attachedTask`/`registryAttachedTaskSince` as a sibling field to `TurnPhase`, deliberately not folded into it. Reducer slice + dispatch shipped in PR #2489.
+- [`docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md`](../retro/retro-persistent-agent-working-status-stuck-2026-07-16.md) — the original Agent1 incident. Its own lesson: *"turn-phase and attached-process-liveness are orthogonal — a live process is not the same signal as a live turn."*
+- [`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`](SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) — the watchdog force-recovery model. Mostly shipped; one item (tame `bumpEvent`/`StreamFlushObserved` re-promotion) not shipped.
+- [`docs/specs/SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) — named five-plus independent "is this still going" trackers and recommended unification. This spec is effectively that consolidation's follow-through for the two trackers the user is pointing at (`TurnPhase` and the attached-task axis).
+- [`docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) — added `attachedTask`/`registryAttachedTaskSince` as a sibling field to `TurnPhase`, deliberately not folded into it. Reducer slice + dispatch shipped in PR #2489.
 - **PR #2495 (2026-08-10)** — reverted #2489's `AgentFooter` render of that axis. Rationale, quoted directly from the PR body: *"the ActivityDock's running row — same data source, pinned right above the composer — already IS the indicator for a live attached task, with strictly more affordance (full command, live log, stop button). The footer copy was redundant by construction."* **This is a load-bearing fact for this plan** — the obvious-looking fix ("put the running-task text back in the footer") was already tried and deliberately rejected on live-UX grounds, not abandoned by neglect. Any new plan has to either explain why that reasoning no longer holds or design something that isn't just the same footer text again.
-- `docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md` — diagnosed `Done.completed → Streaming` re-promotion as a "design tension," proposed a `settled: boolean` grace flag. Never implemented.
-- `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` — catalogued **9 distinct ways "Working" can read true/false incorrectly**, and designed 4 logging-only telemetry additions to make them diagnosable via `muxlog` instead of by reasoning/guessing. **None of the 4 were ever implemented.**
+- [`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`](../reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md) — diagnosed `Done.completed → Streaming` re-promotion as a "design tension," proposed a `settled: boolean` grace flag. Never implemented.
+- [`docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md`](../reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md) — catalogued **9 distinct ways "Working" can read true/false incorrectly**, and designed 4 logging-only telemetry additions to make them diagnosable via `muxlog` instead of by reasoning/guessing. **None of the 4 were ever implemented.**
 
 ## 1. What's actually broken (root-caused, not guessed)
 
@@ -157,26 +157,26 @@ This phase is explicitly lower-urgency cleanup, not bug-fixing — sequence it a
 
 | Concern | File | Line(s) |
 |---|---|---|
-| `TurnPhase` state machine | `frontend/app/store/agent-pane-state/types.ts` | 195-233, 457-471 |
-| Reducer transitions (`StreamFlushObserved`, `StreamWatchdogTick`, `ReconcileTurnActive`, `TurnStart`/`TurnEnd`, `PendingMessage*`, `bumpEvent`) | `frontend/app/store/agent-pane-state/reducer.ts` | 101-146, 223-395, 397-507, 523-710, 959-1129, 1515-1562 |
-| Working/Worked label source | `frontend/app/view/agent/agent-view.tsx` | 1620-1621, 2443 |
-| `AgentWorkingRow` render | `frontend/app/view/agent/components/AgentFooter.tsx` | 25-31, 57-121 |
-| Ungated "Queued message" render (bug 1.1) | `frontend/app/view/agent/components/PendingMessagesPanel.tsx` | 41-53 |
-| Turn-end flush trigger (async race, bug 1.1) | `frontend/app/view/agent/agent-view.tsx` | 1921-1936 |
-| Pending-message ack consumer | `frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts` | 63-129 |
-| `attachedTask`/`registryAttachedTaskSince` axis | `frontend/app/store/agent-pane-state/types.ts` | 123-125, 359, 368-386 |
-| Attached-task dispatch site (`Math.min` combination) | `frontend/app/view/agent/agent-view.tsx` | 1641-1683 |
-| ActivityDock running row (current sole indicator for bug 1.2) | `frontend/app/view/agent/activity/tool-adapter.ts` | full |
+| `TurnPhase` state machine | [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | 195-233, 457-471 |
+| Reducer transitions (`StreamFlushObserved`, `StreamWatchdogTick`, `ReconcileTurnActive`, `TurnStart`/`TurnEnd`, `PendingMessage*`, `bumpEvent`) | [`frontend/app/store/agent-pane-state/reducer.ts`](../../frontend/app/store/agent-pane-state/reducer.ts) | 101-146, 223-395, 397-507, 523-710, 959-1129, 1515-1562 |
+| Working/Worked label source | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 1620-1621, 2443 |
+| `AgentWorkingRow` render | [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | 25-31, 57-121 |
+| Ungated "Queued message" render (bug 1.1) | [`frontend/app/view/agent/components/PendingMessagesPanel.tsx`](../../frontend/app/view/agent/components/PendingMessagesPanel.tsx) | 41-53 |
+| Turn-end flush trigger (async race, bug 1.1) | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 1921-1936 |
+| Pending-message ack consumer | [`frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts`](../../frontend/app/view/agent/hooks/usePendingMessageAcceptance.ts) | 63-129 |
+| `attachedTask`/`registryAttachedTaskSince` axis | [`frontend/app/store/agent-pane-state/types.ts`](../../frontend/app/store/agent-pane-state/types.ts) | 123-125, 359, 368-386 |
+| Attached-task dispatch site (`Math.min` combination) | [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx) | 1641-1683 |
+| ActivityDock running row (current sole indicator for bug 1.2) | [`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts) | full |
 | Durable background-task registry | `agentmux-srv/src/backend/storage/background_tasks.rs` | full |
-| `dispatch()` — where Phase 0's telemetry lands | `frontend/app/store/agent-pane-state-store.ts` | 169-249 |
-| `[wave-title]` precedent to mirror | `frontend/app-init.ts` | 857-867 |
-| `settled` grace-flag design (Phase 3) | `docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md` | §1.3 |
-| 9-path false-Working catalog | `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` | §1 |
+| `dispatch()` — where Phase 0's telemetry lands | [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | 169-249 |
+| `[wave-title]` precedent to mirror | [`frontend/app-init.ts`](../../frontend/app-init.ts) | 857-867 |
+| `settled` grace-flag design (Phase 3) | [`docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`](../reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md) | §1.3 |
+| 9-path false-Working catalog | [`docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md`](../reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md) | §1 |
 | PR #2489 (attached-task axis + footer render, shipped) | GitHub | — |
 | PR #2495 (footer render reverted, same day) | GitHub | — |
-| `PendingMessage.flushing` (Phase 1) | `frontend/app/view/agent/state.ts` | 157-188 |
-| `PendingMessageFlushStarted` dispatch site (Phase 1, corrected design) | `frontend/app/view/agent/hooks/useAgentCommands.ts` | `flushHeldMessages`, just before `deliverToBackend` |
-| `[wave-turn]` attached-task logging (Phase 0 extension) | `frontend/app/store/agent-pane-state-store.ts` | ~403-430 |
-| `muxlog phases` recipe (already-shipped Phase 0) | `docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md` | §1 |
-| Backgrounded-Bash dock wiring (already-shipped, ruling out §1.2(b)) | `frontend/app/view/agent/activity/tool-adapter.ts` | `isAcceptedBackgroundLaunch`, `parseTaskNotification`, `toolActivities` |
-| Fleet-level Swarm view (unaccounted-for §1.2(a) lead, not chased down) | `frontend/app/view/swarm/swarm-view.tsx`, `swarm-child-count.ts` | `agentChildRowCount` |
+| `PendingMessage.flushing` (Phase 1) | [`frontend/app/view/agent/state.ts`](../../frontend/app/view/agent/state.ts) | 157-188 |
+| `PendingMessageFlushStarted` dispatch site (Phase 1, corrected design) | [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) | `flushHeldMessages`, just before `deliverToBackend` |
+| `[wave-turn]` attached-task logging (Phase 0 extension) | [`frontend/app/store/agent-pane-state-store.ts`](../../frontend/app/store/agent-pane-state-store.ts) | ~403-430 |
+| `muxlog phases` recipe (already-shipped Phase 0) | [`docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md`](SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md) | §1 |
+| Backgrounded-Bash dock wiring (already-shipped, ruling out §1.2(b)) | [`frontend/app/view/agent/activity/tool-adapter.ts`](../../frontend/app/view/agent/activity/tool-adapter.ts) | `isAcceptedBackgroundLaunch`, `parseTaskNotification`, `toolActivities` |
+| Fleet-level Swarm view (unaccounted-for §1.2(a) lead, not chased down) | [`frontend/app/view/swarm/swarm-view.tsx`](../../frontend/app/view/swarm/swarm-view.tsx), `swarm-child-count.ts` | `agentChildRowCount` |

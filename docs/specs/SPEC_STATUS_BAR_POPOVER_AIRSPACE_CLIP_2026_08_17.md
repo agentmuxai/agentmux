@@ -3,7 +3,7 @@
 **Date:** 2026-08-17
 **Type:** Bug fix (root-caused, implementation-ready — no code shipped yet)
 **Status:** Draft
-**Scope:** `frontend/app/statusbar/HostPopover.tsx`, `frontend/app/statusbar/BackendStatus.tsx` (+ matching CSS in `StatusBar.scss`). No backend changes.
+**Scope:** [`frontend/app/statusbar/HostPopover.tsx`](../../frontend/app/statusbar/HostPopover.tsx), [`frontend/app/statusbar/BackendStatus.tsx`](../../frontend/app/statusbar/BackendStatus.tsx) (+ matching CSS in `StatusBar.scss`). No backend changes.
 
 ## Problem
 
@@ -20,7 +20,7 @@ token-usage breakdown, the version/instance panel) and the widget bar's
 On Windows, a browser pane's content is a real native child HWND
 (`agentmux-cef`'s `CefBrowserView`), which Win32 composites **above the DOM
 regardless of CSS z-index** — the "airspace problem," fully diagnosed in
-`docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`. Any DOM element that
+[`docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md). Any DOM element that
 needs to visually sit above a pane must explicitly register its screen rect
 so the backend can punch a transparent hole through the pane's HWND
 (`SetWindowRgn`) at that rect. There is no way for CSS alone to win this —
@@ -30,7 +30,7 @@ paint order at all.
 The app already has a working, reusable fix for exactly this, used by
 **every other** status-bar popover:
 
-- `usePaneOverlay(() => rootRef)` (`frontend/app/platform/pane-overlay.ts:265-316`)
+- `usePaneOverlay(() => rootRef)` ([`frontend/app/platform/pane-overlay.ts:265-316`](../../frontend/app/platform/pane-overlay.ts))
   — call once per popover root; it measures the element's
   `getBoundingClientRect()` on mount/resize/reposition and dispatches the
   rect into the shared overlay-clip map, which flushes to the
@@ -142,7 +142,7 @@ popover mounts.
   spec only wires two stragglers onto it.
 - Does not address the browser-pane loading-indicator flicker — unrelated
   bug, covered separately in
-  `docs/specs/SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`.
+  [`docs/specs/SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`](SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md).
 
 ## Verification
 
@@ -160,15 +160,15 @@ already relies on).
 
 ## References
 
-- `docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md` — origin of the
+- [`docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md) — origin of the
   `data-pane-overlay` auto-discovery mechanism and the airspace problem
   writeup.
-- `frontend/app/platform/pane-overlay.ts`, `pane-overlay-auto.ts` — the
+- [`frontend/app/platform/pane-overlay.ts`](../../frontend/app/platform/pane-overlay.ts), `pane-overlay-auto.ts` — the
   primitive this spec reuses unmodified.
-- `frontend/app/statusbar/TokenUsageIndicator.tsx`,
+- [`frontend/app/statusbar/TokenUsageIndicator.tsx`](../../frontend/app/statusbar/TokenUsageIndicator.tsx),
   `TokenBreakdownPopover.tsx` — the pattern being mirrored.
-- `frontend/app/statusbar/CpuCoresPopover.tsx`,
+- [`frontend/app/statusbar/CpuCoresPopover.tsx`](../../frontend/app/statusbar/CpuCoresPopover.tsx),
   `DiskVolumesPopover.tsx`, `SystemStats.tsx` — a second working precedent
   (two triggers sharing one parent).
-- `frontend/app/element/popover-menu.tsx` — the widget bar's "More ▾"
+- [`frontend/app/element/popover-menu.tsx`](../../frontend/app/element/popover-menu.tsx) — the widget bar's "More ▾"
   dropdown, the user's own reference point for "already works correctly."

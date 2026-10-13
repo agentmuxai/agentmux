@@ -2,7 +2,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The App API's focus path (docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md, A1
+// MuxAPI's focus path (docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md, A1
 // and A2): a target anywhere in this window is revealed (its tab switched to,
 // its pane showing it) by revealBlockLocally, and PressKeys waits a few
 // frames for the caret before refusing.

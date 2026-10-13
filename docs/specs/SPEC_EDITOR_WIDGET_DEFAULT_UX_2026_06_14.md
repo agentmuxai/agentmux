@@ -102,7 +102,7 @@ created if absent. A 30-day cleanup pass on startup prunes orphaned files.
 
 ### 3. `EditorTab` model changes
 
-`frontend/app/store/editor-pane-state-store.ts` — extend `EditorTab`:
+[`frontend/app/store/editor-pane-state-store.ts`](../../frontend/app/store/editor-pane-state-store.ts) — extend `EditorTab`:
 
 ```typescript
 interface EditorTab {
@@ -194,7 +194,7 @@ No new infrastructure needed — block meta persistence already exists.
 | `websocket.rs` | `movescratchfile` command | **Yes (new)** |
 | `rpc_types.rs` | `CommandCreateScratchFile`, `CommandMoveScratchFile` structs | **Yes (new)** |
 | `frontend/app/view/editor/editor-tab-header.tsx` | Save As inline input field | No (edit) |
-| `frontend/app/view/editor/editor-view.tsx` | Handle `editor:scratch` meta on mount | No (edit) |
+| [`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx) | Handle `editor:scratch` meta on mount | No (edit) |
 | `app-api-pane-open.md` | `is_new: true` variant | Updated |
 
 ---

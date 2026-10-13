@@ -163,7 +163,7 @@ if (api && typeof api.setZoomFactor === "function") {
 }
 ```
 
-**`frontend/util/cef-api.ts`:** Restore normal `toggleDevtools`:
+**[`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts):** Restore normal `toggleDevtools`:
 ```typescript
 // BEFORE (workaround)
 toggleDevtools: () => {

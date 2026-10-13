@@ -30,7 +30,7 @@ Every user-visible widget/pane label is Title Case (`Agent`, `Browser`, `Editor`
 | 4 | User-facing docs — references to the bar labels in prose | `agentmux-docs/src/content/docs/{first-agent,quickstart,pane-types}.md` | "click the **agent** icon" | "click the **Agent** icon" |
 | 5 | Repo README — feature-list prose | `agentmux/README.md:31` | "alongside terminals, editor, browser, and system metrics" | "alongside **Terminal**, **Editor**, **Browser**, and **Sysinfo** panes" (or leave as common-noun list — see §Open Questions) |
 
-Surface (1) is the dominant fix — every widget-bar button reads `widget.label` directly (`frontend/app/window/action-widgets.tsx:123`, `:197`).
+Surface (1) is the dominant fix — every widget-bar button reads `widget.label` directly ([`frontend/app/window/action-widgets.tsx:123`](../../frontend/app/window/action-widgets.tsx), `:197`).
 
 Surface (2) is the safety net: a few code paths (`block.tsx:113`, `blockframe.tsx:260,271`) call `blockViewToName()` and currently get the raw lowercase id back for `agent`, `browser`, `editor`, `sysinfo`, `warden`.
 
@@ -46,7 +46,7 @@ Surface (5) is a single optional line. The README's widget table at lines 81–8
 - Internal `viewType = "agent"` strings on view models.
 - `widgets.json` keys (`defwidget@agent`) and `blockdef.meta.view` fields.
 - All test fixtures using lowercase view ids (`viewType="agent"` in `BlockErrorBoundary.test.tsx` etc.) — these probe the internal id, not the label.
-- Drone canvas block labels (`frontend/app/view/drone/block-registry.ts`) — already Title-Case.
+- Drone canvas block labels ([`frontend/app/view/drone/block-registry.ts`](../../frontend/app/view/drone/block-registry.ts)) — already Title-Case.
 - `autotitle.ts::generateAutoTitle` — already Title-Cases via `generateDefaultTitle` (`charAt(0).toUpperCase()`), and explicit cases (`"Help"`, `"System Info"`) are already correct.
 - Common-noun usage in docs: "the **agent pane** has a cog icon", "the **browser pane**'s lifecycle", "open a **terminal**" — these are concept-noun references, not UI-label references, and should stay lowercase.
 - Architectural/internal docs that describe widgets as components (e.g. `internals/agent-pane-virtualization.md`, `internals/warden.md`) — they document the implementation, not the visible label.

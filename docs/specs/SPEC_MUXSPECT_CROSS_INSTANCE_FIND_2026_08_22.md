@@ -5,7 +5,7 @@
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/server/muxspect_handlers.rs`,
 `agentmux-srv/src/server/mod.rs`, `agentmux-srv/src/backend/shellintegration/muxspect.mjs`)
-**Related:** Ext 4 of `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`;
+**Related:** Ext 4 of [`docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`](../reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md);
 builds on the cross-channel fan-out mechanism `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
 (Phase A) already shipped for `muxspect conversations`.
 

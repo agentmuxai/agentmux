@@ -122,7 +122,7 @@ cef host-reducer H-phase scaffolding (9+ never-constructed `HostCommand` variant
 
 ## 3. Tree-shake — Frontend
 
-Inventory: 788 files under `frontend/` (642 TS/TSX ≈ 133k LOC incl. tests; 136 SCSS ≈ 21k). Knip ran clean (caveat: its platform resolver targets win32 only — **`.darwin.*`/`.linux.*` variants are false positives; a naive knip-driven delete would break macOS/Linux builds**).
+Inventory: 788 files under [`frontend/`](../../frontend) (642 TS/TSX ≈ 133k LOC incl. tests; 136 SCSS ≈ 21k). Knip ran clean (caveat: its platform resolver targets win32 only — **`.darwin.*`/`.linux.*` variants are false positives; a naive knip-driven delete would break macOS/Linux builds**).
 
 ### 3.1 Verified-dead files (~4,200 LOC, high confidence — knip + manual grep both zero)
 
@@ -187,7 +187,7 @@ Most important:
 
 ### 4.3 Test coverage gaps (structural)
 
-Zero tests: **`agentmux-srv/src/muxbus/`** (incl. PKCE — security-relevant), **`frontend/app/workspace/`** (incl. the 1,056-line floating-pane workspace under heavy churn), `TileLayout.*` (~2.5k LOC), cef top-level runtime (`lib.rs`, `state.rs`, `app.rs`, `ui_tasks/window.rs`), `server/service/workspace.rs` (1,395 — where redock logic lives). Well-covered: identity, sagas, store, agent view.
+Zero tests: **`agentmux-srv/src/muxbus/`** (incl. PKCE — security-relevant), **[`frontend/app/workspace/`](../../frontend/app/workspace)** (incl. the 1,056-line floating-pane workspace under heavy churn), `TileLayout.*` (~2.5k LOC), cef top-level runtime (`lib.rs`, `state.rs`, `app.rs`, `ui_tasks/window.rs`), `server/service/workspace.rs` (1,395 — where redock logic lives). Well-covered: identity, sagas, store, agent view.
 
 ### 4.4 Consistency
 
@@ -197,26 +197,26 @@ Zero tests: **`agentmux-srv/src/muxbus/`** (incl. PKCE — security-relevant), *
 
 ### 4.5 Config/scripts
 
-Broken: **11 dead `tsunami:*` tasks** (`Taskfile.yml:377-466`, Go leftovers), `storybook`/`storybook:build` tasks (no config/dep exists), `npm run package:portable` → nonexistent task (`package.json:24`), phantom `docs` npm workspace (`package.json:130-132`), `scripts/verify-package.sh` (Electron/asar/wsh-era relic). CLAUDE.md/README cite `task test` — doesn't exist (tests are `npm test`).
+Broken: **11 dead `tsunami:*` tasks** (`Taskfile.yml:377-466`, Go leftovers), `storybook`/`storybook:build` tasks (no config/dep exists), `npm run package:portable` → nonexistent task (`package.json:24`), phantom `docs` npm workspace (`package.json:130-132`), [`scripts/verify-package.sh`](../../scripts/verify-package.sh) (Electron/asar/wsh-era relic). CLAUDE.md/README cite `task test` — doesn't exist (tests are `npm test`).
 
 ---
 
 ## 5. Documentation audit
 
-**913 markdown docs** (784 under `docs/`, 129 under root `specs/`), produced at ~250/month and essentially never retired (<5% archived). Sample of 30 verified against code: 9 LIVING, 13 HISTORICAL, 8 SUPERSEDED, 0 outright WRONG.
+**913 markdown docs** (784 under [`docs/`](..), 129 under root `specs/`), produced at ~250/month and essentially never retired (<5% archived). Sample of 30 verified against code: 9 LIVING, 13 HISTORICAL, 8 SUPERSEDED, 0 outright WRONG.
 
 ### 5.1 The retirement gap (core problem)
 
 - Status fields written once, never re-stamped: ≥5 implemented specs still say "Draft"/"ready to implement" (`SPEC_MUXBUS_DELIVERY_HIERARCHY`, `SPEC_AGENT_CONTROL_PROTOCOL`, `SPEC_DRONE_CANVAS_NODE_EDITOR`, `SPEC_AGENT_FAILURE_DIAGNOSTICS`, `SPEC_LINUX_DOCS_UPDATE`).
 - `Supersedes:` header exists in only 12 of 913 files; zero sampled docs carry a supersession banner even with an explicit replacement.
-- Most misleading file found: **`docs/specs/SPEC_BACKEND_LIFECYCLE.md`** — "Status: Draft", cites removed `src-tauri/` files; its replacement (`docs/specs/process-lifecycle-v2.md`) names it, but the old file has no banner.
-- Dangerous self-declared-canonical: `docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md` ("start here") describes pre-global-agent-promotion storage.
+- Most misleading file found: **[`docs/specs/SPEC_BACKEND_LIFECYCLE.md`](../specs/SPEC_BACKEND_LIFECYCLE.md)** — "Status: Draft", cites removed `src-tauri/` files; its replacement ([`docs/specs/process-lifecycle-v2.md`](../specs/process-lifecycle-v2.md)) names it, but the old file has no banner.
+- Dangerous self-declared-canonical: [`docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md`](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md) ("start here") describes pre-global-agent-promotion storage.
 
 ### 5.2 Indexes are stale
 
-- `docs/README.md`: omits 12 of 20 subdirs, references nonexistent `docs-internal/`, states an inverted specs convention ("approved specs live in top-level `specs/`" — de facto all new specs go to `docs/specs/`: 57 vs 13 since 06-25).
-- `docs/specs/INDEX.md`: links 71 of 487 specs (~15%), frozen at 2026-06-18 — misses the entire Armory/composable-model/July arc.
-- Cruft: `docs/retros/` (2 strays) duplicates `docs/retro/`; 7 singleton dirs.
+- [`docs/README.md`](../README.md): omits 12 of 20 subdirs, references nonexistent `docs-internal/`, states an inverted specs convention ("approved specs live in top-level `specs/`" — de facto all new specs go to [`docs/specs/`](../specs): 57 vs 13 since 06-25).
+- [`docs/specs/INDEX.md`](../specs/INDEX.md): links 71 of 487 specs (~15%), frozen at 2026-06-18 — misses the entire Armory/composable-model/July arc.
+- Cruft: `docs/retros/` (2 strays) duplicates [`docs/retro/`](../retro); 7 singleton dirs.
 
 ### 5.3 Top-level docs — verified wrong claims
 
@@ -268,7 +268,7 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 ### 6.5 Proposed "where knowledge lives" rule
 
 1. **agentmux-docs** = everything a user/operator reads. Never document a feature only in `agentmux/docs/`.
-2. **agentmux `specs/` + `docs/`** = engineering truth + canonical wire-format specs for anything both repos implement (jekt marker, delivery hierarchy).
+2. **agentmux `specs/` + [`docs/`](..)** = engineering truth + canonical wire-format specs for anything both repos implement (jekt marker, delivery hierarchy).
 3. **agentmux-cloud** = relay/consumer implementation + business docs; protocol semantics imported from main-repo specs, never redefined.
 4. **Renames aren't done** until the docs repo and all keyword/string lists are swept — add to the rename-spec checklist.
 
@@ -280,9 +280,9 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 
 | # | Action | Evidence |
 |---|---|---|
-| 1 | Remove active BUG-TRACE logging | `frontend/app/tab/tabcontent.tsx:62-68` |
+| 1 | Remove active BUG-TRACE logging | [`frontend/app/tab/tabcontent.tsx:62-68`](../../frontend/app/tab/tabcontent.tsx) |
 | 2 | `cargo fix --workspace` (49 mechanical warning fixes; skip in-flight files) | §2.1 |
-| 3 | Delete dead Taskfile/`package.json` entries: 11 `tsunami:*` tasks, `storybook`, `package:portable` script, phantom `docs` workspace; delete `scripts/verify-package.sh` | §4.5 |
+| 3 | Delete dead Taskfile/`package.json` entries: 11 `tsunami:*` tasks, `storybook`, `package:portable` script, phantom `docs` workspace; delete [`scripts/verify-package.sh`](../../scripts/verify-package.sh) | §4.5 |
 | 4 | Fix invalid SPDX `Apache-2.0s` (3 files) | §4.4 |
 | 5 | Remove unused deps: `async-stream`, prod `tower` (Rust); `@dschz/solid-flow`, `@tanstack/solid-virtual`, `streamdown` (npm) | §2.4, §3.2 |
 | 6 | One-word muxbus fix in `SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md:195` | §5.4 |
@@ -305,10 +305,10 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 |---|---|
 | 14 | Rewrite BUILD.md wrong claims (WebView2, NSIS→Inno, React→SolidJS, Node 24, `--fresh`, log paths → point at muxlog) |
 | 15 | Regenerate widget tables in CLAUDE.md + README.md from `widgets.json` (17 widgets, 4 pinned); fix Settings, `AGENTMUX_DEV` bullet, `task test` |
-| 16 | Refresh `docs/README.md` (drop `docs-internal/` ghost, add 12 missing dirs, state the real specs policy: root `specs/` frozen, new specs → `docs/specs/`); regenerate `docs/specs/INDEX.md` (script it from filename dates + Status headers) |
-| 17 | Supersession banners: `SPEC_BACKEND_LIFECYCLE.md`, `docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`, `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR`, `openclaw-agent-runtime.md`, `single-instance-new-window.md`; as-of banner on `ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL` |
+| 16 | Refresh [`docs/README.md`](../README.md) (drop `docs-internal/` ghost, add 12 missing dirs, state the real specs policy: root `specs/` frozen, new specs → [`docs/specs/`](../specs)); regenerate [`docs/specs/INDEX.md`](../specs/INDEX.md) (script it from filename dates + Status headers) |
+| 17 | Supersession banners: `SPEC_BACKEND_LIFECYCLE.md`, [`docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`](../specs/archive/SPEC_TRUST_CENTER_2026_06_15.md), `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR`, `openclaw-agent-runtime.md`, `single-instance-new-window.md`; as-of banner on `ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL` |
 | 18 | Re-stamp the 5 implemented-but-"Draft" specs; adopt closed Status vocabulary (`draft/approved/implemented/living/historical/superseded`) + `Superseded-by:` convention for new docs |
-| 19 | VERSION_HISTORY.md tail cleanup (line 1817 stray, line 2443 bump-cli instructions); merge `docs/retros/`→`docs/retro/`, fold singleton dirs |
+| 19 | VERSION_HISTORY.md tail cleanup (line 1817 stray, line 2443 bump-cli instructions); merge `docs/retros/`→[`docs/retro/`](../retro), fold singleton dirs |
 
 ### Tier 3 — Cross-repo sync (needs a product decision on #20)
 

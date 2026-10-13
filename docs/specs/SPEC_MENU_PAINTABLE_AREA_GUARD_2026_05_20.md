@@ -51,15 +51,15 @@ The Explore pass over the codebase (verified against HEAD `7e3d5722`) found **7+
 
 | # | Surface | File | Render layer | Offset logic | Correct? |
 |---|---|---|---|---|---|
-| 1 | **FlyoutMenu** (hamburger, dropdowns) | `frontend/app/element/flyoutmenu.tsx:51` | DOM | floating-ui `computePosition`, **placement only — no middleware** | ❌ never offsets |
-| 2 | **MenuButton** | `frontend/app/element/menubutton.tsx` | DOM | wraps FlyoutMenu | ❌ inherits |
+| 1 | **FlyoutMenu** (hamburger, dropdowns) | [`frontend/app/element/flyoutmenu.tsx:51`](../../frontend/app/element/flyoutmenu.tsx) | DOM | floating-ui `computePosition`, **placement only — no middleware** | ❌ never offsets |
+| 2 | **MenuButton** | [`frontend/app/element/menubutton.tsx`](../../frontend/app/element/menubutton.tsx) | DOM | wraps FlyoutMenu | ❌ inherits |
 | 3 | **FlyoutMenu submenu** | `flyoutmenu.tsx:262-289` | DOM | ad-hoc manual `getBoundingClientRect` vs `innerWidth/Height`, one-shot `flipped` flag | ⚠️ offsets, but window-edge only + buggy (see §3.1) |
 | 4 | **Popover** (status bar, notifications) | `frontend/app/element/popover.tsx:59` | DOM | floating-ui, `offset` only — `shift`/`flip` only if the *caller* passes them | ❌ no offset by default |
-| 5 | **Tooltip** | `frontend/app/element/tooltip.tsx:49` | DOM | floating-ui `offset(10)` + `flip()` + `shift({padding:12})` | ✅ offsets correctly (window edge only) |
-| 6 | **More dropdown** (widget bar) | `frontend/app/window/action-widgets.tsx:229` | DOM `position:fixed` | manual `window.innerWidth - rect.right` | ⚠️ horizontal offset only |
-| 7 | **TokenBreakdownPopover** | `frontend/app/statusbar/TokenBreakdownPopover.tsx:76-84` | DOM `position:fixed` | manual clamp, bespoke 8px gutter | ⚠️ correct but hand-rolled |
-| 8 | **Native context menus** (all right-click) | `frontend/app/store/contextmenu.ts:52-58` | **native CEF/OS** | raw `clientX/clientY` → `getApi().showContextMenu` | ✅ OS offsets natively, paints above panes |
-| 9 | **Command palette** | `frontend/app/modals/command-palette.tsx` | DOM modal | modal-v2 centering | ✅ centered, never near an edge |
+| 5 | **Tooltip** | [`frontend/app/element/tooltip.tsx:49`](../../frontend/app/element/tooltip.tsx) | DOM | floating-ui `offset(10)` + `flip()` + `shift({padding:12})` | ✅ offsets correctly (window edge only) |
+| 6 | **More dropdown** (widget bar) | [`frontend/app/window/action-widgets.tsx:229`](../../frontend/app/window/action-widgets.tsx) | DOM `position:fixed` | manual `window.innerWidth - rect.right` | ⚠️ horizontal offset only |
+| 7 | **TokenBreakdownPopover** | [`frontend/app/statusbar/TokenBreakdownPopover.tsx:76-84`](../../frontend/app/statusbar/TokenBreakdownPopover.tsx) | DOM `position:fixed` | manual clamp, bespoke 8px gutter | ⚠️ correct but hand-rolled |
+| 8 | **Native context menus** (all right-click) | [`frontend/app/store/contextmenu.ts:52-58`](../../frontend/app/store/contextmenu.ts) | **native CEF/OS** | raw `clientX/clientY` → `getApi().showContextMenu` | ✅ OS offsets natively, paints above panes |
+| 9 | **Command palette** | [`frontend/app/modals/command-palette.tsx`](../../frontend/app/modals/command-palette.tsx) | DOM modal | modal-v2 centering | ✅ centered, never near an edge |
 
 Of the six **DOM menus**, exactly **one** (Tooltip) offsets correctly — and even that one only knows about the window edge, not native panes.
 
@@ -188,7 +188,7 @@ Result: **one offsetter for every DOM menu; native menus stay native.** A litera
 Q1 (editor pane DOM-vs-native), Q2 (fallback scope), verify `getNativePaneRects` sources cleanly from the layout reducer.
 
 ### Phase 1 — `useMenuPosition` + paintable-area selector (1.5 days)
-`frontend/app/util/menu-position.ts` — the hook, `getPaintableArea()`, `getNativePaneRects()`. Fixed middleware stack with custom `boundary`. Unit tests: anchor at each edge, anchor over a synthetic native-pane rect, tall-menu shrink.
+[`frontend/app/util/menu-position.ts`](../../frontend/app/util/menu-position.ts) — the hook, `getPaintableArea()`, `getNativePaneRects()`. Fixed middleware stack with custom `boundary`. Unit tests: anchor at each edge, anchor over a synthetic native-pane rect, tall-menu shrink.
 
 ### Phase 2 — migrate FlyoutMenu + Popover (1 day)
 Covers the majority of DOM menus (MenuButton, NotificationPopover inherit). Delete the one-shot `flipped` submenu logic — submenus offset through the hook.

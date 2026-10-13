@@ -201,10 +201,10 @@ Applied to both `Block` (line 258) and `SubBlock` (line 294) components in
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/block.tsx` | `viewType` memo + narrowed effect dependency (Block + SubBlock) |
-| `frontend/app/block/blockframe.tsx` | `getBodyContextMenuItems` injected into body menu |
-| `frontend/app/view/sysinfo/sysinfo-model.ts` | Added `getBodyContextMenuItems()` method |
-| `frontend/types/custom.d.ts` | Added `getBodyContextMenuItems?()` to ViewModel interface |
+| [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx) | `viewType` memo + narrowed effect dependency (Block + SubBlock) |
+| [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) | `getBodyContextMenuItems` injected into body menu |
+| [`frontend/app/view/sysinfo/sysinfo-model.ts`](../../frontend/app/view/sysinfo/sysinfo-model.ts) | Added `getBodyContextMenuItems()` method |
+| [`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts) | Added `getBodyContextMenuItems?()` to ViewModel interface |
 
 ---
 

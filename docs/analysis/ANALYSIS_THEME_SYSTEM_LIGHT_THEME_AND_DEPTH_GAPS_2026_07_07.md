@@ -20,7 +20,7 @@
 
 ### Current state
 
-`frontend/app/theme.scss`'s bare `:root` (209 custom properties across color/typography/spacing/radius/shadow/motion/cursor/z-index/etc.) is the *default* theme and is itself dark (`--main-bg-color: rgba(34,34,34, var(--window-opacity))`, `--main-text-color: #f7f7f7`). Every named theme in `frontend/app/themes/` overrides a subset of those tokens under a `[data-theme="name"]` selector:
+[`frontend/app/theme.scss`](../../frontend/app/theme.scss)'s bare `:root` (209 custom properties across color/typography/spacing/radius/shadow/motion/cursor/z-index/etc.) is the *default* theme and is itself dark (`--main-bg-color: rgba(34,34,34, var(--window-opacity))`, `--main-text-color: #f7f7f7`). Every named theme in [`frontend/app/themes/`](../../frontend/app/themes) overrides a subset of those tokens under a `[data-theme="name"]` selector:
 
 | Theme | `--main-bg-color` | `--main-text-color` |
 |---|---|---|
@@ -36,14 +36,14 @@
 Every single one is dark-background/light-text. "High-contrast" is the classic black-background/white-text WCAG pattern, not a light-background high-contrast variant.
 
 Two things that looked like they might be existing light themes, checked and ruled out:
-- **`catppuccin-latte` JS chunk** (seen in build output) — this is the Shiki syntax-highlighter's bundled Catppuccin *Latte* flavor (VSCode-theme-JSON format, `"activityBar.background":"#dce0e8"` etc.), used only for code-block syntax highlighting. It's entirely unrelated to the app-chrome theme system — `frontend/app/themes/catppuccin.scss` only implements Mocha.
-- **`prefers-color-scheme: light`** — exactly one hit in the whole frontend, `frontend/app/window/window-controls.win32.scss:55-61`, and it only retints the Win11 caption-button hover/press overlay (white↔black tint), unconnected to `data-theme`/`window:theme`. A separate spec doc (`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md`) flags OS-light-mode-aware coloring as an explicit *design target, not yet implemented*.
+- **`catppuccin-latte` JS chunk** (seen in build output) — this is the Shiki syntax-highlighter's bundled Catppuccin *Latte* flavor (VSCode-theme-JSON format, `"activityBar.background":"#dce0e8"` etc.), used only for code-block syntax highlighting. It's entirely unrelated to the app-chrome theme system — [`frontend/app/themes/catppuccin.scss`](../../frontend/app/themes/catppuccin.scss) only implements Mocha.
+- **`prefers-color-scheme: light`** — exactly one hit in the whole frontend, [`frontend/app/window/window-controls.win32.scss:55-61`](../../frontend/app/window/window-controls.win32.scss), and it only retints the Win11 caption-button hover/press overlay (white↔black tint), unconnected to `data-theme`/`window:theme`. A separate spec doc (`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md`) flags OS-light-mode-aware coloring as an explicit *design target, not yet implemented*.
 
 ### Mechanism (for building a light theme against)
 
 - Settings key: `window:theme`, schema enum in `dist/schema/settings.json`.
-- Picker UI: `frontend/app/view/settings/settings-view.tsx` `<select>`, options sourced from `THEME_OPTIONS` in `frontend/app/menu/base-menus.ts` (also drives the hamburger-menu Theme submenu).
-- Applied via `frontend/app/app.tsx`'s `AppSettingsUpdater()`: `document.documentElement.setAttribute("data-theme", theme)` (or removes the attribute for `"default"`). Pure attribute-driven CSS cascade, live-reactive — no reload needed.
+- Picker UI: [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx) `<select>`, options sourced from `THEME_OPTIONS` in [`frontend/app/menu/base-menus.ts`](../../frontend/app/menu/base-menus.ts) (also drives the hamburger-menu Theme submenu).
+- Applied via [`frontend/app/app.tsx`](../../frontend/app/app.tsx)'s `AppSettingsUpdater()`: `document.documentElement.setAttribute("data-theme", theme)` (or removes the attribute for `"default"`). Pure attribute-driven CSS cascade, live-reactive — no reload needed.
 - To add a theme: create `frontend/app/themes/<name>.scss` following the existing 8 files' pattern, add it to `index.scss`'s `@use` list, add the id to the settings schema enum and `THEME_OPTIONS`.
 
 ### What a light theme needs beyond "just flip the tokens"
@@ -58,7 +58,7 @@ The `--term-*` token set already exists and is unused (Dimension 2) — a light 
 
 ### 2a. The terminal (primary ask) — confirmed fully decoupled
 
-The embedded terminal (xterm.js, `frontend/app/view/term/`) gets its colors from `computeTheme()` / `computeTermThemeFromSettings()` in `frontend/app/view/term/termutil.ts`, which:
+The embedded terminal (xterm.js, [`frontend/app/view/term/`](../../frontend/app/view/term)) gets its colors from `computeTheme()` / `computeTermThemeFromSettings()` in [`frontend/app/view/term/termutil.ts`](../../frontend/app/view/term/termutil.ts), which:
 
 1. Reads `fullConfig.termthemes[term:theme]` — a **backend-owned** config (`agentmux-srv/src/backend/wconfig/types.rs`), keyed by the **separate** `term:theme` setting (not `window:theme`).
 2. If that's empty (true by default today), falls back to a hardcoded JS literal, `FALLBACK_TERM_THEME` (`termutil.ts:18-43`) — a hand-authored 21-color palette resembling but not identical to Dracula.
@@ -66,7 +66,7 @@ The embedded terminal (xterm.js, `frontend/app/view/term/`) gets its colors from
 
 Meanwhile, `theme.scss` and all 8 theme files **already define** a complete matching 22-token terminal palette (`--term-black` … `--term-bright-white`, `--term-foreground/background`, `--term-selection-background`, `--term-cursor-accent`) with an explicit comment: *"these colors should be used by plugins/applications."* Grepping every `.ts`/`.tsx` file for `--term-` returns **zero** hits from actual terminal code — the only consumers are unrelated decorative CSS elsewhere (markdown link color, tool-badge pills, shell-node status dot) that borrow the terminal palette's hues for visual consistency, not the terminal itself.
 
-There **is** a working live-update path (`terminal.options.theme = ...` in `frontend/app/view/term/termtheme.ts` and inline in `AgentInstallModal.tsx`) — but it's wired only to `term:theme`/`term:transparency` changes. `window:theme` has no code path into it at all.
+There **is** a working live-update path (`terminal.options.theme = ...` in [`frontend/app/view/term/termtheme.ts`](../../frontend/app/view/term/termtheme.ts) and inline in `AgentInstallModal.tsx`) — but it's wired only to `term:theme`/`term:transparency` changes. `window:theme` has no code path into it at all.
 
 **Net effect:** switching the app's theme instantly recolors every other themed surface via CSS cascade, but the terminal's glyphs, cursor, and selection never change — not live, not on restart, not ever, because the color computation simply doesn't look at `data-theme` or any `--term-*` variable.
 
@@ -91,7 +91,7 @@ This is worth fixing regardless of the light-theme timeline — it's a correctne
 
 ### 2c. Fully hardcoded, high-traffic surfaces
 
-- **`frontend/app/components/context-menu.scss`** — the entire right-click context menu (every line: background, border, text, hover, disabled states) is hand-painted with literal Catppuccin Mocha hex values (`#1e1e2e`, `#313244`, `#cdd6f4`, `#f38ba8`, `#6c7086`). Zero custom properties in the file. This is probably the single most visible "doesn't theme at all" surface in the app — a very frequently used popup that stays a small dark-purple box regardless of active theme.
+- **[`frontend/app/components/context-menu.scss`](../../frontend/app/components/context-menu.scss)** — the entire right-click context menu (every line: background, border, text, hover, disabled states) is hand-painted with literal Catppuccin Mocha hex values (`#1e1e2e`, `#313244`, `#cdd6f4`, `#f38ba8`, `#6c7086`). Zero custom properties in the file. This is probably the single most visible "doesn't theme at all" surface in the app — a very frequently used popup that stays a small dark-purple box regardless of active theme.
 - **`frontend/app/block/titlebar.scss:11,12,20,24,55,70`** — every pane's title bar uses `rgba(0,0,0,0.6-0.8)` background and `rgba(255,255,255,0.1)` border instead of `--main-bg-color`/`--border-color`. Directly blocks a light theme (see Dimension 1).
 - **`frontend/app/tab/tab.scss:152,157,228`** — colored-tab text/accent forced to `rgba(255,255,255,...)`, an assumption baked in rather than tokenized; already borderline for some existing `TAB_COLORS` swatches (yellow, lime).
 
@@ -114,7 +114,7 @@ These can't be fixed by touching SCSS at all; they'd need a separate native-side
 
 A long tail of un-tokenized status/accent colors with no `var()` at all: `drone-view.scss`/`.tsx`, `warden.scss`, `identity-pane-view.scss` status dots, `editor-view.scss` diff indicators, `swarm-view.scss`, `settings.scss`, `_install-modal.scss`, `_recent-sessions.scss`, `modal.scss`, plus several files already using inline `/* stylelint-disable-line color-no-hex */` suppressions (not tracked in `.stylelintignore`, so invisible unless greeped for directly: `StatusBar.scss:386`, `term.scss:218`, `_document-nodes.scss:416`, `_focused-overlay.scss:118`, `_retry-empty.scss:21`, `_picker.scss:215`).
 
-Dev-only surfaces (`frontend/perf/hud.tsx`, `frontend/app/devtools/diag-panel.tsx`, `agent-pane-perf-section.tsx`) are also fully hardcoded but lowest priority — not seen by end users in production.
+Dev-only surfaces ([`frontend/perf/hud.tsx`](../../frontend/perf/hud.tsx), [`frontend/app/devtools/diag-panel.tsx`](../../frontend/app/devtools/diag-panel.tsx), `agent-pane-perf-section.tsx`) are also fully hardcoded but lowest priority — not seen by end users in production.
 
 Checked and ruled out as non-issues: `ProviderLogo.tsx` brand-color SVGs (intentionally fixed), `TAB_COLORS`/`color-swatch-palette.tsx` (these ARE the user-facing color picker's literal options, not a theming bug), and the many `rgba(0,0,0,...)` box-shadows across the codebase (conventional, shadows are black regardless of theme).
 
@@ -125,7 +125,7 @@ Checked and ruled out as non-issues: `ProviderLogo.tsx` brand-color SVGs (intent
 1. **Terminal theme-awareness** (2a) — the explicit ask, well-scoped fix identified above (derive default term-theme from `--term-*` via `getComputedStyle`, re-run on `data-theme` change).
 2. **Phantom tokens** (2b) — cheap, mechanical, and a real correctness bug independent of any new theme.
 3. **Context menu + pane title bar** (2c) — the two most visible "doesn't theme" surfaces; both are self-contained files.
-4. **Light theme itself** — once 2b/2c are addressed, adding `frontend/app/themes/light.scss` (or similar) following the existing 8-file pattern is mechanical.
+4. **Light theme itself** — once 2b/2c are addressed, adding [`frontend/app/themes/light.scss`](../../frontend/app/themes/light.scss) (or similar) following the existing 8-file pattern is mechanical.
 5. Mermaid/Shiki theme wiring (2d) — larger effort (each library's own theming API differs), worth its own follow-up investigation.
 6. Native/CEF pre-paint flash guards (2e) — only matters once a light theme ships; needs a persisted-preference read at process start, a different kind of work entirely from the CSS-side items.
 7. Scattered bare hex (2f) — long tail, fix opportunistically or in a dedicated sweep PR.

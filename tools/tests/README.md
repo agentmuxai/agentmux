@@ -30,7 +30,7 @@ $client = Invoke-AgentMuxService -Auth $auth -Service client -Method GetClientDa
 ## `bench-term-echo.mjs`
 
 Node.js benchmark for **terminal input echo latency** — the interval from
-sending a command into a PTY via the App API until its echo appears in
+sending a command into a PTY via MuxAPI until its echo appears in
 the PTY output stream. Uses the sentinel-echo pattern to avoid false
 matches from concurrent output.
 
@@ -304,7 +304,7 @@ Drives a **real terminal pane with real synthetic keystrokes** (CDP
 `Input.dispatchKeyEvent`) and checks they survive a full-screen alternate-screen
 program. Written to diagnose "vim freezes the pane", which turned out to be an
 esbuild miscompile of xterm's DECRQM handler
-(`docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md`).
+([`docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md`](../../docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md)).
 
 ```bash
 # Drive vim end to end. Discover the port first — do NOT assume 9222/9223:
@@ -337,7 +337,7 @@ Other modes: `--recon` dumps the pane/block structure, `--eval <js>` evaluates
 in the page, `--cmd "<shell>"` types a command into a pane, `--block <id>`
 targets a specific pane.
 
-**Find the port with `lib/instance-discovery.mjs`**, never a constant — 9222/9223
+**Find the port with [`lib/instance-discovery.mjs`](lib/instance-discovery.mjs)**, never a constant — 9222/9223
 are only *preferred* values, and on a machine running several instances the
 constant names whichever one won the race. Attaching to the wrong instance is
 silent: it happened during this probe's own development, and clicks and

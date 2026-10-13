@@ -10,7 +10,7 @@ routing, and the status-bar/Warden LAN peer lists, on a ~40-46 minute cycle.
 on the same network (`Area54`, `narko`, `starpower`) plus one long-lived peer
 (`gamerlove`).
 **Related:** PR #3245 (`831a57149`, "fix(lan-discovery): stop wiping peer
-identity on mDNS ServiceRemoved churn"), `docs/retro/retro-lan-diamond-vanished-after-self-peer-fix-2026-09-06.md`
+identity on mDNS ServiceRemoved churn"), [`docs/retro/retro-lan-diamond-vanished-after-self-peer-fix-2026-09-06.md`](retro-lan-diamond-vanished-after-self-peer-fix-2026-09-06.md)
 (a different bug, same file, same shape of lesson — see below).
 
 ---

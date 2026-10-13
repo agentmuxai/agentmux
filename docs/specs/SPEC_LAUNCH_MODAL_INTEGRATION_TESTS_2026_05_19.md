@@ -5,7 +5,7 @@
 **Author:** AgentA
 **Related:**
 - [SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md](./SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md) §6.10 — calls for an integration test that pins the memory-change-resets-auth regression.
-- `frontend/app/store/launch-flow-state/` — the reducer slice the tests cross-verify against the view.
+- [`frontend/app/store/launch-flow-state/`](../../frontend/app/store/launch-flow-state) — the reducer slice the tests cross-verify against the view.
 
 ---
 
@@ -170,11 +170,11 @@ Goal: **6–8 focused tests, ~250 LOC total**. Each test is one specific regress
        ...
    }
    ```
-3. Create `test/vitest-setup.ts`:
+3. Create [`test/vitest-setup.ts`](../../test/vitest-setup.ts):
    ```ts
    import "@testing-library/jest-dom/vitest";
    ```
-4. Create `frontend/app/view/agent/components/AgentLaunchModal.integration.test.tsx` with the suite from §4.
+4. Create [`frontend/app/view/agent/components/AgentLaunchModal.integration.test.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.integration.test.tsx) with the suite from §4.
 5. Wire CI: `npm test` already runs Vitest — no new pipeline.
 
 ---

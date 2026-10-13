@@ -3,7 +3,7 @@
 **Date:** 2026-06-29
 **Status:** Draft
 **Author:** AgentX
-**Related:** `frontend/app/block/block.scss`, `frontend/app/block/blockframe.tsx`, `frontend/app/view/agent/agent-model.ts`, `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/hooks/useHistoryPagination.ts`
+**Related:** [`frontend/app/block/block.scss`](../../frontend/app/block/block.scss), [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx), [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts), [`frontend/app/view/agent/agent-view.tsx`](../../frontend/app/view/agent/agent-view.tsx), [`frontend/app/view/agent/hooks/useHistoryPagination.ts`](../../frontend/app/view/agent/hooks/useHistoryPagination.ts)
 
 ---
 

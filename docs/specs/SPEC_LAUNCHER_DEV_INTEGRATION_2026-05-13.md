@@ -5,7 +5,7 @@
 **Date:** 2026-05-13
 **Related specs:**
 - `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` (Phase B launcher ownership model)
-- `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` (LSD-1..4 durable saga log)
+- [`docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`](SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md) (LSD-1..4 durable saga log)
 - `specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` (gap #8: stale state)
 
 ---
@@ -261,7 +261,7 @@ Tracked via launcher main.rs:153 comment ("Phase 7 covers cross-platform parity"
 
 ### 6.3 Phase 3 — Tooling alignment
 
-1. Update `scripts/install-linux-desktop.sh` invocation in `Taskfile.yml:500` to reference the launcher binary (only relevant after Phase 2 lands).
+1. Update [`scripts/install-linux-desktop.sh`](../../scripts/install-linux-desktop.sh) invocation in `Taskfile.yml:500` to reference the launcher binary (only relevant after Phase 2 lands).
 2. Consider whether `bundle:linux` should also produce a `runtime/` subdir so Linux dev can follow the same shape as Windows when Phase 7 lands.
 
 ---

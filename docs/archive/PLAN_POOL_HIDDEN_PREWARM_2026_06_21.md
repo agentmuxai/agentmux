@@ -3,7 +3,7 @@
 **Date:** 2026-06-21
 **Area:** `agentmux-cef` — window pool (`src/commands/window_pool.rs`, `src/ui_tasks.rs`, window creation)
 **Goal:** keep the new-window/tear-off pool, but make pool-promoted windows **paint correctly on Windows**.
-**Backed by:** `docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md`
+**Backed by:** [`docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md`](../research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md)
 **Prior point-fixes (orthogonal, already merged):** #1650 (default layout), #1652 (on-screen clamp).
 
 ---

@@ -41,7 +41,7 @@
   - `windows.rs`: `tray-icon 0.24` + `muda 0.19` on a dedicated thread. This is the launcher's **only** Win32 message pump (`GetMessageW`). Status changes arrive as `WM_APP+1`.
   - `macos.rs`: no thread of its own. It is serviced by the main-thread AppKit pump.
   - **Linux:** no backend. The `start_if_enabled` arm returns `"no backend on this platform yet"`, and `ksni` is not in `Cargo.toml` despite #2996's commit message.
-- **The gate** is in `tray/mod.rs:247-262`. `should_enable(tray_opt_in, background_service)` requires `AGENTMUX_TRAY` **and** `AGENTMUX_BACKGROUND_SERVICE` to be present in the launcher's own environment. `settings-template.jsonc` and `schema/settings.json` contain no `tray`, `background` or `autostart` keys.
+- **The gate** is in `tray/mod.rs:247-262`. `should_enable(tray_opt_in, background_service)` requires `AGENTMUX_TRAY` **and** `AGENTMUX_BACKGROUND_SERVICE` to be present in the launcher's own environment. `settings-template.jsonc` and [`schema/settings.json`](../../schema/settings.json) contain no `tray`, `background` or `autostart` keys.
 - **Autostart bug** (verified by grep, not tested live):
   - `autostart/mod.rs:89-98` `background_env_for(args)` maps `--background` to both variables.
   - It is applied only to the host `Command` (`host_spawn.rs:58, 169`).
@@ -53,10 +53,10 @@
 
 | Surface | State | Where |
 |---|---|---|
-| In-app toast bubbles | Live. About 15 callers of `pushNotification` / `pushFlashError` | `frontend/app/store/flash-notifications.ts`, `frontend/app/notification/notificationbubbles.tsx`, mounted `app.tsx:450`. Type in `custom.d.ts:710-721` |
-| Sounds | Live. 6 sound IDs; suppressed while the source pane is focused | `frontend/app/notification/sound/` (`sounds.ts`, `sound-service.ts`), `frontend/app/window/window-focus.ts` |
-| "Ran while you were away" | Live | `agentmux-cef/src/background_audit.rs`, `frontend/app/init/background-audit.ts` |
-| OS toasts | **None. Deliberately disabled** | `agentmux-cef/src/app/mod.rs:911-918` (`disable-notifications`), `scripts/package-macos.sh:286-293` (Alerts helper stripped), `docs/retro/retro-macos-notification-double-prompt-regression-2026-06-22.md` |
+| In-app toast bubbles | Live. About 15 callers of `pushNotification` / `pushFlashError` | [`frontend/app/store/flash-notifications.ts`](../../frontend/app/store/flash-notifications.ts), [`frontend/app/notification/notificationbubbles.tsx`](../../frontend/app/notification/notificationbubbles.tsx), mounted `app.tsx:450`. Type in `custom.d.ts:710-721` |
+| Sounds | Live. 6 sound IDs; suppressed while the source pane is focused | [`frontend/app/notification/sound/`](../../frontend/app/notification/sound) (`sounds.ts`, `sound-service.ts`), [`frontend/app/window/window-focus.ts`](../../frontend/app/window/window-focus.ts) |
+| "Ran while you were away" | Live | `agentmux-cef/src/background_audit.rs`, [`frontend/app/init/background-audit.ts`](../../frontend/app/init/background-audit.ts) |
+| OS toasts | **None. Deliberately disabled** | `agentmux-cef/src/app/mod.rs:911-918` (`disable-notifications`), [`scripts/package-macos.sh:286-293`](../../scripts/package-macos.sh) (Alerts helper stripped), [`docs/retro/retro-macos-notification-double-prompt-regression-2026-06-22.md`](../retro/retro-macos-notification-double-prompt-regression-2026-06-22.md) |
 | Taskbar overlay / flash / dock badge | None. The draft spec was never built | `SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md` |
 
 Tauri-era history: `tauri-plugin-notification` and `frontend/util/notification.ts` were deleted in #665. Nothing survives.
@@ -80,14 +80,14 @@ The srv event bus is `backend/mps.rs` (a port of Wave's `wps`). It has one fan-o
 
 - **Windows AUMID:**
   - `AgentMuxCorp.AgentMux` is set via `SetCurrentProcessExplicitAppUserModelID` **in the host only** (`agentmux-cef/src/lib.rs:475-485`). The launcher sets none.
-  - The Inno Setup shortcuts (`packaging/windows/agentmux.iss`) carry **no** `AppUserModelID:` parameter.
+  - The Inno Setup shortcuts ([`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss)) carry **no** `AppUserModelID:` parameter.
   - There is no HKCU `AppUserModelId` registration.
   - MSIX packages have a package identity (`AgentMux.AgentMux_vqr1k32tkfk4y!AgentMux`), so toasts work there without extra registration, but under a **different** AUMID.
-- **macOS bundle ID:** `ai.agentmux.<channel>.<version>` (`scripts/package-macos.sh:163-172`), so **each version is a new bundle ID**. Notification permission and per-app notification settings are keyed by bundle ID, so every update would re-prompt and reset the user's choices. The bundle's main executable is `agentmux-launcher` (`LSUIElement=true`), which is good: the launcher is the right process to own `UNUserNotificationCenter`.
-- **Linux:** `assets/linux/agentmux.desktop`, with `StartupWMClass` rewritten per channel and version.
+- **macOS bundle ID:** `ai.agentmux.<channel>.<version>` ([`scripts/package-macos.sh:163-172`](../../scripts/package-macos.sh)), so **each version is a new bundle ID**. Notification permission and per-app notification settings are keyed by bundle ID, so every update would re-prompt and reset the user's choices. The bundle's main executable is `agentmux-launcher` (`LSUIElement=true`), which is good: the launcher is the right process to own `UNUserNotificationCenter`.
+- **Linux:** [`assets/linux/agentmux.desktop`](../../assets/linux/agentmux.desktop), with `StartupWMClass` rewritten per channel and version.
 - **Foreground signal:** the host already reports `ReportHwndForegroundChanged { hwnd }` to the launcher over the launcher pipe (`agentmux-common/src/ipc.rs:242`, handled `launcher/src/reducer/mod.rs:299`). **The launcher already knows whether an AgentMux window is foreground.** It does not know which pane or agent is focused; only the renderer knows that (`focusManager`).
 - **Custom URL scheme:** none (`agentmux://` has zero hits in code or packaging).
-- **Settings:** flat `namespace:key` entries in `<instance>/config/settings.json`. Template in `settings-template.jsonc:68-83` (`notify:sounds:*` already exists). Schema wildcard `"notify:*": boolean` in `schema/settings.json`. Rust in `wconfig/types.rs`. Written via the `setconfig` RPC, which broadcasts the `config` event. UI in `frontend/app/view/settings/sections/sounds-section.tsx`, already titled "Sounds & Notifications".
+- **Settings:** flat `namespace:key` entries in `<instance>/config/settings.json`. Template in `settings-template.jsonc:68-83` (`notify:sounds:*` already exists). Schema wildcard `"notify:*": boolean` in [`schema/settings.json`](../../schema/settings.json). Rust in `wconfig/types.rs`. Written via the `setconfig` RPC, which broadcasts the `config` event. UI in [`frontend/app/view/settings/sections/sounds-section.tsx`](../../frontend/app/view/settings/sections/sounds-section.tsx), already titled "Sounds & Notifications".
 
 ---
 
@@ -199,7 +199,7 @@ The kind is a **closed enum**. A Source cannot invent a new visual treatment. Ne
    - Better long term: stop reading env inside `tray::` and pass a resolved `LauncherOptions { tray, background_service }` built once in `main`. Both env and settings (next item) feed it.
 2. **Add a real setting.**
    - The launcher reads `<config_dir>/settings.json` directly at startup. It starts before srv, and it already knows the data dir (see `data_paths.rs`).
-   - New key: `app:runinbackground` (bool, default `false`; changed to `true` on 2026-09-25 by #3785, **reverted to `false` on 2026-09-28** by the repo owner, see `docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md`). The tray icon became its own key, `app:showtray` (bool, default `true`); background mode forces the icon on. "Keep AgentMux running in the system tray when all windows are closed."
+   - New key: `app:runinbackground` (bool, default `false`; changed to `true` on 2026-09-25 by #3785, **reverted to `false` on 2026-09-28** by the repo owner, see [`docs/reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md`](../reports/REPORT_TRAY_BACKGROUND_DEFAULT_ON_2026_09_28.md)). The tray icon became its own key, `app:showtray` (bool, default `true`); background mode forces the icon on. "Keep AgentMux running in the system tray when all windows are closed."
    - It implies both flags, preserving the tray spec's deliberate pairing (§1.1 rationale at `tray/mod.rs:240-246`: a tray without background mode would lie).
    - The env vars stay as developer overrides.
    - Changing it requires a restart in v1. Surface that in the settings UI. Live toggling can follow once the launcher is subscribed to srv's `config` event (§3.3).
@@ -330,7 +330,7 @@ Also hold back (queue, don't drop) while the OS reports a presentation or full-s
 - **Authorization:**
   - Call `requestAuthorization([.alert, .sound, .badge])` **lazily**, the first time a notification would actually be shown, or when the user enables OS notifications in settings. Never at cold launch; that was the regression in `retro-macos-notification-double-prompt-regression-2026-06-22.md`.
   - If the user denies, record it and show "Notifications are off in System Settings" in our settings page with a deep link.
-- **Interruption levels:** `InputWaiting`/`AgentCrashed`/`MessageNeedsReview` → `.active` (optionally `.timeSensitive` behind `notify:os:persistentattention`, which needs the `com.apple.developer.usernotifications.time-sensitive` entitlement in `build/entitlements.mac.plist`; no Apple approval is required). `Low` → `.passive`. Never `.critical`.
+- **Interruption levels:** `InputWaiting`/`AgentCrashed`/`MessageNeedsReview` → `.active` (optionally `.timeSensitive` behind `notify:os:persistentattention`, which needs the `com.apple.developer.usernotifications.time-sensitive` entitlement in [`build/entitlements.mac.plist`](../../build/entitlements.mac.plist); no Apple approval is required). `Low` → `.passive`. Never `.critical`.
 - **Categories:** `agentmux.attention` (actions: Open, Mute 1h) and `agentmux.info` (Open). Use `hiddenPreviewsBodyPlaceholder = "Agent activity"`.
 - **Dock:** badge = unresolved `Attention` count via `NSApp.dockTile.badgeLabel`. `LSUIElement=true` means the launcher has no Dock tile, so the badge must be set by the **host** process that owns the Dock presence. That is Phase 4, handled with the taskbar overlay.
 - **Signing:** notifications require a signed bundle (ad-hoc works for dev); shipping requires Developer ID + notarization, which the tray spec already calls a prerequisite.
@@ -374,7 +374,7 @@ Also hold back (queue, don't drop) while the OS reports a presentation or full-s
 | `notify:quiethours` | string `"HH:MM-HH:MM"` | `""` | Local time |
 | `notify:mute:<agent_id>` | int (epoch ms, `-1` = forever) | none | Per-agent mute |
 
-- The `schema/settings.json` wildcard `"notify:*": boolean` must be narrowed to explicit entries, because several keys are not booleans.
+- The [`schema/settings.json`](../../schema/settings.json) wildcard `"notify:*": boolean` must be narrowed to explicit entries, because several keys are not booleans.
 - Mirror the keys in `wconfig/types.rs` and `srv-types.d.ts`.
 - The settings page section `sounds-section.tsx` ("Sounds & Notifications") gets a "Desktop notifications" group, with a **"Send test notification"** button. It is the single most useful support tool: it proves AUMID, permission and DND state end to end.
 
@@ -491,9 +491,9 @@ Phase 5 is what fully delivers G4. Until it lands, `InputWaiting` requires the a
 - jekt stop: `reactive/handler.rs:1219-1284`, `sanitize.rs:327-379`
 - AUMID: `agentmux-cef/src/lib.rs:475-485`
 - `disable-notifications`: `agentmux-cef/src/app/mod.rs:911-918`
-- bundle ID: `scripts/package-macos.sh:163-172`
+- bundle ID: [`scripts/package-macos.sh:163-172`](../../scripts/package-macos.sh)
 - foreground report: `agentmux-common/src/ipc.rs:242`
-- settings: `settings-template.jsonc:68-83`, `schema/settings.json:244-310`, `wconfig/types.rs:259-310`
+- settings: `settings-template.jsonc:68-83`, [`schema/settings.json:244-310`](../../schema/settings.json), `wconfig/types.rs:259-310`
 
 **Microsoft:**
 - Toast content: https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/app-notifications-content

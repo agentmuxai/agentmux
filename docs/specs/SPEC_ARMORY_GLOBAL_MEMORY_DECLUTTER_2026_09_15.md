@@ -24,7 +24,7 @@ applies to, or new section."
 
 ## 2. Current state — why it reads as cluttered
 
-`frontend/app/view/global-bundle/global-bundle-manager.tsx` stacks **nine**
+[`frontend/app/view/global-bundle/global-bundle-manager.tsx`](../../frontend/app/view/global-bundle/global-bundle-manager.tsx) stacks **nine**
 visually distinct blocks, each with its own chrome, for one pane:
 
 1. Intro paragraph, 2 sentences (`:133-136`)

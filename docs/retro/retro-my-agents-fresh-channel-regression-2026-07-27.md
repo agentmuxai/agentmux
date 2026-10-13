@@ -16,7 +16,7 @@
 
 ## 2. Ground truth going in (established by direct investigation before git archaeology; not re-derived here)
 
-- "My Agents" = `frontend/app/view/agent/components/MyAgentsList.tsx` (renamed
+- "My Agents" = [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) (renamed
   from `RecentSessionsList.tsx`, PR #977/#1008 cascade), calling
   `RpcApi.ListRecentSessionsCommand` → backend `COMMAND_LIST_RECENT_SESSIONS`
   in `agentmux-srv/src/server/agent_handlers/session.rs`.
@@ -50,14 +50,14 @@ this exact complaint is already tracked.
 
 ## 3. Is this already a known pattern? Yes — repeatedly
 
-`docs/retro/` already has **three** prior incidents in the same feature area,
+[`docs/retro/`](.) already has **three** prior incidents in the same feature area,
 all within the last six weeks:
 
 | Retro | Date | Symptom | Root cause |
 |---|---|---|---|
 | `retro-local-build-isolation-regression-2026-06-09.md` | 06-09 | New local build joins an old running instance instead of starting fresh | Pipe-hash key didn't include the build stamp |
 | `retro-per-build-launch-isolation-2026-06-13.md` | 06-13 | Same, plus nested-launch channel leak | cef-cache stayed per-branch; ambient `AGENTMUX_CHANNEL` leaked into nested launches |
-| `docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md` | 06-13 | Fresh channel shows **zero** custom agents (only 7 seeded templates) | The one-shot definitions-backfill migration skipped 10/12 DBs on a schema-drift error, never scanned `dev/`, and its one-shot marker made the failure permanent |
+| [`docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md`](../analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md) | 06-13 | Fresh channel shows **zero** custom agents (only 7 seeded templates) | The one-shot definitions-backfill migration skipped 10/12 DBs on a schema-drift error, never scanned `dev/`, and its one-shot marker made the failure permanent |
 | `retro-legacy-agent-history-cross-channel-2026-06-16.md` + `retro-cross-channel-conversation-continuity-regression-2026-06-16.md` | 06-16 | Agent *appears in the list* but opens blank / loses history cross-channel | `sourceBlockId` in the global snapshot was channel-local, so the cross-channel read fallback couldn't anchor it |
 
 None of these four is a live match for *this* incident (the registry/definition
@@ -371,14 +371,14 @@ rows or invalidate JSON) — but it's now moot either way since the fix shipped.
 
 ## 10. Related docs
 
-- `docs/retro/retro-local-build-isolation-regression-2026-06-09.md`
-- `docs/retro/retro-per-build-launch-isolation-2026-06-13.md`
-- `docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md`
-- `docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md`
-- `docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md`
-- `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`
-- `docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md`
-- `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (§7's `aeb4f024`
+- [`docs/retro/retro-local-build-isolation-regression-2026-06-09.md`](retro-local-build-isolation-regression-2026-06-09.md)
+- [`docs/retro/retro-per-build-launch-isolation-2026-06-13.md`](retro-per-build-launch-isolation-2026-06-13.md)
+- [`docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md`](../analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md)
+- [`docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md`](retro-legacy-agent-history-cross-channel-2026-06-16.md)
+- [`docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md`](retro-cross-channel-conversation-continuity-regression-2026-06-16.md)
+- [`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](../specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md)
+- [`docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md`](../specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md)
+- [`docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`](../specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md) (§7's `aeb4f024`
   context)
 - PR #2296 (`cb8c9eeb`) — the direct prior instance of this exact symptom.
 - PR #2319 (`128633ce`) — same-day, same-build fix for a different

@@ -97,7 +97,7 @@ function toolSummaryArgs(node: ToolNode): string {
 }
 ```
 
-Lives in `frontend/app/view/agent/components/ToolBlock.tsx` next to the existing render code.
+Lives in [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) next to the existing render code.
 
 ## Virtualization compatibility
 
@@ -135,10 +135,10 @@ The only caveat: if a future change adds a "wrap to N lines" mode (e.g., showing
 
 ## Cross-references
 
-- Agent pane virtualization: `docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` — confirms one-line collapsed rows have stable height which this design preserves.
-- `frontend/app/view/agent/components/ToolBlock.tsx` — render site
+- Agent pane virtualization: [`docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`](SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md) — confirms one-line collapsed rows have stable height which this design preserves.
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) — render site
 - `frontend/app/view/agent/styles/_tool-block.scss` (or similar) — CSS additions
-- `frontend/app/view/agent/types.ts` — `ToolNode` shape, `ToolParams` discriminated union
+- [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) — `ToolNode` shape, `ToolParams` discriminated union
 
 ## Driving observation (verbatim)
 

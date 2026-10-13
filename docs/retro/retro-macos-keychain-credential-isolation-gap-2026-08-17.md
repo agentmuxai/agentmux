@@ -23,7 +23,7 @@ access. The user's framing: "that would be impossible on Windows."
   **Correction to an earlier working theory in this investigation:** the
   `use_ambient_login` escape hatch this function's doc comments still
   describe was fully retired — per the "Superseded same-day" note in
-  `docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7
+  [`docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md`](../specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) §7
   (2026-07-22 correction), a missing bound oauth account now blocks the
   spawn *unconditionally*; the flag is read only for a log line and has no
   effect on the outcome (`spawn_still_blocked_when_bound_oauth_account_missing_and_flag_true`
@@ -51,7 +51,7 @@ access. The user's framing: "that would be impossible on Windows."
   mechanism documented in `agentmux-cef/src/commands/platform.rs`
   (`ensure_auth_dir`) as the account-wide, version/channel-independent
   default, put in place as the fix for
-  `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`. The
+  [`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`](retro-provider-auth-isolation-regression-2026-06-05.md). The
   layer-3 gate in `inject.rs` only resolves `db_agent_identity_links`
   bindings — it has no knowledge of, and does not gate, this shared-provider
   path at all.

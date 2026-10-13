@@ -3,7 +3,7 @@
 **Status:** living — operator runbook; keep current as the migration framework changes.
 **Date:** 2026-09-07
 **Author:** Korp
-**Related:** `docs/specs/SPEC_MIGRATION_FRAMEWORK_2026_06_24.md` (what ships), `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` (why each safeguard exists; this runbook is its Phase 6 deliverable and supersedes its Part 4), `docs/exe-return-codes.md`.
+**Related:** [`docs/specs/SPEC_MIGRATION_FRAMEWORK_2026_06_24.md`](../specs/SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) (what ships), [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](../specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) (why each safeguard exists; this runbook is its Phase 6 deliverable and supersedes its Part 4), [`docs/exe-return-codes.md`](../exe-return-codes.md).
 
 This is the short version for support / on-call. Every step is something an operator can run without reading source. Nothing here is destructive until §5, and §5 says so.
 

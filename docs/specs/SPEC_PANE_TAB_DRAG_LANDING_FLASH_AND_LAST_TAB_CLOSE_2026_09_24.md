@@ -15,12 +15,12 @@ in the new pane." Follow-up in the same session: flash the header except the
 tabs, as close to the Window Tab look as possible, and (3) remove the
 `"multi-only"` setting, because a pane header should always show its tabs
 (§8).
-**Amends:** `docs/specs/SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` —
+**Amends:** [`docs/specs/SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md`](SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) —
 §3.4 (the "one-shot hover-flash" was specced but shipped as a static
 outline), §4.1 step 3 and `moveMemberAcrossStacks`' doc (the "refuse to move
 a pane's only member" rule is reversed for the cross-pane case), and §7 open
 question 2 (answered: flash yes; still no dwell).
-**Supersedes:** `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`
+**Supersedes:** [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md)
 §4.1's `pane:tabstrip` paragraph and §7 resolution 1 (the setting is
 removed, §8).
 
@@ -181,7 +181,7 @@ line) is unchanged. It has its own grammar and doesn't need a flash.
 
 **Share the keyframes rather than copying them.** Move `tab-drop-pulse`,
 `tab-drop-invert-strobe` and `tab-bounce` (§3.4) from `tabbar.scss` into a small partial (e.g.
-`frontend/app/drop-feedback.scss`, or a `@mixin drop-target-flash($width)` in
+[`frontend/app/drop-feedback.scss`](../../frontend/app/drop-feedback.scss), or a `@mixin drop-target-flash($width)` in
 `mixins.scss`). Import that partial from both `tabbar.scss` and
 `PaneTabStrip.scss`. Keep names and values byte-identical so the Window Tab
 bar renders exactly as before. That way the two can't drift, and a future
@@ -664,8 +664,8 @@ either skipped this mode or needed special handling for it.
 
 - **One setting, two values:** `pane:tabstrip`, either `"always"` (default;
   also what you get when the key is absent) or `"multi-only"`. Typed in
-  `frontend/types/srv-types.d.ts:1081-1083`, listed as a plain `string` in
-  `schema/settings.json:113`, and round-tripped but never read by the backend
+  [`frontend/types/srv-types.d.ts:1081-1083`](../../frontend/types/srv-types.d.ts), listed as a plain `string` in
+  [`schema/settings.json:113`](../../schema/settings.json), and round-tripped but never read by the backend
   (`agentmux-srv/src/backend/wconfig/types.rs:120-130`).
 - **Origin:** added with universal pane tabs (#3309, 2026-09-17), per
   `SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` §4.1. It's an
@@ -750,7 +750,7 @@ without a pill doesn't get them:
    tabs". The per-pane name/icon/rename that ReAgent P1 on #3309 guarded
    there now live on the pill (#3373).
 2. **Types/schema/backend:** `"pane:tabstrip"` is removed from
-   `srv-types.d.ts`, `schema/settings.json` and `SettingsType`
+   `srv-types.d.ts`, [`schema/settings.json`](../../schema/settings.json) and `SettingsType`
    (`wconfig/types.rs`) in one step, with no grace release. This follows the
    precedent of the earlier retired keys (`ai:*`, `autoupdate:*`,
    `editor:*`, `markdown:*`), which were removed from all three the same way:

@@ -161,7 +161,7 @@ The recovery page is plain HTML+CSS, no JS dependencies, bundled with `include_s
 
 **New file:** `frontend/app/ui/BackendStatusBanner.tsx`. Mounts in the top-level layout (`wave.ts` or wherever the root `<div>` lives).
 
-Reads from a new signal `backendState` (in `frontend/app/store/global.ts` or similar):
+Reads from a new signal `backendState` (in [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) or similar):
 
 ```ts
 type BackendState =
@@ -275,8 +275,8 @@ The `last_heartbeat_json` is captured from the memory heartbeat module's most re
 - `agentmux-cef/src/memory_heartbeat.rs` — add threshold check, emit `mem_warning` event.
 - `agentmux-cef/src/main.rs` — register the `recent_logs` tracing layer.
 - `frontend/wave.ts` — install global `error` / `unhandledrejection` listeners, wire `backendState` signal to WebSocket lifecycle.
-- `frontend/app/store/global.ts` — new `backendState` atom.
-- `frontend/app/block/blockframe.tsx` (or wherever block view components mount) — wrap in `<PaneErrorBoundary>`.
+- [`frontend/app/store/global.ts`](../../frontend/app/store/global.ts) — new `backendState` atom.
+- [`frontend/app/block/blockframe.tsx`](../../frontend/app/block/blockframe.tsx) (or wherever block view components mount) — wrap in `<PaneErrorBoundary>`.
 - `frontend/app/store/websocket.ts` (or current WS client location) — emit backend-state transitions on connect/close/error.
 
 ## 8. Implementation order (incremental, each shippable)

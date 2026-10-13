@@ -4,7 +4,7 @@
 **Type:** Design spec (frontend-only, Agent pane)
 **Status:** Proposed — not yet implemented
 **Trigger:** User request — in the Agent pane's tool-call stream, WebSearch results should show their full content (not visually cut off), and the card should be reviewed for styling improvements.
-**Builds on:** `docs/specs/SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md` (the spec that built the current card — already implemented; this spec revises two of its deliberate decisions in light of the new request) and `docs/specs/SPEC_TOOL_OUTPUT_CAP_2026_05_30.md` (the codebase's general "a render cap is never silent" rule, which the current snippet clamp violates — see §2.2).
+**Builds on:** [`docs/specs/SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) (the spec that built the current card — already implemented; this spec revises two of its deliberate decisions in light of the new request) and [`docs/specs/SPEC_TOOL_OUTPUT_CAP_2026_05_30.md`](SPEC_TOOL_OUTPUT_CAP_2026_05_30.md) (the codebase's general "a render cap is never silent" rule, which the current snippet clamp violates — see §2.2).
 
 ---
 
@@ -32,9 +32,9 @@ ToolBlock (collapsed row) → ToolBlockOverlay → ToolOverlayLog
             ✗ null        → CompactResult (JSON fallback)
 ```
 
-This registry (`frontend/app/view/agent/components/tool-renderers/registry.ts`) is the codebase's established per-tool-name customization point — `registerToolRenderer({ priority, label, match, render })`, matched by `byName`/`byNamePrefix`/`byShape`, highest `priority` wins. This spec extends existing registrations; it does not need a new mechanism.
+This registry ([`frontend/app/view/agent/components/tool-renderers/registry.ts`](../../frontend/app/view/agent/components/tool-renderers/registry.ts)) is the codebase's established per-tool-name customization point — `registerToolRenderer({ priority, label, match, render })`, matched by `byName`/`byNamePrefix`/`byShape`, highest `priority` wins. This spec extends existing registrations; it does not need a new mechanism.
 
-`ToolNode` (`frontend/app/view/agent/types.ts:225-237`) carries two separate name fields:
+`ToolNode` ([`frontend/app/view/agent/types.ts:225-237`](../../frontend/app/view/agent/types.ts)) carries two separate name fields:
 - `tool`: a closed coarse kind — `"Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Other"`. `stream-parser.ts`'s `normalizeToolName` (`stream-parser.ts:738-745`) maps anything not in that 8-name list — including `WebSearch`/`web_search` — to `"Other"`.
 - `toolName?: string`: the raw provider tool name (`"WebSearch"`, `"web_search"`, `"mcp__..."`, etc.), preserved specifically so the renderer registry (and, per its own doc comment, anything else that needs the real name) doesn't have to go through the lossy coarse kind.
 
@@ -44,7 +44,7 @@ This registry (`frontend/app/view/agent/components/tool-renderers/registry.ts`) 
 
 ### 2.1 Snippet and title are clamped with no expand affordance
 
-`frontend/app/view/agent/styles/_document-nodes.scss:1435-1453`:
+[`frontend/app/view/agent/styles/_document-nodes.scss:1435-1453`](../../frontend/app/view/agent/styles/_document-nodes.scss):
 ```scss
 .agent-search-card-title {
     overflow: hidden;
@@ -62,13 +62,13 @@ This registry (`frontend/app/view/agent/components/tool-renderers/registry.ts`) 
 ```
 This was a deliberate choice in the prior spec (`SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md` §3.4: *"Snippet: shown only when present; max 3 lines clamped"*) — not a bug. This spec proposes revisiting that choice per the new, explicit request.
 
-**Why this is worth fixing, not just a preference call:** `docs/specs/SPEC_TOOL_OUTPUT_CAP_2026_05_30.md` §6 establishes a codebase-wide rule, quoted verbatim in `OutputHiddenMarker.tsx`'s own header comment: *"A cap is never silent."* Every other capped tool output in the Agent pane (Bash stdout, Read content, the search-results **list** itself via `MAX_TOOL_OUTPUT_LINES` in `SearchResults.tsx:73`) shows an `OutputHiddenMarker` ("… N more lines hidden") when content is cut. The per-card snippet/title clamp is the one place that cuts content with **zero indication anything was cut and zero way to see the rest** — worse than the codebase's own standard, not just a style nit.
+**Why this is worth fixing, not just a preference call:** [`docs/specs/SPEC_TOOL_OUTPUT_CAP_2026_05_30.md`](SPEC_TOOL_OUTPUT_CAP_2026_05_30.md) §6 establishes a codebase-wide rule, quoted verbatim in `OutputHiddenMarker.tsx`'s own header comment: *"A cap is never silent."* Every other capped tool output in the Agent pane (Bash stdout, Read content, the search-results **list** itself via `MAX_TOOL_OUTPUT_LINES` in `SearchResults.tsx:73`) shows an `OutputHiddenMarker` ("… N more lines hidden") when content is cut. The per-card snippet/title clamp is the one place that cuts content with **zero indication anything was cut and zero way to see the rest** — worse than the codebase's own standard, not just a style nit.
 
 **Scale check — is unclamping actually safe?** Search-result snippets are provider-supplied summaries, typically one to a few sentences (a few hundred characters), not full page bodies — nothing like the multi-KB/MB bodies `MAX_TOOL_OUTPUT_LINES`/`MAX_TOOL_OUTPUT_CHARS` (`output-cap.ts:16,22`) exist to bound. Removing the per-card clamp does not reintroduce the DOM-bloat risk `SPEC_TOOL_OUTPUT_CAP_2026_05_30.md` was written for — the *list* still IS capped (§ above, unchanged by this spec) for exactly that reason; only the *within-card* text truncation is in scope here.
 
 ### 2.2 The WebSearch/WebFetch identity-color CSS rule is dead
 
-`frontend/app/view/agent/components/ToolBlock.tsx:368`:
+[`frontend/app/view/agent/components/ToolBlock.tsx:368`](../../frontend/app/view/agent/components/ToolBlock.tsx):
 ```tsx
 data-tool={props.node.tool.toLowerCase()}
 ```
@@ -135,9 +135,9 @@ Not required to close the user's request (which named WebSearch specifically) bu
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_document-nodes.scss` | Remove `-webkit-line-clamp` from `.agent-search-card-snippet`; relax/remove single-line clamp on `.agent-search-card-title`; add the missing `websearch`/`webfetch` `.agent-tool-name` color rule (§3.3) |
-| `frontend/app/view/agent/components/ToolBlock.tsx` | Add `toolDataAttr()` helper; use it in place of the bare `props.node.tool.toLowerCase()` for `data-tool` (§3.2) |
-| `frontend/app/view/agent/types.ts` (optional, §3.4) | Differentiate `WebFetch`/`web_fetch` icon from `WebSearch`/`web_search` |
+| [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) | Remove `-webkit-line-clamp` from `.agent-search-card-snippet`; relax/remove single-line clamp on `.agent-search-card-title`; add the missing `websearch`/`webfetch` `.agent-tool-name` color rule (§3.3) |
+| [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) | Add `toolDataAttr()` helper; use it in place of the bare `props.node.tool.toLowerCase()` for `data-tool` (§3.2) |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) (optional, §3.4) | Differentiate `WebFetch`/`web_fetch` icon from `WebSearch`/`web_search` |
 
 No backend/srv changes — this is entirely a frontend rendering/styling fix.
 
@@ -167,14 +167,14 @@ No backend/srv changes — this is entirely a frontend rendering/styling fix.
 
 ## 7. Sources
 
-- `frontend/app/view/agent/components/tool-renderers/SearchResults.tsx`
-- `frontend/app/view/agent/components/tool-renderers/search-results.ts`
-- `frontend/app/view/agent/components/tool-renderers/registry.ts`
-- `frontend/app/view/agent/components/ToolBlock.tsx` (lines 340-375, `data-tool` + row class wiring)
-- `frontend/app/view/agent/components/output-cap.ts`, `OutputHiddenMarker.tsx`
-- `frontend/app/view/agent/styles/_document-nodes.scss` (lines 471-494 per-tool identity color rules; 1346-1460 SearchResults card styles)
-- `frontend/app/view/agent/stream-parser.ts` (`normalizeToolName`, lines 738-745)
-- `frontend/app/view/agent/types.ts` (`ToolNode`, lines 225-237; `TOOL_ICONS`, lines 775-778)
-- `docs/specs/SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md` (the spec that built the current card)
-- `docs/specs/SPEC_TOOL_OUTPUT_CAP_2026_05_30.md` (the "a cap is never silent" principle §2.1 relies on)
-- `docs/specs/SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md` (the registry pattern §1 describes)
+- [`frontend/app/view/agent/components/tool-renderers/SearchResults.tsx`](../../frontend/app/view/agent/components/tool-renderers/SearchResults.tsx)
+- [`frontend/app/view/agent/components/tool-renderers/search-results.ts`](../../frontend/app/view/agent/components/tool-renderers/search-results.ts)
+- [`frontend/app/view/agent/components/tool-renderers/registry.ts`](../../frontend/app/view/agent/components/tool-renderers/registry.ts)
+- [`frontend/app/view/agent/components/ToolBlock.tsx`](../../frontend/app/view/agent/components/ToolBlock.tsx) (lines 340-375, `data-tool` + row class wiring)
+- [`frontend/app/view/agent/components/output-cap.ts`](../../frontend/app/view/agent/components/output-cap.ts), `OutputHiddenMarker.tsx`
+- [`frontend/app/view/agent/styles/_document-nodes.scss`](../../frontend/app/view/agent/styles/_document-nodes.scss) (lines 471-494 per-tool identity color rules; 1346-1460 SearchResults card styles)
+- [`frontend/app/view/agent/stream-parser.ts`](../../frontend/app/view/agent/stream-parser.ts) (`normalizeToolName`, lines 738-745)
+- [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) (`ToolNode`, lines 225-237; `TOOL_ICONS`, lines 775-778)
+- [`docs/specs/SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) (the spec that built the current card)
+- [`docs/specs/SPEC_TOOL_OUTPUT_CAP_2026_05_30.md`](SPEC_TOOL_OUTPUT_CAP_2026_05_30.md) (the "a cap is never silent" principle §2.1 relies on)
+- [`docs/specs/SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md`](SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md) (the registry pattern §1 describes)

@@ -193,7 +193,7 @@ async fn handle_shell_create(
 
 ### 5.4 Frontend: new types
 
-**`frontend/app/view/agent/types.ts`** — add `ShellNode`:
+**[`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts)** — add `ShellNode`:
 
 ```typescript
 export interface ShellNode {
@@ -214,7 +214,7 @@ export interface ShellNode {
 
 ### 5.5 Frontend: store commands
 
-**`frontend/app/store/agent-document/types.ts`** — add:
+**[`frontend/app/store/agent-document/types.ts`](../../frontend/app/store/agent-document/types.ts)** — add:
 
 ```typescript
 | { type: "ShellNodeCreate"; node: ShellNode }
@@ -275,7 +275,7 @@ Flush dispatches `ShellNodeCreate` first, then `ShellChunkAppend`, then `ShellSt
 
 ### 5.8 Frontend: `<PersistentShellBlock>` component
 
-New file: `frontend/app/view/agent/components/PersistentShellBlock.tsx`
+New file: [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx)
 
 **Collapsed row (always rendered):**
 ```tsx
@@ -391,17 +391,17 @@ This is optional; the explicit `Shell` tool is the primary interface.
 | `agentmux-mcp/` | New workspace member — MCP server binary |
 | `agentmux-mcp/src/main.rs` | Tool definitions + HTTP client to srv |
 | `agentmux-mcp/Cargo.toml` | Crate manifest |
-| `frontend/app/view/agent/components/PersistentShellBlock.tsx` | Collapsed row + overlay wiring |
-| `frontend/app/view/agent/styles/_shell-node.scss` | Shell-specific CSS |
+| [`frontend/app/view/agent/components/PersistentShellBlock.tsx`](../../frontend/app/view/agent/components/PersistentShellBlock.tsx) | Collapsed row + overlay wiring |
+| [`frontend/app/view/agent/styles/_shell-node.scss`](../../frontend/app/view/agent/styles/_shell-node.scss) | Shell-specific CSS |
 
 ### Modified files
 | File | Change |
 |------|--------|
-| `frontend/app/view/agent/types.ts` | Add `ShellNode` to `DocumentNode` union |
-| `frontend/app/store/agent-document/types.ts` | Add `ShellNodeCreate`, `ShellChunkAppend`, `ShellStatusUpdate` commands |
-| `frontend/app/store/agent-document-store.ts` | Reducer cases for new commands |
-| `frontend/app/view/agent/virtualization/DocumentRow.tsx` | Add `<Show>` branch for `shell` type |
-| `frontend/app/view/agent/useAgentStream.ts` | Add `shell_node_create` + `shell_chunk` subscriptions |
+| [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | Add `ShellNode` to `DocumentNode` union |
+| [`frontend/app/store/agent-document/types.ts`](../../frontend/app/store/agent-document/types.ts) | Add `ShellNodeCreate`, `ShellChunkAppend`, `ShellStatusUpdate` commands |
+| [`frontend/app/store/agent-document-store.ts`](../../frontend/app/store/agent-document-store.ts) | Reducer cases for new commands |
+| [`frontend/app/view/agent/virtualization/DocumentRow.tsx`](../../frontend/app/view/agent/virtualization/DocumentRow.tsx) | Add `<Show>` branch for `shell` type |
+| [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) | Add `shell_node_create` + `shell_chunk` subscriptions |
 | `frontend/app/view/agent/styles/index.scss` | Import `_shell-node.scss` |
 | `agentmux-srv/src/server/app_api.rs` | Add `POST /api/v1/shell/create` handler |
 | `agentmux-srv/src/backend/rpc_types.rs` | Add `ShellCreateRequest` / `ShellCreateResponse` |

@@ -2,9 +2,9 @@
 
 **Date:** 2026-07-08
 **Author:** Agent1
-**Status:** active — §7's phase table is the authoritative record here and has been kept current; only this header was not. Phase A (§4.1 structured config, §4.4 health probe, §5 migration) shipped in #2030, the PR this doc was added in — see `agentmux-srv/src/backend/mcp_probe.rs` and `frontend/app/store/mcp-capabilities.ts`, both citing §4.4. Phase B (catalog UI + the Ableton entry) shipped in #2064. **Phases C (secrets-via-Account, OAuth) and D (tool introspection, config-hash pinning) are open**, as are §8's three product questions.
-**Related:** `agentmux-srv/src/server/app_api/mcp.rs`, `agentmux-srv/src/backend/storage/mcp_servers.rs`, `agentmux-srv/src/backend/agent_config.rs`, `frontend/app/view/mcp/`, `frontend/app/view/agent/agent-mcp-model.ts`, `frontend/app/store/toolchain-capabilities.ts`, `frontend/app/view/accounts/oauth-catalog.ts`
-**Governing context:** `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (MCP Server is a first-class composable-model primitive as of Phase 1, PR #1877), `docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` (Armory IA, deferred **Policy** primitive), `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (Armory umbrella)
+**Status:** active — §7's phase table is the authoritative record here and has been kept current; only this header was not. Phase A (§4.1 structured config, §4.4 health probe, §5 migration) shipped in #2030, the PR this doc was added in — see `agentmux-srv/src/backend/mcp_probe.rs` and [`frontend/app/store/mcp-capabilities.ts`](../../frontend/app/store/mcp-capabilities.ts), both citing §4.4. Phase B (catalog UI + the Ableton entry) shipped in #2064. **Phases C (secrets-via-Account, OAuth) and D (tool introspection, config-hash pinning) are open**, as are §8's three product questions.
+**Related:** `agentmux-srv/src/server/app_api/mcp.rs`, `agentmux-srv/src/backend/storage/mcp_servers.rs`, `agentmux-srv/src/backend/agent_config.rs`, [`frontend/app/view/mcp/`](../../frontend/app/view/mcp), [`frontend/app/view/agent/agent-mcp-model.ts`](../../frontend/app/view/agent/agent-mcp-model.ts), [`frontend/app/store/toolchain-capabilities.ts`](../../frontend/app/store/toolchain-capabilities.ts), [`frontend/app/view/accounts/oauth-catalog.ts`](../../frontend/app/view/accounts/oauth-catalog.ts)
+**Governing context:** [`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) (MCP Server is a first-class composable-model primitive as of Phase 1, PR #1877), [`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md`](archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md) (Armory IA, deferred **Policy** primitive), [`docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`](archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md) (Armory umbrella)
 
 ---
 
@@ -21,7 +21,7 @@ This spec (a) inventories that gap against Claude Desktop and Cursor's current (
 The v1 composable-model `McpServer` primitive (Phase 1 of the Preset→Bundle refactor, already shipped):
 
 - **Storage** (`mcp_servers.rs`, `migrations.rs:416-441`): `db_mcp_servers(id, name, transport TEXT DEFAULT 'stdio', config TEXT DEFAULT '{}', is_global, created_at, updated_at)` + `db_agent_mcp_ref(agent_id, mcp_id)` bind table. `config` is an opaque JSON string — the store never looks inside it.
-- **App API** (`app_api/mcp.rs`): `mcp.list/get/upsert/delete/bind/unbind` (agent-scoped, `check_s1`-gated) + `mcp.catalog.list/upsert/delete` (window-scoped, global rows only — the Armory's **MCP Servers** tab, `armory-view.tsx:20`).
+- **MuxAPI** (`app_api/mcp.rs`): `mcp.list/get/upsert/delete/bind/unbind` (agent-scoped, `check_s1`-gated) + `mcp.catalog.list/upsert/delete` (window-scoped, global rows only — the Armory's **MCP Servers** tab, `armory-view.tsx:20`).
 - **Launch-time merge** (`agent_config.rs:320` `build_mcp_config_from_refs`): synthesizes the reserved `agentmux` entry, layers the legacy blob, then layers each bound `McpServer.config` **as-is** under `mcpServers.<name>` in `.mcp.json`. Whatever JSON the user typed is whatever Claude Code receives — AgentMux never validates it beyond "is it a JSON object."
 - **UI** (`AgentMcpModal.tsx`, `mcp-manager.tsx`): a name field, a free-text transport field (defaults `"stdio"`, not validated against known values), and a raw JSON `<textarea>` for `config`. No connect test, no tool list, no distinction between `stdio`/`sse`/`streamable-http` beyond what the user happens to type inside the blob.
 
@@ -64,7 +64,7 @@ Interpolation: support `${env:NAME}` inside `command`/`args`/`env`/`url`/`header
 
 ### 4.2 Secrets via the existing Account primitive, not new plaintext storage
 
-Rather than inventing a parallel secrets store, let an MCP server's `env`/`headers` values reference an **Account** (already a first-class primitive with its own encrypted-at-rest credential handling per `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`) by id: `${account:<id>:token}`. This reuses infrastructure instead of building a second vault, and matches the composable-model philosophy ("reference, don't copy" — `EXPLAINER_COMPOSABLE_MODEL…md` §2).
+Rather than inventing a parallel secrets store, let an MCP server's `env`/`headers` values reference an **Account** (already a first-class primitive with its own encrypted-at-rest credential handling per [`docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`](archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md)) by id: `${account:<id>:token}`. This reuses infrastructure instead of building a second vault, and matches the composable-model philosophy ("reference, don't copy" — `EXPLAINER_COMPOSABLE_MODEL…md` §2).
 
 ### 4.3 OAuth for remote (`http`) MCP servers
 
@@ -77,7 +77,7 @@ Redirect URI: reuse the existing AgentMux desktop-app callback scheme (already w
 
 ### 4.4 Health / prerequisite probe
 
-New App API command `mcp.probe(agent_id, id)`: opens a short-lived MCP client connection, performs the `initialize` handshake, and — on success — `tools/list` (and `resources/list`/`prompts/list` where the server declares those capabilities). Returns `{status: "connected"|"unreachable"|"handshake_failed", tool_count, resource_count, prompt_count, server_info, error}`.
+New MuxAPI command `mcp.probe(agent_id, id)`: opens a short-lived MCP client connection, performs the `initialize` handshake, and — on success — `tools/list` (and `resources/list`/`prompts/list` where the server declares those capabilities). Returns `{status: "connected"|"unreachable"|"handshake_failed", tool_count, resource_count, prompt_count, server_info, error}`.
 
 Frontend: a new `mcp-capabilities.ts` module, structurally identical to `toolchain-capabilities.ts` (module-level `createStore`, `ensureCapability`/`watchCapability`, in-flight de-dup) — same pattern, new domain. The Armory MCP Servers list gets a status pill per server (Connected · N tools / Not connected / Error) instead of the current name-only row, polling while the Armory tab is open the same way the Toolchain widget polls Docker liveness.
 
@@ -90,7 +90,7 @@ This is the piece the Ableton pilot is written to prove out end-to-end (§6).
 1. **Read-only display** in the Armory (what does this server actually offer) and in the per-agent MCP tab (what will this agent be able to call) — parity with Cursor's "MCP Tools" panel and Claude's per-connector tool list.
 2. **Per-tool enable/disable**, stored as a new `disabled_tools: string[]` field on the agent↔server bind row (`db_agent_mcp_ref`) — an agent can bind a server but suppress specific tools, same granularity Claude Desktop offers per connector.
 
-Full per-call **approval prompting** (Cursor's "click Run tool to proceed" / Claude's permission dialog) is **out of scope for this spec's Phase A–C** — it is correctly the deferred **Policy** primitive's job (`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` §7 item 2: "hooks + `.claude/settings.json` permissions... deferred to a later phase"). This spec only prepares the ground: `disabled_tools` and the introspected tool list are exactly the inputs a future Policy primitive needs, so they should land now even though enforcement lands later.
+Full per-call **approval prompting** (Cursor's "click Run tool to proceed" / Claude's permission dialog) is **out of scope for this spec's Phase A–C** — it is correctly the deferred **Policy** primitive's job ([`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md`](archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md) §7 item 2: "hooks + `.claude/settings.json` permissions... deferred to a later phase"). This spec only prepares the ground: `disabled_tools` and the introspected tool list are exactly the inputs a future Policy primitive needs, so they should land now even though enforcement lands later.
 
 ### 4.6 Catalog / one-click install
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-26
 **Status:** active — §3.2 (header row) implemented in #3871; §3.1, §3.3 and §3.4 (WebSearch content-first) in the second PR; §3.5 and §3.6 (text bodies, content blocks) in the third; §3.7 ToolSearch in the fourth (TodoWrite and ExitPlanMode deferred, not observed)
-**Scope:** agent pane tool previews (`frontend/app/view/agent/`)
+**Scope:** agent pane tool previews ([`frontend/app/view/agent/`](../../frontend/app/view/agent))
 **Verified against:** `main` @ `6b5c2b59b`, which includes #3861 (the jekt
 height cap)
 **Related:** `SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md`,
@@ -11,7 +11,7 @@ height cap)
 `PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`,
 `SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md`,
 `SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md` §3
-**Companion report:** `docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`
+**Companion report:** [`docs/reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md`](../reports/REPORT_TOOL_PREVIEW_DRY_AND_ARCHITECTURE_2026_09_26.md)
 
 ---
 
@@ -45,7 +45,7 @@ What's wrong today:
 
 A survey of the other tools against real transcript payloads (§2) found the
 same class of problem in several more places. Most noticeable: **every MCP tool
-call (all of the AgentMux App API) renders as a two-column `type | text`
+call (all of MuxAPI) renders as a two-column `type | text`
 table**, and **every Agent report renders as `▸ 0: {2 keys}`**.
 
 The fix:
@@ -138,7 +138,7 @@ Shapes are taken from real Claude Code transcripts on this machine (the last 60
 | # | Tool | Real `tool_result.content` | Renders as today | Problem |
 |---|------|----------------------------|------------------|---------|
 | F1 | **WebSearch** (reported) | `str`: header + `Links: [...]` + markdown summary + `REMINDER:` footer | `CompactResult`: `▸ Web search results for query: "…" Links: [{"title":"…` | Cards never render; content behind the chevron; raw JSON in the summary line |
-| F2 | **mcp\_\_\*** (all App API tools, all MCP) | `list[{type:"text", text}]` | `RecordTable` with columns **`type` \| `text`** | A table where plain text belongs |
+| F2 | **mcp\_\_\*** (all MuxAPI tools, all MCP) | `list[{type:"text", text}]` | `RecordTable` with columns **`type` \| `text`** | A table where plain text belongs |
 | F3 | **Agent** (no live dispatch match, which is always the case on the Agent History tab and for replays) | `list[{type:"text", text}]` | `renderAgent` → `CompactResult` → **`▸ 0: {2 keys}`**, expanding to JSON of the blocks | The report is unreadable |
 | F4 | **Grep** | `str` → `{content}` | `Pattern: <pattern>` + `▸ N result lines` | Pattern duplicates the row; matches behind the chevron |
 | F5 | Generic text tools (TaskOutput, TaskStop, ListAgents, ScheduleWakeup, Skill, …) | `str` → `{content}` | `▸ <first 120 chars>` | Multi-line results hidden behind the chevron |

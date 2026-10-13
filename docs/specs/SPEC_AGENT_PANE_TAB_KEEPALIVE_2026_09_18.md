@@ -5,12 +5,12 @@
 `pane-leaf-chrome.tsx`'s `KEEP_ALIVE_TYPES`, alongside the two
 dormancy-gated timer fixes this audit found were needed first
 (`AgentQuestionPanel`'s auto-timeout, `useAgentFailure`'s auto-retry).
-**Related:** `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`
+**Related:** [`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md)
 (shipped the keep-alive machinery this reuses, scoped to `"term"` only, and
 is the source of the "not yet audited for keep-alive safety" warning this
-spec resolves), `docs/analysis/ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md`
+spec resolves), [`docs/analysis/ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md`](../analysis/ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md)
 §6 (flagged in-pane agent-tab-switch latency as unmeasured and out of scope),
-`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` (a different,
+[`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) (a different,
 unrelated tab surface — the top-level window tab bar — despite the similar
 name; its findings don't apply here, see §1).
 
@@ -42,7 +42,7 @@ unmounted and a fresh one mounted for the new member. That remount pays for:
 - a full `AgentDocumentVirtualList` rebuild over whatever that restore just
   produced.
 
-This is the dominant cost. (`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`
+This is the dominant cost. ([`docs/specs/SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md)
 profiled a different tab surface — the top-level window tab bar, which stays
 mounted via `display:none` and never remounts — and attributed ITS cost to
 browser layout/paint, not JS. It doesn't apply to this bug at all; the two
