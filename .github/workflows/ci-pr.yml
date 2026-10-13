@@ -742,6 +742,12 @@ jobs:
       - name: tsc --noEmit
         if: matrix.shard == 1
         run: npx tsc --noEmit -p tsconfig.citypecheck.json
+      # frontend/app/store/rpc-api/generated.ts is what scripts/gen-rpc-stubs.mjs
+      # writes from frontend/types/rpc/rpc-schema.json and the manifest. Whether
+      # the schema itself is current is check-rpc-bindings.sh's job (rust job).
+      - name: generated RPC stubs are current
+        if: matrix.shard == 1
+        run: node scripts/gen-rpc-stubs.mjs --check
       # npm dependencies match the imports (#4207 S2, the npm half of the
       # cargo machete gate): fails on an unused dependency, or on an import
       # that only resolves because npm hoisted someone else's dependency.

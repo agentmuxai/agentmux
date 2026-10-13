@@ -39,7 +39,7 @@ const FINISHED_RETENTION_SECS: u64 = 300;
 /// How often the sweeper runs (`spawn_sweeper`).
 const SWEEP_INTERVAL_SECS: u64 = 30;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[serde(
     tag = "status",
     rename_all = "kebab-case",
@@ -139,7 +139,7 @@ impl Session {
 /// owns the spawned CLI's child handle (so it can stdin-inject the
 /// pasted callback URL and kill on cancel); this manager owns the
 /// session state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct StartSessionResult {
     pub session_id: String,
@@ -151,7 +151,7 @@ pub struct StartSessionResult {
 
 /// Snapshot returned by `poll_session`. Mirrors `AuthSessionStatus`
 /// plus the provider id for renderer dispatch.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PollSessionResult {
     pub provider_id: String,

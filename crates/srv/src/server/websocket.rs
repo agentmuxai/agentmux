@@ -777,7 +777,7 @@ async fn handle_incoming_text(
 /// a finished row is still in the list for as long as it is shown.
 const FLEET_ENDED_WINDOW_MS: i64 = 60_000;
 
-fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
+pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
     // getfullconfig → return full config as JSON
     let config_watcher = state.config_watcher.clone();
     // The RESPONSE stays `serde_json::Value`, deliberately. Redaction runs on
