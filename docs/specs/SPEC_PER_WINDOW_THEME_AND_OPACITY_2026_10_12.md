@@ -84,7 +84,7 @@ windowOpacity(win) = win.meta["window:opacity"]
                      ?? (settings["window:transparent"] ? settings["window:opacity"] ?? 0.8 : 1.0)
 ```
 
-The fallback is exactly what every window shows today, which satisfies Goal 6. One reactive helper, `windowOpacityFor(windowId)` in `store/window-opacity-store.ts`, computes it. Combined with `liveWindowOpacity(label)` for the drag in progress, it is what every control displays.
+The fallback is exactly what every window shows today, which satisfies Goal 6. `opacityFor(windowMeta, settings)` in `store/window-appearance.ts` computes it, and `currentWindowOpacity()` is its reactive value for the window the code runs in. Combined with `liveWindowOpacity(label)` for the drag in progress, it is what every control displays.
 
 **Source of truth:** the window's meta key. srv's `Window.opacity` mirror keeps being written by the host's debounced write-through, unchanged, since the crash reproject reads it. Retiring the duplicate is a follow-up (§9), not part of this work.
 
@@ -93,24 +93,24 @@ The fallback is exactly what every window shows today, which satisfies Goal 6. O
 Extract the panel's two halves into one function in `window-opacity-store.ts`:
 
 ```ts
-setWindowOpacity(windowId: string | null, label: string, value: number, phase: "live" | "commit")
+setWindowOpacityFor(target: { label: string; windowId: string | null }, opacity: number, phase: "live" | "commit")
 ```
 
 - **`live`:** `dispatchWindowOpacity` → native alpha now. The panel calls this on `onInput`.
-- **`commit`:** the same, plus a write to the window's meta (`window:opacity`, or `null` at 100%). The panel calls this on `onChange`. The hamburger calls it on click, since a menu item is a single discrete choice.
+- **`commit`:** the same, plus a write to the window's meta (`window:opacity`). The panel calls this on `onChange`. The hamburger calls it on click, since a menu item is a single discrete choice.
 
 `windowId: null` keeps today's floater behaviour: live only, never persisted.
 
 100% is stored as `1`, not cleared. A cleared value would fall back to the channel default, which may be see-through, so a window set to 100% would not stay opaque. The panel no longer writes `window:transparent` beside it; the resolver doesn't need it.
 
-The hamburger stops writing settings. Its submenu keeps its 100%–35% steps; the checkmark compares against this window's `windowOpacity`, rounded to 5% as now, so a slider value between steps, such as 72%, checks the nearest (70%).
+The hamburger stops writing settings. Its submenu keeps its 100%–35% steps; the checkmark compares against this window's `currentWindowOpacity()` (or the drag in progress), rounded to 5% as now, so a slider value between steps, such as 72%, checks the nearest (70%).
 
 ### 4.3 Applying it: the window owns its alpha
 
 `AppSettingsUpdater` stops pushing the channel opacity to the native window:
-- **On load**, after the window's id is known, it applies `windowOpacity(this window)` once via `dispatchWindowOpacity` (`source: "restore"`, a command that already exists for this and is unused).
-- **When the value changes**, it re-applies, but only if the window has no meta value of its own: a window that inherits the default keeps following Settings → Appearance; one with its own value ignores it.
-- `setWindowTransparency` keeps its job for blur and the CSS `is-transparent` class. It is passed the window's resolved opacity instead of the setting, so the two IPCs can never disagree about the same window.
+- **On load**, once the window's host label is known, it applies `currentWindowOpacity()` via `dispatchWindowOpacity` (`source: "restore"`, a command that already existed for this and was unused).
+- **When that value changes**, it applies it again. A window with its own value resolves to it whatever the settings say, so a settings change leaves it alone; a window without one follows Settings → Appearance. The dispatch is untracked, so a slider drag doesn't re-run the effect and snap the window back.
+- **The `setWindowTransparency` call is gone.** It only set the native alpha, the same thing `setWindowOpacity` does, and it set every window to the channel's value. The CSS `is-transparent` class and `--window-opacity` are still set from the settings and the window's resolved opacity, as before.
 
 ### 4.4 Reactivity
 
@@ -178,9 +178,9 @@ The second-exe launch, login start and a notification click for an unshown works
 Built in three parts and shipped as one PR, verified live in a `task dev` build before review.
 
 **P1: Opacity, combined (§4).**
-- `setWindowOpacity(…, phase)` and `windowOpacityFor` in `window-opacity-store.ts`; the panel moves onto them with no behaviour change.
+- `setWindowOpacityFor(…, phase)` in `window-opacity-store.ts` and `opacityFor` / `currentWindowOpacity()` in `window-appearance.ts`; the panel moves onto them.
 - The hamburger's Opacity moves onto them and stops writing settings.
-- `AppSettingsUpdater` applies the window's resolved opacity on load and on change, as §4.3 describes, and passes it to `setWindowTransparency`.
+- `AppSettingsUpdater` applies the window's resolved opacity on load and on change, as §4.3 describes, in place of `setWindowTransparency`.
 - Settings → Appearance's Opacity is relabelled as the default.
 - **Tests:**
   - Reducer and store: commit writes meta; live doesn't; a floater never persists.
@@ -191,7 +191,7 @@ Built in three parts and shipped as one PR, verified live in a `task dev` build 
 **P2: Theme per window (§5).**
 - `currentWindowTheme()` and the reader switch-over, with the grep test.
 - The hamburger writes window meta.
-- Floaters follow their owner.
+- Floaters following their owner is deferred (§5.4, §9).
 - Settings → Appearance's Theme relabelled as the default.
 - **Tests:**
   - Rendered hamburger: a theme click sets this window's `data-theme` and not the setting.
