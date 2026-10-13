@@ -7,8 +7,8 @@
 import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const setConfig = vi.fn(async () => {});
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: (...a: unknown[]) => setConfig(...(a as [])) } }));
+const setConfig = vi.fn(async (_client: unknown, _data: unknown) => {});
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: (client: unknown, data: unknown) => setConfig(client, data) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/store/global", async () => {
     const signals = await import("@/app/store/config-signals");

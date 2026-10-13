@@ -1,7 +1,7 @@
 # Widget bar visibility in Settings: pin, keep in More, or hide
 
 **Date:** 2026-10-12
-**Status:** implemented on branch `agenty/widget-bar-visibility` (phases 1-3; §7 items 5-11 remain follow-ups)
+**Status:** active — phases 1-3 (hidden entries, the Widget bar section, live "+" picker, the null fix) in PR #4754; §7 items 5-11 remain follow-ups. Verified 2026-10-12.
 **Author:** AgentY
 **Audited against:** `main` at `052f6f67f`
 **Related:** `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md` (§8.4, Settings → Widgets for packages),

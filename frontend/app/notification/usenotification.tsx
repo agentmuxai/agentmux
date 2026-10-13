@@ -20,6 +20,11 @@ export function setNotificationAction(actionKey: string, fn: () => void): void {
     notificationActions[actionKey] = fn;
 }
 
+/** Forget an action registered with `setNotificationAction`. */
+export function clearNotificationAction(actionKey: string): void {
+    delete notificationActions[actionKey];
+}
+
 export function useNotification() {
     const notificationPopoverMode = atoms.notificationPopoverMode;
     const notifications = atoms.notifications;

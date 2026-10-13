@@ -8,14 +8,16 @@
  * SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md §4.2.
  */
 
-import { setNotificationAction } from "@/app/notification/usenotification";
+import { clearNotificationAction, setNotificationAction } from "@/app/notification/usenotification";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { pushNotification } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { setWidgetBarState } from "./action-widgets-config";
 
-const UNDO_ACTION = "widgetBarUndoHide";
+// Each hide gets its own Undo key, so a second hide inside the first one's 8 s can't make
+// the first notification's Undo restore the second snapshot.
+let undoSeq = 0;
 
 export function hideFromWidgetBar(key: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>): void {
     const before = {
@@ -24,7 +26,9 @@ export function hideFromWidgetBar(key: string, settings: Record<string, any>, wm
     };
     fireAndForget(async () => {
         await setWidgetBarState(key, "hidden", settings, wmap);
-        setNotificationAction(UNDO_ACTION, () => {
+        const undoKey = `widgetBarUndoHide:${++undoSeq}`;
+        setNotificationAction(undoKey, () => {
+            clearNotificationAction(undoKey);
             fireAndForget(() => RpcApi.SetConfigCommand(TabRpcClient, before as unknown as SettingsType));
         });
         pushNotification({
@@ -34,7 +38,7 @@ export function hideFromWidgetBar(key: string, settings: Record<string, any>, wm
             timestamp: new Date().toISOString(),
             type: "info",
             expiration: Date.now() + 8000,
-            actions: [{ label: "Undo", actionKey: UNDO_ACTION, color: "grey" }],
+            actions: [{ label: "Undo", actionKey: undoKey, color: "grey" }],
         });
     });
 }
