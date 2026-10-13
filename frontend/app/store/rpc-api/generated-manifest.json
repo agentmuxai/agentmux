@@ -2,12 +2,44 @@
     "$comment": "Commands whose frontend stubs are generated (scripts/gen-rpc-stubs.mjs -> generated.ts). Each entry: command, method (the RpcApi method name callers use), and optionally send (a no-argument command: \"{}\" (default) or \"null\"; an optional request: \"data\" (default) or \"data ?? {}\") and opts (an expression replacing opts, e.g. a longer timeout). Moving a command here: add its entry, delete its hand-written method, run the generator.",
     "stubs": [
         {
+            "command": "agentinput",
+            "method": "AgentInputCommand"
+        },
+        {
+            "command": "agentlastruntime",
+            "method": "AgentLastRuntimeCommand"
+        },
+        {
+            "command": "agentstop",
+            "method": "AgentStopCommand"
+        },
+        {
+            "command": "appendagenthistory",
+            "method": "AppendAgentHistoryCommand"
+        },
+        {
+            "command": "asksidequestion",
+            "method": "AskSideQuestionCommand"
+        },
+        {
             "command": "createeditordir",
             "method": "CreateEditorDirCommand"
         },
         {
             "command": "createeditorfile",
             "method": "CreateEditorFileCommand"
+        },
+        {
+            "command": "deleteagent",
+            "method": "DeleteAgentDefinitionCommand"
+        },
+        {
+            "command": "deleteagentskill",
+            "method": "DeleteAgentSkillCommand"
+        },
+        {
+            "command": "deletedrone",
+            "method": "DeleteDroneCommand"
         },
         {
             "command": "deleteeditorfile",
@@ -75,12 +107,52 @@
             "method": "FsWatchCommand"
         },
         {
+            "command": "getagentbundles",
+            "method": "GetAgentBundlesCommand"
+        },
+        {
+            "command": "getagentcontent",
+            "method": "GetAgentContentCommand"
+        },
+        {
+            "command": "getagentinstance",
+            "method": "GetAgentInstanceCommand"
+        },
+        {
+            "command": "getallagentcontent",
+            "method": "GetAllAgentContentCommand"
+        },
+        {
+            "command": "getdrone",
+            "method": "GetDroneCommand"
+        },
+        {
             "command": "geteditorhome",
             "method": "GetEditorHomeCommand"
         },
         {
             "command": "geteditorroots",
             "method": "GetEditorRootsCommand"
+        },
+        {
+            "command": "importagents",
+            "method": "ImportAgentDefinitionsCommand"
+        },
+        {
+            "command": "importagentfromclaw",
+            "method": "ImportAgentFromClawCommand"
+        },
+        {
+            "command": "listagentinstances",
+            "method": "ListAgentInstancesCommand"
+        },
+        {
+            "command": "listagentskills",
+            "method": "ListAgentSkillsCommand"
+        },
+        {
+            "command": "listdrones",
+            "method": "ListDronesCommand"
         },
         {
             "command": "listeditordir",
@@ -139,8 +211,84 @@
             "method": "RemoteTestCommand"
         },
         {
+            "command": "renameagentdefinitiontitle",
+            "method": "RenameAgentDefinitionTitleCommand"
+        },
+        {
             "command": "renameeditorfile",
             "method": "RenameEditorFileCommand"
+        },
+        {
+            "command": "rundrone",
+            "method": "RunDroneCommand"
+        },
+        {
+            "command": "setagentbundles",
+            "method": "SetAgentBundlesCommand"
+        },
+        {
+            "command": "setagentcontent",
+            "method": "SetAgentContentCommand"
+        },
+        {
+            "command": "bookmarks.set",
+            "method": "SetBookmarksCommand"
+        },
+        {
+            "command": "shellstatus",
+            "method": "ShellStatusCommand"
+        },
+        {
+            "command": "shellstop",
+            "method": "ShellStopCommand"
+        },
+        {
+            "command": "skill.bind",
+            "method": "SkillBindCommand"
+        },
+        {
+            "command": "skill.catalog.bind",
+            "method": "SkillCatalogBindCommand"
+        },
+        {
+            "command": "skill.catalog.bind_to_bundle",
+            "method": "SkillCatalogBindToBundleCommand"
+        },
+        {
+            "command": "skill.catalog.delete",
+            "method": "SkillCatalogDeleteCommand"
+        },
+        {
+            "command": "skill.catalog.list_for_agent",
+            "method": "SkillCatalogListForAgentCommand"
+        },
+        {
+            "command": "skill.catalog.list_for_bundle",
+            "method": "SkillCatalogListForBundleCommand"
+        },
+        {
+            "command": "skill.catalog.unbind",
+            "method": "SkillCatalogUnbindCommand"
+        },
+        {
+            "command": "skill.catalog.unbind_from_bundle",
+            "method": "SkillCatalogUnbindFromBundleCommand"
+        },
+        {
+            "command": "skill.delete",
+            "method": "SkillDeleteCommand"
+        },
+        {
+            "command": "skill.get",
+            "method": "SkillGetCommand"
+        },
+        {
+            "command": "skill.list",
+            "method": "SkillListCommand"
+        },
+        {
+            "command": "skill.unbind",
+            "method": "SkillUnbindCommand"
         },
         {
             "command": "unwatcheditorfile",
@@ -149,6 +297,18 @@
         {
             "command": "unwatchmediadir",
             "method": "UnwatchMediaDirCommand"
+        },
+        {
+            "command": "updateagentinstance",
+            "method": "UpdateAgentInstanceCommand"
+        },
+        {
+            "command": "updateagentskill",
+            "method": "UpdateAgentSkillCommand"
+        },
+        {
+            "command": "upsertdrone",
+            "method": "UpsertDroneCommand"
         },
         {
             "command": "watcheditorfile",

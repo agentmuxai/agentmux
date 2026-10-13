@@ -5,6 +5,31 @@
 // typed commands) and generated-manifest.json. Do not edit: change the Rust types or the
 // manifest, then run `node scripts/gen-rpc-stubs.mjs`.
 
+import type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
+import type { AgentContent } from "@/types/rpc/AgentContent";
+import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
+import type { AgentHistory } from "@/types/rpc/AgentHistory";
+import type { AgentInstance } from "@/types/rpc/AgentInstance";
+import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentSkill } from "@/types/rpc/AgentSkill";
+import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
+import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
+import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
+import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
+import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
+import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
+import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
+import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
+import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
+import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
+import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
+import type { CommandGetAgentContentData } from "@/types/rpc/CommandGetAgentContentData";
+import type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
+import type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAgentContentData";
+import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
+import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
+import type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
+import type { CommandListAgentSkillsData } from "@/types/rpc/CommandListAgentSkillsData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
 import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
@@ -14,12 +39,22 @@ import type { CommandRemoteHelperRemoveData } from "@/types/rpc/CommandRemoteHel
 import type { CommandRemoteSetConfigData } from "@/types/rpc/CommandRemoteSetConfigData";
 import type { CommandRemoteSshLocateData } from "@/types/rpc/CommandRemoteSshLocateData";
 import type { CommandRemoteTestData } from "@/types/rpc/CommandRemoteTestData";
+import type { CommandRenameAgentDefinitionTitleData } from "@/types/rpc/CommandRenameAgentDefinitionTitleData";
+import type { CommandSetAgentBundlesData } from "@/types/rpc/CommandSetAgentBundlesData";
+import type { CommandSetAgentContentData } from "@/types/rpc/CommandSetAgentContentData";
+import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
+import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
+import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
+import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
 import type { CreateEditorDirReq } from "@/types/rpc/CreateEditorDirReq";
 import type { CreateEditorDirResult } from "@/types/rpc/CreateEditorDirResult";
 import type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
 import type { CreateEditorFileResult } from "@/types/rpc/CreateEditorFileResult";
+import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
+import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
+import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
@@ -43,8 +78,11 @@ import type { FsTrashReq } from "@/types/rpc/FsTrashReq";
 import type { FsUnwatchReq } from "@/types/rpc/FsUnwatchReq";
 import type { FsWatchReq } from "@/types/rpc/FsWatchReq";
 import type { FsWatchResult } from "@/types/rpc/FsWatchResult";
+import type { GetDroneReq } from "@/types/rpc/GetDroneReq";
 import type { GetEditorHomeResult } from "@/types/rpc/GetEditorHomeResult";
 import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
+import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
+import type { ListDronesReq } from "@/types/rpc/ListDronesReq";
 import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
 import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
 import type { LspSendReq } from "@/types/rpc/LspSendReq";
@@ -58,12 +96,57 @@ import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
 import type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
 import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
+import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
+import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
+import type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
+import type { ShellStopResult } from "@/types/rpc/ShellStopResult";
+import type { SkillAgentBindingData } from "@/types/rpc/SkillAgentBindingData";
+import type { SkillAgentItemData } from "@/types/rpc/SkillAgentItemData";
+import type { SkillAgentScopeData } from "@/types/rpc/SkillAgentScopeData";
+import type { SkillBindResult } from "@/types/rpc/SkillBindResult";
+import type { SkillBundleBindingData } from "@/types/rpc/SkillBundleBindingData";
+import type { SkillBundleScopeData } from "@/types/rpc/SkillBundleScopeData";
+import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
+import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
 import type { WatchEditorFileReq } from "@/types/rpc/WatchEditorFileReq";
 import type { WatchMediaDirReq } from "@/types/rpc/WatchMediaDirReq";
 import { RpcClient } from "../rpc-client";
 
 export const GeneratedApi = {
+  // command "agentinput"
+  AgentInputCommand(client: RpcClient, data: CommandAgentInputData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("agentinput", data, opts);
+  },
+  // command "agentlastruntime"
+  AgentLastRuntimeCommand(
+    client: RpcClient,
+    data: CommandAgentLastRuntimeData,
+    opts?: RpcOpts
+  ): Promise<AgentLastRuntime> {
+    return client.rpcCall("agentlastruntime", data, opts);
+  },
+  // command "agentstop"
+  AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("agentstop", data, opts);
+  },
+  // command "appendagenthistory"
+  AppendAgentHistoryCommand(
+    client: RpcClient,
+    data: CommandAppendAgentHistoryData,
+    opts?: RpcOpts
+  ): Promise<AgentHistory> {
+    return client.rpcCall("appendagenthistory", data, opts);
+  },
+  // command "asksidequestion"
+  AskSideQuestionCommand(
+    client: RpcClient,
+    data: CommandAskSideQuestionData,
+    opts?: RpcOpts
+  ): Promise<AskSideQuestionResult> {
+    return client.rpcCall("asksidequestion", data, opts);
+  },
   // command "createeditordir"
   CreateEditorDirCommand(client: RpcClient, data: CreateEditorDirReq, opts?: RpcOpts): Promise<CreateEditorDirResult> {
     return client.rpcCall("createeditordir", data, opts);
@@ -75,6 +158,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<CreateEditorFileResult> {
     return client.rpcCall("createeditorfile", data, opts);
+  },
+  // command "deleteagent"
+  DeleteAgentDefinitionCommand(
+    client: RpcClient,
+    data: CommandDeleteAgentDefinitionData,
+    opts?: RpcOpts
+  ): Promise<void> {
+    return client.rpcCall("deleteagent", data, opts);
+  },
+  // command "deleteagentskill"
+  DeleteAgentSkillCommand(client: RpcClient, data: CommandDeleteAgentSkillData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("deleteagentskill", data, opts);
+  },
+  // command "deletedrone"
+  DeleteDroneCommand(client: RpcClient, data: DeleteDroneReq, opts?: RpcOpts): Promise<DeleteDroneResp> {
+    return client.rpcCall("deletedrone", data, opts);
   },
   // command "deleteeditorfile"
   DeleteEditorFileCommand(client: RpcClient, data: DeleteEditorFileReq, opts?: RpcOpts): Promise<void> {
@@ -140,6 +239,42 @@ export const GeneratedApi = {
   FsWatchCommand(client: RpcClient, data: FsWatchReq, opts?: RpcOpts): Promise<FsWatchResult> {
     return client.rpcCall("fs.watch", data, opts);
   },
+  // command "getagentbundles"
+  GetAgentBundlesCommand(
+    client: RpcClient,
+    data: CommandGetAgentBundlesData,
+    opts?: RpcOpts
+  ): Promise<AgentBundlesResult> {
+    return client.rpcCall("getagentbundles", data, opts);
+  },
+  // command "getagentcontent"
+  GetAgentContentCommand(
+    client: RpcClient,
+    data: CommandGetAgentContentData,
+    opts?: RpcOpts
+  ): Promise<AgentContent | null> {
+    return client.rpcCall("getagentcontent", data, opts);
+  },
+  // command "getagentinstance"
+  GetAgentInstanceCommand(
+    client: RpcClient,
+    data: CommandGetAgentInstanceData,
+    opts?: RpcOpts
+  ): Promise<AgentInstance> {
+    return client.rpcCall("getagentinstance", data, opts);
+  },
+  // command "getallagentcontent"
+  GetAllAgentContentCommand(
+    client: RpcClient,
+    data: CommandGetAllAgentContentData,
+    opts?: RpcOpts
+  ): Promise<Array<AgentContent>> {
+    return client.rpcCall("getallagentcontent", data, opts);
+  },
+  // command "getdrone"
+  GetDroneCommand(client: RpcClient, data: GetDroneReq, opts?: RpcOpts): Promise<DroneDefinition | null> {
+    return client.rpcCall("getdrone", data, opts);
+  },
   // command "geteditorhome"
   GetEditorHomeCommand(client: RpcClient, data?: EditorRootsReq | null, opts?: RpcOpts): Promise<GetEditorHomeResult> {
     return client.rpcCall("geteditorhome", data, opts);
@@ -151,6 +286,42 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<GetEditorRootsResult> {
     return client.rpcCall("geteditorroots", data, opts);
+  },
+  // command "importagents"
+  ImportAgentDefinitionsCommand(
+    client: RpcClient,
+    data: CommandImportAgentDefinitionsData,
+    opts?: RpcOpts
+  ): Promise<ImportAgentDefinitionsResult> {
+    return client.rpcCall("importagents", data, opts);
+  },
+  // command "importagentfromclaw"
+  ImportAgentFromClawCommand(
+    client: RpcClient,
+    data: CommandImportAgentFromClawData,
+    opts?: RpcOpts
+  ): Promise<AgentDefinition> {
+    return client.rpcCall("importagentfromclaw", data, opts);
+  },
+  // command "listagentinstances"
+  ListAgentInstancesCommand(
+    client: RpcClient,
+    data?: CommandListAgentInstancesData | null,
+    opts?: RpcOpts
+  ): Promise<Array<AgentInstance>> {
+    return client.rpcCall("listagentinstances", data, opts);
+  },
+  // command "listagentskills"
+  ListAgentSkillsCommand(
+    client: RpcClient,
+    data: CommandListAgentSkillsData,
+    opts?: RpcOpts
+  ): Promise<Array<AgentSkill>> {
+    return client.rpcCall("listagentskills", data, opts);
+  },
+  // command "listdrones"
+  ListDronesCommand(client: RpcClient, data?: ListDronesReq | null, opts?: RpcOpts): Promise<Array<DroneDefinition>> {
+    return client.rpcCall("listdrones", data, opts);
   },
   // command "listeditordir"
   ListEditorDirCommand(client: RpcClient, data: ListEditorDirReq, opts?: RpcOpts): Promise<ListEditorDirResult> {
@@ -216,6 +387,14 @@ export const GeneratedApi = {
   RemoteTestCommand(client: RpcClient, data: CommandRemoteTestData, opts?: RpcOpts): Promise<RemoteTestResult> {
     return client.rpcCall("remotetest", data, opts);
   },
+  // command "renameagentdefinitiontitle"
+  RenameAgentDefinitionTitleCommand(
+    client: RpcClient,
+    data: CommandRenameAgentDefinitionTitleData,
+    opts?: RpcOpts
+  ): Promise<AgentDefinition> {
+    return client.rpcCall("renameagentdefinitiontitle", data, opts);
+  },
   // command "renameeditorfile"
   RenameEditorFileCommand(
     client: RpcClient,
@@ -224,6 +403,102 @@ export const GeneratedApi = {
   ): Promise<RenameEditorFileResult> {
     return client.rpcCall("renameeditorfile", data, opts);
   },
+  // command "rundrone"
+  RunDroneCommand(client: RpcClient, data: RunDroneReq, opts?: RpcOpts): Promise<RunDroneResp> {
+    return client.rpcCall("rundrone", data, opts);
+  },
+  // command "setagentbundles"
+  SetAgentBundlesCommand(
+    client: RpcClient,
+    data: CommandSetAgentBundlesData,
+    opts?: RpcOpts
+  ): Promise<AgentBundlesResult> {
+    return client.rpcCall("setagentbundles", data, opts);
+  },
+  // command "setagentcontent"
+  SetAgentContentCommand(client: RpcClient, data: CommandSetAgentContentData, opts?: RpcOpts): Promise<AgentContent> {
+    return client.rpcCall("setagentcontent", data, opts);
+  },
+  // command "bookmarks.set"
+  SetBookmarksCommand(client: RpcClient, data: CommandBookmarksSetData, opts?: RpcOpts): Promise<BookmarksResult> {
+    return client.rpcCall("bookmarks.set", data, opts);
+  },
+  // command "shellstatus"
+  ShellStatusCommand(client: RpcClient, data: CommandShellStatusData, opts?: RpcOpts): Promise<ShellStatusResult> {
+    return client.rpcCall("shellstatus", data, opts);
+  },
+  // command "shellstop"
+  ShellStopCommand(client: RpcClient, data: CommandShellStopData, opts?: RpcOpts): Promise<ShellStopResult> {
+    return client.rpcCall("shellstop", data, opts);
+  },
+  // command "skill.bind"
+  SkillBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {
+    return client.rpcCall("skill.bind", data, opts);
+  },
+  // command "skill.catalog.bind"
+  SkillCatalogBindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillBindResult> {
+    return client.rpcCall("skill.catalog.bind", data, opts);
+  },
+  // command "skill.catalog.bind_to_bundle"
+  SkillCatalogBindToBundleCommand(
+    client: RpcClient,
+    data: SkillBundleBindingData,
+    opts?: RpcOpts
+  ): Promise<SkillBindResult> {
+    return client.rpcCall("skill.catalog.bind_to_bundle", data, opts);
+  },
+  // command "skill.catalog.delete"
+  SkillCatalogDeleteCommand(client: RpcClient, data: SkillCatalogItemData, opts?: RpcOpts): Promise<SkillDeleteResult> {
+    return client.rpcCall("skill.catalog.delete", data, opts);
+  },
+  // command "skill.catalog.list_for_agent"
+  SkillCatalogListForAgentCommand(
+    client: RpcClient,
+    data: SkillAgentScopeData,
+    opts?: RpcOpts
+  ): Promise<Array<SkillListItem>> {
+    return client.rpcCall("skill.catalog.list_for_agent", data, opts);
+  },
+  // command "skill.catalog.list_for_bundle"
+  SkillCatalogListForBundleCommand(
+    client: RpcClient,
+    data: SkillBundleScopeData,
+    opts?: RpcOpts
+  ): Promise<Array<SkillBundleListItem>> {
+    return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
+  },
+  // command "skill.catalog.unbind"
+  SkillCatalogUnbindCommand(
+    client: RpcClient,
+    data: SkillAgentBindingData,
+    opts?: RpcOpts
+  ): Promise<SkillUnbindResult> {
+    return client.rpcCall("skill.catalog.unbind", data, opts);
+  },
+  // command "skill.catalog.unbind_from_bundle"
+  SkillCatalogUnbindFromBundleCommand(
+    client: RpcClient,
+    data: SkillBundleBindingData,
+    opts?: RpcOpts
+  ): Promise<SkillUnbindResult> {
+    return client.rpcCall("skill.catalog.unbind_from_bundle", data, opts);
+  },
+  // command "skill.delete"
+  SkillDeleteCommand(client: RpcClient, data: SkillAgentItemData, opts?: RpcOpts): Promise<SkillDeleteResult> {
+    return client.rpcCall("skill.delete", data, opts);
+  },
+  // command "skill.get"
+  SkillGetCommand(client: RpcClient, data: SkillAgentItemData, opts?: RpcOpts): Promise<Skill | null> {
+    return client.rpcCall("skill.get", data, opts);
+  },
+  // command "skill.list"
+  SkillListCommand(client: RpcClient, data: SkillAgentScopeData, opts?: RpcOpts): Promise<Array<SkillListItem>> {
+    return client.rpcCall("skill.list", data, opts);
+  },
+  // command "skill.unbind"
+  SkillUnbindCommand(client: RpcClient, data: SkillAgentBindingData, opts?: RpcOpts): Promise<SkillUnbindResult> {
+    return client.rpcCall("skill.unbind", data, opts);
+  },
   // command "unwatcheditorfile"
   UnwatchEditorFileCommand(client: RpcClient, data: WatchEditorFileReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("unwatcheditorfile", data, opts);
@@ -231,6 +506,22 @@ export const GeneratedApi = {
   // command "unwatchmediadir"
   UnwatchMediaDirCommand(client: RpcClient, data: UnwatchMediaDirReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("unwatchmediadir", data, opts);
+  },
+  // command "updateagentinstance"
+  UpdateAgentInstanceCommand(
+    client: RpcClient,
+    data: CommandUpdateAgentInstanceData,
+    opts?: RpcOpts
+  ): Promise<AgentInstance> {
+    return client.rpcCall("updateagentinstance", data, opts);
+  },
+  // command "updateagentskill"
+  UpdateAgentSkillCommand(client: RpcClient, data: CommandUpdateAgentSkillData, opts?: RpcOpts): Promise<AgentSkill> {
+    return client.rpcCall("updateagentskill", data, opts);
+  },
+  // command "upsertdrone"
+  UpsertDroneCommand(client: RpcClient, data: DroneDefinition, opts?: RpcOpts): Promise<DroneDefinition> {
+    return client.rpcCall("upsertdrone", data, opts);
   },
   // command "watcheditorfile"
   WatchEditorFileCommand(client: RpcClient, data: WatchEditorFileReq, opts?: RpcOpts): Promise<void> {
