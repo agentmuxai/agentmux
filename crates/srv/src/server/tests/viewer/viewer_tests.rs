@@ -224,7 +224,12 @@ async fn the_viewer_token_opens_the_viewer_routes_and_nothing_else() {
 async fn the_lan_key_and_the_instance_key_open_no_viewer_route() {
     let state = test_state();
     let viewer = viewer_router(&state);
-    for uri in ["/agentmux/viewer/hello", "/agentmux/viewer/agents", "/agentmux/viewer/agents/anyone/feed"] {
+    for uri in [
+        "/agentmux/viewer/hello",
+        "/agentmux/viewer/agents",
+        "/agentmux/viewer/agents/anyone/feed",
+        "/agentmux/viewer/panes",
+    ] {
         for key in ["test-secret-key", "test-lan-key"] {
             assert_eq!(send(&viewer, Method::GET, uri, Some(("X-AuthKey", key.into()))).await, StatusCode::UNAUTHORIZED);
             assert_eq!(send(&viewer, Method::GET, uri, bearer(key)).await, StatusCode::UNAUTHORIZED);
@@ -300,6 +305,52 @@ async fn a_hidden_or_unknown_agent_has_no_feed() {
         StatusCode::NOT_FOUND
     );
     assert_eq!(state.viewer.open_feeds(), 0, "a refused feed holds no place");
+}
+
+// ---- Panes ----
+
+#[tokio::test]
+async fn panes_lists_every_tab_pane_with_agent_names_and_leaves_hidden_agents_out() {
+    use crate::backend::obj::{Tab, Window, Workspace};
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (shown, shown_block, _) = register_defined(&state, "viewer-pane-agent");
+    let (_, hidden_block, hidden_def) = register_defined(&state, "viewer-pane-hidden");
+    state.mstore.agent_hide_from_devices_set(&hidden_def, true).unwrap();
+    let term = uuid::Uuid::new_v4().to_string();
+    let mut term_block = crate::backend::obj::Block { oid: term.clone(), ..Default::default() };
+    term_block.meta.insert("view".into(), serde_json::json!("term"));
+    term_block.meta.insert("frame:title".into(), serde_json::json!("build"));
+    state.mstore.insert(&mut term_block).unwrap();
+    let mut tab = Tab {
+        oid: uuid::Uuid::new_v4().to_string(),
+        name: "Work".into(),
+        blockids: vec![shown_block.clone(), hidden_block.clone(), term.clone()],
+        ..Default::default()
+    };
+    state.mstore.insert(&mut tab).unwrap();
+    let mut ws = Workspace { oid: uuid::Uuid::new_v4().to_string(), tabids: vec![tab.oid.clone()], activetabid: tab.oid.clone(), ..Default::default() };
+    state.mstore.insert(&mut ws).unwrap();
+    let mut window = Window { oid: uuid::Uuid::new_v4().to_string(), workspaceid: ws.oid.clone(), ..Default::default() };
+    state.mstore.insert(&mut window).unwrap();
+
+    let resp = viewer_router(&state)
+        .oneshot(request(Method::GET, "/agentmux/viewer/panes", Some(("Authorization", &format!("Bearer {token}"))), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = json_of(resp).await;
+    assert!(json["now_ms"].as_u64().unwrap() > 0);
+    // Tests share one object store, so only this test's window is looked at.
+    let panes: Vec<&serde_json::Value> =
+        json["panes"].as_array().unwrap().iter().filter(|p| p["window_id"] == window.oid.as_str()).collect();
+    let ids: Vec<&str> = panes.iter().map(|p| p["block_id"].as_str().unwrap()).collect();
+    assert_eq!(ids, [shown_block.as_str(), term.as_str()], "the hidden agent is left out");
+    assert_eq!(panes[0]["kind"], "agent");
+    assert_eq!(panes[0]["agent"], shown.as_str(), "the name its feed opens by");
+    assert_eq!((panes[0]["tab"].as_str(), panes[0]["tab_active"].as_bool()), (Some("Work"), Some(true)));
+    assert_eq!((panes[1]["kind"].as_str(), panes[1]["label"].as_str()), (Some("terminal"), Some("build")));
+    assert!(panes[1].get("running").is_none(), "no controller: not known to run");
 }
 
 // ---- The feed ----
