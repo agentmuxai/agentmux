@@ -33,6 +33,8 @@ function setBlockView(blockId: string, view: string | undefined) {
     }
 }
 
+// Pane colours read the window's theme; this window has the default one.
+vi.mock("@/app/store/window-appearance", () => ({ currentWindowTheme: () => "default" }));
 vi.mock("@/store/mos", () => ({
     getMuxObjectAtom: (oid: string) => {
         if (!blockMetaSignals.has(oid)) {

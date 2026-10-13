@@ -276,6 +276,16 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["ctx".into(), "windowId".into(), "opacity".into()],
             return_desc: None,
         }),
+        ("window", "MarkWindowOpen") => Some(MethodMeta {
+            desc: Some("a mark to take before opening a window that should inherit appearance".into()),
+            arg_names: vec![],
+            return_desc: Some("mark".into()),
+        }),
+        ("window", "InheritWindowAppearance") => Some(MethodMeta {
+            desc: Some("copy a window's theme and opacity onto the window opened after the mark with this host label".into()),
+            arg_names: vec!["sourceWindowId".into(), "hostLabel".into(), "mark".into()],
+            return_desc: None,
+        }),
         ("window", "SetWindowTopology") => Some(MethodMeta {
             desc: Some("set a window's persisted kind + parent_window_id".into()),
             arg_names: vec!["ctx".into(), "windowId".into(), "kind".into(), "parentWindowId".into()],

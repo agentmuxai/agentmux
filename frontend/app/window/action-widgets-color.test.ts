@@ -11,6 +11,10 @@ const [settings, setSettings] = createSignal<Record<string, unknown>>({});
 vi.mock("@/app/store/block-atom-cache", () => ({
     getSettingsKeyAtom: (key: string) => () => settings()[key],
 }));
+// A window with no theme of its own shows the default theme setting.
+vi.mock("@/app/store/window-appearance", () => ({
+    currentWindowTheme: () => (settings()["window:theme"] as string) ?? "default",
+}));
 
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
 import { registerPaneTab } from "@/app/block/pane-tab-registry";

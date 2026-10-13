@@ -44,7 +44,17 @@ const h = vi.hoisted(() => {
     };
     const settings = { read: (): Record<string, unknown> => ({}) };
     const caps = { multiWindow: true };
-    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, menu: { items: [] as MenuItem[] } };
+    // This window's resolved theme and opacity, and the drag in progress
+    // (window-appearance.ts / window-opacity-store.ts). A test can swap in
+    // reactive sources.
+    const win = {
+        theme: (): string => "default",
+        opacity: (): number => 1,
+        live: (): number | undefined => undefined,
+        setTheme: vi.fn((_: string) => Promise.resolve()),
+        setOpacity: vi.fn(),
+    };
+    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[] } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -56,6 +66,18 @@ vi.mock("@/app/store/modalmodel", () => ({
 }));
 vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: h.CommandPaletteModal }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
+vi.mock("@/app/store/window-appearance", () => ({
+    currentWindowLabel: () => "win-a",
+    currentWindowTheme: () => h.win.theme(),
+    currentWindowOpacity: () => h.win.opacity(),
+    setCurrentWindowTheme: h.win.setTheme,
+    openNewWindowFromHere: () => h.openNewWindow(),
+}));
+vi.mock("@/app/store/window-opacity-store", () => ({
+    liveWindowOpacity: () => h.win.live(),
+    setWindowOpacityFor: h.win.setOpacity,
+}));
+vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w-a" }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
@@ -290,20 +312,71 @@ describe("Theme and Opacity", () => {
         cleanup();
     });
 
-    it("move the checkmark on a settings change without rebuilding the items", () => {
-        const [cfg, setCfg] = createSignal<Record<string, unknown>>({ "window:theme": "default" });
-        h.settings.read = cfg;
+    it("move the checkmark when this window's theme changes, without rebuilding the items", () => {
+        const [theme, setTheme] = createSignal("default");
+        h.win.theme = theme;
         createRoot((dispose) => {
             render(() => <HamburgerMenu />);
             const before = h.menu.items;
             expect(sub("Theme").filter((i) => i.checked)).toHaveLength(1);
 
-            setCfg({ "window:theme": "__none__" });
+            setTheme("__none__");
             expect(h.menu.items).toBe(before);
             expect(sub("Theme").filter((i) => i.checked)).toHaveLength(0);
             dispose();
         });
-        h.settings.read = () => ({});
+        h.win.theme = () => "default";
+        cleanup();
+    });
+});
+
+// SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12: both submenus act on this
+// window only, never on the setting every window reads.
+describe("Theme and Opacity are this window's", () => {
+    const sub = (label: string) => h.menu.items.find((i) => i.label === label)?.subItems ?? [];
+
+    afterEach(() => {
+        h.win.setTheme.mockClear();
+        h.win.setOpacity.mockClear();
+        h.win.live = () => undefined;
+        h.win.opacity = () => 1;
+    });
+
+    it("a theme sets this window's theme, not the setting", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        render(() => <HamburgerMenu />);
+        const dracula = sub("Theme").find((i) => i.label !== sub("Theme")[0].label)!;
+        dracula.onClick!(undefined as never);
+        await Promise.resolve();
+        expect(h.win.setTheme).toHaveBeenCalledTimes(1);
+        expect(RpcApi.SetConfigCommand).not.toHaveBeenCalled();
+        cleanup();
+    });
+
+    it("an opacity sets and stores this window's opacity, through the slider's setter", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        render(() => <HamburgerMenu />);
+        sub("Opacity").find((i) => i.label === "70%")!.onClick!(undefined as never);
+        expect(h.win.setOpacity).toHaveBeenCalledWith({ label: "win-a", windowId: "w-a" }, 0.7, "commit");
+        expect(RpcApi.SetConfigCommand).not.toHaveBeenCalled();
+        cleanup();
+    });
+
+    it("the check follows this window's opacity, and a slider drag in progress", () => {
+        const [live, setLive] = createSignal<number | undefined>(undefined);
+        h.win.opacity = () => 0.8;
+        h.win.live = live;
+        createRoot((dispose) => {
+            render(() => <HamburgerMenu />);
+            const checked = () => sub("Opacity").filter((i) => i.checked).map((i) => i.label);
+            expect(checked()).toEqual(["80%"]);
+            setLive(0.55);
+            expect(checked()).toEqual(["55%"]);
+            // Between steps: the nearest step is checked.
+            setLive(0.72);
+            expect(checked()).toEqual(["70%"]);
+            dispose();
+        });
         cleanup();
     });
 });

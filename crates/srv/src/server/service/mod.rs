@@ -32,6 +32,7 @@ mod tear_off;
 mod window;
 mod window_close;
 mod window_create;
+mod window_inherit;
 mod window_mutate;
 mod window_query;
 mod workspace;

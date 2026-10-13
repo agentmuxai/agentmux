@@ -25,7 +25,9 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatUtcTimestamp } from "@/util/format-time";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/mos";
-import { dispatchWindowOpacity, liveWindowOpacity } from "@/app/store/window-opacity-store";
+import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
+import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
+import { settingsAtom } from "@/app/store/config-signals";
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import {
     DISPLAY_NAME_MAX_LEN,
@@ -299,32 +301,22 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                     value={p.currentOpacity()}
                     title="Opacity"
                     aria-label="Opacity"
-                    onInput={(e) => {
-                        const val = parseFloat(e.currentTarget.value);
-                        dispatchWindowOpacity({
-                            type: "SetWindowOpacity",
-                            label: p.label,
-                            opacity: val,
-                            source: "user",
-                        });
-                    }}
-                    onChange={(e) => {
-                        if (!p.persistWindowId) return; // floater: session-only
-                        const raw = parseFloat(e.currentTarget.value);
-                        const val = Math.round(raw * 100) / 100;
-                        // Set window:transparent alongside window:opacity so
-                        // AppSettingsUpdater applies it correctly on restore.
-                        const fullyOpaque = val >= 1.0;
-                        ObjectService.UpdateObjectMeta(
-                            makeORef("window", p.persistWindowId),
-                            {
-                                "window:opacity": fullyOpaque ? null : val,
-                                "window:transparent": fullyOpaque ? false : true,
-                            } as MetaType,
-                        ).catch((err) =>
-                            console.error("[InstancePanel] opacity persist failed:", err),
-                        );
-                    }}
+                    // The hamburger's Opacity sets the same value through
+                    // the same setter (SPEC_PER_WINDOW_THEME_AND_OPACITY §4.2).
+                    onInput={(e) =>
+                        setWindowOpacityFor(
+                            { label: p.label, windowId: p.persistWindowId },
+                            parseFloat(e.currentTarget.value),
+                            "live",
+                        )
+                    }
+                    onChange={(e) =>
+                        setWindowOpacityFor(
+                            { label: p.label, windowId: p.persistWindowId },
+                            parseFloat(e.currentTarget.value),
+                            "commit",
+                        )
+                    }
                 />
                 <span class="instance-panel-opacity-value">
                     {/* Live store value tracks the drag tick-by-tick; falls back
@@ -360,7 +352,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
 
     const handleOpenNewWindow = async () => {
         try {
-            await getApi().openNewWindow();
+            await openNewWindowFromHere();
         } catch (e) {
             console.error("[InstancePanel] openNewWindow failed:", e);
         }
@@ -476,7 +468,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         const currentOpacity = () => {
                             if (!entry.windowId) return 1.0;
                             const win = getObjectValue<MuxWindow>(makeORef("window", entry.windowId));
-                            return (win?.meta?.["window:opacity"] as number | undefined) ?? 1.0;
+                            return opacityFor(win?.meta, settingsAtom());
                         };
                         return (
                             <>

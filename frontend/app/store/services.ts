@@ -139,18 +139,32 @@ class WindowServiceType {
     // its resolved view + full blockdef.meta here so srv seeds the fresh
     // tab with ONLY that one pane instead of the default 3-pane layout.
     // Every other caller omits them and keeps the default-seed behavior.
+    // `previousWindowId` (optional, arg 6): the row this renderer had before a
+    // reload; srv copies its theme and opacity onto the new row
+    // (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.6).
     CreateWindow(
         winSize: WinSize,
         workspaceId: string,
         hostLabel?: string,
         restoreIfAvailable?: boolean,
         seedView?: string,
-        seedMeta?: Record<string, unknown>
+        seedMeta?: Record<string, unknown>,
+        previousWindowId?: string
     ): Promise<MuxWindow> {
         return MOS.callBackendService("window", "CreateWindow", Array.from(arguments))
     }
     GetWindow(windowId: string): Promise<MuxWindow> {
         return MOS.callBackendService("window", "GetWindow", Array.from(arguments))
+    }
+    // Take before opening a window that should inherit appearance; pass to
+    // InheritWindowAppearance (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6).
+    MarkWindowOpen(): Promise<number> {
+        return MOS.callBackendService("window", "MarkWindowOpen", Array.from(arguments))
+    }
+    // Copy `sourceWindowId`'s theme and opacity onto the window with host label
+    // `hostLabel` opened after `mark`, whether or not its row exists yet.
+    InheritWindowAppearance(sourceWindowId: string, hostLabel: string, mark: number): Promise<void> {
+        return MOS.callBackendService("window", "InheritWindowAppearance", Array.from(arguments))
     }
 
     // move block to new window

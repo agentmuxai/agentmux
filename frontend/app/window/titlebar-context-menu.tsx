@@ -5,7 +5,8 @@ import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { hostHas } from "@/app/host/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createTab, getApi } from "@/store/global";
+import { createTab } from "@/store/global";
+import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, untrack, type JSX } from "solid-js";
 import { getEffectiveGroupedChildKeys, getHiddenKeys, getSavedPinNames, isWidgetHidden } from "./action-widgets-config";
@@ -62,7 +63,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             items.push({
                 label: "New Window",
                 click: () => {
-                    fireAndForget(async () => getApi().openNewWindow());
+                    fireAndForget(async () => openNewWindowFromHere());
                 },
             });
         }

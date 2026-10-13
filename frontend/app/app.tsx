@@ -15,7 +15,7 @@ import { Workspace } from "@/app/workspace/workspace";
 import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
 import { showTextInputContextMenu } from "@/store/contextmenu";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
-import { atoms, getApi, getSettingsPrefixAtom, isDev, removeFlashError, flashErrors } from "@/store/global";
+import { atoms, getSettingsPrefixAtom, isDev, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
 import {
     chromeZoomIn,
@@ -34,7 +34,14 @@ import * as util from "@/util/util";
 import clsx from "clsx";
 import debug from "debug";
 import "overlayscrollbars/overlayscrollbars.css";
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
+import {
+    currentWindowLabel,
+    currentWindowOpacity,
+    currentWindowTheme,
+    markWindowThemeApplied,
+} from "@/app/store/window-appearance";
+import { dispatchWindowOpacity } from "@/app/store/window-opacity-store";
 import { AppBackground } from "./app-bg";
 import { appShellState } from "./app-shell-state";
 import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
@@ -76,7 +83,9 @@ function AppSettingsUpdater() {
         const isTransparentOrBlur =
             hostHas("windowTransparency") &&
             ((windowSettings?.["window:transparent"] || windowSettings?.["window:blur"]) ?? false);
-        const opacity = util.boundNumber(windowSettings?.["window:opacity"] ?? 0.8, 0, 1);
+        // This window's own opacity, else the channel default
+        // (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.1).
+        const opacity = util.boundNumber(currentWindowOpacity(), 0, 1);
         const baseBgColor = windowSettings?.["window:bgcolor"];
         // `#main` may not exist on the first effect run: AppSettingsUpdater is
         // a sibling of <Workspace /> (which owns the main div), and SolidJS's
@@ -118,26 +127,9 @@ function AppSettingsUpdater() {
         } else {
             document.body.style.removeProperty("--main-bg-color");
         }
-        // Apply host-level window transparency and platform blur effects.
-        // The IPC call can throw early in startup if window.api hasn't been
-        // wired yet (visible as "[getApi] called before window.api exists" in
-        // the console). Without try/catch the throw aborts this effect and
-        // SolidJS never re-runs it on the next settings tick — leaving the
-        // CSS classes set above untouched, and the body opaque. The CEF host
-        // also reads CefSettings.background_color directly at init time, so
-        // the IPC is only a best-effort mirror of that host setting; we can
-        // safely skip it when the API isn't ready.
-        const isBlur = windowSettings?.["window:blur"] ?? false;
-        try {
-            if (hostHas("windowTransparency")) getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
-        } catch (e) {
-            // Swallow — the CSS path above is what actually drives visual
-            // transparency on Linux/Wayland under CEF. The IPC
-            // mirror is best-effort.
-        }
-
-        // Apply color theme
-        const theme = windowSettings?.["window:theme"];
+        // Apply color theme: this window's own, else the channel default
+        // (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §5.1).
+        const theme = currentWindowTheme();
         if (theme && theme !== "default") {
             document.documentElement.setAttribute("data-theme", theme);
         } else {
@@ -150,6 +142,22 @@ function AppSettingsUpdater() {
         } else {
             document.documentElement.removeAttribute("data-theme-polarity");
         }
+        markWindowThemeApplied(theme);
+    });
+
+    // The window's native opacity (whole-window alpha). Only this window's
+    // resolved value moves it, so a settings change can't override a
+    // window's own opacity, and a reload restores it. Through the same store
+    // as the status bar slider and the hamburger, so all three agree. It
+    // replaces the old setWindowTransparency call, which applied the
+    // channel's opacity to every window. Waits for the host label, which
+    // the store addresses windows by.
+    createEffect(() => {
+        if (!hostHas("windowTransparency")) return;
+        const label = currentWindowLabel();
+        const opacity = currentWindowOpacity();
+        if (!label) return;
+        untrack(() => dispatchWindowOpacity({ type: "SetWindowOpacity", label, opacity, source: "restore" }));
     });
     return null;
 }

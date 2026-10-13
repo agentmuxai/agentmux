@@ -22,6 +22,7 @@ import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 
 // ---------------------------------------------------------------------------
@@ -235,7 +236,7 @@ export function registerDefaultCommands(): void {
         category: "Window",
         icon: "clone",
         requires: "multiWindow",
-        execute: () => getApi().openNewWindow().catch(console.error),
+        execute: () => openNewWindowFromHere().catch(console.error),
     });
     commandRegistry.register({
         id: "window:close",

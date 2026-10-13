@@ -18,6 +18,10 @@ vi.mock("@/app/store/rpc-util", () => ({
 vi.mock("@/app/host/host-caps", () => ({
     hostHas: (cap: string) => cap === "multiWindow" && caps.multiWindow,
 }));
+// The new window inherits this window's appearance; here it just opens.
+vi.mock("@/app/store/window-appearance", () => ({
+    openWindowInheriting: (open: () => Promise<string>) => open(),
+}));
 vi.mock("@/app/tab/tab-presets", () => ({
     openViewInNewTab: (...args: unknown[]) => openViewInNewTab(...args),
 }));

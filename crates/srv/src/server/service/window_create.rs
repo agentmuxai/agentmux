@@ -395,10 +395,35 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         }
         evs
     };
+    // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.6 — a reloaded window
+    // other than the main one gets a new row each load (optional arg 6 is
+    // the row it had before), so its own theme and opacity come across.
+    let previous_window_id: Option<String> = service::get_optional_arg(args, 6).unwrap_or(None);
+    let mut reload_events = match previous_window_id.filter(|p| !p.is_empty() && *p != window_id) {
+        Some(prev) => super::window_inherit::apply_inheritance(state, &prev, &window_id).await,
+        None => Vec::new(),
+    };
+    // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6 — the window that
+    // opened this one may already have asked for its appearance to be
+    // copied here (`InheritWindowAppearance`, keyed by host label). Taken
+    // only after the row is recorded, so a request arriving in between
+    // finds the row instead (see window_inherit.rs).
+    let inherit_events = match (!host_label.is_empty())
+        .then(|| {
+            let row_seq = super::window_inherit::record_created(&host_label, &window_id);
+            super::window_inherit::take_pending(&host_label, row_seq)
+        })
+        .flatten()
+    {
+        Some(source) => super::window_inherit::apply_inheritance(state, &source, &window_id).await,
+        None => Vec::new(),
+    };
     // Publish all events from this multi-step (workspace + tab + window).
     let mut all_events = fresh_workspace_events;
     all_events.extend(win_events);
     all_events.extend(crumb_events);
+    reload_events.extend(inherit_events);
+    all_events.extend(reload_events);
     publish_events(state, &all_events);
     // Return the Window struct (matches the prior RPC contract).
     match store.must_get::<Window>(&window_id) {

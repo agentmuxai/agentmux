@@ -19,6 +19,7 @@
 
 import type { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
+import { inheritAppearanceInto, markWindowOpen } from "@/app/store/window-appearance";
 
 type Api = ReturnType<typeof getApi>;
 
@@ -150,6 +151,11 @@ export async function openTearOffWindow(
     tabAnchorY?: number,
     snapshot?: string,
 ): Promise<TearOffWindow> {
+    // The new window starts with this window's theme and opacity. The mark is
+    // taken before the open (one local call), so it always comes before the
+    // new window's row: a mark taken after it would leave an entry no row
+    // takes, waiting for whichever window gets the label next.
+    const mark = await markWindowOpen();
     try {
         const label = await api.tearOffPoolPromote(
             newWsId,
@@ -161,12 +167,14 @@ export async function openTearOffWindow(
             tabAnchorY,
             snapshot,
         );
+        inheritAppearanceInto(label, mark);
         return { label, pooled: true };
     } catch (poolErr) {
         Logger.warn("dnd:cross", "pool promote failed, cold-pathing", {
             error: String(poolErr),
         });
         const label = await api.openWindowAtPosition(screenX, screenY, newWsId, width, height, tabAnchorX, tabAnchorY);
+        inheritAppearanceInto(label, mark);
         return { label, pooled: false };
     }
 }

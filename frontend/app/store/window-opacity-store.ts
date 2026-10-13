@@ -14,6 +14,8 @@
 import { createSignal } from "solid-js";
 
 import { getApi } from "@/store/global";
+import { makeORef } from "@/store/mos";
+import { ObjectService } from "@/store/services";
 import { update } from "./window-opacity/reducer";
 import { initialState, type WindowOpacityCommand, type WindowOpacityState } from "./window-opacity/types";
 
@@ -48,6 +50,30 @@ export function dispatchWindowOpacity(command: WindowOpacityCommand): void {
                 break;
         }
     }
+}
+
+/**
+ * Set one window's opacity. The status bar panel's slider and the hamburger's
+ * Opacity both go through here, so they set the same value
+ * (SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.2).
+ *
+ * `live` applies it now (a slider drag tick). `commit` also stores it as the
+ * window's own value, which outlives a reload and which every window's panel
+ * reads. 100% is stored as 1.0, not cleared: a cleared value would fall back
+ * to the channel default, which may be see-through. `windowId: null` (a
+ * floating pane) is never stored.
+ */
+export function setWindowOpacityFor(
+    target: { label: string; windowId: string | null },
+    opacity: number,
+    phase: "live" | "commit",
+): void {
+    dispatchWindowOpacity({ type: "SetWindowOpacity", label: target.label, opacity, source: "user" });
+    if (phase !== "commit" || !target.windowId) return;
+    const value = Math.round(Math.max(0.35, Math.min(1, opacity)) * 100) / 100;
+    ObjectService.UpdateObjectMeta(makeORef("window", target.windowId), {
+        "window:opacity": value,
+    } as MetaType).catch((e: unknown) => console.error("[window-opacity] persist failed:", e));
 }
 
 /**
