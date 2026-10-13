@@ -40,7 +40,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import type { AgentDefinition, NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
@@ -417,25 +417,23 @@ export function NativeMemoryManager(): JSX.Element {
             }
         }
 
-        const unsub = muxEventSubscribe(
-            ...list.map((agent) => ({
-                eventType: `agent:memory:changed:${agent.id}`,
-                handler: () => {
-                    const existing = debounceTimers.get(agent.id);
-                    if (existing !== undefined) clearTimeout(existing);
-                    debounceTimers.set(
-                        agent.id,
-                        setTimeout(() => {
-                            debounceTimers.delete(agent.id);
-                            fetchCountFor(agent);
-                            if (untrack(selectedAgent)?.id === agent.id) {
-                                refetchSelectedAgentFiles(agent);
-                            }
-                        }, 250)
-                    );
-                },
-            }))
+        const unsubs = list.map((agent) =>
+            onMuxEvent(`agent:memory:changed:${agent.id}`, () => {
+                const existing = debounceTimers.get(agent.id);
+                if (existing !== undefined) clearTimeout(existing);
+                debounceTimers.set(
+                    agent.id,
+                    setTimeout(() => {
+                        debounceTimers.delete(agent.id);
+                        fetchCountFor(agent);
+                        if (untrack(selectedAgent)?.id === agent.id) {
+                            refetchSelectedAgentFiles(agent);
+                        }
+                    }, 250)
+                );
+            })
         );
+        const unsub = () => unsubs.forEach((u) => u());
 
         // Per-run cleanup: only the subscriptions this run created. Pending
         // debounce timers are this effect's OWN concern to prune above, not

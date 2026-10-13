@@ -9,7 +9,7 @@
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { sleep } from "@/util/util";
 import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 import { retryRecheckAfterBind } from "./recheck-after-bind";
@@ -78,7 +78,8 @@ export function useSyntheticAuthRow(opts: { canRetry: Accessor<boolean>; paneMod
 export interface AuthHealthDeps {
     /** The live failure's code for this pane (from the pane-state store). */
     failureCode: () => string | undefined;
-    subscribe: (sub: { eventType: string; handler: () => void }) => () => void;
+    /** Subscribes to this agent's `agentidentities:changed:<id>`. */
+    subscribe: (event: `agentidentities:changed:${string}`, handler: () => void) => () => void;
     sleep: (ms: number) => Promise<void>;
 }
 
@@ -97,7 +98,7 @@ export function useAuthHealth(opts: {
     const { paneModel } = opts;
     const deps: AuthHealthDeps = {
         failureCode: () => paneSnapshot(opts.blockId)?.failure?.data.code,
-        subscribe: (sub) => muxEventSubscribe(sub),
+        subscribe: (event, handler) => onMuxEvent(event, handler),
         sleep,
         ...opts.deps,
     };
@@ -154,14 +155,11 @@ export function useAuthHealth(opts: {
     createEffect(() => {
         const agentDefinitionId = opts.agentDefinitionId();
         if (!agentDefinitionId) return;
-        const unsub = deps.subscribe({
-            eventType: `agentidentities:changed:${agentDefinitionId}`,
-            handler: () => {
-                void opts.refreshLinkedAccountId();
-                const blocked = opts.status.canRetry() || deps.failureCode() === "auth";
-                if (!blocked) return;
-                void recheckAuthAfterBindWithRetry();
-            },
+        const unsub = deps.subscribe(`agentidentities:changed:${agentDefinitionId}`, () => {
+            void opts.refreshLinkedAccountId();
+            const blocked = opts.status.canRetry() || deps.failureCode() === "auth";
+            if (!blocked) return;
+            void recheckAuthAfterBindWithRetry();
         });
         onCleanup(unsub);
     });

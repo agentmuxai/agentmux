@@ -12,7 +12,7 @@ const hub = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/store/mps", async () => {
-    const { NO_PAYLOAD_MUX_EVENTS } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
     const mock = {
         muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
             hub.handlers.set(sub.eventType, sub.handler);
@@ -21,7 +21,7 @@ vi.mock("@/app/store/mps", async () => {
     };
     // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
     const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
-        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (NO_PAYLOAD_MUX_EVENTS.has(eventType)) handler(null, e); } } as any);
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
     return { ...mock, onMuxEvent };
 });
 vi.mock("@/app/store/rpc-api", () => ({

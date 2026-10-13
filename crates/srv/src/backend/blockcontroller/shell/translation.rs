@@ -75,12 +75,6 @@ pub(super) fn accumulate_and_translate(
     translator: &mut crate::agents::translator::claude::ClaudeTranslator,
 ) {
     for event in extract_agent_events(line_buf, chunk, translator) {
-        broker.publish(mps::MuxEvent {
-            event: format!("agent_event:{}", block_id),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 0,
-            data: Some(serde_json::to_value(&event).unwrap_or_default()),
-        });
+        broker.publish_event_for::<crate::backend::mps_events::AgentEventStream>(&block_id, &event, vec![], 0);
     }
 }

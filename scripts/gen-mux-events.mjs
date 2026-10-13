@@ -28,6 +28,9 @@ const NAMES = join(ROOT, "frontend/app/store/mps-events.ts");
 /** The generated file's source for `rows` (event-schema.json). */
 export function renderEvents(rows) {
     const imports = new Set(rows.flatMap((r) => r.payloadTs.imports));
+    const fixed = rows.filter((r) => !r.perId);
+    const perId = rows.filter((r) => r.perId);
+    const noPayload = (r) => r.payloadTs.name === "null";
     return [
         "// Copyright 2026, AgentMux Corp.",
         "// SPDX-License-Identifier: Apache-2.0",
@@ -38,16 +41,24 @@ export function renderEvents(rows) {
         "",
         ...[...imports].sort().map((n) => `import type { ${n} } from "@/types/rpc/${n}";`),
         "",
-        "/** Each typed broker event's payload, by its wire name. Subscribe with `onMuxEvent`. */",
+        "/** Each typed broker event's payload, by its wire name. An event sent under a name per id",
+        " *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */",
         "export type MuxEventPayloads = {",
-        ...rows.map((r) => `    ${JSON.stringify(r.event)}: ${r.payloadTs.name};`),
+        ...fixed.map((r) => `    ${JSON.stringify(r.event)}: ${r.payloadTs.name};`),
+        ...perId.map((r) => `    [event: \`${r.event}\${string}\`]: ${r.payloadTs.name};`),
         "};",
         "",
-        "/** The typed events' wire names. */",
-        `export const TYPED_MUX_EVENTS = [${rows.map((r) => JSON.stringify(r.event)).join(", ")}] as const;`,
+        "/** The typed events' wire names, apart from the per-id ones. */",
+        `export const TYPED_MUX_EVENTS = [${fixed.map((r) => JSON.stringify(r.event)).join(", ")}] as const;`,
         "",
-        "/** The typed events that carry no payload: srv sends them with no `data`. */",
-        `export const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([${rows.filter((r) => r.payloadTs.name === "null").map((r) => JSON.stringify(r.event)).join(", ")}]);`,
+        "/** Whether a typed event carries no payload: srv sends it with no `data`. */",
+        "export function isNoPayloadMuxEvent(eventType: string): boolean {",
+        "    return NO_PAYLOAD_MUX_EVENTS.has(eventType) || NO_PAYLOAD_PER_ID_PREFIXES.some((p) => eventType.startsWith(p));",
+        "}",
+        "",
+        `const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([${fixed.filter(noPayload).map((r) => JSON.stringify(r.event)).join(", ")}]);`,
+        "",
+        `const NO_PAYLOAD_PER_ID_PREFIXES: readonly string[] = [${perId.filter(noPayload).map((r) => JSON.stringify(r.event)).join(", ")}];`,
         "",
     ].join("\n");
 }
@@ -58,8 +69,9 @@ export function wpsNames(source) {
 }
 
 /** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
- *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal. */
-export function untypedSubscriptions(sources, typed, wps) {
+ *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal, or a
+ *  per-id event as a template literal starting with one of `perIdPrefixes`. */
+export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Set()) {
     const errors = [];
     // A subscription can also name its event through a string constant of its own
     // (`const EVENT_AGENT_SHUTDOWN = "agent:shutdown"`), declared in any source.
@@ -76,6 +88,11 @@ export function untypedSubscriptions(sources, typed, wps) {
             if (!name || !typed.has(name)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: "${name}" has a typed payload; subscribe with onMuxEvent(WpsEvent.${m[1] ?? "…"}, (data) => …), not muxEventSubscribe`);
+        }
+        for (const m of text.matchAll(/eventType:\s*`([^`$]*)\$\{/g)) {
+            if (!perIdPrefixes.has(m[1])) continue;
+            const line = text.slice(0, m.index).split("\n").length;
+            errors.push(`${path}:${line}: "${m[1]}<id>" has a typed payload; subscribe with onMuxEvent(\`${m[1]}\${id}\`, (data) => …), not muxEventSubscribe`);
         }
         // Any other use of a typed event's WpsEvent name, such as a list mapped into
         // `muxEventSubscribe({ eventType, … })`, hides how it is subscribed. Allowed: onMuxEvent's
@@ -110,8 +127,10 @@ async function main() {
     const wps = wpsNames(readFileSync(NAMES, "utf8"));
     const errors = [];
     const known = new Set(wps.values());
-    for (const r of rows) if (!known.has(r.event)) errors.push(`"${r.event}" is typed in srv but has no WpsEvent name in frontend/app/store/mps-events.ts`);
-    errors.push(...untypedSubscriptions(frontendSources(), new Set(rows.map((r) => r.event)), wps));
+    const fixed = rows.filter((r) => !r.perId);
+    for (const r of fixed) if (!known.has(r.event)) errors.push(`"${r.event}" is typed in srv but has no WpsEvent name in frontend/app/store/mps-events.ts`);
+    const perIdPrefixes = new Set(rows.filter((r) => r.perId).map((r) => r.event));
+    errors.push(...untypedSubscriptions(frontendSources(), new Set(fixed.map((r) => r.event)), wps, perIdPrefixes));
     if (errors.length) {
         console.error(`gen-mux-events: ${errors.length} problem(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`);
         process.exit(1);

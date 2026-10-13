@@ -24,7 +24,8 @@ import {
     type AgentBlockResult,
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
+import type { RunEvent } from "@/types/rpc/RunEvent";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
@@ -324,29 +325,23 @@ export class DroneViewModel {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
-        this.activeRunUnsub = muxEventSubscribe({
-            eventType: `dronerun:${runId}`,
-            scope: "",
-            handler: (event) => {
-                const data = (event as { data?: RunEventWire }).data;
-                if (!data) return;
-                this.dispatchWireEvent(data);
-                if (data.kind === "run_done" || data.kind === "run_failed") {
-                    // Backend writes the row update BEFORE publishing
-                    // the terminal event (codex P2 on #843), so a
-                    // refresh here lands the final state.
-                    void this.refreshRuns(droneId);
-                    if (this.activeRunUnsub) {
-                        this.activeRunUnsub();
-                        this.activeRunUnsub = null;
-                    }
+        this.activeRunUnsub = onMuxEvent(`dronerun:${runId}`, (data) => {
+            this.dispatchWireEvent(data);
+            if (data.kind === "run_done" || data.kind === "run_failed") {
+                // Backend writes the row update BEFORE publishing
+                // the terminal event (codex P2 on #843), so a
+                // refresh here lands the final state.
+                void this.refreshRuns(droneId);
+                if (this.activeRunUnsub) {
+                    this.activeRunUnsub();
+                    this.activeRunUnsub = null;
                 }
-            },
-        });
+            }
+        }, "");
     }
 
     /** Translate a wire `RunEvent` into a slice-#10 command. */
-    private dispatchWireEvent(ev: RunEventWire): void {
+    private dispatchWireEvent(ev: RunEvent): void {
         switch (ev.kind) {
             case "run_started":
                 // RunStarted already dispatched eagerly from `run()` —
@@ -617,24 +612,6 @@ export class DroneViewModel {
         if (this.disposed) return;
         dispatchDroneRun(this.blockId, command, source);
     }
-}
-
-/** Shape of one `dronerun:<id>` event payload as emitted by
- *  `crates/srv/src/drone/executor/engine.rs::RunEvent`
- *  (`#[serde(tag = "kind", rename_all = "snake_case")]`). */
-interface RunEventWire {
-    kind:
-        | "run_started"
-        | "block_started"
-        | "block_done"
-        | "block_error"
-        | "run_done"
-        | "run_failed";
-    run_id?: string;
-    drone_id?: string;
-    block_id?: string;
-    output?: unknown;
-    error?: string;
 }
 
 function makeId(prefix: string): string {
