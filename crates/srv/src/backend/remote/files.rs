@@ -276,8 +276,6 @@ impl RemoteFiles {
         self.done(Request::Sync { path: path.into() }).await
     }
 
-    /// The host's processes for Tower: the `top` busiest and largest among
-    /// those matching `filter`, with totals (`agentmux_remote::procs`).
     /// One pane's processes on the host (`PaneProcs`): durable `session`'s
     /// shell, else those marked with `block_id`.
     pub async fn pane_procs(&self, block_id: &str, session: &str) -> Result<fsproto::PaneFrame, RemoteError> {
@@ -293,6 +291,8 @@ impl RemoteFiles {
         }
     }
 
+    /// The host's processes for Tower: the `top` busiest and largest among
+    /// those matching `filter`, with totals (`agentmux_remote::procs`).
     pub async fn procs(&self, top: u32, filter: &str) -> Result<fsproto::ProcFrame, RemoteError> {
         match self
             .call(Request::Procs {

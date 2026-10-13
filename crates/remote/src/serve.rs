@@ -46,11 +46,11 @@ pub fn run_with(mut server: Server, input: &mut impl Read, output: &mut impl Wri
     }
 }
 
-/// One connection's server: [`handle`], plus what lasts between requests
-/// (Tower's CPU rates, `procs`).
 /// A durable session's shell PID, by session id (the daemon's).
 pub type SessionPid = Box<dyn Fn(&str) -> Option<u32> + Send>;
 
+/// One connection's server: [`handle`], plus what lasts between requests
+/// (Tower's CPU rates, `procs`).
 pub struct Server {
     home: PathBuf,
     procs: crate::procs::Sampler,
