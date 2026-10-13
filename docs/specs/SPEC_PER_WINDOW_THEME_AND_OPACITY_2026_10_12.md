@@ -166,7 +166,7 @@ Host labels are reused, though: a pool window can be demoted and promoted again 
 2. opens the window and gets its label;
 3. calls `WindowService.InheritWindowAppearance(sourceWindowId, hostLabel, mark)`.
 
-`openWindowInheriting(open)` and `openNewWindowFromHere()` (`store/window-appearance.ts`) do this for every path in §1.3 that has a creator. A tear-off asks for the mark alongside the open instead of before it, so the drag isn't slowed. If the mark arrives late, that window keeps the defaults; it can never select an older window.
+`openWindowInheriting(open)` and `openNewWindowFromHere()` (`store/window-appearance.ts`) do this for every path in §1.3 that has a creator. Every path, a tear-off included, takes the mark before it opens the window (one local call), so the mark always precedes the new window's row. A mark taken after the row would leave an entry no row takes, waiting for whichever window gets the label next.
 
 ### 6.2 srv copies, whichever call arrives first
 
