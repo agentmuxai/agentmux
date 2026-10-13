@@ -970,6 +970,25 @@
     }
   },
   {
+    "command": "blockstats.detail",
+    "request": "agentmux_srv::backend::rpc_types::blockstats::BlockStatsDetailReq",
+    "requestName": "BlockStatsDetailReq",
+    "requestTs": {
+      "imports": [
+        "BlockStatsDetailReq"
+      ],
+      "name": "BlockStatsDetailReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::blockstats::BlockStatsDetail",
+    "responseName": "BlockStatsDetail",
+    "responseTs": {
+      "imports": [
+        "BlockStatsDetail"
+      ],
+      "name": "BlockStatsDetail"
+    }
+  },
+  {
     "command": "bookmarks.list",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandBookmarksListData",
     "requestName": "CommandBookmarksListData",

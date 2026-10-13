@@ -492,6 +492,10 @@ pub const COMMAND_TOWER_PEERS: &str = "tower.peers";
 pub const COMMAND_TOWER_PAIR: &str = "tower.pair";
 pub const COMMAND_TOWER_FORGET: &str = "tower.forget";
 
+// A terminal's stats badge tooltip (backend::blockstats_detail). The window's,
+// not an agent API.
+pub const COMMAND_BLOCKSTATS_DETAIL: &str = "blockstats.detail";
+
 // MuxAPI Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
 /// Reorder a Pane Tab within its own pane, or move it into a different

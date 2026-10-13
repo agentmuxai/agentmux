@@ -89,6 +89,7 @@ pub(crate) mod connections;
 pub(crate) mod viewer;
 mod presence;
 pub(crate) mod tower_pane;
+mod blockstats;
 
 /// Register all MuxAPI handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -114,6 +115,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     viewer::register(engine, state);
     presence::register(engine, state);
     tower_pane::register(engine, state);
+    blockstats::register(engine, state);
 }
 
 #[cfg(test)]

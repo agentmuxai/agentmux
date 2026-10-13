@@ -807,6 +807,7 @@ partial list.
 | [`SPEC_TASK_DEV_LAUNCHER_GAPS_2026_05_06`](SPEC_TASK_DEV_LAUNCHER_GAPS_2026_05_06.md) | task dev — launcher-driven shutdown gaps |
 | [`SPEC_TEAR_OFF_POOL_PATH_2026_05_06`](SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md) | Tab Tear-Off — Always Use Warm Pool + Source-Side Renderer Crash |
 | [`SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31`](SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md) | SPEC — Terminal scroll wheel sensitivity setting |
+| [`SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12`](SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md) | The terminal stats badge on SSH and WSL panes: the remote shell's figures, not the local client's |
 | [`SPEC_TEST_SRV_SPAWN_GUARDS_2026_07_11`](SPEC_TEST_SRV_SPAWN_GUARDS_2026_07_11.md) | SPEC: Guard integration-test srv spawns (kill_on_drop / Job Object) |
 | [`SPEC_TITLEBAR_CONTEXTMENU_REWORK_2026_06_19`](SPEC_TITLEBAR_CONTEXTMENU_REWORK_2026_06_19.md) | Spec: Title Bar Context Menu Rework & Reusable PopoverMenu |
 | [`SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22`](SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md) | Toolchain Manager — External Widgets Extension |
