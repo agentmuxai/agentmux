@@ -14,7 +14,7 @@ import { META_OPEN, type MediaOpenRequest } from "./media-pane";
 
 /** A Media pane shown in the window tab on screen: the focused one if it is
  *  one, else the first. */
-export function mediaPaneOnScreen(): string | null {
+function mediaPaneOnScreen(): string | null {
     const model = getLayoutModelForStaticTab();
     if (!model) return null;
     const isMedia = (id: string | undefined): id is string =>

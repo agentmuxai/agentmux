@@ -132,6 +132,7 @@ pub(super) fn handle_pop_and_promote_front_pool_window(state: &mut HostState) ->
 /// `PopAndPromoteFrontPoolWindow` (a real user promote) for the same front
 /// label, for the identical reason the pane-pool eviction command exists
 /// as its own command rather than a peek-then-separately-dispatch pair.
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn handle_pop_front_pool_for_eviction(state: &mut HostState) -> DispatchOutput {
     let Some(label) = state.pool.queue.pop_front() else {
         return DispatchOutput::default();
@@ -142,38 +143,6 @@ pub(super) fn handle_pop_front_pool_for_eviction(state: &mut HostState) -> Dispa
     DispatchOutput {
         evicted_pool_label: Some(label),
         pool_size_after: Some(queue_len_after),
-        ..Default::default()
-    }
-}
-
-pub(super) fn handle_promote_pool_window(state: &mut HostState, label: String) -> DispatchOutput {
-    // Idempotent no-op for truly unknown labels (reagent P2 PR #654 round 3).
-    // Symmetric with `handle_pool_destroyed_before_promote`'s pattern: only
-    // emit `PoolWindowLeft` if we actually removed the label from one of
-    // the pool sets. Without this, a stale promote command (e.g., from a
-    // race between PromotePoolWindow and PoolWindowDestroyedBeforePromote)
-    // would emit a phantom `PoolWindowLeft` event that observers might act on.
-    let queue_len_before = state.pool.queue.len();
-    state.pool.queue.retain(|l| l != &label);
-    let was_in_queue = state.pool.queue.len() < queue_len_before;
-    let was_in_unpromoted = state.pool.unpromoted.remove(&label);
-    if !was_in_queue && !was_in_unpromoted {
-        return DispatchOutput::default();
-    }
-    // Mark the corresponding browser handle as no-longer-pool.
-    if let Some(handle) = state.browsers.get_mut(&label) {
-        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
-            *is_pool = false;
-        }
-    }
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::PoolWindowLeft {
-            label,
-            queue_len_after: state.pool.queue.len(),
-            reason: PoolLeaveReason::Promoted,
-            version: v,
-        }],
         ..Default::default()
     }
 }
@@ -194,6 +163,7 @@ pub(super) fn handle_promote_pool_window(state: &mut HostState, label: String) -
 /// bounded by `spawn_pool_window`'s own capacity guard). Idempotent: a
 /// label already pool-side (double demote, race with destroy) is a no-op
 /// with `pool_demote_accepted: false`.
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn handle_demote_pool_window(state: &mut HostState, label: String) -> DispatchOutput {
     let already_pool_side = state.pool.unpromoted.contains(&label)
         || state.pool.queue.iter().any(|l| l == &label);
@@ -216,32 +186,6 @@ pub(super) fn handle_demote_pool_window(state: &mut HostState, label: String) ->
     DispatchOutput {
         pool_demote_accepted: true,
         pool_size_after: Some(state.pool.queue.len()),
-        ..Default::default()
-    }
-}
-
-pub(super) fn handle_pool_drain_all(state: &mut HostState) -> DispatchOutput {
-    let drained: Vec<String> = state
-        .pool
-        .queue
-        .drain(..)
-        .chain(state.pool.unpromoted.drain())
-        .collect();
-    state.pool.respawn_in_flight = false;
-    let mut events = Vec::new();
-    for label in drained {
-        let v = state.bump_version();
-        events.push(HostEvent::PoolWindowLeft {
-            label,
-            queue_len_after: 0,
-            reason: PoolLeaveReason::DrainedOnShutdown,
-            version: v,
-        });
-    }
-    let v = state.bump_version();
-    events.push(HostEvent::PoolEmpty { version: v });
-    DispatchOutput {
-        events,
         ..Default::default()
     }
 }

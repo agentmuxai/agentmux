@@ -27,6 +27,7 @@ pub mod session_recovery;
 pub mod session_stats;
 pub mod shell;
 pub mod subprocess;
+pub mod term_size;
 pub mod watchdog;
 
 use std::any::Any;
@@ -61,7 +62,6 @@ pub const RESYNC_ERR_ALREADY_EXITED: &str = "resync_controller: controller alrea
 
 pub const BLOCK_CONTROLLER_SHELL: &str = "shell";
 pub const BLOCK_CONTROLLER_CMD: &str = "cmd";
-pub const BLOCK_CONTROLLER_TSUNAMI: &str = "tsunami";
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
@@ -77,6 +77,9 @@ pub const META_KEY_CMD_CWD: &str = "cmd:cwd";
 pub const META_KEY_CMD_SHELL: &str = "cmd:shell";
 pub const META_KEY_CMD_ARGS: &str = "cmd:args";
 pub const META_KEY_CMD_ENV: &str = "cmd:env";
+/// On an agent block: the block id of its shell drawer, the headless terminal
+/// the drawer, the agent's PtyShell and a paired device's pane list share.
+pub const META_KEY_SHELL_SUBBLOCK_ID: &str = "term:shellsubblockid";
 
 /// A meta value that is an object of strings, or a JSON string encoding one,
 /// as a string map. Non-string values are skipped; any other shape is empty.
@@ -550,6 +553,7 @@ pub fn delete_controller(block_id: &str) {
         let _ = ctrl.stop(true, STATUS_DONE);
     }
     release_block_processes(block_id);
+    term_size::forget(block_id);
 }
 
 /// Remove a controller from `CONTROLLER_REGISTRY` and hand it back, without
@@ -670,8 +674,20 @@ pub fn stop_block_controller(block_id: &str) -> Result<(), String> {
 
 /// Send input to a block's controller.
 pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String> {
+    let resize = input
+        .term_size
+        .as_ref()
+        .filter(|ts| ts.rows > 0 && ts.cols > 0)
+        .map(|ts| (ts.rows.min(u16::MAX as i64) as u16, ts.cols.min(u16::MAX as i64) as u16));
     match get_controller(block_id) {
-        Some(ctrl) => ctrl.send_input(input, seq),
+        Some(ctrl) => {
+            ctrl.send_input(input, seq)?;
+            // The size a paired device watching the terminal renders at.
+            if let Some((rows, cols)) = resize {
+                term_size::record(block_id, rows, cols);
+            }
+            Ok(())
+        }
         None => Err(format!("no controller for block {block_id}")),
     }
 }
@@ -1121,7 +1137,6 @@ pub fn resync_controller(
         }
         BLOCK_CONTROLLER_APP_SERVER => {
             let ctrl = app_server_controller::AppServerController::new(
-                tab_id.to_string(),
                 block_id.to_string(),
                 broker,
                 event_bus,
@@ -1132,10 +1147,6 @@ pub fn resync_controller(
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)
-        }
-        BLOCK_CONTROLLER_TSUNAMI => {
-            // Tsunami controller deferred to later phase
-            Err("tsunami controller not yet implemented".to_string())
         }
         _ => Err(format!("unknown controller type: {controller_type}")),
     }

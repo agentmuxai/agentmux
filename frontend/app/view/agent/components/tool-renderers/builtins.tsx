@@ -116,7 +116,7 @@ export function withoutTrailingNotes(text: string): string {
  * image (its type, dimensions and size), a PDF (its size and the pages asked
  * for), or a file unchanged since the last Read. Null for a text Read.
  */
-export function readFactsLine(node: ToolNode): string | null {
+function readFactsLine(node: ToolNode): string | null {
     const file = (node.result as { file?: ResultFileFacts } | undefined)?.file;
     if (file?.kind === "unchanged") return "unchanged since the last Read";
     const images = resultImagesOf(node.result);

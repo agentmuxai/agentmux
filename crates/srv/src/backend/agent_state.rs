@@ -226,7 +226,7 @@ mod tests {
     use super::*;
     use crate::backend::blockcontroller::{
         BLOCK_CONTROLLER_ACP, BLOCK_CONTROLLER_APP_SERVER, BLOCK_CONTROLLER_CMD, BLOCK_CONTROLLER_PERSISTENT,
-        BLOCK_CONTROLLER_SHELL, BLOCK_CONTROLLER_SUBPROCESS, BLOCK_CONTROLLER_TSUNAMI, STATUS_DONE, STATUS_INIT,
+        BLOCK_CONTROLLER_SHELL, BLOCK_CONTROLLER_SUBPROCESS, STATUS_DONE, STATUS_INIT,
         STATUS_RUNNING,
     };
 
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn terminal_panes_and_unknown_controllers_report_nothing() {
-        for t in [BLOCK_CONTROLLER_SHELL, BLOCK_CONTROLLER_CMD, BLOCK_CONTROLLER_TSUNAMI, "", "future"] {
+        for t in [BLOCK_CONTROLLER_SHELL, BLOCK_CONTROLLER_CMD, "", "future"] {
             assert_eq!(decide(&inputs(t, false, STATUS_RUNNING)), None, "{t}");
             assert_eq!(decide(&inputs(t, true, STATUS_RUNNING)), None, "{t} mid-turn");
         }

@@ -327,7 +327,7 @@ mod tests {
         let d = cfg();
         let live = write_session(d.path(), "live", "{\"turn\":1}
 {\"tur");
-        let partial = write_session(d.path(), "partial", "{\"tur");
+        write_session(d.path(), "partial", "{\"tur");
         assert!(!is_resumable_file(&live));
         assert!(can_relocate(&s(d.path()), CWD, "live"));
         assert!(!can_relocate(&s(d.path()), CWD, "partial"), "no complete record");

@@ -4,8 +4,6 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
-
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,

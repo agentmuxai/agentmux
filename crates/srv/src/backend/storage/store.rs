@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection};
-use serde::{Deserialize, Serialize};
 
 use crate::backend::obj::{mux_obj_from_json, mux_obj_to_json, StoreObj};
 use crate::registry::{DefinitionStore, Registry};
@@ -831,7 +830,6 @@ impl<'a> StoreTx<'a> {
 pub use super::agents::{derive_slug, AgentDefinition, AgentInstance, InstanceStatus};
 pub use super::bundles::Bundle;
 pub use super::content::AgentContent;
-pub use super::history::AgentHistory;
 pub use super::skills::AgentSkill;
 
 // Identity system types.

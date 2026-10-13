@@ -1116,9 +1116,10 @@ pub async fn start(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::rpc_types::{FsOpEvent, FsOpEventState};
-    use std::sync::Mutex;
+    #[cfg(target_os = "linux")]
+    use {crate::backend::rpc_types::{FsOpEvent, FsOpEventState}, std::sync::Mutex};
 
+    #[cfg(target_os = "linux")]
     fn events() -> (super::super::jobs::Emit, Arc<Mutex<Vec<FsOpEvent>>>) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let s = seen.clone();
@@ -1128,6 +1129,7 @@ mod tests {
         )
     }
 
+    #[cfg(target_os = "linux")]
     async fn finished(seen: &Arc<Mutex<Vec<FsOpEvent>>>) -> FsOpEvent {
         for _ in 0..500 {
             if let Some(e) = seen
@@ -1149,6 +1151,7 @@ mod tests {
         panic!("the op never finished");
     }
 
+    #[cfg(target_os = "linux")]
     async fn host(home: &Path) -> End {
         let (r, w) = crate::backend::remote::files::testing::helper(home.to_path_buf());
         End::host(

@@ -33,6 +33,7 @@ pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<Stri
 pub(crate) struct OutputIndex {
     pub output_size: u64,
     /// `output`'s valid generation; `None` when it is not counted.
+    #[cfg(test)]
     pub output_gen: Option<String>,
     /// The line count `output.idx` gives, if it describes `output` exactly:
     /// its covered size is `output_size` and it is labelled with
@@ -52,7 +53,12 @@ pub(crate) fn output_index(fs: &FileStore, zone: &str) -> Option<OutputIndex> {
             && labelled_for(&idx.meta, snap.output_gen.as_deref()))
         .then_some(((idx.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64)
     });
-    Some(OutputIndex { output_size, output_gen: snap.output_gen, fresh_lines })
+    Some(OutputIndex {
+        output_size,
+        #[cfg(test)]
+        output_gen: snap.output_gen,
+        fresh_lines,
+    })
 }
 
 /// Whether an index with metadata `meta` may describe `output` of generation
@@ -76,8 +82,6 @@ fn labelled_for(meta: &crate::backend::storage::filestore::FileMeta, output_gen:
 pub(crate) struct IndexedRead {
     /// Total line count of `output` in the snapshot.
     pub total: u64,
-    pub output_size: u64,
-    pub output_gen: Option<String>,
     /// The bytes of the requested lines (from the first line's offset up to
     /// the next line's, or the end of `output`).
     pub raw: Vec<u8>,
@@ -144,8 +148,6 @@ fn read_indexed(fs: &FileStore, zone: &str, offset: u64, limit: u64, stale_ok: b
         }
         let mut read = IndexedRead {
             total,
-            output_size,
-            output_gen: out.gen.clone(),
             raw: Vec::new(),
             line_offsets: Vec::new(),
             stamps: None,

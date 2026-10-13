@@ -40,8 +40,7 @@ import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
 
 // Zoom constants
-export { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
-export const KEYBOARD_STEP = 0.1; // 10% increments for keyboard
+const KEYBOARD_STEP = 0.1; // 10% increments for keyboard
 export const WHEEL_STEP = 0.05; // 5% increments for scroll wheel
 const MICRO_STEP = 0.01; // fine step for skip-to-next-size logic
 
@@ -49,10 +48,6 @@ const MICRO_STEP = 0.01; // fine step for skip-to-next-size logic
 export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<boolean>(false);
 export const [zoomIndicatorTextAtom, setZoomIndicatorText] = createSignal<string>("");
 let zoomIndicatorTimeout: NodeJS.Timeout | null = null;
-
-// Chrome zoom (title bar + status bar + pane headers). The signal lives in a
-// leaf module so the layout engine can size minimized-pane chips from it.
-export { chromeZoomAtom } from "./chrome-zoom";
 
 function roundZoom(factor: number): number {
     return Math.round(factor * 100) / 100; // Round to 0.01 increments
@@ -249,10 +244,6 @@ export function chromeZoomOut(step: number = WHEEL_STEP): void {
     setChromeZoom(chromeZoomAtom() - step);
 }
 
-export function chromeZoomReset(): void {
-    setChromeZoom(DEFAULT_ZOOM);
-}
-
 function setChromeZoom(factor: number): void {
     const clamped = clampZoom(roundZoom(factor));
     setChromeZoomSignal(clamped);
@@ -278,13 +269,3 @@ export function showZoomIndicator(text: string): void {
         zoomIndicatorTimeout = null;
     }, 1500);
 }
-
-export function getZoomPercentage(): string {
-    const blockId = getFocusedBlockId();
-    if (!blockId) return "100%";
-    const zoom = getBlockZoom(blockId);
-    if (zoom == null) return "100%";
-    return `${Math.round(zoom * 100)}%`;
-}
-
-export async function loadZoom(store: any): Promise<void> {}

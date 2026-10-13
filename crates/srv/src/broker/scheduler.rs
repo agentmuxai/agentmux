@@ -132,6 +132,7 @@ impl RefreshScheduler {
             .or_insert_with(|| Arc::new(Notify::new()));
     }
 
+    #[cfg(test)]
     pub async fn unregister(&self, credential_id: &str) {
         self.closures.lock().await.remove(credential_id);
         let events = {

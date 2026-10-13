@@ -73,19 +73,9 @@ pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
     format!("\\\\.\\pipe\\agentmux-{}\\srv-command", data_dir_hash16)
 }
 
-#[cfg(unix)]
-pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
-    // PURE — see comment on `pipe_name` above.
-    format!(
-        "{}/{}-srv.sock",
-        ipc_socket_dir_path().display(),
-        data_dir_hash16
-    )
-}
-
 /// Pure computation of the IPC socket directory path. No I/O, no
-/// process-exit. Used by `pipe_name` / `srv_pipe_name` so they
-/// behave like their Windows counterparts (pure string formatters).
+/// process-exit. Used by `pipe_name` so it behaves like its Windows
+/// counterpart (a pure string formatter).
 ///
 /// Resolution order (A1.1 of SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_
 /// 2026_06_05):

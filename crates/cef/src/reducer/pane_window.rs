@@ -111,6 +111,7 @@ pub(super) fn handle_toggle_floating_maximize(
 /// IPC handler applies the Win32 z-order after dispatch. Emits an event even
 /// when the value doesn't change, so a re-apply (the frontend re-sends a
 /// stored `true` when a floater loads) still reaches the handler.
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn handle_set_floating_always_on_top(
     state: &mut HostState,
     label: String,

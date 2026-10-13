@@ -96,7 +96,7 @@ pub fn install(
 
 /// Whether the notes are on (`agent:overlapnotes`, default on).
 pub fn enabled(extra: &HashMap<String, serde_json::Value>) -> bool {
-    extra.get("agent:overlapnotes").and_then(|v| v.as_bool()).unwrap_or(true)
+    extra.get(SETTING).and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
 /// The edits worth checking now: none when the notes are off, else those

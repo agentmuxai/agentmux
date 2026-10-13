@@ -9,6 +9,7 @@ use super::*;
 pub struct ReducerPlumbing {
     pub srv_state: Arc<tokio::sync::Mutex<state::State>>,
     pub srv_events_tx: tokio::sync::broadcast::Sender<agentmux_common::ipc::Event>,
+    #[cfg(target_os = "windows")]
     pub srv_event_log: Arc<event_log::EventLog>,
 }
 
@@ -102,6 +103,7 @@ pub async fn spawn_reducer_plumbing(
     ReducerPlumbing {
         srv_state,
         srv_events_tx,
+        #[cfg(target_os = "windows")]
         srv_event_log,
     }
 }

@@ -11,7 +11,7 @@ import { createSignal } from "solid-js";
 const [flashErrors, setFlashErrors] = createSignal<FlashErrorType[]>([]);
 export { flashErrors };
 export const [notifications, setNotifications] = createSignal<NotificationType[]>([]);
-export const [notificationPopoverMode, setNotificationPopoverMode] = createSignal(false);
+export const [notificationPopoverMode] = createSignal(false);
 
 export function pushFlashError(ferr: FlashErrorType) {
     if (ferr.expiration == null) ferr.expiration = Date.now() + 5000;

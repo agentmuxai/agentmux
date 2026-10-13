@@ -93,13 +93,6 @@ impl ClaudeTranslator {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Reset all in-flight state. Intended for re-use of the same
-    /// translator across distinct runs (rare; usually each run gets
-    /// a fresh translator).
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 impl Translator for ClaudeTranslator {
@@ -899,26 +892,6 @@ mod tests {
                 assert_eq!(tr["is_error"], json!(false));
             }
             other => panic!("expected Done, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn reset_clears_in_flight_state() {
-        let mut t = ClaudeTranslator::new();
-        t.translate(tool_use_start("t5", "Edit"));
-        t.translate(input_json_delta(r#"{"x":1}"#));
-        t.translate(text_delta("partial response"));
-
-        t.reset();
-
-        // After reset, a content_block_stop should not emit because
-        // the pending_tool was cleared.
-        assert!(t.translate(content_block_stop()).is_empty());
-        // And the accumulated response is gone.
-        let done = t.translate(json!({ "type": "result", "cost_usd": 0.0 }));
-        match &done[1] {
-            AgentEvent::Done { response, .. } => assert_eq!(response, ""),
-            other => panic!("expected empty Done response, got {other:?}"),
         }
     }
 

@@ -800,16 +800,6 @@ impl Router {
         let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question, count });
     }
 
-    /// Queued emit with no body (turn outcomes).
-    pub fn emit_nonblocking(&self, kind: NotifyKind, block_id: &str) {
-        let _ = self.internal.send(Internal::Emit {
-            kind,
-            block_id: block_id.to_string(),
-            body: None,
-            own_blocks_only: false,
-        });
-    }
-
     /// The user stopped this block's turn: cancel "finished" for it, and don't
     /// turn the resulting turn-end into one (queued, ordered).
     pub fn turn_stopped_nonblocking(&self, block_id: &str) {

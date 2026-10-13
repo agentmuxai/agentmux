@@ -217,7 +217,8 @@ impl Store {
 
 /// Standalone skill primitive (v1 composable model).
 /// Not bound to a specific agent at rest — agents reference via db_agent_skills_ref.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct Skill {
     pub id: String,
     pub name: String,
@@ -226,7 +227,9 @@ pub struct Skill {
     pub description: String,
     pub content: String,
     pub is_global: bool,
+    #[ts(type = "number")]
     pub created_at: i64,
+    #[ts(type = "number")]
     pub updated_at: i64,
 }
 
@@ -289,7 +292,8 @@ impl ManagedResource for Skill {
 /// specifically holds a `db_agent_skills_ref` row for it. Mirrors
 /// `McpServerListItem` — see its doc comment for why `is_global` alone isn't
 /// enough to render bind/unbind as a stateful toggle (tracked in #1960).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillListItem {
     #[serde(flatten)]
     pub skill: Skill,
@@ -299,10 +303,12 @@ pub struct SkillListItem {
 /// `skill_list_global`'s response shape: the skill plus how many agents
 /// currently hold a `db_agent_skills_ref` to it — the Armory catalog's
 /// "used by N agents" count (gap #2 of #1960).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillCatalogItem {
     #[serde(flatten)]
     pub skill: Skill,
+    #[ts(type = "number")]
     pub bound_count: i64,
 }
 
@@ -310,7 +316,8 @@ pub struct SkillCatalogItem {
 /// "bound" means a `db_bundle_skills_ref` row for this bundle, not an
 /// agent's `db_agent_skills_ref` row. Composable model v2,
 /// docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillBundleListItem {
     #[serde(flatten)]
     pub skill: Skill,

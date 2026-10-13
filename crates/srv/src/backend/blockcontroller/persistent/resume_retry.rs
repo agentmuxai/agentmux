@@ -35,23 +35,6 @@ impl PersistentSubprocessController {
         surface_error_line(&self.block_id, None, &line, Some(broker.as_ref()), &self.mstore, &self.event_bus);
     }
 
-    /// Publish a session-outcome line immediately, via the same append
-    /// path `session_outcome_line`'s other call sites use
-    /// (`persistent_resume::ResumeEffect::EmitSessionOutcome`'s normal
-    /// handling). Used by `retry_after_resume_failure` for the ONE case
-    /// it can decide unambiguously and immediately: no recovery candidate
-    /// exists, so this is genuinely, unconditionally a fresh conversation
-    /// — see that function's own doc comment for why the Resumed case is
-    /// deliberately NOT emitted here.
-    pub(super) fn emit_session_outcome_now(
-        &self,
-        outcome: persistent_resume::SessionOutcome,
-        attempted_sid: String,
-        actual_sid: Option<String>,
-    ) {
-        self.emit_session_outcome_now_with(outcome, attempted_sid, actual_sid, false);
-    }
-
     /// A `Fresh` outcome whose new session will carry AgentMux's record of
     /// the conversation, so the pane says "continued" rather than "new".
     pub(super) fn emit_fresh_outcome_now(&self, attempted_sid: String, continued: bool) {

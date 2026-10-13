@@ -34,8 +34,7 @@ const [busyPanes, setBusyPanes] = createSignal<ReadonlySet<string>>(
     { equals: false },
 );
 
-export const busyCount: Accessor<number> = () => busyPanes().size;
-export const anyBusy: Accessor<boolean> = () => busyPanes().size > 0;
+const busyCount: Accessor<number> = () => busyPanes().size;
 
 // Per-block phase accessor registry as a SolidJS signal so that reads
 // inside createMemo/createEffect track it. A createMemo with no tracked

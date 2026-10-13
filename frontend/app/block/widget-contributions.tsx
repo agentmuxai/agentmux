@@ -34,7 +34,7 @@ export interface ContributionDeps {
 
 const FA_NAME = /^[a-z0-9-]{1,60}$/;
 /** A Font Awesome name, or the puzzle piece. */
-export const safeIcon = (icon: string | undefined, fallback = "puzzle-piece") => (icon && FA_NAME.test(icon) ? icon : fallback);
+const safeIcon = (icon: string | undefined, fallback = "puzzle-piece") => (icon && FA_NAME.test(icon) ? icon : fallback);
 
 /**
  * Runs command `commandId` (null: just show the pane) of `pkg` in a pane of

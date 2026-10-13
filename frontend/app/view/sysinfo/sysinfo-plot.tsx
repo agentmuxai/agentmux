@@ -53,7 +53,7 @@ function widestYTickLabel(plot: Element): number {
 }
 
 /** Class on every chart's SVG; sysinfo-plot.scss carries Plot's rules for it. */
-export const PLOT_CLASS = "sysinfo-plot";
+const PLOT_CLASS = "sysinfo-plot";
 
 /**
  * Ready a freshly drawn plot before it enters the document.

@@ -388,7 +388,7 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
  * term-pane-tab.ts. Focus hand-off on a tab switch is the host's, for every
  * tab type (block.tsx, Pane Tab contract Phase 3b).
  */
-export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
+function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
     // Tracks the CURRENTLY ACTIVE member, not the anchor — getMuxObjectAtom

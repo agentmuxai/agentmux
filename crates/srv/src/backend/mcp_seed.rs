@@ -59,11 +59,6 @@ struct StarterMcpServer {
 /// `crates/srv/src/config/starter-mcp-servers.json`.
 const STARTER_MCP_SERVERS_JSON: &str = include_str!("../config/starter-mcp-servers.json");
 
-/// Report returned after a seed attempt.
-pub struct McpServerSeedReport {
-    pub created: usize,
-}
-
 /// Deterministic row id for a starter MCP server, derived from its `name`.
 /// See `skill_seed::starter_skill_id`'s doc comment for the full reasoning —
 /// this is the identical derivation keyed on the server's catalog name
@@ -80,6 +75,7 @@ pub(crate) fn starter_mcp_server_id(name: &str) -> Uuid {
 /// doc comment for why the durable-bindings carry-across migration needs
 /// this distinction (recognized starters converge on
 /// [`starter_mcp_server_id`]; everything else keeps first-wins dedup).
+#[cfg(test)]
 pub(crate) fn is_starter_mcp_server_name(name: &str) -> bool {
     let Ok(manifest) = serde_json::from_str::<Vec<StarterMcpServer>>(STARTER_MCP_SERVERS_JSON) else {
         return false;
@@ -146,7 +142,7 @@ pub(crate) fn any_starter_mcp_server_name_exists(mstore: &Arc<Store>) -> Result<
 /// would hit the name-uniqueness rejection on the servers already stranded
 /// from the failed attempt. Mirrors `skill_seed::seed_starter_skills`
 /// exactly (reagent P2, PR #2141 round 1).
-pub(crate) fn seed_starter_mcp_servers(mstore: &Arc<Store>) -> Result<McpServerSeedReport, StoreError> {
+pub(crate) fn seed_starter_mcp_servers(mstore: &Arc<Store>) -> Result<usize, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
     reject_duplicate_names(&manifest)?;
@@ -179,7 +175,7 @@ pub(crate) fn seed_starter_mcp_servers(mstore: &Arc<Store>) -> Result<McpServerS
         inserted_ids.push(server.id);
     }
 
-    Ok(McpServerSeedReport { created: inserted_ids.len() })
+    Ok(inserted_ids.len())
 }
 
 #[cfg(test)]
@@ -255,9 +251,9 @@ mod tests {
         let mstore = Arc::new(Store::open_in_memory().unwrap());
         assert!(mstore.mcp_server_list_global(&mstore).unwrap().is_empty());
 
-        let report = seed_starter_mcp_servers(&mstore).unwrap();
+        let created = seed_starter_mcp_servers(&mstore).unwrap();
 
-        assert_eq!(report.created, 6);
+        assert_eq!(created, 6);
         let after = mstore.mcp_server_list_global(&mstore).unwrap();
         assert_eq!(after.len(), 6, "all six starter MCP servers should be seeded");
         assert!(after.iter().all(|item| item.server.is_global));

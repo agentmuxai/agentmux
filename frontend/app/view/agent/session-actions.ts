@@ -17,7 +17,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { setBlockMeta } from "@/app/store/block-meta";
 
 /** Line count at/above which the session is "large" and worth archiving. */
-export const LARGE_SESSION_THRESHOLD = 500_000;
+const LARGE_SESSION_THRESHOLD = 500_000;
 
 export type BlockAccessor = () => Block | undefined;
 

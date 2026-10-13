@@ -7,7 +7,7 @@
 //!
 //! ```ignore
 //! let slot = call::admit(&purpose::ACTIVITY_SUMMARY, block_id, generation).await?;
-//! // ... read the block, build the prompt (slot.cancellation() is available) ...
+//! // ... read the block, build the prompt (slot.is_superseded() is available) ...
 //! let reply = slot.run(&target, &prompt, |raw| reply::judge_line(raw, |t| validate::accept_line(t, &limits))).await;
 //! ```
 //!
@@ -163,11 +163,6 @@ async fn admit_with_limit(
 }
 
 impl Slot {
-    /// Fires when a newer request for the same key supersedes this one.
-    pub fn cancellation(&self) -> CancellationToken {
-        self.cancel.clone()
-    }
-
     /// Whether a newer request for the same key has been admitted since this one.
     pub fn is_superseded(&self) -> bool {
         self.cancel.is_cancelled()
@@ -285,9 +280,8 @@ mod tests {
     #[tokio::test]
     async fn a_newer_request_cancels_the_older_ones_cli() {
         let first = admit_with_limit(&NEWER, "call-newer", 1, None, None).await.unwrap();
-        let cancelled = first.cancellation();
+        assert!(!first.is_superseded());
         let _second = admit_with_limit(&NEWER, "call-newer", 2, None, None).await.unwrap();
-        assert!(cancelled.is_cancelled());
         // A slot still held (`run_held`) can tell, and so not act on its reply.
         assert!(first.is_superseded());
     }
@@ -296,7 +290,7 @@ mod tests {
     async fn different_entities_do_not_cancel_each_other() {
         let first = admit_with_limit(&SIBLINGS, "call-a", 1, None, None).await.unwrap();
         let _second = admit_with_limit(&SIBLINGS, "call-b", 1, None, None).await.unwrap();
-        assert!(!first.cancellation().is_cancelled());
+        assert!(!first.is_superseded());
     }
 
     #[tokio::test]

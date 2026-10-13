@@ -418,50 +418,83 @@ async fn resolve_install_step(tool_id: &str) -> Option<SystemInstallStep> {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 struct ToolIdReq {
     tool_id: String,
 }
 
+/// What `toolchain.resolve_install_command` answers. Untagged, so the JSON is
+/// the same two shapes the handler always sent, and ts-rs renders it as the
+/// `{ available: false } | { available: true, ... }` union the frontend narrows on.
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(untagged)]
+enum ResolveInstallCommandResult {
+    Unavailable(InstallCommandUnavailable),
+    Available(InstallCommandAvailable),
+}
+
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+struct InstallCommandUnavailable {
+    #[ts(type = "false")]
+    available: bool,
+}
+
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+struct InstallCommandAvailable {
+    #[ts(type = "true")]
+    available: bool,
+    program: String,
+    args: Vec<String>,
+    needs_elevation: bool,
+    command_preview: String,
+    /// The version this command would install, queried from the package
+    /// manager's catalog; null when the query failed or isn't implemented.
+    resolved_version: Option<String>,
+}
+
+/// What `toolchain.install_system_tool` answers: the install session to follow.
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+struct InstallSystemToolResult {
+    session_id: String,
+}
+
 pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    engine.register_handler(
-        COMMAND_TOOLCHAIN_RESOLVE_INSTALL_COMMAND,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let req: ToolIdReq = serde_json::from_value(data)
-                    .map_err(|e| format!("toolchain.resolve_install_command: {e}"))?;
+    engine.register_typed(COMMAND_TOOLCHAIN_RESOLVE_INSTALL_COMMAND, move |req: ToolIdReq, _ctx| {
+        async move {
                 if !is_safe_tool_id(&req.tool_id) {
                     return Err(format!(
                         "toolchain.resolve_install_command: invalid tool id {:?}",
                         req.tool_id
                     ));
                 }
-                match resolve_install_step(&req.tool_id).await {
-                    Some(step) => Ok(Some(json!({
-                        "available": true,
-                        "program": step.program,
-                        "args": step.args,
-                        "needsElevation": step.needs_elevation,
-                        "commandPreview": format!("{} {}", step.program, step.args.join(" ")),
-                        "resolvedVersion": step.resolved_version,
-                    }))),
-                    None => Ok(Some(json!({ "available": false }))),
-                }
-            })
-        }),
-    );
+                Ok(match resolve_install_step(&req.tool_id).await {
+                    Some(step) => ResolveInstallCommandResult::Available(InstallCommandAvailable {
+                        available: true,
+                        command_preview: format!("{} {}", step.program, step.args.join(" ")),
+                        program: step.program,
+                        args: step.args,
+                        needs_elevation: step.needs_elevation,
+                        resolved_version: step.resolved_version,
+                    }),
+                    None => ResolveInstallCommandResult::Unavailable(InstallCommandUnavailable { available: false }),
+                })
+        }
+    });
 
     let registry = state.install_sessions.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_TOOLCHAIN_INSTALL_SYSTEM_TOOL,
-        Box::new(move |data, _ctx| {
-            let registry = registry.clone();
-            let broker = broker.clone();
-            Box::pin(async move {
-                let req: ToolIdReq = serde_json::from_value(data)
-                    .map_err(|e| format!("toolchain.install_system_tool: {e}"))?;
+    engine.register_typed(COMMAND_TOOLCHAIN_INSTALL_SYSTEM_TOOL, move |req: ToolIdReq, _ctx| {
+        let registry = registry.clone();
+        let broker = broker.clone();
+        async move {
                 if !is_safe_tool_id(&req.tool_id) {
                     return Err(format!(
                         "toolchain.install_system_tool: invalid tool id {:?}",
@@ -502,10 +535,9 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                     cancel_rx,
                 );
 
-                Ok(Some(json!({ "sessionId": session_id })))
-            })
-        }),
-    );
+                Ok(InstallSystemToolResult { session_id })
+        }
+    });
 }
 
 fn spawn_system_install_task(

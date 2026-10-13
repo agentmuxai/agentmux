@@ -313,7 +313,6 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // get reparented to init and outlive the timeout.
                 #[cfg(unix)]
                 {
-                    use std::os::unix::process::CommandExt as _;
                     proc.process_group(0);
                 }
                 if let Some(ref dir) = cwd {

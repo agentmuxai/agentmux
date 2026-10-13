@@ -163,7 +163,7 @@ impl AgentMuxHandler {
         let is_popup = self.pending_popups > 0;
         if is_popup {
             self.pending_popups -= 1;
-            let mut b = browser.clone();
+            let b = browser.clone();
             self.popup_browser_ids.insert(b.identifier());
             tracing::info!(
                 target: "oauth-popup",
@@ -1315,7 +1315,7 @@ impl AgentMuxHandler {
             let popup_ids: Vec<i32> = self.popup_browser_ids.drain().collect();
             for pid in popup_ids {
                 if let Some(popup) = self.browser_list.iter().find(|b| {
-                    let mut b = (*b).clone();
+                    let b = (*b).clone();
                     b.identifier() == pid
                 }) {
                     tracing::info!(
@@ -1345,7 +1345,7 @@ impl AgentMuxHandler {
         let label = snapshot
             .iter()
             .find(|(_, b)| {
-                let mut b = b.clone();
+                let b = b.clone();
                 b.is_same(Some(&mut browser)) != 0
             })
             .map(|(k, _)| k.clone());
@@ -1528,7 +1528,7 @@ impl AgentMuxHandler {
                 let child_labels = self.state.subwindow_children_of(&meta.label);
                 for child_label in child_labels {
                     // Phase H.2.b — reducer-aware lookup with fallback.
-                    if let Some(mut child) = self.state.get_browser(&child_label) {
+                    if let Some(child) = self.state.get_browser(&child_label) {
                         if let Some(host) = child.host() {
                             tracing::info!(parent = %meta.label, child = %child_label, "[subwindow-cascade] closing sub-window");
                             host.close_browser(1);

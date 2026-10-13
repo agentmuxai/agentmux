@@ -120,6 +120,7 @@ pub fn report_pool_window_removed(label: String) {
 /// helpers — `task dev` mode (no launcher in the loop) silently
 /// drops; the host's authoritative state and refill mechanism are
 /// unaffected.
+#[cfg(target_os = "windows")]
 pub fn report_pool_window_promoted(label: String) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;
@@ -282,6 +283,7 @@ pub fn report_host_pool_count(count: u32) {
 /// Called from the WRR `SetWinEventHook` callback. No-op if the
 /// launcher pipe isn't connected (`task dev` mode); reducer arm
 /// stashes pending-without-label until reconciliation.
+#[cfg(target_os = "windows")]
 pub fn report_hwnd_opened(
     hwnd: u64,
     class_name: String,
@@ -303,6 +305,7 @@ pub fn report_hwnd_opened(
 }
 
 /// Phase B.9.1 — sync API: report a Win32 HWND destroyed.
+#[cfg(target_os = "windows")]
 pub fn report_hwnd_destroyed(hwnd: u64) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;
@@ -314,6 +317,7 @@ pub fn report_hwnd_destroyed(hwnd: u64) {
 }
 
 /// Phase B.9.1 — sync API: report visibility change.
+#[cfg(target_os = "windows")]
 pub fn report_hwnd_visibility_changed(hwnd: u64, visible: bool) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;
@@ -325,6 +329,7 @@ pub fn report_hwnd_visibility_changed(hwnd: u64, visible: bool) {
 }
 
 /// Phase B.9.1 — sync API: report foreground change.
+#[cfg(target_os = "windows")]
 pub fn report_hwnd_foreground_changed(hwnd: u64) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;
@@ -336,6 +341,7 @@ pub fn report_hwnd_foreground_changed(hwnd: u64) {
 }
 
 /// Phase B.9.1 — sync API: report iconic (minimized) change.
+#[cfg(target_os = "windows")]
 pub fn report_hwnd_iconic_changed(hwnd: u64, iconic: bool) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;
@@ -348,6 +354,7 @@ pub fn report_hwnd_iconic_changed(hwnd: u64, iconic: bool) {
 
 /// Phase B.9.1 — sync API: report position change. Caller is
 /// responsible for debouncing — see `wrr/position_debounce.rs`.
+#[cfg(target_os = "windows")]
 pub fn report_hwnd_position_changed(hwnd: u64, rect: agentmux_common::ipc::Rect) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;
@@ -361,6 +368,7 @@ pub fn report_hwnd_position_changed(hwnd: u64, rect: agentmux_common::ipc::Rect)
 /// Phase B.9.1 — sync API: report current monitor topology. Sent
 /// once at install time; mid-session topology changes are a B.9.2
 /// follow-up.
+#[cfg(target_os = "windows")]
 pub fn report_monitor_topology_changed(rects: Vec<agentmux_common::ipc::Rect>) {
     let Some(tx) = super::COMMAND_TX.get() else {
         return;

@@ -94,14 +94,6 @@ pub(crate) enum Denied {
     Forbidden(String),
 }
 
-impl Denied {
-    pub(crate) fn message(&self) -> &str {
-        match self {
-            Denied::NotFound(m) | Denied::Forbidden(m) => m,
-        }
-    }
-}
-
 /// May `agent_id` drive `pane`? `block` is the pane's block as stored (None if
 /// it no longer exists) and `recorded` its entry in the owner map.
 pub(crate) fn check(

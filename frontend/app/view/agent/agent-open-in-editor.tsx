@@ -35,7 +35,7 @@ export function AgentPaneFilesProvider(props: {
     return <AgentPaneFilesContext.Provider value={props.files}>{props.children}</AgentPaneFilesContext.Provider>;
 }
 
-export function useAgentPaneFiles(): Accessor<AgentPaneFiles | undefined> {
+function useAgentPaneFiles(): Accessor<AgentPaneFiles | undefined> {
     return useContext(AgentPaneFilesContext);
 }
 
@@ -54,7 +54,7 @@ export function resolveAgentPath(path: string, baseDir: string): string {
  * collapsed, srv's default for a Markdown file. No `tree_expanded`: srv
  * doesn't reuse a pane when one is given.
  */
-export async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {
+async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {
     const opened = (await TabRpcClient.rpcCall(
         "pane.open",
         {

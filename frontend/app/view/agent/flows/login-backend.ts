@@ -41,7 +41,7 @@ export interface LoginUrl {
 }
 
 /** A start that a newer start (or a cancel) overtook: the login slot is no longer this caller's. */
-export const SUPERSEDED = { superseded: true } as const;
+const SUPERSEDED = { superseded: true } as const;
 
 export interface LoginBackend {
     /** Start a login; resolves with where to sign in, `SUPERSEDED` if a newer

@@ -318,7 +318,7 @@ impl TrackerHandle for JobObjectTracker {
 impl Drop for JobObjectTracker {
     fn drop(&mut self) {
         unsafe {
-            let mut inner = self.inner.get_mut().unwrap();
+            let inner = self.inner.get_mut().unwrap();
             if !inner.closed && !inner.job.is_null() && inner.job != INVALID_HANDLE_VALUE {
                 // KILL_ON_JOB_CLOSE will fire when we close the handle,
                 // so we don't need an explicit TerminateJobObject here.

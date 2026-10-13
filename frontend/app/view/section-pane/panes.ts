@@ -27,9 +27,6 @@ export const LEGACY_REMOTES_VIEW = "remotes";
 export type ConnectorsSection = "accounts" | "mcp" | "remotes";
 export type MemorySection = "global" | "personal" | "skills" | "bundles";
 
-export const CONNECTORS_SECTIONS: readonly ConnectorsSection[] = ["accounts", "mcp", "remotes"];
-export const MEMORY_SECTIONS: readonly MemorySection[] = ["global", "personal", "skills", "bundles"];
-
 /** Opens Connectors, or focuses the one already in this tab, on `section`. */
 export function openConnectors(section: ConnectorsSection = "accounts"): Promise<void> {
     const meta = { [CONNECTORS_SECTION_KEY]: section };

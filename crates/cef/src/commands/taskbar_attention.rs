@@ -74,6 +74,7 @@ pub fn forget(hwnd: isize) {
 }
 
 /// Accessible description for the overlay (also used as its tooltip-ish label).
+#[cfg(any(target_os = "windows", test))]
 pub fn description(count: u32) -> String {
     if count == 1 {
         "1 agent needs you".to_string()
@@ -84,6 +85,7 @@ pub fn description(count: u32) -> String {
 
 /// Flash only when the number of agents waiting on input grew and the window
 /// isn't already in front.
+#[cfg(any(target_os = "windows", test))]
 pub fn should_flash(prev: u32, next: u32, is_foreground: bool) -> bool {
     next > prev && !is_foreground
 }

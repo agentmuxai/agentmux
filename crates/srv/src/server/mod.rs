@@ -14,7 +14,7 @@ mod fs_handlers;
 pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;
-mod identity_handlers;
+pub(crate) mod identity_handlers;
 pub mod install_handlers;
 mod lsp_handlers;
 mod system_install_handlers;
@@ -63,6 +63,8 @@ pub(crate) mod widget_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod rpc_schema_export;
 
 use std::sync::Arc;
 
@@ -108,6 +110,7 @@ mod routes;
 mod http_health;
 mod http_fleet;
 mod http_viewer;
+mod http_viewer_terminal;
 mod http_shell;
 mod http_pty_shell;
 mod http_open;

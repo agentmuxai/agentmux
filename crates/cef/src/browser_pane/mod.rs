@@ -23,6 +23,3 @@ pub use creation::CreateBrowserPaneTask;
 
 #[cfg(target_os = "windows")]
 pub use hwnd::ALLOW_BROWSER_PANE_FOCUS_ONCE;
-
-#[cfg(target_os = "windows")]
-pub use hwnd::install_browser_pane_focus_redirect;

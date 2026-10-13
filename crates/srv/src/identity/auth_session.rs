@@ -39,7 +39,8 @@ const FINISHED_RETENTION_SECS: u64 = 300;
 /// How often the sweeper runs (`spawn_sweeper`).
 const SWEEP_INTERVAL_SECS: u64 = 30;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(
     tag = "status",
     rename_all = "kebab-case",
@@ -70,6 +71,7 @@ pub enum AuthSessionStatus {
         /// that mode; existing bundle-mode callers never populate
         /// this field, so it's skipped on the wire when absent.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         account_id: Option<String>,
     },
     /// Auth attempt failed. `error` is a short human-readable phrase
@@ -139,7 +141,8 @@ impl Session {
 /// owns the spawned CLI's child handle (so it can stdin-inject the
 /// pasted callback URL and kill on cancel); this manager owns the
 /// session state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct StartSessionResult {
     pub session_id: String,
@@ -151,7 +154,8 @@ pub struct StartSessionResult {
 
 /// Snapshot returned by `poll_session`. Mirrors `AuthSessionStatus`
 /// plus the provider id for renderer dispatch.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct PollSessionResult {
     pub provider_id: String,
@@ -271,10 +275,6 @@ impl AuthSessionManager {
                 if session.captured_email.is_none() {
                     session.captured_email = email.clone();
                 }
-            }
-            AuthPatternMatch::LoginFailure { message: _ } => {
-                // Same — handler decides Failed status (it has more
-                // context: CLI exit code, auth check result, etc.).
             }
         }
         Some(m)

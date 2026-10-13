@@ -72,6 +72,7 @@ pub(crate) use clip::compute_pane_visible;
 /// be updated every time `close()` grows. Other ops (`focus`, `resize`, …)
 /// can gain their own traits when they need testing, or graduate to a
 /// unified `BrowserPaneCefBridge` once the shape is stable.
+#[cfg(any(target_os = "windows", test))]
 pub trait BrowserPaneCloseOps {
     /// Remove the Browser for this label from the registry. Return its
     /// outer HWND as a pointer-sized value, or `None` if there is no
@@ -100,8 +101,10 @@ pub trait BrowserPaneCloseOps {
 /// 2026-07-07), never CEF's own window directly and never via
 /// `close_browser()`, avoiding the close_browser-cascades-into-main bug three
 /// earlier attempts hit.
+#[cfg(target_os = "windows")]
 struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
+#[cfg(target_os = "windows")]
 impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
     fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
         // Atomic take-and-return via reducer (codex P2 PR #660). Earlier
@@ -117,22 +120,19 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
         );
         let browser = out.removed_browser?;
 
-        #[cfg(target_os = "windows")]
-        {
-            // Forget any stale focus-tracking entry for CEF's OWN hwnd
-            // (LAST_FOCUSED_BY_ROOT is keyed by whatever HWND actually
-            // received SetFocus — always CEF's own hwnd/descendants, never
-            // our wrapper, which never itself receives focus). Belt-and-
-            // suspenders: `on_before_close_browser_pane` also runs a more
-            // thorough sweep via `uninstall_focus_redirect_for_block` once
-            // CEF's OnBeforeClose fires (which the wrapper's reparent-then-
-            // destroy teardown is what makes reliable — see
-            // destroy_wrapper_hwnd) — this covers the gap before that.
-            if let Some(host) = browser.host() {
-                let wh = host.window_handle();
-                if !wh.0.is_null() {
-                    crate::browser_pane::hwnd::forget_focus_for_child(wh.0 as *mut _);
-                }
+        // Forget any stale focus-tracking entry for CEF's OWN hwnd
+        // (LAST_FOCUSED_BY_ROOT is keyed by whatever HWND actually
+        // received SetFocus — always CEF's own hwnd/descendants, never
+        // our wrapper, which never itself receives focus). Belt-and-
+        // suspenders: `on_before_close_browser_pane` also runs a more
+        // thorough sweep via `uninstall_focus_redirect_for_block` once
+        // CEF's OnBeforeClose fires (which the wrapper's reparent-then-
+        // destroy teardown is what makes reliable — see
+        // destroy_wrapper_hwnd) — this covers the gap before that.
+        if let Some(host) = browser.host() {
+            let wh = host.window_handle();
+            if !wh.0.is_null() {
+                crate::browser_pane::hwnd::forget_focus_for_child(wh.0 as *mut _);
             }
         }
 
@@ -140,44 +140,30 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
         // for the caller's scope to unwind.
         drop(browser);
 
-        #[cfg(target_os = "windows")]
-        {
-            crate::browser_pane::wrapper::take_wrapper_hwnd(label).map(|h| h as usize)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            None
-        }
+        crate::browser_pane::wrapper::take_wrapper_hwnd(label).map(|h| h as usize)
     }
 
     fn destroy_hwnd(&self, hwnd: usize) {
-        #[cfg(target_os = "windows")]
-        {
-            // Marshal the destroy onto the CEF UI thread — the thread that
-            // CREATED the wrapper (CreateBrowserPaneTask::execute). `close()`
-            // runs on a tokio IPC thread, and Win32's DestroyWindow hard-fails
-            // (ERROR_ACCESS_DENIED) from any thread other than the window's
-            // owner — which is exactly how every pane close silently leaked
-            // its renderer while the logs looked clean
-            // (retro-browser-pane-renderer-leak-2026-07-07: the pixels
-            // vanished because ShowWindow(SW_HIDE) works cross-thread; the
-            // DestroyWindow after it never did anything, so CEF never saw
-            // WM_DESTROY and the browser survived headless). Mirrors the
-            // Linux/macOS path, which has always posted
-            // DetachBrowserPaneViewTask for the same stated reason (see the
-            // marshalling-tasks comment near the bottom of `close.rs`).
-            let mut task = close::DestroyPaneWrapperTask::new(hwnd as isize);
-            let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
-            if posted == 0 {
-                tracing::error!(
-                    hwnd,
-                    "[pane-wrapper] post_task(destroy) failed — wrapper + CEF browser will leak"
-                );
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = hwnd;
+        // Marshal the destroy onto the CEF UI thread — the thread that
+        // CREATED the wrapper (CreateBrowserPaneTask::execute). `close()`
+        // runs on a tokio IPC thread, and Win32's DestroyWindow hard-fails
+        // (ERROR_ACCESS_DENIED) from any thread other than the window's
+        // owner — which is exactly how every pane close silently leaked
+        // its renderer while the logs looked clean
+        // (retro-browser-pane-renderer-leak-2026-07-07: the pixels
+        // vanished because ShowWindow(SW_HIDE) works cross-thread; the
+        // DestroyWindow after it never did anything, so CEF never saw
+        // WM_DESTROY and the browser survived headless). Mirrors the
+        // Linux/macOS path, which has always posted
+        // DetachBrowserPaneViewTask for the same stated reason (see the
+        // marshalling-tasks comment near the bottom of `close.rs`).
+        let mut task = close::DestroyPaneWrapperTask::new(hwnd as isize);
+        let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+        if posted == 0 {
+            tracing::error!(
+                hwnd,
+                "[pane-wrapper] post_task(destroy) failed — wrapper + CEF browser will leak"
+            );
         }
     }
 }

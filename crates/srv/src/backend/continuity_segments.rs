@@ -184,6 +184,7 @@ pub(crate) fn record_session(fs: &FileStore, agent_uid: &str, segment_id: &str, 
     )
 }
 
+#[cfg(test)]
 pub(crate) fn record_end(
     fs: &FileStore,
     agent_uid: &str,

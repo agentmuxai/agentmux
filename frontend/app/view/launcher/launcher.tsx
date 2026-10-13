@@ -25,7 +25,7 @@ function sortByDisplayOrder(
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
 /** The launcher's state behind its native pane tab (`launcherPaneTab`). */
-export class LauncherViewModel {
+class LauncherViewModel {
     blockId: string;
     searchTerm: SignalAtom<string>;
     selectedIndex: SignalAtom<number>;

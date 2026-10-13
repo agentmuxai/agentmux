@@ -99,6 +99,25 @@ describe("DevicesSection", () => {
         expect(await screen.findByText("Sign in to publish")).toBeInTheDocument();
         expect(screen.getByText("Cloud presence")).toBeInTheDocument();
     });
+    it("offers Share terminals with paired devices, off unless set", async () => {
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Share terminals with paired devices" });
+        expect(toggle).toHaveAttribute("aria-checked", "false");
+        fireEvent.click(toggle);
+        expect(setConfig).toHaveBeenCalledWith({}, { "viewer:shareterminals": true });
+    });
+
+    it("turning terminal sharing off clears the setting", async () => {
+        settings = { "viewer:shareterminals": true };
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Share terminals with paired devices" });
+        expect(toggle).toHaveAttribute("aria-checked", "true");
+        fireEvent.click(toggle);
+        expect(setConfig).toHaveBeenCalledWith({}, { "viewer:shareterminals": null });
+    });
+
     // SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md
     it("offers the MuxBus Cloud status-bar toggle, on when the setting is absent", async () => {
         listDevices.mockResolvedValue({ devices: [] });

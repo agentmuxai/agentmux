@@ -30,4 +30,3 @@ mod pool;
 mod recovery;
 
 pub use pool::{FsWatchEvent, FsWatchEventKind, FsWatchPool, Subscription};
-pub use recovery::{FsWatchHealth, WatchBackend};

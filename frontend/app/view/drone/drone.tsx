@@ -28,5 +28,3 @@ export const dronePaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { DroneViewModel };

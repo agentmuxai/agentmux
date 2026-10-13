@@ -26,6 +26,7 @@ pub enum ControllerType {
     Acp,
     /// Provider-specific App Server protocol over a persistent JSONL stdio
     /// transport. Protocol semantics are selected by [`AppServerKind`].
+    #[allow(dead_code)] // Off by default until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
     AppServer,
 }
 

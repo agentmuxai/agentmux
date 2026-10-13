@@ -36,7 +36,7 @@ export function setClipboard(c: FilesClipboard | null): void {
 
 /** The drive or share a path is on: a move within one is a rename, across
  *  two it's a copy then delete. Case-insensitive, as Windows roots are. */
-export function rootOf(path: string): string {
+function rootOf(path: string): string {
     return (crumbsOf(path)[0]?.path ?? "").toLowerCase();
 }
 

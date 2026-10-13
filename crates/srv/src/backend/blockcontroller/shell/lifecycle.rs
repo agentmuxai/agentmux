@@ -26,9 +26,8 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_DRAIN_TIMEOUT,
-    FLUSHER_EOF_GRACE, PTY_CHANNEL_CAPACITY,
-    PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
+    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE,
+    PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
@@ -581,7 +580,7 @@ impl Controller for ShellController {
         // historical 25x200 when no size was supplied (e.g. programmatic
         // spawns). See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
         let pty_system = native_pty_system();
-        let pty_size = Self::pty_size_from_rt_opts(&rt_opts);
+        let pty_size = self.spawn_pty_size(&rt_opts);
 
         let pair = pty_system.openpty(pty_size).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");

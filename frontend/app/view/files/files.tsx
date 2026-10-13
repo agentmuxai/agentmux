@@ -52,5 +52,3 @@ export const filesPaneTab: PaneTabManifest = {
         };
     },
 };
-
-export { FilesModel };

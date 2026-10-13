@@ -81,7 +81,9 @@ pub struct SrvSpawnResult {
 pub enum SrvSpawnError {
     BinaryNotFound(String),
     SpawnFailed(String),
+    #[cfg(target_os = "windows")]
     JobAssignFailed(String),
+    #[cfg(target_os = "windows")]
     ResumeFailed(String),
     EstartTimeout,
     EstartChannelClosed,
@@ -98,7 +100,9 @@ impl std::fmt::Display for SrvSpawnError {
         match self {
             Self::BinaryNotFound(s) => write!(f, "srv binary not found: {}", s),
             Self::SpawnFailed(s) => write!(f, "spawn failed: {}", s),
+            #[cfg(target_os = "windows")]
             Self::JobAssignFailed(s) => write!(f, "AssignProcessToJobObject failed: {}", s),
+            #[cfg(target_os = "windows")]
             Self::ResumeFailed(s) => write!(f, "ResumeThread failed: {}", s),
             Self::EstartTimeout => write!(f, "timeout waiting for AGENTMUXSRV-ESTART (30s)"),
             Self::EstartChannelClosed => {
@@ -475,7 +479,6 @@ pub async fn spawn_srv(
     // handled by tokio's child supervision in `run_unix`.
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::process::CommandExt as _;
         unsafe {
             cmd.pre_exec(|| {
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
@@ -638,7 +641,7 @@ pub async fn spawn_srv(
     let normal_timeout = std::time::Duration::from_secs(30);
     let migration_timeout = std::time::Duration::from_secs(1800);
     let mut deadline = tokio::time::Instant::now() + normal_timeout;
-    let mut sleep = tokio::time::sleep_until(deadline);
+    let sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
     let recv = loop {

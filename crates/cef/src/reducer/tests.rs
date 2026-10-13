@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
-use crate::state::WindowKind;
+use crate::state::{BrowserPaneLifecycle, WindowKind};
 
 fn entry(label: &str) -> PendingWindowCreation {
     PendingWindowCreation {
@@ -140,17 +140,14 @@ fn version_increments_monotonically() {
         HostEvent::PendingWindowQueueEmpty { version } => *version,
         HostEvent::PendingWindowNotFound { version, .. } => *version,
         HostEvent::BrowserPaneCreateRequested { version, .. } => *version,
-        HostEvent::BrowserPaneLive { version, .. } => *version,
         HostEvent::BrowserPaneClosing { version, .. } => *version,
         HostEvent::BrowserPaneClosed { version, .. } => *version,
-        HostEvent::BrowserPaneCreationFailed { version, .. } => *version,
         HostEvent::BrowserRegistered { version, .. } => *version,
         HostEvent::BrowserUnregistered { version, .. } => *version,
         HostEvent::DragStarted { version, .. } => *version,
         HostEvent::DragEnded { version, .. } => *version,
         HostEvent::PoolWindowEntered { version, .. } => *version,
         HostEvent::PoolWindowLeft { version, .. } => *version,
-        HostEvent::PoolEmpty { version } => *version,
         HostEvent::QuitDraining { version, .. } => *version,
         HostEvent::QuitReady { version } => *version,
         HostEvent::WindowOpacityApplied { version, .. } => *version,
@@ -168,37 +165,12 @@ fn version_increments_monotonically() {
 
 // ── Phase H foundations tests ───────────────────────────────────────
 
-fn browser_pane_request(block_id: &str, label: &str) -> HostCommand {
-    HostCommand::EnqueueBrowserPaneCreate {
-        block_id: block_id.to_string(),
-        label: label.to_string(),
-    }
-}
-
 // ── H.1 panes ────────────────────────────────────────────────────────
-
-#[test]
-fn enqueue_browser_pane_create_inserts_live() {
-    let mut state = HostState::default();
-    let out = update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
-    assert!(state.browser_panes.contains_key("b1"));
-    assert!(matches!(state.browser_panes["b1"].lifecycle, BrowserPaneLifecycle::Live));
-    assert!(matches!(out.events[0], HostEvent::BrowserPaneCreateRequested { .. }));
-}
-
-#[test]
-fn enqueue_browser_pane_create_duplicate_rejected() {
-    let mut state = HostState::default();
-    update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
-    let out = update(&mut state, browser_pane_request("b1", "browser-pane-b1-2"));
-    assert!(matches!(out.events[0], HostEvent::Error { .. }));
-    assert_eq!(state.browser_panes.len(), 1);
-}
 
 #[test]
 fn pane_close_lifecycle() {
     let mut state = HostState::default();
-    update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
     update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
     assert!(matches!(
         state.browser_panes["b1"].lifecycle,
@@ -206,21 +178,6 @@ fn pane_close_lifecycle() {
     ));
     update(&mut state, HostCommand::CompleteBrowserPaneClose { block_id: "b1".into() });
     assert!(!state.browser_panes.contains_key("b1"));
-}
-
-#[test]
-fn pane_abort_removes_entry() {
-    let mut state = HostState::default();
-    update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
-    let out = update(
-        &mut state,
-        HostCommand::AbortBrowserPaneCreate {
-            block_id: "b1".into(),
-            reason: "test".into(),
-        },
-    );
-    assert!(!state.browser_panes.contains_key("b1"));
-    assert!(matches!(out.events[0], HostEvent::BrowserPaneCreationFailed { .. }));
 }
 
 #[test]
@@ -613,18 +570,6 @@ fn pool_spawn_then_ready_enters_queue() {
 }
 
 #[test]
-fn pool_drain_clears_all() {
-    let mut state = HostState::default();
-    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
-    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
-    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p2".into() });
-    let out = update(&mut state, HostCommand::PoolDrainAll);
-    assert!(state.pool.queue.is_empty());
-    assert!(state.pool.unpromoted.is_empty());
-    assert!(out.events.iter().any(|e| matches!(e, HostEvent::PoolEmpty { .. })));
-}
-
-#[test]
 fn pool_spawn_during_quit_suppressed() {
     let mut state = HostState::default();
     update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
@@ -781,7 +726,6 @@ fn pane_pool_destroyed_before_promote_pops_and_clears_state() {
     assert!(state.pane_pool.queue.is_empty(), "queue must not retain the evicted label");
     assert!(state.pane_pool.unpromoted.is_empty());
     assert!(!state.pane_pool.respawn_in_flight);
-    assert!(out.pane_pool_destroyed_was_unpromoted, "must report a real removal, not a no-op");
     assert_eq!(out.pane_pool_size_after, Some(0));
 }
 
@@ -797,7 +741,6 @@ fn pane_pool_destroyed_before_promote_on_unknown_label_is_noop() {
         &mut state,
         HostCommand::PanePoolWindowDestroyedBeforePromote { label: "ghost".into() },
     );
-    assert!(!out.pane_pool_destroyed_was_unpromoted);
     assert_eq!(out.pane_pool_size_after, Some(0));
     assert!(state.pane_pool.queue.is_empty());
     assert!(state.pane_pool.unpromoted.is_empty());
@@ -835,35 +778,6 @@ fn pop_front_pane_pool_for_eviction_on_empty_queue_is_noop() {
     assert_eq!(out.evicted_pane_pool_label, None);
     assert!(state.pane_pool.queue.is_empty());
     assert!(state.pane_pool.unpromoted.is_empty());
-}
-
-/// Regression test for reagent P2 on PR #654 round 3.
-///
-/// `handle_promote_pool_window` should be idempotent for truly unknown
-/// labels (matching `handle_pool_destroyed_before_promote`'s pattern).
-/// A stale promote command — e.g., racing with destroy — must not emit
-/// a phantom `PoolWindowLeft` event that observers might act on.
-#[test]
-fn pool_promote_with_unknown_label_is_noop() {
-    let mut state = HostState::default();
-    let out = update(&mut state, HostCommand::PromotePoolWindow { label: "ghost".into() });
-    assert!(out.events.is_empty(), "promote of unknown label must be no-op");
-    assert!(state.pool.queue.is_empty());
-    assert!(state.pool.unpromoted.is_empty());
-}
-
-/// Confirms promote DOES emit when the label was in queue (the normal flow).
-#[test]
-fn pool_promote_with_known_label_emits_event() {
-    let mut state = HostState::default();
-    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
-    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
-    let out = update(&mut state, HostCommand::PromotePoolWindow { label: "p1".into() });
-    assert!(state.pool.queue.is_empty());
-    assert!(out.events.iter().any(|e| matches!(
-        e,
-        HostEvent::PoolWindowLeft { reason: PoolLeaveReason::Promoted, .. }
-    )));
 }
 
 // ── Round 6 — pool demote ────────────────────────────────────────────
@@ -1335,7 +1249,7 @@ fn is_quit_relevant_guard_membership() {
     // Relevant — change live-window count / pending creations / quit_state.
     assert!(is_quit_relevant(&HostCommand::UnregisterBrowser { label: "w".into() }));
     assert!(is_quit_relevant(&HostCommand::DequeuePendingWindowCreation));
-    assert!(is_quit_relevant(&HostCommand::PoolDrainAll));
+    assert!(is_quit_relevant(&HostCommand::PopAndPromoteFrontPoolWindow));
     assert!(is_quit_relevant(&HostCommand::BeginDrain {
         reason: QuitReason::LastWindowClosed
     }));
@@ -1449,11 +1363,12 @@ fn browser_pane_event_target_is_none_for_unknown_or_windowless_pane() {
         crate::events::browser_pane_event_target(&state, "nope"),
         None
     );
-    // The legacy enqueue path records no window: the emitter must fall back
-    // to its previous behaviour rather than try to deliver to an empty label.
+    // A pane registered without a pending create records no window: the
+    // emitter must fall back to its previous behaviour rather than try to
+    // deliver to an empty label.
     update(
         &mut state,
-        browser_pane_request("legacy", "browser-pane-legacy-1"),
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "legacy".into(), pending: None },
     );
     assert_eq!(
         crate::events::browser_pane_event_target(&state, "legacy"),

@@ -30,8 +30,8 @@
 //   the process.
 
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::collections::HashMap;
+#[cfg(target_os = "windows")]
+use std::{collections::HashMap, sync::Mutex};
 
 // `Task`/`WrapTask`/`ImplTask` are what `cef::wrap_task!` expands into —
 // needed for `DestroyPoolHwndTask` (memory-pressure eviction). Same import
@@ -39,7 +39,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use cef::{rc::Rc, ImplTask, Task, WrapTask};
 
-use crate::state::{AppState, WindowKind, WindowMeta};
+use crate::state::{AppState, WindowKind};
 // The pane-pool subsystem (spawn/promote/evict for `floating-pool-*` frameless
 // windows) now lives in `pane_pool.rs` (extracted — this file was ~2250 lines
 // covering two independently-lifecycled subsystems). Re-exported here so the
@@ -124,6 +124,7 @@ pub const POOL_TARGET_SIZE: usize = 2;
 /// why tightening the cap under pressure is a low-risk lever (routes into
 /// the already-reliable `park_and_blank_window`, not the flakier round-5
 /// destroy).
+#[cfg(any(target_os = "windows", test))]
 fn effective_pool_demote_cap(pressure: crate::memory_pressure::PressureLevel) -> usize {
     if pressure != crate::memory_pressure::PressureLevel::Normal {
         POOL_TARGET_SIZE
@@ -142,6 +143,7 @@ pub(crate) const POOL_HEIGHT: i32 = 800;
 /// Pixels above the cursor where the title bar sits — matches
 /// open_window_at_position so the cursor lands near the top-center
 /// of the title bar after promotion.
+#[cfg(target_os = "windows")]
 const TITLE_BAR_OFFSET_PX: i32 = 16;
 
 /// Clamp a window rect so it lies fully within a monitor work area.
@@ -153,6 +155,7 @@ const TITLE_BAR_OFFSET_PX: i32 = 16;
 /// DPI-scaled `POOL_OFFSCREEN`, e.g. `-25600 = -32000 × 0.8` at 125%). Pure — the
 /// work-area rect is passed in — so the placement logic is unit-tested without
 /// Win32. See docs/specs/archive/PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21.md.
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn clamp_rect_within(
     x: i32,
     y: i32,
@@ -656,6 +659,8 @@ pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
             );
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = state;
     tracing::debug!(
         target: "dnd:tearoff:pool",
         label = %label,
@@ -827,6 +832,7 @@ fn pool_frontend_url(state: &Arc<AppState>, label: &str) -> String {
 ///
 /// Called for BOTH demote outcomes (re-enqueued or destroy-fallback):
 /// either way the workspace is gone from the user's point of view.
+#[cfg(target_os = "windows")]
 pub fn demote_srv_cleanup(state: &Arc<AppState>, label: &str) {
     crate::launcher_ipc::report_panes_reaped(label.to_string());
 
@@ -1044,7 +1050,7 @@ pub fn demote_promoted_pool_window(
     // origin); page state resets fully; `pool_window_ready` re-arrives on
     // boot and completes the queue re-entry.
     let url = pool_frontend_url(state, label);
-    if let Some(mut browser) = state.get_browser(label) {
+    if let Some(browser) = state.get_browser(label) {
         if let Some(frame) = browser.main_frame() {
             frame.load_url(Some(&cef::CefString::from(url.as_str())));
         }
@@ -1127,7 +1133,7 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
     // 3. Blank the content — releases the workspace app (WebGL, websockets,
     // timers). Same load_url-on-a-parked-window call demote's step 5 has
     // proven for months.
-    if let Some(mut browser) = state.get_browser(label) {
+    if let Some(browser) = state.get_browser(label) {
         if let Some(frame) = browser.main_frame() {
             frame.load_url(Some(&cef::CefString::from("about:blank")));
         }

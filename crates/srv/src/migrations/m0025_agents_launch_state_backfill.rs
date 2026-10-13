@@ -407,7 +407,7 @@ impl Migration for M0025AgentsLaunchStateBackfill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::store::{AgentDefinition, AgentInstance};
+    use crate::backend::storage::store::AgentDefinition;
 
     fn def(id: &str, is_seeded: i64, parent_id: &str) -> AgentDefinition {
         AgentDefinition {
@@ -441,26 +441,6 @@ mod tests {
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
-        }
-    }
-
-    fn inst(id: &str, def_id: &str, parent: &str, block: &str, session: &str, status: &str, created_at: i64) -> AgentInstance {
-        AgentInstance {
-            id: id.to_string(),
-            definition_id: def_id.to_string(),
-            parent_instance_id: parent.to_string(),
-            block_id: block.to_string(),
-            session_id: session.to_string(),
-            status: status.to_string(),
-            github_context: String::new(),
-            started_at: created_at,
-            ended_at: 0,
-            created_at,
-            identity_id: String::new(),
-            memory_id: String::new(),
-            instance_name: id.to_string(),
-            working_directory: String::new(),
-            display_hidden: false,
         }
     }
 
@@ -535,7 +515,7 @@ mod tests {
         // above no longer writes it (definition flip), so this fixture must
         // add the row itself, standing in for "a definition an older build
         // wrote the only way it still could."
-        let mut add_legacy_def = |id: &str, is_seeded: i64, parent_id: &str| {
+        let add_legacy_def = |id: &str, is_seeded: i64, parent_id: &str| {
             conn.execute(
                 "INSERT INTO db_agent_definitions (
                     id, slug, name, icon, provider, description, working_directory, shell,
@@ -550,7 +530,7 @@ mod tests {
         };
         add_legacy_def("tpl", 1, "");
         add_legacy_def("clone", 0, "tpl");
-        let mut add_legacy = |id: &str, def_id: &str, parent: &str, block: &str, session: &str, status: &str, created: i64| {
+        let add_legacy = |id: &str, def_id: &str, parent: &str, block: &str, session: &str, status: &str, created: i64| {
             conn.execute(
                 "INSERT INTO db_agent_instances
                     (id, definition_id, parent_instance_id, block_id, session_id, status,

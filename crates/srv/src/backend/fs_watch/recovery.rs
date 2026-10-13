@@ -25,6 +25,7 @@ pub enum WatchBackend {
 /// Snapshot of the pool's current health, for diagnostics (`muxlog`,
 /// eventually a UI surface — not built here, see spec §6 non-goals).
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Diagnostics surface, SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md §4 point 4.
 pub struct FsWatchHealth {
     pub backend: WatchBackend,
     pub active_watches: usize,

@@ -53,7 +53,7 @@ function formatHeldFor(secs: number): string {
 /** When the jekt reached this pane: its send time, plus how long it waited if
  *  it was held for an absent recipient (`HELD_FOR`). A held jekt delivered
  *  just now arrived live, however long ago it was sent. */
-export function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSecs">): number {
+function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSecs">): number {
     return node.timestamp + (node.heldForSecs ?? 0) * 1000;
 }
 

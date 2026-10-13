@@ -127,32 +127,7 @@ function computeTheme(
     return [themeCopy, bgcolor];
 }
 
-/**
- * Resolve the terminal theme for callers without a blockId (modals,
- * install dialogs, anything outside the pane tree). Respects the global
- * `term:theme` setting with a fallback to DefaultTermTheme. Skips
- * transparency — callers in this position render on opaque panel
- * backgrounds where transparency is meaningless.
- *
- * See docs/specs/SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md.
- */
-function computeTermThemeFromSettings(fullConfig: FullConfigType): [TermThemeType, string] {
-    const themeName = fullConfig?.settings?.["term:theme"] ?? DefaultTermTheme;
-    const [theme, bgcolor] = computeTheme(fullConfig, themeName, 0);
-    // Modal callers paint xterm directly onto the panel surface — restore
-    // the resolved background so xterm renders the theme's bg rather than
-    // letting the container CSS's hardcoded color bleed through. Block-pane
-    // callers want the original behavior (transparent bg → blockBg shows
-    // through), so `computeTheme` stays unchanged. Codex caught this on PR
-    // #895: a non-dark theme would put light foreground on a hardcoded
-    // dark container bg.
-    if (bgcolor) {
-        theme.background = bgcolor;
-    }
-    return [theme, bgcolor];
-}
-
-export { computeTheme, computeTermThemeFromSettings, tryDeriveTermThemeFromCss };
+export { computeTheme, tryDeriveTermThemeFromCss };
 
 /**
  * A terminal pane's header name: the agent it runs (from `cmd:env`), else

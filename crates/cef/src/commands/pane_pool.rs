@@ -28,6 +28,7 @@ use cef::{rc::Rc, ImplTask, Task, WrapTask};
 
 // Off-screen spawn position shared with the top-level window pool — pane-pool
 // windows are parked at the same coordinates while pre-painting.
+#[cfg(not(target_os = "windows"))]
 use super::window_pool::{POOL_OFFSCREEN_X, POOL_OFFSCREEN_Y};
 
 /// HWND cache for pane pool windows. Separate from `POOL_HWND_CACHE` because
@@ -192,7 +193,7 @@ cef::wrap_task! {
             // UI-thread hang (reagent P1, round 2).
             {
                 use cef::{ImplBrowser, ImplBrowserHost};
-                if let Some(mut browser) = self.state.get_browser(&self.label) {
+                if let Some(browser) = self.state.get_browser(&self.label) {
                     if let Some(host) = browser.host() {
                         tracing::debug!(
                             target: "pool:pane",
@@ -219,6 +220,7 @@ cef::wrap_task! {
 
 /// How long a promoted floater with a snapshot stays hidden waiting for its
 /// renderer to put the snapshot up. SPEC_TEAROFF_PAINT_LATENCY §4 phase 3.1.
+#[cfg(target_os = "windows")]
 const SNAPSHOT_SHOW_WAIT: std::time::Duration = std::time::Duration::from_millis(80);
 
 static SNAPSHOT_ACKS: std::sync::OnceLock<Mutex<HashMap<String, std::sync::mpsc::Sender<()>>>> =
@@ -230,6 +232,7 @@ fn snapshot_acks() -> &'static Mutex<HashMap<String, std::sync::mpsc::Sender<()>
 
 /// Register for the renderer's "snapshot-shown" ack BEFORE emitting the
 /// promote event that carries the snapshot. Shared with the window pool.
+#[cfg(target_os = "windows")]
 pub(crate) fn expect_snapshot_shown(label: &str) -> std::sync::mpsc::Receiver<()> {
     let (tx, rx) = std::sync::mpsc::channel();
     if let Ok(mut acks) = snapshot_acks().lock() {
@@ -239,6 +242,7 @@ pub(crate) fn expect_snapshot_shown(label: &str) -> std::sync::mpsc::Receiver<()
 }
 
 /// Wait, bounded, for that ack; forget the registration either way.
+#[cfg(target_os = "windows")]
 pub(crate) fn wait_snapshot_shown(label: &str, shown: std::sync::mpsc::Receiver<()>) -> bool {
     let acked = shown.recv_timeout(SNAPSHOT_SHOW_WAIT).is_ok();
     if let Ok(mut acks) = snapshot_acks().lock() {

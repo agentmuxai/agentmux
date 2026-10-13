@@ -15,6 +15,7 @@
 //! answers two questions: which volume backs the page file, and can Windows
 //! actually grow it there.
 
+#[cfg(target_os = "windows")]
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
 /// One `PagingFiles` registry entry
@@ -23,6 +24,7 @@ const BYTES_PER_GB: f64 = 1_073_741_824.0;
 /// [Microsoft's documented format](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/how-to-determine-the-appropriate-page-file-size-for-64-bit-versions-of-windows):
 /// `initial_mb == 0 && maximum_mb == 0` means "system managed" (auto-grow)
 /// for that specific pagefile.
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, PartialEq)]
 struct PagingFileEntry {
     /// Drive letter the pagefile lives on, uppercased, e.g. `"C"`. `None` if
@@ -36,6 +38,7 @@ struct PagingFileEntry {
 /// instead of a drive letter for some `\\?\Volume{guid}\` forms — those
 /// yield `drive_letter: None` rather than erroring, since a pure parser
 /// should never fail on a value the OS itself produced.
+#[cfg(any(target_os = "windows", test))]
 fn parse_paging_file_entry(line: &str) -> Option<PagingFileEntry> {
     let mut parts = line.split_whitespace();
     let path = parts.next()?;
@@ -66,6 +69,7 @@ fn parse_paging_file_entry(line: &str) -> Option<PagingFileEntry> {
 ///   risk from disk space — report `system_managed: false` on
 ///   `system_drive` for visibility, but callers must not apply the
 ///   "can't grow" risk framing to a fixed-size pagefile.
+#[cfg(any(target_os = "windows", test))]
 fn resolve_pagefile_watch_target(entries: &[PagingFileEntry], system_drive: char) -> (char, bool) {
     if entries.is_empty() {
         return (system_drive, true);
@@ -78,8 +82,8 @@ fn resolve_pagefile_watch_target(entries: &[PagingFileEntry], system_drive: char
     (system_drive, false)
 }
 
-/// Read `PagingFiles` and split it into entries. Non-Windows / read failure
-/// returns an empty vec (caller's `resolve_pagefile_watch_target` then
+/// Read `PagingFiles` and split it into entries. A read failure returns an
+/// empty vec (caller's `resolve_pagefile_watch_target` then
 /// degrades to "watch the system drive as if system-managed" — the correct
 /// fail-open default: assume the common case rather than silently reporting
 /// nothing).
@@ -140,11 +144,6 @@ fn read_paging_files_registry() -> Vec<PagingFileEntry> {
             .filter_map(|s| parse_paging_file_entry(&String::from_utf16_lossy(s)))
             .collect()
     }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn read_paging_files_registry() -> Vec<PagingFileEntry> {
-    Vec::new()
 }
 
 /// Free/total space (GB) for a drive letter, e.g. `'C'`. Windows-only;

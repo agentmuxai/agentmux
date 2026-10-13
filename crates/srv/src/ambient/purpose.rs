@@ -84,6 +84,7 @@ pub const SESSION_CONTINUED_NOTE: Purpose =
     Purpose { tag: "session_continued_note", timeout: BACKGROUND_TIMEOUT, class: Class::Interactive, logs_reply: false };
 
 /// Every purpose, for anything that lists them.
+#[cfg(test)]
 pub const ALL: &[&Purpose] = &[
     &ACTIVITY_SUMMARY,
     &ACTIVITY_SUMMARY_PUSHED,

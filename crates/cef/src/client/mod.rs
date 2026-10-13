@@ -66,9 +66,11 @@ mod unresponsive;
 mod recovery_pages;
 pub(crate) mod error_catalog;
 mod context_menu;
-// Deliberately NOT windows-gated even though both call sites are: it is pure
-// integer geometry with no Win32 types, so its tests run on every CI target
-// instead of only windows-latest. See the module's own doc comment.
+// Both call sites are Windows-only, but the module is also built for tests on
+// every target: it is pure integer geometry with no Win32 types, so its tests
+// run on every CI target instead of only windows-latest. See the module's own
+// doc comment.
+#[cfg(any(target_os = "windows", test))]
 pub(crate) mod window_snap;
 #[cfg(target_os = "windows")]
 pub(crate) mod wndproc;
@@ -89,7 +91,9 @@ pub(crate) use helpers::{backend_get_window_opacity, backend_set_window_opacity}
 // `commands/window/position_persist.rs` and
 // `commands/window/creation.rs::reproject_from_srv` — closes
 // SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md §4's documented gap.
-pub(crate) use helpers::{backend_get_window_pos_and_size, backend_set_window_pos_and_size};
+pub(crate) use helpers::backend_get_window_pos_and_size;
+#[cfg(target_os = "windows")]
+pub(crate) use helpers::backend_set_window_pos_and_size;
 // SPEC_PILLAR1_STEP2 Slice B Phase 4 — floating-pane placement write-through,
 // used by `commands/window/chrome.rs`.
 pub(crate) use helpers::backend_update_block_meta;
@@ -101,11 +105,13 @@ pub(crate) use helpers::backend_set_window_topology;
 pub(crate) use helpers::{backend_get_client_window_ids, backend_get_window_topology};
 // SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual 2 — crumb-based label
 // resolution for `demote_srv_cleanup`'s no-registration fallback.
+#[cfg(target_os = "windows")]
 pub(crate) use helpers::backend_find_window_by_label;
 // SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18 — one-time push of
 // this host's own ipc_port/ipc_token to srv, so srv can proxy agent-facing
 // UI-automation calls through to this host's browser_api routes.
 pub(crate) use helpers::register_ipc_with_backend;
+#[cfg(target_os = "windows")]
 pub(crate) use lifecycle::{
     retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
     BACKEND_WINDOW_ID_RETRY_DELAY,
@@ -138,7 +144,7 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let mut b = self.browser.clone();
+            let b = self.browser.clone();
             if let Some(host) = b.host() {
                 host.close_browser(1); // force_close = true
             }
@@ -337,7 +343,7 @@ pub(crate) fn window_label_for_state(state: &AppState, browser: &mut Browser) ->
         .list_browsers()
         .into_iter()
         .find(|(_, b)| {
-            let mut b = b.clone();
+            let b = b.clone();
             b.is_same(Some(&mut *browser)) != 0
         })
         .map(|(k, _)| k)

@@ -48,12 +48,11 @@ mod oauth_probe;
 mod provider;
 mod secret;
 
-pub use errors::{ResolverError, SpawnGateError};
+pub use errors::SpawnGateError;
 pub(crate) use inject::block_agent_id;
 pub use inject::{
-    inject_identity_env, inject_identity_env_async, inject_identity_env_with_broker, resolve_account,
+    inject_identity_env, inject_identity_env_async, resolve_account,
     agent_has_identity_binding, resolve_bound_claude_config_dir_for_agent, resolve_bound_oauth_config_dir,
 };
-pub use oauth_probe::{oauth_status, probe_oauth_status, OAuthProbeStatus};
+pub use oauth_probe::oauth_status;
 pub use provider::{provider_class, ProviderClass};
-pub use secret::resolve_secret;

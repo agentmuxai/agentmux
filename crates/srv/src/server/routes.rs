@@ -19,6 +19,7 @@ pub struct SrvRouters {
 }
 
 /// Build the full router (see [`build_routers`]).
+#[cfg(test)]
 pub fn build_router(state: AppState) -> Router {
     build_routers(state).full
 }

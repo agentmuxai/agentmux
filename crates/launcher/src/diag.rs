@@ -23,14 +23,18 @@
 // `since: u64` parameter for delta replay; until then a snapshot is
 // "as-of-now" only.
 
+#[cfg(target_os = "windows")]
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
 use agentmux_common::ipc::{ClientKind, Command, Event};
+#[cfg(target_os = "windows")]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[cfg(target_os = "windows")]
 use tokio::net::windows::named_pipe::ClientOptions;
 
+#[cfg(target_os = "windows")]
 const OBSERVATION_WINDOW: Duration = Duration::from_secs(2);
 
 /// Entry point for diag mode. Returns `Ok(())` on success (printed
