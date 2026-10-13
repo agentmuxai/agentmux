@@ -24,7 +24,8 @@ use crate::backend::session_backfill::session_file_path;
 
 const MARKER_SUFFIX: &str = ".agentmux-relocated";
 const TMP_INFIX: &str = ".agentmux-tmp-";
-/// How much of a session's end is read to check its last record parses.
+/// How much of a session's end is read first to find its last record; more
+/// is read when the record is larger.
 const TAIL_CHECK_BYTES: u64 = 256 * 1024;
 
 /// The session file `sid` for `cwd` under `config_dir`, or under the
@@ -58,7 +59,7 @@ fn global_twin(config_dir: &str) -> Option<PathBuf> {
 /// Whether `path` is a session the CLI can resume: a non-empty file whose
 /// last record parses (spec H5 — a file cut mid-write is not resumed).
 pub(crate) fn is_resumable_file(path: &Path) -> bool {
-    read_tail(path).is_ok_and(|(_, tail)| last_record_parses(&tail))
+    last_record(path, false).is_ok_and(|(_, record)| parses(&record))
 }
 
 /// Whether session `sid` for `cwd` under `config_dir` can be copied in by
@@ -67,35 +68,47 @@ pub(crate) fn is_resumable_file(path: &Path) -> bool {
 /// mid-turn: [`relocate`] cuts the copy back to its last complete one.
 pub(crate) fn can_relocate(config_dir: &str, cwd: &str, sid: &str) -> bool {
     source_file(config_dir, cwd, sid)
-        .and_then(|p| read_tail(&p).ok())
-        .is_some_and(|(_, tail)| last_record_parses(&tail[..complete_end(&tail)]))
+        .and_then(|p| last_record(&p, true).ok())
+        .is_some_and(|(_, record)| parses(&record))
 }
 
-/// The last [`TAIL_CHECK_BYTES`] of `path`, and the offset they start at.
-fn read_tail(path: &Path) -> std::io::Result<(u64, Vec<u8>)> {
+/// `path`'s last record and the offset where it ends. With `complete_only`
+/// that is the last newline-ended record, so a record still being written
+/// is passed over; a file with no newline at all is one record either way,
+/// left to the parse to judge. Reads the file's end, widening the window
+/// until it holds the whole record, however large (a big tool result).
+fn last_record(path: &Path, complete_only: bool) -> std::io::Result<(u64, Vec<u8>)> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path)?;
-    let start = f.metadata()?.len().saturating_sub(TAIL_CHECK_BYTES);
-    f.seek(SeekFrom::Start(start))?;
-    let mut tail = Vec::new();
-    f.read_to_end(&mut tail)?;
-    Ok((start, tail))
+    let len = f.metadata()?.len();
+    let mut window = TAIL_CHECK_BYTES;
+    loop {
+        let start = len.saturating_sub(window);
+        f.seek(SeekFrom::Start(start))?;
+        let mut tail = Vec::new();
+        f.read_to_end(&mut tail)?;
+        let newline_before = |at: usize| tail[..at].iter().rposition(|b| *b == b'\n');
+        let end = match (complete_only, newline_before(tail.len())) {
+            (false, _) => Some(tail.len()),
+            (true, Some(at)) => Some(at + 1),
+            (true, None) => (start == 0).then_some(tail.len()),
+        };
+        if let Some(end) = end {
+            let body = tail[..end].iter().rposition(|b| !b.is_ascii_whitespace()).map_or(0, |at| at + 1);
+            match newline_before(body) {
+                Some(at) => return Ok((start + end as u64, tail[at + 1..body].to_vec())),
+                None if start == 0 => return Ok((end as u64, tail[..body].to_vec())),
+                None => {}
+            }
+        }
+        window = window.saturating_mul(4);
+    }
 }
 
-/// Where the last complete (newline-ended) record of `tail` ends; all of it
-/// when it holds no newline, which leaves the judging to the parse.
-fn complete_end(tail: &[u8]) -> usize {
-    tail.iter().rposition(|b| *b == b'\n').map_or(tail.len(), |at| at + 1)
-}
-
-/// Whether the last non-blank line of `tail` parses as JSON (false when
-/// there is none: an empty file isn't resumable).
-fn last_record_parses(tail: &[u8]) -> bool {
-    String::from_utf8_lossy(tail)
-        .lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .is_some_and(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
+/// Whether `record` is one JSON value (an empty one isn't: an empty file
+/// isn't resumable).
+fn parses(record: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(record).is_ok()
 }
 
 /// A copy [`relocate`] placed, with the marker that makes it this
@@ -157,10 +170,10 @@ pub(crate) fn relocate(src: &Path, dest_config_dir: &str, cwd: &str, sid: &str, 
 /// the kept length. A tail with no newline at all is left as it is; the
 /// resumability check that follows judges it.
 fn trim_to_complete_records(path: &Path) -> std::io::Result<u64> {
-    let (start, tail) = read_tail(path)?;
-    let keep = start + complete_end(&tail) as u64;
-    if keep < start + tail.len() as u64 {
-        std::fs::OpenOptions::new().write(true).open(path)?.set_len(keep)?;
+    let (keep, _) = last_record(path, true)?;
+    let f = std::fs::OpenOptions::new().write(true).open(path)?;
+    if keep < f.metadata()?.len() {
+        f.set_len(keep)?;
     }
     Ok(keep)
 }
@@ -287,6 +300,23 @@ mod tests {
         assert!(!is_resumable_file(&cut), "a file cut mid-record");
         assert!(!is_resumable_file(&empty));
         assert!(!is_resumable_file(&d.path().join("missing.jsonl")));
+    }
+
+    /// A last record larger than the first read of the file's end (a big
+    /// tool result) is still found whole (#4748).
+    #[test]
+    fn a_record_larger_than_the_tail_window_is_read_whole() {
+        let (from, to) = (cfg(), cfg());
+        let big = format!("{{\"result\":\"{}\"}}
+", "x".repeat(TAIL_CHECK_BYTES as usize * 2));
+        let src = write_session(from.path(), "big", &format!("{{\"turn\":1}}
+{big}{{\"tur"));
+        assert!(!is_resumable_file(&src));
+        assert!(can_relocate(&s(from.path()), CWD, "big"));
+        let r = relocate(&src, &s(to.path()), CWD, "big", "uid-1").unwrap();
+        assert_eq!(std::fs::read_to_string(&r.copy).unwrap(), format!("{{\"turn\":1}}
+{big}"));
+        assert!(is_resumable_file(&r.copy));
     }
 
     /// A parent mid-turn can still be forked from: the gate asks whether a
