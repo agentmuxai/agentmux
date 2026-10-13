@@ -142,7 +142,7 @@ export class AgentNativeMemoryModel {
         this.draftContentAtom = () => this.draft.draftAtom() ?? "";
         this.savingAtom = () => this._creating[0]() || this.draft.savingAtom();
         void this.loadFiles();
-        // Live updates, debounced like the Armory's own subscription
+        // Live updates, debounced like Memory → Personal's own subscription
         // (native-memory-manager.tsx): a burst of writes is one refresh.
         this.unsubChanged = onMuxEvent(`agent:memory:changed:${agentId}`, () => {
             if (this.changeDebounce !== undefined) clearTimeout(this.changeDebounce);

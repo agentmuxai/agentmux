@@ -32,8 +32,8 @@ pub struct Bundle {
     #[serde(default)]
     pub is_blank: bool,
     /// Global bundles are injected into every agent's CLAUDE.md at launch,
-    /// regardless of per-agent memory selection. Managed in the Armory
-    /// (Identity & Bundle hamburger modal). Seeded from workspace-wide rule sets.
+    /// regardless of per-agent memory selection. Managed in Memory → Global.
+    /// Seeded from workspace-wide rule sets.
     #[serde(default)]
     pub is_global: bool,
     /// "claude" | "codex" | "gemini" | empty string
@@ -60,7 +60,7 @@ pub struct Bundle {
     /// JSON-encoded array of skill IDs.
     #[serde(default = "default_json_array_string")]
     pub skills: String,
-    /// Explicit ordering within the Armory global bundles. Lower sorts
+    /// Explicit ordering within Memory → Global. Lower sorts
     /// first; this is the order sections inject into CLAUDE.md at launch.
     /// Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
     /// `reorderglobalbrain` RPC — `bundle_upsert` never overwrites it
@@ -146,7 +146,7 @@ pub enum BundleReseedOutcome {
 /// The `source` sentinel `bundle_delete_system_if_owned` stamps on the
 /// tombstone version row it appends after deleting a row — distinguishes a
 /// deliberate, generation-aware retirement (pruned because a manifest no
-/// longer lists this id) from an ordinary human delete via the Armory UI
+/// longer lists this id) from an ordinary human delete in Memory
 /// (`bundle_delete_system`, which records no version at all). `bundle_
 /// reseed_system_if_owned`'s missing-row branch checks for this sentinel
 /// specifically — see that method's own doc comment.
@@ -265,7 +265,7 @@ impl Store {
     /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md), then by
     /// explicit `sort_order` (then name as a stable tiebreak). Called at
     /// agent launch to inject workspace-wide rules into every agent in the
-    /// order the user arranged them in the Armory Global section.
+    /// order the user arranged them in Memory → Global.
     pub fn bundle_list_global(&self) -> Result<Vec<Bundle>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -325,7 +325,7 @@ impl Store {
         r
     }
 
-    /// Generic Global Bundle upsert — used by the ordinary Armory editor,
+    /// Generic Global Bundle upsert — used by the ordinary Memory editor,
     /// the per-agent Bundle editor, ABF import, and internal seeding.
     /// Refuses outright to touch an existing `is_system=1` row (content
     /// included, not just the flag) — see
@@ -397,12 +397,12 @@ impl Store {
     /// transaction makes that interleaving impossible.
     ///
     /// `written_by` is the caller's own TRUSTED identity (an agent's real
-    /// `AGENTMUX_AGENT_ID`, or `"armory-ui"` for the human-facing Armory
+    /// `AGENTMUX_AGENT_ID`, or `"armory-ui"` for the human-facing Memory
     /// editor) — see `BundleVersion::written_by`'s own doc comment for why
     /// this is a separate field from `source`/`source_detail`.
     /// `written_by_uid` is the writer's UID from the request's `Caller`
     /// (identity M4c-1, spec §6.5.9) — `""` when Unattributed, and for the
-    /// Armory UI. Returns
+    /// Memory pane. Returns
     /// `None` (no version recorded) when `memory.is_global` is false —
     /// versioning is scoped to Global Memory specifically, matching this
     /// table's whole purpose; a private, per-agent bundle upsert still
@@ -441,8 +441,8 @@ impl Store {
     /// value as the latest version's `content_hash`), checked inside the
     /// same `IMMEDIATE` transaction as the write, else `StoreError::Conflict`
     /// and nothing is written. A missing row is a conflict too. `None`
-    /// behaves exactly like `bundle_upsert_with_version`. The Armory's
-    /// Global Memory editor sends it (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
+    /// behaves exactly like `bundle_upsert_with_version`. Memory →
+    /// Global's editor sends it (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
     fn bundle_upsert_with_version_based_unobserved(
         &self,
         memory: &Bundle,
@@ -613,8 +613,8 @@ impl Store {
     /// `is_global=1`, so there is never a case where versioning would not
     /// apply. See docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md
     /// — this is what lets `operator_config_seed`'s startup reseed tell "did
-    /// AgentMux's own seeder write this last, or did a human edit it via the
-    /// Armory UI" apart, via the returned/stored `written_by`.
+    /// AgentMux's own seeder write this last, or did a human edit it in
+    /// Memory" apart, via the returned/stored `written_by`.
     ///
     /// Shares `bundle_upsert_system`'s exact guard and SQL, duplicated for
     /// the same non-reentrant-`Mutex` reason `bundle_upsert_with_version`
@@ -698,7 +698,7 @@ impl Store {
     /// Same as `bundle_upsert_system_with_version`, but skips recording a
     /// version when the write is byte-identical (`name` + `instructions`) to
     /// what's already stored — the case where an operator opens a seeded
-    /// Operator Config entry in the Armory UI and clicks Save without
+    /// Operator Config entry in Memory and clicks Save without
     /// changing anything (the UI does not suppress this request). Recording
     /// a version for a true no-op would permanently mark the row as
     /// human-owned even though nothing actually changed, breaking `bundle_
@@ -737,7 +737,7 @@ impl Store {
 
     /// `bundle_upsert_system_if_changed` with the same optional base check
     /// `bundle_upsert_with_version_based` documents — the system-tier half
-    /// of the Armory's conditional Global Memory save.
+    /// of Memory → Global's conditional save.
     fn bundle_upsert_system_if_changed_based_unobserved(
         &self,
         memory: &Bundle,
@@ -846,7 +846,7 @@ impl Store {
     /// calls composed by the caller. A caller-composed version (read latest
     /// version via `bundle_version_list`, decide, then separately call
     /// `bundle_upsert_system_with_version`) is a check-then-act race: a
-    /// concurrent writer — a human editing this row via the Armory UI, or
+    /// concurrent writer — a human editing this row in Memory, or
     /// another AgentMux instance's own startup reseed, since multiple
     /// instances can run in parallel by design — could land a new version
     /// between the read and the write, and the caller's decision would be
@@ -1280,7 +1280,7 @@ impl Store {
     }
 
     /// Assign `sort_order` to the given bundle ids in the order supplied
-    /// (position 0, 1, 2, …). Drives the Armory global bundles ordering,
+    /// (position 0, 1, 2, …). Drives the Memory → Global ordering,
     /// which in turn controls CLAUDE.md injection order. Ids not present in
     /// the table, OR present but `is_system=1`, are skipped silently — a
     /// system row's position is fixed (always first, see

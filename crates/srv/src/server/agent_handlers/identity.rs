@@ -59,7 +59,7 @@ fn reject_ambient_home_dir_binding(account: &IdentityAccount) -> Result<(), Stri
     Ok(())
 }
 
-/// Request for `account.key.verify` (Armory key flow). The `api_key`
+/// Request for `account.key.verify` (account key flow). The `api_key`
 /// field is a secret — never log this struct.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -146,7 +146,7 @@ fn merge_json_object(base: &mut serde_json::Value, overlay: &serde_json::Value) 
 #[serde(rename_all = "camelCase")]
 pub struct DeleteIdentityAccountResult {
     deleted: bool,
-    /// Agents whose link to the account was removed (Armory delete-time disclosure).
+    /// Agents whose link to the account was removed (delete-time disclosure).
     affected_agents: Vec<String>,
     /// What removing the saved login did; null when there was no account row.
     #[ts(type = "{ outcome: \"removed\" | \"absent\" | \"skipped\" | \"failed\" | \"none\"; path?: string; detail?: string; historyKept?: boolean; historyPath?: string } | null")]
@@ -291,7 +291,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // Armory: validate (optional) + securely store an API key.
+    // Connectors → Accounts: validate (optional) + securely store an API key.
     // The plaintext goes to the OS keychain; the DB row keeps only the
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
     // See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
@@ -440,7 +440,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // ── Armory service OAuth (scaffold) ──
+    // ── Service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
     let oauth_mstore = state.id_store.clone();
@@ -511,7 +511,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // side log lines can carry it.
                 let acct = mstore.identity_get(&cmd.id).ok().flatten();
                 let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
-                // What the cleanup did, returned to the Armory so a login that
+                // What the cleanup did, returned to Connectors so a login that
                 // couldn't be removed is reported, not hidden
                 // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H3).
                 let mut cleanup_report = serde_json::Value::Null;
@@ -619,7 +619,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 Ok(DeleteIdentityAccountResult {
                     deleted,
-                    // Layer 4: Armory delete-time disclosure (spec §4).
+                    // Layer 4: delete-time disclosure (spec §4).
                     affected_agents,
                     // Null when there was no account row to clean up after.
                     cleanup: cleanup_report,

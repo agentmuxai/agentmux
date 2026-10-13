@@ -3,7 +3,7 @@
 
 /**
  * MemoryClaimsPanel — "Memory folders this agent claims", collapsed, above
- * an agent's file grid in Armory → Memory → Personal
+ * an agent's file grid in Memory → Personal
  * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2, the human "release
  * this folder" action).
  *

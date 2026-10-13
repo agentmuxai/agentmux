@@ -41,7 +41,7 @@
 // .warden-section-stub, .warden-manager-body/-error/-table/-mono/-dim/
 // -footnote) do NOT live here — they're in warden-shared/warden-manager-
 // chrome.scss, explicitly imported by every manager that uses them. Unlike
-// .bundle-manager-* (reused by convention, matching Armory's own established
+// .bundle-manager-* (reused by convention, matching the section pane's established
 // pattern — see the file-header comment above), these classes have no such
 // precedent forcing implicit-only reuse, so every consumer imports them
 // explicitly (reagent P2, PR #2553 — some managers imported the shared

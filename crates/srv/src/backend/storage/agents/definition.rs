@@ -689,7 +689,7 @@ impl Store {
     /// (`AppState.id_store`), never on the per-channel `mstore` directly.**
     /// Bundles live in the shared store when one is configured (the normal
     /// case) — every real bundle-read path (`listmemories`/`getmemory`/
-    /// the Armory editor/the bundle-summary panel) reads through
+    /// the Memory editor/the bundle-summary panel) reads through
     /// `id_store`, so a bundle created via `mstore.bundle_upsert`
     /// directly would be written to a different SQLite file and be
     /// invisible everywhere else (P1 finding, Codex review on PR #2587,

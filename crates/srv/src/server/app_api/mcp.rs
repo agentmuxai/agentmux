@@ -4,9 +4,9 @@
 //! MuxAPI handlers for the v1 standalone MCP Server primitive.
 //! mcp.list / mcp.get / mcp.upsert / mcp.delete / mcp.bind / mcp.unbind
 //!
-//! Plus the Armory-level catalog (mcp.catalog.*): global servers only,
+//! Plus the Connectors-level catalog (mcp.catalog.*): global servers only,
 //! window-scoped — no `agent_id`, no `check_s1` (mirrors bundle.* auth
-//! shape, since the Armory has no agent connection context to gate on).
+//! shape, since Connectors has no agent connection context to gate on).
 //!
 //! `db_mcp_servers` is authoritatively `identity_store` as of Phase 2 of
 //! SPEC_DURABLE_BINDINGS_2026_09_10.md (§5.1/§5.4) — see `skill.rs`'s
@@ -349,7 +349,7 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 // Catalog-tier sibling of register_mcp_bind (above) — same DB write and
 // "only global servers may be bound" safety check, but no check_s1: the
-// Armory's WebSocket never authenticates as an agent (see this file's
+// Connectors' WebSocket never authenticates as an agent (see this file's
 // module doc comment), so a check_s1-gated bind can never be satisfied from
 // that caller. mcp.bind itself is left untouched — it may still be the
 // intended surface for an agent binding a server to itself over its own
@@ -387,7 +387,7 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 mstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind: {e}"))?;
-                // Lets any other open Stash/Armory view for this agent pick up
+                // Lets any other open Stash/Connectors view for this agent pick up
                 // the new binding without a manual refresh — mcp.bind (the
                 // check_s1 agent-self-service path) intentionally left alone.
                 broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
@@ -625,7 +625,7 @@ fn observed_agents(
 
 /// Health/prerequisite probe for a global catalog server, callable without
 /// an agent context (mirrors mcp.catalog.*'s window-scoped, no-`check_s1`
-/// shape) — this is what lets the Armory's MCP Servers tab show a
+/// shape) — this is what lets Connectors → MCP servers show a
 /// connected/error status per row before any agent has bound the server.
 /// See SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.4.
 fn register_mcp_catalog_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {

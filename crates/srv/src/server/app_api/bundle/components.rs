@@ -10,7 +10,7 @@ use super::*;
 /// Drop a deleted bundle's component refs.
 ///
 /// Called from **both** delete paths — `bundle.delete` here and `deletememory`
-/// in `agent_handlers/bundle.rs`, which is the one the Armory actually calls.
+/// in `agent_handlers/bundle.rs`, which is the one Memory actually calls.
 /// Fixing only the first left the product path orphaning refs (Codex, PR
 /// #3153), so this exists to make "both" mean one implementation.
 ///
@@ -115,7 +115,7 @@ pub(crate) struct ResolvedComponents {
 /// this, export read the inline `bundle.skills` column
 /// while agent launch read the ref tables (`write_agent_config_files` in
 /// `app_api/agent_open.rs`), and nothing kept the two in step — so a skill
-/// bound in the Armory ran at launch but exported as an empty `skills/`
+/// bound in Memory → Skills ran at launch but exported as an empty `skills/`
 /// directory, with no warning. One
 /// resolver, used by every export path, is what stops that recurring.
 ///

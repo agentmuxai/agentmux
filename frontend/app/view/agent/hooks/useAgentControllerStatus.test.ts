@@ -237,7 +237,7 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
         // simply doesn't fire, mirroring a persist failure inside
         // runProviderLogin (REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_
         // WORKING_2026_07_27.md) — the credential is on disk but the
-        // Armory row couldn't be saved.
+        // account row couldn't be saved.
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.setAuthUrl?.("https://claude.com/cai/oauth/authorize?code=true");
             return "inapp-success";

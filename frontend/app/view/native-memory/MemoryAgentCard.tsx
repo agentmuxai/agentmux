@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MemoryAgentCard — one agent in the Armory → Memory → Personal grid.
+ * MemoryAgentCard — one agent in the Memory → Personal grid.
  *
  * Deliberately NOT `AgentCard` (view/agent/components/AgentCard.tsx), despite
  * mirroring its visual language. That component's contract is "launch this

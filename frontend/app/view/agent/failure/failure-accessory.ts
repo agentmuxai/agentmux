@@ -30,7 +30,7 @@ export interface FailureActions {
     openAccounts: () => void;
     /**
      * Bind an already-authenticated account (of this agent's provider) to
-     * this agent, replacing the round-trip through the Armory. Receives the
+     * this agent, replacing the round-trip through Connectors. Receives the
      * click event so the caller can anchor a picker popover at the click
      * position when there's more than one candidate — see
      * SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.2. Never fires a
@@ -174,7 +174,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             // one.
             //
             // NOTE: this is a DIFFERENT thing from `bindCandidates` below —
-            // that reuses an existing per-channel Armory account (a real,
+            // that reuses an existing per-channel account (a real,
             // channel-local login someone already completed), not the raw
             // ambient `~/.claude` file. See
             // SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §0.

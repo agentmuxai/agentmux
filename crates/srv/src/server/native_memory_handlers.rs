@@ -176,7 +176,7 @@ pub(crate) fn memory_dir_for_agent(
         // real directory. The registry fallback below is what knows that
         // real directory (`source_agents_base` + `working_dir`).
         //
-        // Returning Err here instead made Armory → Bundle → Personal and the
+        // Returning Err here instead made Memory → Personal and the
         // MemoryList MCP tool fail with "agent <x> has no working directory"
         // for every such agent, while its memory files sat on disk perfectly
         // intact — the common case, since `working_directory` is blank by
@@ -1357,7 +1357,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: mirror upsert failed (non-fatal)");
                 }
 
-                // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md):
+                // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md):
                 // same event, same `agent:memory:changed:{canonical_uuid}`
                 // naming convention `app_api::mod`'s write/revert already use
                 // for the MemoryWrite MCP tool's own path — keying by

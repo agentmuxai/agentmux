@@ -59,10 +59,10 @@ pub const AGENTMUX_DOCKER_NETWORK: &str = "agentmux-agents";
 /// `docs/reports/REPORT_CONTAINER_AGENT_CREDENTIALS_AND_WORKSPACE_2026_09_02.md`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContainerMountSpec {
-    /// The bound Armory account's own resolved Claude config dir on the host —
+    /// The bound account's own resolved Claude config dir on the host —
     /// i.e. whatever `CLAUDE_CONFIG_DIR` the identity resolver produced for this
     /// agent. Its `.credentials.json` is bind-mounted into the container so the
-    /// CLI there reads the same token the Armory login wrote (see
+    /// CLI there reads the same token the account login wrote (see
     /// [`agent_home_mounts`] for why it is that one file and not the whole dir).
     ///
     /// This is deliberately the ONE account's isolated dir, never the operator's
@@ -1152,7 +1152,7 @@ impl ContainerManager {
     /// Compares the owned set in BOTH directions — a mount that should now be
     /// ABSENT is drift too, not just a missing or changed one. That case is the
     /// security-relevant one (reagent P1 on PR #2933): unbinding an agent's
-    /// Armory account is a normal transition that never reaches
+    /// account is a normal transition that never reaches
     /// `SpawnGateError::MissingCredentials` (that gate fires when credentials
     /// are expected and missing, not when an agent legitimately has none). A
     /// presence-only check would leave the old account's `.credentials.json`
@@ -1772,7 +1772,7 @@ mod tests {
     }
 
     /// THE fix: the bound account's `.credentials.json` is bind-mounted into the
-    /// container, so the CLI there reads the same token the Armory login wrote.
+    /// container, so the CLI there reads the same token the account login wrote.
     /// Without it a container agent authenticates NEVER — `CLAUDE_CONFIG_DIR` is
     /// a host path and is stripped by CONTAINER_ENV_DENYLIST before exec.
     #[test]
@@ -1847,7 +1847,7 @@ mod tests {
     // desired-set logic is what the tests pin; the Docker inspect half needs a
     // live daemon and is covered by the ignored integration test.
 
-    /// Unbinding an agent's Armory account must show up as drift. It is a normal
+    /// Unbinding an agent's account must show up as drift. It is a normal
     /// transition that never trips SpawnGateError::MissingCredentials, so if the
     /// desired set still claimed a credentials mount — or if a presence-only
     /// check ignored the now-absent one — the OLD account's token would stay

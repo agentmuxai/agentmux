@@ -5,7 +5,7 @@
 // gradient illustration renders AgentMux's brand mark) define internal
 // `<linearGradient id="...">`s with plain, non-unique ids and reference
 // them via `fill="url(#...)"`. `innerHTML`-mounting the SAME raw markup
-// more than once on one page (e.g. the Armory Accounts gallery tile AND
+// more than once on one page (e.g. the Connectors → Accounts gallery tile AND
 // the connected-accounts row both showing the AgentMux icon at once)
 // creates duplicate ids — the browser resolves every `url(#id)` reference
 // to whichever element with that id appears FIRST in the document,
@@ -15,7 +15,7 @@
 // positioned for a shape it doesn't belong to — in practice, invisible
 // (live-confirmed via CDP: a second inlined copy's path resolved its
 // gradient fill to the FIRST copy's element). Live symptom: the AgentMux
-// icon renders blank in Armory Accounts once both the tile and the
+// icon renders blank in Connectors → Accounts once both the tile and the
 // connected row are visible together (post-`SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT`,
 // both are now always in the same continuous scroll, not hidden in a
 // separate scroll region).

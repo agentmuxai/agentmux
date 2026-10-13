@@ -77,7 +77,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // A host's durable sessions, for the Remotes pane's "Sessions…"
+    // A host's durable sessions, for Connectors → Remotes' "Sessions…"
     // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
     // UI's other connection calls do. Ending one is the user's decision,
     // made in the host's own window (`ask_user`): anything holding srv's
@@ -93,7 +93,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     auth_key: &auth_key,
                 });
                 let list = sessions::list(&store, &conn, ask).await?;
-                // The Remotes pane shows the count without opening ssh itself.
+                // Connectors → Remotes shows the count without opening ssh itself.
                 remotes::note_sessions(&conn, list.len());
                 Ok(list)
         }
@@ -123,7 +123,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
+    // Connectors → Remotes (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
     // a remote's settings, and forgetting a recent one.
     let config = state.config_watcher.clone();
     engine.register_typed(COMMAND_REMOTES_LIST, move |_cmd: CommandRemotesListData, _ctx| {

@@ -23,7 +23,7 @@ interface MemoryContentProps {
     editing: boolean;
     draft?: string;
     onDraftInput?: (value: string) => void;
-    /** "markdown" renders the read-only view as Markdown (the Armory);
+    /** "markdown" renders the read-only view as Markdown (Memory);
      *  "plain" as preformatted text (the Stash, which always has). */
     view?: "markdown" | "plain";
     placeholder?: string;

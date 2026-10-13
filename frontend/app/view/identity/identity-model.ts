@@ -57,7 +57,7 @@ export interface AccountContext {
     anthropic_model?: string;
     endpoint?: string;
     description?: string;
-    // Armory key flow — non-secret display hint (e.g. "••••••••3f9a")
+    // Account key flow — non-secret display hint (e.g. "••••••••3f9a")
     // and per-service validation metadata. Populated by account.key.verify.
     masked_tail?: string;
     openai_model_count?: number;
@@ -123,7 +123,7 @@ export function agentsAssignedToAccount(accountId: string, agents: AgentDefiniti
 }
 
 /**
- * Layer-4 Armory truthfulness (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
+ * Layer-4 delete truthfulness (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
  * §4): the delete-time notice text, derived from the RPC response's
  * `affectedAgents` (the agent ids whose links were cascaded by the
  * delete). Returns null when no agent was using the account — the
@@ -379,10 +379,10 @@ export function primeAccountCache(): void {
     // broadcast, so accounts created/edited/deleted by ANY path — the in-app
     // OAuth login persist, API-key verify, upsert/delete RPCs from another
     // tab, the spawn-time expiry probe — propagate to every cache consumer
-    // (Armory Accounts tab, launch modal, pickers) without a reload.
+    // (Connectors → Accounts, launch modal, pickers) without a reload.
     // Previously the cache was only refreshed by its own CRUD methods'
     // explicit calls, so backend-originated account creation (e.g. completing
-    // an in-app OAuth login) left the Armory stale until reopen/reload, and
+    // an in-app OAuth login) left Connectors stale until reopen/reload, and
     // each consumer that wanted liveness had to hand-roll its own event
     // subscription (AgentLaunchModal did exactly that).
     //
@@ -398,7 +398,7 @@ export function primeAccountCache(): void {
 // ── ViewModel ────────────────────────────────────────────────────────────────
 
 /**
- * What an account is called in the Armory: its login email when the provider
+ * What an account is called in Connectors: its login email when the provider
  * recorded one, else its generic name (`claude-oauth`) — the email is what
  * tells two accounts on one provider apart
  * (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §3).
@@ -547,7 +547,7 @@ export class IdentityViewModel implements ViewModel {
         // Stay in sync with module-level cache updates from any source
         // (other panes, RPC events, etc.). The unsubscribe is stashed and
         // invoked in dispose() so callers that mount this model directly
-        // (e.g. the Armory Accounts tab) don't leak a listener per
+        // (e.g. Connectors → Accounts) don't leak a listener per
         // open/close.
         this._unsubAccounts = subscribeAccountChanges((accounts) => {
             this.setAccounts(accounts);

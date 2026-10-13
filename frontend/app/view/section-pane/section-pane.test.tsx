@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Connectors and Memory panes (section-pane.tsx and the two manifests),
- * and the Armory and Remotes manifests that move saved blocks onto them.
+ * The Connectors and Memory panes (section-pane.tsx and the two manifests).
  * docs/specs/SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md,
  * docs/specs/SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md.
  */
@@ -220,13 +219,13 @@ describe("section pane zoom", () => {
 
     it("applies term:zoom as CSS zoom", () => {
         const { container } = mount(connectorsPaneTab, { "term:zoom": 1.2 });
-        expect((container.querySelector(".armory-view") as HTMLElement).style.zoom).toBe("1.2");
+        expect((container.querySelector(".section-pane-view") as HTMLElement).style.zoom).toBe("1.2");
     });
 
     it("Ctrl+Wheel steps term:zoom; back at 1.0 it clears the key", () => {
         setPlatform("win32"); // mod+wheel: Ctrl here, ⌘ on macOS
         const { container } = mount(memoryPaneTab);
-        const view = container.querySelector(".armory-view")!;
+        const view = container.querySelector(".section-pane-view")!;
         wheel(view, { ctrlKey: true, deltaY: 100 });
         expect(setMetaMock).toHaveBeenLastCalledWith({ "term:zoom": 0.9 });
         wheel(view, { ctrlKey: true, deltaY: -100 });
@@ -235,7 +234,7 @@ describe("section pane zoom", () => {
 
     it("leaves a plain wheel and Ctrl+Shift+Wheel (all panes) alone", () => {
         const { container } = mount(memoryPaneTab);
-        const view = container.querySelector(".armory-view")!;
+        const view = container.querySelector(".section-pane-view")!;
         wheel(view, { deltaY: 100 });
         wheel(view, { ctrlKey: true, shiftKey: true, deltaY: 100 });
         expect(setMetaMock).not.toHaveBeenCalled();

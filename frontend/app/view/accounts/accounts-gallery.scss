@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Armory Accounts gallery — brand tiles + per-tile connected count +
+// Connectors → Accounts gallery — brand tiles + per-tile connected count +
 // the OAuth/Key chooser. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
 
 // Density: tiles are horizontal chips (logo | name/status | count), not
@@ -117,11 +117,11 @@
     color: var(--secondary-text-color);
 }
 
-// ── Armory-only row/header density ────────────────────────────────────────────
+// ── Connectors-only row/header density ────────────────────────────────────────
 // `.identity-account-row`, `.identity-group-header` and `.identity-header` are
 // shared with the agent pane's Identity tab (identity/styles/_accounts.scss,
 // _header.scss). Overrides are scoped to `.accounts-manager` so only the
-// Armory page tightens; consecutive rows share a border instead of each
+// Connectors page tightens; consecutive rows share a border instead of each
 // carrying its own 1px gap + 1px border.
 .identity-view.accounts-manager {
     .identity-header {

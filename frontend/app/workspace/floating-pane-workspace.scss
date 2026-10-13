@@ -27,18 +27,18 @@
     // `.block` in `block.scss`), opted out per-view via `noPadding` ->
     // `.block-no-padding` (`BlockFull` in `block.tsx`). Views that opt out —
     // agent, term, editor, browser, drone, swarm, sysinfo, files — render
-    // flush. Views that do NOT — **armory**, identity, memory — keep the 5px.
+    // flush. Views that do NOT — **connectors**, memory, identity — keep the 5px.
     //
     // Docked that is correct: it is interior breathing room next to sibling
     // panes. In a floater the single pane fills the whole window, so the same
     // 5px sits directly against the window edge, over the dark
     // `#1e1e2e` window-class brush (`create_popup` in
     // `crates/cef/src/floating_pane.rs`), and reads as a thick border. That is
-    // exactly why a floating Armory looks bordered while a floating agent or
+    // exactly why a floating Connectors looks bordered while a floating agent or
     // terminal does not — measured at 6px of inset (5px padding + 1px block)
-    // for armory versus 0px for agent/term.
+    // for the Armory, which Connectors and Memory replaced, versus 0px for agent/term.
     //
-    // Scoped to the floater rather than setting `noPadding` on Armory, because
+    // Scoped to the floater rather than setting `noPadding` on Connectors, because
     // the docked rendering is right as it stands and must not change.
     //
     // No `!important` needed here, unlike the rule above: this is

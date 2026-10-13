@@ -783,10 +783,10 @@ mod tests {
                             "data": { "blockId": "swarm-block" }
                         },
                         {
-                            "id": "armory-id",
+                            "id": "memory-id",
                             "flexDirection": "row",
                             "size": 4,
-                            "data": { "blockId": "armory-block" }
+                            "data": { "blockId": "memory-block" }
                         },
                         {
                             "id": "sysinfo-id",
@@ -808,7 +808,7 @@ mod tests {
         assert_eq!(right_col.children.len(), 3);
         assert_eq!(right_col.data, None); // group node, no leaf data
         assert_eq!(right_col.children[0].data.as_ref().unwrap().block_id, "swarm-block");
-        assert_eq!(right_col.children[1].data.as_ref().unwrap().block_id, "armory-block");
+        assert_eq!(right_col.children[1].data.as_ref().unwrap().block_id, "memory-block");
         assert_eq!(right_col.children[2].data.as_ref().unwrap().block_id, "sysinfo-block");
         let reserialized = serde_json::to_value(&root).unwrap();
         let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();

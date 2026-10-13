@@ -800,7 +800,7 @@ async fn route_command(
             }
         }
         "memory_adoption_request" => {
-            // The Armory asks to adopt earlier accounts' memory for an agent
+            // Memory → Personal asks to adopt earlier accounts' memory for an agent
             // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). This only
             // opens the approval subwindow; see `memory_adoption`.
             let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("");

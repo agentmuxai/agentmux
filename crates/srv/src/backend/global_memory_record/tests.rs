@@ -40,7 +40,7 @@ fn an_entry_is_recorded_with_its_writer_once_and_again_when_it_changes() {
     assert_eq!(h[1].written_by_uid, "uid-x");
 }
 
-/// Removing from Global Memory (a demote, as the Armory's Remove does, or a
+/// Removing from Global Memory (a demote, as Memory → Global's Remove does, or a
 /// delete) is a tombstone; a bundle that was never global is not recorded.
 #[test]
 fn leaving_global_memory_is_a_tombstone_and_other_bundles_are_ignored() {

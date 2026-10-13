@@ -5,7 +5,7 @@
  */
 export type AgentSkill = { id: string, agent_id: string, name: string, trigger: string, 
 /**
- * Free-form rather than an enum: rows written by the Armory catalog and
+ * Free-form rather than an enum: rows written by Memory → Skills and
  * by older builds both land here, so a closed set would fail to read
  * them back. `createagentskill` defaults it to "prompt".
  */

@@ -65,7 +65,7 @@ const READY_GATE_FADE_MS = 200;
  * itself applies, not just a raw `meta.view === "agent"` check.
  */
 export function resolveEffectiveViewType(blockView: string): string {
-    // Migration aliases (forge → agent, workflows → drone, trust → armory)
+    // Migration aliases (forge → agent, workflows → drone)
     // are declared on each view's manifest in block-registry.ts.
     return resolvePaneTabView(blockView);
 }

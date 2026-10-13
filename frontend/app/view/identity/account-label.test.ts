@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §3: an Armory account is called
+// SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §3: an account is called
 // by its login email when the provider recorded one, else by its name.
 
 import { describe, expect, it } from "vitest";

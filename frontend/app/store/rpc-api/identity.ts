@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Type re-exports for identity accounts, Armory key/OAuth flows,
+// Type re-exports for identity accounts, account key/OAuth flows,
 // agent-identity links, and the pre-launch OAuth / install / prereq flows.
 // Their stubs are generated (generated.ts); the shapes are GENERATED from
 // their Rust definitions by ts-rs.

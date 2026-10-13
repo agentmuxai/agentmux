@@ -3,7 +3,7 @@
 
 /**
  * MemoryDraftModel — the edit lifecycle shared by every memory editor
- * (Armory → Personal / Global full views, the Stash memory tab): a draft, the
+ * (Memory → Personal / Global full views, the Stash memory tab): a draft, the
  * content it was based on, and that base's SHA-256.
  *
  * Two jobs, both from docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md

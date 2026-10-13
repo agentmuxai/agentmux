@@ -71,7 +71,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [anthropicModel, setAnthropicModel] = createSignal(editing()?.context.anthropic_model ?? "");
     const [description, setDescription] = createSignal(editing()?.context.description ?? "");
 
-    // ── Armory secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
+    // ── Account secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
     // Active when secretBackend === "keychain": the user pastes a key and
     // clicks Validate (single user-initiated egress) or "Save without
     // validating". The plaintext is sent once to the backend, which stores it

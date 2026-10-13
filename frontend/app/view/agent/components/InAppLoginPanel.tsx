@@ -7,7 +7,7 @@
  * line, and Cancel / "Use terminal instead" actions.
  *
  * Extracted from `PreLaunchAuthPanel.tsx` (its original and still-primary
- * caller — the launch surface, spec §3.3 surface 1) so the Armory/Stash
+ * caller — the launch surface, spec §3.3 surface 1) so the Connectors/Stash
  * surface (§3.3 surface 3) can reuse the identical UI instead of a second
  * hand-rolled copy. Decoupled from `PreLaunchAuthPanel`'s own
  * `AuthFlowController`/`AuthState` reducer — callers pass `authUrl` directly

@@ -168,7 +168,7 @@ export function HueSwatchRow(p: { value: number | null | undefined; onChange: (h
 /**
  * Masked credential input — at-rest shows a fixed-width dot mask with a
  * "Replace" button (no partial/tail hint: this is a flat settings.json
- * string, not keychain-backed like the Armory identity form, so there's no
+ * string, not keychain-backed like the Connectors → Accounts form, so there's no
  * separate masked_tail metadata to show); clicking Replace reveals a
  * password-type entry field with Save/Cancel. Modeled on
  * `identity-account-form.tsx`'s masked-key UX without its keychain

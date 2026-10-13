@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * McpCatalogPicker — the "+ Browse catalog" overlay for the Armory's MCP
- * Servers tab (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.6).
+ * McpCatalogPicker — the "+ Browse catalog" overlay for Connectors → MCP
+ * servers (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.6).
  * Lists MCP_PRELOAD_CATALOG; picking an entry pre-fills the existing
  * add-server form (McpCatalogModel.startFromCatalog) instead of requiring
  * the user to hand-type command/args JSON.

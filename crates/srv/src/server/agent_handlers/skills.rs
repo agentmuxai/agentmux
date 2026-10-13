@@ -27,7 +27,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // `write_agent_config_files` path rather than the frontend calling the
     // agent-scoped `skill.list` RPC directly (it would fail check_s1 pre-
     // launch). Previously returned only agent_skill_list (legacy-only),
-    // silently hiding every standalone/Armory-catalog skill from the actual
+    // silently hiding every standalone/Memory → Skills skill from the actual
     // launch flow (reagent P0 on PR #2322).
     let mstore_lfs = state.mstore.clone();
     let identity_store_lfs = state.identity_store.clone();

@@ -3,7 +3,7 @@
 
 /**
  * MemoryTile — one tile in a memory tile grid: `{icon, title, badges, meta}`.
- * Generalized out of MemoryFileCard (which is now a thin wrapper) so Armory →
+ * Generalized out of MemoryFileCard (which is now a thin wrapper) so
  * Memory → Global renders its entries with exactly the Personal Memory file
  * tile look — same markup, same `memory-file-card*` CSS
  * (native-memory-manager.scss) — per

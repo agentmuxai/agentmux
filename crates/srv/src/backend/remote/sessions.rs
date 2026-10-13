@@ -3,7 +3,7 @@
 
 //! The durable sessions on an SSH host (spec §7.6): what the helper's daemon
 //! holds there, which pane (if any) each belongs to, and ending one. Behind
-//! the Remotes pane's "Sessions…".
+//! Connectors → Remotes' "Sessions…".
 
 use std::time::Duration;
 

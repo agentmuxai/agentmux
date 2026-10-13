@@ -1117,7 +1117,7 @@ pub async fn run_agent_turn_joining(
             // by CONTAINER_ENV_DENYLIST before exec — mounting it is the only way
             // the in-container CLI ever sees `.credentials.json`. Without this a
             // container agent authenticates never, no matter how many times the
-            // operator logs in via Armory.
+            // operator logs in via Connectors → Accounts.
             let mount_spec = crate::backend::container::ContainerMountSpec {
                 claude_config_host_dir: env_vars
                     .get("CLAUDE_CONFIG_DIR")

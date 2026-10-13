@@ -66,7 +66,7 @@ export class SettingsViewModel {
         const [section, setSection] = createSignal<SettingsSection>(initial ?? "appearance");
         this.activeSection = section;
         this.setSection = setSection;
-        // No blockAtom/meta-persistence here (unlike Armory/Warden's
+        // No blockAtom/meta-persistence here (unlike Connectors/Memory/Warden's
         // sectionAtom) — SettingsViewModel has never had a blockAtom, and
         // activeSection is already a plain createSignal read directly, so no
         // useBlockAtom wrapper is needed either (same as agent-model.ts's

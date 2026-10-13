@@ -64,7 +64,7 @@ notify = "7"
 # in memory. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 # OS-native secret storage (macOS Keychain / Windows Credential Manager /
-# Linux Secret Service) for Armory API keys. See
+# Linux Secret Service) for account API keys. See
 # docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
 keyring = "2"
 # Zero plaintext secret buffers on drop.

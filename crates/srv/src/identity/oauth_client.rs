@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Service-account OAuth 2.0 client for the Armory.
+//! Service-account OAuth 2.0 client for Connectors → Accounts.
 //!
 //! Distinct from the CLI-provider OAuth in `auth_session.rs` (which scrapes a
 //! spawned CLI's stdout): this drives the flow itself — opens the system

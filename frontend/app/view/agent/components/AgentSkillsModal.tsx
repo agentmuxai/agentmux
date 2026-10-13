@@ -29,7 +29,7 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
     onCleanup(() => model.dispose());
 
     // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md
-    // §5 (shared with Armory's Skills/MCP Servers tabs; applied here too since
+    // §5 (shared with the Skills/MCP servers sections; applied here too since
     // there's no evidence the split was intentional in this modal specifically).
     const inDetail = () => model.selectedIdAtom() !== null;
     const handleBack = () => {

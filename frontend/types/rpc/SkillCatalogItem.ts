@@ -2,7 +2,7 @@
 
 /**
  * `skill_list_global`'s response shape: the skill plus how many agents
- * currently hold a `db_agent_skills_ref` to it — the Armory catalog's
+ * currently hold a `db_agent_skills_ref` to it — Memory → Skills'
  * "used by N agents" count (gap #2 of #1960).
  */
 export type SkillCatalogItem = { bound_count: number, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };

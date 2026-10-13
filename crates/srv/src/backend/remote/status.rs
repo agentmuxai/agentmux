@@ -119,7 +119,7 @@ fn update(
         change(entry);
         entry.clone()
     };
-    // An SSH connection that reached `connected` joins the Remotes pane's Recent
+    // An SSH connection that reached `connected` joins Connectors → Remotes' Recent
     // section (SPEC_REMOTES_PANE_2026_10_05.md §4.5): recorded before the events
     // below, so a pane refreshing on them already sees it. Not in unit tests,
     // which would write the file into whatever config dir the test process

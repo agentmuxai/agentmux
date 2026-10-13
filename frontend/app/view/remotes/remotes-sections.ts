@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// How the Remotes pane groups and labels its records
+// How Connectors → Remotes groups and labels its records
 // (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.2). Pure: no Solid, no RPC.
 
 import type { RemoteHelper, RemotePlatform, RemoteRecord, RemoteStatus } from "@/app/store/rpc-api/remotes";

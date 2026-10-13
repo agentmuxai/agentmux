@@ -154,7 +154,7 @@ async fn project_instructions_resolves_the_authenticated_slug_not_a_uuid() {
 
 #[tokio::test]
 async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
-    // The Phase 0b regression. Before this, binding a skill in the Armory
+    // The Phase 0b regression. Before this, binding a skill in Memory → Skills
     // wrote only a ref row while export read only the inline column, so this
     // bundle exported an empty skills/ directory with no warning — in a
     // format advertised as a backup.
@@ -205,7 +205,7 @@ async fn deleting_a_bundle_takes_its_component_refs_with_it() {
 
     assert!(state.id_store.bundle_delete("bundle-1").unwrap());
     // Through the shared helper both delete RPCs call — `bundle.delete`
-    // here and `deletememory`, the one the Armory actually uses. Fixing
+    // here and `deletememory`, the one Memory actually uses. Fixing
     // only one left the product path orphaning refs (Codex, PR #3153).
     purge_bundle_component_refs(&state.mstore, "bundle-1");
     let (skills, mcp) = state.mstore.bundle_unbind_all_components("bundle-1").unwrap();

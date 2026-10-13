@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * McpCatalogModel — view model for the Armory's MCP Servers tab. Drives
+ * McpCatalogModel — view model for Connectors → MCP servers. Drives
  * list + create/edit/delete, plus binding a global server to an agent,
  * over the window-scoped `mcp.catalog.*` MuxAPI
  * (crates/srv/src/server/app_api/mcp.rs) — no `agent_id`/`check_s1`
- * context, since the Armory's connection is never agent-authenticated.
+ * context, since Connectors' connection is never agent-authenticated.
  * Every row here is global by construction — the catalog only ever
  * lists/creates/edits is_global rows. Per-agent private servers, and
  * unbinding, live in the Agent-setup modal (AgentMcpModel), not here.
@@ -46,8 +46,8 @@ export function reachLabel(server: McpServerCatalogItem): string {
 
 export class McpCatalogModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
-    // a bind/unbind/add/edit made elsewhere refreshes this standalone Armory
-    // "MCP Servers" tab without a manual reopen.
+    // a bind/unbind/add/edit made elsewhere refreshes Connectors →
+    // MCP servers without a manual reopen.
     private unsubChanged: () => void;
 
     private _servers = createSignal<McpServerCatalogItem[]>([]);

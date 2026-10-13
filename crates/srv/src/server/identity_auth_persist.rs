@@ -216,7 +216,7 @@ mod tests {
 
     // Absent, not empty. A provider whose CLI reports no email must stay
     // distinguishable from one that reported a blank address — otherwise the
-    // Armory cannot tell "nothing to show" from "logged in as ''".
+    // Connectors cannot tell "nothing to show" from "logged in as ''".
     #[test]
     fn persist_omits_the_email_key_entirely_when_none_was_captured() {
         let mstore = Arc::new(Store::open_in_memory().unwrap());

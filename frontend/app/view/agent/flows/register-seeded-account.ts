@@ -8,7 +8,7 @@
  * global"): `identity/resolver/inject.rs`'s layer-3 spawn gate unconditionally
  * requires a real bound account for any oauth-class provider — the
  * `use_ambient_login` escape hatch that used to let a shared-dir credential
- * work invisibly (no Armory row, no expiry tracking, no way to tell it apart
+ * work invisibly (no account row, no expiry tracking, no way to tell it apart
  * from a genuinely unconfigured agent) is retired. So a completed login has to
  * do two things, not one:
  *
@@ -16,7 +16,7 @@
  *      around the `identity.ensureaccountdir` RPC, itself the same
  *      `compute_and_ensure_account_dir` `auth.start` already uses for a
  *      real OAuth handshake).
- *   2. Persist the account row (`persistSeededAccount`) so Armory can see it,
+ *   2. Persist the account row (`persistSeededAccount`) so Connectors can see it,
  *      the expiry probe can track it, and the resolver's gate can find it.
  *
  * Exported as separate steps because the terminal-login tier needs the dir

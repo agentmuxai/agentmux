@@ -282,7 +282,7 @@ describe("auth row: pre-launch vs post-turn (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATIO
 
     it("keeps the same secondary recovery actions in both cases", () => {
         // The consolidation must not cost the pre-launch case the terminal
-        // fallback / Armory link it never had as a bare blue button.
+        // fallback / Connectors → Accounts link it never had as a bare blue button.
         const labels = (turnAttempted: boolean) =>
             failureToRow(authFailure(), mkView({ turnAttempted }), mkActions())
                 .actions.map((a) => a.label);

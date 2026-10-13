@@ -3,8 +3,8 @@
 
 /**
  * How the AgentMux Cloud session reads in the UI, from `muxbus.status`. Pure
- * and dependency-free so every surface (host popover, instance panel, Armory
- * accounts) agrees, and tests can use it without mocking the controller.
+ * and dependency-free so every surface (host popover, instance panel, Connectors
+ * → Accounts) agrees, and tests can use it without mocking the controller.
  */
 
 /** The parts of `muxbus.status` these helpers read. */
