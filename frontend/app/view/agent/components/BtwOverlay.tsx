@@ -40,11 +40,10 @@
  * below — rather than relying on remount to clear them.
  */
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
-import type { AgentEvent } from "@/types/rpc/AgentEvent";
 
 export interface BtwOverlayProps {
     /** Block this overlay belongs to — scopes the MPS subscription. */
@@ -63,18 +62,6 @@ export interface BtwOverlayProps {
     /** Set if the backend request itself failed. */
     error: string | null;
     onClose: () => void;
-}
-
-/**
- * `WpsEvent.BtwAnswerChunk` payload — mirrors `publish_chunk` in
- * `crates/srv/src/server/agent_handlers/side_question.rs`. See that
- * constant's doc comment (`mps-events.ts`) for the full contract.
- */
-interface BtwAnswerChunkPayload {
-    blockId: string;
-    requestId: string;
-    event: AgentEvent;
-    done: boolean;
 }
 
 export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
@@ -106,46 +93,40 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
     createEffect(() => {
         const requestId = props.requestId;
         if (!requestId) return;
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.BtwAnswerChunk,
-            scope: `block:${props.blockId}:btw:${requestId}`,
-            handler: (event: any) => {
-                const data = event?.data as BtwAnswerChunkPayload | undefined;
-                if (!data) return;
-                // Bound to a local so TS narrows on `ev.type` — narrowing
-                // does not reliably survive re-accessing `data.event` a
-                // second time per switch case.
-                const ev = data.event;
-                switch (ev.type) {
-                    case "assistant_text":
-                        setAnswer((prev) => prev + ev.delta);
-                        break;
-                    case "done":
-                        // `response` is the FULL final text, not a delta —
-                        // it supersedes whatever was accumulated from
-                        // streamed `assistant_text` chunks rather than
-                        // appending to it.
-                        if (ev.response) setAnswer(ev.response);
-                        break;
-                    case "error":
-                        setStreamError(ev.message);
-                        break;
-                    // tool_use/tool_result never appear on this path (the
-                    // backend turn runs with every tool disallowed);
-                    // cost/compaction_boundary aren't relevant to a
-                    // one-shot, no-session-resume answer.
-                    default:
-                        break;
-                }
-                // The outer `done` flag (not `event.type === "done"`) is the
-                // authoritative completion signal — it also fires on a
-                // terminal `error` event, which `event.type` alone would not
-                // indicate as "done". See mps-events.ts's doc comment.
-                if (data.done) {
-                    setDone(true);
-                }
-            },
-        });
+        const unsub = onMuxEvent(WpsEvent.BtwAnswerChunk, (data) => {
+            // Bound to a local so TS narrows on `ev.type` — narrowing
+            // does not reliably survive re-accessing `data.event` a
+            // second time per switch case.
+            const ev = data.event;
+            switch (ev.type) {
+                case "assistant_text":
+                    setAnswer((prev) => prev + ev.delta);
+                    break;
+                case "done":
+                    // `response` is the FULL final text, not a delta —
+                    // it supersedes whatever was accumulated from
+                    // streamed `assistant_text` chunks rather than
+                    // appending to it.
+                    if (ev.response) setAnswer(ev.response);
+                    break;
+                case "error":
+                    setStreamError(ev.message);
+                    break;
+                // tool_use/tool_result never appear on this path (the
+                // backend turn runs with every tool disallowed);
+                // cost/compaction_boundary aren't relevant to a
+                // one-shot, no-session-resume answer.
+                default:
+                    break;
+            }
+            // The outer `done` flag (not `event.type === "done"`) is the
+            // authoritative completion signal — it also fires on a
+            // terminal `error` event, which `event.type` alone would not
+            // indicate as "done". See mps-events.ts's doc comment.
+            if (data.done) {
+                setDone(true);
+            }
+        }, `block:${props.blockId}:btw:${requestId}`);
         onCleanup(() => {
             try {
                 unsub();

@@ -71,10 +71,21 @@ describe("untypedSubscriptions", () => {
         ]);
     });
 
+    it("still refuses a use after a comment or a `//` inside a string on the same line", () => {
+        const sources = [
+            ["frontend/i.ts", "/* why */ [WpsEvent.SysInfo].map((eventType) => muxEventSubscribe({ eventType, handler }));"],
+            ["frontend/j.ts", 'const url = "http://x"; [WpsEvent.SysInfo].map((eventType) => muxEventSubscribe({ eventType, handler }));'],
+            ["frontend/k.ts", "const re = /[/*]/;\n[WpsEvent.SysInfo].map((eventType) => muxEventSubscribe({ eventType, handler }));"],
+            ["frontend/l.ts", "const t = `// ${a} /*`;\n[WpsEvent.SysInfo].map((eventType) => muxEventSubscribe({ eventType, handler }));"],
+        ];
+        expect(untypedSubscriptions(sources, typed, wps).map((e) => e.split(":")[0])).toEqual(["frontend/i.ts", "frontend/j.ts", "frontend/k.ts", "frontend/l.ts"]);
+    });
+
     it("leaves untyped events, onMuxEvent, an RPC's event field and a named constant alone", () => {
         const sources = [
             ["frontend/c.ts", "muxEventSubscribe({ eventType: WpsEvent.BlockClose, handler: () => {} });"],
             ["frontend/d.ts", "onMuxEvent(WpsEvent.SysInfo, (data) => use(data.values));"],
+            ["frontend/h.ts", "/**\n * Streamed as `WpsEvent.SysInfo` events.\n */\n// see WpsEvent.SysInfo\nconst x = 1; // WpsEvent.SysInfo"],
             ["frontend/f.ts", "EventReadHistoryCommand(client, { event: WpsEvent.SysInfo, scope });\nconst EVENT_SYS = WpsEvent.SysInfo;"],
         ];
         expect(untypedSubscriptions(sources, typed, wps)).toEqual([]);

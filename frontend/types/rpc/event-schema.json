@@ -26,6 +26,33 @@
     "perId": true
   },
   {
+    "event": "agent:progress",
+    "payloadTs": {
+      "imports": [
+        "AgentProgressEvent"
+      ],
+      "name": "AgentProgressEvent"
+    }
+  },
+  {
+    "event": "agent:reactive-registered",
+    "payloadTs": {
+      "imports": [
+        "BlockRefEvent"
+      ],
+      "name": "BlockRefEvent"
+    }
+  },
+  {
+    "event": "agent:reactive-unregistered",
+    "payloadTs": {
+      "imports": [
+        "BlockRefEvent"
+      ],
+      "name": "BlockRefEvent"
+    }
+  },
+  {
     "event": "agent:shutdown",
     "payloadTs": {
       "imports": [
@@ -135,6 +162,15 @@
     }
   },
   {
+    "event": "ambient-narration",
+    "payloadTs": {
+      "imports": [
+        "AmbientNarrationEvent"
+      ],
+      "name": "AmbientNarrationEvent"
+    }
+  },
+  {
     "event": "attachment:batch-done",
     "payloadTs": {
       "imports": [
@@ -171,6 +207,15 @@
     }
   },
   {
+    "event": "background-task-updated",
+    "payloadTs": {
+      "imports": [
+        "BlockRefEvent"
+      ],
+      "name": "BlockRefEvent"
+    }
+  },
+  {
     "event": "blockfile",
     "payloadTs": {
       "imports": [
@@ -186,6 +231,15 @@
         "TimeSeriesData"
       ],
       "name": "TimeSeriesData"
+    }
+  },
+  {
+    "event": "btw_answer_chunk",
+    "payloadTs": {
+      "imports": [
+        "BtwAnswerChunkEvent"
+      ],
+      "name": "BtwAnswerChunkEvent"
     }
   },
   {
@@ -229,6 +283,15 @@
         "DispatchUpdatedEvent"
       ],
       "name": "DispatchUpdatedEvent"
+    }
+  },
+  {
+    "event": "dock:clear",
+    "payloadTs": {
+      "imports": [
+        "DockClearEvent"
+      ],
+      "name": "DockClearEvent"
     }
   },
   {
@@ -276,6 +339,15 @@
     }
   },
   {
+    "event": "identity:no-direct-links",
+    "payloadTs": {
+      "imports": [
+        "NoDirectLinksEvent"
+      ],
+      "name": "NoDirectLinksEvent"
+    }
+  },
+  {
     "event": "identityaccounts:changed",
     "payloadTs": {
       "imports": [],
@@ -299,6 +371,15 @@
     }
   },
   {
+    "event": "mcp:observed",
+    "payloadTs": {
+      "imports": [
+        "BlockRefEvent"
+      ],
+      "name": "BlockRefEvent"
+    }
+  },
+  {
     "event": "media:file_changed",
     "payloadTs": {
       "imports": [
@@ -319,6 +400,33 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "notification:state",
+    "payloadTs": {
+      "imports": [
+        "NotifyTrayState"
+      ],
+      "name": "NotifyTrayState"
+    }
+  },
+  {
+    "event": "output",
+    "payloadTs": {
+      "imports": [
+        "ProtocolFrame"
+      ],
+      "name": "ProtocolFrame"
+    }
+  },
+  {
+    "event": "processbroker:status-changed",
+    "payloadTs": {
+      "imports": [
+        "ProcessStatus"
+      ],
+      "name": "ProcessStatus"
     }
   },
   {
@@ -457,6 +565,33 @@
         "MuxObjUpdate"
       ],
       "name": "MuxObjUpdate"
+    }
+  },
+  {
+    "event": "widgetpackages",
+    "payloadTs": {
+      "imports": [
+        "WidgetPackagesEvent"
+      ],
+      "name": "WidgetPackagesEvent"
+    }
+  },
+  {
+    "event": "widgetrequests",
+    "payloadTs": {
+      "imports": [
+        "WidgetRequestsEvent"
+      ],
+      "name": "WidgetRequestsEvent"
+    }
+  },
+  {
+    "event": "widgetstorage",
+    "payloadTs": {
+      "imports": [
+        "WidgetStorageEvent"
+      ],
+      "name": "WidgetStorageEvent"
     }
   },
   {

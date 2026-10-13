@@ -568,18 +568,13 @@ fn publish_chunk(
     event: &AgentEvent,
     done: bool,
 ) {
-    broker.publish(mps::MuxEvent {
-        event: mps::EVENT_BTW_ANSWER_CHUNK.to_string(),
-        scopes: vec![scope.to_string()],
-        sender: String::new(),
-        persist: 0,
-        data: Some(serde_json::json!({
-            "blockId": source_block_id,
-            "requestId": request_id,
-            "event": event,
-            "done": done,
-        })),
-    });
+    let chunk = crate::backend::mps_events::BtwAnswerChunkEvent {
+        block_id: source_block_id.to_string(),
+        request_id: request_id.to_string(),
+        event: event.clone(),
+        done,
+    };
+    broker.publish_event::<crate::backend::mps_events::BtwAnswerChunk>(&chunk, vec![scope.to_string()], 0);
 }
 
 #[cfg(test)]

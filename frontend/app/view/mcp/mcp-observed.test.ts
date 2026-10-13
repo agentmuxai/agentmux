@@ -112,7 +112,7 @@ describe("McpObservedModel", () => {
         expect(notLoadedBy(model.agentsAtom(), "git")).toEqual(["Korp"]);
 
         observedListMock.mockClear();
-        mpsHub.handlers.get("mcp:observed")?.({});
+        mpsHub.handlers.get("mcp:observed")?.({ data: { block_id: "b2" } });
         mpsHub.handlers.get("mcp:changed")?.({});
         expect(observedListMock).toHaveBeenCalledTimes(2);
         model.dispose();

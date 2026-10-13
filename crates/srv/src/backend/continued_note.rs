@@ -152,17 +152,8 @@ pub(crate) fn schedule(
             return;
         }
         tracing::info!(block_id = %block_id, "continuity: pick-up note written");
-        broker.publish(mps::MuxEvent {
-            event: "ambient-narration".to_string(),
-            scopes: vec![format!("block:{block_id}")],
-            sender: String::new(),
-            persist: 0,
-            data: Some(serde_json::json!({
-                "block_id": block_id,
-                "kind": KIND,
-                "text": text,
-            })),
-        });
+        let narration = crate::backend::mps_events::AmbientNarrationEvent { block_id: block_id.to_string(), kind: KIND.to_string(), text: text.to_string() };
+        broker.publish_event::<crate::backend::mps_events::AmbientNarration>(&narration, vec![format!("block:{block_id}")], 0);
     });
 }
 

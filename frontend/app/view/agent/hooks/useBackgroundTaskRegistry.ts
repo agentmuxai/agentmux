@@ -54,7 +54,7 @@
  */
 
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -112,11 +112,7 @@ export function useBackgroundTaskRegistry(opts: UseBackgroundTaskRegistryOptions
     activeRefreshCallbacks.add(doRefresh);
     onCleanup(() => { activeRefreshCallbacks.delete(doRefresh); });
 
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.BackgroundTaskUpdated,
-        scope: `block:${opts.blockId}`,
-        handler: doRefresh,
-    });
+    const unsub = onMuxEvent(WpsEvent.BackgroundTaskUpdated, doRefresh, `block:${opts.blockId}`);
     onCleanup(() => { try { unsub(); } catch { /* ignore */ } });
 
     return tasks;

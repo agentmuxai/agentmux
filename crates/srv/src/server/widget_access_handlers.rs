@@ -174,13 +174,8 @@ async fn call(st: &AppState, packages: &[WidgetPackageInfo], req: WidgetCallReq)
 /// Tells the package's panes, in every window, which key changed (never its
 /// value), so each can read it again.
 fn storage_changed(st: &AppState, widget_id: &str, key: &str) {
-    st.broker.publish(crate::backend::mps::MuxEvent {
-        event: crate::backend::mps::EVENT_WIDGET_STORAGE.to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: Some(json!({ "id": widget_id, "keys": [key] })),
-    });
+    let event = crate::backend::mps_events::WidgetStorageEvent { id: widget_id.to_string(), keys: vec![key.to_string()] };
+    st.broker.publish_event::<crate::backend::mps_events::WidgetStorage>(&event, vec![], 0);
 }
 
 /// The user's running agents on this machine, with whether each is busy.

@@ -19,6 +19,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCHEMA = join(ROOT, "frontend/types/rpc/event-schema.json");
@@ -68,6 +69,27 @@ export function wpsNames(source) {
     return new Map([...source.matchAll(/^\s*(\w+):\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
 }
 
+const parsed = new Map();
+
+/** Whether `at` in the source at `path` falls inside a comment. TypeScript parses the file, so a
+ *  `//` or `/*` inside a string, a template or a regex literal is not taken for one: a comment is
+ *  what lies in a token's leading trivia. */
+function inComment(path, text, at) {
+    let sf = parsed.get(text);
+    if (!sf) {
+        const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+        sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, kind);
+        parsed.set(text, sf);
+    }
+    for (let node = sf; ; ) {
+        const child = node.getChildren(sf).find((c) => c.pos <= at && at < c.end);
+        if (!child) return at < node.getStart(sf);
+        // A doc comment is parsed into JSDoc nodes of its own.
+        if (child.kind >= ts.SyntaxKind.FirstJSDocNode && child.kind <= ts.SyntaxKind.LastJSDocNode) return true;
+        node = child;
+    }
+}
+
 /** Where a typed event is subscribed with `muxEventSubscribe` instead of `onMuxEvent`, in
  *  `sources` ([path, text]). A subscription names its event as `WpsEvent.<Key>` or a literal, or a
  *  per-id event as a template literal starting with one of `perIdPrefixes`. */
@@ -101,6 +123,8 @@ export function untypedSubscriptions(sources, typed, wps, perIdPrefixes = new Se
             const name = wps.get(m[1]);
             if (!name || !typed.has(name)) continue;
             if (/(?:onMuxEvent\(|eventType:|\bevent:|\bconst\s+\w+\s*(?::\s*string\s*)?=)\s*$/.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
+            // A comment naming the event subscribes nothing.
+            if (inComment(path, text, m.index)) continue;
             const line = text.slice(0, m.index).split("\n").length;
             errors.push(`${path}:${line}: WpsEvent.${m[1]} has a typed payload; pass it straight to onMuxEvent(WpsEvent.${m[1]}, (data) => …)`);
         }

@@ -17,7 +17,6 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::backend::mps::EVENT_WIDGET_REQUESTS;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::widget_packages::{self, WidgetState};
 use crate::backend::widget_requests::{self, Answer, WidgetInstallRequest};
@@ -35,13 +34,8 @@ pub struct WidgetRequestsResult {
 
 /// Tells every UI the requests now waiting.
 pub(crate) fn publish_requests(state: &AppState) {
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: EVENT_WIDGET_REQUESTS.to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: Some(json!({ "requests": widget_requests::requests().list() })),
-    });
+    let event = crate::backend::mps_events::WidgetRequestsEvent { requests: widget_requests::requests().list() };
+    state.broker.publish_event::<crate::backend::mps_events::WidgetRequests>(&event, vec![], 0);
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>) {

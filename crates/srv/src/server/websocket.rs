@@ -1383,20 +1383,11 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
                             }
                         }
                     }
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: "ambient-narration".to_string(),
-                        scopes: vec![format!("block:{}", cmd.blockid)],
-                        sender: String::new(),
-                        persist: 0,
-                        // Carries the text itself, unlike background-task-updated
-                        // next to it: there is no list query to re-read, so an
-                        // invalidation ping would have nothing to invalidate.
-                        data: Some(serde_json::json!({
-                            "block_id": cmd.blockid,
-                            "kind": cmd.kind,
-                            "text": text,
-                        })),
-                    });
+                    // Carries the text itself, unlike background-task-updated
+                    // next to it: there is no list query to re-read, so an
+                    // invalidation ping would have nothing to invalidate.
+                    let narration = crate::backend::mps_events::AmbientNarrationEvent { block_id: cmd.blockid.clone(), kind: cmd.kind.clone(), text: text.to_string() };
+                    broker.publish_event::<crate::backend::mps_events::AmbientNarration>(&narration, vec![format!("block:{}", cmd.blockid)], 0);
                 });
                 Ok(())
             }

@@ -23,7 +23,7 @@
 
 import { onCleanup } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 
 export interface UseDockClearStreamOptions {
@@ -32,24 +32,18 @@ export interface UseDockClearStreamOptions {
 }
 
 export function useDockClearStream(opts: UseDockClearStreamOptions): void {
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.DockClear,
-        scope: `block:${opts.blockId}`,
-        handler: (event: any) => {
-            const d = event?.data;
-            if (!d || typeof d !== "object") return;
-            const nodeId = typeof d.node_id === "string" ? d.node_id : "";
-            if (!nodeId) return;
-            // model.dispatchDoc is the disposal-safe wrapper — required
-            // here, not the raw (throwing) dispatch: this handler can fire
-            // after the pane's slot unregisters (pane closed, or the
-            // documented CASCADE_DETECTED unmount race) and
-            // dispatchToSubjects in mps.ts invokes handlers with no
-            // try/catch, so a throw here would be uncaught. reagentx P1 on
-            // PR #2432 — mirrors useCompactionStream.ts's use of
-            // opts.model.dispatchPane for the identical reason.
-            opts.model.dispatchDoc({ type: "ForceCancelToolNode", nodeId }, "system");
-        },
-    });
+    const unsub = onMuxEvent(WpsEvent.DockClear, (d) => {
+        const nodeId = d.node_id;
+        if (!nodeId) return;
+        // model.dispatchDoc is the disposal-safe wrapper — required
+        // here, not the raw (throwing) dispatch: this handler can fire
+        // after the pane's slot unregisters (pane closed, or the
+        // documented CASCADE_DETECTED unmount race) and
+        // dispatchToSubjects in mps.ts invokes handlers with no
+        // try/catch, so a throw here would be uncaught. reagentx P1 on
+        // PR #2432 — mirrors useCompactionStream.ts's use of
+        // opts.model.dispatchPane for the identical reason.
+        opts.model.dispatchDoc({ type: "ForceCancelToolNode", nodeId }, "system");
+    }, `block:${opts.blockId}`);
     onCleanup(() => { try { unsub(); } catch { /* ignore */ } });
 }

@@ -1,6 +1,6 @@
 # Typed event payloads
 
-**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796; step 7 (per-id events) in review; step 8 not started. Verified 2026-10-13.
+**Status:** active — step 1 (infrastructure, `controllerstatus`, `sysinfo`) shipped in #4791, step 2 (agent events) in #4792, step 3 (subagents and dispatches) in #4793, step 4 (files and blocks) in #4794, step 5 (the no-payload `*changed` signals) in #4795, step 6 (install, shell, attachments, connections) in #4796, step 7 (per-id events) in #4797; step 8 (the remaining fixed-name events) in review; step 9 not started. Verified 2026-10-13.
 **Follows:** the RPC stub generation (#4759 to #4777). Every RPC stub and every srv type the frontend reads is generated now. Event payloads are the one part of the srv↔frontend wire that is still untyped.
 
 ## The gap
@@ -45,9 +45,10 @@ One PR per domain, about 10 events each. The busiest subscribers go first:
 5. **Signals:** the fixed-name `*changed` events with no payload (agents, memories, skills, MCP, accounts, cron, drones, remotes, the work queue). The widget events move to step 7.
 6. **Shell, install, attachments and connections:** `shell_chunk`, `shell_node_create`, `install_chunk`, `attachment:*`, `connchange`.
 7. **Names per id:** `agent:memory:changed:`, `agentidentities:changed:`, `agentinstances:changed:`, `agentcredentials:revoked:`, `dronerun:`, `agent_event:`.
-8. **The rest**, including the widget events, and the gate at zero.
+8. **The remaining fixed-name events:** widgets, notifications, progress, narration, the process broker, side questions, dock clears, reactive panes, app-server output.
+9. **Relays and direct frames, and the gate at zero:** the helpers that publish an event name they are given (the HTTP publish route, the WebSocket forwarder, the notification router, the process registry, pending shutdown) and the frames written straight to a WebSocket (`srvinfo`, `config`, the spend frame).
 
-**Effort:** about 8 PRs, comparable to the stub work. Every step can be shipped on its own: an unmigrated event works exactly as today.
+**Effort:** about 9 PRs, comparable to the stub work. Every step can be shipped on its own: an unmigrated event works exactly as today.
 
 ## Not in scope
 

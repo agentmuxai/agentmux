@@ -31,7 +31,7 @@ import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import { focusManager } from "@/app/store/focusManager";
 import { getApi, getSettingsKeyAtom, workspace } from "@/app/store/global";
 import { revealBlockLocally } from "@/app/util/reveal-block";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { windowId } from "@/app/store/window-identity";
@@ -221,13 +221,10 @@ export function installOsNotifyBridge(): () => void {
         lastKey = key;
         void applyTaskbarAttention(count, input);
     };
-    const stateUnsub = muxEventSubscribe({
-        eventType: EVENT_NOTIFICATION_STATE,
-        handler: (event) => {
-            latestCount = attentionCount(event.data);
-            latestInput = inputWaitingCount(event.data);
-            syncTaskbar();
-        },
+    const stateUnsub = onMuxEvent(EVENT_NOTIFICATION_STATE, (tray) => {
+        latestCount = attentionCount(tray);
+        latestInput = inputWaitingCount(tray);
+        syncTaskbar();
     });
     const disposeTaskbarRoot = createRoot((dispose) => {
         createEffect(on(taskbarOn, () => syncTaskbar(), { defer: true }));

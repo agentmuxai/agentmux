@@ -23,7 +23,7 @@ use std::sync::Arc;
 use crate::backend::providers::resolve_provider_alias;
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 use crate::backend::storage::StoreError;
-use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::mps::Broker;
 
 use super::errors::SpawnGateError;
 use super::oauth_probe::{oauth_status, probe_oauth_status};
@@ -272,21 +272,16 @@ fn resolve_bindings_for_instance(
             instance.identity_id,
         );
         if let Some(b) = broker {
-            b.publish(MuxEvent {
-                event: "identity:no-direct-links".to_string(),
-                scopes: vec![],
-                sender: String::new(),
-                // Persisted (unlike the rest of this file's ephemeral
-                // events) — nothing subscribes live yet, so without
-                // persistence a future frontend surface polling via
-                // read_event_history would see nothing. Small window;
-                // this is a diagnostic, not an audit log.
-                persist: 20,
-                data: Some(serde_json::json!({
-                    "definition_id": instance.definition_id,
-                    "identity_id": instance.identity_id,
-                })),
-            });
+            let event = crate::backend::mps_events::NoDirectLinksEvent {
+                definition_id: instance.definition_id.clone(),
+                identity_id: instance.identity_id.clone(),
+            };
+            // Persisted (unlike the rest of this file's ephemeral
+            // events) — nothing subscribes live yet, so without
+            // persistence a future frontend surface polling via
+            // read_event_history would see nothing. Small window;
+            // this is a diagnostic, not an audit log.
+            b.publish_event::<crate::backend::mps_events::IdentityNoDirectLinks>(&event, vec![], 20);
         }
     }
 
