@@ -198,27 +198,41 @@ impl PressureTracker {
     }
 }
 
-/// How long commit pressure must stay `Normal` before the warm pools are
-/// refilled. Refilling creates windows, and on Windows a new pool window
-/// activates during creation and takes keyboard focus from the window the user
-/// is typing in. Commit pressure flaps while builds run (151 transitions in a
-/// day on one machine), so refilling on every return to `Normal` stole
-/// focus dozens of times a day, and built windows that were destroyed again
-/// minutes later.
-/// docs/reports/REPORT_INPUT_FOCUS_STOLEN_BY_POOL_REFILL_2026_10_03.md
-pub const POOL_REFILL_SETTLE: std::time::Duration = std::time::Duration::from_secs(180);
+/// Whether the warm pools (window pool, pane pool) may exist at this commit
+/// pressure level: spawned, refilled, kept. Only `Critical` sheds them.
+///
+/// They used to be shed at `Warn` (less than 15% of the commit limit free)
+/// too. On a machine whose other applications keep commit near that line —
+/// the operator's sat at Warn most of the day — that meant the pools were
+/// almost always empty, so every "Open in New Window" / "Open in Floating
+/// Pane" took the cold path, for a saving of about 165 MB (three warm
+/// renderers) against Warn's gigabytes of headroom.
+/// docs/specs/SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md §2.
+pub fn pool_spawn_allowed(level: PressureLevel) -> bool {
+    level != PressureLevel::Critical
+}
 
-/// Decides when to refill the warm pools after commit pressure returns to
-/// `Normal`: only once it has stayed there for `POOL_REFILL_SETTLE`, and then
-/// on every heartbeat tick until both pools are full again. The spawn
-/// functions are single-flight and do nothing when their pool is full or a
-/// browser pane is mid-close, so retrying each tick is cheap, and it is the
-/// only race-free way to make sure a refill that coincided with a pane close
-/// still happens: whether a pane is closing can change between any check here
-/// and the spawn's own check.
+/// How long commit pressure must stay below `Critical` before the warm pools
+/// are refilled after a Critical episode shed them. Refilling creates windows,
+/// and pressure can flap; waiting a minute avoids building windows that are
+/// destroyed again moments later. (A refill no longer takes keyboard focus:
+/// `client/wndproc.rs` hands activation back from invisible windows —
+/// docs/reports/REPORT_INPUT_FOCUS_STOLEN_BY_POOL_REFILL_2026_10_03.md.)
+pub const POOL_REFILL_SETTLE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Decides when to refill the warm pools after a `Critical` episode: once
+/// pressure has stayed below Critical for `POOL_REFILL_SETTLE`, and then on
+/// every heartbeat tick until both pools are full again. Moving between
+/// Normal and Warn doesn't shed the pools, so it doesn't start a refill
+/// either. The spawn functions are single-flight and do nothing when their
+/// pool is full or a browser pane is mid-close, so retrying each tick is
+/// cheap, and it is the only race-free way to make sure a refill that
+/// coincided with a pane close still happens: whether a pane is closing can
+/// change between any check here and the spawn's own check.
 #[derive(Debug, Default)]
 pub struct PoolRefillGate {
-    normal_since: Option<std::time::Instant>,
+    in_critical: bool,
+    left_critical_at: Option<std::time::Instant>,
 }
 
 impl PoolRefillGate {
@@ -226,28 +240,24 @@ impl PoolRefillGate {
         Self::default()
     }
 
-    /// `transition` is the tracker's return for this tick (`Some` on a level
-    /// change); `pools_full` is whether both warm pools are at their target
-    /// size. Returns true when the pool spawns should be called this tick.
-    pub fn tick(
-        &mut self,
-        transition: Option<PressureLevel>,
-        level: PressureLevel,
-        now: std::time::Instant,
-        pools_full: bool,
-    ) -> bool {
-        if level != PressureLevel::Normal {
-            self.normal_since = None;
+    /// `level` is this tick's commit pressure level; `pools_full` is whether
+    /// both warm pools are at their target size. Returns true when the pool
+    /// spawns should be called this tick.
+    pub fn tick(&mut self, level: PressureLevel, now: std::time::Instant, pools_full: bool) -> bool {
+        if !pool_spawn_allowed(level) {
+            self.in_critical = true;
+            self.left_critical_at = None;
             return false;
         }
-        if transition == Some(PressureLevel::Normal) {
-            self.normal_since = Some(now);
+        if self.in_critical {
+            self.in_critical = false;
+            self.left_critical_at = Some(now);
             return false;
         }
-        match self.normal_since {
+        match self.left_critical_at {
             Some(since) if now.duration_since(since) >= POOL_REFILL_SETTLE => {
                 if pools_full {
-                    self.normal_since = None; // refilled: done until the next episode
+                    self.left_critical_at = None; // refilled: done until the next episode
                     false
                 } else {
                     true
@@ -457,45 +467,60 @@ mod tests {
     }
 
     #[test]
-    fn pool_refill_waits_until_normal_has_held_for_the_settle_time() {
+    fn pools_are_shed_only_at_critical() {
+        assert!(pool_spawn_allowed(PressureLevel::Normal));
+        assert!(pool_spawn_allowed(PressureLevel::Warn));
+        assert!(!pool_spawn_allowed(PressureLevel::Critical));
+    }
+
+    #[test]
+    fn pool_refill_waits_until_below_critical_for_the_settle_time() {
         let t0 = std::time::Instant::now();
         let mut gate = PoolRefillGate::new();
-        assert!(!gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false));
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE / 2, false));
-        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
+        assert!(!gate.tick(PressureLevel::Critical, t0, false));
+        // Leaving Critical — to Warn, which no longer sheds — starts the clock.
+        assert!(!gate.tick(PressureLevel::Warn, t0, false));
+        assert!(!gate.tick(PressureLevel::Warn, t0 + POOL_REFILL_SETTLE / 2, false));
+        assert!(gate.tick(PressureLevel::Warn, t0 + POOL_REFILL_SETTLE, false));
     }
 
     #[test]
     fn pool_refill_keeps_trying_each_tick_until_the_pools_are_full() {
         let t0 = std::time::Instant::now();
         let mut gate = PoolRefillGate::new();
-        gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false);
+        gate.tick(PressureLevel::Critical, t0, false);
+        gate.tick(PressureLevel::Normal, t0, false);
         // Due; the spawns may have refused (a pane was closing): try again.
-        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
-        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, false));
+        assert!(gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
+        assert!(gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, false));
         // Full: stop, and stay stopped.
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 3, true));
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 4, false));
+        assert!(!gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 3, true));
+        assert!(!gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 4, false));
     }
 
     #[test]
-    fn pool_refill_is_cancelled_by_pressure_returning_before_the_settle_time() {
+    fn pool_refill_is_cancelled_by_pressure_returning_to_critical_before_the_settle_time() {
         let t0 = std::time::Instant::now();
         let mut gate = PoolRefillGate::new();
-        gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false);
-        assert!(!gate.tick(Some(PressureLevel::Warn), PressureLevel::Warn, t0 + POOL_REFILL_SETTLE / 2, false));
-        // Back to Normal restarts the clock.
+        gate.tick(PressureLevel::Critical, t0, false);
+        gate.tick(PressureLevel::Normal, t0, false);
+        assert!(!gate.tick(PressureLevel::Critical, t0 + POOL_REFILL_SETTLE / 2, false));
+        // Leaving Critical again restarts the clock.
         let t1 = t0 + POOL_REFILL_SETTLE;
-        assert!(!gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t1, false));
-        assert!(!gate.tick(None, PressureLevel::Normal, t1 + POOL_REFILL_SETTLE / 2, false));
-        assert!(gate.tick(None, PressureLevel::Normal, t1 + POOL_REFILL_SETTLE, false));
+        assert!(!gate.tick(PressureLevel::Warn, t1, false));
+        assert!(!gate.tick(PressureLevel::Warn, t1 + POOL_REFILL_SETTLE / 2, false));
+        assert!(gate.tick(PressureLevel::Warn, t1 + POOL_REFILL_SETTLE, false));
     }
 
     #[test]
-    fn pool_refill_never_fires_without_a_return_to_normal() {
+    fn moving_between_normal_and_warn_never_starts_a_refill() {
         let t0 = std::time::Instant::now();
         let mut gate = PoolRefillGate::new();
         // Steady Normal from startup: the pools were filled at startup, not here.
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 10, false));
+        assert!(!gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 10, false));
+        // Warn sheds nothing, so neither it nor the return to Normal refills.
+        assert!(!gate.tick(PressureLevel::Warn, t0 + POOL_REFILL_SETTLE * 11, false));
+        assert!(!gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 12, false));
+        assert!(!gate.tick(PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 20, false));
     }
 }

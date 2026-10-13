@@ -158,8 +158,11 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                         "page file (commit) pressure changed"
                     );
                     // B.5 Part 1 (issue #2218): react to the transition, not
-                    // just log it. Entering Warn/Critical trims BOTH pools
-                    // now — the pane pool via evict_idle_pane_pool_window
+                    // just log it. Entering Critical trims BOTH pools — Warn
+                    // used to as well, which on a machine sitting at Warn kept
+                    // them empty all day for ~165 MB
+                    // (SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md)
+                    // — the pane pool via evict_idle_pane_pool_window
                     // (issue #2218) and, as of
                     // docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md, the
                     // top-level window pool via evict_idle_pool_window too
@@ -170,8 +173,8 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                     // evict_idle_pool_window's own doc comment for why that
                     // destroy path was safe to build here even though the
                     // *embedded-pane* equivalent needed 3 attempts and a
-                    // structural redesign. Returning to Normal refills both
-                    // pools (below, once Normal has held for
+                    // structural redesign. Leaving Critical refills both
+                    // pools (below, once that has held for
                     // POOL_REFILL_SETTLE) so a transient pressure blip
                     // doesn't leave them starved for the rest of the
                     // session. Every fn called here is already internally
@@ -181,20 +184,19 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                     // pressure alone (with healthy commit) doesn't risk a
                     // crash the way commit pressure does, so it doesn't
                     // trigger shedding — SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §6.
-                    if level != crate::memory_pressure::PressureLevel::Normal {
+                    if !crate::memory_pressure::pool_spawn_allowed(level) {
                         while crate::commands::window_pool::evict_idle_pane_pool_window(&state) {}
                         while crate::commands::window_pool::evict_idle_pool_window(&state) {}
                     }
                 }
-                // The refill waits until Normal has held for POOL_REFILL_SETTLE,
-                // then retries each tick until both pools are full (see
-                // PoolRefillGate): each refill creates windows, which on Windows
-                // took keyboard focus, and pressure flaps while builds run.
+                // After a Critical episode the refill waits until pressure has
+                // stayed below Critical for POOL_REFILL_SETTLE, then retries
+                // each tick until both pools are full (see PoolRefillGate).
                 let pools_full = state.pool_queue_size()
                     >= crate::commands::window_pool::POOL_TARGET_SIZE
                     && state.pane_pool_queue_size()
                         >= crate::commands::pane_pool::PANE_POOL_TARGET_SIZE;
-                if pool_refill.tick(transition, level_now, std::time::Instant::now(), pools_full) {
+                if pool_refill.tick(level_now, std::time::Instant::now(), pools_full) {
                     tracing::debug!(target: "mem_pressure", "refilling warm pools after pressure settled");
                     crate::commands::window_pool::spawn_pane_pool_window(&state);
                     crate::commands::window_pool::spawn_pool_window(&state);
