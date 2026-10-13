@@ -61,7 +61,6 @@ pub const RESYNC_ERR_ALREADY_EXITED: &str = "resync_controller: controller alrea
 
 pub const BLOCK_CONTROLLER_SHELL: &str = "shell";
 pub const BLOCK_CONTROLLER_CMD: &str = "cmd";
-pub const BLOCK_CONTROLLER_TSUNAMI: &str = "tsunami";
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
@@ -1132,10 +1131,6 @@ pub fn resync_controller(
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)
-        }
-        BLOCK_CONTROLLER_TSUNAMI => {
-            // Tsunami controller deferred to later phase
-            Err("tsunami controller not yet implemented".to_string())
         }
         _ => Err(format!("unknown controller type: {controller_type}")),
     }

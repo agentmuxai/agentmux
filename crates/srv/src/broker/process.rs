@@ -91,7 +91,7 @@ pub struct ProcessStatus {
     pub processes: Vec<TrackedProcess>,
     pub liveness_confidence: TrackingConfidence,
     /// Controller type string (`"shell"`, `"cmd"`, `"subprocess"`,
-    /// `"persistent"`, `"acp"`, `"tsunami"`) — see `is_agent()` for why this
+    /// `"persistent"`, `"acp"`, `"app-server"`) — see `is_agent()` for why this
     /// matters beyond being informational.
     pub controller_type: String,
     pub is_agent_pane: bool,

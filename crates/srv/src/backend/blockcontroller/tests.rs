@@ -250,7 +250,6 @@ fn test_status_constants() {
 fn test_controller_type_constants() {
     assert_eq!(BLOCK_CONTROLLER_SHELL, "shell");
     assert_eq!(BLOCK_CONTROLLER_CMD, "cmd");
-    assert_eq!(BLOCK_CONTROLLER_TSUNAMI, "tsunami");
     assert_eq!(BLOCK_CONTROLLER_APP_SERVER, "app-server");
 }
 
