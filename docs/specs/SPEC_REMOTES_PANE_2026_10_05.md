@@ -256,7 +256,7 @@ This builds decision 2 of the remote-terminals spec (§11.1), still outstanding 
 | Answer | Effect |
 |---|---|
 | Always / Never | Stored as `conn:helper` for that host |
-| Install | Installs this time only |
+| Install | Installs; not stored, but the host's other terminals don't ask again until srv restarts (the first may still be uploading) |
 | Not now, or Never | The pane falls back: a plain SSH terminal, or "File browsing on db1.internal needs AgentMux's helper", with an Install button and a link to the Remotes row |
 
 **When an agent triggers it,** the question is always asked, whatever `conn:helper` says. Approving an agent's use of a host (§8.2) is not approving software installed there.

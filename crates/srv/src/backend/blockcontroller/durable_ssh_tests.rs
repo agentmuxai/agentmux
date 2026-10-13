@@ -732,3 +732,58 @@ async fn a_helper_removed_after_attaching_is_installed_again() {
     let install = "attach-missing\nprobe\nupload\ninstall\nattach\n";
     assert_eq!(log, install.repeat(2), "installed, removed, installed again");
 }
+
+/// A host where the install says ok but the helper still doesn't run (it is
+/// gone again before the attach, or can't execute there): attach is always
+/// 127.
+const FAKE_SSH_NEVER_RUNNABLE: &str = r#"
+import os, sys
+remote = sys.argv[-1]
+log = open(os.path.join(os.environ['FAKE_HOST_DIR_NEVER'], 'log'), 'ab', buffering=0)
+if remote.startswith('sh -c') and 'uname -sm' in remote:
+    log.write(b'probe\n')
+    sys.stdout.write('Linux x86_64\n')
+elif remote.startswith('sh -c') and 'cat >' in remote:
+    log.write(b'upload\n')
+    sys.stdin.buffer.read()
+elif remote.startswith('sh -c') and 'mv -f' in remote:
+    log.write(b'install\n')
+    sys.stdout.write('ok\n')
+else:
+    log.write(b'attach-missing\n')
+    sys.exit(127)
+"#;
+
+/// Installed, and still not runnable: a pane durable only by default becomes
+/// a plain SSH terminal, as for a failed install, instead of stopping.
+#[tokio::test]
+async fn a_helper_still_missing_after_installing_leaves_a_plain_terminal_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(ssh_path) = fake_ssh(dir.path(), "fake_ssh_never", FAKE_SSH_NEVER_RUNNABLE) else {
+        eprintln!("skipped: no python to stand in for ssh");
+        return;
+    };
+    std::env::set_var("FAKE_HOST_DIR_NEVER", dir.path());
+    crate::backend::remote::helper_consent::install_answering_yes();
+    let builds = dir.path().join("builds");
+    std::fs::create_dir_all(&builds).unwrap();
+    let name = crate::backend::remote::helper_install::asset_name(env!("CARGO_PKG_VERSION"), "x86_64-unknown-linux-musl");
+    std::fs::write(builds.join(name), b"the helper").unwrap();
+    let _env = HELPER_DIR_ENV.lock().await;
+    std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
+    let state = crate::server::tests::test_state();
+    let mut run = test_run(&state, "durable-never-block", "neverhost", "amx-never", ssh_path);
+    run.by_default = true;
+    let plain = run.plain.clone();
+    let (_input_tx, input_rx) = mpsc::unbounded_channel();
+    let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+    let ended = tokio::time::timeout(Duration::from_secs(30), run.run(input_rx, leave_rx, Box::new(|_| {})))
+        .await
+        .expect("the run ends");
+    std::env::remove_var("AGENTMUX_REMOTE_HELPER_DIR");
+    assert_eq!((ended, plain.load(Ordering::SeqCst)), (None, true), "a plain terminal instead");
+    let term = state.filestore.read_file("durable-never-block", "term").unwrap().unwrap();
+    let text = String::from_utf8_lossy(&term).into_owned();
+    assert!(text.contains("plain SSH terminal") && text.contains("still"), "{text:?}");
+    assert!(crate::backend::remote::helper_consent::not_installed("neverhost"));
+}

@@ -221,17 +221,27 @@ fn plain_for(policy: Policy, declined: bool) -> bool {
     }
 }
 
-/// Remember an answer for [`plain_instead`]: "Not now" until srv restarts,
-/// undone by a later Install. A closed window is no answer.
+/// Hosts the user answered Install for since srv started: the host's other
+/// terminals install without asking again, the first maybe still uploading.
+fn approved() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    static APPROVED: Hosts = OnceLock::new();
+    hosts(&APPROVED)
+}
+
+/// Remember an answer until srv restarts: "Not now" for [`plain_instead`],
+/// Install so the host isn't asked again; each undoes the other. A closed
+/// window is no answer.
 pub(crate) fn note_answer(connection: &str, answer: Answer) {
     if !answer.answered {
         return;
     }
-    let mut declined = declined();
+    let key = host_key(connection);
     if answer.approve {
-        declined.remove(&host_key(connection));
+        declined().remove(&key);
+        approved().insert(key);
     } else {
-        declined.insert(host_key(connection));
+        approved().remove(&key);
+        declined().insert(key);
     }
 }
 
@@ -407,6 +417,8 @@ async fn allow_install_with(deps: &Deps, connection: &str, block_id: Option<&str
                 "installing AgentMux's helper on {connection} is set to Never (change it in Connectors > Remotes)"
             ))
         }
+        // Install, answered for this host since srv started.
+        Step::Ask if !by_agent && approved().contains(&host_key(connection)) => return Ok(()),
         Step::Ask => {}
     }
     let answer = if by_agent {
@@ -461,6 +473,12 @@ mod tests {
         );
         assert_eq!((a, b, c), (Ok(()), Ok(()), Ok(())));
         assert_eq!(asked.load(Ordering::SeqCst), 2, "one question per host");
+
+        // A terminal that gets to the host after the question closed (the
+        // first is still uploading the helper) doesn't ask again.
+        let later = allow_install_with(&deps, "me@shared-question-host", Some("blk-shared-4")).await;
+        assert_eq!(later, Ok(()));
+        assert_eq!(asked.load(Ordering::SeqCst), 2, "Install holds until srv restarts");
     }
 
     /// The pane asking is closed mid-question: a pane waiting on its answer

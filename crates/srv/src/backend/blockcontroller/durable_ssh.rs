@@ -742,20 +742,16 @@ impl Run {
                     }
                     if !attached && code == Some(EXIT_COMMAND_NOT_FOUND) {
                         // No helper on the host (yet): install it once, then
-                        // attach again; a failed install stops the pane.
-                        if installed_once {
-                            self.note(&format!(
-                                "AgentMux's helper still is not runnable on {} ({}).",
-                                self.conn,
-                                helper_path()
-                            ))
-                            .await;
-                            return over(EXIT_COMMAND_NOT_FOUND);
-                        }
-                        installed_once = true;
-                        let why = match self.install_helper().await {
-                            Ok(()) => continue,
-                            Err(why) => why,
+                        // attach again. One that still isn't there after
+                        // installing it failed the same way.
+                        let why = if installed_once {
+                            format!("it still isn't runnable after installing it ({})", helper_path())
+                        } else {
+                            installed_once = true;
+                            match self.install_helper().await {
+                                Ok(()) => continue,
+                                Err(why) => why,
+                            }
                         };
                         let declined = crate::backend::remote::helper_consent::plain_instead(&self.conn);
                         // Durable was asked for and the user didn't decline
