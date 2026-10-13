@@ -1,6 +1,6 @@
 # ts-rs drops serde attributes it can't parse
 
-**Status:** active — the upgrade, the binding review, the rename test and the CI gate in review. The problem and options are AgentX's, from #4802; this is the plan for carrying out its recommended option D. Written 2026-10-13.
+**Status:** implemented — the upgrade, the binding review, the rename test and the CI gate in #4824. The problem and options are AgentX's, from #4802; this is the plan for carrying out its recommended option D. Written 2026-10-13.
 **Related:** `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.2 assumes ts-rs's `serde-compat` feature honours `skip_serializing_if`. With ts-rs 10.1 it does not.
 
 ## The problem (#4802)
