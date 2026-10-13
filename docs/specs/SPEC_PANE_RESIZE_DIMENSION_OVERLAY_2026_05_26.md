@@ -1,7 +1,7 @@
 # SPEC: Pane resize dimension overlay (WxH badge)
 
 **Date:** 2026-05-26
-**Status:** Draft — ready to implement
+**Status:** implemented — #1057 (the badge); browser panes in #4788 (§2.3).
 **Author:** AgentA
 **Tracking discussion:** TBD
 
@@ -86,6 +86,17 @@ Bottom-left was picked over bottom-right or center because:
 - Agent panes' "Send / Stop" buttons live bottom-right (per
   `SPEC_AGENT_PANE_BOTTOM_BUTTONS_2026_04_22.md`). Bottom-left is the
   only consistently-empty corner.
+
+**Browser panes (2026-10-13).** A browser pane's page is a native window drawn
+above the DOM, so it would cover the bottom-left badge. The badge stays in
+the same place as on every other pane: while a splitter is dragged, the
+native page stops 32 CSS px short of the pane's bottom
+(`use-pane-rect-sync.ts`, `SIZE_BADGE_STRIP_CSS`), leaving that strip, and
+the badge in it, to the DOM. The rect is already sent every frame of a drag,
+so this adds no host work; the strip goes when the drag ends. Registering the
+badge as a pane overlay was rejected: its rect changes every frame, so every
+browser pane would be re-clipped every frame. See
+`docs/reports/REPORT_PANE_SIZE_BADGE_HIDDEN_ON_BROWSER_PANES_RCA_2026_10_12.md`.
 
 ### 2.4 Style
 

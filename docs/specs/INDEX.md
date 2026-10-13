@@ -399,6 +399,7 @@ partial list.
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
+| [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22`](SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md) | Selecting a pane should focus its input — not just opening one |
 | [`SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19`](SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) | SPEC + PLAN: Pane Tab Drag-and-Drop — reorder, cross-pane move, tear-off-to-floating-pane, and reserved whole-pane-drag space |
 | [`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24`](SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md) | SPEC: Pane Tab drag — Window-Tab-style landing flash on the destination, moving a pane's last tab closes that pane, and removing `pane:tabstrip = "multi-only"` |
@@ -1020,7 +1021,6 @@ partial list.
 | [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30`](SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md) | SPEC: Pane Icon and Text Visibility Pass |
 | [`SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05`](SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md) | Spec (v2) — Floating-pane drag — host-side manual loop |
-| [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PERSISTENT_SHELL_NODE_2026_06_11`](SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md) | SPEC: Persistent Shell Node in the Agent Pane |
 | [`SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14`](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | SPEC: Persistent Shell Node — Phase 3 (Stop / Lifecycle) |
 | [`SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) | SPEC: Phase E.4 — Layout reducer migration |

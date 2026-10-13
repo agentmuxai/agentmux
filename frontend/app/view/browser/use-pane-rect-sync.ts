@@ -11,6 +11,20 @@ import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
 import { paneRectBatcher } from "./pane-rect-batcher";
 
+/** CSS px the native page stops short of the pane's bottom while a splitter is
+ *  dragged, so the pane size badge (bottom-left, `pane-size-badge.scss`: 8px
+ *  inset, about 21px tall) shows in the same place as on every other pane.
+ *  The page is a native window above the DOM and would cover it otherwise
+ *  (docs/reports/REPORT_PANE_SIZE_BADGE_HIDDEN_ON_BROWSER_PANES_RCA_2026_10_12.md).
+ *  A rect inset, not an overlay clip: the rect is already sent every frame of a
+ *  drag, while a clip would re-clip every pane on every frame. */
+export const SIZE_BADGE_STRIP_CSS = 32;
+
+/** `rect` (device px) without the bottom strip the size badge needs. */
+export function insetForSizeBadge(rect: PaneRect, dpr: number): PaneRect {
+    return { ...rect, height: Math.max(1, rect.height - Math.round(SIZE_BADGE_STRIP_CSS * dpr)) };
+}
+
 export interface PaneRect {
     x: number;
     y: number;
@@ -100,7 +114,8 @@ export function usePaneRectSync(params: {
             width = Math.max(1, width - 2 * b);
             height = Math.max(1, height - b);
         }
-        return { x, y, width, height };
+        const rect = { x, y, width, height };
+        return model.splitterDragging?.() ? insetForSizeBadge(rect, dpr) : rect;
     };
 
     /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
@@ -108,11 +123,12 @@ export function usePaneRectSync(params: {
      *  `sendClip` can short-circuit when no overlay intersects a pane. */
     const paneRectCss = () => {
         const r = placeholderRef()!.getBoundingClientRect();
+        const h = Math.round(r.height);
         return {
             x: Math.round(r.x),
             y: Math.round(r.y),
             w: Math.round(r.width),
-            h: Math.round(r.height),
+            h: model.splitterDragging?.() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
         };
     };
 
@@ -269,6 +285,14 @@ export function usePaneRectSync(params: {
     // show a stale frame.
     createEffect(() => {
         visibility();
+        if (placeholderRef()) syncPosition();
+    });
+
+    // A splitter drag starts or ends: leave (or give back) the size badge's
+    // strip at once, even before the pointer moves. During the drag the rect
+    // is re-sent every frame anyway (ResizeObserver), with the strip applied.
+    createEffect(() => {
+        model.splitterDragging?.();
         if (placeholderRef()) syncPosition();
     });
 

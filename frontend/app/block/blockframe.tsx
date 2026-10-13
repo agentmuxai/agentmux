@@ -1445,7 +1445,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 badge on every pane. The Show keeps the component (and
                 its ResizeObserver) mounted only during the drag, so
                 idle panes do no observer work. Codex P2 rounds 1 + 2
-                on PR #1057.
+                on PR #1057. A browser pane's native page would cover it;
+                while a splitter is dragged that page stops short of the
+                badge's strip (use-pane-rect-sync.ts, SIZE_BADGE_STRIP_CSS).
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
             <Show when={!props.preview && nodeModel.isSplitterDragging()}>
                 <PaneSizeBadge target={frameEl} />
