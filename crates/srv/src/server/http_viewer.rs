@@ -8,9 +8,9 @@
 //!
 //! - `POST /agentmux/viewer/pair`: a pairing code for a viewer token. The
 //!   only route without a token.
-//! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents` and
-//!   `GET /agentmux/viewer/agents/:name/feed`: `Authorization: Bearer
-//!   amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
+//! - `GET /agentmux/viewer/hello`, `GET /agentmux/viewer/agents`,
+//!   `GET /agentmux/viewer/agents/:name/feed`, `GET /agentmux/viewer/panes`
+//!   and `GET /agentmux/viewer/procs`: `Authorization: Bearer amxv_…` only. Neither the `lan_key` nor the instance `auth_key` opens
 //!   them, and the token opens nothing else: no other router knows it.
 //!
 //! Read-only throughout. An agent hidden from paired devices is left out of
@@ -63,6 +63,7 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/agents", get(handle_viewer_agents))
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
         .route("/agentmux/viewer/procs", get(handle_viewer_procs))
+        .route("/agentmux/viewer/panes", get(handle_viewer_panes))
         .route_layer(middleware::from_fn_with_state(state.clone(), viewer_auth_middleware));
     Router::new()
         .route("/agentmux/viewer/pair", post(handle_viewer_pair))
@@ -304,6 +305,52 @@ async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<Proc
         Ok(Ok(snap)) => Json(snap).into_response(),
         Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+/// `GET /agentmux/viewer/panes`: every pane on this computer, window by window
+/// and tab by tab, with each agent's shell drawer (`backend::viewer::panes`):
+/// names, types, the agent name a feed opens by, and whether a terminal runs.
+/// No content, command line or working directory; agents hidden from paired
+/// devices, and their shells, are left out.
+async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
+    let st = state.clone();
+    let panes = tokio::task::spawn_blocking(move || {
+        use crate::backend::obj::{Block, Tab, Window, Workspace};
+        // A table that can't be read fails the request: an empty or partial
+        // list would read as "nothing open".
+        let windows = st.mstore.get_all::<Window>().map_err(|e| e.to_string())?;
+        let workspaces = st.mstore.get_all::<Workspace>().map_err(|e| e.to_string())?;
+        let tabs = st.mstore.get_all::<Tab>().map_err(|e| e.to_string())?;
+        let blocks = st.mstore.get_all::<Block>().map_err(|e| e.to_string())?;
+        let label = |b: &Block| {
+            crate::server::app_api::tower_pane::block_label(&st.mstore, &b.oid)
+                .map(|l| (l.label, l.agent))
+                .unwrap_or_default()
+        };
+        let agent_name = |id: &str| st.reactive_handler.get_agent_by_block(id).map(|a| a.agent_id.clone());
+        let running = |id: &str| {
+            crate::backend::blockcontroller::get_block_controller_status(id)
+                .map(|s| s.shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
+        };
+        let hidden = |id: &str| agent_hidden(&st, id);
+        let facts = crate::backend::viewer::panes::PaneFacts {
+            label: &label,
+            agent_name: &agent_name,
+            running: &running,
+            hidden: &hidden,
+        };
+        Ok::<_, String>(crate::backend::viewer::panes::list(&windows, &workspaces, &tabs, &blocks, &facts))
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    match panes {
+        Ok(panes) => Json(json!({ "now_ms": agentmux_common::time::now_ms_u64(), "panes": panes })).into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "viewer: could not list panes");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "could not list panes" }))).into_response()
+        }
     }
 }
 

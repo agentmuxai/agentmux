@@ -22,6 +22,7 @@ pub mod cert;
 pub mod client;
 pub mod feed;
 pub mod pairing;
+pub mod panes;
 
 use std::collections::HashMap;
 use std::net::IpAddr;

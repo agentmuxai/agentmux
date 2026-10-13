@@ -283,7 +283,7 @@ pub(super) async fn handle_shell_status(
 // drives the SAME shell a human sees in the drawer, and a drawer opened
 // later attaches to whatever the agent already started, live output and
 // scrollback included.
-pub(super) const META_KEY_SHELL_SUBBLOCK_ID: &str = "term:shellsubblockid";
+pub(super) use crate::backend::blockcontroller::META_KEY_SHELL_SUBBLOCK_ID;
 
 // How long an agent's write (input/resize) locks the shell out from human
 // keyboard input, refreshed on every subsequent write. Deliberately a lease,

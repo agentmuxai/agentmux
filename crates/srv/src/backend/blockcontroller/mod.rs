@@ -76,6 +76,9 @@ pub const META_KEY_CMD_CWD: &str = "cmd:cwd";
 pub const META_KEY_CMD_SHELL: &str = "cmd:shell";
 pub const META_KEY_CMD_ARGS: &str = "cmd:args";
 pub const META_KEY_CMD_ENV: &str = "cmd:env";
+/// On an agent block: the block id of its shell drawer, the headless terminal
+/// the drawer, the agent's PtyShell and a paired device's pane list share.
+pub const META_KEY_SHELL_SUBBLOCK_ID: &str = "term:shellsubblockid";
 
 /// A meta value that is an object of strings, or a JSON string encoding one,
 /// as a string map. Non-string values are skipped; any other shape is empty.
