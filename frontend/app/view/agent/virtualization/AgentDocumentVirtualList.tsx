@@ -30,7 +30,7 @@
 
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
-import { Key } from "@solid-primitives/keyed";
+import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { DocumentNode, DocumentState } from "../types";
