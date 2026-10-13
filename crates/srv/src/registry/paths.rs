@@ -47,7 +47,7 @@ pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
 ///
 /// When `agentmux_common::isolated_auth_enabled()` is set, resolves to
 /// `<instance_dir>/identity-store.db` instead — a channel-scoped store for
-/// destructive Armory testing (delete-account flows) that can never touch
+/// destructive account testing (delete-account flows) that can never touch
 /// the real global store other channels/instances depend on. Falls back
 /// to the global path if `AGENTMUX_INSTANCE_DIR` isn't set (e.g. a bare
 /// `cargo run` outside the launcher) rather than failing outright — this
@@ -421,7 +421,7 @@ mod tests {
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
         std::env::set_var("AGENTMUX_CHANNEL", "local-somebranch-abcd1234-ef56789a");
         std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/channels/local-somebranch-abcd1234-ef56789a");
-        // Explicit isolation (the flag Armory testing relies on for
+        // Explicit isolation (the flag account testing relies on for
         // db_accounts / identities_dir()) must have NO effect here — this
         // store never had a legitimate isolation use case (design doc §2.3).
         std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
@@ -440,7 +440,7 @@ mod tests {
         std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
         // Deliberately proves the two resolvers now disagree under
         // isolation — resolve_shared_store_path (accounts, still
-        // isolatable for Armory) redirects per-channel;
+        // isolatable for account testing) redirects per-channel;
         // resolve_identity_store_path (links/bundles/drones/muxbus) does
         // not. If a future change accidentally re-couples them, this test
         // fails immediately instead of silently reintroducing the bug.

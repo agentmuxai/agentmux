@@ -3,13 +3,13 @@
 
 /**
  * MemoryAdoptionPanel — "Earlier memory found under N accounts", above an
- * agent's file grid in Armory → Memory → Personal
+ * agent's file grid in Memory → Personal
  * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4).
  *
  * Lists the agent's memory folders under its earlier accounts (and files
  * held at first sighting), lets the human pick some, and asks the host to
  * confirm. The confirmation is a separate host window, never this panel: an
- * agent can reach this panel's buttons (they're Armory chrome), so this
+ * agent can reach this panel's buttons (they're Memory pane chrome), so this
  * panel can only open that window, not adopt.
  *
  * Renders nothing when there is nothing to offer.

@@ -114,7 +114,7 @@ pub(super) fn normalize_bundle_upsert_input(mut data: serde_json::Value) -> serd
 }
 
 // The deprecated `preset.*` aliases (Phase 2's one-release compat window)
-// were retired as part of the Armory Bundle Format (ABF) UI-alignment pass —
+// were retired as part of the ABF UI-alignment pass —
 // `bundle.*` is the only surface now; see the ABF branding sweep this
 // change shipped alongside.
 
@@ -515,10 +515,10 @@ pub(crate) async fn bundle_get_impl(
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
 
-/// Structurally validate a bundle draft — Armory Bundle Format (ABF)
+/// Structurally validate a bundle draft — ABF
 /// UI-alignment pass. Takes the SAME payload shape `bundle.upsert` accepts
 /// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
-/// Armory editor's "Validate" button can check an unsaved draft (including a
+/// Memory → Bundles editor's "Validate" button can check an unsaved draft (including a
 /// brand-new bundle with no id yet) rather than only whatever was last
 /// persisted.
 ///

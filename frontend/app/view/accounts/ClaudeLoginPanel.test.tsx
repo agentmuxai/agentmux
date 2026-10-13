@@ -111,7 +111,7 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
         expect(hub.refreshAccountCache).toHaveBeenCalled();
     });
 
-    it("does NOT call UnlinkAgentIdentityCommand when staleAliasProvider is unset (canonical row, or Armory's bare Connect)", async () => {
+    it("does NOT call UnlinkAgentIdentityCommand when staleAliasProvider is unset (canonical row, or Connectors' bare Connect)", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
             return "inapp-success";
@@ -165,7 +165,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
     });
 
     it("reagent P2 on PR #2414 (round 4): Retry after a link-verification failure reuses the account THIS panel already minted, instead of re-minting a second one", async () => {
-        // First attempt: Armory's bare-Connect shape (no existingAccountId
+        // First attempt: Connectors' bare-Connect shape (no existingAccountId
         // prop) mints a NEW account and persists it, but the agent-link
         // check fails — mirrors the test above, just with a Stash
         // linkTarget added so there's an agent to (fail to) link to.
@@ -246,7 +246,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         expect(hub.refreshAccountCache).not.toHaveBeenCalled();
     });
 
-    it("skips link verification entirely for Armory's bare Connect (no linkTarget) — nothing to verify", async () => {
+    it("skips link verification entirely for Connectors' bare Connect (no linkTarget) — nothing to verify", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
             return "inapp-success";

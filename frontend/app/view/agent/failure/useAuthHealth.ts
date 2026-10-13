@@ -142,7 +142,7 @@ export function useAuthHealth(opts: {
             onHealthy: declareAuthHealthy,
         });
 
-    // Auto-unblock: a bind can happen from ANYWHERE (the Armory's
+    // Auto-unblock: a bind can happen from ANYWHERE (Connectors → Accounts'
     // Bind-to-Agent menu, the per-agent Identity tab, or this pane's own
     // "Bind account" above) — this pane must notice regardless of source.
     // `agentidentities:changed:<agentId>` already fires on every one of

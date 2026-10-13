@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Remotes pane's list (SPEC_REMOTES_PANE_2026_10_05.md §4.6): every remote
+//! The Connectors → Remotes list (SPEC_REMOTES_PANE_2026_10_05.md §4.6): every remote
 //! machine AgentMux knows about, one record each, built from what srv already
 //! keeps:
 //! - the hosts named in `~/.ssh/config` (`ssh_config`);
@@ -210,7 +210,7 @@ pub fn check_connection_entry(
     }
 }
 
-/// Tell every Remotes pane its list changed.
+/// Tell every open Connectors → Remotes its list changed.
 pub fn publish_change(broker: &Broker) {
     broker.publish_event::<crate::backend::mps_events::RemotesChanged>(&(), vec![], 0);
 }

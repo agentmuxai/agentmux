@@ -3,7 +3,7 @@
 
 /**
  * ClaudeLoginPanel — the in-app Claude/Anthropic login session, driven from
- * a context that has no agent block: the Armory Accounts gallery's "Connect"
+ * a context that has no agent block: Connectors → Accounts' "Connect"
  * (fresh account, no `linkTarget`) and the Agent Stash's per-binding
  * "Connect / Re-login" action (`linkTarget` + `existingAccountId`, refresh
  * not mint). Both reuse the exact same session logic and UI
@@ -37,7 +37,7 @@ export function ClaudeLoginPanel(props: {
     onClose: () => void;
     /** Set for the Stash's per-binding re-login: refreshes THIS account's
      *  isolated dir instead of minting a new one, and links the result back
-     *  to the agent. Omit for Armory's bare Connect (fresh account, no
+     *  to the agent. Omit for Connectors' bare Connect (fresh account, no
      *  agent to link yet — the account just needs to exist for a later
      *  launch/Stash bind). */
     existingAccountId?: string;
@@ -57,7 +57,7 @@ export function ClaudeLoginPanel(props: {
      *  success, this panel unlinks `staleAliasProvider` for the same
      *  agent so only the canonical row remains. */
     staleAliasProvider?: string;
-    /** Which region the dialog locks — see `Modal`'s `scope` prop. Armory
+    /** Which region the dialog locks — see `Modal`'s `scope` prop. Connectors
      *  (no ModalLayer ancestor) passes "tab"; the Agent Stash (already
      *  inside agent-view.tsx's `ModalLayer scope="pane"`) passes "pane" so
      *  this stacks correctly over the Stash modal instead of both
@@ -117,7 +117,7 @@ export function ClaudeLoginPanel(props: {
             // this, clicking Retry after a link-verification failure (the
             // account persisted fine, but confirming its link to this
             // agent failed) re-ran with the stale props.existingAccountId
-            // — undefined for Armory's bare Connect — minting a SECOND
+            // — undefined for Connectors' bare Connect — minting a SECOND
             // fresh account and orphaning the first one, which is already
             // a real, credentialed Claude account. Falls back to
             // props.existingAccountId when nothing has been registered yet
@@ -356,7 +356,7 @@ export function ClaudeLoginPanel(props: {
                         // "Anthropic" (the account/brand), not
                         // CLAUDE_PROVIDER.displayName ("Claude Code", the
                         // internal CLI tool AgentMux runs under the hood) —
-                        // this panel is Armory/Stash-facing, where the CLI
+                        // this panel is Connectors/Stash-facing, where the CLI
                         // implementation detail shouldn't surface. Contrast
                         // PreLaunchAuthPanel, a different call site of this
                         // same shared component, which correctly keeps

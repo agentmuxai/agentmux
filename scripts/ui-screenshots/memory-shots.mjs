@@ -76,7 +76,7 @@ export const PERSONAL_FILES = {
     "feedback_test_style.md": "---\nname: feedback-test-style\ndescription: how the team wants tests written\n---\n\nOne behaviour per test, named for what it checks (\"says item for one\").\n",
 };
 
-const MEMORY = ".armory-view";
+const MEMORY = ".section-pane-view";
 const tab = (label) => `button.ui-tab[role=tab][aria-label=${JSON.stringify(label)}]`;
 
 async function waitFor(session, expression, what, timeoutMs = 15000) {

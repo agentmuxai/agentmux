@@ -103,7 +103,7 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  §3.3 surface 3): when present, the block's `cmd:env` is ALSO updated
      *  to point at the isolated dir — the pane-level recovery case (an
      *  already-running agent that needs its live env refreshed right now).
-     *  Callers with no live pane (Armory's bare Connect, or the Stash's
+     *  Callers with no live pane (Connectors' bare Connect, or the Stash's
      *  per-binding re-login when the agent has no open pane) still get the
      *  account linked; the next spawn resolves the dir fresh regardless. */
     linkTarget?: { blockId?: string; agentDefinitionId: string };
@@ -199,7 +199,7 @@ async function finalizeAccount(
         return;
     }
     // Best-effort live-pane env refresh — only when a block actually exists
-    // (the pane-level recovery case). Armory's bare Connect and the Stash's
+    // (the pane-level recovery case). Connectors' bare Connect and the Stash's
     // re-login for an agent with no open pane have nothing to refresh here;
     // the link above is already durable, and the next spawn resolves the
     // account's dir fresh regardless of this pane-local cache.

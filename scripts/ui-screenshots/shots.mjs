@@ -79,7 +79,7 @@ export const shots = [
         id: "memory-bundles",
         title: "Memory — Bundles",
         description: "The Memory widget's Bundles section.",
-        selector: `.pane-stack:has(.armory-view)`,
+        selector: `.pane-stack:has(.section-pane-view)`,
         prep: async (session) => {
             await openWidget(session, "Memory");
             await session.wait(300);

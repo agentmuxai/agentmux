@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * NativeMemoryFileView — Armory → Memory → Personal's full view of one
+ * NativeMemoryFileView — Memory → Personal's full view of one
  * memory file (the third drill-down screen). Replaces the read-only
  * NativeMemoryHistoryPanel there, per
  * docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3/§2.4:
@@ -71,7 +71,7 @@ export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Elem
                 agent_id: agentId,
                 filename,
                 content,
-                // A human edit in the Armory — without this the backend
+                // A human edit in Memory — without this the backend
                 // defaults to "agent_inferred" (reagent P1 on PR #2678).
                 provenance: { source: "human" },
                 ...(base !== null ? { base_sha256: base } : {}),

@@ -264,8 +264,8 @@ pub(crate) fn sync_all(fs: &FileStore, store: &Store, scope: &str) -> Result<usi
 // ── Import into an isolated channel (§2.1.6) ────────────────────────────
 //
 // An isolated channel keeps its own Global Memory, on purpose: destructive
-// Armory testing there can't touch the real store. So a new one starts
-// empty of the entries people added elsewhere. The Armory offers to bring
+// testing there can't touch the real store. So a new one starts
+// empty of the entries people added elsewhere. Memory → Global offers to bring
 // them in from another scope's record — never silently.
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]

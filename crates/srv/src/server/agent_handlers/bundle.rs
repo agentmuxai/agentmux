@@ -91,11 +91,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 memory.updated_at = now;
                 // bundle_upsert_with_version, not bundle_upsert — this is
-                // the actual Armory Global Memory save path (frontend's
+                // the actual Memory → Global save path (frontend's
                 // UpsertBundleCommand -> "upsertmemory"; also used by the
                 // per-agent Bundle editor, which is fine: versioning only
                 // fires when memory.is_global is true either way). Without
-                // this, a human edit through the Armory UI was invisible to
+                // this, a human edit in Memory → Global was invisible to
                 // db_bundle_versions entirely — only agent-originated
                 // writes through GlobalMemoryWrite recorded a version, so a
                 // future history/diff view would present a false sequence
@@ -108,7 +108,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // this code path can honestly claim. No writer UID either
                 // (identity M4c-1): the WebSocket is always Unattributed.
                 // `base_sha256` (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
-                // §2.4): the Armory editor says which content its draft
+                // §2.4): the Memory editor says which content its draft
                 // started from, so a concurrent write (an agent's
                 // GlobalMemoryWrite, another window) becomes a `conflict:`
                 // refusal instead of being silently overwritten. Absent =
@@ -136,7 +136,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_delete(&cmd.id)
                     .map_err(|e| format!("deletememory: {e}"))?;
                 if deleted {
-                    // This is the delete the Armory actually calls
+                    // This is the delete Memory actually calls
                     // (`rpc-api/bundle.ts`), so the ref purge has to live here
                     // too — fixing only `bundle.delete` left the product path
                     // orphaning refs (Codex, PR #3153). Shared helper, not a
@@ -262,11 +262,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
-    // ---- Global Memory version history for the Armory UI
+    // ---- Global Memory version history for Memory → Global
     // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3). Same rows, same
     // diff, same "revert records a new version" rule as the MCP tools in
     // app_api/mod.rs (global_memory_{history,diff,revert}_impl) — the
-    // difference is the guard: the Armory can already edit and delete
+    // difference is the guard: Memory → Global can already edit and delete
     // system-tier entries through upsertsystemmemory/deletesystemmemory, so
     // their history is not hidden from it the way it is from agents.
 
@@ -336,7 +336,7 @@ fn own_bundle_id(mstore: &Store, agent_id: &str) -> String {
     mstore.agent_def_get(agent_id).ok().flatten().map(|def| def.memory_id).unwrap_or_default()
 }
 
-/// The Armory's "Bring Global Memory from…" step for an isolated channel
+/// Memory → Global's "Bring Global Memory from…" step for an isolated channel
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). Registered with the
 /// others below.
 /// `globalmemory:sections`: the Global Memory block an agent's startup file
@@ -407,7 +407,7 @@ pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppSt
     );
 }
 
-/// Loads a Global Memory entry for the Armory's history commands: it must
+/// Loads a Global Memory entry for Memory → Global's history commands: it must
 /// exist, be `is_global`, and not be the blank singleton. System-tier rows
 /// are allowed (see the comment above the registrations).
 fn load_global_bundle_for_ui(store: &Store, id: &str, verb: &str) -> Result<Bundle, String> {
@@ -501,7 +501,7 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -
     let version = if bundle.is_system {
         // Reverting to text AgentMux itself seeded hands the entry back to
         // the seeder, so it keeps receiving Operator Config updates;
-        // recording it as an Armory edit would opt it out of them for good
+        // recording it as a human edit would opt it out of them for good
         // (`bundle_reseed_system_if_owned` skips any non-seeder last writer).
         let seeder = crate::backend::operator_config_seed::WRITTEN_BY;
         let written_by = if target.written_by == seeder { seeder } else { "armory-ui" };
@@ -777,7 +777,7 @@ mod delete_memory_tests {
     }
 }
 
-// Conditional saves (`base_sha256`) and the Armory's Global Memory history
+// Conditional saves (`base_sha256`) and Memory → Global's history
 // commands — SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3/§2.4.
 #[cfg(test)]
 mod global_memory_ui_tests {
@@ -984,7 +984,7 @@ mod global_memory_ui_tests {
         assert!(resp.error.contains("not a Global Memory entry"), "got {:?}", resp.error);
     }
 
-    // Unlike the MCP tools, the Armory sees system-tier history — it can
+    // Unlike the MCP tools, Memory → Global sees system-tier history — it can
     // already edit those entries. A no-op revert of one records nothing.
     #[tokio::test]
     async fn system_entries_have_history_and_a_no_op_revert_records_nothing() {

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// SkillCatalogModel — the standalone Armory "Skills" tab's model. Scoped to
+// SkillCatalogModel — the Memory → Skills model. Scoped to
 // the reactive-updates wiring added by
 // docs/specs/SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md; this model had no
 // prior test coverage, and full CRUD coverage is out of scope here.

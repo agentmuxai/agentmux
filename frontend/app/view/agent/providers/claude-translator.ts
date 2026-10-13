@@ -273,7 +273,7 @@ export class ClaudeTranslator implements OutputTranslator {
                 // `error.message` with no `result` at all — reading only
                 // `result` rendered every gate refusal as a bare "Agent
                 // encountered an error" with the actionable "bind an
-                // account in the Armory" text silently dropped (live
+                // account in Connectors" text silently dropped (live
                 // repro: claudius v0.54.14 Agent1, 2026-08-09). The CLI's own
                 // failures before a turn ("No conversation found with session
                 // ID: …") come only in `errors`.

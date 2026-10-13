@@ -266,7 +266,7 @@ pub(crate) fn memory_write_impl<'o>(
 // (`agent_handlers/bundle.rs`'s `upsertmemory`), which `agentmux-mcp`
 // cannot reach at all. Every function here calls the SAME
 // `Store::bundle_upsert`/`bundle_get`/`bundle_list_global` the human-facing
-// Armory editor already uses — no new storage-layer write path, no new way
+// Memory editor already uses — no new storage-layer write path, no new way
 // to touch a row this app didn't already know how to touch.
 //
 // The one invariant every function below shares: NONE of them ever read or

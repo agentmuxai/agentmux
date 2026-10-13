@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Armory → Personal Memory full view: editing through agent:memory:write_file,
+// Memory → Personal full view: editing through agent:memory:write_file,
 // the editor pinned to the bottom, and unsaved drafts that survive live
 // changes. docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3/§2.4.
 

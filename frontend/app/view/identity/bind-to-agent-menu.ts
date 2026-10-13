@@ -1,12 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// "Bind to Agent" context menu for Armory account rows —
+// "Bind to Agent" context menu for Connectors → Accounts rows —
 // SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md.
 //
 // The menu builder is a pure function (inputs → ContextMenuItem[]) so the
 // filtering/annotation rules are unit-testable without a DOM or RPC mocks;
-// the bind action itself lives here too so both the Armory tab and any
+// the bind action itself lives here too so both Connectors → Accounts and any
 // future surface share one implementation.
 
 import { RpcApi } from "@/app/store/rpc-api";
@@ -179,13 +179,13 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
     } catch (e: any) {
         Logger.error(
             "identity",
-            `armory bind FAILED: account ${account.id} → agent ${candidate.agentId}: ${e?.message ?? e}`,
+            `bind to agent FAILED: account ${account.id} → agent ${candidate.agentId}: ${e?.message ?? e}`,
         );
         throw e;
     }
     Logger.info(
         "identity",
-        `armory bind: account ${account.id} (${account.name}) → agent ${candidate.agentId} (${candidate.agentName})`,
+        `bind to agent: account ${account.id} (${account.name}) → agent ${candidate.agentId} (${candidate.agentName})`,
     );
 
     const blockId = candidate.runningBlockId;
@@ -204,13 +204,13 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
         } else {
             Logger.warn(
                 "identity",
-                `armory bind: pane ${blockId} not in this window's tabs — binding applies on its next spawn`,
+                `bind to agent: pane ${blockId} not in this window's tabs — binding applies on its next spawn`,
             );
         }
     } catch (e: any) {
         // The link itself succeeded — the binding applies at the next
         // clean spawn even if the live apply failed. Log, don't throw.
-        Logger.warn("identity", `armory bind: live apply failed: ${e?.message ?? e}`);
+        Logger.warn("identity", `bind to agent: live apply failed: ${e?.message ?? e}`);
     }
 }
 

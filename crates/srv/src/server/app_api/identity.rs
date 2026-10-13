@@ -336,7 +336,7 @@ pub(crate) async fn identity_self_accounts_impl<'o>(
         // fixed — but it is a real UX gap: nothing in this payload tells the
         // caller the account can't satisfy a spawn in THIS channel. Logged
         // below so it is at least observable; surfacing it in the payload (and
-        // in Armory) is tracked as follow-up, not silently assumed fine. See
+        // in Connectors) is tracked as follow-up, not silently assumed fine. See
         // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md §6.
         match crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, &link.account_id) {
             Ok(Some((acct, account_store))) => {

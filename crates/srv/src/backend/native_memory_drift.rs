@@ -84,7 +84,7 @@ pub(crate) fn check_and_record_drift(
 }
 
 /// Give every verified agent's memory file with no recorded version its
-/// first one, labelled `agent_inferred` ("Agent" in the Armory), before the
+/// first one, labelled `agent_inferred` ("Agent" in Memory), before the
 /// drift detector starts. Otherwise the detector finds these ordinary files
 /// on its first sweep and records them as `external_fs_write`, "Detected
 /// outside AgentMux", as it did for every file after a new local-build
@@ -300,7 +300,7 @@ fn sweep_one_agent_dir(
             Ok(true) => {
                 drifted += 1;
                 tracing::info!(agent_id, filename = %name, detected_via, "native_memory_drift: recorded an out-of-band write");
-                // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
+                // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
                 // Only on an actual recorded change (Ok(true)) — this branch
                 // runs once per sweep tick per watched agent, and firing on
                 // every no-op tick would mean an event for every agent every
@@ -416,7 +416,7 @@ fn spawn_fast_path(
                     match check_and_record_drift(&id_store, &agent_id, filename, &content, "fs_watch") {
                         Ok(true) => {
                             tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
-                            // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
+                            // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
                             broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&agent_id, &(), vec![], 0);
                         }
                         Ok(false) => {}
@@ -599,7 +599,7 @@ mod tests {
 
     // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: an out-of-band write
     // (bypassing both the WS RPC and MuxAPI surfaces entirely) must still
-    // make the Armory grid reactive — that's this whole module's reason to
+    // make the Memory → Personal grid reactive — that's this whole module's reason to
     // exist, so its own publish path needs the same regression guard the
     // RPC handlers' publish calls get.
     #[test]
@@ -793,7 +793,7 @@ mod tests {
     // Codex P2, PR #2932: content-drift detection alone never notices a
     // file that's gone (nothing to compare content against), and the fast
     // path deliberately ignores FsWatchEventKind::Removed — without this,
-    // an out-of-band deletion of the file open in the Armory detail view
+    // an out-of-band deletion of the file open in the Memory → Personal detail view
     // stayed stale forever, since no event ever arrived to trigger the
     // frontend's own "the selected file is gone" handling.
     #[tokio::test]

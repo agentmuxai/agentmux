@@ -535,7 +535,7 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
 ///
 /// `bound_dir` — pass `identity::resolver::resolve_bound_oauth_config_dir`'s
 /// result here. It wins when present: for an agent bound to an explicit
-/// Armory identity, it's the ONLY correct answer — `cmd:env.CLAUDE_CONFIG_DIR`
+/// account, it's the ONLY correct answer — `cmd:env.CLAUDE_CONFIG_DIR`
 /// below is a write-once launch-time snapshot of the generic shared-provider
 /// dir, while the identity-bound agent's CLI actually runs (and writes
 /// subagent files) under its own identity dir, re-resolved fresh on every

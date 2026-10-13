@@ -101,7 +101,7 @@ pub struct CommandUpsertBundleData {
     pub base_sha256: Option<String>,
 }
 
-// ---- Global Memory version history for the Armory UI —
+// ---- Global Memory version history for Memory → Global —
 // globalmemory:history / diff / revert. The WebSocket counterparts of the
 // GlobalMemoryHistory/Diff/Revert MCP tools (#3448), over the same
 // db_bundle_versions rows. SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.

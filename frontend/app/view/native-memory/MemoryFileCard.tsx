@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MemoryFileCard — one *.md file in the Armory → Memory → Personal file grid.
+ * MemoryFileCard — one *.md file in the Memory → Personal file grid.
  *
  * This grid replaced the file `<select>` that used to sit in the detail
  * header. The dropdown showed nothing but the filename, so choosing a file

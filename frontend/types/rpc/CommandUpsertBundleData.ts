@@ -13,8 +13,8 @@
 export type CommandUpsertBundleData = { base_sha256?: string, id: string, name: string, description: string, is_blank: boolean, 
 /**
  * Global bundles are injected into every agent's CLAUDE.md at launch,
- * regardless of per-agent memory selection. Managed in the Armory
- * (Identity & Bundle hamburger modal). Seeded from workspace-wide rule sets.
+ * regardless of per-agent memory selection. Managed in Memory → Global.
+ * Seeded from workspace-wide rule sets.
  */
 is_global: boolean, 
 /**
@@ -43,7 +43,7 @@ mcp_servers: string,
  */
 skills: string, 
 /**
- * Explicit ordering within the Armory global bundles. Lower sorts
+ * Explicit ordering within Memory → Global. Lower sorts
  * first; this is the order sections inject into CLAUDE.md at launch.
  * Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
  * `reorderglobalbrain` RPC — `bundle_upsert` never overwrites it

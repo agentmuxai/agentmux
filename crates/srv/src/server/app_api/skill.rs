@@ -4,9 +4,9 @@
 //! MuxAPI handlers for the v1 standalone Skill primitive.
 //! skill.list / skill.get / skill.upsert / skill.delete / skill.bind / skill.unbind
 //!
-//! Plus the Armory-level catalog (skill.catalog.*): global skills only,
+//! Plus the Memory-level catalog (skill.catalog.*): global skills only,
 //! window-scoped — no `agent_id`, no `check_s1` (mirrors bundle.* auth
-//! shape, since the Armory has no agent connection context to gate on).
+//! shape, since Memory has no agent connection context to gate on).
 //!
 //! `db_skills` is authoritatively `identity_store` as of Phase 2 of
 //! SPEC_DURABLE_BINDINGS_2026_09_10.md (§5.1/§5.4) — `mstore` stays the
@@ -307,7 +307,7 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 // Catalog-tier sibling of register_skill_bind (above) — same DB write and
 // "only global skills may be bound" safety check, but no check_s1: the
-// Armory's WebSocket never authenticates as an agent (see this file's
+// Memory's WebSocket never authenticates as an agent (see this file's
 // module doc comment), so a check_s1-gated bind can never be satisfied from
 // that caller. skill.bind itself is left untouched — it may still be the
 // intended surface for an agent binding a skill to itself over its own
@@ -344,7 +344,7 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 mstore.skill_bind(&identity_store, &req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.bind: {e}"))?;
-                // Lets any other open Stash/Armory view for this agent pick up
+                // Lets any other open Stash/Memory view for this agent pick up
                 // the new binding without a manual refresh — skill.bind (the
                 // check_s1 agent-self-service path) intentionally left alone.
                 broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Remotes pane's commands and the records they return
+//! Connectors → Remotes' commands and the records they return
 //! (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6). Built by
 //! `backend::remote::remotes`.
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandRemotesListData {}
 
-/// One remote machine, as the Remotes pane shows it.
+/// One remote machine, as Connectors → Remotes shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RemoteRecord {

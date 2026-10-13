@@ -296,7 +296,7 @@ fn resolve_bindings_for_instance(
 
 /// Resolve an account by id, checking `id_store` first — the
 /// authoritative, per-account-isolatable primary, which is what preserves
-/// Armory's disposable-test-account isolation guarantee — and falling
+/// the disposable-test-account isolation guarantee — and falling
 /// back to `identity_store`'s read-through mirror
 /// (`IDENTITY_STORE_SCHEMA_VERSION` v2,
 /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` §3.1) only when the
@@ -329,7 +329,7 @@ pub fn resolve_account(
 /// global mirror.**
 ///
 /// Deliberately NOT [`resolve_account`]: that function's global fallback is
-/// correct for read-only/display callers (the Armory account list, link
+/// correct for read-only/display callers (the Connectors → Accounts list, link
 /// summaries — they should still describe an account that exists elsewhere),
 /// but using it to satisfy a *spawn* lets an agent in a fresh channel launch
 /// against a credential authenticated in a DIFFERENT channel. That is exactly
@@ -530,7 +530,7 @@ pub fn inject_identity_env_with_broker(
     // account" gate below entirely — a genuinely brand-new agent launched
     // with no account selected got identity_id="" and spawned on whatever
     // ambient credential happened to be sitting on disk, with nothing
-    // bound in Armory. Observed behavior therefore depended on whether the
+    // bound in Connectors. Observed behavior therefore depended on whether the
     // test machine happened to have a stray credential file, not on any
     // actual policy decision. The UI no longer produces empty/"blank"
     // identity_id for new launches (identity is required at submit-time —
@@ -629,9 +629,9 @@ pub fn inject_identity_env_with_broker(
     // global/ambient CLI login instead of blocking. That escape hatch is
     // retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7,
     // "single point, not global"): a credential the app can't attribute to
-    // a specific Armory account is exactly the state that left Marks
+    // a specific account is exactly the state that left Marks
     // silently working with an untracked, unrefreshed shared-dir credential
-    // and no visible account anywhere in Armory. The flag is no longer read.
+    // and no visible account anywhere in Connectors. The flag is no longer read.
     let gate_oauth_failure = |provider: &str, detail: &str| -> Result<(), SpawnGateError> {
         tracing::warn!(
             target: "identity",
@@ -925,7 +925,7 @@ pub fn inject_identity_env_with_broker(
                                     "oauth probe: status updated"
                                 );
                                 // Publish accounts-changed so any live
-                                // account list (Armory Accounts tab,
+                                // account list (Connectors → Accounts,
                                 // launch modal) refreshes its Status
                                 // column without a reload — the account
                                 // row itself is what changed.
@@ -1435,7 +1435,7 @@ mod tests {
     ///
     /// Per-channel isolation is a wanted feature, and that fallback is exactly
     /// what let an agent in a fresh channel launch against another channel's
-    /// credential with an empty Armory. The operator's requirement:
+    /// credential with no account of its own. The operator's requirement:
     ///
     /// > "we want per-channel isolation. a user needs a login anytime in the
     /// > channel."
@@ -2265,7 +2265,7 @@ mod tests {
         // back to ambient creds even with use_ambient_login=0. That let a
         // brand-new agent launch with no account selected spawn on
         // whatever ambient credential happened to be on disk, with
-        // nothing bound in Armory — observably different behavior on two
+        // nothing bound in Connectors — observably different behavior on two
         // machines running the identical code, purely as a function of
         // which one had a stray credential file. A blank/empty
         // identity_id must be gated exactly like any other unresolvable

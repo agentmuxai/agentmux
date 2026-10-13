@@ -297,7 +297,7 @@ impl Store {
     }
 
     /// Global rows with how many agents hold an agent-level ref to each —
-    /// the Armory catalog's "used by N agents". Newest first.
+    /// the catalog's "used by N agents" in Connectors and Memory. Newest first.
     pub(super) fn managed_list_global<R: ManagedResource>(&self, catalog: &Store) -> Result<Vec<(R, i64)>, StoreError> {
         let globals = catalog.managed_catalog_global::<R>()?;
         let counts = self.managed_bound_counts::<R>()?;

@@ -10,8 +10,8 @@
  * longer routes through this modal — it starts directly from the
  * launch modal's auth panel, which mints the account backend-side.
  *
- * Mirrors the key-entry flow in identity-account-form.tsx's Armory Accounts
- * tab (`AccountKeyVerifyCommand`, `validate: true`).
+ * Mirrors the key-entry flow in identity-account-form.tsx's Connectors →
+ * Accounts (`AccountKeyVerifyCommand`, `validate: true`).
  */
 
 import { createSignal, type JSX } from "solid-js";

@@ -68,7 +68,7 @@ pub enum SecretCleanup {
 }
 
 impl SecretCleanup {
-    /// The `cleanup` object `deleteidentityaccount` returns, so the Armory can
+    /// The `cleanup` object `deleteidentityaccount` returns, so Connectors → Accounts can
     /// say whether the saved login is really gone
     /// (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.4).
     /// `outcome` is `removed`, `absent`, `skipped`, `failed` or `none` (no

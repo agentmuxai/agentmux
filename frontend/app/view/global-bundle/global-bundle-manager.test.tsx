@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBundleManager — Armory → Memory → Global as TILES FIRST, expanding to
+// GlobalBundleManager — Memory → Global as TILES FIRST, expanding to
 // a full view (docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3),
 // with the editor pinned to the bottom, a base-carrying save and dirty-draft
 // protection (§2.4).

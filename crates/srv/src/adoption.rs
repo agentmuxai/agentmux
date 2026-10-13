@@ -12,7 +12,7 @@
 //! |---|---|---|
 //! | Global Memory (global, non-system bundles) and their versions | every channel store, newest wins | each channel kept its own; the same entry written twice is one entry |
 //! | Native memory and its versions | every channel store, newest wins | the shared store has none; the entries are scattered over older channels |
-//! | Accounts | this channel's own isolated store and the newest same-branch predecessor | a login belongs to the build that made it; adopting every channel's would flood the Armory with test accounts |
+//! | Accounts | this channel's own isolated store and the newest same-branch predecessor | a login belongs to the build that made it; adopting every channel's would flood Connectors → Accounts with test accounts |
 //!
 //! Everything else is left alone. Non-global bundles in particular are mostly
 //! per-agent bundles each channel made for itself (4,740 distinct ones across the

@@ -74,12 +74,12 @@ impl std::fmt::Display for SpawnGateError {
                 "this agent's definition ({agent_id}) was deleted, so this pane cannot \
                  start. Close the pane, or launch another agent in it.",
             ),
-            // "Bind an account in the Armory" is now the ONLY path — the
+            // "Bind an account in Connectors" is now the ONLY path — the
             // ambient/"use global CLI login" opt-in this used to also
             // suggest was retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_
             // 2026_07_20.md §7): it let a credential the app couldn't
             // attribute to any account run indefinitely, invisible to
-            // Armory. Don't point users at a toggle that no longer works.
+            // Connectors. Don't point users at a toggle that no longer works.
             SpawnGateError::MissingCredentials { provider } => write!(
                 f,
                 "no credentials for {}: the bound account was deleted or is \
@@ -139,7 +139,7 @@ pub enum ResolverError {
     OAuthConfigDirNotASecret,
 
     /// The OS keychain read failed (no entry, locked store, or no Secret
-    /// Service agent). Armory API keys (`SecretRef::Keychain`) live
+    /// Service agent). Account API keys (`SecretRef::Keychain`) live
     /// in the OS keychain; this surfaces a resolution failure at spawn.
     #[error("keychain error: {0}")]
     KeychainError(String),

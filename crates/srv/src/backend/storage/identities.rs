@@ -98,7 +98,7 @@ pub enum SecretRef {
     /// **API key / token stored in the OS-native secret store** (macOS
     /// Keychain / Windows Credential Manager / Linux Secret Service),
     /// addressed by `(service, account)`. The plaintext is NEVER held in
-    /// the DB — only this pointer. Written by the Armory key flow
+    /// the DB — only this pointer. Written by the account key flow
     /// after a successful live validation; resolved to the real value at
     /// agent spawn time via `crate::identity::secret_store`. See
     /// docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
@@ -1063,7 +1063,7 @@ mod tests {
     /// `identity_list` must return the good rows and skip the malformed
     /// one — not abort the whole query. This is the actual bug: one
     /// corrupted account made 9 real accounts invisible everywhere
-    /// `identity_list` is called (Armory's account list, boot-time
+    /// `identity_list` is called (Connectors → Accounts' list, boot-time
     /// identity sweep, post-login cache refresh).
     #[test]
     fn identity_list_skips_a_malformed_row_instead_of_failing_the_whole_query() {

@@ -890,7 +890,7 @@ fn the_agents_own_record_is_not_another_agents() {
     assert!(record::held_by_other_records(&f.fs, UID, &[sha]).unwrap().is_empty());
 }
 
-// ── AgentMux's own writes (MemoryWrite, the Armory, revert, import) ─────
+// ── AgentMux's own writes (MemoryWrite, Memory, revert, import) ─────────
 
 /// Recorded with its source, so the next spawn doesn't take it for the
 /// provider's; a new file too.
@@ -900,8 +900,8 @@ fn an_agentmux_write_is_recorded_as_itself_and_the_next_spawn_is_quiet() {
     f.put("notes.md", "v1");
     f.run();
     let dir = f.dir();
-    assert!(record_agentmux_write_in(&f.fs, UID, &dir, "notes.md", b"v2 from the Armory", "armory-ui", "").unwrap());
-    f.put("notes.md", "v2 from the Armory");
+    assert!(record_agentmux_write_in(&f.fs, UID, &dir, "notes.md", b"v2 from Memory", "armory-ui", "").unwrap());
+    f.put("notes.md", "v2 from Memory");
     assert!(record_agentmux_write_in(&f.fs, UID, &dir, "new.md", b"via MemoryWrite", "agent", "").unwrap());
     f.put("new.md", "via MemoryWrite");
     let h = record::history(&f.fs, UID, "notes.md").unwrap();

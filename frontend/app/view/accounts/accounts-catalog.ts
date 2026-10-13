@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Account service catalog — the brands shown as tiles in the Armory
- * Accounts gallery, and which auth paths each offers. Clicking a tile opens a
+ * Account service catalog — the brands shown as tiles in the
+ * Connectors → Accounts gallery, and which auth paths each offers. Clicking a tile opens a
  * chooser of the brand's `authModes`; picking one opens the Add-account form
  * preset to that provider + the matching account kind.
  *

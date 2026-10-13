@@ -11,7 +11,7 @@
  *
  * Two consumers share this module so there is exactly one implementation:
  *   - `MuxBusConnectSection` — the per-agent identity panel (AgentIdentityPanel).
- *   - `AgentMuxConnectPanel` — the Armory → Accounts gallery tile.
+ *   - `AgentMuxConnectPanel` — the Connectors → Accounts gallery tile.
  *
  * The gallery additionally projects the signed-in session into the connected
  * list as a read-only row; that projection lives in `accounts-manager.tsx` and
@@ -206,7 +206,7 @@ function expiryLabel(status: MuxBusStatus | null): string | null {
 
 /**
  * Per-agent identity panel section (unchanged UI). Owns its own controller so
- * the agent panel keeps working independently of the Armory tab.
+ * the agent panel keeps working independently of Connectors → Accounts.
  */
 export const MuxBusConnectSection = (): JSX.Element => {
     const muxbus = useMuxBusStatus();
@@ -277,7 +277,7 @@ export const MuxBusConnectSection = (): JSX.Element => {
 MuxBusConnectSection.displayName = "MuxBusConnectSection";
 
 /**
- * Armory → Accounts gallery connect panel. Renders in the existing
+ * Connectors → Accounts gallery connect panel. Renders in the existing
  * accounts-chooser modal shell (no new SCSS). Uses the controller owned by
  * `AccountsManager` so the tile/row/panel stay in sync.
  */

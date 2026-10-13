@@ -220,7 +220,7 @@ export class BundleViewModel {
 
     /** Re-fetch the full list. Called on mount and after each mutation.
      *  Excludes is_system rows — this is the generic Bundle Manager
-     *  (Armory "Memories" tab), not the dedicated Global Memory system-tier
+     *  (Memory → Bundles), not the dedicated Global Memory system-tier
      *  editor; showing a system entry here would let a human open it and
      *  have any edit silently rejected by bundle_memory_upsert's guard.
      *  reagent P1, PR #2782 — see

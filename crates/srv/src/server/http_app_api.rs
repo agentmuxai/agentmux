@@ -426,8 +426,8 @@ pub(super) struct AgentGlobalMemoryRemoveRequest {
 }
 
 /// `POST /api/v1/agent/globalmemory/remove` — demote a Global Memory entry
-/// (clears `is_global`; the bundle row itself survives, same as the Armory
-/// UI's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
+/// (clears `is_global`; the bundle row itself survives, same as Memory →
+/// Global's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
 pub(super) async fn handle_agent_globalmemory_remove(
     State(state): State<AppState>,
     Json(req): Json<AgentGlobalMemoryRemoveRequest>,

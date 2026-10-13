@@ -58,7 +58,7 @@ fn write_file_req_accepts_an_omitted_provenance() {
     assert!(req.base_sha256.is_none(), "an omitted base means an unconditional write");
 }
 
-// The Armory / Stash editors send the hash of the content their draft
+// The Memory / Stash editors send the hash of the content their draft
 // started from (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
 #[test]
 fn write_file_req_accepts_a_base_sha256() {

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Remotes pane's model (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4).
+// Connectors → Remotes' model (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4).
 // The list is srv's (`remoteslist`), so every Remotes tab shows the same one;
 // this model only fetches it, re-fetches when something changes, and runs the
 // row actions.

@@ -74,7 +74,7 @@ export interface QuickForkModel {
  * `template.rs`'s `forkagentdefinition` handler), conversation history
  * carried forward via `continueSessionId`/`forkSession`.
  *
- * Always inherits the source's own bound Armory account (spec §5, revised
+ * Always inherits the source's own bound account (spec §5, revised
  * 2026-08-22) — sourced via `ListAgentIdentitiesCommand`, filtered to the
  * fork's own canonical effective provider through `lastLinkedAccountId`
  * (NOT a raw `.find()` — `db_agent_identity_links` can hold both a

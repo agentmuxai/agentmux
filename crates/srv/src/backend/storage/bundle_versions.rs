@@ -8,18 +8,18 @@
 //! `docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md` Phase 0 —
 //! Global Memory (`db_bundles`) previously had no audit trail at all, only
 //! `updated_at`; this exists specifically because Global Memory is about to
-//! gain a write path an agent, not just a human at the Armory UI, can reach.
+//! gain a write path an agent, not just a human in Memory, can reach.
 //!
 //! The WRITE side (`bundle_version_insert`, called via
 //! `Store::bundle_upsert_with_version` in `bundles.rs` on every
-//! `globalmemory.write` AND the Armory UI's own `upsertmemory` save path)
+//! `globalmemory.write` AND Memory → Global's own `upsertmemory` save path)
 //! and the READ side (`bundle_version_list`/`bundle_version_get`, called by
 //! `global_memory_history_impl`/`global_memory_diff_impl`/
 //! `global_memory_revert_impl` in `app_api/mod.rs`, backing the
 //! `GlobalMemoryHistory`/`GlobalMemoryDiff`/`GlobalMemoryRevert` MCP tools)
 //! are both wired into the agent-facing MCP surface now — see
 //! `docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md`. No
-//! Armory UI surface for this yet — that remains out of scope (MCP/REST
+//! Memory pane surface for this yet — that remains out of scope (MCP/REST
 //! only, per that spec's own non-goals).
 
 use rusqlite::params;
@@ -45,7 +45,7 @@ pub struct BundleVersion {
     /// (unforgeable, stamped server-side by the caller of
     /// `bundle_upsert_with_version`, never read from caller-supplied
     /// `source`/`source_detail`) or `"armory-ui"` for a write through the
-    /// human-facing Armory editor. Distinct from `source` on purpose
+    /// human-facing Memory editor. Distinct from `source` on purpose
     /// (codex P2, PR #3237): `source` is free-form annotation the caller
     /// can say anything in (an agent could label its own write
     /// `source: "human"`), so it alone cannot answer "who actually made
@@ -54,7 +54,7 @@ pub struct BundleVersion {
     /// Identity M4c-1 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
     /// §6.5.9): the writer's UID beside `written_by`, taken from the
     /// request's `Caller` — its `X-Agent-Token` — never from a body field.
-    /// Empty = unknown: an Unattributed write, the Armory UI, a seeder.
+    /// Empty = unknown: an Unattributed write, the Memory pane, a seeder.
     /// Dual-written; nothing branches on it.
     pub written_by_uid: String,
     pub created_at: i64,

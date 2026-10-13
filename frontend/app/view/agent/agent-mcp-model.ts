@@ -6,7 +6,7 @@
  * AgentStashModal). A reactive, read-only view of the standalone MCP
  * Server primitive (`mcp.*` MuxAPI, crates/srv/src/server/app_api/mcp.rs)
  * plus a Bind/Unbind toggle — NOT a create/edit/delete surface. Global
- * servers are authored in the Armory; this tab lets you choose which of
+ * servers are authored in Connectors → MCP servers; this tab lets you choose which of
  * them apply to this agent.
  *
  * `mcp.catalog.list_for_agent` returns every GLOBAL server (never this
@@ -48,7 +48,7 @@ export class AgentMcpModel {
 
     selectedAtom: Accessor<McpServerListItem | null>;
 
-    // Cross-window reactivity — a bind/unbind or Armory catalog edit made
+    // Cross-window reactivity — a bind/unbind or MCP servers catalog edit made
     // elsewhere (another window, or this same agent's own tool calls)
     // refreshes this view without a manual reopen.
     private unsubChanged: () => void;
