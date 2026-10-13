@@ -6,7 +6,7 @@
  * `AuthState` reducer.
  *
  * Owns one reducer instance + a poll loop. The launch modal calls
- * `select` / `connect` / `cancel` / `submitCallback` / `submitApiKey`
+ * `select` / `connect` / `cancel` / `submitCallback`
  * on the controller; the controller dispatches commands into the
  * reducer and runs RPCs in response to the emitted events. The view
  * subscribes to `state()` for reactive reads.
@@ -54,12 +54,6 @@ export interface AuthRpc {
     poll(sessionId: string): Promise<AuthSessionStatusWire>;
     submitCallback(sessionId: string, callbackUrl: string): Promise<void>;
     cancel(sessionId: string): Promise<void>;
-    submitApiKey(req: {
-        providerId: string;
-        intoBundleId?: string;
-        apiKey: string;
-        accountName: string;
-    }): Promise<{ bundleId: string }>;
 }
 
 const defaultAuthRpc: AuthRpc = {
@@ -87,23 +81,6 @@ const defaultAuthRpc: AuthRpc = {
     },
     async cancel(sessionId) {
         await RpcApi.AuthCancelCommand(TabRpcClient, { sessionId });
-    },
-    async submitApiKey(req) {
-        const r = await RpcApi.AuthSubmitApiKeyCommand(TabRpcClient, req);
-        if (!r.success) {
-            throw new Error(r.error ?? "auth.submitapikey rejected");
-        }
-        // Reagent P1 on #850: until PR C of the spec wires the actual
-        // bundle row creation on the backend, `bundleId` may be
-        // missing on success. Treat that as a failure so the view
-        // surfaces it instead of silently transitioning to `ready`
-        // with an unusable identity reference.
-        if (!r.bundleId) {
-            throw new Error(
-                "auth.submitapikey accepted the key but backend did not return a bundleId (PR C of the spec wires this).",
-            );
-        }
-        return { bundleId: r.bundleId };
     },
 };
 
@@ -163,9 +140,8 @@ export class AuthFlowController {
     /** Monotonically-increasing token incremented on every action that
      *  invalidates an in-flight RPC (selected, cancel, dispose, new
      *  submit). RPC completions check the token at start vs. now —
-     *  stale results are ignored. Codex P2 on #850: prevents a slow
-     *  `auth.submitapikey` completion from landing after the user
-     *  swapped to a different bundle and submitted again. */
+     *  stale results are ignored, so a slow RPC can't land after the
+     *  user swapped to a different bundle (#850). */
     private actionToken = 0;
     private externalDispatch: ((cmd: AuthCommand) => void) | null;
     /** Set only by `cancel()` — an explicit user Cancel click, not any
@@ -452,58 +428,6 @@ export class AuthFlowController {
                 status: { status: "failed", error: errMsg(e) },
             });
             this.stopPolling();
-        }
-    }
-
-    async submitApiKey(apiKey: string, accountName: string): Promise<void> {
-        const s = this.state();
-        // Codex P2 on #850 (round 6): mirror the reducer's
-        // ApiKeySubmitted gate (unauthenticated|expired|failed) so
-        // double-clicks and stale invocations don't double-submit to
-        // the backend nor flip an OAuth waiting flow to ready with a
-        // bundleId from a wrong-state submit.
-        if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
-            return;
-        }
-        // Bump action token + capture so a late completion can detect
-        // that the user already started another submit (codex P2 on #850).
-        this.actionToken += 1;
-        const myToken = this.actionToken;
-        this.dispatch({
-            type: "ApiKeySubmitted",
-            apiKey,
-            accountName,
-        });
-        try {
-            const { bundleId } = await this.rpc.submitApiKey({
-                providerId: s.providerId,
-                intoBundleId: s.intoBundleId || undefined,
-                apiKey,
-                accountName,
-            });
-            if (this.actionToken !== myToken) {
-                // Stale completion: user changed selection or started
-                // another submit while this was in flight. Codex P2
-                // on #850.
-                return;
-            }
-            // API-key flow stays single-phase until backend C-2 lands
-            // (see `auth-state.ts` ApiKeyAccepted comment).
-            this.dispatch({ type: "ApiKeyAccepted", bundleId });
-        } catch (e) {
-            if (this.actionToken !== myToken) {
-                // Stale rejection: a newer submit already succeeded
-                // and moved state to `ready`. Don't clobber it with
-                // this old failure. Reagent P1 on #850 round 4.
-                return;
-            }
-            const synthSessionId = "apikey-submit-failed";
-            this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
-            this.dispatch({
-                type: "Polled",
-                sessionId: synthSessionId,
-                status: { status: "failed", error: errMsg(e) },
-            });
         }
     }
 

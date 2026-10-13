@@ -30,7 +30,15 @@ vi.mock("@/app/store/global", () => ({
     MOS: {
         makeORef: (_t: string, id: string) => id,
         getObjectValue: (id: string) => tabs[id],
-        reloadMuxObject: async (id: string) => tabs[id],
+        // Tabs, workspaces and windows share one id space here (makeORef returns the id).
+        reloadMuxObject: async (id: string) => {
+            if (id === "win-stale") throw new Error("not found: window win-stale");
+            return (
+                tabs[id] ??
+            otherWorkspaces.find((w) => w.workspacedata.oid === id)?.workspacedata ??
+                otherWorkspaces.filter((w) => w.windowid === id).map((w) => ({ workspaceid: w.workspacedata.oid }))[0]
+            );
+        },
     },
     setActiveTab: async (tabId: string) => calls.push(`setActiveTab:${tabId}`),
     getApi: () => ({
@@ -49,12 +57,18 @@ vi.mock("@/app/store/rpc-api", () => ({
             calls.push(`block.reveal:${d.block_id}`);
             return blockReveal(d);
         },
-        WorkspaceListCommand: async () => otherWorkspaces,
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/services", () => ({
-    WorkspaceService: { SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`) },
+    WorkspaceService: {
+        SetActiveTab: async (ws: string, tab: string) => calls.push(`SetActiveTab:${ws}:${tab}`),
+    },
+    // The window list; each window's workspace and its tabs come from MOS (reloadMuxObject above).
+    // A stale id first: session restore can leave one in Client.windowids.
+    ClientService: {
+        GetClientData: async () => ({ windowids: ["win-stale", "win-this", ...otherWorkspaces.map((w) => w.windowid)] }),
+    },
 }));
 
 import { revealBlock, revealBlockLocally, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
@@ -210,7 +224,7 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
 
     it("not found: falls back to activating its tab in the other workspace and raising that window", async () => {
         tabs.t9 = { blockids: ["remote"] };
-        otherWorkspaces = [{ workspacedata: { oid: "ws2", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
+        otherWorkspaces = [{ workspacedata: { oid: "ws2", name: "", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
         await revealBlock("remote");
         expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
     });
@@ -220,7 +234,7 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
             throw new Error("unknown command block.reveal");
         };
         tabs.t9 = { blockids: ["remote"] };
-        otherWorkspaces = [{ workspacedata: { oid: "ws2", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
+        otherWorkspaces = [{ workspacedata: { oid: "ws2", name: "", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         await revealBlock("remote");
         warn.mockRestore();

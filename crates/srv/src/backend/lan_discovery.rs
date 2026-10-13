@@ -229,20 +229,20 @@ pub struct LanInstance {
     #[serde(skip_serializing, default)]
     pub auth_key: String,
     pub agents: Vec<String>,
-    /// Each listed agent's state as the peer reported it, by lower-cased name
-    /// (`lan_discovery/agent_names.rs`). Self-reported, for the Swarm's status chip only.
+    /// Each listed agent's state and summary line as the peer reported them, by
+    /// lower-cased name (`lan_discovery/agent_names.rs`). Self-reported, for the Swarm.
     #[serde(default)]
     pub agent_status: BTreeMap<String, AgentState>,
+    #[serde(default)]
+    pub agent_lines: BTreeMap<String, String>,
     pub first_seen: u64,
     pub last_seen: u64,
-    /// Unix seconds of the last successful agent-name poll of this peer
-    /// (`agent_names_refresh_loop`), 0 for never. The Swarm judges liveness by
-    /// the later of this and `last_seen`, which moves only on an mDNS re-resolve.
+    /// Unix seconds of the last answered agent-name poll, 0 for never. The Swarm
+    /// judges liveness by the later of this and `last_seen` (mDNS re-resolves only).
     #[serde(default)]
     pub last_polled_ok: u64,
-    /// This peer's own advertised PTR/TXT record TTL (seconds), captured from
-    /// `ServiceInfo::get_other_ttl()` at the most recent `ServiceResolved`.
-    /// Drives `peer_staleness_window_secs` — see its doc comment.
+    /// This peer's advertised PTR/TXT record TTL (seconds) at its latest
+    /// `ServiceResolved` (`get_other_ttl()`); drives `peer_staleness_window_secs`.
     pub other_ttl_secs: u32,
 }
 
@@ -1178,6 +1178,7 @@ impl LanDiscovery {
                     auth_key: auth_key.clone(),
                     agents: Vec::new(),
                     agent_status: Default::default(),
+                    agent_lines: Default::default(),
                     first_seen: now,
                     last_seen: now,
                     last_polled_ok: 0,
@@ -1236,15 +1237,13 @@ impl LanDiscovery {
                 self.broadcast_instances();
             }
             ServiceEvent::ServiceRemoved(_, fullname) => {
-                // Deliberately NOT deleted from `self.instances` here — see
-                // `peer_staleness_window_secs`. This event is too unreliable
-                // to trust as "the peer is actually gone": a real departure
-                // and ordinary TTL/interface churn look identical on the
-                // wire, and eagerly removing throws away last-known-good TXT
-                // fields that a post-removal re-resolution (almost always
-                // blank-TXT) can never restore. `get_instances()` prunes on
-                // `last_seen` age instead, which only advances on an actual
-                // `ServiceResolved`.
+                // Deliberately NOT deleted from `self.instances` here (see
+                // `peer_staleness_window_secs`): a real departure and ordinary
+                // TTL/interface churn look identical on the wire, and removing
+                // throws away last-known-good TXT fields that a post-removal
+                // re-resolution (almost always blank-TXT) can never restore.
+                // `get_instances()` prunes on `last_seen` age instead, which
+                // only advances on an actual `ServiceResolved`.
                 tracing::debug!(
                     fullname = %fullname,
                     "mDNS ServiceRemoved received (not acted on; peer expires via last_seen staleness instead)"
@@ -3008,6 +3007,7 @@ mod peer_fanout_tests {
             auth_key: "k".into(),
             agents: vec![],
             agent_status: Default::default(),
+            agent_lines: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,

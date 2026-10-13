@@ -16,6 +16,7 @@
  */
 
 import type { PaneRowAction } from "../components/PaneRow";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /** Handlers the pane wires to the recovery actions. */
 export interface FailureActions {

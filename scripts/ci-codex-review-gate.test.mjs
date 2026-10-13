@@ -12,6 +12,7 @@ import {
     isDependencyBotPr,
     isDocsOnlyPath,
     latestCodexOutput,
+    needsDiffSince,
     reviewedCommit,
     SKIP_AUTHOR,
     skippedHead,
@@ -287,12 +288,31 @@ describe("carrying an OK across a docs-only diff", () => {
     });
 
     it("never carries findings forward as an OK", () => {
+        // Only docs since: nothing will ask Codex again, so the fix is owed.
         const r = evaluateCodexGate({
             headSha: HEAD,
             reviews: [findingsReview(OLD)],
             filesSinceLatest: ["docs/notes.md"],
         });
+        expect(r.state).toBe("failure");
+        expect(r.description).toContain(OLD.slice(0, 10));
+        expect(r.description).toMatch(/codex re-review/);
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("waits, naming the findings, when code changed since findings on an earlier head", () => {
+        // muxreview asks about any code change once it approves, flagged file
+        // or not.
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [findingsReview(OLD)],
+            filesSinceLatest: ["src/caller.rs"],
+        });
         expect(r.state).toBe("pending");
+        expect(r.description).toContain(OLD.slice(0, 10));
+        expect(r.description).toContain(HEAD.slice(0, 10));
+        expect(r.description).toMatch(/once it approves/);
+        expect(r.description.length).toBeLessThanOrEqual(140);
     });
 
     it("does not carry an OK that later findings superseded", () => {
@@ -302,7 +322,7 @@ describe("carrying an OK across a docs-only diff", () => {
             reviews: [findingsReview(OLD, "2026-09-23T06:00:00Z")],
             filesSinceLatest: ["docs/notes.md"],
         });
-        expect(r.state).toBe("pending");
+        expect(r.state).toBe("failure");
     });
 });
 
@@ -353,13 +373,13 @@ describe("findings only on docs", () => {
             "failure",
         );
         const carried = { headSha: HEAD, reviews: [reviewWithId(11, OLD)], reviewComments, filesSinceLatest: ["docs/a.md"] };
-        expect(evaluateCodexGate(carried).state).toBe("pending");
+        expect(evaluateCodexGate(carried).state).toBe("failure");
     });
 
     it("treats findings with no known files as before (fail safe)", () => {
         expect(evaluateCodexGate({ headSha: HEAD, reviews: [reviewWithId(11, HEAD)] }).state).toBe("failure");
         const carried = { headSha: HEAD, reviews: [reviewWithId(11, OLD)], filesSinceLatest: ["docs/a.md"] };
-        expect(evaluateCodexGate(carried).state).toBe("pending");
+        expect(evaluateCodexGate(carried).state).toBe("failure");
     });
 
     it("only counts inline comments from that review", () => {
@@ -382,7 +402,7 @@ describe("findings only on docs", () => {
             reviewComments: [inline(10, "docs/a.md"), inline(11, "src/lib.rs")],
             filesSinceLatest: ["docs/a.md"],
         });
-        expect(r.state).toBe("pending");
+        expect(r.state).toBe("failure");
     });
 });
 
@@ -565,5 +585,19 @@ describe("dependency bot PRs", () => {
 
     it("without the flag the same PR still waits", () => {
         expect(evaluateCodexGate({ headSha: HEAD }).state).toBe("pending");
+    });
+});
+
+describe("needsDiffSince", () => {
+    it("fetches the diff for an OK or any findings on an earlier commit", () => {
+        expect(needsDiffSince({ kind: "ok", sha: OLD.slice(0, 10) }, HEAD)).toBe(true);
+        // Code findings too: with only docs since, the gate fails instead of waiting.
+        expect(needsDiffSince({ kind: "findings", sha: OLD.slice(0, 10), files: new Set(["src/a.rs"]) }, HEAD)).toBe(true);
+    });
+
+    it("skips it for the head itself, a quota answer, or no answer", () => {
+        expect(needsDiffSince({ kind: "findings", sha: HEAD.slice(0, 10) }, HEAD)).toBe(false);
+        expect(needsDiffSince({ kind: "quota", sha: OLD.slice(0, 10) }, HEAD)).toBe(false);
+        expect(needsDiffSince(null, HEAD)).toBe(false);
     });
 });

@@ -1,22 +1,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// RPC bindings. `generated.ts` (`GeneratedApi`) is generated from srv's typed
-// commands by scripts/gen-rpc-stubs.mjs; the domain files hold the stubs not
-// moved there yet, still hand-maintained against the agentmux-srv RPC
-// handlers (backend/rpc_types/, server/websocket.rs). To move one, add it to
-// generated-manifest.json, delete its method here, and run the generator.
-//
-// This module was split from a single ~1,454-line rpc-api file into domain
-// files. `RpcApi` is composed here from the per-domain partials; its public
-// shape, method names, signatures, and call syntax (`RpcApi.SomeMethod(...)`)
-// are identical to the original single-object export. None of the methods use
-// `this`, so composing them into one plain object is behaviour-preserving.
+// RPC bindings. Every stub is in `generated.ts` (`GeneratedApi`), generated
+// from srv's typed commands by scripts/gen-rpc-stubs.mjs; to add one, list it
+// in generated-manifest.json and run the generator. The domain files only
+// re-export the request/response types under their historical names.
 
 import { GeneratedApi } from "./generated";
-import { IdentityApi } from "./identity";
-
-import { WorkspaceApi } from "./workspace";
 
 export type {
     AgentConfigFile,
@@ -282,9 +272,4 @@ export type {
     ToolStatusEntry,
 } from "./workspace";
 
-// WshServerCommandToDeclMap
-export const RpcApi = {
-    ...WorkspaceApi,
-    ...IdentityApi,
-    ...GeneratedApi,
-};
+export const RpcApi = GeneratedApi;

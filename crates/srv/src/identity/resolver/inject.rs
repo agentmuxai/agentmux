@@ -935,13 +935,7 @@ pub fn inject_identity_env_with_broker(
                                 // column without a reload — the account
                                 // row itself is what changed.
                                 if let Some(b) = broker.as_ref() {
-                                    b.publish(MuxEvent {
-                                        event: "identityaccounts:changed".to_string(),
-                                        scopes: vec![],
-                                        sender: String::new(),
-                                        persist: 0,
-                                        data: None,
-                                    });
+                                    b.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                                 }
                             }
                             Err(e) => {

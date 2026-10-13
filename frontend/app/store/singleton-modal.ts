@@ -68,6 +68,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { subscribeLauncherEvent } from "@/util/launcher-events";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 /** MPS event name carrying singleton claim/release broadcasts. */
 const EVENT_SINGLETON_CLAIM = WpsEvent.SingletonClaim;
 

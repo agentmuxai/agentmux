@@ -41,6 +41,8 @@ import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResul
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
+import type { BlockStatsDetail } from "@/types/rpc/BlockStatsDetail";
+import type { BlockStatsDetailReq } from "@/types/rpc/BlockStatsDetailReq";
 import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
 import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
 import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
@@ -152,6 +154,8 @@ import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeM
 import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
 import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNativeMemoryWriteFileData";
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
+import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
+import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
 import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
@@ -297,6 +301,7 @@ import type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 import type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
 import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 import type { NamedAgentRow } from "@/types/rpc/NamedAgentRow";
 import type { NativeMemoryAdoptionListResult } from "@/types/rpc/NativeMemoryAdoptionListResult";
 import type { NativeMemoryClaimList } from "@/types/rpc/NativeMemoryClaimList";
@@ -316,6 +321,7 @@ import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivatio
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
@@ -1622,6 +1628,14 @@ export const GeneratedApi = {
   OpenInShellCommand(client: RpcClient, data: OpenInShellReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("openinshell", data, opts);
   },
+  // command "pane.open"
+  PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
+    return client.rpcCall("pane.open", data, opts);
+  },
+  // command "pane.moveTab"
+  PaneMoveTabCommand(client: RpcClient, data: CommandPaneMoveTabData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("pane.moveTab", data, opts);
+  },
   // command "layout.open"
   OpenLayoutCommand(client: RpcClient, data: CommandLayoutOpenData, opts?: RpcOpts): Promise<LayoutOpenResult> {
     return client.rpcCall("layout.open", data, opts);
@@ -1990,6 +2004,10 @@ export const GeneratedApi = {
   // command "tooldecision"
   ToolDecisionCommand(client: RpcClient, data: CommandToolDecisionData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("tooldecision", data, opts);
+  },
+  // command "blockstats.detail"
+  BlockStatsDetailCommand(client: RpcClient, data: BlockStatsDetailReq, opts?: RpcOpts): Promise<BlockStatsDetail> {
+    return client.rpcCall("blockstats.detail", data, opts);
   },
   // command "tower.forget"
   TowerForgetCommand(client: RpcClient, data: TowerForgetReq, opts?: RpcOpts): Promise<TowerPeersResult> {

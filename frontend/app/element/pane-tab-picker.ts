@@ -38,9 +38,7 @@ export function openPaneTabWidgetPicker(
      *  knowledge of any view type. */
     newTabMeta?: (view: string | undefined) => Record<string, unknown> | undefined
 ): void {
-    const wmap = atoms.fullConfigAtom()?.widgets ?? {};
-    const settings = atoms.fullConfigAtom()?.settings ?? {};
-    const items = buildPaneWidgetMenuItems(wmap, settings, (blockDef) => {
+    const onSelect = (blockDef: BlockDef) => {
         // Surfaced rather than swallowed — `handleNewAgentTab` (the agent
         // pane's own former "+") already did this for a failed `pane.open`,
         // and folding it in here means the eight other pane types that
@@ -56,6 +54,10 @@ export function openPaneTabWidgetPicker(
                 expiration: Date.now() + 8000,
             });
         });
-    });
-    ContextMenuModel.showContextMenu(items, e);
+    };
+    // Live: `build` reads the widget config, so the open picker follows a widget being hidden,
+    // shown or added (SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md).
+    const build = () =>
+        buildPaneWidgetMenuItems(atoms.fullConfigAtom()?.widgets ?? {}, atoms.fullConfigAtom()?.settings ?? {}, onSelect);
+    ContextMenuModel.showLiveContextMenu(build, e);
 }

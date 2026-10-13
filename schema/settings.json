@@ -66,6 +66,10 @@
         "term:shiftenternewline": {
           "type": "boolean"
         },
+        "browser:searchsuggestions": {
+          "type": "boolean",
+          "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit. Off: suggestions come only from this computer (history, typed addresses)."
+        },
         "keybindings": {
           "type": "array",
           "description": "Your own keyboard shortcuts, applied over the defaults. Each entry: {\"key\": \"ctrl+shift+e\", \"command\": \"split:right\"}. A command starting with - unbinds it: {\"command\": \"-tab:new\"} removes every key, or add \"key\" to remove one. Optional \"when\" (e.g. \"!terminalFocus\") and \"platform\" (\"mac\" or \"other\"). Command ids are listed in the keyboard shortcuts help.",
@@ -150,6 +154,16 @@
         "widget:icononly": {
           "type": "boolean"
         },
+        "widget:pinned": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The widget bar's pinned icons, in order, as short names (\"agent\" for defwidget@agent). Absent means the fresh-install default."
+        },
+        "widget:hidden": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Widget-bar entries hidden from the bar, More and the pane + picker, as full keys (\"defwidget@drone\"). Set in Settings > Widgets. See docs/specs/SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md."
+        },
         "statusbar:showmuxbuscloud": {
           "type": "boolean",
           "description": "Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in the host menu. Default true (absent means shown); set false to hide both. LAN discovery is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md."
@@ -163,6 +177,11 @@
           "type": "boolean",
           "default": true,
           "description": "Publish this computer to my devices: while signed in to MuxBus Cloud, tell the cloud this computer is online so your signed-in devices can list it from anywhere. Default true; set false to stop, which also tells the cloud this computer went offline. Dev builds, headless installs, isolated homes and test harnesses never publish, whatever this says."
+        },
+        "swarm:sharesummaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Share what my agents are working on: other AgentMux instances on this computer and on the local network show each agent's summary line in their Swarm, from GET /agentmux/reactive/agent-names (readable with the LAN key). Default true (absent means on); set false to share status only."
         },
         "window:*": {
           "type": "boolean"

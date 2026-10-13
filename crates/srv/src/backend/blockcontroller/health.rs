@@ -301,6 +301,15 @@ enum PassStart {
     CliWake,
 }
 
+/// The `agentturn` event's payload (`mps_events::AgentTurn`): the ledger, and its pane.
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentTurnEvent {
+    pub block_id: String,
+    #[serde(flatten)]
+    pub ledger: TurnLedger,
+}
+
 /// Called with the ledger after every change, outside the tracker's lock.
 pub type TurnLedgerPublisher = Arc<dyn Fn(&TurnLedger) + Send + Sync>;
 
@@ -314,17 +323,8 @@ pub type TurnLedgerPublisher = Arc<dyn Fn(&TurnLedger) + Send + Sync>;
 pub fn ledger_publisher(broker: Arc<crate::backend::mps::Broker>, block_id: String) -> TurnLedgerPublisher {
     let latest_seq = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let publish = Arc::new(move |ledger: &TurnLedger| {
-        let mut data = serde_json::to_value(ledger).unwrap_or_default();
-        if let Some(obj) = data.as_object_mut() {
-            obj.insert("block_id".into(), serde_json::Value::String(block_id.clone()));
-        }
-        broker.publish(crate::backend::mps::MuxEvent {
-            event: crate::backend::mps::EVENT_AGENT_TURN.to_string(),
-            scopes: vec![format!("block:{block_id}")],
-            sender: String::new(),
-            persist: 1,
-            data: Some(data),
-        });
+        let payload = AgentTurnEvent { block_id: block_id.clone(), ledger: ledger.clone() };
+        broker.publish_event::<crate::backend::mps_events::AgentTurn>(&payload, vec![format!("block:{block_id}")], 1);
     });
     Arc::new(move |ledger: &TurnLedger| {
         latest_seq.store(ledger.seq, std::sync::atomic::Ordering::SeqCst);

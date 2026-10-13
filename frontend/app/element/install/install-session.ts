@@ -14,7 +14,7 @@
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 
 import type { InstallFailure, InstallStep, LineTone, StepTracker } from "./install-types";
 
@@ -24,15 +24,6 @@ export type InstallState = "idle" | "running" | "done" | "failed";
 export interface LogLine {
     text: string;
     tone: LineTone;
-}
-
-/** An `install_chunk` event payload: a log line, or the final `done`. */
-interface InstallChunk {
-    line?: string;
-    stream?: "stdout" | "stderr";
-    op?: "done";
-    ok?: boolean;
-    error?: unknown;
 }
 
 // Frontend view cap (spec §4.2). The backend keeps the complete log.
@@ -187,20 +178,16 @@ export function createInstallSession(opts: InstallSessionOptions): InstallSessio
             return;
         }
         setSessionId(sid);
-        unsub = muxEventSubscribe({
-            eventType: WpsEvent.InstallChunk,
-            scope: `install:${sid}`,
-            handler: (event: { data?: InstallChunk }) => {
-                const data = event?.data;
-                if (!data || typeof data !== "object" || state() !== "running") return;
-                if (typeof data.line === "string") {
-                    append(data.line, tracker?.line(data.line, now()) ?? "normal");
-                    sync();
-                } else if (data.op === "done") {
-                    finish(!!data.ok, data.error ?? "install failed");
-                }
-            },
-        });
+        // A log line, or the final `done`.
+        unsub = onMuxEvent(WpsEvent.InstallChunk, (data) => {
+            if (state() !== "running") return;
+            if ("line" in data) {
+                append(data.line, tracker?.line(data.line, now()) ?? "normal");
+                sync();
+            } else {
+                finish(data.ok, data.error ?? "install failed");
+            }
+        }, `install:${sid}`);
     };
 
     const cancel = async () => {

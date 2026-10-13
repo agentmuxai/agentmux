@@ -10,12 +10,18 @@ const setBlockMeta = vi.hoisted(() => vi.fn<(blockId: string, meta: Record<strin
 vi.mock("@/app/store/block-meta", () => ({ setBlockMeta }));
 // The `agentcontextusage` subscription: the test plays srv's part.
 const usageHandlers = vi.hoisted(() => [] as ((event: unknown) => void)[]);
-vi.mock("@/app/store/mps", () => ({
-    muxEventSubscribe: (sub: { eventType: string; handler: (event: unknown) => void }) => {
-        if (sub.eventType === "agentcontextusage") usageHandlers.push(sub.handler);
-        return () => {};
-    },
-}));
+vi.mock("@/app/store/mps", () => {
+    const mock = {
+        muxEventSubscribe: (sub: { eventType: string; handler: (event: unknown) => void }) => {
+            if (sub.eventType === "agentcontextusage") usageHandlers.push(sub.handler);
+            return () => {};
+        },
+    };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        mock.muxEventSubscribe({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 
 import { useContextMeter } from "./useContextReading";
 

@@ -16,7 +16,7 @@ use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigState;
-use crate::backend::mps::{Broker, MuxEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
+use crate::backend::mps::Broker;
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
@@ -1090,6 +1090,9 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
     #[cfg(target_os = "windows")]
     let mut last_urgent_attribution: Option<Instant> = None;
 
+    // Each pane badge's highest memory, for its tooltip.
+    let mut peaks = crate::backend::blockstats_detail::Peaks::default();
+
     let mut current_interval = get_interval_secs(&config_watcher);
     let mut ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1191,19 +1194,12 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
 
         let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
 
-        let event = MuxEvent {
-            event: EVENT_SYS_INFO.to_string(),
-            scopes: vec![conn_name.clone()],
-            sender: String::new(),
-            persist: PERSIST_COUNT,
-            data: serde_json::to_value(&ts_data).ok(),
-        };
-
-        broker.publish(event);
+        broker.publish_event::<crate::backend::mps_events::SysInfo>(&ts_data, vec![conn_name.clone()], PERSIST_COUNT);
 
         // Per-pane process tree metrics: aggregate CPU/mem across each block's
         // shell process and all its descendants.
         let block_pids = pidregistry::get_all();
+        peaks.retain(|id| block_pids.iter().any(|(b, _)| b == id));
         if !block_pids.is_empty() {
             // Pass 1: cheap minimal refresh of all processes to populate parent()
             // links. ProcessRefreshKind::nothing() skips CPU/mem — just PID/PPID.
@@ -1279,6 +1275,9 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
                 block_values.insert("cpu".to_string(), total_cpu);
                 block_values.insert("mem".to_string(), total_mem as f64);
                 block_values.insert("pids".to_string(), live_count as f64);
+                let started = sys.process(root_pid).map_or(0, |p| p.start_time());
+                let peak = peaks.observe(block_id, (root_pid.as_u32(), started), total_mem);
+                block_values.insert("mem:peak".to_string(), peak as f64);
 
                 let block_ts = TimeSeriesData {
                     ts: now,
@@ -1286,14 +1285,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
                     // Per-block process stats, not the backend's own uptime.
                     uptime_secs: None,
                 };
-                let block_event = MuxEvent {
-                    event: EVENT_BLOCK_STATS.to_string(),
-                    scopes: vec![format!("block:{}", block_id)],
-                    sender: String::new(),
-                    persist: 0,
-                    data: serde_json::to_value(&block_ts).ok(),
-                };
-                broker.publish(block_event);
+                broker.publish_event::<crate::backend::mps_events::BlockStats>(&block_ts, vec![format!("block:{block_id}")], 0);
             }
 
             for block_id in &dead_block_ids {

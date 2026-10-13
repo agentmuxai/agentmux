@@ -42,7 +42,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { makeORef } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
@@ -280,14 +280,9 @@ export class EditorViewModel {
 
         // Live-reload: one subscription per pane, scoped to this block.
         // Fires when a path open in one of this pane's tabs changes on disk.
-        this._unsubFileChanged = muxEventSubscribe({
-            eventType: WpsEvent.EditorFileChanged,
-            scope: makeORef("block", blockId),
-            handler: (event) => {
-                const path = (event as any)?.data?.path as string | undefined;
-                if (path) void this._handleExternalFileChanged(path);
-            },
-        });
+        this._unsubFileChanged = onMuxEvent(WpsEvent.EditorFileChanged, (data) => {
+                if (data.path) void this._handleExternalFileChanged(data.path);
+            }, makeORef("block", blockId));
 
         // Pane-reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
         // Part 2): reactively drains META_PENDING_OPEN_FILES whenever the
@@ -1212,15 +1207,14 @@ export class EditorViewModel {
     /** Open the folder in a terminal pane (split right of the current pane). */
     async openInTerminal(folderPath: string): Promise<void> {
         try {
-            // pane.open is a raw RPC — no typed wrapper exists yet in RpcApi.
-            await TabRpcClient.rpcCall("pane.open", {
+            await RpcApi.PaneOpenCommand(TabRpcClient, {
                 view: "term",
                 cwd: folderPath,
                 split_direction: "right",
                 split_reference_block_id: this.blockId,
             }, {});
         } catch {
-            // pane.open might not be registered yet — fail silently.
+            // Opening beside is best-effort: fail silently.
         }
     }
 
@@ -1230,14 +1224,14 @@ export class EditorViewModel {
      *  docs/specs/SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md. */
     async openToTheSide(filePath: string): Promise<void> {
         try {
-            await TabRpcClient.rpcCall("pane.open", {
+            await RpcApi.PaneOpenCommand(TabRpcClient, {
                 view: "editor",
                 file: filePath,
                 split_direction: "right",
                 split_reference_block_id: this.blockId,
             }, {});
         } catch {
-            // pane.open might not be registered yet — fail silently, same as openInTerminal.
+            // Best-effort, same as openInTerminal.
         }
     }
 

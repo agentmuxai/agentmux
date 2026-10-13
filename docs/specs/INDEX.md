@@ -399,6 +399,7 @@ partial list.
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
+| [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22`](SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md) | Selecting a pane should focus its input — not just opening one |
 | [`SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19`](SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) | SPEC + PLAN: Pane Tab Drag-and-Drop — reorder, cross-pane move, tear-off-to-floating-pane, and reserved whole-pane-drag space |
 | [`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24`](SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md) | SPEC: Pane Tab drag — Window-Tab-style landing flash on the destination, moving a pane's last tab closes that pane, and removing `pane:tabstrip = "multi-only"` |
@@ -470,6 +471,7 @@ partial list.
 | [`SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04`](SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) | Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs) |
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
+| [`SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12`](SPEC_TERMINAL_STATS_BADGE_REMOTE_PANES_2026_10_12.md) | The terminal stats badge on SSH and WSL panes: the remote shell's figures, not the local client's |
 | [`SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30`](SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md) | SPEC: Remove the terminal Stage-1 RAF write-coalescer (double-rAF) |
 | [`SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15`](SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md) | SPEC: Typing `exit` in a terminal pane doesn't close it — instead the shell respawns and appears to loop |
 | [`SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07`](SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md) | SPEC: Frosted-glass backdrop for the terminal pane tab strip |
@@ -521,6 +523,7 @@ partial list.
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_COMPILE_GATE_2026_10_09`](PLAN_MACOS_COMPILE_GATE_2026_10_09.md) | Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
+| [`PLAN_RENDERER_MEMORY_FIXES_2026_10_12`](PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md) | Plan: renderer memory fixes, in ROI order |
 | [`PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10`](PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md) | Plan — every shortcut in the Help pane works on every platform, and agents can drive them |
 | [`PLAN_SHORTCUT_KINKS_2026_10_10`](PLAN_SHORTCUT_KINKS_2026_10_10.md) | Plan — ironing out the kinks found while verifying the shortcuts |
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
@@ -603,6 +606,7 @@ partial list.
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
+| [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
 | [`SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30`](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown |
@@ -643,15 +647,18 @@ partial list.
 | [`SPEC_TEAROFF_PAINT_LATENCY_2026_09_30`](SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md) | SPEC: Tear-off paint latency: show the torn-off content as fast as the window |
 | [`SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16`](SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md) | SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring |
 | [`SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17`](SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17.md) | SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle |
+| [`SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12`](SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md) | Spec: a collapsed tool panel lets go of its body |
 | [`SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26`](SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md) | Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row |
 | [`SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03`](SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md) | Spec: Scroll Chaining for Nested Tool-Preview Regions |
 | [`SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07`](SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md) | Top bar: widget labels drop before tabs shrink |
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
+| [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
+| [`SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12`](SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md) | Widget bar visibility in Settings: pin, keep in More, or hide |
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
@@ -713,6 +720,7 @@ partial list.
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
 | [`SPEC_DOCS_CLEANUP_AUDIT_2026_08_22`](SPEC_DOCS_CLEANUP_AUDIT_2026_08_22.md) | SPEC — Docs cleanup audit: what's stale, duplicated, or mis-shelved |
 | [`SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27`](SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md) | SPEC: Drag and drop: audit, one facility, one drop indicator |
+| [`SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13`](SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md) | Drag space in the window and pane headers: does it need a grip? |
 | [`SPEC_EARLY_ALPHA_WARNING_2026_06_05`](SPEC_EARLY_ALPHA_WARNING_2026_06_05.md) | SPEC: Early Alpha Warning — README & Microsoft Store Partner Center |
 | [`SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21`](SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21.md) | SPEC — Editor Markdown Live Preview Panel |
 | [`SPEC_ERROR_COPY_EVERYWHERE_2026_09_24`](SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md) | SPEC: every error surface can be copied, errors and traces in one click |
@@ -1013,7 +1021,6 @@ partial list.
 | [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30`](SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md) | SPEC: Pane Icon and Text Visibility Pass |
 | [`SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05`](SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md) | Spec (v2) — Floating-pane drag — host-side manual loop |
-| [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PERSISTENT_SHELL_NODE_2026_06_11`](SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md) | SPEC: Persistent Shell Node in the Agent Pane |
 | [`SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14`](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | SPEC: Persistent Shell Node — Phase 3 (Stop / Lifecycle) |
 | [`SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01`](SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md) | SPEC: Phase E.4 — Layout reducer migration |

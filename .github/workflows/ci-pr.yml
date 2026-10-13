@@ -748,6 +748,11 @@ jobs:
       - name: generated RPC stubs are current
         if: matrix.shard == 1
         run: node scripts/gen-rpc-stubs.mjs --check
+      # frontend/app/store/mps-events.generated.ts (typed broker events), from
+      # event-schema.json; also fails a typed event subscribed without onMuxEvent.
+      - name: generated broker event types are current
+        if: matrix.shard == 1
+        run: node scripts/gen-mux-events.mjs --check
       # npm dependencies match the imports (#4207 S2, the npm half of the
       # cargo machete gate): fails on an unused dependency, or on an import
       # that only resolves because npm hoisted someone else's dependency.

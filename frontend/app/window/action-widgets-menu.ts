@@ -14,6 +14,7 @@
 
 import { hostHas } from "@/app/host/host-caps";
 import { openViewInNewTab } from "@/app/tab/tab-presets";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
 import { inheritAppearanceInto } from "@/app/store/window-appearance";
@@ -55,7 +56,7 @@ export function buildWidgetOpenActions(
             label: "Open in Floating Pane",
             run: () =>
                 fireAndForget(async () =>
-                    TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true }, {})
+                    RpcApi.PaneOpenCommand(TabRpcClient, { view, meta: blockMeta, floating: true }, {})
                 ),
         },
         inNewTab,

@@ -20,18 +20,21 @@ use crate::backend::remote::conn::SshDest;
 use crate::backend::remote::{askpass, link, ssh};
 use crate::backend::storage::filestore::FileStore;
 
-/// The pane's `ssh` (`ssh_path`) to `dest`, running `cmd` (`cmd_args`) in
-/// `cwd` there, sharing the channel's connection to it. `askpass_secret`: an
-/// agent's SSH shell, whose every ssh prompt goes to the user through the
-/// askpass bridge, never into this terminal, which the agent reads.
+/// Pane `block_id`'s `ssh` (`ssh_path`) to `dest`, running `cmd`
+/// (`cmd_args`) in `cwd` there, sharing the channel's connection to it.
+/// `askpass_secret`: an agent's SSH shell, whose every ssh prompt goes to the
+/// user through the askpass bridge, never into this terminal, which the agent
+/// reads.
 pub(super) fn command(
     ssh_path: &Path,
     dest: &SshDest,
     (cmd, cmd_args, cwd): (&str, &[String], &str),
     askpass_secret: Option<&str>,
     auth_key: &str,
+    block_id: &str,
 ) -> CommandBuilder {
-    let args = ssh::launch(dest, cmd, cmd_args, cwd, ssh::shared_control_dir().as_deref());
+    let mut args = ssh::launch(dest, cmd, cmd_args, cwd, ssh::shared_control_dir().as_deref());
+    ssh::set_pane_env(&mut args, block_id);
     tracing::info!(dest = %dest.destination, args = ?args, "ssh spawn path");
     let mut c = CommandBuilder::new(ssh_path);
     c.args(args.iter().map(String::as_str));

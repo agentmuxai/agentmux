@@ -21,7 +21,7 @@ import { allConnStatus } from "./conn-status";
 import { flashErrors, notificationPopoverMode, notifications, pushNotification } from "./flash-notifications";
 import { openModal } from "./modalmodel";
 import * as MOS from "./mos";
-import { getFileSubject, muxEventSubscribe } from "./mps";
+import { getFileSubject, muxEventSubscribe, onMuxEvent } from "./mps";
 import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
 import {
     activeTabId,
@@ -37,6 +37,7 @@ import {
     workspace,
 } from "./window-identity";
 import { reconnectWS } from "./ws";
+import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 
 // ---------------------------------------------------------------------------
 // Global signals (replace Jotai atoms)
@@ -246,14 +247,12 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 }
 
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
+    onMuxEvent(WpsEvent.MuxObjUpdate, (update) => MOS.updateMuxObject(update));
+    onMuxEvent(WpsEvent.BlockFile, (fileData) => {
+        const fileSubject = getFileSubject(fileData.zoneid, fileData.filename);
+        if (fileSubject != null) fileSubject.next(fileData);
+    });
     muxEventSubscribe(
-        {
-            eventType: WpsEvent.MuxObjUpdate,
-            handler: (event) => {
-                const update: MuxObjUpdate = event.data;
-                MOS.updateMuxObject(update);
-            },
-        },
         {
             eventType: WpsEvent.MuxObjBatchedUpdates,
             handler: (event) => {
@@ -280,14 +279,6 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 openModal(UserInputModal, { ...data });
             },
             scope: initOpts.windowId,
-        },
-        {
-            eventType: WpsEvent.BlockFile,
-            handler: (event) => {
-                const fileData: WSFileEventData = event.data;
-                const fileSubject = getFileSubject(fileData.zoneid, fileData.filename);
-                if (fileSubject != null) fileSubject.next(fileData);
-            },
         },
         {
             eventType: WpsEvent.LanInstances,

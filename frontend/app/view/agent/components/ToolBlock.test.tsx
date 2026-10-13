@@ -13,11 +13,12 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ToolBlock } from "./ToolBlock";
 import type { ToolNode } from "../types";
+import { ToolBlock } from "./ToolBlock";
+import { BODY_LINGER_MS } from "./body-mount";
 
 afterEach(() => {
     cleanup();
@@ -35,9 +36,7 @@ const baseTool: ToolNode = {
 
 describe("ToolBlock — panel mode", () => {
     it("collapsed (default success) → panel has `--hidden` class", () => {
-        const { container } = render(() => (
-            <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />);
         const panel = container.querySelector(".agent-tool-panel");
         expect(panel).not.toBeNull();
         expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(true);
@@ -45,9 +44,7 @@ describe("ToolBlock — panel mode", () => {
     });
 
     it("pinned → panel is in-flow (`--flow`)", () => {
-        const { container } = render(() => (
-            <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />);
         const panel = container.querySelector(".agent-tool-panel");
         expect(panel).not.toBeNull();
         expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
@@ -56,9 +53,7 @@ describe("ToolBlock — panel mode", () => {
 
     it("running (auto-expanded) → panel is in-flow (`--flow`)", () => {
         const running: ToolNode = { ...baseTool, status: "running" };
-        const { container } = render(() => (
-            <ToolBlock node={running} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={running} pinned={false} onTogglePin={() => {}} />);
         const panel = container.querySelector(".agent-tool-panel");
         expect(panel).not.toBeNull();
         expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
@@ -66,9 +61,7 @@ describe("ToolBlock — panel mode", () => {
 
     it("pending_approval (auto-expanded) → panel is in-flow", () => {
         const pending: ToolNode = { ...baseTool, status: "pending_approval" };
-        const { container } = render(() => (
-            <ToolBlock node={pending} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={pending} pinned={false} onTogglePin={() => {}} />);
         const panel = container.querySelector(".agent-tool-panel");
         expect(panel).not.toBeNull();
         expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
@@ -112,15 +105,13 @@ describe("ToolBlock — panel mode", () => {
             expect(panel).not.toBeNull();
             expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(true);
             expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(false);
-        },
+        }
     );
 
     it("calls onHoldOpen once when a running tool completes (active→inactive)", () => {
         const onHoldOpen = vi.fn();
         const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
-        render(() => (
-            <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />
-        ));
+        render(() => <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />);
         expect(onHoldOpen).not.toHaveBeenCalled(); // still running
         setNode({ ...baseTool, status: "success" }); // completes live
         expect(onHoldOpen).toHaveBeenCalledTimes(1);
@@ -128,9 +119,7 @@ describe("ToolBlock — panel mode", () => {
 
     it("does NOT call onHoldOpen for an already-completed tool on mount (loaded history)", () => {
         const onHoldOpen = vi.fn();
-        render(() => (
-            <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />
-        ));
+        render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />);
         expect(onHoldOpen).not.toHaveBeenCalled();
     });
 
@@ -182,9 +171,7 @@ describe("ToolBlock — panel mode", () => {
         it("holds a node that arrives in a reused slot, finished and fresh", () => {
             const onHoldOpen = vi.fn();
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, id: "old", timestamp: Date.now() - 60_000 });
-            render(() => (
-                <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />
-            ));
+            render(() => <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />);
             expect(onHoldOpen).not.toHaveBeenCalled();
             setNode({ ...baseTool, id: "new", timestamp: Date.now() - 10 });
             expect(onHoldOpen).toHaveBeenCalledTimes(1);
@@ -218,7 +205,10 @@ describe("ToolBlock — panel mode", () => {
                 <ToolBlock
                     node={read({
                         params: { file_path: "src/a.ts", offset: 120, limit: 500 },
-                        result: { content: "   120\tx", range: { startLine: 120, numLines: 24, totalLines: 143 } } as unknown as ToolNode["result"],
+                        result: {
+                            content: "   120\tx",
+                            range: { startLine: 120, numLines: 24, totalLines: 143 },
+                        } as unknown as ToolNode["result"],
                     })}
                     pinned={true}
                     onTogglePin={() => {}}
@@ -245,9 +235,7 @@ describe("ToolBlock — panel mode", () => {
     it("mouseenter on a completed tool does NOT expand the panel", () => {
         vi.useFakeTimers();
         try {
-            const { container } = render(() => (
-                <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
-            ));
+            const { container } = render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />);
             const root = container.querySelector(".agent-tool-block") as HTMLElement;
             fireEvent.mouseEnter(root);
             // Wait well past the old 150ms hover-enter delay so we
@@ -268,9 +256,7 @@ describe("ToolBlock — panel mode", () => {
         // mouseenter event guards against an over-zealous hover-trigger
         // removal that would also drop the auto-expand path.
         const running: ToolNode = { ...baseTool, status: "running" };
-        const { container } = render(() => (
-            <ToolBlock node={running} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={running} pinned={false} onTogglePin={() => {}} />);
         const root = container.querySelector(".agent-tool-block") as HTMLElement;
         fireEvent.mouseEnter(root);
         const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
@@ -278,9 +264,7 @@ describe("ToolBlock — panel mode", () => {
     });
 
     it("pinned panel has no inline `max-height`", () => {
-        const { container } = render(() => (
-            <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />);
         const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
         expect(panel.style.maxHeight).toBe("");
     });
@@ -329,9 +313,7 @@ describe("ToolBlock — panel mode", () => {
         it("collapsed: hovering the name shows the bare command, not the decorated summary", () => {
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />);
                 expect(container.querySelector(".agent-tool-name-peek-anchor")).not.toBeNull();
                 hoverToolName(container);
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
@@ -349,14 +331,30 @@ describe("ToolBlock — panel mode", () => {
         // so this pins the markup the CSS relies on.
         it("lays out a Read path to be cut from the left, keeping the full path text", () => {
             const path = "/c/Users/me/projects/agentmux/frontend/app/view/agent/a.ts";
-            const read: ToolNode = { ...baseTool, id: "tc-r", tool: "Read", toolName: "Read", params: { file_path: path }, summary: `Read ${path}` };
+            const read: ToolNode = {
+                ...baseTool,
+                id: "tc-r",
+                tool: "Read",
+                toolName: "Read",
+                params: { file_path: path },
+                summary: `Read ${path}`,
+            };
             const { container } = render(() => <ToolBlock node={read} pinned={false} onTogglePin={() => {}} />);
-            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--cut-start")).toBe(true);
+            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--cut-start")).toBe(
+                true
+            );
             const detail = container.querySelector(".agent-tool-detail--cut-start")!;
             expect(detail.querySelector("bdi")!.textContent).toBe(path);
             cleanup();
 
-            const grep: ToolNode = { ...baseTool, id: "tc-g2", tool: "Grep", toolName: "Grep", params: { pattern: "x" }, summary: "Grep x" };
+            const grep: ToolNode = {
+                ...baseTool,
+                id: "tc-g2",
+                tool: "Grep",
+                toolName: "Grep",
+                params: { pattern: "x" },
+                summary: "Grep x",
+            };
             const other = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
             expect(other.container.querySelector(".agent-tool-name--cut-start")).toBeNull();
             expect(other.container.querySelector(".agent-tool-detail--cut-start")).toBeNull();
@@ -367,7 +365,9 @@ describe("ToolBlock — panel mode", () => {
             const cmd = "cd /c/Users/me/projects/agentmux && npm run build -- --mode production | tail -20";
             const bash: ToolNode = { ...baseTool, id: "tc-b", params: { command: cmd }, summary: `Bash ${cmd}` };
             const { container } = render(() => <ToolBlock node={bash} pinned={false} onTogglePin={() => {}} />);
-            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--cut-start")).toBe(true);
+            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--cut-start")).toBe(
+                true
+            );
             const detail = container.querySelector(".agent-tool-detail--cut-start")!;
             expect(detail.classList.contains("agent-shell-inline")).toBe(true);
             expect(detail.querySelector("bdi .sh-program")?.textContent).toBe("cd");
@@ -392,7 +392,13 @@ describe("ToolBlock — panel mode", () => {
                 expect(tip.textContent).toBe(`Bash ${cmd}`);
 
                 cleanup();
-                const grep: ToolNode = { ...baseTool, id: "tc-g", tool: "Grep", params: { pattern: "a | b" }, summary: "Grep a | b" };
+                const grep: ToolNode = {
+                    ...baseTool,
+                    id: "tc-g",
+                    tool: "Grep",
+                    params: { pattern: "a | b" },
+                    summary: "Grep a | b",
+                };
                 const other = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
                 expect(other.container.querySelector(".agent-tool-detail .sh-program")).toBeNull();
                 expect(other.container.querySelector(".agent-shell-inline")).toBeNull();
@@ -407,12 +413,16 @@ describe("ToolBlock — panel mode", () => {
         it("the popover's command carries the row's data-tool, for the row's colour", () => {
             vi.useFakeTimers();
             try {
-                const write: ToolNode = { ...baseTool, id: "tc-w", tool: "Write", params: { file_path: "/a/b.ts" }, summary: "Write b.ts" };
+                const write: ToolNode = {
+                    ...baseTool,
+                    id: "tc-w",
+                    tool: "Write",
+                    params: { file_path: "/a/b.ts" },
+                    summary: "Write b.ts",
+                };
                 for (const node of [baseTool, write]) {
                     cleanup();
-                    const { container } = render(() => (
-                        <ToolBlock node={node} pinned={false} onTogglePin={() => {}} />
-                    ));
+                    const { container } = render(() => <ToolBlock node={node} pinned={false} onTogglePin={() => {}} />);
                     hoverToolName(container);
                     const row = container.querySelector(".agent-tool-block") as HTMLElement;
                     const tip = document.body.querySelector(".agent-node-peek-tooltip-body") as HTMLElement;
@@ -431,15 +441,17 @@ describe("ToolBlock — panel mode", () => {
             const timed: ToolNode = { ...baseTool, timestamp: Date.now() - 65_000 };
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={timed} pinned={false} onTogglePin={() => {}} />);
                 hoverToolName(container);
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 // One line: time and tokens side by side (PeekMetaRow).
                 expect(metaLines.length).toBe(1);
-                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")?.textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
-                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")?.textContent).toMatch(
+                    /\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/
+                );
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(
+                    /~\d+ tok \(est\.\)/
+                );
             } finally {
                 vi.useRealTimers();
             }
@@ -449,14 +461,14 @@ describe("ToolBlock — panel mode", () => {
             const untimed: ToolNode = { ...baseTool, timestamp: undefined };
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={untimed} pinned={false} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={untimed} pinned={false} onTogglePin={() => {}} />);
                 hoverToolName(container);
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 // Still one line: the token estimate (params always give SOME text).
                 expect(metaLines.length).toBe(1);
-                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(
+                    /~\d+ tok \(est\.\)/
+                );
                 expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")).toBeNull();
             } finally {
                 vi.useRealTimers();
@@ -471,9 +483,7 @@ describe("ToolBlock — panel mode", () => {
         it("expanded (pinned): hovering shows the full command line alongside time/estimate", () => {
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />);
                 hoverToolName(container);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
@@ -482,7 +492,9 @@ describe("ToolBlock — panel mode", () => {
                 // baseTool has no timestamp, so just the token estimate line.
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 expect(metaLines.length).toBe(1);
-                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(/~\d+ tok \(est\.\)/);
+                expect(metaLines[0].querySelector(".agent-node-peek-tooltip-tokens")?.textContent).toMatch(
+                    /~\d+ tok \(est\.\)/
+                );
                 expect(metaLines[0].querySelector(".agent-node-peek-tooltip-time")).toBeNull();
             } finally {
                 vi.useRealTimers();
@@ -494,9 +506,7 @@ describe("ToolBlock — panel mode", () => {
             const longTool: ToolNode = { ...baseTool, params: { command: `cat ${longPath}` } };
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={longTool} pinned={true} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={longTool} pinned={true} onTogglePin={() => {}} />);
                 hoverToolName(container);
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
@@ -515,9 +525,7 @@ describe("ToolBlock — panel mode", () => {
             const opaque: ToolNode = { ...baseTool, tool: "Other", params: {}, timestamp: Date.now() };
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={opaque} pinned={false} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={opaque} pinned={false} onTogglePin={() => {}} />);
                 hoverToolName(container);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
@@ -572,9 +580,7 @@ describe("ToolBlock — panel mode", () => {
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
             vi.useFakeTimers();
             try {
-                const { container } = render(() => (
-                    <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
-                ));
+                const { container } = render(() => <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />);
                 const row = container.querySelector(".agent-tool-block") as HTMLElement;
                 const line = container.querySelector(".agent-tool-summary") as HTMLElement;
                 // Cursor arrives on the line while still running (panel auto-expanded):
@@ -636,9 +642,7 @@ describe("ToolBlock — panel mode", () => {
         };
 
         it("adds the one-shot class on mount and removes it after animationend", async () => {
-            const { container } = render(() => (
-                <ToolBlock node={withResult} pinned={false} onTogglePin={() => {}} />
-            ));
+            const { container } = render(() => <ToolBlock node={withResult} pinned={false} onTogglePin={() => {}} />);
             const pill = container.querySelector(".agent-tool-result-pill") as HTMLElement;
             expect(pill).not.toBeNull();
 
@@ -695,9 +699,7 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
     };
 
     it("renders `.agent-user-message` with the raw answer text, not `.agent-tool-summary`", () => {
-        const { container } = render(() => (
-            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-user-message")).not.toBeNull();
         expect(container.querySelector(".agent-tool-summary")).toBeNull();
         expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe("Yes");
@@ -707,9 +709,7 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         // Reverted per direct user feedback after the larger-text variant
         // shipped: the answer should read at the SAME size as ordinary
         // typed input, not enlarged.
-        const { container } = render(() => (
-            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-user-message--answered-question")).toBeNull();
     });
 
@@ -718,9 +718,7 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
             ...answeredQuestion,
             questionText: "Which color do you like?",
         };
-        const { container } = render(() => (
-            <ToolBlock node={withQuestion} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={withQuestion} pinned={false} onTogglePin={() => {}} />);
         const markdown = container.querySelector(".agent-markdown-block");
         expect(markdown?.textContent).toContain("Which color do you like?");
         const userMessage = container.querySelector(".agent-user-message");
@@ -731,9 +729,7 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
     });
 
     it("omits the question block when questionText is absent (answered before that field existed)", () => {
-        const { container } = render(() => (
-            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-markdown-block")).toBeNull();
         expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe("Yes");
     });
@@ -743,11 +739,9 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
             ...answeredQuestion,
             timeoutNote: "⏱️ Auto-answered (no response in 30s)",
         };
-        const { container } = render(() => (
-            <ToolBlock node={autoAnswered} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={autoAnswered} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-user-message-timeout-note")?.textContent).toBe(
-            "⏱️ Auto-answered (no response in 30s)",
+            "⏱️ Auto-answered (no response in 30s)"
         );
     });
 
@@ -767,25 +761,21 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
             <ToolBlock node={partlyAutoAnswered} pinned={false} onTogglePin={() => {}} />
         ));
         expect(container.querySelector(".agent-user-message-timeout-note")?.textContent).toBe(
-            "⏱️ Partly auto-answered (2/3 — no response in 30s)",
+            "⏱️ Partly auto-answered (2/3 — no response in 30s)"
         );
         expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe(
-            "the answer — with its own em dash — right in the middle",
+            "the answer — with its own em dash — right in the middle"
         );
     });
 
     it("does not show a timeout note for a manually-answered question", () => {
-        const { container } = render(() => (
-            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-user-message-timeout-note")).toBeNull();
     });
 
     it("falls back to the generic collapsed row when answerText is missing (legacy transcript)", () => {
         const legacy: ToolNode = { ...answeredQuestion, answerText: undefined };
-        const { container } = render(() => (
-            <ToolBlock node={legacy} pinned={false} onTogglePin={() => {}} />
-        ));
+        const { container } = render(() => <ToolBlock node={legacy} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-tool-summary")).not.toBeNull();
         expect(container.querySelector(".agent-user-message")).toBeNull();
     });
@@ -981,8 +971,15 @@ describe("ToolBlock — Grep pill", () => {
     it("reads the default files_with_matches header as files, and an empty search as zero", () => {
         const pill = (content: string) => {
             const n: ToolNode = {
-                type: "tool", id: "g-2", tool: "Grep", toolName: "Grep", params: { pattern: "x" },
-                status: "success", collapsed: true, summary: "x", result: { content } as any,
+                type: "tool",
+                id: "g-2",
+                tool: "Grep",
+                toolName: "Grep",
+                params: { pattern: "x" },
+                status: "success",
+                collapsed: true,
+                summary: "x",
+                result: { content } as any,
             };
             const { container, unmount } = render(() => <ToolBlock node={n} pinned={false} onTogglePin={() => {}} />);
             const text = container.querySelector(".agent-tool-result-pill")?.textContent;
@@ -996,8 +993,14 @@ describe("ToolBlock — Grep pill", () => {
 
 // SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4: a restored history mounts many
 // collapsed tool rows; their bodies (shiki-highlighted diffs, previews, Bash
-// output) must not be built until a row is first opened, and must then stay.
-describe("ToolBlock — panel body mounts on first open, then stays", () => {
+// output) must not be built until a row is first opened.
+// SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md: once closed, a body
+// lingers for BODY_LINGER_MS and then goes; opening again builds it again.
+describe("ToolBlock — panel body mounts while open, lingers, then goes", () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     it("a collapsed row never opened has no body", () => {
         const { container } = render(() => <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-tool-panel")).not.toBeNull();
@@ -1009,7 +1012,8 @@ describe("ToolBlock — panel body mounts on first open, then stays", () => {
         expect(container.querySelector(".agent-tool-overlay")).not.toBeNull();
     });
 
-    it("opening mounts the body; collapsing again keeps it", () => {
+    it("opening mounts the body; collapsing keeps it through the linger, then drops it", () => {
+        vi.useFakeTimers();
         const [pinned, setPinned] = createSignal(false);
         const { container } = render(() => <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />);
         expect(container.querySelector(".agent-tool-overlay")).toBeNull();
@@ -1018,7 +1022,34 @@ describe("ToolBlock — panel body mounts on first open, then stays", () => {
         expect(body).not.toBeNull();
         setPinned(false);
         expect(container.querySelector(".agent-tool-panel")!.classList.contains("agent-tool-panel--hidden")).toBe(true);
+        // The collapse animates on the real content.
+        vi.advanceTimersByTime(BODY_LINGER_MS - 1);
         expect(container.querySelector(".agent-tool-overlay")).toBe(body);
+        vi.advanceTimersByTime(1);
+        expect(container.querySelector(".agent-tool-overlay")).toBeNull();
+        // The panel itself stays (collapsed), so the row keeps its shape.
+        expect(container.querySelector(".agent-tool-panel--hidden")).not.toBeNull();
+        // Opening again builds a new body.
+        setPinned(true);
+        const again = container.querySelector(".agent-tool-overlay");
+        expect(again).not.toBeNull();
+        expect(again).not.toBe(body);
+    });
+
+    it("reopening within the linger keeps the same body and cancels the drop", () => {
+        vi.useFakeTimers();
+        const [pinned, setPinned] = createSignal(true);
+        const { container } = render(() => <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />);
+        const body = container.querySelector(".agent-tool-overlay");
+        setPinned(false);
+        vi.advanceTimersByTime(BODY_LINGER_MS / 2);
+        setPinned(true);
+        vi.advanceTimersByTime(BODY_LINGER_MS * 2);
+        expect(container.querySelector(".agent-tool-overlay")).toBe(body);
+        // And a later close still drops it after a full linger.
+        setPinned(false);
+        vi.advanceTimersByTime(BODY_LINGER_MS);
+        expect(container.querySelector(".agent-tool-overlay")).toBeNull();
     });
 });
 
@@ -1032,7 +1063,10 @@ describe("an Edit's and a Write's line range in the header", () => {
                     tool: "Edit",
                     toolName: "Edit",
                     params: { file_path: "src/a.ts", old_string: "a", new_string: "b" },
-                    result: { content: "ok", patch: [{ start: 109, end: 157, added: 18, removed: 5 }] } as unknown as ToolNode["result"],
+                    result: {
+                        content: "ok",
+                        patch: [{ start: 109, end: 157, added: 18, removed: 5 }],
+                    } as unknown as ToolNode["result"],
                 })}
                 pinned={false}
                 onTogglePin={() => {}}

@@ -34,7 +34,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -86,14 +86,10 @@ export function useResumeRetryStream(opts: UseResumeRetryStreamOptions): void {
     // still-in-flight read is simply discarded rather than applied.
     let receivedLiveEvent = false;
 
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.AgentResumeRetry,
-        scope: `block:${opts.blockId}`,
-        handler: (event: any) => {
+    const unsub = onMuxEvent(WpsEvent.AgentResumeRetry, (data) => {
             receivedLiveEvent = true;
-            applyEvent(event?.data);
-        },
-    });
+            applyEvent(data);
+        }, `block:${opts.blockId}`);
 
     // Explicit current-history read on mount — see this module's doc
     // comment (reagentx P1, round 2) for why subscribe-time replay alone

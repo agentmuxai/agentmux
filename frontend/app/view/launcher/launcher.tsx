@@ -4,7 +4,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, replaceBlock } from "@/app/store/global";
-import { getChildWidgets, getPinnedKeys, widgetEntryColor } from "@/app/window/action-widgets-config";
+import { getChildWidgets, getHiddenKeys, getPinnedKeys, isWidgetHidden, widgetEntryColor } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -25,7 +25,8 @@ function sortByDisplayOrder(
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
 /** The launcher's state behind its native pane tab (`launcherPaneTab`). */
-class LauncherViewModel {
+/** Exported for launcher-hidden.test.ts; the app reaches it through `launcherPaneTab`. */
+export class LauncherViewModel {
     blockId: string;
     searchTerm: SignalAtom<string>;
     selectedIndex: SignalAtom<number>;
@@ -56,7 +57,13 @@ class LauncherViewModel {
         const fullConfig = atoms.fullConfigAtom();
         const wmap = fullConfig?.widgets || {};
         const settings = fullConfig?.settings || {};
-        const parent = this.activeParent();
+        // A group that's been hidden since the user drilled into it (Settings → Widgets, the bar)
+        // drops the Launcher back to the top-level grid, where it no longer shows either.
+        const drilled = this.activeParent();
+        const drilledKey = drilled
+            ? Object.keys(wmap).find((k) => wmap[k] === drilled || (wmap[k]?.label === drilled.label && wmap[k]?.children?.join() === drilled.children?.join()))
+            : undefined;
+        const parent = drilled && !(drilledKey && isWidgetHidden(drilledKey, wmap, settings)) ? drilled : null;
 
         let source: WidgetConfigType[];
         if (parent) {
@@ -71,9 +78,13 @@ class LauncherViewModel {
             // group-hiding default everywhere else (see
             // getEffectiveGroupedChildKeys).
             const pinnedSet = new Set(getPinnedKeys(settings, wmap));
+            const hidden = getHiddenKeys(settings);
             source = sortByDisplayOrder(wmap).filter(
                 ([key, widget]) => !widget["display:hidden"] || pinnedSet.has(key.replace("defwidget@", ""))
-            ).map(([, widget]) => widget);
+            )
+                // Hidden by the user in Settings → Widgets, like the bar and the "+" picker.
+                .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden))
+                .map(([, widget]) => widget);
         }
 
         return source.filter(

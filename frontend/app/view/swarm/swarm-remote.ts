@@ -8,8 +8,8 @@
  *
  * The data comes from `swarm.other-instances` (crates/srv/src/backend/swarm_remote.rs).
  * It lists this machine's other channels and the LAN hosts (Phases 1 and 2),
- * with each agent's state where its instance reports one (Phase 4); cloud
- * installs arrive later as more hosts with their own `tier`.
+ * with each agent's state and summary line where its instance reports them
+ * (Phase 4); cloud installs arrive later as more hosts with their own `tier`.
  */
 
 import { formatAgoPrecise } from "@/util/format-time";
@@ -23,6 +23,9 @@ export interface RemoteAgent {
     block_id: string;
     /** Absent when its instance gave no state: a build from before it did. */
     status?: RemoteAgentState;
+    /** Its summary line, as its instance shares it (srv `backend::agent_line`).
+     *  Absent when that instance shares none. */
+    line?: string;
 }
 
 export interface RemoteChannel {
@@ -132,6 +135,16 @@ const REMOTE_CHIPS: Record<RemoteAgentState, RemoteChip> = {
 export function remoteChip(status: string | null | undefined, stale: boolean): RemoteChip | null {
     if (stale || !status || !Object.hasOwn(REMOTE_CHIPS, status)) return null;
     return REMOTE_CHIPS[status as RemoteAgentState];
+}
+
+/**
+ * The summary line under a remote agent, or null for none: no line shared, or a
+ * stale section, whose last line may be long out of date, as with the chip.
+ * srv already bounds it to one line; the view shows it as text only.
+ */
+export function remoteLine(line: string | null | undefined, stale: boolean): string | null {
+    if (stale || typeof line !== "string") return null;
+    return line.trim() || null;
 }
 
 /** "seen 2m ago" for a stale section, from Unix ms. */

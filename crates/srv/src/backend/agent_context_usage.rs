@@ -93,15 +93,29 @@ pub fn context_usage_from_control_response(frame: &Value) -> Option<AgentContext
     })
 }
 
+/// The `agentcontextusage` event's payload (`mps_events::AgentContextUsageChanged`). An
+/// unknown value is null, not omitted.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentContextUsageEvent {
+    pub blockid: String,
+    pub model: Option<String>,
+    #[ts(type = "number | null")]
+    pub auto_compact_window: Option<u64>,
+    #[ts(type = "number | null")]
+    pub auto_compact_threshold: Option<u64>,
+    pub auto_compact_enabled: bool,
+}
+
 /// The `agentcontextusage` event data for one pane.
-pub fn agent_context_usage_event(block_id: &str, usage: &AgentContextUsage) -> Value {
-    json!({
-        "blockid": block_id,
-        "model": usage.model,
-        "auto_compact_window": usage.auto_compact_window,
-        "auto_compact_threshold": usage.auto_compact_threshold,
-        "auto_compact_enabled": usage.auto_compact_enabled,
-    })
+pub fn agent_context_usage_event(block_id: &str, usage: &AgentContextUsage) -> AgentContextUsageEvent {
+    AgentContextUsageEvent {
+        blockid: block_id.to_string(),
+        model: usage.model.clone(),
+        auto_compact_window: usage.auto_compact_window,
+        auto_compact_threshold: usage.auto_compact_threshold,
+        auto_compact_enabled: usage.auto_compact_enabled,
+    }
 }
 
 /// Publish it, persisted, so a pane that mounts later still gets the latest.
@@ -110,14 +124,11 @@ pub fn publish_agent_context_usage(
     block_id: &str,
     usage: &AgentContextUsage,
 ) {
-    use crate::backend::mps::{MuxEvent, EVENT_AGENT_CONTEXT_USAGE};
-    broker.publish(MuxEvent {
-        event: EVENT_AGENT_CONTEXT_USAGE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 1,
-        data: Some(agent_context_usage_event(block_id, usage)),
-    });
+    broker.publish_event::<crate::backend::mps_events::AgentContextUsageChanged>(
+        &agent_context_usage_event(block_id, usage),
+        vec![format!("block:{block_id}")],
+        1,
+    );
 }
 
 #[cfg(test)]
@@ -239,7 +250,7 @@ mod tests {
             auto_compact_enabled: true,
         };
         assert_eq!(
-            agent_context_usage_event("blk", &u),
+            serde_json::to_value(agent_context_usage_event("blk", &u)).unwrap(),
             json!({ "blockid": "blk", "model": "claude-haiku-4-5-20251001", "auto_compact_window": 200_000,
                     "auto_compact_threshold": 167_000, "auto_compact_enabled": true })
         );

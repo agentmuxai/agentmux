@@ -1,5 +1,47 @@
 # AgentMux Version History
 
+## 0.59.22 — 2026-10-13
+
+- Tests: the remote Swarm chip test reads the chip's label, not the spinner glyph beside it
+- docs: file paths in the top-level docs are links, a script links them anywhere, and the link check covers every .md
+- Agents keep their own identity when their pane opens: forks ("Loap #3") show up in Swarm and can receive messages again, and every agent signs with its stable id (for example agent2) instead of switching to its display name after the first restart
+- The App API is now called MuxAPI in the docs, the muxsh help and the Operator Config note agents receive
+- Forking a fork no longer makes ever-longer agent ids (loap-loap-2-loap-3 is now loap-3), fork numbers aren't reused after a fork is deleted, and a fork can't take a name another agent already has
+- A forked agent's pane shows tabs only for its forks open in the same window tab: a fork in another window tab no longer appears as a tab of this pane, and every fork tab's close button works
+- A forked agent starts from its parent's conversation: the parent's session is copied into the fork's own folder and continued as a new conversation, even while the parent is still running
+- Agent panes no longer keep old conversation rows in memory after they scroll out of the live view, which cut the page's DOM roughly in half in long sessions.
+- Swarm: a LAN host that stops answering no longer keeps showing its agents' last status.
+- Screenshot tooling: a landing suite for agentmux.ai, starting with a shot of three terminals running commands in the demo project
+- An empty Media pane shows the faint AgentMux logo, like an empty Editor
+- Hover a terminal's CPU/memory badge to see what it measures: the pane's processes, when the shell started, private and committed memory, and the peak.
+- Settings → Widgets has a Widget bar section: pin each widget, keep it in More, or hide it everywhere (bar, More and a pane's + menu); the bar, Settings and an open + menu all update together, and the bar's right-click menu can hide a widget too, with Undo
+- LAN peer keys no longer appear in the peer list the app's own UI, the LAN instances route and the discovery route return.
+- Removed leftovers from the original Go codebase and files nothing used, and CI now fails on a source file nothing imports.
+- A finished tool's output in an agent pane is released from memory once its row is collapsed, instead of staying in the page for the rest of the session; opening the row builds it again.
+- Removed unused code and exports from the frontend, so the app ships less dead code.
+- The phone's live feed keeps following an agent after it restarts in another pane, and shows lines another pane or AgentMux instance adds to the agent's conversation, instead of freezing.
+- RPC stubs are generated from srv's typed commands (scripts/gen-rpc-stubs.mjs); the first 40 (fs, editor files and LSP, remotes) move from hand-written to generated
+- 40 more RPC stubs generated instead of hand-written: agent definitions, instances, history and skills (agent.ts), the skill commands, and bookmarks
+- 40 more RPC stubs generated instead of hand-written: block and blockfile commands, identities and accounts, sessions, and bundles
+- 40 more RPC stubs generated instead of hand-written: MCP servers, workspace and connections, notifications, viewer, attachments, browser profiles, layout, misc and fleet
+- 40 more RPC stubs generated: agent, widget, MCP and block commands whose hand-written types were inline shapes or local aliases now use the generated types; the generator handles requests sent as {} or null with no data parameter
+- 38 more RPC stubs generated: native memory, workspace, bundles, fleet, misc (MuxBus), tower, presence and other commands, with their generated types; every wire call unchanged
+- Paired phones can list every pane on the computer, window by window and tab by tab: agents with the name their live feed opens by, terminals (including each agent's shell) and whether they run, and every other pane by name.
+- 23 more RPC stubs generated, including the special cases: list commands that now send {} when called without data, raw-JSON commands keeping their precise types, and requests whose defaulted fields the generated type makes optional (proven by srv tests)
+- The connection and agent process RPC handlers are typed in srv, and their 15 frontend stubs are generated (keeping their precise request types)
+- Paired phones can watch this computer's terminals, read-only and live, once you turn on Settings > Devices > Share terminals with paired devices (off by default). Turning it off closes what is open.
+- Seven more RPC handlers are typed in srv (agent and session lists, toolchain installs, browser start page, bundle validation) and their stubs generated; RecentSessionRow is now generated from Rust
+- Remove unused Rust code across the workspace and gate platform-only items so Windows, macOS and Linux builds are free of unused-code warnings
+- The last 11 frontend-facing RPC handlers are typed in srv (identity accounts, OAuth, setmeta/getmeta, controllerresync, createsubblock, agentanswer, setconfig) and their stubs generated
+- RPC stubs: the last generatable ones (auth start/poll, bundle upserts) are generated; dead stubs and the telemetry calls that never reached srv are removed; 298 of the 306 former hand-written stubs are now generated
+- The last hand-written RPC stubs are gone: revealing a pane in another workspace now finds it, and calls to commands srv never had (resolveids, setrtinfo, workspacelist, auth.submitapikey) are removed
+- The Codex review check now says when Codex's findings on an earlier commit are waiting on a re-ask, and fails when only docs changed since.
+- The broker event envelope (MuxEvent) is generated from srv instead of hand-written; a spec proposes typing the event payloads
+- The Swarm shows the summary line of agents on this computer's other AgentMux channels and on LAN hosts, under their status. A new setting (Settings, Devices) stops sharing your agents' lines; it is on by default.
+- A paired phone's pane list no longer calls an agent pane with no agent started in it "Terminal".
+- Screenshot tooling: publish.mjs and refresh.mjs can publish into agentmux-landing from its manifest (WebP stills, MP4 clips with posters)
+- Your signed-in devices see each agent's summary line for this computer's agents, over the cloud and on the local network, when sharing is on (Settings, Devices).
+
 ## 0.59.21 — 2026-10-12
 
 - Terminals keep the window responsive while it is resized on machines where resizing a terminal is slow

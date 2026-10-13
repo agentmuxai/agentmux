@@ -21,6 +21,7 @@ import { setBlockMeta } from "@/app/store/block-meta";
 import { refreshRemotes, remotesList } from "@/app/store/remotes-store";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { remoteSuggestionScopes } from "./conn-remote-items";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // newConnList -> connList => filteredList -> remoteItems -> sortedRemoteItems => remoteSuggestion
 // filteredList -> createNew
@@ -267,15 +268,6 @@ const ChangeConnectionBlockModal = ({
             newFile = "~";
         }
         await setBlockMeta(blockId, { connection: connName, file: newFile, "cmd:cwd": null });
-
-        const rtInfo = { "cmd:hascurcwd": null };
-        const rtInfoData: CommandSetRTInfoData = {
-            oref: MOS.makeORef("block", blockId),
-            data: rtInfo,
-        };
-        RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
-            console.log("error setting RT info", e)
-        );
         try {
             await RpcApi.ConnEnsureCommand(
                 TabRpcClient,

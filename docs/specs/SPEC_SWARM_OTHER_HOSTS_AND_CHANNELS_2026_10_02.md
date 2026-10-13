@@ -1,7 +1,7 @@
 # SPEC: The Swarm shows the agents of every other instance this one knows about
 
 **Date:** 2026-10-02
-**Status:** active — Phase 1 (this machine's other channels) in PR #4239, Phase 2 (LAN hosts) in PR #4241, Phase 4's `status` (no `line`) built 2026-10-11; Phase 3 not started. Section 9 asks for decisions.
+**Status:** active — Phase 1 (this machine's other channels) in PR #4239, Phase 2 (LAN hosts) in PR #4241, Phase 4's `status` built 2026-10-11 and its `line` 2026-10-13 (this machine's channels, LAN, and the cloud presence record); Phase 3 not started. Section 9 asks for decisions.
 **Author:** AgentX (narko), at the owner's request
 **Affects:** [`frontend/app/view/swarm/`](../../frontend/app/view/swarm) (`swarm-model.ts`, `swarm-view.tsx`), [`crates/srv/src/server/http_health.rs`](../../crates/srv/src/server/http_health.rs) (`/agentmux/discovery`), [`crates/srv/src/backend/lan_discovery.rs`](../../crates/srv/src/backend/lan_discovery.rs), [`crates/srv/src/server/reactive.rs`](../../crates/srv/src/server/reactive.rs), [`crates/srv/src/registry/`](../../crates/srv/src/registry), and, for the cloud tier, [`crates/srv/src/muxbus/`](../../crates/srv/src/muxbus) plus the separate `agentmux-cloud` repository
 **Builds on:** [`docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) (the same-host registry), [`docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) (install identities), [`docs/specs/SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) (how LAN peers are found), [`docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) §3 (the per-account directory this needs)
@@ -90,7 +90,11 @@ RemoteAgent  { name, block_id?, status?: "running"|"idle", provider?, line? }
 - **LAN:** the discovery loop's 30 s poll now keeps each listed agent's state (`LanInstance.agent_status`) instead of dropping it. A poll that fails keeps the last names but clears the states: mDNS can keep a peer looking fresh long after it stopped answering, and its last state would otherwise show indefinitely.
 - **This machine's other channels:** srv asks each live channel's same route over loopback, with that channel's key from the shared registry, as the cross-channel fleet forwarder does. It asks once per `swarm.other-instances` call, concurrently, with a 1.5 s limit, so a hung channel costs its rows their chip, not the poll.
 - **The row:** the same status chip as a local row (`working`, `question` for `waiting`, `idle` for idle, stopped and error), with the exact state as its tooltip. A stale section shows no chip, since its last state may be long out of date, and an agent whose instance gives no state (a build from before it did) shows its name alone, as §3.2 requires.
-- **Not carried:** `since_ms`, which the chip doesn't show and which would need moving from the peer's clock to this one; and `line`, which is content and still waits on decision 1.
+- **Not carried:** `since_ms`, which the chip doesn't show and which would need moving from the peer's clock to this one.
+
+**Phase 4's `line` is built (2026-10-13), by the owner's answer to decision 1: show the summary lines on every tier, on by default, "no need for privacy".** The names route adds `agent_lines` (`{name: line}`): the agent's generated title when it is usable, else its CLI's OSC title, exactly what the frontend's `readSwarmSummary` shows; the local row's fallbacks (a restored title, a one-liner from the last prompt, a status phrase) are not sent (`backend/agent_line.rs`). `swarm:sharesummaries` (Settings, Devices; absent means on) turns it off on the machine that sends. Both ends fold each line to one line of at most 200 characters, and a line for an unlisted name is dropped. A failed LAN poll clears the lines with the states, and a stale section shows neither. Since the route accepts the `lan_key`, anything on the LAN that learns the key can read the lines; the owner accepted that.
+
+- **Cloud (2026-10-13):** presence record version 4 (`agentmux_common::install_presence`) is v3 plus each agent's optional `line`, signed as a fourth agent field. The desktop publishes v4 with the lines of its fleet feed (which now carries `agent_lines` too, for the phone on the LAN), at most 16 KB of lines per record; a goodbye stays v3. A relay that refuses v4 as malformed gets v2 (states, no lines), then v1, and the version it took is remembered as v1 was. The phone shows the lines once agentmux-mobile reads them. The desktop Swarm lists no cloud installs until Phase 3.
 
 Phases 1 and 2 do not touch the cloud repository. Phase 3 cannot start from this repository alone.
 
@@ -114,7 +118,7 @@ Same-account only, as the WAN signing is. A sender on another account is never l
 ## 6. Privacy and trust
 
 - **What leaves the machine.** Names only crosses to LAN and cloud peers in Phases 1 to 3. LAN peers already get names; the cloud tier newly sends agent names off the machine to the account's relay. Say so in the settings text for the feature.
-- **`status`** (running or idle) is activity metadata, not content. **`line`** is content: a paraphrase of what the user asked. A LAN peer holding the `lan_key` is only network-claimed, so a `line` on that route is readable by anything on the LAN that learns the key. Default off; if enabled it should be per-tier and opt-in.
+- **`status`** (running or idle) is activity metadata, not content. **`line`** is content: a paraphrase of what the user asked. A LAN peer holding the `lan_key` is only network-claimed, so a `line` on that route is readable by anything on the LAN that learns the key. Default off; if enabled it should be per-tier and opt-in. **Superseded 2026-10-13:** the owner chose on by default for every tier, with one setting to turn it off (§3.4).
 - **Found on the way, not part of this spec's scope:** the `laninstances` WS event serialises each peer's full `LanInstance` to the frontend, `auth_key` (the peer's `lan_key`) included, although the TypeScript type omits it. It goes to local clients only, but the frontend does not need it. It should be dropped from the event before the Swarm starts consuming peer data. **Done 2026-10-13:** `auth_key` is no longer serialized at all, which also takes it out of `/api/lan-instances` and of `/agentmux/discovery`'s `lan` list, a route container agents may call.
 - Remote rows are display only in Phase 1, and carry no credentials to the frontend.
 
@@ -130,7 +134,7 @@ Jekting a remote agent from its row; opening a remote agent's pane; fleet action
 
 ## 9. Decisions for the owner
 
-1. **How much about a remote agent?** Name only (Phase 1 to 3); then running/idle (Phase 4, recommended, no content); then the title line (opt-in, content). Where does the line stop?
+1. **How much about a remote agent?** Name only (Phase 1 to 3); then running/idle (Phase 4, recommended, no content); then the title line (opt-in, content). Where does the line stop? **Answered 2026-10-13: the line on every tier, on by default.**
 2. **May the cloud tier send agent names off the machine?** It is the first thing that does. Recommended: yes, same account only, behind a setting that is on once the user is signed in.
 3. **Actions on remote rows.** Read-only for now (recommended). Next in value order: compose a jekt to that agent, then focus or open it.
 4. **Hosts with no agents.** Hidden, with an unreachable count in the footer (recommended), or always listed?

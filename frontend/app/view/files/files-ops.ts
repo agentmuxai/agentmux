@@ -9,7 +9,7 @@
  */
 
 import { makeORef } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -71,11 +71,7 @@ export class FilesOps {
         const [ops, setOps] = createSignal<OpView[]>([]);
         this.ops = ops;
         this.setOps = setOps;
-        this.unsubscribe = muxEventSubscribe({
-            eventType: WpsEvent.FilesOp,
-            scope: makeORef("block", blockId),
-            handler: (event) => this.onEvent((event as { data?: FsOpEvent }).data),
-        });
+        this.unsubscribe = onMuxEvent(WpsEvent.FilesOp, (data) => this.onEvent(data), makeORef("block", blockId));
     }
 
     private onEvent(data: FsOpEvent | undefined): void {

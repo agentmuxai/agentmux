@@ -97,13 +97,18 @@ pub fn list(windows: &[Window], workspaces: &[Workspace], tabs: &[Tab], blocks: 
                     if (facts.hidden)(&b.oid) {
                         continue;
                     }
+                    // An agent pane with no agent in it yet: `block_label`
+                    // doesn't know it as an agent and calls it "Terminal".
+                    // Its own title, or none (the device says "Agent").
+                    let label = if agent { label } else { obj::meta_get_string(&b.meta, "frame:title", "") };
                     out.push(PaneEntry { agent: (facts.agent_name)(&b.oid), ..entry(b, PaneKind::Agent, label.clone()) });
                     let drawer = obj::meta_get_string(&b.meta, META_KEY_SHELL_SUBBLOCK_ID, "");
                     if let Some(shell) = block(&drawer).filter(|_| !drawer.is_empty()) {
+                        let shell_label = if label.is_empty() { "Agent shell".to_string() } else { format!("{label} shell") };
                         out.push(PaneEntry {
                             running: (facts.running)(&shell.oid),
                             parent_block_id: Some(b.oid.clone()),
-                            ..entry(shell, PaneKind::Terminal, format!("{label} shell"))
+                            ..entry(shell, PaneKind::Terminal, shell_label)
                         });
                     }
                 } else if view == "term" {
@@ -220,5 +225,25 @@ mod tests {
         let agent = serde_json::to_value(panes.iter().find(|p| p.block_id == "ag").unwrap()).unwrap();
         assert_eq!(agent["kind"], "agent");
         assert!(agent.get("agent").is_none(), "an agent that is not registered has no feed name");
+    }
+
+    #[test]
+    fn an_agent_pane_with_no_agent_yet_is_not_called_terminal() {
+        let mut window = Window { oid: "w".into(), workspaceid: "ws".into(), ..Default::default() };
+        window.meta.insert("window:displayname".into(), serde_json::json!(""));
+        let ws = Workspace { oid: "ws".into(), tabids: vec!["t".into()], activetabid: "t".into(), ..Default::default() };
+        let tabs = vec![tab("t", "Tab 1", &["empty"])];
+        // What a fresh window opens with: an agent pane nobody started an
+        // agent in. `block_label` calls it "Terminal" (seen on a phone).
+        let blocks = vec![block("empty", "agent", &[(META_KEY_SHELL_SUBBLOCK_ID, "sh")]), block("sh", "term", &[])];
+        let facts = PaneFacts {
+            label: &|_| ("Terminal".to_string(), false),
+            agent_name: &|_| None,
+            running: &|_| None,
+            hidden: &|_| false,
+        };
+        let panes = list(&[window], &[ws], &tabs, &blocks, &facts);
+        assert_eq!((panes[0].kind, panes[0].label.as_str()), (PaneKind::Agent, ""), "the device names it Agent");
+        assert_eq!(panes[1].label, "Agent shell");
     }
 }

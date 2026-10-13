@@ -213,10 +213,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 id_store.bundle_upsert(&memory)
                     .map_err(|e| format!("bundle.upsert: {e}"))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "memories:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(Some(serde_json::to_value(&memory).map_err(|e| e.to_string())?))
             })
         })
@@ -247,10 +244,7 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Ok(deleted) => {
                         if deleted {
                             purge_bundle_component_refs(&mstore, &req.id);
-                            broker.publish(crate::backend::mps::MuxEvent {
-                                event: "memories:changed".to_string(),
-                                scopes: vec![], sender: String::new(), persist: 0, data: None,
-                            });
+                            broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                         }
                         Ok(Some(json!({ "deleted": deleted })))
                     }

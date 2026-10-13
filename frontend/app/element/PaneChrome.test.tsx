@@ -91,7 +91,11 @@ vi.mock("@/app/block/blockframe", () => ({
 
 const showContextMenu = vi.fn();
 vi.mock("@/app/store/contextmenu", () => ({
-    ContextMenuModel: { showContextMenu: (...args: any[]) => showContextMenu(...args) },
+    ContextMenuModel: {
+        showContextMenu: (...args: any[]) => showContextMenu(...args),
+        // The "+" picker is a live menu; for these tests its first build is the menu.
+        showLiveContextMenu: (build: () => unknown[], ev: unknown) => showContextMenu(build(), ev),
+    },
 }));
 
 // Backed by real Solid signals (not a plain Map) — required to actually prove

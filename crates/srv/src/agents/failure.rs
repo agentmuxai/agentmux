@@ -20,7 +20,8 @@ use serde_json::Value;
 
 /// Stable failure taxonomy. Wire format is snake_case to match the rest
 /// of the agent event surface (`frontend/types/srv-types.d.ts`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum FailureClass {
     /// Server-side rate limit (HTTP 429). Transient, not the account quota.
@@ -60,17 +61,21 @@ pub enum FailureClass {
 /// A classified agent failure: the class, a user-facing title + detail,
 /// the raw exit evidence, the stderr tail, and whether a retry is
 /// worth attempting.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct AgentFailure {
     pub code: FailureClass,
     pub title: String,
     pub detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub signal: Option<i32>,
     #[serde(skip_serializing_if = "String::is_empty")]
+    #[ts(as = "Option<String>", optional)]
     pub stderr_tail: String,
     pub retryable: bool,
 }

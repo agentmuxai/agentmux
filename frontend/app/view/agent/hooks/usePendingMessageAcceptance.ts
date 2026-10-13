@@ -16,7 +16,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { trail } from "@/log/render-trail";
@@ -74,13 +74,8 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
     // pending zone into a real `user_message` document node. That
     // color shift (amber → accent blue) is the user's visible
     // "accepted" transition for the user.
-    const acceptedUnsub = muxEventSubscribe({
-        eventType: WpsEvent.AgentMessageAccepted,
-        scope: MOS.makeORef("block", opts.blockId),
-        handler: (event) => {
-            const data = (event as any)?.data;
-            if (!data) return;
-            const messageId: string | undefined = data.message_id;
+    const acceptedUnsub = onMuxEvent(WpsEvent.AgentMessageAccepted, (data) => {
+            const messageId = data.message_id;
             if (!messageId) return;
             const pending = getPending().find((m) => m.id === messageId);
             if (!pending) {
@@ -143,7 +138,6 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 opts.queue.pushNewNode(node);
                 opts.queue.scheduleFlush();
             }
-        },
-    });
+        }, MOS.makeORef("block", opts.blockId));
     onCleanup(() => acceptedUnsub());
 }

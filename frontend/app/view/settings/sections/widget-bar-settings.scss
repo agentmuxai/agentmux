@@ -1,0 +1,53 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// widget-bar-settings.tsx: Settings → Widgets → Widget bar.
+
+.widget-bar-list {
+    display: flex;
+    flex-direction: column;
+    margin-top: var(--space-2);
+}
+
+.widget-bar-row {
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.widget-bar-row--child {
+    padding-left: var(--space-4);
+}
+
+.widget-bar-row--hidden .widget-bar-row-label,
+.widget-bar-row--hidden .widget-bar-row-icon {
+    opacity: 0.55;
+}
+
+.widget-bar-row-icon {
+    display: inline-flex;
+    justify-content: center;
+    color: var(--widget-tint, var(--secondary-text-color));
+}
+
+.widget-bar-row-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.widget-bar-row-note {
+    margin-left: var(--space-2);
+    color: var(--secondary-text-color);
+    font-size: 0.85em;
+}
+
+.widget-bar-row-move {
+    display: inline-flex;
+    gap: 2px;
+    min-width: 3.5rem;
+    justify-content: flex-end;
+}

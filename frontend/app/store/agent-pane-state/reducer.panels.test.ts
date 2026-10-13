@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { AgentPaneState, isWorking, TurnPhase, isAuthFailure, type PaneFailure } from "./types";
 import { streaming, mk, ready } from "./reducer-test-fixtures";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 describe("agent-pane-state reducer", () => {
     // ── Composer details / Log panel ────────────────────────────────

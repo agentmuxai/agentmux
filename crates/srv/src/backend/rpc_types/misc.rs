@@ -171,7 +171,8 @@ pub struct WorkspaceInfoData {
 }
 
 /// Matches Go's `ConnStatus`
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ConnStatus {
     pub status: String,
     #[serde(default)]
@@ -183,6 +184,7 @@ pub struct ConnStatus {
     #[serde(default)]
     pub activeconnnum: i32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[ts(as = "Option<String>", optional)]
     pub error: String,
 }
 
@@ -251,8 +253,10 @@ pub struct CommandVarResponseData {
 }
 
 /// Matches Go's `TimeSeriesData`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TimeSeriesData {
+    #[ts(type = "number")]
     pub ts: i64,
     pub values: HashMap<String, f64>,
     /// Backend uptime in seconds, from a MONOTONIC clock (`sysinfo::uptime_secs`)
@@ -266,6 +270,7 @@ pub struct TimeSeriesData {
     /// wall-clock `ts`, which goes permanently negative after any backwards
     /// clock step. See `frontend/app/statusbar/backend-uptime.ts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub uptime_secs: Option<u64>,
 }
 

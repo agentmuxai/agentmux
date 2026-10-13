@@ -167,17 +167,25 @@ const REMAKE_ARR_THRESHOLD: usize = 10 * 1024;
 
 // ---- Types ----
 
+/// One event on the broker. The envelope is typed; `data` is each event's own
+/// payload, still untyped (`any`) on the frontend: srv builds most payloads with
+/// `json!`, so there is no Rust type per event to generate yet.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxEvent {
     pub event: String,
+    // The skipped-when-empty fields are absent on the wire, so optional in TS.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[ts(as = "Option<Vec<String>>", optional)]
     pub scopes: Vec<String>,
     #[serde(skip_serializing_if = "String::is_empty", default)]
+    #[ts(as = "Option<String>", optional)]
     pub sender: String,
     #[serde(skip_serializing_if = "is_zero", default)]
-    #[ts(type = "number")]
+    #[ts(as = "Option<u32>", optional)]
     pub persist: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "any")]
     pub data: Option<serde_json::Value>,
 }
 
@@ -202,12 +210,14 @@ pub struct SubscriptionRequest {
     pub allscopes: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WSFileEventData {
     pub zoneid: String,
     pub filename: String,
     pub fileop: String,
     #[serde(skip_serializing_if = "String::is_empty", default)]
+    #[ts(as = "Option<String>", optional)]
     pub data64: String,
     /// File size immediately before this append (the chunk spans
     /// `[offset, offset + data.len())`). Only populated for filestore-
@@ -215,6 +225,7 @@ pub struct WSFileEventData {
     /// means "no offset info available" — consumers should treat that as
     /// "always new" (the pre-existing, always-write behavior).
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[ts(optional, type = "number")]
     pub offset: Option<u64>,
     /// Where this append landed, per transcript stream, for agent `output`
     /// appends to a counted file (Phase 5a-3,
@@ -222,6 +233,7 @@ pub struct WSFileEventData {
     /// Empty for anything else (terminal data, uncounted files). Consumers
     /// pick the entry for the stream they read from.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[ts(as = "Option<Vec<StreamPos>>", optional)]
     pub pos: Vec<StreamPos>,
     /// Set when the records are an echo of something the pane already shows:
     /// `"stdin"` for a user message the controller wrote to the agent's stdin
@@ -229,20 +241,24 @@ pub struct WSFileEventData {
     /// record, with positions, so the stream has no gap; the pane doesn't add
     /// a second node for it (Phase 5a-3c).
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[ts(optional)]
     pub echo: Option<String>,
 }
 
 /// One transcript stream's position for an append: the records it wrote are
 /// lines `line .. lines` of generation `gen` of `stream`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct StreamPos {
     /// `b:<blockId>` for the block's own `output`, `g:<zone>` for the
     /// agent's global transcript zone.
     pub stream: String,
     pub gen: String,
     /// Index of the first record this append wrote.
+    #[ts(type = "number")]
     pub line: u64,
     /// The stream's line count after this append.
+    #[ts(type = "number")]
     pub lines: u64,
 }
 
@@ -481,6 +497,29 @@ impl Broker {
         }
     }
 
+    /// Publish a typed event (`mps_events`): `payload` is `E::Payload`, so its
+    /// frontend subscribers get it as that type.
+    pub fn publish_event<E: super::mps_events::Event>(&self, payload: &E::Payload, scopes: Vec<String>, persist: usize) {
+        self.publish(MuxEvent {
+            event: E::NAME.to_string(),
+            scopes,
+            sender: String::new(),
+            persist,
+            data: super::mps_events::payload_data(payload),
+        });
+    }
+
+    /// Publishes a per-id event (`mps_events::PerIdEvent`) under its prefix plus `id`.
+    pub fn publish_event_for<E: super::mps_events::PerIdEvent>(&self, id: &str, payload: &E::Payload, scopes: Vec<String>, persist: usize) {
+        self.publish(MuxEvent {
+            event: format!("{}{id}", E::PREFIX),
+            scopes,
+            sender: String::new(),
+            persist,
+            data: super::mps_events::payload_data(payload),
+        });
+    }
+
     /// Publish an event to all matching subscribers.
     pub fn publish(&self, event: MuxEvent) {
         for o in self.observers.read().unwrap_or_else(|e| e.into_inner()).iter() {
@@ -699,6 +738,41 @@ mod tests {
             b.publish(MuxEvent { event: name.into(), scopes: vec![], sender: String::new(), persist: 0, data: None });
         }
         assert_eq!(*seen.lock().unwrap(), vec!["agentfailure".to_string(), "config".to_string()]);
+    }
+
+    #[test]
+    fn a_signal_event_goes_out_with_no_data_and_a_payload_event_with_its_payload() {
+        use crate::backend::mps_events::{AgentsChanged, FilesChanged, FilesChangedEvent};
+        let b = Broker::new();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<MuxEvent>::new()));
+        let s2 = seen.clone();
+        b.add_observer(std::sync::Arc::new(move |e: &MuxEvent| s2.lock().unwrap().push(e.clone())));
+        b.publish_event::<AgentsChanged>(&(), vec![], 0);
+        b.publish_event::<FilesChanged>(&FilesChangedEvent { dir: "/tmp".into() }, vec![], 0);
+        let seen = seen.lock().unwrap();
+        // As the hand-built `data: None` it replaces: no `data` key on the wire at all.
+        let signal = serde_json::to_value(&seen[0]).unwrap();
+        assert_eq!(signal["event"], "agents:changed");
+        assert!(signal.get("data").is_none(), "{signal}");
+        assert_eq!(seen[1].data, Some(serde_json::json!({ "dir": "/tmp" })));
+    }
+
+    #[test]
+    fn a_per_id_event_goes_out_under_its_prefix_and_the_id() {
+        use crate::backend::mps_events::{AgentCredentialsRevoked, AgentMemoryChanged, CredentialsRevokedEvent};
+        let b = Broker::new();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<MuxEvent>::new()));
+        let s2 = seen.clone();
+        b.add_observer(std::sync::Arc::new(move |e: &MuxEvent| s2.lock().unwrap().push(e.clone())));
+        let revoked = CredentialsRevokedEvent { credentials_revoked: true, provider: "claude".into(), account_id: None };
+        b.publish_event_for::<AgentCredentialsRevoked>("agent-1", &revoked, vec![], 0);
+        b.publish_event_for::<AgentMemoryChanged>("agent-2", &(), vec![], 0);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].event, "agentcredentials:revoked:agent-1");
+        // As the json! it replaces: no accountId when no one account was unlinked.
+        assert_eq!(seen[0].data, Some(serde_json::json!({ "credentialsRevoked": true, "provider": "claude" })));
+        assert_eq!(seen[1].event, "agent:memory:changed:agent-2");
+        assert_eq!(seen[1].data, None);
     }
 
     use super::*;

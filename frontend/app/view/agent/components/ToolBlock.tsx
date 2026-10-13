@@ -50,6 +50,7 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import { OpenInEditorButton } from "../agent-open-in-editor";
 import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
+import { createBodyMount } from "./body-mount";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { ShellTokens } from "./shell-highlight/ShellCommand";
@@ -238,15 +239,16 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // actions (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §3).
     const [tall, setTall] = createSignal(false);
     // The panel's body (full tool output: diffs, file previews, Bash output,
-    // all highlighted with shiki) mounts the first time the panel opens and
-    // then stays — never unmounted on collapse, so the collapse transition
-    // and the virtualizer's measurements keep the stable subtree the
-    // `--hidden` styles rely on. A row that is never opened never builds it:
-    // restoring history used to highlight every collapsed Edit/Read/Bash
-    // row on mount (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4: shiki + its
-    // wasm ≈ 94 ms of one open).
-    let bodyEverShown = false;
-    const bodyMounted = createMemo(() => bodyEverShown || (bodyEverShown = expanded()));
+    // all highlighted with shiki) mounts while the panel is open and for a
+    // short linger after it closes, so the collapse transition runs on the
+    // real content; then it goes, and opening again builds it again. A row
+    // that is never opened never builds it: restoring history used to
+    // highlight every collapsed Edit/Read/Bash row on mount
+    // (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4: shiki + its wasm ≈ 94 ms of
+    // one open). It used to stay forever once opened — and every live tool
+    // call opens while it runs — so a session kept every tool's full output
+    // (SPEC_TOOL_BODY_UNMOUNT_ON_COLLAPSE_2026_10_12.md).
+    const bodyMounted = createBodyMount(expanded);
     // The header click flips whichever set the rule says this row uses:
     // collapsedNodes for an open-by-default (content-first) tool, else the pin.
     const onHeaderClick = () =>

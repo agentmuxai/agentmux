@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RpcApi } from "@/app/store/rpc-api";
-import type { BackgroundTaskView, FleetActionResult, FleetStagePlan } from "@/app/store/rpc-api";
+import { RpcApi, type BackgroundTaskView, type FleetActionResult, type FleetStagePlan } from "@/app/store/rpc-api";
 import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     localFleetTargets,
@@ -12,7 +11,7 @@ import {
     type FleetTargetInfo,
 } from "./swarm-fleet-targets";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { muxEventSubscribe, onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
@@ -25,6 +24,7 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -870,16 +870,12 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
         setEntries((prev) => mergeDispatchActivityEntries(prev, incoming));
     };
 
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.DispatchActivity,
-        handler: (event: MuxEvent) => {
-            const data = event?.data as any;
-            if (data?.dispatchId !== dispatchId) return;
-            const members = (data?.members as { agentId: string; events: SubagentEvent[] }[]) ?? [];
+    const unsub = onMuxEvent(WpsEvent.DispatchActivity, (data) => {
+            if (data.dispatchId !== dispatchId) return;
+            const members = data.members;
             const relevant = backfillAgentId ? members.filter((m) => m.agentId === backfillAgentId) : members;
             mergeIncoming(relevant.flatMap((m) => (m.events ?? []).map((evt) => ({ agentId: m.agentId, event: evt }))));
-        },
-    });
+        });
 
     const soloAgentId = backfillAgentId ?? (dispatchId.startsWith("solo:") ? dispatchId.slice("solo:".length) : undefined);
     if (soloAgentId) {
@@ -1194,25 +1190,16 @@ export class SwarmViewModel {
         // handlers below — no response to await here.
         void callBackendService("subagent", "ResolveUnnamedBacklog", []);
 
-        const unsubSpawned = muxEventSubscribe({
-            eventType: WpsEvent.SubagentSpawned,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubSpawned = onMuxEvent(WpsEvent.SubagentSpawned, () => this.scheduleLoadSubagents());
         if (unsubSpawned) this.unsubs.push(unsubSpawned);
 
-        const unsubCompleted = muxEventSubscribe({
-            eventType: WpsEvent.SubagentCompleted,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubCompleted = onMuxEvent(WpsEvent.SubagentCompleted, () => this.scheduleLoadSubagents());
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
 
         // A known subagent's `tool_use_id` arrived after its spawn (the CLI
         // writes the sidecar separately) — reload so its background tasks
         // move from the agent-level bucket to under its row.
-        const unsubUpdated = muxEventSubscribe({
-            eventType: WpsEvent.SubagentUpdated,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubUpdated = onMuxEvent(WpsEvent.SubagentUpdated, () => this.scheduleLoadSubagents());
         if (unsubUpdated) this.unsubs.push(unsubUpdated);
 
         // One or more subagents just reconciled active -> abandoned, either
@@ -1225,59 +1212,40 @@ export class SwarmViewModel {
         // listener is simply inert until #2234 lands (subagent:abandoned
         // is never emitted yet), not broken; #2234's own PR description
         // covers the same sequencing from the backend side.
-        const unsubAbandoned = muxEventSubscribe({
-            eventType: WpsEvent.SubagentAbandoned,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubAbandoned = onMuxEvent(WpsEvent.SubagentAbandoned, () => this.scheduleLoadSubagents());
         if (unsubAbandoned) this.unsubs.push(unsubAbandoned);
 
         // dispatch:updated fires for both Solo and Workflow kinds (SPEC §5) —
         // a member count/status change on either warrants the same reload
         // used for subagent spawn/completion (they're closely correlated:
         // a workflow member spawning/completing IS a dispatch update).
-        const unsubDispatchUpdated = muxEventSubscribe({
-            eventType: WpsEvent.DispatchUpdated,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubDispatchUpdated = onMuxEvent(WpsEvent.DispatchUpdated, () => this.scheduleLoadSubagents());
         if (unsubDispatchUpdated) this.unsubs.push(unsubDispatchUpdated);
 
         // A closed block's subagents/dispatches were just pruned server-side
         // (SubagentWatcher::prune_block, backstopped against BlockDeleted/
         // TabDeleted/WorkspaceDeleted) — reload so the ghost row this used
         // to leave behind (visible until srv restart) disappears promptly.
-        const unsubBlockPruned = muxEventSubscribe({
-            eventType: WpsEvent.SubagentBlockPruned,
-            handler: () => this.scheduleLoadSubagents(),
-        });
+        const unsubBlockPruned = onMuxEvent(WpsEvent.SubagentBlockPruned, () => this.scheduleLoadSubagents());
         if (unsubBlockPruned) this.unsubs.push(unsubBlockPruned);
 
         // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).
         // shell_node_create — a new shell appeared, reload the active list.
-        const unsubShellCreate = muxEventSubscribe({
-            eventType: WpsEvent.ShellNodeCreate,
-            handler: () => this.scheduleLoadShells(),
-        });
+        const unsubShellCreate = onMuxEvent(WpsEvent.ShellNodeCreate, () => this.scheduleLoadShells());
         if (unsubShellCreate) this.unsubs.push(unsubShellCreate);
 
         // shell_chunk fires per output line too — only reload on the
         // terminal "exit" op, not every line of stdout/stderr (that would
         // re-fetch the whole active-shells list on every chunk).
-        const unsubShellChunk = muxEventSubscribe({
-            eventType: WpsEvent.ShellChunk,
-            handler: (event: MuxEvent) => {
-                const data = event?.data as any;
-                if (data?.op === "exit") this.scheduleLoadShells();
-            },
+        const unsubShellChunk = onMuxEvent(WpsEvent.ShellChunk, (data) => {
+            if (data.op === "exit") this.scheduleLoadShells();
         });
         if (unsubShellChunk) this.unsubs.push(unsubShellChunk);
 
         // Cron bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2).
         // Payload-free — any create/fire/pause/resume/delete just triggers a
         // full reload of the (already-cheap, unfiltered) active list.
-        const unsubCronChanged = muxEventSubscribe({
-            eventType: WpsEvent.CronChanged,
-            handler: () => this.scheduleLoadCrons(),
-        });
+        const unsubCronChanged = onMuxEvent(WpsEvent.CronChanged, () => this.scheduleLoadCrons());
         if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
 
         // Background tasks. Payload-free invalidation, scoped to the block
@@ -1367,10 +1335,7 @@ export class SwarmViewModel {
         // restored agent's controller could register successfully server-side
         // while this list stayed stale client-side indefinitely. See
         // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
-        const unsubTrackedBlocksChanged = muxEventSubscribe({
-            eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged,
-            handler: () => void this.loadTrackedBlocks(),
-        });
+        const unsubTrackedBlocksChanged = onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, () => void this.loadTrackedBlocks());
         if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
 
         // Bounded self-healing safety net: re-poll regardless of whether any
@@ -2056,19 +2021,14 @@ export class SwarmViewModel {
                 .catch(() => {/* keep idle default */});
 
             const scope = MOS.makeORef("block", blockId);
-            const unsub = muxEventSubscribe({
-                eventType: WpsEvent.ControllerStatus,
-                scope,
-                handler: (ev) => {
-                    const data = (ev as any)?.data;
-                    const next = derivedRunningStatus(data?.is_agent_pane, data?.turn_active, data?.shellprocstatus);
+            const unsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                    const next = derivedRunningStatus(data.is_agent_pane, data.turn_active, data.shellprocstatus);
                     this.setAgentStatuses((prev) => {
                         const m = new Map(prev);
                         m.set(blockId, next);
                         return m;
                     });
-                },
-            });
+                }, scope);
             if (unsub) this.blockUnsubs.push(unsub);
         }
     }

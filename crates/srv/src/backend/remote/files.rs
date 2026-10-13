@@ -276,6 +276,21 @@ impl RemoteFiles {
         self.done(Request::Sync { path: path.into() }).await
     }
 
+    /// One pane's processes on the host (`PaneProcs`): durable `session`'s
+    /// shell, else those marked with `block_id`.
+    pub async fn pane_procs(&self, block_id: &str, session: &str) -> Result<fsproto::PaneFrame, RemoteError> {
+        match self
+            .call(Request::PaneProcs {
+                block_id: block_id.to_string(),
+                session: session.to_string(),
+            })
+            .await?
+        {
+            Reply::PaneProcs(f) => Ok(f),
+            r => Err(unexpected(&r)),
+        }
+    }
+
     /// The host's processes for Tower: the `top` busiest and largest among
     /// those matching `filter`, with totals (`agentmux_remote::procs`).
     pub async fn procs(&self, top: u32, filter: &str) -> Result<fsproto::ProcFrame, RemoteError> {
@@ -536,6 +551,61 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
     Ok(files)
 }
 
+/// [`connect`] for something that asks every few seconds on its own (a
+/// pane's stats badge), not on the user's word: the open connection, or a new
+/// one only on a host the helper is known to be on (`helper_hosts`), never an
+/// install, a consent question or an ssh prompt (a login that needs one
+/// fails instead; a pane's shared connection usually makes it unneeded).
+pub async fn connect_quiet(conn: &str) -> Result<Arc<RemoteFiles>, RemoteError> {
+    let name = canonical(conn)?;
+    let slot = pool().lock().unwrap().entry(name.clone()).or_default().clone();
+    let mut s = slot.lock().await;
+    if let Some(f) = s.as_ref().filter(|f| f.is_open()) {
+        return Ok(f.clone());
+    }
+    // A host this failed on lately (a helper of another version, a login
+    // that needs a prompt) isn't tried again on every poll.
+    if let Some(why) = quiet_failures().lock().unwrap().get(&name).filter(|(at, _)| at.elapsed() < QUIET_RETRY_AFTER) {
+        return Err(RemoteError::link(why.1.clone()));
+    }
+    if !super::helper_hosts::known(conn) {
+        return Err(RemoteError::link(format!("AgentMux's helper isn't on {name}")));
+    }
+    let host = HostSsh::for_connection(conn).map_err(RemoteError::link)?;
+    // Its own deadline, inside: a caller's timeout would drop this before a
+    // failure is recorded, and an unreachable host would be tried every poll.
+    let started = tokio::time::timeout(QUIET_START_TIMEOUT, start(&name, host, None)).await;
+    let files = match started {
+        Ok(Ok(f)) => f,
+        Ok(Err((e, _))) => {
+            quiet_failures().lock().unwrap().insert(name, (Instant::now(), e.message.clone()));
+            return Err(e);
+        }
+        Err(_) => {
+            let why = format!("{name} didn't answer in time");
+            quiet_failures().lock().unwrap().insert(name, (Instant::now(), why.clone()));
+            return Err(RemoteError::link(why));
+        }
+    };
+    quiet_failures().lock().unwrap().remove(&name);
+    *s = Some(files.clone());
+    Ok(files)
+}
+
+/// How long [`connect_quiet`] leaves a host it failed on alone.
+const QUIET_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// How long [`connect_quiet`] waits for the helper to start: under the
+/// stats badge's own 5 s, so a host that doesn't answer is recorded as a
+/// failure rather than cut off and tried again on the next poll.
+const QUIET_START_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Hosts [`connect_quiet`] failed on: when, and why (said again meanwhile).
+fn quiet_failures() -> &'static Mutex<HashMap<String, (Instant, String)>> {
+    static FAILURES: OnceLock<Mutex<HashMap<String, (Instant, String)>>> = OnceLock::new();
+    FAILURES.get_or_init(Default::default)
+}
+
 /// The pool's key for `conn`: its canonical name, one per host however it is
 /// spelled. `Err` unless it is an SSH connection.
 fn canonical(conn: &str) -> Result<String, RemoteError> {
@@ -558,6 +628,25 @@ pub(crate) async fn connect_in_process(conn: &str, home: std::path::PathBuf) -> 
     let slot = pool().lock().unwrap().entry(name).or_default().clone();
     *slot.lock().await = Some(f.clone());
     f
+}
+
+#[cfg(test)]
+mod quiet_tests {
+    use super::*;
+
+    /// A host `connect_quiet` failed on lately gets the same answer again,
+    /// without another ssh, until the back-off has passed.
+    #[tokio::test]
+    async fn a_recent_failure_is_answered_without_trying_again() {
+        let name = canonical("me@quiet-backoff-test").unwrap();
+        quiet_failures().lock().unwrap().insert(name.clone(), (Instant::now(), "the helper is another version".into()));
+        let err = connect_quiet("me@quiet-backoff-test").await.err().expect("refused");
+        assert_eq!(err.message, "the helper is another version");
+        let long_ago = Instant::now().checked_sub(QUIET_RETRY_AFTER + Duration::from_secs(1)).unwrap();
+        quiet_failures().lock().unwrap().insert(name, (long_ago, "old".into()));
+        let err = connect_quiet("me@quiet-backoff-test").await.err().expect("still no helper here");
+        assert_ne!(err.message, "old", "after the back-off it is tried again");
+    }
 }
 
 #[cfg(test)]

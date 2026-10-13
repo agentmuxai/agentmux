@@ -688,22 +688,33 @@ pub struct RunCliLoginResult {
 // §2.8), catching drift between this struct and the CLI/manifest at CI time
 // on this side, the same way a corresponding muxsh.contract.test.mjs catches
 // it on the Node side.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Every Option field may be left out (serde reads a missing one as None), so each is optional in TS.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandPaneOpenData {
     pub view: String,
+    #[ts(optional)]
     pub file: Option<String>,
+    #[ts(optional)]
     pub url: Option<String>,
+    #[ts(optional)]
     pub cwd: Option<String>,
+    #[ts(optional)]
     pub title: Option<String>,
+    #[ts(optional)]
     pub tab_id: Option<String>,
+    #[ts(optional)]
     pub split_direction: Option<String>,
+    #[ts(optional)]
     pub split_reference_block_id: Option<String>,
+    #[ts(optional)]
     pub focus: Option<bool>,
     /// `editor` only: initial file-tree sidebar state. `Some(false)` opens the
     /// editor with its tree collapsed (just the file, no explorer). Written to
     /// `block.meta["editor:tree_expanded"]`, which the frontend `EditorViewModel`
     /// restores on init. Absent / `Some(true)` → the frontend default (expanded).
+    #[ts(optional)]
     pub tree_expanded: Option<bool>,
     /// `Some(true)` opens the pane as a floating window instead of a docked
     /// split. The block is created then moved into a fresh floating workspace
@@ -712,12 +723,14 @@ pub struct CommandPaneOpenData {
     /// calls the host `open_floating_pane_window` command to materialize the OS
     /// window. `split_direction` / `split_reference_block_id` are ignored when
     /// floating. See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
+    #[ts(optional)]
     pub floating: Option<bool>,
     /// When present, used as the block meta directly instead of going through
     /// `build_pane_meta`. Allows callers with a complete blockdef (e.g. widget
     /// bar actions) to bypass the view-specific argument validation that
     /// `build_pane_meta` enforces. `view` must still be set to the canonical
     /// view string so the block is routed to the correct renderer.
+    #[ts(type = "MetaType", optional)]
     pub meta: Option<MetaMapType>,
     /// `Some(true)` creates the block through the reducer (same as the docked
     /// path) but skips BOTH the layout-placement step AND the floating path's
@@ -735,6 +748,7 @@ pub struct CommandPaneOpenData {
     /// block-stack instead of giving it its own tile (in-pane tabs —
     /// see `frontend/layout/lib/layoutStack.ts`'s `pushBlockOntoStack`,
     /// docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2).
+    #[ts(optional)]
     pub skip_placement: Option<bool>,
     /// Create the block directly as a new tab of the pane that holds this
     /// block (visible or background), in ONE reducer step
@@ -745,15 +759,18 @@ pub struct CommandPaneOpenData {
     /// placement; `floating` still wins (checked first).
     /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub stack_onto_block_id: Option<String>,
     /// `editor`, `term` or `files`: the connection the pane works on (block
     /// meta `connection`): an SSH host, `wsl://<distro>`, or absent for this
     /// computer (remote terminals spec §6.3). Over HTTP (the agent path) an
     /// SSH connection needs the agent's signed `auth` and the user's consent
     /// for that host, as `Shell` does.
+    #[ts(optional)]
     pub connection: Option<String>,
     /// The calling agent's signed identity (`UiAutomationAuth`), for an SSH
-    /// `connection` over HTTP.
+    /// `connection` over HTTP. Not in the TypeScript type: the frontend never sends it.
+    #[ts(skip)]
     pub auth: Option<agentmux_common::api_types::UiAutomationAuth>,
     /// `Some(true)`, `view: "editor"` only: if the caller (identified by
     /// `split_reference_block_id`) already has an Editor pane open in its
@@ -772,6 +789,7 @@ pub struct CommandPaneOpenData {
     /// docked pane. See
     /// docs/specs/SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
     /// Part 2.
+    #[ts(optional)]
     pub reuse_editor_pane: Option<bool>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the pane has listed it, written to `block.meta["files:select"]`
@@ -780,6 +798,7 @@ pub struct CommandPaneOpenData {
     /// so `muxsh` (which never sends it) and the app-api manifest are
     /// unaffected. SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub select: Option<Vec<String>>,
     /// `editor` only: a 1-based line to put the cursor on and scroll to once
     /// the file is open, written to `block.meta["editor:line"]` (a one-shot
@@ -787,11 +806,13 @@ pub struct CommandPaneOpenData {
     /// (SPEC_REMOTES_PANE_2026_10_05.md §4.3). Omitted from serialization when
     /// absent, like `select`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub line: Option<u32>,
 }
 
 /// Response from pane.open.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct PaneOpenResult {
     pub block_id: String,
@@ -805,11 +826,14 @@ pub struct PaneOpenResult {
 /// `"end"`, relative to `target_block_id` (matches
 /// `agentmux_common::StackMovePosition`'s serde encoding).
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandPaneMoveTabData {
     pub block_id: String,
     pub target_block_id: String,
+    // move_tab accepts only these three.
+    #[ts(type = r#""before" | "after" | "end""#)]
     pub position: String,
     pub activate: bool,
 }

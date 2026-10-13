@@ -20,9 +20,32 @@ let contextMenuClickCallback: ((id: string) => void) | null = null;
 // Close function of the currently open showJsContextMenu, if any.
 let activeContextMenuClose: (() => void) | null = null;
 
+// Replaces the open menu's items in place, if a menu is open.
+let activeContextMenuUpdate: ((items: NativeContextMenuItem[]) => void) | null = null;
+
+// Called whenever a menu closes, by any path (click, Escape, outside click, another menu).
+const closeListeners = new Set<() => void>();
+
 /** Close the open JS context menu (if any), releasing its pane-overlay holes. */
 export function closeJsContextMenu(): void {
     activeContextMenuClose?.();
+}
+
+/**
+ * Replace the items of the menu that is open, where it is: a live menu (the pane "+" picker)
+ * follows a config change without closing. A submenu that was open stays open if a submenu
+ * with the same label is still there. Returns false when no menu is open.
+ */
+export function updateJsContextMenu(items: NativeContextMenuItem[]): boolean {
+    if (!activeContextMenuUpdate) return false;
+    activeContextMenuUpdate(items);
+    return true;
+}
+
+/** Run `listener` the next time any JS context menu closes. Returns an unsubscribe. */
+export function onJsContextMenuClosed(listener: () => void): () => void {
+    closeListeners.add(listener);
+    return () => closeListeners.delete(listener);
 }
 
 /**
@@ -78,6 +101,10 @@ export function showJsContextMenu(
     // the DOM. A leaked registration would leave a see-through,
     // click-through hole in the pane after the menu is gone.
     const overlayHandles: PaneOverlayHandle[] = [];
+    // Submenu holes, released and rebuilt when a live menu's items change.
+    const submenuHandles: PaneOverlayHandle[] = [];
+    // Top-level submenu rows by label, to reopen the one that was open after an update.
+    const topLevelSubmenus = new Map<string, { hover: SubmenuHoverController; sub: HTMLElement }>();
     const onDocMouseDown = (e: MouseEvent) => {
         // The backdrop covers the whole window, so a real click lands on it.
         // What reaches here from outside is the synthetic body mousedown that
@@ -93,9 +120,15 @@ export function showJsContextMenu(
         }
     };
     function closeMenu() {
-        if (activeContextMenuClose === closeMenu) activeContextMenuClose = null;
+        if (activeContextMenuClose === closeMenu) {
+            activeContextMenuClose = null;
+            activeContextMenuUpdate = null;
+        }
         for (const h of overlayHandles) h.release();
         overlayHandles.length = 0;
+        for (const h of submenuHandles) h.release();
+        submenuHandles.length = 0;
+        for (const listener of [...closeListeners]) listener();
         document.removeEventListener("mousedown", onDocMouseDown, true);
         document.removeEventListener("keydown", onDocKeyDown, true);
         overlay.remove();
@@ -133,6 +166,7 @@ export function showJsContextMenu(
     menuEl.style.visibility = "hidden";
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
+        const topLevel = container === menuEl;
         // Peers (same-level submenu-bearing rows) close each other instantly
         // on entry — matches the old zero-delay mouseleave's implicit
         // sibling-closing side effect, which createSubmenuHover's open-delay/
@@ -220,7 +254,7 @@ export function showJsContextMenu(
                 row.appendChild(sub);
                 // display:none until hovered → no hole until it's shown and
                 // placed; the style observer picks up each open/close.
-                overlayHandles.push(registerPaneOverlay(sub));
+                submenuHandles.push(registerPaneOverlay(sub));
                 // Positioned through the shared framework, like the top-level
                 // menu: anchored to the row, preferring right-start — flip()
                 // sends it left of the parent near the right edge, shift()
@@ -305,6 +339,7 @@ export function showJsContextMenu(
                 // yet" — safe to register once, up front.
                 hover.setSubmenuEl(sub);
                 peers.push(hover);
+                if (topLevel && item.label) topLevelSubmenus.set(item.label, { hover, sub });
                 row.addEventListener("mouseenter", () => {
                     for (const peer of peers) {
                         if (peer !== hover) peer.close();
@@ -344,23 +379,43 @@ export function showJsContextMenu(
     // pane. The `data-pane-overlay` clip reveals it through the native pane;
     // holding it visibility:hidden until placed means the clip rect registers
     // once, at the final position — no flapping, no stale-rect black artifact.
-    void computeMenuPosition(
-        {
-            anchor: { x: position.x, y: position.y },
-            placement: "bottom-start",
-            avoidNativePanes: false,
-        },
-        menuEl,
-    ).then((pos) => {
+    const place = () =>
+        void computeMenuPosition(
+            {
+                anchor: { x: position.x, y: position.y },
+                placement: "bottom-start",
+                avoidNativePanes: false,
+            },
+            menuEl,
+        ).then((pos) => {
+            if (!menuEl.isConnected) return;
+            applyMenuPosition(menuEl, pos);
+            menuEl.style.visibility = "";
+            assertMenuInPaintableArea(menuEl, "context-menu");
+        }).catch(() => {
+            // computeMenuPosition should not throw; if it does, fall back to the
+            // raw cursor position rather than leaving the menu invisible.
+            if (menuEl.isConnected) menuEl.style.visibility = "";
+        });
+    place();
+
+    activeContextMenuUpdate = (next: NativeContextMenuItem[]) => {
         if (!menuEl.isConnected) return;
-        applyMenuPosition(menuEl, pos);
-        menuEl.style.visibility = "";
-        assertMenuInPaintableArea(menuEl, "context-menu");
-    }).catch(() => {
-        // computeMenuPosition should not throw; if it does, fall back to the
-        // raw cursor position rather than leaving the menu invisible.
-        if (menuEl.isConnected) menuEl.style.visibility = "";
-    });
+        let openLabel: string | null = null;
+        for (const [label, { hover, sub }] of topLevelSubmenus) {
+            if (sub.style.display !== "none") openLabel = label;
+            hover.dispose();
+        }
+        topLevelSubmenus.clear();
+        for (const h of submenuHandles) h.release();
+        submenuHandles.length = 0;
+        menuEl.replaceChildren();
+        renderItems(menuEl, next);
+        // Same anchor, new height: re-place so a longer list still fits the window.
+        menuEl.style.maxHeight = "";
+        place();
+        if (openLabel) topLevelSubmenus.get(openLabel)?.hover.openNow();
+    };
 }
 
 /** `AppApi.showContextMenu` and `AppApi.onContextMenuClick`, backed by the JS

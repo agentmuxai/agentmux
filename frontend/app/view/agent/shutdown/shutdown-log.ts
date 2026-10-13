@@ -13,7 +13,7 @@
 
 import { createStore, produce } from "solid-js/store";
 import { MOS } from "@/app/store/global";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 
 import { WpsEvent } from "@/app/store/mps-events";
 const EVENT_AGENT_SHUTDOWN = WpsEvent.AgentShutdown;
@@ -68,18 +68,14 @@ export function shutdownLogFor(blockId: string): ShutdownLog | undefined {
 export function beginShutdownLog(blockId: string): void {
     if (unsubscribers.has(blockId)) return;
     setLogs(blockId, { lines: [], done: false });
-    const unsub = muxEventSubscribe({
-        eventType: EVENT_AGENT_SHUTDOWN,
-        scope: MOS.makeORef("block", blockId),
-        handler: (event: { data?: unknown }) => {
+    const unsub = onMuxEvent(EVENT_AGENT_SHUTDOWN, (data) => {
             setLogs(
                 produce((all) => {
                     const cur = all[blockId];
-                    if (cur) all[blockId] = applyShutdownEvent(cur, event?.data);
+                    if (cur) all[blockId] = applyShutdownEvent(cur, data);
                 })
             );
-        },
-    });
+        }, MOS.makeORef("block", blockId));
     unsubscribers.set(blockId, unsub ?? (() => {}));
 }
 

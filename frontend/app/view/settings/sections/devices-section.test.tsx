@@ -157,4 +157,21 @@ describe("DevicesSection", () => {
         const toggle = await screen.findByRole("switch", { name: "Publish this computer to my devices" });
         expect(toggle).toHaveAttribute("aria-checked", "false");
     });
+
+    it("offers Share what my agents are working on, on when the setting is absent", async () => {
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Share what my agents are working on" });
+        expect(toggle).toHaveAttribute("aria-checked", "true");
+        fireEvent.click(toggle);
+        expect(setConfig).toHaveBeenCalledWith({}, { "swarm:sharesummaries": false });
+    });
+
+    it("reads Share what my agents are working on off when the setting is false", async () => {
+        settings = { "swarm:sharesummaries": false };
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Share what my agents are working on" });
+        expect(toggle).toHaveAttribute("aria-checked", "false");
+    });
 });

@@ -7,7 +7,7 @@ import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { noteResolved, registerPaneCommandRunner, type RunResult } from "@/app/keybindings/app-api";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { isChordActive, resolveKeyEvent } from "@/app/store/keymodel-dispatch";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { appliedWindowTheme } from "@/app/store/window-appearance";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -45,6 +45,7 @@ import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import { isNewerControllerStatus } from "./controller-status";
+import type { ConnStatus } from "@/types/rpc/ConnStatus";
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
 class TermViewModel {
@@ -306,14 +307,9 @@ class TermViewModel {
         initialShellProcStatus.then((rts) => {
             this.updateShellProcStatus(rts);
         });
-        this.shellProcStatusUnsubFn = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: MOS.makeORef("block", blockId),
-            handler: (event) => {
-                let bcRTS: BlockControllerRuntimeStatus = event.data;
-                this.updateShellProcStatus(bcRTS);
-            },
-        });
+        this.shellProcStatusUnsubFn = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
+                this.updateShellProcStatus(data);
+            }, MOS.makeORef("block", blockId));
 
         // Last, once every field exists: registering notifies readers of
         // this block (the pane chrome's runtime badge, multi-input), which

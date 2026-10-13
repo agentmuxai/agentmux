@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub mod agent_line;
 pub mod agent_state;
 pub mod attachments;
 pub mod agent_color;
@@ -117,6 +118,7 @@ pub mod posix_shell;
 pub mod shellintegration;
 pub mod swarm_remote;
 pub mod sysinfo;
+pub mod blockstats_detail;
 pub mod tower_agentmux;
 pub mod tower_peers;
 pub mod tower_remote;
@@ -132,6 +134,7 @@ pub mod obj;
 pub mod wconfig;
 pub mod wcore;
 pub mod mps;
+pub mod mps_events;
 pub mod osc_extractor;
 pub mod tool_store;
 pub mod container;

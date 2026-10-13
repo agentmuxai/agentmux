@@ -25,7 +25,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import type { Bundle, BundleUpsertInput, BundleValidationReport } from "@/app/store/rpc-api";
 
@@ -215,10 +215,7 @@ export class BundleViewModel {
 
         // Kick off initial load. Errors land in errorAtom for UI surfacing.
         void this.refresh();
-        this.unsubChanged = muxEventSubscribe({
-            eventType: WpsEvent.MemoriesChanged,
-            handler: () => void this.refresh(),
-        });
+        this.unsubChanged = onMuxEvent(WpsEvent.MemoriesChanged, () => void this.refresh());
     }
 
     /** Re-fetch the full list. Called on mount and after each mutation.

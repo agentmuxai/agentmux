@@ -54,6 +54,7 @@
 //! `spawn`/`watch_agent`/`unwatch_agent`/`prune_block*`).
 
 mod completion;
+pub mod events;
 mod jsonl;
 mod parse;
 mod query;
@@ -81,10 +82,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
+use super::eventbus::EventBus;
 use parse::{derive_session_id, nearest_existing_ancestor};
 use types::{DispatchState, PendingDispatchActivity, SessionWatch, WatchedAgent};
 
@@ -949,18 +949,9 @@ impl SubagentWatcher {
     }
 
     fn broadcast_block_pruned(&self, block_id: &str) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:block_pruned",
-                    "data": { "blockId": block_id }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
+        self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentBlockPruned>(&events::SubagentBlockPrunedEvent {
+            block_id: block_id.to_string(),
+        });
     }
 
     /// Prune `block_id` and broadcast `subagent:block_pruned` if anything

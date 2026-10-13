@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { closeJsContextMenu, onJsContextMenuClosed, updateJsContextMenu } from "@/app/host/js-context-menu";
+import { createEffect, createRoot, untrack } from "solid-js";
 import { atoms, getApi, openLink } from "./global";
 import {
     readAttachments as clipboardReadAttachments,
@@ -63,6 +65,41 @@ class ContextMenuModelType {
         const nativeMenuItems = this._convertAndRegisterMenu(menu);
         const position = { x: Math.round((ev as MouseEvent).clientX), y: Math.round((ev as MouseEvent).clientY) };
         getApi().showContextMenu(atoms.workspace()?.oid, nativeMenuItems, position);
+    }
+
+    /**
+     * Show a menu that follows its data while it's open: `build` is re-run whenever a signal
+     * it reads changes (the pane "+" picker reads the widget config, so hiding or showing a
+     * widget in Settings → Widgets or on the bar updates the open picker in place). The
+     * tracking stops when the menu closes, by any path.
+     */
+    showLiveContextMenu(build: () => ContextMenuItem[], ev: MouseEvent | { stopPropagation(): void }): void {
+        const first = untrack(build);
+        if (first.length === 0) return;
+        this.showContextMenu(first, ev);
+        createRoot((dispose) => {
+            let initial = true;
+            const stop = onJsContextMenuClosed(() => {
+                stop();
+                dispose();
+            });
+            createEffect(() => {
+                const menu = build();
+                if (initial) {
+                    initial = false;
+                    return;
+                }
+                if (menu.length === 0) {
+                    closeJsContextMenu();
+                    return;
+                }
+                this.handlers.clear();
+                if (!updateJsContextMenu(this._convertAndRegisterMenu(menu))) {
+                    stop();
+                    dispose();
+                }
+            });
+        });
     }
 }
 

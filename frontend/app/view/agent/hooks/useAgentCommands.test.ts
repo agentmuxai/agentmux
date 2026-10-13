@@ -52,6 +52,7 @@ import type { DocumentNode } from "../types";
 import { snapshot as paneSnapshot, __resetAllSlots as resetPaneStateSlots } from "@/app/store/agent-pane-state-store";
 import { __resetAllSlots as resetDocSlots } from "@/app/store/agent-document-store";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /**
  * Wrap a bare AgentFailure in the PaneFailure envelope `sendMessage` now takes.

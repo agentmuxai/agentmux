@@ -36,7 +36,7 @@ use crate::backend::blockcontroller;
 use crate::server::agent_resources::{self, AgentIdentity, AgentResources};
 use crate::server::AppState;
 
-use super::close_pane::{exit_line, process_line, publish_shutdown, save_final_state, short_command};
+use super::close_pane::{exit_line, process_extra, process_line, publish_shutdown, save_final_state, short_command, ShutdownExtra};
 
 /// How the agent's own process is stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -392,7 +392,7 @@ async fn stop_container(
     let grace = deadline.saturating_duration_since(std::time::Instant::now()).as_secs().max(1) as i64;
     match cm.stop(&name, grace).await {
         Ok(()) => {
-            publish_shutdown(state, block_id, "container", format!("stopped container {name}"), serde_json::json!({}));
+            publish_shutdown(state, block_id, "container", format!("stopped container {name}"), ShutdownExtra::default());
             Some(name)
         }
         Err(e) => {
@@ -438,7 +438,7 @@ async fn compose_containers_left(
             block_id,
             "container",
             format!("container {name} (Docker Compose, in this agent's folder) is still running"),
-            serde_json::json!({ "container": name, "outcome": "left" }),
+            ShutdownExtra { container: Some(name.clone()), outcome: Some("left".into()), ..Default::default() },
         );
     }
     names
@@ -499,7 +499,7 @@ async fn close_cli(
     let (controller_type, outcome) = match ctrl {
         Some(ctrl) => {
             if ctrl.get_runtime_status().turn_active {
-                publish_shutdown(state, block_id, "interrupt", "turn interrupted".into(), serde_json::json!({}));
+                publish_shutdown(state, block_id, "interrupt", "turn interrupted".into(), ShutdownExtra::default());
             }
             let outcome = ctrl.shutdown(deadline).await;
             (ctrl.controller_type().to_string(), outcome)
@@ -524,11 +524,7 @@ async fn close_cli(
             block_id,
             "process",
             process_line(&p.command, p.pid, killed),
-            serde_json::json!({ "process": {
-                "pid": p.pid,
-                "name": short_command(&p.command),
-                "outcome": if killed { "killed" } else { "stopped" },
-            } }),
+            process_extra(p.pid, &p.command, if killed { "killed" } else { "stopped" }),
         );
     }
     // 5b. Verify: everything in the snapshot is gone, else force it once
@@ -540,7 +536,7 @@ async fn close_cli(
             block_id,
             "survivor",
             format!("still running: {} (pid {})", short_command(&p.command), p.pid),
-            serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "survived" } }),
+            process_extra(p.pid, &p.command, "survived"),
         );
     }
     // 5c. What still carries the agent's env tag got out of its tracker
@@ -552,7 +548,7 @@ async fn close_cli(
             block_id,
             "survivor",
             format!("still running, outside the agent's tracking: {} (pid {})", short_command(&p.command), p.pid),
-            serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "escaped" } }),
+            process_extra(p.pid, &p.command, "escaped"),
         );
         survivors.push(p);
     }
@@ -560,8 +556,8 @@ async fn close_cli(
     crate::backend::container_credential::revoke_block(block_id);
     // 6. Save final state.
     save_final_state(state, block_id);
-    publish_shutdown(state, block_id, "saved", "conversation saved".into(), serde_json::json!({}));
-    publish_shutdown(state, block_id, "done", "closing".into(), serde_json::json!({}));
+    publish_shutdown(state, block_id, "saved", "conversation saved".into(), ShutdownExtra::default());
+    publish_shutdown(state, block_id, "done", "closing".into(), ShutdownExtra::default());
     tracing::info!(
         block_id = %block_id,
         controller_type = %controller_type,

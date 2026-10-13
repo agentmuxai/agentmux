@@ -24,6 +24,31 @@ pub(crate) fn is_zero_f32(v: &f32) -> bool {
     *v == 0.0
 }
 
+/// A list of strings such as `widget:pinned`, read leniently: a value that isn't a list
+/// is ignored with a warning and non-string items are dropped. Failing it would fail the
+/// whole `SettingsType`, as the note on [`deserialize_connections`] explains.
+fn deserialize_string_list<'de, D>(d: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match Value::deserialize(d)? {
+        Value::Null => None,
+        Value::Array(items) => Some(
+            items
+                .into_iter()
+                .filter_map(|item| match item {
+                    Value::String(s) => Some(s),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        _ => {
+            tracing::warn!("settings.json: a widget list setting is not a list of names; ignoring it");
+            None
+        }
+    })
+}
+
 /// `settings.json` → `connections`, entry by entry. An entry that doesn't
 /// parse (say `"term:durable": "yes"`) is skipped with a warning; failing it
 /// would fail the whole `SettingsType`, which resets every setting at startup
@@ -121,6 +146,13 @@ pub struct SettingsType {
     #[serde(rename = "term:shiftenternewline", default, skip_serializing_if = "Option::is_none")]
     pub term_shift_enter_newline: Option<bool>,
 
+    /// A browser pane's address bar also asks the default search engine for
+    /// suggestions while you type (each edit is sent to it before you submit).
+    /// Unset: off, so suggestions come only from this computer (history,
+    /// typed URLs).
+    #[serde(rename = "browser:searchsuggestions", default, skip_serializing_if = "Option::is_none")]
+    pub browser_search_suggestions: Option<bool>,
+
     /// Maximum runtime in hours before the watchdog kills an agent pane.
     /// 0 (default) disables the limit.
     #[serde(rename = "term:agentmaxruntimehours", default, skip_serializing_if = "is_zero_f64")]
@@ -159,6 +191,28 @@ pub struct SettingsType {
 
     #[serde(rename = "widget:icononly", default, skip_serializing_if = "Option::is_none")]
     pub widget_icon_only: Option<bool>,
+
+    /// The widget bar's pinned icons, in order, as short names (`agent` for
+    /// `defwidget@agent`). Absent means the fresh-install default: the entries with
+    /// `display:pinned`. Written whole by the bar, its drag reorder and Settings → Widgets.
+    #[serde(
+        rename = "widget:pinned",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_string_list"
+    )]
+    pub widget_pinned: Option<Vec<String>>,
+
+    /// Widget-bar entries the user hid, as full keys (`defwidget@drone`,
+    /// `ext@acme.board/main`): on neither the bar nor More, nor in the pane "+" picker.
+    /// Absent means nothing is hidden. SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md.
+    #[serde(
+        rename = "widget:hidden",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_string_list"
+    )]
+    pub widget_hidden: Option<Vec<String>>,
 
     // -- Status bar settings --
     /// Whether the status bar shows MuxBus Cloud: the dot after the host name and
@@ -515,7 +569,7 @@ pub struct SettingsType {
     #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_connections")]
     pub connections: HashMap<String, ConnKeywords>,
 
-    /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
+    /// Catch-all for unknown/dynamic keys (a key this struct has no field for yet).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, serde_json::Value>,

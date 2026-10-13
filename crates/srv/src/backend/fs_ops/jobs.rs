@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::mps::Broker;
 use crate::backend::rpc_types::{
     FsOpChoice, FsOpConflict, FsOpEvent, FsOpEventState, FsOpKind, FsOpResult, FsOpStartReq, FsOpStartResult,
 };
@@ -68,20 +68,7 @@ type ChunkHook = Arc<dyn Fn(&OpControl, u64) + Send + Sync>;
 pub fn broker_emitter(broker: Arc<Broker>, block_id: String) -> Emit {
     let scope = format!("block:{block_id}");
     Arc::new(move |event: &FsOpEvent| {
-        let data = match serde_json::to_value(event) {
-            Ok(data) => data,
-            Err(e) => {
-                tracing::warn!(error = %e, "fs.op: couldn't encode a progress event");
-                return;
-            }
-        };
-        broker.publish(MuxEvent {
-            event: EVENT_FILES_OP.to_string(),
-            scopes: vec![scope.clone()],
-            sender: String::new(),
-            persist: 0,
-            data: Some(data),
-        });
+        broker.publish_event::<crate::backend::mps_events::FilesOp>(event, vec![scope.clone()], 0);
     })
 }
 

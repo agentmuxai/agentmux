@@ -104,6 +104,24 @@ pub fn run(base: &Path, session: &str, offset: u64, cols: u16, rows: u16) -> i32
     0
 }
 
+/// A durable session's shell PID, asked of the daemon (`PID`): `None` with
+/// no daemon, no such session, or a daemon that doesn't know the command.
+/// Bounded, so a wedged daemon can't stall the serve loop that asks.
+pub fn session_pid(base: &Path, session: &str) -> Option<u32> {
+    if !crate::daemon::valid_session_id(session) {
+        return None;
+    }
+    let mut stream = UnixStream::connect(socket_path(base)).ok()?;
+    let limit = Some(std::time::Duration::from_secs(2));
+    stream.set_read_timeout(limit).ok()?;
+    stream.set_write_timeout(limit).ok()?;
+    stream.write_all(format!("AMR {PROTOCOL} PID {session}\n").as_bytes()).ok()?;
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).ok()?;
+    answer.trim().parse().ok()
+}
+
 /// Send one control line (`END`, `LIST`) and print the answer.
 pub fn control(base: &Path, line: &str) -> i32 {
     let mut stream = match UnixStream::connect(socket_path(base)) {

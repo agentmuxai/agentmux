@@ -507,12 +507,15 @@ impl_mux_obj!(Block, OTYPE_BLOCK);
 
 /// Represents an update notification for a wave object.
 /// Matches Go's `MuxObjUpdate`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct MuxObjUpdate {
     pub updatetype: String,
     pub otype: String,
     pub oid: String,
+    /// The object, for an update; absent for a delete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "MuxObj")]
     pub obj: Option<serde_json::Value>,
 }
 

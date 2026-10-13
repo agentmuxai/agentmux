@@ -254,10 +254,7 @@ pub(crate) fn memory_write_impl<'o>(
     // subscriber can ever match — the exact class of bug this file's own
     // `resolve_agent_uuid` doc comment already warns about for version
     // storage; the same reasoning applies to this event.
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: format!("agent:memory:changed:{version_agent_id}"),
-        scopes: vec![], sender: String::new(), persist: 0, data: None,
-    });
+    state.broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&version_agent_id, &(), vec![], 0);
     Ok(())
 }
 
@@ -437,10 +434,7 @@ pub(crate) fn memory_revert_impl<'o>(
 
     // See memory_write_impl's own comment on why this is version_agent_id
     // (canonical UUID), not the raw agent_id slug parameter.
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: format!("agent:memory:changed:{version_agent_id}"),
-        scopes: vec![], sender: String::new(), persist: 0, data: None,
-    });
+    state.broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&version_agent_id, &(), vec![], 0);
 
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryRevertResult {
         version: crate::backend::rpc_types::NativeMemoryVersionMeta {

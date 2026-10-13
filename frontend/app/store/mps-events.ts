@@ -121,7 +121,7 @@ export const WpsEvent = {
     // — `event` is the SAME tagged `AgentEvent` union every normal turn
     // streams (`type: "assistant_text"` with `delta`, `"done"` with the
     // final `response`, `"error"` with `message`, etc. — see
-    // `frontend/types/srv-types.d.ts`'s `AgentEvent`). The outer `done: true`
+    // `frontend/types/rpc/AgentEvent.ts`). The outer `done: true`
     // (not `event.type === "done"`) is the authoritative completion signal
     // `components/BtwOverlay.tsx` waits on — it also fires on a terminal
     // `error` event, which `event.type` alone would not indicate as "done".
@@ -166,7 +166,16 @@ export const WpsEvent = {
     SubagentCompleted: "subagent:completed",
     SubagentNamed: "subagent:named",
     SubagentSpawned: "subagent:spawned",
+    // New events from one subagent. Typed in srv; nothing subscribes yet (Swarm uses dispatch:activity).
+    SubagentActivity: "subagent:activity",
     SubagentUpdated: "subagent:updated",
+    // No-payload signals typed in srv that nothing subscribes to yet.
+    AgentContentChanged: "agentcontent:changed",
+    AgentHistoryChanged: "agenthistory:changed",
+    AgentSkillsChanged: "agentskills:changed",
+    DronesChanged: "drones:changed",
+    NamedAgentsChanged: "namedagents:changed",
+    WorkQueueChanged: "workqueue:changed",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
     AgentShutdown: "agent:shutdown",

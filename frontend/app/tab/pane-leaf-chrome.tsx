@@ -8,7 +8,7 @@ import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { MOS } from "@/app/store/global";
 import type { NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
-import { Key } from "@solid-primitives/keyed";
+import { Key } from "@/util/keyed";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 /**

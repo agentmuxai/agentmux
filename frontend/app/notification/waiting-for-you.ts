@@ -25,10 +25,11 @@ import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
 import { getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { windowId } from "@/app/store/window-identity";
 
+import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
 import { APP_KEY_PREFIX } from "./waiting-keys";
 
 
@@ -102,15 +103,8 @@ export function isAgentWaitingForYou(blockId: string): boolean {
 }
 
 /** srv's announcement of a call to action it holds open (`userattention`,
- *  crates/srv/src/backend/user_attention.rs). */
-export interface UserAttention {
-    key: string;
-    block_id: string;
-    kind: string;
-    text: string;
-    window_ids: string[];
-    active: boolean;
-}
+ *  crates/srv/src/backend/user_attention.rs), as its Rust type. */
+export type UserAttention = UserAttentionEvent;
 
 /** Apply one of srv's announcements, if it's for this window: one that
  *  names windows is for those; one that names none is for every window. */
@@ -131,16 +125,11 @@ let installed = false;
 export function installWaitingForYou(): void {
     if (installed) return;
     installed = true;
-    muxEventSubscribe({
-        eventType: WpsEvent.UserAttention,
-        handler: (event: { data?: UserAttention }) => {
-            if (event?.data) applyUserAttention(event.data, windowId());
-        },
-    });
+    onMuxEvent(WpsEvent.UserAttention, (data) => applyUserAttention(data, windowId()));
     // What was already open when this window started.
     void RpcApi.NotifyAttentionCommand(TabRpcClient)
         .then((r) => {
-            for (const a of r.attention ?? []) applyUserAttention(a as UserAttention, windowId());
+            for (const a of r.attention ?? []) applyUserAttention(a, windowId());
         })
         .catch(() => {
             /* older srv without notify.attention */

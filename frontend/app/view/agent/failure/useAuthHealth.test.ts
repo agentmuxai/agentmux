@@ -81,7 +81,7 @@ describe("useAuthHealth", () => {
                 refreshLinkedAccountId,
                 deps: {
                     failureCode: () => pane.state.failure?.data.code,
-                    subscribe: ({ eventType, handler }) => {
+                    subscribe: (eventType, handler) => {
                         handlers[eventType] = handler;
                         return () => delete handlers[eventType];
                     },

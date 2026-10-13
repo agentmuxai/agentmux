@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use super::helper_hosts::HostInfo;
 use super::ConnTarget;
-use crate::backend::mps::{Broker, MuxEvent, EVENT_REMOTES_CHANGE};
+use crate::backend::mps::Broker;
 use crate::backend::rpc_types::{ConnStatus, RemoteHelper, RemotePlatform, RemoteRecord, RemoteStatus};
 use crate::backend::wconfig::ConnKeywords;
 
@@ -212,13 +212,7 @@ pub fn check_connection_entry(
 
 /// Tell every Remotes pane its list changed.
 pub fn publish_change(broker: &Broker) {
-    broker.publish(MuxEvent {
-        event: EVENT_REMOTES_CHANGE.to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: None,
-    });
+    broker.publish_event::<crate::backend::mps_events::RemotesChanged>(&(), vec![], 0);
 }
 
 // ── The list (§4.6) ─────────────────────────────────────────────────────────

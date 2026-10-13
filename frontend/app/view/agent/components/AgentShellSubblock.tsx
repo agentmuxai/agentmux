@@ -21,7 +21,7 @@ import { resolveTermScrollback } from "@/app/view/term/termscrollback";
 import { resolveTermScrollSensitivity } from "@/app/view/term/termscrollsensitivity";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { pushNotification } from "@/app/store/flash-notifications";
 import { BlockInputSender } from "@/app/view/term/block-input-sender";
@@ -243,12 +243,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // one exits gets its own scope, and must arm independently.
         let sawRunning = false;
         let exitNotified = false;
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: MOS.makeORef("block", id),
-            handler: (event) => {
-                const data = event?.data as { shellprocstatus?: unknown; shellprocexitcode?: unknown } | undefined;
-                if (!data) return;
+        const unsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
                 if (data.shellprocstatus === "running") {
                     sawRunning = true;
                     return;
@@ -296,8 +291,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 if (exitNotified) return;
                 exitNotified = true;
                 props.onShellExited?.();
-            },
-        });
+            }, MOS.makeORef("block", id));
         onCleanup(() => unsub());
     });
 

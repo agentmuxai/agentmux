@@ -16,6 +16,7 @@ import { IconButton } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import { pushNotification } from "@/app/store/global";
 import { openModal } from "@/app/store/modalmodel";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import {
@@ -57,7 +58,7 @@ export function openIncognitoTab(model: BrowserViewModel, home: string): void {
 
 /** Open Settings at its Browser section (Manage profiles…). */
 function openProfileSettings(): void {
-    void TabRpcClient.rpcCall("pane.open", { view: "settings", meta: { view: "settings", "settings:section": "browser" } }, {});
+    void RpcApi.PaneOpenCommand(TabRpcClient, { view: "settings", meta: { view: "settings", "settings:section": "browser" } }, {});
 }
 
 /** A profile's badge: its initial on its colour. */

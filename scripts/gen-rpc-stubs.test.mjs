@@ -4,7 +4,7 @@
 // Unit tests for gen-rpc-stubs.mjs.
 
 import { describe, expect, it } from "vitest";
-import { generate, namesUsed, renderStub, tsOf } from "./gen-rpc-stubs.mjs";
+import { generate, generatedOnlyProblems, namesUsed, renderStub, tsOf } from "./gen-rpc-stubs.mjs";
 
 const row = (command, req, resp, reqImports = [], respImports = []) => ({
     command,
@@ -181,5 +181,43 @@ describe("module type overrides", () => {
     it("an import(...) type in an override is left to tsc, not checked as a global", () => {
         const names = namesUsed({ returns: 'import("@/app/store/ambient-outcomes").AmbientOutcomes', dataType: "Record<string, never>" }, row("a", "JsonValue", "JsonValue"));
         expect([...names]).toEqual([]);
+    });
+});
+
+describe("generatedOnlyProblems", () => {
+    const ok = { hand: new Map(), indexSource: "export const RpcApi = GeneratedApi;\n", sources: [] };
+
+    it("passes when every call goes through a generated stub", () => {
+        const sources = [["frontend/a.ts", 'await RpcApi.PaneOpenCommand(TabRpcClient, { view: "term" }, {});']];
+        expect(generatedOnlyProblems({ ...ok, sources })).toEqual([]);
+    });
+
+    it("refuses a hand-written stub and an RpcApi that spreads anything else", () => {
+        const errors = generatedOnlyProblems({
+            hand: new Map([["FooCommand", "misc.ts"]]),
+            indexSource: "export const RpcApi = { ...MiscApi, ...GeneratedApi };\n",
+            sources: [],
+        });
+        expect(errors).toHaveLength(2);
+        expect(errors[0]).toMatch(/rpc-api\/misc\.ts: FooCommand is a hand-written stub/);
+        expect(errors[1]).toMatch(/RpcApi must be exactly/);
+    });
+
+    it("refuses any raw rpcCall or rpcStream, whatever names the command", () => {
+        const sources = [
+            ["frontend/x.ts", 'void TabRpcClient.rpcCall("pane.open", { view: "settings" }, {});'],
+            ["frontend/y.ts", "await TabRpcClient.rpcCall(\n    \"pane.moveTab\",\n    { block_id: b },\n);"],
+            ["frontend/z.ts", "const cmd = pick();\nawait client.rpcCall(cmd, data, opts);"],
+            ["frontend/s.ts", 'for await (const x of TabRpcClient.rpcStream<Foo>("tail", {}, {})) use(x);'],
+            // A mention in a comment isn't a call.
+            ["frontend/c.ts", "// we used to call client.rpcCall(...) here"],
+        ];
+        const msg = (where, fn) => `${where}: calls srv with ${fn} directly; call the command's generated stub on RpcApi instead`;
+        expect(generatedOnlyProblems({ ...ok, sources })).toEqual([
+            msg("frontend/x.ts:1", "rpcCall"),
+            msg("frontend/y.ts:1", "rpcCall"),
+            msg("frontend/z.ts:2", "rpcCall"),
+            msg("frontend/s.ts:1", "rpcStream"),
+        ]);
     });
 });

@@ -16,12 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::fs_ops::platform::display_path;
 use super::fs_watch::{FsWatchPool, Subscription};
-use super::mps::{Broker, MuxEvent};
+use super::mps::Broker;
 
 /// MPS event telling a Files pane to re-list a folder. Scoped to
 /// `block:<id>`; payload `{ dir }`, the folder's display path exactly as
@@ -226,18 +225,17 @@ fn publish_files_changed<'a>(broker: &Broker, display_dir: &str, block_ids: impl
     if scopes.is_empty() {
         return;
     }
-    broker.publish(MuxEvent {
-        event: EVENT_FILES_CHANGED.to_string(),
+    broker.publish_event::<crate::backend::mps_events::FilesChanged>(
+        &crate::backend::mps_events::FilesChangedEvent { dir: display_dir.to_string() },
         scopes,
-        sender: String::new(),
-        persist: 0,
-        data: Some(json!({ "dir": display_dir })),
-    });
+        0,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::mps::MuxEvent;
     use std::sync::Mutex as StdMutex;
 
     struct TestClient {

@@ -19,7 +19,14 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: () => () => {} }));
+vi.mock("@/app/store/mps", async () => {
+    const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
+    const mock = { muxEventSubscribe: () => () => {} };
+    // As the real onMuxEvent: a typed subscription is a muxEventSubscribe whose handler gets the data.
+    const onMuxEvent = (eventType: string, handler: (data: unknown, event: unknown) => void, scope?: string) =>
+        (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); else if (isNoPayloadMuxEvent(eventType)) handler(null, e); } } as any);
+    return { ...mock, onMuxEvent };
+});
 vi.mock("@/app/store/global", () => ({
     MOS: { makeORef: (t: string, id: string) => `${t}:${id}` },
     pushNotification: (n: unknown) => hub.toast(n),

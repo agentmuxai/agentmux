@@ -88,6 +88,7 @@ pub fn kinds_by_name<'a>(
 type AgentList = Box<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 type KindOfBlock = Box<dyn Fn(&str) -> Option<AgentKind> + Send + Sync>;
 type StateOfBlock = Box<dyn Fn(&str) -> Option<AgentState> + Send + Sync>;
+type LineOfBlock = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
 type RegistryRead = Box<dyn Fn() -> Vec<AgentEntry> + Send + Sync>;
 
 /// The fleet feed's view of this instance.
@@ -98,6 +99,9 @@ pub struct FleetSource {
     /// The block's state now (`agent_state::current_state`); read on every
     /// look, unlike the kind.
     state_of_block: StateOfBlock,
+    /// The block's summary line now (`agent_line`), `None` while sharing is
+    /// off; read on every look.
+    line_of_block: LineOfBlock,
     /// When each state began; a block no longer listed is forgotten.
     since: &'static SinceTracker,
     shared_registry: RegistryRead,
@@ -110,14 +114,16 @@ pub struct FleetSource {
 }
 
 impl FleetSource {
-    /// The live source: the reactive registry, the object store and the
-    /// host-global shared registry.
+    /// The live source: the reactive registry, the object store, the
+    /// settings and the host-global shared registry.
     pub fn live(
         handler: &'static crate::backend::reactive::handler::ReactiveHandler,
         mstore: Arc<Store>,
+        config: Arc<crate::backend::wconfig::ConfigState>,
         own_url: String,
     ) -> Self {
         let state_store = Arc::clone(&mstore);
+        let line_store = Arc::clone(&mstore);
         Self::new(
             Box::new(move || {
                 handler
@@ -128,6 +134,11 @@ impl FleetSource {
             }),
             Box::new(move |block_id| crate::backend::operator_config_seed::agent_kind_of_block(&mstore, block_id)),
             Box::new(move |block_id| crate::backend::agent_state::current_state(&state_store, block_id)),
+            Box::new(move |block_id| {
+                crate::backend::agent_line::sharing_on(&config.get_full_config().settings)
+                    .then(|| crate::backend::agent_line::agent_line_of_block(&line_store, block_id))
+                    .flatten()
+            }),
             crate::backend::agent_state::global_tracker(),
             Box::new(|| {
                 crate::registry::resolve_shared_reactive_dir()
@@ -143,6 +154,7 @@ impl FleetSource {
         agents: AgentList,
         kind_of_block: KindOfBlock,
         state_of_block: StateOfBlock,
+        line_of_block: LineOfBlock,
         since: &'static SinceTracker,
         shared_registry: RegistryRead,
         own_channel: String,
@@ -152,6 +164,7 @@ impl FleetSource {
             agents,
             kind_of_block,
             state_of_block,
+            line_of_block,
             since,
             shared_registry,
             own_channel,
@@ -172,6 +185,10 @@ impl FleetSource {
                 let status = self.since.record(block_id, (self.state_of_block)(block_id), now_ms)?;
                 Some((name.clone(), status))
             })
+            .collect();
+        let agent_lines = listed
+            .iter()
+            .filter_map(|(name, block_id)| Some((name.clone(), (self.line_of_block)(block_id)?)))
             .collect();
         let agents = {
             let mut cache = self.kinds.lock();
@@ -197,6 +214,7 @@ impl FleetSource {
             agents,
             channels_running: self.channels_running(),
             agent_status,
+            agent_lines,
         }
     }
 
@@ -291,6 +309,7 @@ mod tests {
                 }
             }),
             Box::new(|_| None),
+            Box::new(|_| None),
             tracker(),
             Box::new(Vec::new),
             "stable".into(),
@@ -334,6 +353,7 @@ mod tests {
             Box::new(move || list.lock().clone()),
             Box::new(|_| Some("host")),
             Box::new(move |b| read.lock().get(b).copied()),
+            Box::new(|_| None),
             since,
             Box::new(Vec::new),
             "stable".into(),

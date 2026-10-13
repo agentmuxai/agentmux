@@ -87,6 +87,10 @@ export interface PaneTabHostContext {
      *  a `nativeSurface` view collapses its surface whenever it isn't
      *  `"active"`. */
     visibility: Accessor<"active" | "dormant" | "windowHidden">;
+    /** True while a splitter of this pane's layout is being dragged (the pane
+     *  size badge is showing). A `nativeSurface` view uses it to leave the
+     *  badge's corner to the DOM. Optional: hosts without a layout omit it. */
+    splitterDragging?: Accessor<boolean>;
 }
 
 /** A live native tab. The host decides the header, chrome and hiding. */

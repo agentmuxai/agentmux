@@ -359,13 +359,7 @@ impl ProcessBroker {
         let Some(ref broker) = self.mps_broker else {
             return;
         };
-        broker.publish(MuxEvent {
-            event: EVENT_TRACKED_BLOCKS_CHANGED.to_string(),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 0,
-            data: None,
-        });
+        broker.publish_event::<crate::backend::mps_events::TrackedBlocksChanged>(&(), vec![], 0);
     }
 }
 

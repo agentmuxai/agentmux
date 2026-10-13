@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { CpuCoresPopover } from "./CpuCoresPopover";
@@ -71,12 +71,8 @@ const SystemStats = (): JSX.Element => {
     const toggleDiskPanel = () => setDiskPanelOpen(!diskPanelOpen());
 
     onMount(() => {
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.SysInfo,
-            scope: "local",
-            handler: (event) => {
-                const vals = (event as MuxEvent)?.data?.values;
-                if (vals == null) return;
+        const unsub = onMuxEvent(WpsEvent.SysInfo, (data) => {
+                const vals = data.values;
                 setStats({
                     cpu: vals["cpu"] ?? 0,
                     gpu: vals["gpu"] != null ? vals["gpu"] : null,
@@ -100,8 +96,7 @@ const SystemStats = (): JSX.Element => {
                             : null,
                 });
                 setDiskVolumes(parseDiskVolumes(vals));
-            },
-        });
+            }, "local");
         onCleanup(() => unsub?.());
     });
 

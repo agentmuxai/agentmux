@@ -13,6 +13,10 @@
 //! only as the goodbye when it quits, signs out or stops publishing:
 //! `gone: true` and no agent states, which the relay keeps as "offline
 //! since" for a short while instead of a live entry.
+//! Version 4 is v3 with each agent's optional `line`, its Swarm summary line
+//! (agentmux's SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02 §3.4 Phase 4),
+//! signed as a fourth agent field. The desktop publishes v4 when it has
+//! lines to share; a goodbye stays v3.
 //!
 //! Signed with the install's WAN instance key (the W3-S identity in
 //! [`crate::jekt_sign`]), so the record names the key that signed it and
@@ -40,6 +44,13 @@ pub const PRESENCE_VERSION: u32 = 2;
 pub const PRESENCE_VERSION_V1: u32 = 1;
 /// The goodbye: `gone: true`, no agent `state`.
 pub const PRESENCE_VERSION_GOODBYE: u32 = 3;
+/// v3 plus each agent's optional `line`.
+pub const PRESENCE_VERSION_LINES: u32 = 4;
+/// Longest agent `line`, in characters (`agent_line::MAX_LINE_CHARS` in srv).
+pub const MAX_PRESENCE_LINE_CHARS: usize = 200;
+/// Most bytes of lines one signed record carries, so a record stays small
+/// enough to send on every change; lines past it are dropped.
+pub const MAX_PRESENCE_LINE_BYTES: usize = 16 * 1024;
 /// The values an agent's `state` may take (the LAN feed's `agent_status`).
 pub const PRESENCE_STATES: [&str; 5] = ["working", "waiting", "idle", "stopped", "error"];
 /// Agents in one record; the rest are left out.
@@ -51,14 +62,16 @@ pub const MAX_CHANNELS_RUNNING: u32 = 99;
 const MAX_OS_LEN: usize = 16;
 
 /// One agent of the install. `kind` is `host` or `container` (the agent's
-/// block `agentMode`); `state` (v2 only) is one of [`PRESENCE_STATES`], or
-/// absent when unknown.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// block `agentMode`); `state` (v2 and later) is one of [`PRESENCE_STATES`],
+/// or absent when unknown; `line` (v4 only) is its summary line, or absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresenceAgent {
     pub name: String,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
 /// The record, in the contract's field order. Public keys and the signature
@@ -106,10 +119,11 @@ fn agent_in_bounds(agent: &PresenceAgent) -> bool {
     text_in_bounds(&agent.name, MAX_PRESENCE_NAME_CHARS)
         && (agent.kind == "host" || agent.kind == "container")
         && agent.state.as_deref().is_none_or(|s| PRESENCE_STATES.contains(&s))
+        && agent.line.as_deref().is_none_or(|l| text_in_bounds(l, MAX_PRESENCE_LINE_CHARS))
 }
 
 /// The agents as a record carries them: sorted by lower-cased name, ties by
-/// name; an agent whose name, kind or state is out of bounds (a control
+/// name; an agent whose name, kind, state or line is out of bounds (a control
 /// character, too long, an unknown kind or state) left out; each name once;
 /// at most [`MAX_PRESENCE_AGENTS`].
 pub fn canonical_agents(agents: impl IntoIterator<Item = PresenceAgent>) -> Vec<PresenceAgent> {
@@ -122,6 +136,20 @@ pub fn canonical_agents(agents: impl IntoIterator<Item = PresenceAgent>) -> Vec<
     keyed.dedup_by(|later, earlier| later.1.name == earlier.1.name);
     keyed.truncate(MAX_PRESENCE_AGENTS);
     keyed.into_iter().map(|(_, a)| a).collect()
+}
+
+/// Keeps each agent's line, in order, while the lines kept so far fit in
+/// [`MAX_PRESENCE_LINE_BYTES`]; a line that doesn't fit is dropped.
+fn fit_lines(mut agents: Vec<PresenceAgent>) -> Vec<PresenceAgent> {
+    let mut left = MAX_PRESENCE_LINE_BYTES;
+    for a in &mut agents {
+        match a.line.as_ref().map(String::len) {
+            Some(n) if n <= left => left -= n,
+            Some(_) => a.line = None,
+            None => {}
+        }
+    }
+    agents
 }
 
 impl InstallPresence {
@@ -154,9 +182,10 @@ impl InstallPresence {
         )
     }
 
-    /// [`Self::sign`] for record version `v` (1, 2 or 3). A v1 record
-    /// carries no states: any given are dropped. A v3 record is the goodbye:
-    /// `gone` is set and the states are dropped too.
+    /// [`Self::sign`] for record version `v` (1 to 4). A v1 record carries
+    /// no states: any given are dropped. A v3 record is the goodbye: `gone`
+    /// is set and the states are dropped too. Lines are dropped below v4,
+    /// and in v4 any that don't fit [`MAX_PRESENCE_LINE_BYTES`], in order.
     #[allow(clippy::too_many_arguments)]
     pub fn sign_version(
         v: u32,
@@ -176,6 +205,9 @@ impl InstallPresence {
             if v == PRESENCE_VERSION_V1 || gone {
                 a.state = None;
             }
+            if v < PRESENCE_VERSION_LINES {
+                a.line = None;
+            }
             a
         });
         let mut record = Self {
@@ -187,7 +219,7 @@ impl InstallPresence {
             os: os.to_string(),
             version: version.to_string(),
             channels_running: channels_running.clamp(1, MAX_CHANNELS_RUNNING),
-            agents: canonical_agents(agents),
+            agents: fit_lines(canonical_agents(agents)),
             published_at_ms,
             gone,
             sig: String::new(),
@@ -203,26 +235,29 @@ impl InstallPresence {
     /// numbers in decimal, the agents joined by U+0003 (empty when there are
     /// none), in the record's order. In v1 an agent is `name` U+0002 `kind`;
     /// in v2 and v3 `name` U+0002 `kind` U+0002 `state`, `state` empty when
-    /// absent. v3 adds one more field at the end: U+0001 then `1` when
-    /// `gone`, nothing otherwise.
+    /// absent; v4 adds U+0002 `line`, empty when absent. v3 and v4 add one
+    /// more field at the end: U+0001 then `1` when `gone`, nothing otherwise.
     pub fn signed_material(&self) -> String {
         let agents = self
             .agents
             .iter()
             .map(|a| {
-                if self.v == PRESENCE_VERSION_V1 {
-                    format!("{}{AGENT_FIELD_SEP}{}", a.name, a.kind)
-                } else {
-                    let state = a.state.as_deref().unwrap_or("");
-                    format!("{}{AGENT_FIELD_SEP}{}{AGENT_FIELD_SEP}{state}", a.name, a.kind)
+                let state = a.state.as_deref().unwrap_or("");
+                match self.v {
+                    PRESENCE_VERSION_V1 => format!("{}{AGENT_FIELD_SEP}{}", a.name, a.kind),
+                    PRESENCE_VERSION_LINES => {
+                        let line = a.line.as_deref().unwrap_or("");
+                        format!("{}{AGENT_FIELD_SEP}{}{AGENT_FIELD_SEP}{state}{AGENT_FIELD_SEP}{line}", a.name, a.kind)
+                    }
+                    _ => format!("{}{AGENT_FIELD_SEP}{}{AGENT_FIELD_SEP}{state}", a.name, a.kind),
                 }
             })
             .collect::<Vec<_>>()
             .join(&AGENT_SEP.to_string());
-        let gone = match (self.v, self.gone) {
-            (PRESENCE_VERSION_GOODBYE, true) => format!("{FIELD_SEP}1"),
-            (PRESENCE_VERSION_GOODBYE, false) => FIELD_SEP.to_string(),
-            _ => String::new(),
+        let gone = match (self.v >= PRESENCE_VERSION_GOODBYE, self.gone) {
+            (true, true) => format!("{FIELD_SEP}1"),
+            (true, false) => FIELD_SEP.to_string(),
+            (false, _) => String::new(),
         };
         format!(
             "{PRESENCE_DOMAIN}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}\
@@ -240,14 +275,17 @@ impl InstallPresence {
 
     /// The contract's bounds, on every field the signature covers. The
     /// agents must already be in canonical order: the order is signed. A v1
-    /// record may not carry a state, which its signature would not cover.
-    /// Only v3 may be `gone`, and a `gone` record carries no state.
+    /// record may not carry a state, nor one below v4 a line, which their
+    /// signatures would not cover. Only v3 and v4 may be `gone`, and a `gone`
+    /// record carries no state or line.
     pub fn in_bounds(&self) -> bool {
         let stateless = || self.agents.iter().all(|a| a.state.is_none());
+        let lineless = || self.agents.iter().all(|a| a.line.is_none());
         let version_ok = match self.v {
-            PRESENCE_VERSION_V1 => !self.gone && stateless(),
-            PRESENCE_VERSION => !self.gone,
-            PRESENCE_VERSION_GOODBYE => !self.gone || stateless(),
+            PRESENCE_VERSION_V1 => !self.gone && stateless() && lineless(),
+            PRESENCE_VERSION => !self.gone && lineless(),
+            PRESENCE_VERSION_GOODBYE => lineless() && (!self.gone || stateless()),
+            PRESENCE_VERSION_LINES => !self.gone || (stateless() && lineless()),
             _ => false,
         };
         version_ok
@@ -275,7 +313,7 @@ mod tests {
     use super::*;
 
     fn agent(name: &str, kind: &str) -> PresenceAgent {
-        PresenceAgent { name: name.to_string(), kind: kind.to_string(), state: None }
+        PresenceAgent { name: name.to_string(), kind: kind.to_string(), state: None, line: None }
     }
 
     fn agent_in(name: &str, kind: &str, state: &str) -> PresenceAgent {
@@ -656,5 +694,109 @@ mod tests {
         let mut r = vector_record();
         r.agents.reverse();
         assert!(!r.verify());
+    }
+
+    // The v4 vector: the v2 vector's install and agents, two with a line (one
+    // not ASCII), one without. Shared with the relay's suite like the others.
+    const MATERIAL_V4_HEX: &str = "\
+        616d782d696e7374616c6c2d70726573656e63652d76310134016d7733616d3436773577656578346134667172633361766e\
+        7561016e61726b6f01737461626c650177696e646f777301302e35392e31310133016167656e747802636f6e7461696e6572\
+        02776f726b696e6702466978696e6720746865206c6f67696e2072616365034167656e745902686f737402020343616d7065\
+        7202686f73740269646c6502526576696577696e672074686520636166c3a9206d656e750131373931333532343933333838\
+        01";
+    const SIG_V4: &str = "uQEoRZnWxRgCTX/hCtx8zCwqtrsG7DleLCnBjWs7zGWOY2fcTtIgOavDJQSyPe7MH+MlntCG5hGMie17k+FVCA==";
+
+    fn with_line(a: PresenceAgent, line: &str) -> PresenceAgent {
+        PresenceAgent { line: Some(line.to_string()), ..a }
+    }
+
+    fn vector_v4_record() -> InstallPresence {
+        InstallPresence::sign_version(
+            PRESENCE_VERSION_LINES,
+            &seed(),
+            "narko",
+            "stable",
+            "windows",
+            "0.59.11",
+            3,
+            [
+                with_line(agent_in("Camper", "host", "idle"), "Reviewing the café menu"),
+                with_line(agent_in("agentx", "container", "working"), "Fixing the login race"),
+                agent("AgentY", "host"),
+            ],
+            1_791_352_493_388,
+        )
+        .expect("the vector is in bounds")
+    }
+
+    #[test]
+    fn the_v4_vector_signs_byte_for_byte() {
+        let record = vector_v4_record();
+        assert_eq!(hex(record.signed_material().as_bytes()), MATERIAL_V4_HEX);
+        assert_eq!(record.sig, SIG_V4);
+        assert_eq!(
+            serde_json::to_value(&record).unwrap(),
+            serde_json::json!({
+                "v": 4,
+                "instance_id": "mw3am46w5weex4a4fqrc3avnua",
+                "instance_public_key": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+                "hostname": "narko",
+                "channel": "stable",
+                "os": "windows",
+                "version": "0.59.11",
+                "channels_running": 3,
+                "agents": [
+                    {"name": "agentx", "kind": "container", "state": "working", "line": "Fixing the login race"},
+                    {"name": "AgentY", "kind": "host"},
+                    {"name": "Camper", "kind": "host", "state": "idle", "line": "Reviewing the café menu"},
+                ],
+                "published_at_ms": 1_791_352_493_388u64,
+                "sig": SIG_V4,
+            })
+        );
+        assert!(record.verify());
+        let back: InstallPresence = serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(back, record);
+        assert!(back.verify());
+    }
+
+    #[test]
+    fn a_line_needs_v4_and_a_live_record() {
+        let lined = || with_line(agent("AgentY", "host"), "Building");
+        for v in [PRESENCE_VERSION_V1, PRESENCE_VERSION, PRESENCE_VERSION_GOODBYE] {
+            let r = InstallPresence::sign_version(v, &seed(), "narko", "stable", "", "1", 1, [lined()], 1).unwrap();
+            assert_eq!(r.agents[0].line, None, "v{v} drops the line");
+            let mut forged = r.clone();
+            forged.agents[0].line = Some("Building".into());
+            assert!(!forged.in_bounds(), "v{v} can't carry a line its signature doesn't cover");
+        }
+        let mut goodbye = vector_v4_record();
+        goodbye.gone = true;
+        assert!(!goodbye.in_bounds(), "a v4 goodbye carries no line or state");
+    }
+
+    #[test]
+    fn an_agent_with_an_out_of_bounds_line_is_left_out() {
+        let ok = with_line(agent("Ok", "host"), "fine");
+        let control = with_line(agent("Ctl", "host"), "two
+lines");
+        let long = with_line(agent("Long", "host"), &"x".repeat(MAX_PRESENCE_LINE_CHARS + 1));
+        let empty = with_line(agent("Empty", "host"), "");
+        let names: Vec<String> = canonical_agents([ok, control, long, empty]).into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["Ok"]);
+    }
+
+    #[test]
+    fn lines_past_the_byte_budget_are_dropped_in_order() {
+        let line = "x".repeat(MAX_PRESENCE_LINE_CHARS);
+        let n = MAX_PRESENCE_LINE_BYTES / line.len() + 3;
+        let agents = (0..n).map(|i| with_line(agent(&format!("a{i:03}"), "host"), &line));
+        let r = InstallPresence::sign_version(PRESENCE_VERSION_LINES, &seed(), "narko", "stable", "", "1", 1, agents, 1).unwrap();
+        let kept = r.agents.iter().filter(|a| a.line.is_some()).count();
+        assert_eq!(kept, MAX_PRESENCE_LINE_BYTES / line.len());
+        assert!(r.agents[..kept].iter().all(|a| a.line.is_some()), "the first ones keep theirs");
+        assert_eq!(r.agents.len(), n, "every agent is still listed");
+        assert!(r.verify());
+        assert!(serde_json::to_string(&r).unwrap().len() < 24 * 1024, "the lines are most of it");
     }
 }

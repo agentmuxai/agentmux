@@ -21,7 +21,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { PaneRow } from "./PaneRow";
 
 interface AgentCredentialsRevokedChipProps {
@@ -44,17 +44,12 @@ export const AgentCredentialsRevokedChip = (
     // wrapper remounts on change), so a plain subscribe/cleanup pair is
     // enough — mirrors AgentIdentityLinksPanel's subscription to the
     // sibling `agentidentities:changed:<id>` event.
-    const unsub = muxEventSubscribe({
-        eventType: `agentcredentials:revoked:${props.agentId}`,
-        handler: (event: MuxEvent) => {
-            const provider =
-                typeof event?.data?.provider === "string" ? event.data.provider : "";
-            setRevoked((prev) => {
-                const providers = new Set(prev?.providers ?? []);
-                if (provider) providers.add(provider);
-                return { providers: [...providers] };
-            });
-        },
+    const unsub = onMuxEvent(`agentcredentials:revoked:${props.agentId}`, ({ provider }) => {
+        setRevoked((prev) => {
+            const providers = new Set(prev?.providers ?? []);
+            if (provider) providers.add(provider);
+            return { providers: [...providers] };
+        });
     });
     onCleanup(unsub);
 

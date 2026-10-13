@@ -208,7 +208,16 @@ pub fn merge_settings_into_current(
     // Merge via JSON round-trip so the extra HashMap catches all dynamic keys
     if let Ok(mut current_val) = serde_json::to_value(&current) {
         if let serde_json::Value::Object(ref mut map) = current_val {
-            map.extend(new_keys.into_iter().filter(|(_, v)| !v.is_null()));
+            // A null value deletes the key, as `merge_settings_to_disk` does on disk. Skipping
+            // it instead would keep the old value in memory and broadcast it, until the file
+            // watcher reloaded settings.json about 300 ms later (a "Reset" would flicker back).
+            for (key, value) in new_keys {
+                if value.is_null() {
+                    map.remove(&key);
+                } else {
+                    map.insert(key, value);
+                }
+            }
         }
         if let Ok(merged) = serde_json::from_value(current_val) {
             current = merged;
@@ -404,6 +413,41 @@ mod tests {
         // would reset the live config and broadcast defaults to every client.
         assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Removed)));
         assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Other)));
+    }
+
+    /// `setconfig {"widget:pinned": null}` (Settings → Widgets → Reset) must drop the key from
+    /// memory at once, as it does on disk, or the broadcast that follows carries the old pins.
+    #[test]
+    fn merge_into_current_removes_a_key_set_to_null() {
+        let config = ConfigState::new();
+        let mut keys = serde_json::Map::new();
+        keys.insert("widget:pinned".into(), serde_json::json!(["agent", "terminal"]));
+        keys.insert("widget:hidden".into(), serde_json::json!(["defwidget@drone"]));
+        keys.insert("some:dynamic".into(), serde_json::json!(1));
+        config.update_settings(merge_settings_into_current(&config, keys));
+        assert_eq!(config.get_settings().widget_pinned, Some(vec!["agent".to_string(), "terminal".to_string()]));
+        assert!(config.get_settings().extra.contains_key("some:dynamic"));
+
+        let mut reset = serde_json::Map::new();
+        reset.insert("widget:pinned".into(), serde_json::Value::Null);
+        reset.insert("some:dynamic".into(), serde_json::Value::Null);
+        config.update_settings(merge_settings_into_current(&config, reset));
+        let settings = config.get_settings();
+        assert_eq!(settings.widget_pinned, None);
+        assert!(!settings.extra.contains_key("some:dynamic"));
+        // A key not named in the update is kept.
+        assert_eq!(settings.widget_hidden, Some(vec!["defwidget@drone".to_string()]));
+    }
+
+    /// A malformed widget list doesn't fail the whole settings file.
+    #[test]
+    fn a_malformed_widget_list_is_ignored_not_fatal() {
+        let settings: wconfig::SettingsType =
+            serde_json::from_str(r#"{ "widget:pinned": "agent", "widget:hidden": ["defwidget@drone", 3], "widget:icononly": true }"#)
+                .unwrap();
+        assert_eq!(settings.widget_pinned, None);
+        assert_eq!(settings.widget_hidden, Some(vec!["defwidget@drone".to_string()]));
+        assert_eq!(settings.widget_icon_only, Some(true));
     }
 
     // ── resolve_settings_dir isolation (SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) ──

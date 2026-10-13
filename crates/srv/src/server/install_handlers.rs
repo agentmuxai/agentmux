@@ -31,13 +31,63 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::mps::{Broker, MuxEvent};
+use crate::backend::mps::Broker;
 use crate::server::AppState;
 
 pub const COMMAND_INSTALL_START: &str = "install.start";
 pub const COMMAND_INSTALL_CANCEL: &str = "install.cancel";
 pub const COMMAND_INSTALL_CHECK: &str = "install.check";
 pub const COMMAND_RESOLVE_PREREQS: &str = "resolve.prereqs";
+
+/// `install_chunk`: one line of an install's output, or its end. Scoped `install:<sessionId>`;
+/// `system.install` sends the same events.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(untagged)]
+pub enum InstallChunkEvent {
+    Line {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+        line: String,
+        stream: InstallStream,
+    },
+    Done {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+        op: InstallDoneOp,
+        ok: bool,
+        /// Why it failed: a message, or an `AgentMuxError` in its wire form. `null` when it didn't.
+        #[ts(type = "unknown")]
+        error: serde_json::Value,
+    },
+}
+
+impl InstallChunkEvent {
+    pub fn line(session_id: &str, line: String, stream: InstallStream) -> Self {
+        Self::Line { session_id: session_id.to_string(), line, stream }
+    }
+    pub fn done(session_id: &str, ok: bool, error: serde_json::Value) -> Self {
+        Self::Done { session_id: session_id.to_string(), op: InstallDoneOp::Done, ok, error }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "lowercase")]
+pub enum InstallStream {
+    Stdout,
+    Stderr,
+}
+
+/// The `op` of the last event of an install.
+#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "lowercase")]
+pub enum InstallDoneOp {
+    Done,
+}
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -559,19 +609,8 @@ fn spawn_install_task(
                 );
             }
         };
-        let emit_line = |broker: &Broker, line: String, stream: &'static str| {
-            let event = MuxEvent {
-                event: "install_chunk".to_string(),
-                scopes: vec![scope.clone()],
-                sender: String::new(),
-                persist: 1024,
-                data: Some(json!({
-                    "sessionId": session_id,
-                    "line": line,
-                    "stream": stream,
-                })),
-            };
-            broker.publish(event);
+        let emit_line = |broker: &Broker, line: String, stream: InstallStream| {
+            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_id, line, stream), vec![scope.clone()], 1024);
         };
         // Legacy emit path — the `error` field is a free-text string.
         // New code paths should use `emit_done_typed` below to emit
@@ -579,35 +618,11 @@ fn spawn_install_task(
         // render a friendly `<ErrorBanner />`.
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
             log_done(ok, error.as_deref());
-            let event = MuxEvent {
-                event: "install_chunk".to_string(),
-                scopes: vec![scope.clone()],
-                sender: String::new(),
-                persist: 1024,
-                data: Some(json!({
-                    "sessionId": session_id,
-                    "op": "done",
-                    "ok": ok,
-                    "error": error,
-                })),
-            };
-            broker.publish(event);
+            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::done(&session_id, ok, json!(error)), vec![scope.clone()], 1024);
         };
         let emit_done_typed = |broker: &Broker, err: agentmux_common::AgentMuxError| {
             log_done(false, Some(&err.to_string()));
-            let event = MuxEvent {
-                event: "install_chunk".to_string(),
-                scopes: vec![scope.clone()],
-                sender: String::new(),
-                persist: 1024,
-                data: Some(json!({
-                    "sessionId": session_id,
-                    "op": "done",
-                    "ok": false,
-                    "error": err.to_wire(),
-                })),
-            };
-            broker.publish(event);
+            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::done(&session_id, false, err.to_wire()), vec![scope.clone()], 1024);
         };
 
         // One pin decides both the dir and the package version, so an
@@ -687,7 +702,7 @@ fn spawn_install_task(
                 emit_line(
                     &broker,
                     "already installed by another AgentMux instance".to_string(),
-                    "stdout",
+                    InstallStream::Stdout,
                 );
                 emit_done(&broker, true, None);
                 registry.drop_session(&session_id);
@@ -757,7 +772,7 @@ fn spawn_install_task(
         emit_line(
             &broker,
             format!("$ npm {}", npm_args.join(" ")),
-            "stdout",
+            InstallStream::Stdout,
         );
 
         let mut cmd = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
@@ -795,18 +810,7 @@ fn spawn_install_task(
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 push_tail(&tail_out, &line);
-                let event = MuxEvent {
-                    event: "install_chunk".to_string(),
-                    scopes: vec![scope_out.clone()],
-                    sender: String::new(),
-                    persist: 1024,
-                    data: Some(json!({
-                        "sessionId": session_out,
-                        "line": line,
-                        "stream": "stdout",
-                    })),
-                };
-                broker_out.publish(event);
+                broker_out.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_out, line, InstallStream::Stdout), vec![scope_out.clone()], 1024);
             }
         });
 
@@ -818,18 +822,7 @@ fn spawn_install_task(
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 push_tail(&tail_err, &line);
-                let event = MuxEvent {
-                    event: "install_chunk".to_string(),
-                    scopes: vec![scope_err.clone()],
-                    sender: String::new(),
-                    persist: 1024,
-                    data: Some(json!({
-                        "sessionId": session_err,
-                        "line": line,
-                        "stream": "stderr",
-                    })),
-                };
-                broker_err.publish(event);
+                broker_err.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_err, line, InstallStream::Stderr), vec![scope_err.clone()], 1024);
             }
         });
 
@@ -1011,6 +1004,14 @@ mod tests {
 mod req_shape_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn install_chunk_events_serialize_as_before() {
+        let line = InstallChunkEvent::line("s1", "added 3 packages".into(), InstallStream::Stderr);
+        assert_eq!(serde_json::to_value(&line).unwrap(), json!({ "sessionId": "s1", "line": "added 3 packages", "stream": "stderr" }));
+        let done = InstallChunkEvent::done("s1", false, json!(None::<String>));
+        assert_eq!(serde_json::to_value(&done).unwrap(), json!({ "sessionId": "s1", "op": "done", "ok": false, "error": null }));
+    }
 
     // These structs rely on rename_all = "camelCase" to match the wire. Drop
     // that attribute and everything still compiles and the binding still

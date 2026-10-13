@@ -27,7 +27,6 @@ use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
     COMMAND_LIST_DRONE_RUNS, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
-use crate::backend::mps::MuxEvent;
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::drone::executor::{run_drone, RunEvent};
@@ -149,13 +148,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 id_store
                     .drone_upsert(&cmd)
                     .map_err(|e| format!("upsertdrone: {e}"))?;
-                broker.publish(MuxEvent {
-                    event: "drones:changed".to_string(),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
                 Ok(cmd)
             }
         },
@@ -173,13 +166,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
                 if deleted {
-                    broker.publish(MuxEvent {
-                        event: "drones:changed".to_string(),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
                 }
                 Ok(DeleteResp { deleted })
             }
@@ -304,13 +291,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 ),
                             }
                         }
-                        broker_for_drain.publish(MuxEvent {
-                            event: format!("dronerun:{}", run_id_for_drain),
-                            scopes: vec![],
-                            sender: String::new(),
-                            persist: 0,
-                            data: Some(serde_json::to_value(&ev).unwrap_or_default()),
-                        });
+                        broker_for_drain.publish_event_for::<crate::backend::mps_events::DroneRun>(&run_id_for_drain, &ev, vec![], 0);
                     }
                 });
 

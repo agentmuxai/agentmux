@@ -182,14 +182,8 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     return Err(format!("identity.account.upsert: link: {e}"));
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: "identityaccounts:changed".to_string(),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: format!("agentidentities:changed:{}", req.agent_id),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
+                broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
 
                 // The subagent watcher's config-dir resolution for this
                 // agent's pane(s) can have raced ahead of this exact
@@ -301,10 +295,7 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: self-service provider unlink (identity.self.unlink)"
                 );
                 if unlinked {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: format!("agentidentities:changed:{}", req.agent_id),
-                        scopes: vec![], sender: String::new(), persist: 0, data: None,
-                    });
+                    broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
                 }
                 Ok(Some(json!({ "unlinked": unlinked })))
             })

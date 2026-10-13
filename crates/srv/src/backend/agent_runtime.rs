@@ -159,6 +159,31 @@ pub fn effective_from_control_response(frame: &Value) -> Option<EffectiveRuntime
     Some(EffectiveRuntime { model: field("model"), effort: field("effort") })
 }
 
+/// The `agentruntime` event's payload (`mps_events::AgentRuntime`). An absent value is
+/// omitted, not null; what the CLI reported is sent only while a process runs.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentRuntimeEvent {
+    pub blockid: String,
+    pub running: bool,
+    pub restart_pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub permission_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub effective_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub effective_effort: Option<String>,
+}
+
 /// The `agentruntime` event for one pane (persisted, so a menu that mounts late
 /// still gets the latest). `running` is `None` when no process is alive — then
 /// there is nothing for the menu to compare against. `effective` is what the
@@ -168,32 +193,18 @@ pub fn agent_runtime_event(
     running: Option<&SpawnRuntime>,
     restart_pending: bool,
     effective: Option<&EffectiveRuntime>,
-) -> Value {
-    let mut v = json!({
-        "blockid": block_id,
-        "running": running.is_some(),
-        "restart_pending": restart_pending,
-    });
-    if let (Some(rt), Some(obj)) = (running, v.as_object_mut()) {
-        if let Some(m) = &rt.model {
-            obj.insert("model".to_string(), json!(m));
-        }
-        if let Some(e) = &rt.effort {
-            obj.insert("effort".to_string(), json!(e));
-        }
-        if let Some(p) = &rt.permission_mode {
-            obj.insert("permission_mode".to_string(), json!(p));
-        }
+) -> AgentRuntimeEvent {
+    let effective = effective.filter(|_| running.is_some());
+    AgentRuntimeEvent {
+        blockid: block_id.to_string(),
+        running: running.is_some(),
+        restart_pending,
+        model: running.and_then(|rt| rt.model.clone()),
+        effort: running.and_then(|rt| rt.effort.clone()),
+        permission_mode: running.and_then(|rt| rt.permission_mode.clone()),
+        effective_model: effective.and_then(|e| e.model.clone()),
+        effective_effort: effective.and_then(|e| e.effort.clone()),
     }
-    if let (Some(eff), Some(obj)) = (effective.filter(|_| running.is_some()), v.as_object_mut()) {
-        if let Some(m) = &eff.model {
-            obj.insert("effective_model".to_string(), json!(m));
-        }
-        if let Some(e) = &eff.effort {
-            obj.insert("effective_effort".to_string(), json!(e));
-        }
-    }
-    v
 }
 
 pub fn publish_agent_runtime(
@@ -203,14 +214,8 @@ pub fn publish_agent_runtime(
     restart_pending: bool,
     effective: Option<&EffectiveRuntime>,
 ) {
-    use crate::backend::mps::{MuxEvent, EVENT_AGENT_RUNTIME};
-    broker.publish(MuxEvent {
-        event: EVENT_AGENT_RUNTIME.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 1,
-        data: Some(agent_runtime_event(block_id, running, restart_pending, effective)),
-    });
+    let payload = agent_runtime_event(block_id, running, restart_pending, effective);
+    broker.publish_event::<crate::backend::mps_events::AgentRuntime>(&payload, vec![format!("block:{block_id}")], 1);
 }
 
 pub(crate) struct SeededLaunch {
@@ -651,7 +656,7 @@ mod tests {
             effort: None,
             permission_mode: Some("default".into()),
         };
-        let v = agent_runtime_event("b1", Some(&rt), true, None);
+        let v = serde_json::to_value(agent_runtime_event("b1", Some(&rt), true, None)).unwrap();
         assert_eq!(v["blockid"], "b1");
         assert_eq!(v["running"], true);
         assert_eq!(v["model"], "sonnet");
@@ -662,7 +667,7 @@ mod tests {
             "an absent flag is omitted, not null"
         );
 
-        let none = agent_runtime_event("b1", None, false, None);
+        let none = serde_json::to_value(agent_runtime_event("b1", None, false, None)).unwrap();
         assert_eq!(none["running"], false);
         assert!(none.get("model").is_none());
         assert!(v.get("effective_model").is_none(), "nothing reported yet");
@@ -672,11 +677,11 @@ mod tests {
     fn the_event_carries_what_the_cli_reported_only_while_a_process_runs() {
         let rt = SpawnRuntime { model: Some("sonnet".into()), ..Default::default() };
         let eff = EffectiveRuntime { model: Some("claude-sonnet-5-5".into()), effort: None };
-        let v = agent_runtime_event("b1", Some(&rt), false, Some(&eff));
+        let v = serde_json::to_value(agent_runtime_event("b1", Some(&rt), false, Some(&eff))).unwrap();
         assert_eq!(v["effective_model"], "claude-sonnet-5-5");
         assert!(v.get("effective_effort").is_none(), "a null effort (Haiku) is omitted");
         // a stale report must not outlive its process
-        let gone = agent_runtime_event("b1", None, false, Some(&eff));
+        let gone = serde_json::to_value(agent_runtime_event("b1", None, false, Some(&eff))).unwrap();
         assert!(gone.get("effective_model").is_none());
     }
 

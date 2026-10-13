@@ -24,7 +24,7 @@ import { createSignal, type Accessor } from "solid-js";
 import { authHeaders } from "@/app/store/auth-headers";
 import { MOS, pushNotification } from "@/app/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -397,28 +397,13 @@ export class AttachmentDraft {
     private ensureSubscribed(): void {
         if (this.unsubscribe) return;
         const scope = MOS.makeORef("block", this.blockId);
-        this.unsubscribe = muxEventSubscribe(
-            {
-                eventType: WpsEvent.AttachmentProgress,
-                scope,
-                handler: (ev) => this.onProgress((ev as any)?.data as AttachmentProgressEvent),
-            },
-            {
-                eventType: WpsEvent.AttachmentReady,
-                scope,
-                handler: (ev) => this.onReady((ev as any)?.data as AttachmentReadyEvent),
-            },
-            {
-                eventType: WpsEvent.AttachmentFailed,
-                scope,
-                handler: (ev) => this.onFailed((ev as any)?.data as AttachmentFailedEvent),
-            },
-            {
-                eventType: WpsEvent.AttachmentBatchDone,
-                scope,
-                handler: (ev) => this.onBatchDone((ev as any)?.data as AttachmentBatchDoneEvent),
-            },
-        );
+        const unsubs = [
+            onMuxEvent(WpsEvent.AttachmentProgress, (e) => this.onProgress(e), scope),
+            onMuxEvent(WpsEvent.AttachmentReady, (e) => this.onReady(e), scope),
+            onMuxEvent(WpsEvent.AttachmentFailed, (e) => this.onFailed(e), scope),
+            onMuxEvent(WpsEvent.AttachmentBatchDone, (e) => this.onBatchDone(e), scope),
+        ];
+        this.unsubscribe = () => unsubs.forEach((unsub) => unsub());
     }
 
     private findByEvent(batchId: string | undefined, index: number | undefined): DraftAttachment | undefined {

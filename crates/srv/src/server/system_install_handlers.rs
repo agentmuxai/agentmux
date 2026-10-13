@@ -32,8 +32,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::mps::{Broker, MuxEvent};
-use crate::server::install_handlers::resolve_tool_path;
+use crate::backend::mps::Broker;
+use crate::server::install_handlers::{resolve_tool_path, InstallChunkEvent, InstallStream};
 use crate::server::AppState;
 
 pub const COMMAND_TOOLCHAIN_RESOLVE_INSTALL_COMMAND: &str = "toolchain.resolve_install_command";
@@ -562,29 +562,17 @@ fn spawn_system_install_task(
         // the frontend's existing streaming-log subscription code needs
         // no new event type to render this.
         let scope = format!("install:{}", session_id);
-        let emit_line = |broker: &Broker, line: String, stream: &'static str| {
-            broker.publish(MuxEvent {
-                event: "install_chunk".to_string(),
-                scopes: vec![scope.clone()],
-                sender: String::new(),
-                persist: 1024,
-                data: Some(json!({ "sessionId": session_id, "line": line, "stream": stream })),
-            });
+        let emit_line = |broker: &Broker, line: String, stream: InstallStream| {
+            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_id, line, stream), vec![scope.clone()], 1024);
         };
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
-            broker.publish(MuxEvent {
-                event: "install_chunk".to_string(),
-                scopes: vec![scope.clone()],
-                sender: String::new(),
-                persist: 1024,
-                data: Some(json!({ "sessionId": session_id, "op": "done", "ok": ok, "error": error })),
-            });
+            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::done(&session_id, ok, json!(error)), vec![scope.clone()], 1024);
         };
 
         emit_line(
             &broker,
             format!("$ {} {}", step.program, step.args.join(" ")),
-            "stdout",
+            InstallStream::Stdout,
         );
 
         let mut cmd = Command::new(&step.program);
@@ -619,13 +607,7 @@ fn spawn_system_install_task(
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                broker_out.publish(MuxEvent {
-                    event: "install_chunk".to_string(),
-                    scopes: vec![scope_out.clone()],
-                    sender: String::new(),
-                    persist: 1024,
-                    data: Some(json!({ "sessionId": session_out, "line": line, "stream": "stdout" })),
-                });
+                broker_out.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_out, line, InstallStream::Stdout), vec![scope_out.clone()], 1024);
             }
         });
 
@@ -635,13 +617,7 @@ fn spawn_system_install_task(
         let stderr_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                broker_err.publish(MuxEvent {
-                    event: "install_chunk".to_string(),
-                    scopes: vec![scope_err.clone()],
-                    sender: String::new(),
-                    persist: 1024,
-                    data: Some(json!({ "sessionId": session_err, "line": line, "stream": "stderr" })),
-                });
+                broker_err.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_err, line, InstallStream::Stderr), vec![scope_err.clone()], 1024);
             }
         });
 
@@ -669,7 +645,7 @@ fn spawn_system_install_task(
                                     "Note: {} finished successfully, but AgentMux's current session doesn't see \"{}\" yet — restart AgentMux to pick up the updated PATH.",
                                     step.program, step.verify_bin
                                 ),
-                                "stdout",
+                                InstallStream::Stdout,
                             );
                         }
                         emit_done(&broker, true, None);

@@ -47,6 +47,14 @@ export const DEVICES_SETTINGS = {
         section: "devices",
         keywords: ["cloud", "presence", "publish", "offline", "mobile", "devices", "cloud:publishpresence"],
     },
+    shareSummaries: {
+        id: "devices.share_summaries",
+        label: "Share what my agents are working on",
+        description:
+            "Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.",
+        section: "devices",
+        keywords: ["swarm", "summary", "share", "lan", "network", "channel", "status", "swarm:sharesummaries"],
+    },
     statusbarMuxbusCloud: {
         id: "devices.statusbar_muxbus_cloud",
         label: "Show MuxBus Cloud in the status bar",
@@ -179,6 +187,17 @@ export function DevicesSection(): JSX.Element {
                     <ToggleControl
                         checked={settingsAtom()?.["cloud:publishpresence"] !== false}
                         onChange={(v) => set("cloud:publishpresence", v)}
+                    />
+                }
+            />
+            <SettingRow
+                id={DEVICES_SETTINGS.shareSummaries.id}
+                label={DEVICES_SETTINGS.shareSummaries.label}
+                description={DEVICES_SETTINGS.shareSummaries.description}
+                control={
+                    <ToggleControl
+                        checked={settingsAtom()?.["swarm:sharesummaries"] !== false}
+                        onChange={(v) => set("swarm:sharesummaries", v)}
                     />
                 }
             />

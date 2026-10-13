@@ -101,7 +101,7 @@ fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 /// Refuse a connection registered as an agent: Tower's RPCs aren't offered to
 /// agents.
-fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
+pub(super) fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         Ok(())
     } else {

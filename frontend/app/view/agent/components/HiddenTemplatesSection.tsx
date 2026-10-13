@@ -43,7 +43,7 @@ import {
 } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
@@ -72,10 +72,7 @@ export const HiddenTemplatesSection = (): JSX.Element => {
     // fires that event from both `agentdefhide` and `agentdefunhide`,
     // so any state change reflects here without a manual refresh.
     void load();
-    const unsub = muxEventSubscribe({
-        eventType: WpsEvent.AgentsChanged,
-        handler: () => void load(),
-    });
+    const unsub = onMuxEvent(WpsEvent.AgentsChanged, () => void load());
     onCleanup(() => {
         cancelled = true;
         unsub();

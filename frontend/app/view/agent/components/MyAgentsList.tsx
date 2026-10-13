@@ -57,7 +57,7 @@ import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { prefersReducedMotionAtom, pushNotification } from "@/app/store/global";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
@@ -458,10 +458,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
 
     // Refetch when a new agent definition is created (e.g. via agent.define)
     // so the stub instance appears immediately without needing a restart.
-    const unsubAgents = muxEventSubscribe({
-        eventType: WpsEvent.AgentsChanged,
-        handler: () => void refetch(),
-    });
+    const unsubAgents = onMuxEvent(WpsEvent.AgentsChanged, () => void refetch());
     onCleanup(unsubAgents);
 
     const minuteTick = useTick(60_000);

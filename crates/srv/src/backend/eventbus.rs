@@ -181,6 +181,24 @@ impl EventBus {
         self.broadcast_event_lane(event, Lane::Priority);
     }
 
+    /// Broadcast a typed event (`mps_events`) to every connection directly, not through the
+    /// broker: no scopes, nothing persisted. The same `rpc`/`eventrecv` frame a broker event
+    /// gets (a serialized `MuxEvent` omits its empty scopes, sender and persist).
+    pub fn broadcast_typed<E: super::mps_events::Event>(&self, payload: &E::Payload) {
+        let event = MuxEvent {
+            event: E::NAME.to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data: super::mps_events::payload_data(payload),
+        };
+        self.broadcast_event(&WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(serde_json::json!({ "command": "eventrecv", "data": event })),
+        });
+    }
+
     /// Broadcast a set of related `MuxObjUpdate`s from ONE atomic backend
     /// transition as ONE `waveobj:batchedupdates` WS frame, so the frontend
     /// applies them in a single reactive flush (`updateMuxObjects`'s

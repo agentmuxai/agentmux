@@ -25,6 +25,7 @@ const tone = vi.fn();
 vi.mock("@/app/notification/sound/sound-service", () => ({ playShutdownPendingTone: () => tone() }));
 
 import { ShutdownPendingBanner } from "./ShutdownPendingBanner";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 

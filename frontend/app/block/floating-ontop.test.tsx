@@ -29,6 +29,7 @@ import {
     isFloatingOnTop,
     useReapplyFloatingOnTop,
 } from "./floating-ontop";
+import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 
 const realApi = window.api;
 let setOnTop: ReturnType<typeof vi.fn>;

@@ -38,6 +38,7 @@
  */
 
 import { ObjectService } from "@/app/store/services";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
@@ -89,8 +90,11 @@ export async function addWidgetAsPaneTab(
      *  `meta.insert("cmd:cwd", …)`. */
     extraMeta?: Record<string, unknown>
 ): Promise<void> {
-    const meta = extraMeta ? { ...(blockDef.meta as Record<string, unknown>), ...extraMeta } : blockDef.meta;
-    const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"];
+    const view = blockDef.meta?.view;
+    // srv takes a supplied meta as-is and never checks `view`, so a blockdef
+    // without one would make a block with no view: refuse it here.
+    if (typeof view !== "string" || !view) throw new Error("addWidgetAsPaneTab: the blockdef has no view");
+    const meta = (extraMeta ? { ...blockDef.meta, ...extraMeta } : blockDef.meta) as MetaType | undefined;
     await openBlockInStack(model, { nodeId }, view, meta);
 }
 
@@ -117,18 +121,14 @@ export type PaneTabTarget = { nodeId: string } | { blockId: string };
 export async function openBlockInStack(
     model: LayoutModel,
     target: PaneTabTarget,
-    view: unknown,
-    meta: Record<string, unknown> | undefined
+    view: string,
+    meta: MetaType | undefined
 ): Promise<string | null> {
     const findPane = () =>
         "nodeId" in target ? findNode(model.treeState.rootNode, target.nodeId) : model.getNodeByBlockId(target.blockId);
     const anchor = "nodeId" in target ? findPane()?.data?.blockId : target.blockId;
     if (!anchor) return null;
-    const paneOpenResult = (await TabRpcClient.rpcCall(
-        "pane.open",
-        { view, stack_onto_block_id: anchor, meta },
-        {}
-    )) as { block_id: string };
+    const paneOpenResult = await RpcApi.PaneOpenCommand(TabRpcClient, { view, stack_onto_block_id: anchor, meta }, {});
     const node = findPane();
     if (!node) {
         await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
@@ -319,8 +319,8 @@ export function moveBlockInStack(
         if (landedIn) focusNode(model, landedIn.id);
     }
 
-    TabRpcClient.rpcCall(
-        "pane.moveTab",
+    RpcApi.PaneMoveTabCommand(
+        TabRpcClient,
         { block_id: blockId, target_block_id: targetBlockId, position, activate },
         {}
     ).catch((e) => console.error("moveBlockInStack: pane.moveTab RPC failed", e));

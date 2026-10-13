@@ -142,10 +142,7 @@ pub(crate) fn global_memory_write_impl(
         }
     }
 
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: "memories:changed".to_string(),
-        scopes: vec![], sender: String::new(), persist: 0, data: None,
-    });
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
     tracing::info!(agent_id, bundle_id = %bundle.id, name = %bundle.name, "globalmemory.write");
     Ok(json!({ "id": bundle.id, "name": bundle.name }))
 }
@@ -216,10 +213,7 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     bundle.is_global = false;
     bundle.updated_at = agentmux_common::time::now_ms();
     state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: "memories:changed".to_string(),
-        scopes: vec![], sender: String::new(), persist: 0, data: None,
-    });
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
     Ok(json!({ "ok": true }))
 }
 
@@ -393,10 +387,7 @@ pub(crate) fn global_memory_revert_impl(
         // failing loudly beats silently reporting success with no new version.
         .ok_or_else(|| "globalmemory.revert: no version was recorded (unexpected: entry is not global)".to_string())?;
 
-    state.broker.publish(crate::backend::mps::MuxEvent {
-        event: "memories:changed".to_string(),
-        scopes: vec![], sender: String::new(), persist: 0, data: None,
-    });
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
     tracing::info!(agent_id, bundle_id = %id, version_id, "globalmemory.revert");
     Ok(json!({ "version": bundle_version_meta_json(
         &new_version.id,

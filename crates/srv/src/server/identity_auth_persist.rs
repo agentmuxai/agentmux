@@ -98,13 +98,7 @@ fn persist_oauth_direct_account(
         );
         return None;
     }
-    broker.publish(crate::backend::mps::MuxEvent {
-        event: "identityaccounts:changed".to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: None,
-    });
+    broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
     tracing::info!(
         target: "identity",
         account_id,

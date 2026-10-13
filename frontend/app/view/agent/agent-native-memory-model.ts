@@ -24,7 +24,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
 import { sha256Hex } from "@/util/sha256";
@@ -144,15 +144,12 @@ export class AgentNativeMemoryModel {
         void this.loadFiles();
         // Live updates, debounced like the Armory's own subscription
         // (native-memory-manager.tsx): a burst of writes is one refresh.
-        this.unsubChanged = muxEventSubscribe({
-            eventType: `agent:memory:changed:${agentId}`,
-            handler: () => {
-                if (this.changeDebounce !== undefined) clearTimeout(this.changeDebounce);
-                this.changeDebounce = setTimeout(() => {
-                    this.changeDebounce = undefined;
-                    void this.refreshFromChange();
-                }, 250);
-            },
+        this.unsubChanged = onMuxEvent(`agent:memory:changed:${agentId}`, () => {
+            if (this.changeDebounce !== undefined) clearTimeout(this.changeDebounce);
+            this.changeDebounce = setTimeout(() => {
+                this.changeDebounce = undefined;
+                void this.refreshFromChange();
+            }, 250);
         });
     }
 

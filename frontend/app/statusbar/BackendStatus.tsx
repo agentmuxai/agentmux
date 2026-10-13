@@ -3,7 +3,7 @@
 
 import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom, termRendererAtom } from "@/store/global";
 import { setRestartInProgress } from "@/store/backendStatus";
-import { muxEventSubscribe } from "@/app/store/mps";
+import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { getGpuInfo } from "@/util/gpuutil";
 import { Accessor, createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -257,17 +257,12 @@ const BackendStatus = (): JSX.Element => {
     // fixes. `ts` is still passed as a clamped fallback for a payload that
     // predates the field.
     onMount(() => {
-        const unsub = muxEventSubscribe({
-            eventType: WpsEvent.SysInfo,
-            scope: "local",
-            handler: (event) => {
-                const data = (event as MuxEvent)?.data;
+        const unsub = onMuxEvent(WpsEvent.SysInfo, (data) => {
                 const next = resolveUptimeSecs(data?.uptime_secs, data?.ts, startedAt());
                 if (next != null) {
                     setUptimeSecs(next);
                 }
-            },
-        });
+            }, "local");
         onCleanup(() => unsub?.());
     });
 

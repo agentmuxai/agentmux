@@ -24,6 +24,7 @@ import { SectionHeader } from "../settings-controls";
 import { installLabel, WidgetApprovalDetails } from "./widget-approval-details";
 import { CATALOG_LINE, inCatalog, WidgetCatalog } from "./widget-catalog";
 import { describePermission } from "./widget-permissions";
+import { WidgetBarSettings } from "./widget-bar-settings";
 
 export const WIDGETS_SETTINGS = {
     installed: {
@@ -155,6 +156,7 @@ export function WidgetsSection(): JSX.Element {
 
     return (
         <div class="settings-section-body widgets-section">
+            <WidgetBarSettings />
             <SectionHeader label={WIDGETS_SETTINGS.installed.label} />
             <div id={`setting-${WIDGETS_SETTINGS.installed.id}`} class="setting-row">
                 <div class="setting-devices-description">{WIDGETS_SETTINGS.installed.description}</div>

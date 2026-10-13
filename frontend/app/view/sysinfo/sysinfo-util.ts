@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DataItem } from "./sysinfo-types";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
+import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 
 export function convertMuxEventToDataItem(event: MuxEvent): DataItem {
     const eventData: TimeSeriesData = event.data;

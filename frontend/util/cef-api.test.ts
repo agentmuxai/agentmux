@@ -14,7 +14,7 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     },
 }));
 
-import { closeJsContextMenu, showJsContextMenu } from "@/app/host/js-context-menu";
+import { closeJsContextMenu, onJsContextMenuClosed, showJsContextMenu, updateJsContextMenu } from "@/app/host/js-context-menu";
 import { isCef } from "./cef-api";
 
 // ── isCef — #52 reload lock-out fix ──────────────────────────────────────────
@@ -428,5 +428,51 @@ describe("showJsContextMenu — focus", () => {
         row().click();
         await Promise.resolve();
         expect(document.activeElement).toBe(document.body);
+    });
+});
+
+// ── Live menus: the pane "+" picker updates in place while open ─────────────────
+// (SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md)
+
+describe("showJsContextMenu — live update", () => {
+    const labels = () =>
+        [...document.querySelectorAll("#cef-context-menu-overlay > .menu > .menu-item > .label")].map((el) => el.textContent);
+
+    beforeEach(() => {
+        overlayRegs.length = 0;
+    });
+    afterEach(() => closeJsContextMenu());
+
+    test("replaces the items of the open menu without closing it", () => {
+        const closed = vi.fn();
+        showJsContextMenu([{ id: "a", label: "Agent" }, { id: "t", label: "Terminal" }] as NativeContextMenuItem[], { x: 10, y: 10 }, null);
+        const stop = onJsContextMenuClosed(closed);
+        expect(labels()).toEqual(["Agent", "Terminal"]);
+        expect(updateJsContextMenu([{ id: "a", label: "Agent" }] as NativeContextMenuItem[])).toBe(true);
+        expect(labels()).toEqual(["Agent"]);
+        expect(closed).not.toHaveBeenCalled();
+        stop();
+    });
+
+    test("releases the old submenus' overlay holes on update, and every hole on close", () => {
+        showJsContextMenu(
+            [{ id: "m", label: "Messengers", submenu: [{ id: "d", label: "Discord" }] }] as NativeContextMenuItem[],
+            { x: 10, y: 10 },
+            null
+        );
+        const before = overlayRegs.length;
+        updateJsContextMenu([{ id: "m", label: "Messengers", submenu: [{ id: "s", label: "Slack" }] }] as NativeContextMenuItem[]);
+        expect(overlayRegs.slice(0, before).filter((r) => r.el.classList.contains("sub-menu")).every((r) => r.released)).toBe(true);
+        closeJsContextMenu();
+        expect(overlayRegs.every((r) => r.released)).toBe(true);
+    });
+
+    test("tells listeners when it closes, and update is a no-op afterwards", () => {
+        const closed = vi.fn();
+        showJsContextMenu([{ id: "a", label: "Agent" }] as NativeContextMenuItem[], { x: 10, y: 10 }, null);
+        onJsContextMenuClosed(closed);
+        closeJsContextMenu();
+        expect(closed).toHaveBeenCalledTimes(1);
+        expect(updateJsContextMenu([{ id: "b", label: "Browser" }] as NativeContextMenuItem[])).toBe(false);
     });
 });

@@ -805,23 +805,6 @@
     }
   },
   {
-    "command": "auth.submitapikey",
-    "request": "agentmux_srv::server::identity_handlers::SubmitProviderApiKeyReq",
-    "requestName": "SubmitProviderApiKeyReq",
-    "requestTs": {
-      "imports": [
-        "SubmitProviderApiKeyReq"
-      ],
-      "name": "SubmitProviderApiKeyReq"
-    },
-    "response": "()",
-    "responseName": "()",
-    "responseTs": {
-      "imports": [],
-      "name": "null"
-    }
-  },
-  {
     "command": "auth.submitcallback",
     "request": "agentmux_srv::server::identity_handlers::SubmitAuthCallbackReq",
     "requestName": "SubmitAuthCallbackReq",
@@ -967,6 +950,25 @@
         "BlockfileWriteStateResult"
       ],
       "name": "BlockfileWriteStateResult"
+    }
+  },
+  {
+    "command": "blockstats.detail",
+    "request": "agentmux_srv::backend::rpc_types::blockstats::BlockStatsDetailReq",
+    "requestName": "BlockStatsDetailReq",
+    "requestTs": {
+      "imports": [
+        "BlockStatsDetailReq"
+      ],
+      "name": "BlockStatsDetailReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::blockstats::BlockStatsDetail",
+    "responseName": "BlockStatsDetail",
+    "responseTs": {
+      "imports": [
+        "BlockStatsDetail"
+      ],
+      "name": "BlockStatsDetail"
     }
   },
   {
@@ -3718,6 +3720,42 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "pane.moveTab",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneMoveTabData",
+    "requestName": "CommandPaneMoveTabData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneMoveTabData"
+      ],
+      "name": "CommandPaneMoveTabData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "pane.open",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneOpenData",
+    "requestName": "CommandPaneOpenData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneOpenData"
+      ],
+      "name": "CommandPaneOpenData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::PaneOpenResult",
+    "responseName": "PaneOpenResult",
+    "responseTs": {
+      "imports": [
+        "PaneOpenResult"
+      ],
+      "name": "PaneOpenResult"
     }
   },
   {

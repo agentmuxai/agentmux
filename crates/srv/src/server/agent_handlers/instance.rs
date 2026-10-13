@@ -145,13 +145,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: format!("agentinstances:changed:{}", inst.definition_id),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event_for::<crate::backend::mps_events::AgentInstancesChanged>(&inst.definition_id, &(), vec![], 0);
                 Ok(created)
             }
         },
@@ -184,13 +178,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .instance_update_partial(&cmd.id, &upd)
                     .map_err(|e| format!("updateagentinstance: {e}"))?
                     .ok_or_else(|| format!("updateagentinstance: not found id={}", cmd.id))?;
-                broker.publish(crate::backend::mps::MuxEvent {
-                    event: format!("agentinstances:changed:{}", fresh.definition_id),
-                    scopes: vec![],
-                    sender: String::new(),
-                    persist: 0,
-                    data: None,
-                });
+                broker.publish_event_for::<crate::backend::mps_events::AgentInstancesChanged>(&fresh.definition_id, &(), vec![], 0);
                 Ok(fresh)
             }
         },
@@ -248,13 +236,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // gate on.
                 super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagentinstance");
                 if let Some(def_id) = definition_id.filter(|_| deleted) {
-                    broker.publish(crate::backend::mps::MuxEvent {
-                        event: format!("agentinstances:changed:{}", def_id),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: None,
-                    });
+                    broker.publish_event_for::<crate::backend::mps_events::AgentInstancesChanged>(&def_id, &(), vec![], 0);
                 }
                 Ok(DeleteAgentInstanceResult { deleted })
             }

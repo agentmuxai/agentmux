@@ -1414,7 +1414,18 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 </Show>
                 {props.preview ? previewElem : props.children}
                 <Show when={showStatsBadge()}>
-                    <BlockStatsBadge blockId={nodeModel.blockId} noHeader={noHeader()} />
+                    <BlockStatsBadge
+                        blockId={nodeModel.blockId}
+                        noHeader={noHeader()}
+                        connection={
+                            // Only a terminal's badge measures a remote shell;
+                            // other panes on a connection (Files, preview) have
+                            // none and keep the local badge's behavior.
+                            blockData()?.meta?.view === "term"
+                                ? (blockData()?.meta?.connection as string | undefined)
+                                : undefined
+                        }
+                    />
                 </Show>
             </div>
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>
@@ -1434,7 +1445,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 badge on every pane. The Show keeps the component (and
                 its ResizeObserver) mounted only during the drag, so
                 idle panes do no observer work. Codex P2 rounds 1 + 2
-                on PR #1057.
+                on PR #1057. A browser pane's native page would cover it;
+                while a splitter is dragged that page stops short of the
+                badge's strip (use-pane-rect-sync.ts, SIZE_BADGE_STRIP_CSS).
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
             <Show when={!props.preview && nodeModel.isSplitterDragging()}>
                 <PaneSizeBadge target={frameEl} />

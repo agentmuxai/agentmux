@@ -16,7 +16,13 @@
     padding: 1px var(--space-1-5);
     border-radius: 0;
     background: rgba(0, 0, 0, 0.3);
-    pointer-events: none;
+    // Takes the mouse for its tooltip: clicks on this small corner no longer
+    // reach the terminal underneath.
+    cursor: default;
+
+    &:hover {
+        opacity: 0.9;
+    }
 
     .stats-cpu,
     .stats-mem {
@@ -31,6 +37,12 @@
         color: var(--error-color);
     }
 
+    // A remote pane whose own processes can't be told apart: the whole
+    // host's figures, set apart so they don't read as the pane's.
+    &.remote.host {
+        font-style: italic;
+    }
+
     // When this pane's header is hoisted out of BlockFrame_Default (into the
     // shared pane-leaf-chrome above it — see BlockFrame's
     // `noHeader`), `.block-frame-default-inner` no longer
@@ -40,5 +52,51 @@
     // element's own top instead.
     &.no-header {
         top: 4px;
+    }
+}
+
+.block-stats-tooltip {
+    max-width: 440px;
+    white-space: normal;
+    line-height: 1.4;
+
+    .bst-title {
+        font-weight: 600;
+        margin-bottom: var(--space-1);
+    }
+
+    .bst-connection,
+    .bst-how {
+        margin-bottom: var(--space-1);
+    }
+
+    .bst-connection-name {
+        font-variant-numeric: tabular-nums;
+    }
+
+    .bst-grid {
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        column-gap: var(--space-2);
+        row-gap: 2px;
+    }
+
+    .bst-label {
+        color: var(--secondary-text-color);
+    }
+
+    .bst-value {
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .bst-meaning,
+    .bst-footer {
+        color: var(--secondary-text-color);
+    }
+
+    .bst-footer {
+        margin-top: var(--space-1);
     }
 }

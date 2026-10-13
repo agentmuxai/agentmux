@@ -66,31 +66,6 @@ declare global {
         subblockids?: string[];
     };
 
-    // agents.failure.AgentFailure — payload of the `agentfailure` wave event
-    // (classified cause of a non-zero agent exit). snake_case `code`, camelCase rest.
-    type AgentFailure = {
-        code:
-            | "rate_limited"
-            | "overloaded"
-            | "usage_limit"
-            | "auth"
-            | "context_exceeded"
-            | "max_turns"
-            | "network"
-            | "killed"
-            | "no_output"
-            | "spawn_failure"
-            | "unknown_non_zero"
-            | "agent_deleted"
-            | "live_elsewhere";
-        title: string;
-        detail: string;
-        exitCode?: number;
-        signal?: number;
-        stderrTail?: string;
-        retryable: boolean;
-    };
-
     // waveobj.BlockDef
     type BlockDef = {
         files?: {[key: string]: FileDef};
@@ -247,44 +222,11 @@ declare global {
         cacheRead: number;
     };
 
-    type AgentTurn = {
-        role: "user" | "assistant" | "tool_result";
-        content: unknown;
-        timestampMs: number;
-    };
-
-    type AgentEvent =
-        | { type: "assistant_text"; delta: string }
-        | { type: "tool_use"; toolUseId: string; tool: string; input: unknown }
-        | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
-        | { type: "cost"; costUsd: number; tokens: TokenCounts }
-        | { type: "done"; response: string; transcript: AgentTurn[] }
-        | { type: "error"; message: string }
-        /**
-         * Context compaction completed. Sourced from the CLI's own
-         * `system`/`compact_boundary` stream-json frame — real counts, not
-         * inferred. Mirror of `crates/srv/src/agents/types.rs`'s
-         * `AgentEvent::CompactionBoundary` (`CompactionTrigger` is
-         * `#[serde(rename_all = "snake_case")]`). See
-         * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md
-         * (Codex P2, PR #2378 round 4: this mirror was missing the variant
-         * entirely, leaving typed consumers of this wire union unable to
-         * represent an event the backend actually emits).
-         */
-        | {
-              type: "compaction_boundary";
-              trigger: "auto" | "manual";
-              preTokens: number;
-              postTokens: number;
-              cumulativeDroppedTokens: number;
-              durationMs: number;
-          };
-
     type AgentRunResult = {
         response: string;
         tokens: TokenCounts;
         costUsd: number;
-        transcript: AgentTurn[];
+        transcript: import("@/types/rpc/AgentTurn").AgentTurn[];
     };
 
 
@@ -303,11 +245,6 @@ declare global {
 
     // wshrpc.CommandGetMetaData
     type CommandGetMetaData = {
-        oref: ORef;
-    };
-
-    // wshrpc.CommandGetRTInfoData
-    type CommandGetRTInfoData = {
         oref: ORef;
     };
 
@@ -340,27 +277,10 @@ declare global {
         opts?: FileCopyOpts;
     };
 
-    // wshrpc.CommandResolveIdsData
-    type CommandResolveIdsData = {
-        blockid: string;
-        ids: string[];
-    };
-
-    // wshrpc.CommandResolveIdsRtnData
-    type CommandResolveIdsRtnData = {
-        resolvedids: {[key: string]: ORef};
-    };
-
     // wshrpc.CommandSetMetaData
     type CommandSetMetaData = {
         oref: ORef;
         meta: MetaType;
-    };
-
-    // wshrpc.CommandSetRTInfoData
-    type CommandSetRTInfoData = {
-        oref: ORef;
-        data: ObjRTInfo;
     };
 
     // wshrpc.CommandTermGetScrollbackLinesData
@@ -471,16 +391,6 @@ declare global {
         host: string;
         keywords?: ConnKeywords;
         logblockid?: string;
-    };
-
-    // wshrpc.ConnStatus
-    type ConnStatus = {
-        status: string;
-        connection: string;
-        connected: boolean;
-        hasconnected: boolean;
-        activeconnnum: number;
-        error?: string;
     };
 
     // wshrpc.CpuDataRequest
@@ -776,6 +686,8 @@ declare global {
         /** Absolute path to a file or directory the Media pane is pointed
          *  at. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */
         "media:path"?: string;
+        // Settings pane: the section it opens at (settings.tsx).
+        "settings:section"?: string;
         // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
         "files:path"?: string;
         "files:select"?: string[];
@@ -819,8 +731,11 @@ declare global {
         "agent:resume_strategy"?: "none" | "flag" | "codex-exec";
         "agent:session_id_field"?: string;
         "agent:sessionid"?: string;
+        /** A read-only history tab: the agent it shows, and the block it was opened from (open-history-tab.ts). */
+        "agent:historyTabFor"?: string;
+        "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
-        "agent:last_failure"?: AgentFailure;
+        "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
@@ -885,18 +800,6 @@ declare global {
 
     // waveobj.ORef
     type ORef = string;
-
-    // waveobj.ObjRTInfo
-    type ObjRTInfo = {
-        "cmd:hascurcwd"?: boolean;
-        "shell:state"?: string;
-        "shell:type"?: string;
-        "shell:version"?: string;
-        "shell:uname"?: string;
-        "shell:inputempty"?: boolean;
-        "shell:lastcmd"?: string;
-        "shell:lastcmdexitcode"?: number;
-    };
 
     // iochantypes.Packet
     type Packet = {
@@ -992,6 +895,7 @@ declare global {
         "term:scrollsensitivity"?: number;
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
+        "browser:searchsuggestions"?: boolean;
         /** User shortcut overrides (frontend/app/keybindings/registry.ts `setUserKeybindings`). */
         "keybindings"?: { key?: string; command: string; when?: string; platform?: "mac" | "other" }[];
         "term:predictiveecho"?: boolean;
@@ -1012,6 +916,10 @@ declare global {
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
+        /** Pinned widget-bar icons, in order, as short names (`agent` for `defwidget@agent`). */
+        "widget:pinned"?: string[];
+        /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
+        "widget:hidden"?: string[];
         "statusbar:showmuxbuscloud"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;
@@ -1046,6 +954,7 @@ declare global {
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
         "cloud:publishpresence"?: boolean;
+        "swarm:sharesummaries"?: boolean;
         "voice:enabled"?: boolean;
         "voice:engine"?: string;
         "voice:groqApiKey"?: string;
@@ -1284,17 +1193,6 @@ declare global {
         cursor: string;
     };
 
-    // wshrpc.TimeSeriesData
-    type TimeSeriesData = {
-        ts: number;
-        values: {[key: string]: number};
-        // Backend uptime in seconds, from srv's monotonic clock. Present only
-        // on the top-level sysinfo tick, absent on per-block stats and the
-        // CPU-stream RPCs. Never derive uptime from `ts` — see
-        // frontend/app/statusbar/backend-uptime.ts.
-        uptime_secs?: number;
-    };
-
     // uctypes.UIChat
     type UIChat = {
         chatid: string;
@@ -1373,45 +1271,6 @@ declare global {
         data: any;
     };
 
-    // mps.WSFileEventData
-    type WSFileEventData = {
-        zoneid: string;
-        filename: string;
-        fileop: string;
-        data64: string;
-        // File size immediately before this append (the chunk spans
-        // [offset, offset + decoded(data64).length)). Only populated for
-        // filestore-write-through-backed appends (handle_append_block_file);
-        // absent means "no offset info available" — consumers should treat
-        // that as "always new" (the pre-existing, always-write behavior).
-        // Added so TermWrap can reconcile a chunk landing in the reconnect
-        // window against what its own reconnect fetch already covered — see
-        // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 follow-up.
-        offset?: number;
-        // Agent `output` appends to a counted transcript only: where the
-        // records landed in each stream (the block's file, the agent's
-        // global zone). Pick the entry for the stream the pane reads.
-        // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7.
-        pos?: StreamPos[];
-        // Set when the records echo something the pane already shows:
-        // "stdin" for a user message the controller wrote to the agent's
-        // stdin. In the transcript with its position; the pane adds no node
-        // for it (Phase 5a-3c).
-        echo?: string;
-    };
-
-    // mps.StreamPos
-    type StreamPos = {
-        // "b:<blockId>" (the block's own output) or "g:<zone>" (the agent's
-        // global transcript zone).
-        stream: string;
-        gen: string;
-        // Index of the first record this append wrote.
-        line: number;
-        // The stream's line count after this append.
-        lines: number;
-    };
-
     // webcmd.WSRpcCommand
     type WSRpcCommand = {
         wscommand: "rpc";
@@ -1421,15 +1280,6 @@ declare global {
     // wconfig.WatcherUpdate
     type WatcherUpdate = {
         fullconfig: FullConfigType;
-    };
-
-    // mps.MuxEvent
-    type MuxEvent = {
-        event: string;
-        scopes?: string[];
-        sender?: string;
-        persist?: number;
-        data?: any;
     };
 
     // filestore.MuxFile
@@ -1473,14 +1323,6 @@ declare global {
         meta: MetaType;
     };
 
-    // waveobj.MuxObjUpdate
-    type MuxObjUpdate = {
-        updatetype: string;
-        otype: string;
-        oid: string;
-        obj?: MuxObj;
-    };
-
     // waveobj.Window
     type MuxWindow = MuxObj & {
         workspaceid: string;
@@ -1513,7 +1355,7 @@ declare global {
         success?: boolean;
         error?: string;
         data?: any;
-        updates?: MuxObjUpdate[];
+        updates?: import("@/types/rpc/MuxObjUpdate").MuxObjUpdate[];
     };
 
     // wshrpc.WebSelectorOpts
@@ -1550,12 +1392,6 @@ declare global {
         tabids: string[];
         pinnedtabids: string[];
         activetabid: string;
-    };
-
-    // wshrpc.WorkspaceInfoData
-    type WorkspaceInfoData = {
-        windowid: string;
-        workspacedata: Workspace;
     };
 
     // waveobj.WorkspaceListEntry

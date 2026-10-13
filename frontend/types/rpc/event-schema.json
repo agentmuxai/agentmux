@@ -1,0 +1,469 @@
+[
+  {
+    "event": "agent-message-accepted",
+    "payloadTs": {
+      "imports": [
+        "MessageAcceptedEvent"
+      ],
+      "name": "MessageAcceptedEvent"
+    }
+  },
+  {
+    "event": "agent-resume-retry",
+    "payloadTs": {
+      "imports": [
+        "ResumeRetryEvent"
+      ],
+      "name": "ResumeRetryEvent"
+    }
+  },
+  {
+    "event": "agent:memory:changed:",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    },
+    "perId": true
+  },
+  {
+    "event": "agent:shutdown",
+    "payloadTs": {
+      "imports": [
+        "ShutdownLineEvent"
+      ],
+      "name": "ShutdownLineEvent"
+    }
+  },
+  {
+    "event": "agent_event:",
+    "payloadTs": {
+      "imports": [
+        "AgentEvent"
+      ],
+      "name": "AgentEvent"
+    },
+    "perId": true
+  },
+  {
+    "event": "agentcontent:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "agentcontextusage",
+    "payloadTs": {
+      "imports": [
+        "AgentContextUsageEvent"
+      ],
+      "name": "AgentContextUsageEvent"
+    }
+  },
+  {
+    "event": "agentcredentials:revoked:",
+    "payloadTs": {
+      "imports": [
+        "CredentialsRevokedEvent"
+      ],
+      "name": "CredentialsRevokedEvent"
+    },
+    "perId": true
+  },
+  {
+    "event": "agentfailure",
+    "payloadTs": {
+      "imports": [
+        "AgentFailure"
+      ],
+      "name": "AgentFailure"
+    }
+  },
+  {
+    "event": "agenthistory:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "agentidentities:changed:",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    },
+    "perId": true
+  },
+  {
+    "event": "agentinstances:changed:",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    },
+    "perId": true
+  },
+  {
+    "event": "agentruntime",
+    "payloadTs": {
+      "imports": [
+        "AgentRuntimeEvent"
+      ],
+      "name": "AgentRuntimeEvent"
+    }
+  },
+  {
+    "event": "agents:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "agentskills:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "agentturn",
+    "payloadTs": {
+      "imports": [
+        "AgentTurnEvent"
+      ],
+      "name": "AgentTurnEvent"
+    }
+  },
+  {
+    "event": "attachment:batch-done",
+    "payloadTs": {
+      "imports": [
+        "AttachmentBatchDoneEvent"
+      ],
+      "name": "AttachmentBatchDoneEvent"
+    }
+  },
+  {
+    "event": "attachment:failed",
+    "payloadTs": {
+      "imports": [
+        "AttachmentFailedEvent"
+      ],
+      "name": "AttachmentFailedEvent"
+    }
+  },
+  {
+    "event": "attachment:progress",
+    "payloadTs": {
+      "imports": [
+        "AttachmentProgressEvent"
+      ],
+      "name": "AttachmentProgressEvent"
+    }
+  },
+  {
+    "event": "attachment:ready",
+    "payloadTs": {
+      "imports": [
+        "AttachmentReadyEvent"
+      ],
+      "name": "AttachmentReadyEvent"
+    }
+  },
+  {
+    "event": "blockfile",
+    "payloadTs": {
+      "imports": [
+        "WSFileEventData"
+      ],
+      "name": "WSFileEventData"
+    }
+  },
+  {
+    "event": "blockstats",
+    "payloadTs": {
+      "imports": [
+        "TimeSeriesData"
+      ],
+      "name": "TimeSeriesData"
+    }
+  },
+  {
+    "event": "connchange",
+    "payloadTs": {
+      "imports": [
+        "ConnStatus"
+      ],
+      "name": "ConnStatus"
+    }
+  },
+  {
+    "event": "controllerstatus",
+    "payloadTs": {
+      "imports": [
+        "BlockControllerRuntimeStatus"
+      ],
+      "name": "BlockControllerRuntimeStatus"
+    }
+  },
+  {
+    "event": "cron_changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "dispatch:activity",
+    "payloadTs": {
+      "imports": [
+        "DispatchActivityEvent"
+      ],
+      "name": "DispatchActivityEvent"
+    }
+  },
+  {
+    "event": "dispatch:updated",
+    "payloadTs": {
+      "imports": [
+        "DispatchUpdatedEvent"
+      ],
+      "name": "DispatchUpdatedEvent"
+    }
+  },
+  {
+    "event": "dronerun:",
+    "payloadTs": {
+      "imports": [
+        "RunEvent"
+      ],
+      "name": "RunEvent"
+    },
+    "perId": true
+  },
+  {
+    "event": "drones:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "editor:file_changed",
+    "payloadTs": {
+      "imports": [
+        "PathChangedEvent"
+      ],
+      "name": "PathChangedEvent"
+    }
+  },
+  {
+    "event": "files:changed",
+    "payloadTs": {
+      "imports": [
+        "FilesChangedEvent"
+      ],
+      "name": "FilesChangedEvent"
+    }
+  },
+  {
+    "event": "files:op",
+    "payloadTs": {
+      "imports": [
+        "FsOpEvent"
+      ],
+      "name": "FsOpEvent"
+    }
+  },
+  {
+    "event": "identityaccounts:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "install_chunk",
+    "payloadTs": {
+      "imports": [
+        "InstallChunkEvent"
+      ],
+      "name": "InstallChunkEvent"
+    }
+  },
+  {
+    "event": "mcp:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "media:file_changed",
+    "payloadTs": {
+      "imports": [
+        "PathChangedEvent"
+      ],
+      "name": "PathChangedEvent"
+    }
+  },
+  {
+    "event": "memories:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "namedagents:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "processbroker:tracked-blocks-changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "remoteschange",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "shell_chunk",
+    "payloadTs": {
+      "imports": [
+        "ShellChunkEvent"
+      ],
+      "name": "ShellChunkEvent"
+    }
+  },
+  {
+    "event": "shell_node_create",
+    "payloadTs": {
+      "imports": [
+        "ShellNodeCreateEvent"
+      ],
+      "name": "ShellNodeCreateEvent"
+    }
+  },
+  {
+    "event": "skills:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "event": "subagent:abandoned",
+    "payloadTs": {
+      "imports": [
+        "SubagentAbandonedEvent"
+      ],
+      "name": "SubagentAbandonedEvent"
+    }
+  },
+  {
+    "event": "subagent:activity",
+    "payloadTs": {
+      "imports": [
+        "SubagentActivityEvent"
+      ],
+      "name": "SubagentActivityEvent"
+    }
+  },
+  {
+    "event": "subagent:backfill_status",
+    "payloadTs": {
+      "imports": [
+        "SubagentBackfillStatusEvent"
+      ],
+      "name": "SubagentBackfillStatusEvent"
+    }
+  },
+  {
+    "event": "subagent:block_pruned",
+    "payloadTs": {
+      "imports": [
+        "SubagentBlockPrunedEvent"
+      ],
+      "name": "SubagentBlockPrunedEvent"
+    }
+  },
+  {
+    "event": "subagent:completed",
+    "payloadTs": {
+      "imports": [
+        "SubagentCompletedEvent"
+      ],
+      "name": "SubagentCompletedEvent"
+    }
+  },
+  {
+    "event": "subagent:named",
+    "payloadTs": {
+      "imports": [
+        "SubagentNamedEvent"
+      ],
+      "name": "SubagentNamedEvent"
+    }
+  },
+  {
+    "event": "subagent:spawned",
+    "payloadTs": {
+      "imports": [
+        "SubagentSpawnedEvent"
+      ],
+      "name": "SubagentSpawnedEvent"
+    }
+  },
+  {
+    "event": "subagent:updated",
+    "payloadTs": {
+      "imports": [
+        "SubagentUpdatedEvent"
+      ],
+      "name": "SubagentUpdatedEvent"
+    }
+  },
+  {
+    "event": "sysinfo",
+    "payloadTs": {
+      "imports": [
+        "TimeSeriesData"
+      ],
+      "name": "TimeSeriesData"
+    }
+  },
+  {
+    "event": "userattention",
+    "payloadTs": {
+      "imports": [
+        "UserAttentionEvent"
+      ],
+      "name": "UserAttentionEvent"
+    }
+  },
+  {
+    "event": "waveobj:update",
+    "payloadTs": {
+      "imports": [
+        "MuxObjUpdate"
+      ],
+      "name": "MuxObjUpdate"
+    }
+  },
+  {
+    "event": "workqueue:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  }
+]

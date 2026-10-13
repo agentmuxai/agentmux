@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::backend::mps::{Broker, MuxEvent, EVENT_CONN_CHANGE};
+use crate::backend::mps::Broker;
 use crate::backend::rpc_types::ConnStatus;
 
 /// The status words the frontend's overlay understands.
@@ -129,13 +129,7 @@ fn update(
     #[cfg(test)]
     let recorded = false;
     if let Some(broker) = broker {
-        broker.publish(MuxEvent {
-            event: EVENT_CONN_CHANGE.to_string(),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 0,
-            data: serde_json::to_value(&updated).ok(),
-        });
+        broker.publish_event::<crate::backend::mps_events::ConnChange>(&updated, vec![], 0);
         if recorded {
             super::remotes::publish_change(broker);
         }
