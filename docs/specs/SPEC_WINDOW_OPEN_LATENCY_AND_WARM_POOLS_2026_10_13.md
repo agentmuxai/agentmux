@@ -19,7 +19,7 @@ Lab: an isolated production portable of `main` (9088493f5) on the operator's mac
 
 | | Warm (from a pool) | Cold |
 |---|---|---|
-| New window | 150–650 ms (most 150–300) | 850 ms–3.1 s; Memory's first open never rendered within 20 s |
+| New window | 150–650 ms (most 150–300) | 850 ms–3.1 s |
 | Floating pane | **never happened**: 0 of 30 floating opens found a warm window | 500 ms–1.9 s (Toolchain settled at 3.2 s) |
 
 ### 1.2 Why the pools are empty
@@ -73,7 +73,7 @@ When commit was Critical, the cold paths took 1–2 s more: a floating pane spen
 
 - **Window churn leaks memory.** In the lab, about 60 open/close cycles took AgentMux's CEF processes from 189 MB to 1.47 GB. 7 recycled "pre-warmed" windows sat at 115–124 MB each, against 52–58 MB fresh, with 13 documents per renderer. That's more than the cap of `POOL_TARGET_SIZE + 2` allows, and a document per reuse is retained.
 - **A floating pane often doesn't find its parent window.** 21 of 42 floating opens logged "could not resolve parent main HWND; floater will not cascade on minimize/destroy (orphan risk)". `pane.open` from the main page doesn't carry `source_window_label`.
-- **The Memory widget's first open in a new window never rendered** (nothing within 20 s); its second open took 3.1 s.
+- **The Toolchain view takes about 3.6 s to settle,** even in a warm window: its own work, not the window's.
 
 ## 4. Tests
 
