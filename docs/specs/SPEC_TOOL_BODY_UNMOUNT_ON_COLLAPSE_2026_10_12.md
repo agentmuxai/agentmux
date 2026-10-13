@@ -1,7 +1,7 @@
 # Spec: a collapsed tool panel lets go of its body
 
 **Date:** 2026-10-12
-**Status:** Active, implemented together with this spec. Item 2 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
+**Status:** Active, implemented together with this spec in #4756. Item 2 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`.
 **Evidence:** `docs/reports/REPORT_RENDERER_MEMORY_ROOT_CAUSES_2026_10_12.md` §4.1.
 
 ## 1. The problem
