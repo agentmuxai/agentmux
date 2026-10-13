@@ -17,13 +17,20 @@ import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
 import type { AgentHistory } from "@/types/rpc/AgentHistory";
 import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
 import type { AgentInstance } from "@/types/rpc/AgentInstance";
+import type { AgentKillProcessCommand } from "@/types/rpc/AgentKillProcessCommand";
+import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
+import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
+import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
+import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentSessionAppendOutputResult } from "@/types/rpc/AgentSessionAppendOutputResult";
 import type { AgentSessionArchiveResult } from "@/types/rpc/AgentSessionArchiveResult";
 import type { AgentSessionReadResult } from "@/types/rpc/AgentSessionReadResult";
 import type { AgentSessionWriteStateResult } from "@/types/rpc/AgentSessionWriteStateResult";
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
+import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
@@ -416,6 +423,14 @@ export const GeneratedApi = {
   AgentInputCommand(client: RpcClient, data: CommandAgentInputData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("agentinput", data, opts);
   },
+  // command "agent.kill-process"
+  AgentKillProcessCommand(client: RpcClient, data: AgentKillProcessCommand, opts?: RpcOpts): Promise<AgentKillResult> {
+    return client.rpcCall("agent.kill-process", data, opts);
+  },
+  // command "agent.kill-tree"
+  AgentKillTreeCommand(client: RpcClient, data: AgentKillTreeCommand, opts?: RpcOpts): Promise<AgentKillResult> {
+    return client.rpcCall("agent.kill-tree", data, opts);
+  },
   // command "agentlastruntime"
   AgentLastRuntimeCommand(
     client: RpcClient,
@@ -423,6 +438,18 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentLastRuntime> {
     return client.rpcCall("agentlastruntime", data, opts);
+  },
+  // command "agent.open-panes"
+  AgentOpenPanesCommand(client: RpcClient, data: Record<string, never>, opts?: RpcOpts): Promise<AgentOpenPanesResult> {
+    return client.rpcCall("agent.open-panes", data, opts);
+  },
+  // command "agent.process-list"
+  AgentProcessListCommand(
+    client: RpcClient,
+    data: AgentProcessListCommand,
+    opts?: RpcOpts
+  ): Promise<AgentProcessListResult> {
+    return client.rpcCall("agent.process-list", data, opts);
   },
   // command "agent:session:append_output"
   AgentSessionAppendOutputCommand(
@@ -476,9 +503,25 @@ export const GeneratedApi = {
   AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("agentstop", data, opts);
   },
+  // command "agent.tracked-blocks"
+  AgentTrackedBlocksCommand(
+    client: RpcClient,
+    data: Record<string, never>,
+    opts?: RpcOpts
+  ): Promise<AgentTrackedBlocksResult> {
+    return client.rpcCall("agent.tracked-blocks", data, opts);
+  },
   // command "ambientnarrate"
   AmbientNarrateCommand(client: RpcClient, data: CommandAmbientNarrateData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("ambientnarrate", data, opts);
+  },
+  // command "ambient.outcomes"
+  AmbientOutcomesCommand(
+    client: RpcClient,
+    data: Record<string, never>,
+    opts?: RpcOpts
+  ): Promise<import("@/app/store/ambient-outcomes").AmbientOutcomes> {
+    return client.rpcCall("ambient.outcomes", data, opts);
   },
   // command "appendagenthistory"
   AppendAgentHistoryCommand(
@@ -619,6 +662,42 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<MemoryDeliveryComposeResult> {
     return client.rpcCall("memorydelivery:compose", data, opts);
+  },
+  // command "connconnect"
+  ConnConnectCommand(client: RpcClient, data: ConnRequest, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("connconnect", data, opts);
+  },
+  // command "conndisconnect"
+  ConnDisconnectCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("conndisconnect", data, opts);
+  },
+  // command "connensure"
+  ConnEnsureCommand(client: RpcClient, data: ConnExtData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("connensure", data, opts);
+  },
+  // command "connlistaws"
+  ConnListAWSCommand(client: RpcClient, opts?: RpcOpts): Promise<Array<string>> {
+    return client.rpcCall("connlistaws", null, opts);
+  },
+  // command "connlist"
+  ConnListCommand(client: RpcClient, opts?: RpcOpts): Promise<Array<string>> {
+    return client.rpcCall("connlist", null, opts);
+  },
+  // command "connsessionend"
+  ConnSessionEndCommand(
+    client: RpcClient,
+    data: { connname: string; sessionid: string; blockid?: string },
+    opts?: RpcOpts
+  ): Promise<boolean> {
+    return client.rpcCall("connsessionend", data, opts);
+  },
+  // command "connsessions"
+  ConnSessionsCommand(
+    client: RpcClient,
+    data: { connname: string; blockid?: string },
+    opts?: RpcOpts
+  ): Promise<Array<HostSession>> {
+    return client.rpcCall("connsessions", data, opts);
   },
   // command "containerimagecheck"
   ContainerImageCheckCommand(
@@ -1721,6 +1800,14 @@ export const GeneratedApi = {
   SubprocessSpawnCommand(client: RpcClient, data: CommandSubprocessSpawnData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("subprocessspawn", data, opts);
   },
+  // command "swarm.other-instances"
+  SwarmOtherInstancesCommand(
+    client: RpcClient,
+    data: Record<string, never>,
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/swarm/swarm-remote").SwarmOtherInstances> {
+    return client.rpcCall("swarm.other-instances", data, opts);
+  },
   // command "toolchain.env"
   ToolchainEnvCommand(client: RpcClient, opts?: RpcOpts): Promise<ToolchainEnvResult> {
     return client.rpcCall("toolchain.env", {}, opts);
@@ -1957,5 +2044,9 @@ export const GeneratedApi = {
   // command "writeeditorfile"
   WriteEditorFileCommand(client: RpcClient, data: CommandWriteEditorFileData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("writeeditorfile", data, opts);
+  },
+  // command "wsllist"
+  WslListCommand(client: RpcClient, opts?: RpcOpts): Promise<Array<string>> {
+    return client.rpcCall("wsllist", null, opts);
   },
 };

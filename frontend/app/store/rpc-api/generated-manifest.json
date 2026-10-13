@@ -35,8 +35,25 @@
             "method": "AgentInputCommand"
         },
         {
+            "command": "agent.kill-process",
+            "method": "AgentKillProcessCommand"
+        },
+        {
+            "command": "agent.kill-tree",
+            "method": "AgentKillTreeCommand"
+        },
+        {
             "command": "agentlastruntime",
             "method": "AgentLastRuntimeCommand"
+        },
+        {
+            "command": "agent.open-panes",
+            "method": "AgentOpenPanesCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
+            "command": "agent.process-list",
+            "method": "AgentProcessListCommand"
         },
         {
             "command": "agent:session:append_output",
@@ -67,8 +84,19 @@
             "method": "AgentStopCommand"
         },
         {
+            "command": "agent.tracked-blocks",
+            "method": "AgentTrackedBlocksCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
             "command": "ambientnarrate",
             "method": "AmbientNarrateCommand"
+        },
+        {
+            "command": "ambient.outcomes",
+            "method": "AmbientOutcomesCommand",
+            "dataType": "Record<string, never>",
+            "returns": "import(\"@/app/store/ambient-outcomes\").AmbientOutcomes"
         },
         {
             "command": "appendagenthistory",
@@ -153,6 +181,41 @@
         {
             "command": "memorydelivery:compose",
             "method": "ComposeCommand"
+        },
+        {
+            "command": "connconnect",
+            "method": "ConnConnectCommand",
+            "dataType": "ConnRequest"
+        },
+        {
+            "command": "conndisconnect",
+            "method": "ConnDisconnectCommand",
+            "dataType": "string"
+        },
+        {
+            "command": "connensure",
+            "method": "ConnEnsureCommand",
+            "dataType": "ConnExtData"
+        },
+        {
+            "command": "connlistaws",
+            "method": "ConnListAWSCommand",
+            "send": "null"
+        },
+        {
+            "command": "connlist",
+            "method": "ConnListCommand",
+            "send": "null"
+        },
+        {
+            "command": "connsessionend",
+            "method": "ConnSessionEndCommand",
+            "dataType": "{ connname: string; sessionid: string; blockid?: string }"
+        },
+        {
+            "command": "connsessions",
+            "method": "ConnSessionsCommand",
+            "dataType": "{ connname: string; blockid?: string }"
         },
         {
             "command": "containerimagecheck",
@@ -981,6 +1044,12 @@
             "method": "SubprocessSpawnCommand"
         },
         {
+            "command": "swarm.other-instances",
+            "method": "SwarmOtherInstancesCommand",
+            "dataType": "Record<string, never>",
+            "returns": "import(\"@/app/view/swarm/swarm-remote\").SwarmOtherInstances"
+        },
+        {
             "command": "toolchain.env",
             "method": "ToolchainEnvCommand",
             "send": "{}"
@@ -1161,6 +1230,11 @@
         {
             "command": "writeeditorfile",
             "method": "WriteEditorFileCommand"
+        },
+        {
+            "command": "wsllist",
+            "method": "WslListCommand",
+            "send": "null"
         }
     ]
 }

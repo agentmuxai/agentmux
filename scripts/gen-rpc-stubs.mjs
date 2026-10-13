@@ -116,7 +116,10 @@ export function namesUsed(entry, row) {
     const exprs = [overridden(entry, "returns", row.responseTs.name) ?? row.responseTs.name];
     if (!takesNoData(entry, row.requestTs.name)) exprs.push(overridden(entry, "data", row.requestTs.name) ?? row.requestTs.name);
     const names = new Set();
-    for (const e of exprs) for (const m of tsOf(e).matchAll(/\b[A-Z][A-Za-z0-9_]*\b/g)) if (!BUILTIN.has(m[0])) names.add(m[0]);
+    // An override may name a frontend module's type as `import("@/path").Type`: tsc resolves
+    // that itself, so it is neither an import to add nor a global to check.
+    const unimported = (e) => tsOf(e).replace(/import\("[^"]+"\)\.\w+/g, "");
+    for (const e of exprs) for (const m of unimported(e).matchAll(/\b[A-Z][A-Za-z0-9_]*\b/g)) if (!BUILTIN.has(m[0])) names.add(m[0]);
     return names;
 }
 
