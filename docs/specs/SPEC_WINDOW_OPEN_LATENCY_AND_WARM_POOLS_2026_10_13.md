@@ -1,7 +1,7 @@
 # Spec: opening a widget in a new window or a floating pane is fast every time
 
 **Date:** 2026-10-13
-**Status:** Active. Item 3 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`; it replaces that item's original scope ("shrink the spare-window pool") after the measurements below.
+**Status:** Active, implemented in #4767. Item 3 of `PLAN_RENDERER_MEMORY_FIXES_2026_10_12.md`; it replaces that item's original scope ("shrink the spare-window pool") after the measurements below.
 **Reported by the operator:** opening a widget from the widgets bar with "Open in New Window" or "Open in Floating Pane" takes a long time, the first time especially.
 
 ## 1. What happens today
@@ -56,12 +56,12 @@ When commit was Critical, the cold paths took 1–2 s more: a floating pane spen
 - Spawning is refused only at Critical.
 - **Why it's safe:** at the Warn threshold the free commit is 15% of the limit (11.5 GB here, 2.4 GB on a 16 GB-commit machine). The pools total about 165 MB (3 renderers at 52–58 MB measured), 1.4% and 7% of that headroom. Critical (5% free) still sheds them, which is the case the pressure work was built for (`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md`, the 0xE0000008 crashes).
 
-**2. Refill once pressure is below Critical for 30 s, not Normal for 180 s.**
+**2. Refill once pressure has been below Critical for 60 s (`POOL_REFILL_SETTLE`), not Normal for 180 s.**
 - The 180 s settle exists because refills on Windows used to take keyboard focus while pressure flapped.
-- Focus is now handed back (`[focus-restore] invisible … activated … handing back` in the logs). The gate still waits out a flap; 30 s, not 3 minutes.
+- Focus is now handed back (`[focus-restore] invisible … activated … handing back` in the logs). The gate still waits out a flap: 60 s, not 3 minutes.
 
 **3. A cold floating open refills the pane pool.**
-- After `post_create_floating_window`, call `spawn_pane_pool_window`, as a window-pool cold open already leads to a refill.
+- After `post_create_floating_window`, call `defer_pane_pool_refill` (made `pub(crate)`): it spawns the pane-pool window once the floater reports its reveal, or after 2 s at most, so the refill doesn't compete with the open the user is watching. That is the path a promoted floater already uses.
 - The next floating pane is then warm even if the pool was empty.
 
 **4. A cold new window uses the shared request context.**
@@ -77,9 +77,9 @@ When commit was Critical, the cold paths took 1–2 s more: a floating pane spen
 
 ## 4. Tests
 
-- **`memory_pressure.rs`:** `PoolRefillGate` refills after 30 s below Critical. It doesn't refill while Critical, and a return to Critical restarts the wait. `effective_pool_demote_cap` is unchanged.
-- **Spawn guards:** both spawn functions refuse at Critical and proceed at Warn. The guard is a pure function, `pool_spawn_allowed(level)`, so it can be tested without windows.
-- **`create_isolated_request_context`'s caller:** the cold new-window path passes no context. A unit test covers the choice, and its doc comment explains why.
+- **`memory_pressure.rs`:** `PoolRefillGate` refills once pressure has been below Critical for `POOL_REFILL_SETTLE` (60 s). It doesn't refill while Critical, it retries until the pools are full, a return to Critical restarts the wait, and moving between Normal and Warn never starts a refill. `effective_pool_demote_cap` is unchanged.
+- **Spawn guards:** the decision is the pure `pool_spawn_allowed(level)`, tested directly (`pools_are_shed_only_at_critical`). `spawn_pool_window`, `spawn_pane_pool_window` and the heartbeat's eviction all call it; those functions create or destroy real windows and have no unit tests of their own.
+- **The request context:** `secondary_window_request_context()` returns `None`, a constant with no logic to unit-test; its doc comment explains the choice. The lab check below confirms its effect: a cold window loads the app from cache.
 - **Lab:** rerun the widget benchmark from §1.1 on the same machine, while pressure is at Warn as it usually is. Expected:
   - new windows and floating panes come from a pool on every first open (≤ 650 ms);
   - cold new windows load their JS from cache;
