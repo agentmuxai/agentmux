@@ -173,6 +173,9 @@ export function BrowserNavBar(props: {
     };
 
     const handleAddressKeyDown = (e: KeyboardEvent) => {
+        // Keys during an IME composition are the IME's (Enter commits it,
+        // arrows pick a candidate): never a navigation or a suggestion move.
+        if (composing || e.isComposing) return;
         if (e.key === "Enter") {
             e.preventDefault();
             handleNavigate();
@@ -603,6 +606,12 @@ export function BrowserNavBar(props: {
                             getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                         }}
                         onBlur={(e) => {
+                            // Leaving with a suggestion previewed (arrow keys)
+                            // or completed inline: that text was never opened,
+                            // so show the page's own address again.
+                            if (addressBar() !== typed() && autocomplete.matches().length > 0) {
+                                showInInput(model.urlAtom() || typed());
+                            }
                             autocomplete.close();
                             const next = e.relatedTarget as Element | null;
                             // Microtask-deferred so we can see what landed focus AFTER the blur.
