@@ -192,19 +192,37 @@ export function getPinnedKeys(
     wmap: Record<string, WidgetConfigType>
 ): string[] {
     const hidden = getHiddenKeys(settings);
+    return getSavedPinNames(settings, wmap).filter((shortName) => !isWidgetHidden(`defwidget@${shortName}`, wmap, settings, hidden));
+}
+
+/**
+ * The pins as saved, hidden or not: `widget:pinned` with old names mapped (or the fresh-install
+ * default). Every write of `widget:pinned` starts from this, not from getPinnedKeys, so a pinned
+ * group hidden only because its children are (isWidgetHidden) keeps its pin through other edits
+ * and is back on the bar once a child is shown again.
+ */
+export function getSavedPinNames(settings: Record<string, any>, wmap: Record<string, WidgetConfigType>): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) {
-        const keys = currentPinNames(pinned);
-        return [...new Set(keys)].filter(
-            (shortName) => wmap[`defwidget@${shortName}`] != null && !isWidgetHidden(`defwidget@${shortName}`, wmap, settings, hidden)
-        );
+        return [...new Set(currentPinNames(pinned))].filter((shortName) => wmap[`defwidget@${shortName}`] != null);
     }
     const grouped = getGroupedChildKeys(wmap);
     return Object.entries(wmap)
         .filter(([key, w]) => w["display:pinned"] && !grouped.has(key.replace("defwidget@", "")))
-        .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden))
         .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
         .map(([key]) => key.replace("defwidget@", ""));
+}
+
+/** Put the visible pins in `visibleOrder` into the slots they hold in `saved`, leaving any pin
+ *  that is hidden right now where it was. */
+export function withVisibleOrder(saved: string[], visibleOrder: string[]): string[] {
+    const visible = new Set(visibleOrder);
+    const next = [...saved];
+    let i = 0;
+    for (let slot = 0; slot < next.length; slot++) {
+        if (visible.has(next[slot])) next[slot] = visibleOrder[i++];
+    }
+    return next;
 }
 
 export function getPinnedWidgets(
@@ -328,18 +346,18 @@ export async function handleWidgetSelect(widget: WidgetConfigType) {
 
 export function pinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {
     fireAndForget(async () => {
-        const current = getPinnedKeys(settings, wmap);
+        const current = getSavedPinNames(settings, wmap);
         if (current.includes(shortName)) return;
-        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": [...current, shortName] } as any);
+        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": [...current, shortName] });
     });
 }
 
 export function unpinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {
     fireAndForget(async () => {
-        const current = getPinnedKeys(settings, wmap);
+        const current = getSavedPinNames(settings, wmap);
         await RpcApi.SetConfigCommand(TabRpcClient, {
             "widget:pinned": current.filter((k) => k !== shortName),
-        } as any);
+        });
     });
 }
 
@@ -433,7 +451,7 @@ export function nextWidgetBarConfig(
     wmap: Record<string, WidgetConfigType>
 ): { "widget:pinned"?: string[]; "widget:hidden"?: string[] | null } {
     const shortName = key.startsWith(DEFWIDGET) ? key.slice(DEFWIDGET.length) : null;
-    const pinned = getPinnedKeys(settings, wmap);
+    const pinned = getSavedPinNames(settings, wmap);
     const rawHidden: string[] = Array.isArray(settings?.["widget:hidden"])
         ? settings["widget:hidden"].filter((k: unknown): k is string => typeof k === "string")
         : [];
@@ -483,13 +501,13 @@ export async function movePinnedWidget(
     settings: Record<string, any>,
     wmap: Record<string, WidgetConfigType>
 ): Promise<void> {
-    const pinned = getPinnedKeys(settings, wmap);
-    const from = pinned.indexOf(shortName);
+    const visible = getPinnedKeys(settings, wmap);
+    const from = visible.indexOf(shortName);
     const to = from + delta;
-    if (from < 0 || to < 0 || to >= pinned.length) return;
-    const next = [...pinned];
+    if (from < 0 || to < 0 || to >= visible.length) return;
+    const next = [...visible];
     [next[from], next[to]] = [next[to], next[from]];
-    await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next });
+    await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": withVisibleOrder(getSavedPinNames(settings, wmap), next) });
 }
 
 /** Back to the fresh-install bar: the default pins, nothing hidden. */

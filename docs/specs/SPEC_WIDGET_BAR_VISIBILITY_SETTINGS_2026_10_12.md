@@ -180,7 +180,12 @@ the menu closes by any path (`onJsContextMenuClosed`). If every item is gone, th
 
 - Add typed fields for `widget:pinned` and `widget:hidden` to the Rust `SettingsType` (today `widget:pinned` lands in
   the catch-all `extra`, `types.rs:518-521`), to `schema/settings.json`, to the TS `SettingsType` (which removes the
-  `as any` at every write), and to `settings-template.jsonc` with a comment.
+  `as any` at every write). They are **not** added to `settings-template.jsonc`: every commented
+  `"key": value` line there is read as that setting's default by `settings-defaults.test.ts`, and these lists have no
+  default (absent means the fresh-install pins and nothing hidden). The schema's descriptions document them instead.
+- Every write of `widget:pinned` starts from the saved list (`getSavedPinNames`), not the visible one
+  (`getPinnedKeys`), and a reorder goes through `withVisibleOrder`: a pinned group hidden only because its children
+  are hidden keeps its pin through other edits and is back on the bar when a child is shown again.
 - `widget:pinned` stays short names for compatibility with every existing `settings.json`. A later change can move it
   to full keys, which is also what package entries need (§7, item 4).
 

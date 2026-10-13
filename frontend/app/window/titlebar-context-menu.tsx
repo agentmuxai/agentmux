@@ -8,7 +8,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab, getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, untrack, type JSX } from "solid-js";
-import { getEffectiveGroupedChildKeys, getHiddenKeys, getPinnedKeys, isWidgetHidden } from "./action-widgets-config";
+import { getEffectiveGroupedChildKeys, getHiddenKeys, getSavedPinNames, isWidgetHidden } from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -26,12 +26,14 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
     // checkbox clicks chain off the already-updated list rather than
     // re-reading stale settings() and overwriting each other.
     const [localPinned, setLocalPinned] = createSignal<string[] | null>(null);
-    const effectivePinned = (): string[] => localPinned() ?? getPinnedKeys(settings(), widgets());
+    // The saved pins (hidden ones included), so a toggle here never drops a pin that is hidden
+    // right now; the checklist below only lists entries that aren't hidden.
+    const effectivePinned = (): string[] => localPinned() ?? getSavedPinNames(settings(), widgets());
     const pinnedKeys = (): Set<string> => new Set(effectivePinned());
     // Drop the optimistic copy once the saved pins catch up with it, so a change made
     // elsewhere while this menu is open (the bar, Settings → Widgets) shows here too.
     createEffect(() => {
-        const saved = getPinnedKeys(settings(), widgets());
+        const saved = getSavedPinNames(settings(), widgets());
         const local = untrack(localPinned);
         if (local && local.length === saved.length && local.every((k, i) => k === saved[i])) setLocalPinned(null);
     });

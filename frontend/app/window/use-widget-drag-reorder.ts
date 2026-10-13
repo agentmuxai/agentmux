@@ -13,6 +13,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { fireAndForget } from "@/util/util";
+import { withVisibleOrder } from "./action-widgets-config";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
 const DRAG_THRESHOLD = 5;
@@ -27,8 +28,11 @@ const DRAG_IDLE: DragState = { phase: "idle" };
 export function useWidgetDragReorder(opts: {
     containerRef: () => HTMLDivElement | undefined;
     pinnedWidgets: () => { key: string; widget: WidgetConfigType }[];
+    /** The pins as saved, hidden ones included (getSavedPinNames), so a drag doesn't drop a pin
+     *  that is hidden right now. Without it the visible order is written as is. */
+    savedPins?: () => string[];
 }) {
-    const { containerRef, pinnedWidgets } = opts;
+    const { containerRef, pinnedWidgets, savedPins } = opts;
 
     const [dragState, setDragState] = createSignal<DragState>(DRAG_IDLE);
 
@@ -98,7 +102,8 @@ export function useWidgetDragReorder(opts: {
         next.splice(adjustedDrop, 0, dragShort);
         if (next.join(",") !== shortNames.join(",")) {
             fireAndForget(async () => {
-                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
+                const toSave = savedPins ? withVisibleOrder(savedPins(), next) : next;
+                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": toSave });
             });
         }
     };

@@ -29,6 +29,7 @@ import {
     getMoreWidgets,
     getPinnedKeys,
     getPinnedWidgets,
+    getSavedPinNames,
     handleWidgetSelect,
     pinWidget,
     UNHIDEABLE_WIDGET_KEYS,
@@ -127,6 +128,7 @@ const ActionWidgets = (): JSX.Element => {
     } = useWidgetDragReorder({
         containerRef: () => containerRef,
         pinnedWidgets,
+        savedPins: () => getSavedPinNames(settings(), wmap()),
     });
 
     // ── Pinned-parent flyout (Case A, SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §3.3) ──

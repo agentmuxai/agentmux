@@ -14,6 +14,7 @@ import {
     getWidgetBarModel,
     isWidgetHidden,
     nextWidgetBarConfig,
+    withVisibleOrder,
 } from "./action-widgets-config";
 
 function widget(overrides: Partial<WidgetConfigType> = {}): WidgetConfigType {
@@ -319,6 +320,20 @@ describe("nextWidgetBarConfig", () => {
             "widget:hidden": ["defwidget@drone"],
             "widget:pinned": ["agent", "editor", "messengers"],
         });
+    });
+
+    it("keeps the pin of a group hidden only through its children when something else changes", () => {
+        const settings = { "widget:pinned": ["agent", "messengers"], "widget:hidden": ["defwidget@discord", "defwidget@slack"] };
+        expect(getPinnedKeys(settings, barWmap())).toEqual(["agent"]); // off the bar while its children are hidden
+        expect(nextWidgetBarConfig("defwidget@agent", "hidden", settings, barWmap())).toEqual({
+            "widget:hidden": ["defwidget@discord", "defwidget@slack", "defwidget@agent"],
+            "widget:pinned": ["messengers"],
+        });
+        expect(nextWidgetBarConfig("defwidget@drone", "pinned", settings, barWmap())["widget:pinned"]).toEqual(["agent", "messengers", "drone"]);
+    });
+
+    it("reorders the visible pins without dropping a pin that is hidden right now", () => {
+        expect(withVisibleOrder(["agent", "messengers", "editor"], ["editor", "agent"])).toEqual(["editor", "messengers", "agent"]);
     });
 
     it("refuses to hide Settings", () => {
