@@ -219,7 +219,7 @@ function RemoteTooltip(props: { detail: BlockStatsDetail }) {
                             <Row
                                 label="Host memory"
                                 value={formatBytes(h().mem)}
-                                meaning={`${privateMeaning(h().memory_metric).replace("these processes", "its processes")}, ${h().processes} processes`}
+                                meaning={`private memory of all its ${h().processes} processes`}
                             />
                         </>
                     )}
