@@ -828,6 +828,9 @@ export class TermWrap {
         if (resizeAndPaint(this.terminal, dims)) this.notePainted();
     }
 
+    /** The WebGL context was lost and this terminal now draws with the DOM renderer. */
+    private webglFellBack = false;
+
     /** The WebGL canvas, and its size when it was last painted here. */
     private glCanvas: HTMLCanvasElement | null = null;
     private paintedSize = { width: 0, height: 0 };
@@ -874,6 +877,9 @@ export class TermWrap {
             setTermRendererOf(this.blockId, { kind: "lost", why: "its WebGL context was lost; waiting 3 s for it back, then DOM", owner: this });
         };
         const onRestored = () => {
+            // After the DOM fallback the canvas is detached; a late restore
+            // must not claim the terminal is back on WebGL.
+            if (this.webglFellBack) return;
             canvas.style.visibility = "";
             setTermRendererOf(this.blockId, { kind: "webgl", owner: this });
         };
@@ -901,6 +907,7 @@ export class TermWrap {
                 const webglAddon = new WebglAddon();
                 this.toDispose.push(
                     webglAddon.onContextLoss(() => {
+                        this.webglFellBack = true;
                         webglAddon.dispose();
                         console.warn("WebGL context lost, falling back to DOM renderer");
                         setTermRendererAtom("dom"); // GPU context lost → DOM fallback
