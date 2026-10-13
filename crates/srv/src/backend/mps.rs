@@ -450,7 +450,6 @@ impl Broker {
         }
     }
 
-    /// Unsubscribe a route from a specific event.
     /// Whether any route is subscribed to `event_name`, in any scope. For a
     /// publisher that can skip measuring what nobody reads.
     pub fn has_subscribers(&self, event_name: &str) -> bool {
@@ -458,6 +457,7 @@ impl Broker {
         inner.sub_map.get(event_name).is_some_and(|bs| !bs.is_empty())
     }
 
+    /// Unsubscribe a route from a specific event.
     pub fn unsubscribe(&self, route_id: &str, event_name: &str) {
         let mut inner = self.inner.lock().unwrap();
         Self::unsubscribe_nolock(&mut inner, route_id, event_name);
