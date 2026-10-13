@@ -6,8 +6,8 @@
 [build-patched-cef-windows.md](./build-patched-cef-windows.md),
 [build-patched-framework-macos.md](./build-patched-framework-macos.md)
 
-We maintain a fork of CEF carrying **five** AgentMux-specific changes — spanning
-20 CEF source files and 3 Chromium-side patches (§3). Every Chromium
+We maintain a fork of CEF carrying **six** AgentMux-specific changes — spanning
+23 CEF source files and 3 Chromium-side patches (§3). Every Chromium
 milestone upgrade has to carry that set forward, for Windows, Linux and macOS
 together. This doc is the standing practice for doing that without losing pieces.
 

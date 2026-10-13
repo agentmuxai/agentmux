@@ -3,7 +3,7 @@
 #
 # docs/cef-build/CEF_FORK_MAINTENANCE.md (§3 the inventory, §5 this gate)
 #
-# THE RULE: AgentMux carries four changes on top of CEF, spanning 18 CEF source
+# THE RULE: AgentMux carries six changes on top of CEF, spanning 23 CEF source
 # files and 3 Chromium-side patches. Every one must survive every milestone
 # upgrade. Layer A (patches under cef/patch/) fails loudly when it goes missing;
 # Layer B (edits to libcef/** and include/**) fails SILENTLY — the tree still
