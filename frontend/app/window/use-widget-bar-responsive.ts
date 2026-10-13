@@ -16,7 +16,7 @@
  * from action-widgets.tsx.
  */
 
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { decideTopBarTier } from "./top-bar-tier";
 
 // Fallbacks for the tab bar's CSS variables (tabbar.scss), used only if a
@@ -121,6 +121,15 @@ export function useWidgetBarResponsive(opts: {
         return clip > 0 ? all.slice(Math.max(0, all.length - clip)) : [];
     };
 
+    // Set once mounted: measures and applies the tier right away.
+    let measureNow: (() => void) | undefined;
+    // Pinning or unpinning re-renders the mirrors and the visible bar in the
+    // same update. Measure in that update too (an effect runs after the DOM is
+    // written, before paint): left to the next frame, the visible bar is
+    // painted once with the new icon and the old clip count, too wide for the
+    // header, and every widget visibly jumps and snaps back.
+    createEffect(on([pinnedWidgets, moreWidgets], () => measureNow?.(), { defer: true }));
+
     let mirrorRef: HTMLDivElement | undefined;
     let iconMirrorRef: HTMLDivElement | undefined;
     let iconMirrorMoreRef: HTMLDivElement | undefined;
@@ -170,6 +179,7 @@ export function useWidgetBarResponsive(opts: {
             setTooNarrow(tier.tooNarrow);
             setClipCount(pinnedCount > 0 ? tier.clipCount : 0);
         };
+        measureNow = measure;
         // One measurement per frame: a rename or a reorder touches several tabs.
         let raf: number | null = null;
         const schedule = () => {
@@ -195,6 +205,7 @@ export function useWidgetBarResponsive(opts: {
         if (mo && tabScroll) mo.observe(tabScroll, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
         measure();
         onCleanup(() => {
+            measureNow = undefined;
             ro.disconnect();
             mo?.disconnect();
             if (raf !== null) cancelAnimationFrame(raf);
