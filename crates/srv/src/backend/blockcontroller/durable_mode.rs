@@ -12,8 +12,11 @@ use super::durable_ssh::META_KEY_DURABLE;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Plain,
-    /// Durable because the pane, its connection or Settings say so: without
-    /// the helper the pane stops and says why.
+    /// Durable because the pane, its connection or Settings say so: if the
+    /// helper can't be installed (the question closed, the install failed)
+    /// the pane stops and says why. The user declining the helper (Not now,
+    /// Never) still makes it plain: that answer about software on the host
+    /// wins over a setting about all SSH terminals (#4429).
     Chosen,
     /// Durable by default (nothing set): on a host without the helper,
     /// installing it asks first (`helper_consent`), and if it isn't installed
@@ -53,7 +56,8 @@ pub fn mode(meta: &MetaMapType, config: Option<&crate::backend::wconfig::FullCon
     }
     // The user doesn't want the helper on this host (Never, or "Not now"
     // since srv started) and it isn't there: a plain SSH terminal
-    // (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+    // (SPEC_REMOTES_PANE_2026_10_05.md §4.9), whatever `term:durable` says,
+    // since that answer is the more specific one ([`Mode::Chosen`]).
     if crate::backend::remote::helper_consent::plain_instead(&conn)
         && !crate::backend::remote::helper_hosts::known(&conn)
     {

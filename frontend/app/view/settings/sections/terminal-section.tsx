@@ -231,7 +231,7 @@ export function TerminalSection(): JSX.Element {
                         }}
                     >
                         <option value="auto">On, else a plain terminal</option>
-                        <option value="on">Always (stops without the helper)</option>
+                        <option value="on">Always (needs the helper)</option>
                         <option value="off">Never</option>
                     </Select>
                 }

@@ -758,8 +758,9 @@ impl Run {
                             Err(why) => why,
                         };
                         let declined = crate::backend::remote::helper_consent::plain_instead(&self.conn);
-                        // Durable was asked for: without the helper the pane
-                        // stops, and says how to get a plain terminal.
+                        // Durable was asked for and the user didn't decline
+                        // the helper, but it isn't there: the pane stops, and
+                        // says how to get a plain terminal.
                         if !declined && !self.by_default {
                             self.note(&format!(
                                 "This pane can't stay alive without AgentMux's helper on {}: {why}. For a plain SSH terminal, set \"Keep sessions alive\" to Off for this host in Connectors > Remotes.",

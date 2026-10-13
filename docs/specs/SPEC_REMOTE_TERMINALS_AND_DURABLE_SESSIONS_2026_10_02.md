@@ -143,9 +143,9 @@ A Windows machine running OpenSSH Server can host plain SSH terminals from P2 (i
 
 As built (`durable_mode::mode`):
 - "Has the helper" means the helper has answered on that host before. srv records the canonical connection name in `remote-helper-hosts.json` under its config dir on every `Hello`.
-- With nothing set, a pane is `Default`: on a host without the helper (or whose record of it is stale) its first terminal asks. A question closed unanswered or a failed install makes the host's terminals plain until srv restarts (`helper_consent::not_installed`), so they don't ask or fail again; "Not now" does the same (§4.9). A pane whose `term:durable` is set to on (pane, connection or Settings) is `Chosen`: without the helper it stops and says why.
+- With nothing set, a pane is `Default`: on a host without the helper (or whose record of it is stale) its first terminal asks. A question closed unanswered or a failed install makes the host's terminals plain until srv restarts (`helper_consent::not_installed`), so they don't ask or fail again; "Not now" does the same (§4.9). A pane whose `term:durable` is set to on (pane, connection or Settings) is `Chosen`: if the helper can't be installed (the question closed, the install failed) it stops and says why. Declining the helper (Not now, Never) makes even a `Chosen` pane plain, as since #4429: that answer about software on the host is more specific than a setting for all SSH terminals.
 - (Removed 2026-10-05 at the operator's request, with the rest of the terminal's header menu items below Pane Color: the per-pane checkbox and "Sessions on <host>…". A host's setting and sessions are in the Remotes pane, `SPEC_REMOTES_PANE_2026_10_05.md`.) The pane menu's "Keep Session Alive (durable)" checkbox showed what the controller is running (`durable` in its runtime status). Turning it off stores an explicit `false`, so no default turns it back on.
-- Settings, Terminal, "Keep SSH sessions alive" sets the global value: on, else a plain terminal (unset), always (a pane stops without the helper), or never.
+- Settings, Terminal, "Keep SSH sessions alive" sets the global value: on, else a plain terminal (unset), always (needs the helper), or never.
 
 ### 7.2 How it works
 
