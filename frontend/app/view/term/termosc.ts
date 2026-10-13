@@ -5,9 +5,7 @@
 // Terminal OSC escape sequence handlers.
 // Extracted from termwrap.ts — pure functions, no TermWrap dependency.
 
-import { RpcApi } from "@/app/store/rpc-api";
 import { authHeaders } from "@/app/store/auth-headers";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS, atoms } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -27,23 +25,17 @@ export function handleOscMuxCommand(data: string, blockId: string, loaded: boole
         return true;
     }
 
-    // Expected formats:
-    // "setmeta;{JSONDATA}"
-    // "setmeta;[wave-id];{JSONDATA}"
-    const parts = data.split(";");
-    if (parts[0] !== "setmeta") {
+    // Expected format: "setmeta;{JSONDATA}", applied to this pane's own block. The JSON may
+    // itself contain ";". Wave's "setmeta;[wave-id];{JSONDATA}" form, which targets another
+    // object, isn't supported: it needed the `resolveids` RPC, which srv never had.
+    const sep = data.indexOf(";");
+    if (sep < 0 || data.slice(0, sep) !== "setmeta") {
         console.log("Invalid AgentMux OSC command received (bad command)", data);
         return true;
     }
-    let jsonPayload: string;
-    let muxId: string | undefined;
-    if (parts.length === 2) {
-        jsonPayload = parts[1];
-    } else if (parts.length >= 3) {
-        muxId = parts[1];
-        jsonPayload = parts.slice(2).join(";");
-    } else {
-        console.log("Invalid AgentMux OSC command received (1 part)", data);
+    const jsonPayload = data.slice(sep + 1);
+    if (!jsonPayload.trimStart().startsWith("{")) {
+        console.log("AgentMux OSC setmeta with a target id isn't supported; it applies to its own pane only", data);
         return true;
     }
 
@@ -55,26 +47,9 @@ export function handleOscMuxCommand(data: string, blockId: string, loaded: boole
         return true;
     }
 
-    if (muxId) {
-        fireAndForget(() => {
-            return RpcApi.ResolveIdsCommand(TabRpcClient, { blockid: blockId, ids: [muxId] })
-                .then((response: { resolvedids: { [key: string]: any } }) => {
-                    const oref = response.resolvedids[muxId];
-                    if (!oref) {
-                        console.error("Failed to resolve wave id:", muxId);
-                        return;
-                    }
-                    services.ObjectService.UpdateObjectMeta(oref, meta);
-                })
-                .catch((err: any) => {
-                    console.error("Error resolving wave id", muxId, err);
-                });
-        });
-    } else {
-        fireAndForget(() => {
-            return services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), meta);
-        });
-    }
+    fireAndForget(() => {
+        return services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), meta);
+    });
     return true;
 }
 
@@ -123,15 +98,6 @@ export function handleOsc7Command(data: string, blockId: string, loaded: boolean
             await services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), {
                 "cmd:cwd": pathPart,
             });
-
-            const rtInfo = { "cmd:hascurcwd": true };
-            const rtInfoData: CommandSetRTInfoData = {
-                oref: MOS.makeORef("block", blockId),
-                data: rtInfo,
-            };
-            await RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
-                console.log("error setting RT info", e)
-            );
         });
     }, 0);
     return true;
@@ -210,53 +176,10 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
     }
 
     const cmd: Osc16162Command = { command: commandStr, data: parsedData } as Osc16162Command;
-    const rtInfo: ObjRTInfo = {};
     switch (cmd.command) {
-        case "A":
-            rtInfo["shell:state"] = "ready";
-            break;
-        case "C":
-            rtInfo["shell:state"] = "running-command";
-            if (cmd.data.cmd64) {
-                const decodedLen = Math.ceil(cmd.data.cmd64.length * 0.75);
-                if (decodedLen > 8192) {
-                    rtInfo["shell:lastcmd"] = `# command too large (${decodedLen} bytes)`;
-                } else {
-                    try {
-                        const decodedCmd = atob(cmd.data.cmd64);
-                        rtInfo["shell:lastcmd"] = decodedCmd;
-                    } catch (e) {
-                        console.error("Error decoding cmd64:", e);
-                        rtInfo["shell:lastcmd"] = null;
-                    }
-                }
-            } else {
-                rtInfo["shell:lastcmd"] = null;
-            }
-            break;
-        case "M":
-            if (cmd.data.shell) {
-                rtInfo["shell:type"] = cmd.data.shell;
-            }
-            if (cmd.data.shellversion) {
-                rtInfo["shell:version"] = cmd.data.shellversion;
-            }
-            if (cmd.data.uname) {
-                rtInfo["shell:uname"] = cmd.data.uname;
-            }
-            break;
-        case "D":
-            if (cmd.data.exitcode != null) {
-                rtInfo["shell:lastcmdexitcode"] = cmd.data.exitcode;
-            } else {
-                rtInfo["shell:lastcmdexitcode"] = null;
-            }
-            break;
-        case "I":
-            if (cmd.data.inputempty != null) {
-                rtInfo["shell:inputempty"] = cmd.data.inputempty;
-            }
-            break;
+        // A, C, M, D and I (prompt, command, shell, exit code, empty input) used to go to
+        // setrtinfo, which srv never handled and nothing read; they're ignored until
+        // something consumes them.
         case "R":
             if (terminal.buffer.active.type === "alternate") {
                 terminal.write("\x1b[?1049l");
@@ -310,20 +233,6 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                 }
             });
             break;
-    }
-
-    if (Object.keys(rtInfo).length > 0) {
-        setTimeout(() => {
-            fireAndForget(async () => {
-                const rtInfoData: CommandSetRTInfoData = {
-                    oref: MOS.makeORef("block", blockId),
-                    data: rtInfo,
-                };
-                await RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
-                    console.log("error setting RT info (OSC 16162)", e)
-                );
-            });
-        }, 0);
     }
 
     return true;

@@ -37,7 +37,7 @@
  *  - `authenticated`: CLI auth confirmed but no bundle row exists yet.
  *    User chooses a name → frontend would fire `auth.savebundle` →
  *    backend transitions to `success` with the real bundleId. That RPC
- *    is planned (PR C-2) and not built yet; see `ApiKeyAccepted` below.
+ *    is planned (PR C-2) and not built yet.
  *  - `success`: post-save final state, bundleId is the real row id.
  *
  *  `accountId` (issue #1624 PR-C Part B) is set only for a direct-
@@ -76,7 +76,7 @@ export interface AuthState {
      * What the view should render.
      * - `idle`: pre-selection, view has not dispatched `Selected` yet.
      * - `unauthenticated`: Connect CTA visible. Launch disabled.
-     * - `waiting`: OAuth/api-key RPC in flight, CLI running. Cancel button.
+     * - `waiting`: OAuth RPC in flight, CLI running. Cancel button.
      * - `authenticated`: CLI auth done, awaiting `SaveBundleClicked`. SaveBundle panel.
      * - `saving`: `auth.savebundle` RPC in flight. Spinner.
      * - `ready`: bundle row exists in DB. Launch enabled.
@@ -178,22 +178,6 @@ export type AuthCommand =
      */
     | { type: "CallbackSubmitted"; callbackUrl: string }
     /**
-     * API-key path: user pasted a key into the modal. View fires
-     * `SubmitProviderApiKey`; reducer transitions to a brief
-     * `waiting` state with no session id (the RPC is synchronous).
-     */
-    | { type: "ApiKeySubmitted"; apiKey: string; accountName: string }
-    /**
-     * Backend confirmed an API-key bundle creation. API-key flow is
-     * SINGLE-phase (backend persists the bundle in `auth.submitapikey`
-     * itself) — distinct from the 2-phase OAuth path. Codex P1/P2 on
-     * #853 + reagent on #847: the spec's 2-phase api-key flow needs a
-     * backend `auth.savebundle` that doesn't exist yet (PR C-2). Until
-     * then we keep the existing single-phase: validate-and-persist in
-     * one RPC, transition straight to `ready`.
-     */
-    | { type: "ApiKeyAccepted"; bundleId: string }
-    /**
      * A completed login's account is registered, so auth is satisfied and the
      * reducer may transition to `ready`.
      *
@@ -206,7 +190,7 @@ export type AuthCommand =
      * Formerly offered as tier 2
      * alongside the in-app session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
      * §3.1) that's since become tier 1's primary path for Claude v2.1.198+.
-     * Single-phase, like `ApiKeyAccepted`: the credential file IS the
+     * Single-phase: the credential file IS the
      * persistence, so transition straight to `ready`. Honored only from
      * connect-able kinds (`unauthenticated`/`expired`/`failed`); a stale
      * dispatch from `ready`/`waiting`/etc. is dropped. `bundleId` may be ""
@@ -283,14 +267,6 @@ export type AuthEvent =
     | { type: "failed"; error: string }
     | { type: "cancel-requested"; sessionId: string }
     | { type: "callback-submit-requested"; sessionId: string; callbackUrl: string }
-    | {
-          type: "api-key-submit-requested";
-          providerId: string;
-          bundleId: string;
-          apiKey: string;
-          accountName: string;
-      }
-    | { type: "api-key-accepted"; bundleId: string }
     | { type: "seeded"; bundleId: string }
     | { type: "disposed" }
     | { type: "post-close-command-dropped"; commandType: string };
@@ -540,81 +516,6 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
                         callbackUrl: command.callbackUrl,
                     },
                 ],
-            };
-        }
-
-        case "ApiKeySubmitted": {
-            // Reagent P1 on PR #845: ApiKeySubmitted previously
-            // spread `...state` into `waiting`, preserving any
-            // stale OAuth `sessionId`. A late OAuth poll `success`
-            // could then match (sessionId !== "") and flip state
-            // to `ready` with the WRONG bundle. Drop the OAuth
-            // session id + URL + device-code so this attempt is
-            // unambiguously the API-key path.
-            if (state.kind !== "unauthenticated" && state.kind !== "expired" && state.kind !== "failed") {
-                return {
-                    state,
-                    events: [
-                        {
-                            type: "post-close-command-dropped",
-                            commandType: "ApiKeySubmitted",
-                        },
-                    ],
-                };
-            }
-            return {
-                state: {
-                    ...state,
-                    kind: "waiting",
-                    sessionId: "",
-                    authUrl: "",
-                    deviceCode: null,
-                    error: "",
-                },
-                events: [
-                    {
-                        type: "api-key-submit-requested",
-                        providerId: state.providerId,
-                        bundleId: state.bundleId,
-                        apiKey: command.apiKey,
-                        accountName: command.accountName,
-                    },
-                ],
-            };
-        }
-
-        case "ApiKeyAccepted": {
-            // Reagent P2 on #849: only honor ApiKeyAccepted while
-            // the reducer is still in `waiting` for this submit. If
-            // the user picked a different bundle or cancelled during
-            // the API-key RPC await, kind has left `waiting` — a late
-            // accept would otherwise flip state forward with stale data.
-            if (state.kind !== "waiting") {
-                return {
-                    state,
-                    events: [
-                        {
-                            type: "post-close-command-dropped",
-                            commandType: "ApiKeyAccepted",
-                        },
-                    ],
-                };
-            }
-            // PR C-1 (revised): api-key stays SINGLE-phase until C-2
-            // backend `auth.savebundle` lands. Backend persists the
-            // bundle in `auth.submitapikey`; we go straight to `ready`
-            // with the real bundleId.
-            return {
-                state: {
-                    ...state,
-                    kind: "ready",
-                    bundleId: command.bundleId,
-                    sessionId: "",
-                    authUrl: "",
-                    deviceCode: null,
-                    error: "",
-                },
-                events: [{ type: "api-key-accepted", bundleId: command.bundleId }],
             };
         }
 

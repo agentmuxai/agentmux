@@ -1,15 +1,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Identity accounts, Armory key/OAuth flows, agent-identity links, and
-// the pre-launch OAuth / install / prereq flows. Split from the
-// original rpc-api file.
-
-import { RpcClient } from "../rpc-client";
-
-// The install.* and resolve.prereqs shapes are GENERATED from their Rust
-// definitions by ts-rs. The rest of this file is still hand-written -- identity
-// spans four handler files and is being migrated a file at a time.
+// Type re-exports for identity accounts, Armory key/OAuth flows,
+// agent-identity links, and the pre-launch OAuth / install / prereq flows.
+// Their stubs are generated (generated.ts); the shapes are GENERATED from
+// their Rust definitions by ts-rs.
 export type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
 export type { AckResp } from "@/types/rpc/AckResp";
 export type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
@@ -37,11 +32,9 @@ export type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
 export type { SecretRef } from "@/types/rpc/SecretRef";
 export type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
 export type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
-export type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
 export type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 
 import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
-import type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
 
 // `directAccount`, `existingAccountId`, `authEnv` and `requiresTty` are all
 // `#[serde(default)]` on non-`Option` Rust fields, so they are omittable on the
@@ -55,18 +48,3 @@ export type AuthStartInput = Pick<StartProviderAuthReq, "providerId" | "cliPath"
 // `AgentDefinitionIdentity`; the Rust type is `AgentIdentityLink`. Same three
 // fields, so this is a naming alias rather than a second declaration.
 export type { AgentIdentityLink as AgentDefinitionIdentity } from "@/types/rpc/AgentIdentityLink";
-
-export const IdentityApi = {
-    // NOTE: the backend handler for this command currently returns `Err`
-    // unconditionally -- API-key persistence is deferred ("bundle persistence
-    // lands in PR C"). So the success shape below describes a response that
-    // cannot occur yet, which is why it is NOT generated: there is no Rust
-    // success type to generate it from. The REQUEST is generated and accurate.
-    AuthSubmitApiKeyCommand(
-        client: RpcClient,
-        data: SubmitProviderApiKeyReq,
-        opts?: RpcOpts
-    ): Promise<{ success: boolean; bundleId?: string; error?: string }> {
-        return client.rpcCall("auth.submitapikey", data, opts);
-    },
-};

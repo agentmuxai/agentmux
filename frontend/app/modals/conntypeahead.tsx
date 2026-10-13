@@ -267,15 +267,6 @@ const ChangeConnectionBlockModal = ({
             newFile = "~";
         }
         await setBlockMeta(blockId, { connection: connName, file: newFile, "cmd:cwd": null });
-
-        const rtInfo = { "cmd:hascurcwd": null };
-        const rtInfoData: CommandSetRTInfoData = {
-            oref: MOS.makeORef("block", blockId),
-            data: rtInfo,
-        };
-        RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
-            console.log("error setting RT info", e)
-        );
         try {
             await RpcApi.ConnEnsureCommand(
                 TabRpcClient,
