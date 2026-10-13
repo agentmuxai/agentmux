@@ -1390,15 +1390,6 @@ declare global {
         fullconfig: FullConfigType;
     };
 
-    // mps.MuxEvent
-    type MuxEvent = {
-        event: string;
-        scopes?: string[];
-        sender?: string;
-        persist?: number;
-        data?: any;
-    };
-
     // filestore.MuxFile
     type MuxFile = {
         zoneid: string;

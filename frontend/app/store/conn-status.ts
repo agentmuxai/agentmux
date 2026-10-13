@@ -10,6 +10,7 @@ import { isBlank } from "@/util/util";
 import { WpsEvent } from "@/app/store/mps-events";
 import { muxEventSubscribe } from "./mps";
 import { ClientService } from "./services";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 // Connection status map: connName → ConnStatus signal
 const [connStatusMap, setConnStatusMap] = createSignal(

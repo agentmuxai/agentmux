@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RpcApi } from "@/app/store/rpc-api";
-import type { BackgroundTaskView, FleetActionResult, FleetStagePlan } from "@/app/store/rpc-api";
+import { RpcApi, type BackgroundTaskView, type FleetActionResult, type FleetStagePlan } from "@/app/store/rpc-api";
 import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     localFleetTargets,
@@ -25,6 +24,7 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 // ── Types ────────────────────────────────────────────────────────────────
 

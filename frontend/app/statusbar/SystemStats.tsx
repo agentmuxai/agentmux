@@ -8,6 +8,7 @@ import { CpuCoresPopover } from "./CpuCoresPopover";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
 import { cpuColor } from "./cpu-color";
 import { diskTooltip, parseDiskVolumes, watchVolumeColor, type DiskVolume } from "./disk-volumes";
+import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 type SysStats = {
     cpu: number;
