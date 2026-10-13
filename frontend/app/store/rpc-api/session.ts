@@ -37,5 +37,3 @@ export type { SessionResumePreflightResult } from "@/types/rpc/SessionResumePref
 // GLOBAL types reference it, and a global type cannot import. It goes away when
 // those domains migrate.
 export type { TokenCounts as SessionTokenCounts } from "@/types/rpc/TokenCounts";
-
-export const SessionApi = {};

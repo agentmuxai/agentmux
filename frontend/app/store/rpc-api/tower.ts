@@ -12,5 +12,3 @@ export type { TowerProcessRole } from "@/types/rpc/TowerProcessRole";
 export type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
 export type { TowerTask } from "@/types/rpc/TowerTask";
 export type { TowerTaskKind } from "@/types/rpc/TowerTaskKind";
-
-export const TowerApi = {};

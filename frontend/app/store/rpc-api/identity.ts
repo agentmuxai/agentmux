@@ -40,7 +40,6 @@ export type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 export type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
 export type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 
-import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
 import type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
 
@@ -58,25 +57,6 @@ export type AuthStartInput = Pick<StartProviderAuthReq, "providerId" | "cliPath"
 export type { AgentIdentityLink as AgentDefinitionIdentity } from "@/types/rpc/AgentIdentityLink";
 
 export const IdentityApi = {
-    // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
-
-    AuthStartCommand(
-        client: RpcClient,
-        data: AuthStartInput,
-        opts?: RpcOpts
-    ): Promise<{ sessionId: string; authUrl?: string }> {
-        return client.rpcCall("auth.start", data, opts);
-    },
-
-    // command "auth.poll" — flattened `{ providerId, ...AuthSessionStatus }`
-    AuthPollCommand(
-        client: RpcClient,
-        data: PollProviderAuthReq,
-        opts?: RpcOpts
-    ): Promise<AuthSessionStatus & { providerId: string }> {
-        return client.rpcCall("auth.poll", data, opts);
-    },
-
     // NOTE: the backend handler for this command currently returns `Err`
     // unconditionally -- API-key persistence is deferred ("bundle persistence
     // lands in PR C"). So the success shape below describes a response that

@@ -6,8 +6,6 @@
 // scrollback, widget HTTP proxy, and MuxBus cloud connectivity. Split from the
 // original rpc-api file.
 
-import { RpcClient } from "../rpc-client";
-
 // The widget proxy RESULT shapes are GENERATED from Rust by ts-rs. Their
 // REQUESTS deliberately stay hand-written: both handlers read their payload
 // field-by-field off a `serde_json::Value` and answer a bad port or path with
@@ -44,13 +42,3 @@ export type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 export type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
 export type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 export type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
-
-export const MiscApi = {
-    ActivityCommand(client: RpcClient, data: ActivityUpdate, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("activity", data, opts);
-    },
-
-    RecordTEventCommand(client: RpcClient, data: TEvent, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("recordtevent", data, opts);
-    },
-};

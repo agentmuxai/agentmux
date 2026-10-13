@@ -44,5 +44,3 @@ export type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData"
 export type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
 export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
 export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
-
-export const BlockApi = {};

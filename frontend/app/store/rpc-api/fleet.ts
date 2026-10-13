@@ -20,5 +20,3 @@ export type { FleetActionFailure } from "@/types/rpc/FleetActionFailure";
 export type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 export type { FleetGroup } from "@/types/rpc/FleetGroup";
 export type { StagePlanInput as FleetStagePlan } from "@/types/rpc/StagePlanInput";
-
-export const FleetApi = {};

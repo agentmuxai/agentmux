@@ -7,5 +7,3 @@
 export type { PresenceOffReason } from "@/types/rpc/PresenceOffReason";
 export type { PresenceState } from "@/types/rpc/PresenceState";
 export type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
-
-export const PresenceApi = {};

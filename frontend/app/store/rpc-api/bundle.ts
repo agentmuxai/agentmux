@@ -6,8 +6,6 @@
 // gate, same as the rest of `bundle.*`. See
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
-import { RpcClient } from "../rpc-client";
-
 // The bundle CRUD shapes below are GENERATED from their Rust definitions by
 // ts-rs. See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.4 step 2.
 // `BundleImportApi` at the bottom is NOT migrated yet — those three commands
@@ -88,23 +86,3 @@ export type BundleUpsertRequest = BundleUpsertInput & Pick<CommandUpsertBundleDa
 // command does normalize, but that is a different command and not the one this
 // stub calls.)
 export type BundleValidateInput = Pick<BundleT, "name"> & Partial<Omit<BundleT, "name">>;
-
-// Bundle CRUD (db_bundles rows; Rust: Store::bundle_*). The wire command
-// names below (`listmemories`, `getmemory`, ...) are the legacy aliases the
-// backend still registers alongside `bundle.*` — the strings must not change
-// until Phase 3 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md retires them.
-export const BundleApi = {
-    UpsertBundleCommand(client: RpcClient, data: BundleUpsertRequest, opts?: RpcOpts): Promise<BundleT> {
-        return client.rpcCall("upsertmemory", data, opts);
-    },
-
-    // System-tier Global Memory — see
-    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. The ONLY
-    // commands that can write is_system=true; deliberately separate from
-    // UpsertBundleCommand/DeleteBundleCommand.
-    UpsertSystemBundleCommand(client: RpcClient, data: BundleUpsertRequest, opts?: RpcOpts): Promise<BundleT> {
-        return client.rpcCall("upsertsystemmemory", data, opts);
-    },
-};
-
-export const BundleImportApi = {};

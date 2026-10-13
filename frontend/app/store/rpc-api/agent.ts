@@ -228,5 +228,3 @@ import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgen
  */
 export type ForkAgentDefinitionInput = Omit<CommandForkAgentDefinitionData, "branch_label"> &
     Partial<Pick<CommandForkAgentDefinitionData, "branch_label">>;
-
-export const AgentApi = {};

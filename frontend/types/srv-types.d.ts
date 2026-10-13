@@ -294,6 +294,11 @@ declare global {
         | { status: "success"; bundleId: string; email: string | null; accountId?: string }
         | { status: "failed"; error: string };
 
+    /** What `auth.poll` answers: crates/srv/src/identity/auth_session.rs's
+     *  PollSessionResult, `{ providerId, ...AuthSessionStatus }` (the status is
+     *  serde-flattened, which ts-rs can't render, so this stays hand-written). */
+    type PollSessionResult = AuthSessionStatus & { providerId: string };
+
     type AgentRunResult = {
         response: string;
         tokens: TokenCounts;

@@ -135,7 +135,7 @@ itself.** Phase 3 reuses it rather than adding a second mechanism.
 **RPC `block.reveal`** (`agentmux-srv/src/server/notify_handlers.rs`, registered next to
 `notify.takeactivation`; params `BlockRevealParams { block_id }`, result
 `BlockRevealResult { found: bool, window_id?: string }`, both ts-rs generated into [`frontend/types/rpc/`](../../frontend/types/rpc),
-client `RpcApi.BlockRevealCommand` in `rpc-api/notify.ts`). It lives with the notification Router because the
+client `RpcApi.BlockRevealCommand`, generated in `rpc-api/generated.ts`). It lives with the notification Router because the
 Router is what knows which windows are open (each window's `notify.focus` reports):
 
 1. `Router::reveal_target` resolves the target exactly as a toast click does: `resolve_click_target` (block →

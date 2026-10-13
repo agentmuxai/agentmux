@@ -140,6 +140,7 @@ impl Session {
 /// pasted callback URL and kill on cancel); this manager owns the
 /// session state.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct StartSessionResult {
     pub session_id: String,
