@@ -149,9 +149,6 @@
         "widget:*": {
           "type": "boolean"
         },
-        "widget:showhelp": {
-          "type": "boolean"
-        },
         "widget:icononly": {
           "type": "boolean"
         },

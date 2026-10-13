@@ -591,7 +591,6 @@ pub fn implied_from_v1(key: &str, entry: &WidgetConfigType, widgets_dir: &Path) 
             status_items: vec![],
         },
     };
-    let _ = view;
     Some(Found { id, dir, manifest: Ok(manifest), files, implied: true })
 }
 
