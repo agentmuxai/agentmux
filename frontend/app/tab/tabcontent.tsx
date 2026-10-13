@@ -167,10 +167,8 @@ function TabContent(props: { tabId: string }): JSX.Element {
         if (!tab || (tab.blockids?.length ?? 0) > 0) return;
         e.preventDefault();
         e.stopPropagation();
-        const menu = buildEmptyTabMenu();
-        if (menu.length > 0) {
-            ContextMenuModel.showContextMenu(menu, e);
-        }
+        // Live, like the pane "+" picker: follows widgets hidden or shown while it's open.
+        ContextMenuModel.showLiveContextMenu(buildEmptyTabMenu, e);
     };
 
     const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);

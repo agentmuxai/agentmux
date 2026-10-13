@@ -4,7 +4,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, replaceBlock } from "@/app/store/global";
-import { getChildWidgets, getPinnedKeys, widgetEntryColor } from "@/app/window/action-widgets-config";
+import { getChildWidgets, getHiddenKeys, getPinnedKeys, isWidgetHidden, widgetEntryColor } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -71,9 +71,13 @@ export class LauncherViewModel {
             // group-hiding default everywhere else (see
             // getEffectiveGroupedChildKeys).
             const pinnedSet = new Set(getPinnedKeys(settings, wmap));
+            const hidden = getHiddenKeys(settings);
             source = sortByDisplayOrder(wmap).filter(
                 ([key, widget]) => !widget["display:hidden"] || pinnedSet.has(key.replace("defwidget@", ""))
-            ).map(([, widget]) => widget);
+            )
+                // Hidden by the user in Settings → Widgets, like the bar and the "+" picker.
+                .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden))
+                .map(([, widget]) => widget);
         }
 
         return source.filter(

@@ -33,13 +33,6 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         keywords: ["same file", "conflict", "other agents", "WhoIsWorkingOn", "agent:overlapnotes"],
     },
-    iconOnlyWidgetLabels: {
-        id: "advanced.icon_only_widget_labels",
-        label: "Icon-only widget labels",
-        description: "Force the widget bar to show icons without text labels",
-        section: "advanced",
-        keywords: ["compact widget bar", "hide labels", "widget:icononly"],
-    },
     sampleInterval: {
         id: "advanced.sysinfo_sample_interval",
         label: "Sample interval",
@@ -125,18 +118,6 @@ export function AdvancedSection(): JSX.Element {
                     <ToggleControl
                         checked={(s()["agent:overlapnotes"] as boolean) ?? true}
                         onChange={(v) => set("agent:overlapnotes", v)}
-                    />
-                }
-            />
-            <SectionHeader label="Widgets" />
-            <SettingRow
-                id={ADVANCED_SETTINGS.iconOnlyWidgetLabels.id}
-                label={ADVANCED_SETTINGS.iconOnlyWidgetLabels.label}
-                description={ADVANCED_SETTINGS.iconOnlyWidgetLabels.description}
-                control={
-                    <ToggleControl
-                        checked={!!(s()["widget:icononly"] as boolean)}
-                        onChange={(v) => set("widget:icononly", v)}
                     />
                 }
             />

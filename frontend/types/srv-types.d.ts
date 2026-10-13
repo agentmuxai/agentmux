@@ -1163,6 +1163,10 @@ declare global {
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
+        /** Pinned widget-bar icons, in order, as short names (`agent` for `defwidget@agent`). */
+        "widget:pinned"?: string[];
+        /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
+        "widget:hidden"?: string[];
         "statusbar:showmuxbuscloud"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;

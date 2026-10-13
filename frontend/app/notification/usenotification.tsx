@@ -14,6 +14,12 @@ const notificationActions: { [key: string]: () => void } = {
     // Add other action functions here
 };
 
+/** Register (or replace) the function a notification action button runs, for actions
+ *  whose effect is only known when the notification is raised (an Undo, say). */
+export function setNotificationAction(actionKey: string, fn: () => void): void {
+    notificationActions[actionKey] = fn;
+}
+
 export function useNotification() {
     const notificationPopoverMode = atoms.notificationPopoverMode;
     const notifications = atoms.notifications;

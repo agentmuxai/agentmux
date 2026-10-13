@@ -7,8 +7,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab, getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
-import { createSignal, type JSX } from "solid-js";
-import { getEffectiveGroupedChildKeys, getPinnedKeys } from "./action-widgets-config";
+import { createEffect, createSignal, untrack, type JSX } from "solid-js";
+import { getEffectiveGroupedChildKeys, getHiddenKeys, getPinnedKeys, isWidgetHidden } from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -28,6 +28,13 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
     const [localPinned, setLocalPinned] = createSignal<string[] | null>(null);
     const effectivePinned = (): string[] => localPinned() ?? getPinnedKeys(settings(), widgets());
     const pinnedKeys = (): Set<string> => new Set(effectivePinned());
+    // Drop the optimistic copy once the saved pins catch up with it, so a change made
+    // elsewhere while this menu is open (the bar, Settings → Widgets) shows here too.
+    createEffect(() => {
+        const saved = getPinnedKeys(settings(), widgets());
+        const local = untrack(localPinned);
+        if (local && local.length === saved.length && local.every((k, i) => k === saved[i])) setLocalPinned(null);
+    });
 
     const toggleWidget = (shortName: string) => {
         const current = effectivePinned();
@@ -81,8 +88,11 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         // one out via that flyout's own right-click "Pin to bar", it shows
         // up here too, checked, like any other pinned widget.
         const grouped = getEffectiveGroupedChildKeys(widgets(), settings());
+        const hidden = getHiddenKeys(settings());
         const widgetEntries = Object.entries(widgets())
             .filter(([key]) => key.startsWith("defwidget@") && !grouped.has(key.replace("defwidget@", "")))
+            // Hidden in Settings → Widgets: not offered for pinning until it's shown again there.
+            .filter(([key]) => !isWidgetHidden(key, widgets(), settings(), hidden))
             .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
 
         if (widgetEntries.length > 0) {
