@@ -308,9 +308,9 @@ class SysinfoViewModel {
 
     private backfiller = new GapBackfiller((fromTs) => this.backfillFrom(fromTs), BACKFILL_MIN_INTERVAL_MS);
 
-    /** Stop any pending backfill; the pane is gone. */
+    /** Drop any gap still waiting to be fetched; the pane is gone. A pane mounted again with this model backfills as before. */
     dispose() {
-        this.backfiller.dispose();
+        this.backfiller.reset();
     }
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
