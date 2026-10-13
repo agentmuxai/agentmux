@@ -229,6 +229,14 @@ const ActionWidgets = (): JSX.Element => {
         parentOpenConfirmedByClick = true;
     };
 
+    // A group hidden (Settings → Widgets, a file edit) or unpinned while its flyout is open loses
+    // its slot on the bar; close the flyout too, or it would stay up with the group's children
+    // still launchable from it.
+    createEffect(() => {
+        const key = openParentKey();
+        if (key !== null && !pinnedWidgets().some((e) => e.key === key)) closeParentFlyout(key);
+    });
+
     // Close on outside click / Escape — mirrors the More dropdown's own
     // outside-click effect below, scoped to whichever parent is open.
     createEffect(() => {
