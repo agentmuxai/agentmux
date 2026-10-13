@@ -75,10 +75,6 @@ if [ -f "$target_dir/libcef.dll" ] && [ -f "$target_dir/icudtl.dat" ]; then
   replace_stale=1
 fi
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "fetch-patched-cef-windows: gh CLI not found -- cannot auto-fetch" >&2
-  exit 1
-fi
 
 # No `gh auth status` pre-check: it exits 1 whenever ANY stored login is
 # invalid, even with a working GH_TOKEN it reports as logged in, so it
@@ -89,11 +85,21 @@ cleanup() { rm -rf "$work_dir"; }
 trap cleanup EXIT
 
 echo "fetch-patched-cef-windows: downloading $ASSET_PATTERN from $RELEASE_REPO@$RELEASE_TAG ..." >&2
-if ! gh release download "$RELEASE_TAG" --repo "$RELEASE_REPO" \
-    --pattern "$ASSET_PATTERN" --dir "$work_dir" >&2; then
-  echo "fetch-patched-cef-windows: download failed -- is gh authenticated ('gh auth login' or GH_TOKEN)?" >&2
-  echo "  Or set up $target_dir manually per docs/cef-build/build-patched-cef-windows.md" >&2
-  exit 1
+# The repo is public, so the asset downloads without a login. gh is tried
+# first (it follows the API and works for a signed-in user); an agent's gh is
+# signed out on purpose (crates/srv gh_guard), so the plain release URL is the
+# fallback. Either way the bundle step accepts only the pinned libcef.dll
+# (verify-cef-runtime-windows.sh), so how it was downloaded doesn't matter.
+asset_url="https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG/$ASSET_PATTERN"
+if ! { command -v gh >/dev/null 2>&1 \
+       && gh release download "$RELEASE_TAG" --repo "$RELEASE_REPO" \
+            --pattern "$ASSET_PATTERN" --dir "$work_dir" >/dev/null 2>&1; }; then
+  echo "fetch-patched-cef-windows: gh couldn't download it; trying $asset_url" >&2
+  if ! curl -fsSL --retry 3 -o "$work_dir/$ASSET_PATTERN" "$asset_url"; then
+    echo "fetch-patched-cef-windows: download failed from $asset_url" >&2
+    echo "  Or set up $target_dir manually per docs/cef-build/build-patched-cef-windows.md" >&2
+    exit 1
+  fi
 fi
 
 zip_path="$work_dir/$ASSET_PATTERN"
