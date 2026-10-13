@@ -311,10 +311,12 @@ async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
     let st = state.clone();
     let panes = tokio::task::spawn_blocking(move || {
         use crate::backend::obj::{Block, Tab, Window, Workspace};
-        let windows = st.mstore.get_all::<Window>().unwrap_or_default();
-        let workspaces = st.mstore.get_all::<Workspace>().unwrap_or_default();
-        let tabs = st.mstore.get_all::<Tab>().unwrap_or_default();
-        let blocks = st.mstore.get_all::<Block>().unwrap_or_default();
+        // A table that can't be read fails the request: an empty or partial
+        // list would read as "nothing open".
+        let windows = st.mstore.get_all::<Window>().map_err(|e| e.to_string())?;
+        let workspaces = st.mstore.get_all::<Workspace>().map_err(|e| e.to_string())?;
+        let tabs = st.mstore.get_all::<Tab>().map_err(|e| e.to_string())?;
+        let blocks = st.mstore.get_all::<Block>().map_err(|e| e.to_string())?;
         let label = |b: &Block| {
             crate::server::app_api::tower_pane::block_label(&st.mstore, &b.oid)
                 .map(|l| (l.label, l.agent))
@@ -332,12 +334,17 @@ async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
             running: &running,
             hidden: &hidden,
         };
-        crate::backend::viewer::panes::list(&windows, &workspaces, &tabs, &blocks, &facts)
+        Ok::<_, String>(crate::backend::viewer::panes::list(&windows, &workspaces, &tabs, &blocks, &facts))
     })
-    .await;
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
     match panes {
         Ok(panes) => Json(json!({ "now_ms": agentmux_common::time::now_ms_u64(), "panes": panes })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "viewer: could not list panes");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "could not list panes" }))).into_response()
+        }
     }
 }
 

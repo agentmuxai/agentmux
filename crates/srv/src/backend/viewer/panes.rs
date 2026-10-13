@@ -13,10 +13,8 @@
 
 use serde::Serialize;
 
+use crate::backend::blockcontroller::META_KEY_SHELL_SUBBLOCK_ID;
 use crate::backend::obj::{self, Block, Tab, Window, Workspace};
-
-/// The meta key on an agent block naming its shell drawer's block.
-pub const META_SHELL_SUBBLOCK_ID: &str = "term:shellsubblockid";
 
 /// What a device can do with a pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -57,7 +55,9 @@ pub struct PaneEntry {
 
 /// The live facts the object tree doesn't hold.
 pub struct PaneFacts<'a> {
-    /// The pane's label and whether it is an agent (Tower's `block_label`).
+    /// An agent's or terminal's label, and whether it is an agent (Tower's
+    /// `block_label`). Any other pane is labelled by its own title, or not
+    /// at all (the device names it by its view).
     pub label: &'a dyn Fn(&Block) -> (String, bool),
     /// The name a registered agent runs under in this block.
     pub agent_name: &'a dyn Fn(&str) -> Option<String>,
@@ -98,7 +98,7 @@ pub fn list(windows: &[Window], workspaces: &[Workspace], tabs: &[Tab], blocks: 
                         continue;
                     }
                     out.push(PaneEntry { agent: (facts.agent_name)(&b.oid), ..entry(b, PaneKind::Agent, label.clone()) });
-                    let drawer = obj::meta_get_string(&b.meta, META_SHELL_SUBBLOCK_ID, "");
+                    let drawer = obj::meta_get_string(&b.meta, META_KEY_SHELL_SUBBLOCK_ID, "");
                     if let Some(shell) = block(&drawer).filter(|_| !drawer.is_empty()) {
                         out.push(PaneEntry {
                             running: (facts.running)(&shell.oid),
@@ -109,7 +109,9 @@ pub fn list(windows: &[Window], workspaces: &[Workspace], tabs: &[Tab], blocks: 
                 } else if view == "term" {
                     out.push(PaneEntry { running: (facts.running)(&b.oid), ..entry(b, PaneKind::Terminal, label) });
                 } else {
-                    out.push(entry(b, PaneKind::Other, label));
+                    // `block_label` names terminals; it would call an
+                    // untitled editor "Terminal".
+                    out.push(entry(b, PaneKind::Other, obj::meta_get_string(&b.meta, "frame:title", "")));
                 }
             }
         }
@@ -154,12 +156,13 @@ mod tests {
             activetabid: "t2".into(),
             ..Default::default()
         };
-        let tabs = vec![tab("t1", "Pinned", &["ed"]), tab("t2", "Work", &["ag", "hid", "sh", "gone"])];
+        let tabs = vec![tab("t1", "Pinned", &["ed", "wid"]), tab("t2", "Work", &["ag", "hid", "sh", "gone"])];
         let blocks = vec![
             block("ed", "editor", &[("frame:title", "notes.md")]),
-            block("ag", "agent", &[("agentName", "Ada"), (META_SHELL_SUBBLOCK_ID, "drawer")]),
+            block("wid", "ext:acme.board", &[]),
+            block("ag", "agent", &[("agentName", "Ada"), (META_KEY_SHELL_SUBBLOCK_ID, "drawer")]),
             block("drawer", "term", &[]),
-            block("hid", "agent", &[("agentName", "Secret"), (META_SHELL_SUBBLOCK_ID, "hid-drawer")]),
+            block("hid", "agent", &[("agentName", "Secret"), (META_KEY_SHELL_SUBBLOCK_ID, "hid-drawer")]),
             block("hid-drawer", "term", &[]),
             block("sh", "term", &[("frame:title", "build")]),
         ];
@@ -181,23 +184,25 @@ mod tests {
         };
         let panes = list(&windows, &workspaces, &tabs, &blocks, &facts);
         let ids: Vec<&str> = panes.iter().map(|p| p.block_id.as_str()).collect();
-        assert_eq!(ids, ["ed", "ag", "drawer", "sh"], "pinned tab first; a missing block is skipped");
+        assert_eq!(ids, ["ed", "wid", "ag", "drawer", "sh"], "pinned tab first; a missing block is skipped");
 
         assert_eq!(panes[0].kind, PaneKind::Other);
         assert_eq!((panes[0].label.as_str(), panes[0].tab.as_str(), panes[0].tab_active), ("notes.md", "Pinned", false));
         assert_eq!(panes[0].window, "Main");
 
-        assert_eq!(panes[1].kind, PaneKind::Agent);
-        assert_eq!(panes[1].agent.as_deref(), Some("ada"));
-        assert!(panes[1].tab_active);
+        assert_eq!((panes[1].kind, panes[1].label.as_str()), (PaneKind::Other, ""), "an untitled widget isn't called Terminal");
 
-        assert_eq!(panes[2].kind, PaneKind::Terminal);
-        assert_eq!(panes[2].label, "Ada shell");
-        assert_eq!(panes[2].parent_block_id.as_deref(), Some("ag"));
-        assert_eq!(panes[2].running, Some(true));
-        assert_eq!(panes[2].tab_id, "t2", "the drawer is shown where its agent is");
+        assert_eq!(panes[2].kind, PaneKind::Agent);
+        assert_eq!(panes[2].agent.as_deref(), Some("ada"));
+        assert!(panes[2].tab_active);
 
-        assert_eq!((panes[3].kind, panes[3].running), (PaneKind::Terminal, Some(false)));
+        assert_eq!(panes[3].kind, PaneKind::Terminal);
+        assert_eq!(panes[3].label, "Ada shell");
+        assert_eq!(panes[3].parent_block_id.as_deref(), Some("ag"));
+        assert_eq!(panes[3].running, Some(true));
+        assert_eq!(panes[3].tab_id, "t2", "the drawer is shown where its agent is");
+
+        assert_eq!((panes[4].kind, panes[4].running), (PaneKind::Terminal, Some(false)));
         assert!(!ids.contains(&"hid-drawer"), "a hidden agent's shell is hidden with it");
     }
 
